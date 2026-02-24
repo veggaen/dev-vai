@@ -1,0 +1,18 @@
+node_modules/
+dist/
+target/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+.env
+.claude/
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+
+# Tauri sidecar binaries (built, not committed)
+apps/desktop/src-tauri/binaries/
+
+# Test coverage
+coverage/
