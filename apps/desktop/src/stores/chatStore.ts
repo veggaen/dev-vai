@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = 'http://localhost:3006';
 
 interface ChatMessage {
   id: string;
@@ -112,7 +112,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ws.close();
     }
 
-    ws = new WebSocket(`ws://localhost:3001/api/chat`);
+    ws = new WebSocket(`ws://localhost:3006/api/chat`);
 
     ws.onopen = () => {
       ws!.send(

@@ -13,7 +13,7 @@ export interface ServerOptions {
 }
 
 export async function createServer(options?: ServerOptions) {
-  const port = options?.port ?? (process.env.VAI_PORT ? Number(process.env.VAI_PORT) : 3001);
+  const port = options?.port ?? (process.env.VAI_PORT ? Number(process.env.VAI_PORT) : 3006);
   const dbPath = options?.dbPath ?? process.env.VAI_DB_PATH ?? './vai.db';
 
   const db = createDb(dbPath);

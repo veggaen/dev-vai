@@ -2,7 +2,7 @@
  * Communication with the VAI runtime server.
  */
 
-const VAI_SERVER = 'http://localhost:3001';
+const VAI_SERVER = 'http://localhost:3006';
 
 export interface CapturePayload {
   type: string;

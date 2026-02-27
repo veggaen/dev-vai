@@ -14,7 +14,7 @@ interface EngineState {
   startPolling: () => () => void;
 }
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = 'http://localhost:3006';
 
 export const useEngineStore = create<EngineState>((set) => ({
   status: 'idle',

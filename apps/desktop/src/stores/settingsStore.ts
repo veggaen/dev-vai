@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = 'http://localhost:3006';
 
 interface ModelInfo {
   id: string;

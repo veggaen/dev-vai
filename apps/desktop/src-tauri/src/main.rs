@@ -28,7 +28,7 @@ async fn start_engine(
         .shell()
         .sidecar("vai-runtime")
         .map_err(|e| e.to_string())?
-        .env("VAI_PORT", "3001")
+        .env("VAI_PORT", "3006")
         .env("VAI_DB_PATH", db_path.to_string_lossy().to_string());
 
     let (_, child) = sidecar_command.spawn().map_err(|e| e.to_string())?;

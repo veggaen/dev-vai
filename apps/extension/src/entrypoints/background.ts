@@ -30,7 +30,7 @@ async function handleMessage(
 
   if (type === 'GET_STATUS') {
     try {
-      const res = await fetch('http://localhost:3001/health');
+      const res = await fetch('http://localhost:3006/health');
       const data = await res.json();
       return { success: true, connected: true, data };
     } catch {
@@ -45,7 +45,7 @@ async function handleMessage(
     type === 'SAVE_CONTENT'
   ) {
     try {
-      const res = await fetch('http://localhost:3001/api/capture', {
+      const res = await fetch('http://localhost:3006/api/capture', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -69,7 +69,7 @@ async function handleMessage(
     } catch (_err) {
       return {
         success: false,
-        error: 'VAI server not reachable. Is it running on localhost:3001?',
+        error: 'VAI server not reachable. Is it running on localhost:3006?',
       };
     }
   }
