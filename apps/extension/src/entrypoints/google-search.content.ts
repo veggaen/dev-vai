@@ -6,7 +6,19 @@
  */
 
 export default defineContentScript({
-  matches: ['https://www.google.com/search*', 'https://www.google.co.*/search*'],
+  matches: [
+    'https://www.google.com/search*',
+    'https://www.google.co.uk/search*',
+    'https://www.google.no/search*',
+    'https://www.google.se/search*',
+    'https://www.google.de/search*',
+    'https://www.google.fr/search*',
+    'https://www.google.es/search*',
+    'https://www.google.ca/search*',
+    'https://www.google.com.au/search*',
+    'https://www.google.co.in/search*',
+    'https://www.google.co.jp/search*',
+  ],
   runAt: 'document_idle',
 
   main() {

@@ -6,7 +6,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/target/**', '**/.wxt/**'],
+    ignores: ['**/dist/**', '**/node_modules/**', '**/target/**', '**/.wxt/**', '**/.output/**'],
   },
   {
     languageOptions: {
