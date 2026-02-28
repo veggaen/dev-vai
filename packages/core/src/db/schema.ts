@@ -10,6 +10,25 @@ export const conversations = sqliteTable('conversations', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
+// ---- Images / Training Data ----
+
+export const images = sqliteTable('images', {
+  id: text('id').primaryKey(),
+  conversationId: text('conversation_id').references(() => conversations.id),
+  sourceId: text('source_id').references(() => sources.id),
+  filename: text('filename').notNull(),
+  mimeType: text('mime_type').notNull(),
+  data: text('data').notNull(), // base64 encoded
+  description: text('description').notNull(), // human-provided fact/description (required)
+  question: text('question'), // optional question about the image
+  width: integer('width'),
+  height: integer('height'),
+  sizeBytes: integer('size_bytes'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+// ---- Chat Messages ----
+
 export const messages = sqliteTable('messages', {
   id: text('id').primaryKey(),
   conversationId: text('conversation_id')
@@ -17,6 +36,7 @@ export const messages = sqliteTable('messages', {
     .references(() => conversations.id),
   role: text('role', { enum: ['user', 'assistant', 'system', 'tool'] }).notNull(),
   content: text('content').notNull(),
+  imageId: text('image_id').references(() => images.id),
   toolCalls: text('tool_calls'),
   toolCallId: text('tool_call_id'),
   tokenCount: integer('token_count'),

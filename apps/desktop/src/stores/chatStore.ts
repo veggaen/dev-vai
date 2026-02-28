@@ -1,11 +1,22 @@
 import { create } from 'zustand';
+import { API_BASE, WS_BASE } from '../lib/api.js';
 
-const API_BASE = 'http://localhost:3006';
+interface ImageAttachment {
+  data: string;
+  mimeType: string;
+  description: string;
+  question?: string;
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+}
 
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  imageId?: string | null;
+  imagePreview?: string; // temp data URL for display before server-side storage
 }
 
 interface Conversation {
@@ -26,7 +37,7 @@ interface ChatState {
   createConversation: (modelId: string) => Promise<string>;
   selectConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
-  sendMessage: (content: string) => void;
+  sendMessage: (content: string, image?: ImageAttachment) => void;
   appendToLastMessage: (text: string) => void;
 }
 
@@ -66,6 +77,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       id: string;
       role: string;
       content: string;
+      imageId?: string | null;
     }>;
     set({
       activeConversationId: id,
@@ -73,6 +85,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         id: m.id,
         role: m.role as ChatMessage['role'],
         content: m.content,
+        imageId: m.imageId,
       })),
     });
   },
@@ -86,14 +99,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await get().fetchConversations();
   },
 
-  sendMessage: (content: string) => {
+  sendMessage: (content: string, image?: ImageAttachment) => {
     const state = get();
     if (!state.activeConversationId) return;
+
+    // Build display content for user message
+    let displayContent = content;
+    if (image) {
+      const parts = [`[Image: ${image.description}]`];
+      if (image.question) parts.push(`[Question: ${image.question}]`);
+      if (content) parts.push(content);
+      displayContent = parts.join('\n');
+    }
 
     const userMsg: ChatMessage = {
       id: `temp-${Date.now()}`,
       role: 'user',
-      content,
+      content: displayContent,
+      imagePreview: image ? `data:${image.mimeType};base64,${image.data}` : undefined,
     };
 
     const assistantMsg: ChatMessage = {
@@ -112,15 +135,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ws.close();
     }
 
-    ws = new WebSocket(`ws://localhost:3006/api/chat`);
+    ws = new WebSocket(`${WS_BASE}/api/chat`);
 
     ws.onopen = () => {
-      ws!.send(
-        JSON.stringify({
-          conversationId: state.activeConversationId,
-          content,
-        }),
-      );
+      const payload: Record<string, unknown> = {
+        conversationId: state.activeConversationId,
+        content,
+      };
+      if (image) {
+        payload.image = {
+          data: image.data,
+          mimeType: image.mimeType,
+          description: image.description,
+          question: image.question,
+          width: image.width,
+          height: image.height,
+          sizeBytes: image.sizeBytes,
+        };
+      }
+      ws!.send(JSON.stringify(payload));
     };
 
     ws.onmessage = (event) => {

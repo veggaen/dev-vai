@@ -134,4 +134,93 @@ describe('VaiEngine', () => {
     expect(stats.vocabSize).toBeGreaterThan(0);
     expect(stats.knowledgeEntries).toBeGreaterThan(0); // bootstrap entries
   });
+
+  // ─── BINARY DECODE TESTS ───────────────────────────────────────
+  it('decodes binary sequences to ASCII', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: '01010010 01001001 01010011 01001011' }],
+    });
+    expect(response.message.content).toContain('RISK');
+  });
+
+  it('decodes binary with decode prefix', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'decode binary 01001000 01001001' }],
+    });
+    expect(response.message.content).toContain('HI');
+  });
+
+  // ─── CURRENT EVENTS TESTS ─────────────────────────────────────
+  it('knows Circle K CEO is Alex Miller', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'who is the CEO of Circle K' }],
+    });
+    expect(response.message.content).toMatch(/alex\s+miller/i);
+  });
+
+  it('knows about Anthropic Pentagon situation', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'what happened with Anthropic and the Pentagon' }],
+    });
+    expect(response.message.content).toMatch(/pentagon|supply\s+chain|hegseth|contract/i);
+  });
+
+  it('knows about Hommersåk Norway', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'tell me about Hommersåk' }],
+    });
+    expect(response.message.content).toMatch(/norway|rogaland|sandnes|temperature/i);
+  });
+
+  // ─── ADVANCED CODE GENERATION TESTS ────────────────────────────
+  it('generates TypeScript union types', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'create a TypeScript type PentagonStatus with variants: Active, UnderReview, Suspended, Terminated, Replaced' }],
+    });
+    expect(response.message.content).toContain('PentagonStatus');
+    expect(response.message.content).toContain('typescript');
+  });
+
+  it('generates Rust enums with impl', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'create a Rust enum AnthropicAccess with variants: Allowed, Blocked, UnderReview' }],
+    });
+    expect(response.message.content).toContain('AnthropicAccess');
+    expect(response.message.content).toContain('is_allowed');
+    expect(response.message.content).toContain('rust');
+  });
+
+  it('generates C++ classes', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'create a C++ class SecurityGateway with private access control' }],
+    });
+    expect(response.message.content).toContain('SecurityGateway');
+    expect(response.message.content).toContain('private');
+    expect(response.message.content).toContain('cpp');
+  });
+
+  it('generates C access control programs', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'create a C program that checks access control' }],
+    });
+    expect(response.message.content).toContain('GRANTED');
+    expect(response.message.content).toContain('DENIED');
+  });
+
+  // ─── SPEED TEST ────────────────────────────────────────────────
+  it('streams responses in fast chunks', async () => {
+    const start = Date.now();
+    const chunks: string[] = [];
+    for await (const chunk of engine.chatStream({
+      messages: [{ role: 'user', content: 'hello' }],
+    })) {
+      if (chunk.type === 'text_delta' && chunk.textDelta) {
+        chunks.push(chunk.textDelta);
+      }
+    }
+    const elapsed = Date.now() - start;
+    // Should complete in under 500ms for a short response (was ~15ms * wordCount before)
+    expect(elapsed).toBeLessThan(500);
+    expect(chunks.length).toBeGreaterThan(0);
+  });
 });

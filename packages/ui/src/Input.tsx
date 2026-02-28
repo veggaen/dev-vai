@@ -1,6 +1,6 @@
 import { type TextareaHTMLAttributes } from 'react';
 
-interface InputProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+interface InputProps extends Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'onSubmit'> {
   onSubmit?: (value: string) => void;
 }
 

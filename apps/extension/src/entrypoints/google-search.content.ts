@@ -5,6 +5,19 @@
  * VAI learns what you're interested in and what information you find.
  */
 
+// Suppress expected "Extension context invalidated" errors on extension reload
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = e.reason?.message || String(e.reason || '');
+  if (msg.includes('context invalidated') || msg.includes('Extension context')) {
+    e.preventDefault();
+  }
+});
+window.addEventListener('error', (e) => {
+  if (e.message?.includes('context invalidated') || e.message?.includes('Extension context')) {
+    e.preventDefault();
+  }
+});
+
 export default defineContentScript({
   matches: [
     'https://www.google.com/search*',
@@ -21,8 +34,25 @@ export default defineContentScript({
   ],
   runAt: 'document_idle',
 
-  main() {
-    captureSearchResults();
+  main(ctx) {
+    // Respond to popup requests for page content
+    try {
+      if (!browser.runtime?.id || !ctx.isValid) return;
+      browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        if (msg?.type === 'VAI_GET_CONTENT') {
+          sendResponse({
+            title: document.title,
+            content: document.body.innerText.slice(0, 50000),
+            url: window.location.href,
+          });
+        }
+      });
+    } catch {
+      console.warn('[VAI] Extension context invalidated');
+      return;
+    }
+
+    if (ctx.isValid) captureSearchResults();
   },
 });
 
@@ -61,17 +91,21 @@ function captureSearchResults() {
     ),
   ].join('\n');
 
-  browser.runtime.sendMessage({
-    type: 'SAVE_SEARCH',
-    url: window.location.href,
-    title: `Search: ${query}`,
-    content,
-    meta: {
-      query,
-      resultCount: results.length,
-      topResults: results.slice(0, 5).map((r) => r.url),
-    },
-  });
-
-  console.log(`[VAI] Captured Google search: "${query}" (${results.length} results)`);
+  try {
+    if (!browser.runtime?.id) return;
+    browser.runtime.sendMessage({
+      type: 'SAVE_SEARCH',
+      url: window.location.href,
+      title: `Search: ${query}`,
+      content,
+      meta: {
+        query,
+        resultCount: results.length,
+        topResults: results.slice(0, 5).map((r) => r.url),
+      },
+    });
+    console.log(`[VAI] Captured Google search: "${query}" (${results.length} results)`);
+  } catch {
+    console.warn('[VAI] Failed to send message (extension may have been reloaded)');
+  }
 }

@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar.js';
 import { ChatWindow } from './components/ChatWindow.js';
+import { KnowledgePanel } from './components/KnowledgePanel.js';
 import { useEngineStore } from './stores/engineStore.js';
 
 function BootScreen() {
-  const { status, error } = useEngineStore();
+  const { status, error, retry } = useEngineStore();
 
   return (
     <div className="flex h-screen items-center justify-center bg-zinc-950">
@@ -25,12 +26,18 @@ function BootScreen() {
           <p className="text-sm text-zinc-400">Connecting...</p>
         )}
 
-        {status === 'error' && (
-          <div className="space-y-2">
+        {(status === 'error' || status === 'offline') && (
+          <div className="space-y-3">
             <p className="text-sm text-red-400">{error}</p>
             <p className="text-xs text-zinc-500">
               Make sure the server is running: <code className="rounded bg-zinc-800 px-1.5 py-0.5">pnpm dev:web</code>
             </p>
+            <button
+              onClick={retry}
+              className="mt-2 rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-zinc-800"
+            >
+              Retry Connection
+            </button>
           </div>
         )}
       </div>
@@ -40,11 +47,9 @@ function BootScreen() {
 
 export function App() {
   const { status, startPolling } = useEngineStore();
+  const [view, setView] = useState<'chat' | 'knowledge'>('chat');
 
-  useEffect(() => {
-    const cleanup = startPolling();
-    return cleanup;
-  }, [startPolling]);
+  useEffect(() => { startPolling(); }, [startPolling]);
 
   if (status !== 'ready') {
     return <BootScreen />;
@@ -52,8 +57,12 @@ export function App() {
 
   return (
     <div className="flex h-screen bg-zinc-950">
-      <Sidebar />
-      <ChatWindow />
+      <Sidebar onViewChange={setView} currentView={view} />
+      {view === 'chat' ? (
+        <ChatWindow />
+      ) : (
+        <KnowledgePanel onClose={() => setView('chat')} />
+      )}
     </div>
   );
 }

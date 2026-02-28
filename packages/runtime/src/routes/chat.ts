@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { ChatService } from '@vai/core';
+import type { ChatService, ImageInput } from '@vai/core';
 
 export function registerChatRoutes(app: FastifyInstance, chatService: ChatService) {
   app.register(async (fastify) => {
@@ -9,11 +9,13 @@ export function registerChatRoutes(app: FastifyInstance, chatService: ChatServic
           const data = JSON.parse(raw.toString()) as {
             conversationId: string;
             content: string;
+            image?: ImageInput;
           };
 
           for await (const chunk of chatService.sendMessage(
             data.conversationId,
             data.content,
+            data.image,
           )) {
             socket.send(JSON.stringify(chunk));
           }

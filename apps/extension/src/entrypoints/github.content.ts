@@ -7,6 +7,19 @@
 
 import { isSensitivePage, sanitizeContent } from '../lib/privacy.js';
 
+// Suppress expected "Extension context invalidated" errors on extension reload
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = e.reason?.message || String(e.reason || '');
+  if (msg.includes('context invalidated') || msg.includes('Extension context')) {
+    e.preventDefault();
+  }
+});
+window.addEventListener('error', (e) => {
+  if (e.message?.includes('context invalidated') || e.message?.includes('Extension context')) {
+    e.preventDefault();
+  }
+});
+
 export default defineContentScript({
   matches: ['https://github.com/*'],
   excludeMatches: [
@@ -16,15 +29,35 @@ export default defineContentScript({
   ],
   runAt: 'document_idle',
 
-  main() {
+  main(ctx) {
     if (isSensitivePage(window.location.href)) return;
+
+    // Respond to popup requests for page content
+    try {
+      if (!browser.runtime?.id) return;
+      browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        if (msg?.type === 'VAI_GET_CONTENT') {
+          sendResponse({
+            title: document.title,
+            content: document.body.innerText.slice(0, 50000),
+            url: window.location.href,
+          });
+        }
+      });
+    } catch {
+      console.warn('[VAI] Extension context invalidated');
+      return;
+    }
 
     // Debounce to handle GitHub's SPA navigation
     let timeout: ReturnType<typeof setTimeout>;
 
     const capture = () => {
+      if (!ctx.isValid) return;
       clearTimeout(timeout);
-      timeout = setTimeout(() => captureGitHubContent(), 2000);
+      timeout = setTimeout(() => {
+        if (ctx.isValid) captureGitHubContent();
+      }, 2000);
     };
 
     capture();
@@ -32,6 +65,7 @@ export default defineContentScript({
     // GitHub uses pjax/turbo for navigation
     const observer = new MutationObserver(capture);
     observer.observe(document.body, { childList: true, subtree: true });
+    ctx.onInvalidated(() => observer.disconnect());
   },
 });
 
@@ -94,14 +128,18 @@ function captureGitHubContent() {
   const content = parts.join('\n');
   if (content.length < 100) return; // Not enough content
 
-  browser.runtime.sendMessage({
-    type: 'SAVE_GITHUB_REPO',
-    url,
-    title,
-    content,
-    language: 'code',
-    meta: { owner, repo, path: pathParts.slice(2).join('/') || undefined },
-  });
-
-  console.log(`[VAI] Captured GitHub: ${title} (${content.length} chars)`);
+  try {
+    if (!browser.runtime?.id) return;
+    browser.runtime.sendMessage({
+      type: 'SAVE_GITHUB_REPO',
+      url,
+      title,
+      content,
+      language: 'code',
+      meta: { owner, repo, path: pathParts.slice(2).join('/') || undefined },
+    });
+    console.log(`[VAI] Captured GitHub: ${title} (${content.length} chars)`);
+  } catch {
+    console.warn('[VAI] Failed to send message (extension may have been reloaded)');
+  }
 }

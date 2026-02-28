@@ -11,9 +11,25 @@ export interface MessageRecord {
   conversationId: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  imageId?: string | null;
   toolCalls?: string;
   toolCallId?: string;
   tokenCount?: number;
   modelId?: string;
+  createdAt: Date;
+}
+
+export interface ImageRecord {
+  id: string;
+  conversationId?: string | null;
+  sourceId?: string | null;
+  filename: string;
+  mimeType: string;
+  data: string; // base64
+  description: string;
+  question?: string | null;
+  width?: number | null;
+  height?: number | null;
+  sizeBytes?: number | null;
   createdAt: Date;
 }

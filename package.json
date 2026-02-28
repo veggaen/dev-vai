@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node scripts/predev.mjs",
     "dev": "concurrently --kill-others --names runtime,desktop -c cyan,magenta \"pnpm dev:web\" \"pnpm dev:desktop\"",
     "dev:web": "pnpm --filter @vai/runtime dev",
     "dev:desktop": "pnpm --filter @vai/desktop dev",
@@ -18,7 +19,13 @@
     "update": "git pull && pnpm install && pnpm build",
     "release:dev": "git add -A && git commit && git push origin dev",
     "release:main": "git checkout main && git merge dev --no-ff && git push origin main && git checkout dev",
-    "sidecar:build": "node scripts/build-sidecar.mjs"
+    "sidecar:build": "node scripts/build-sidecar.mjs",
+    "vai": "node scripts/vai-server.mjs",
+    "vai:start": "node scripts/vai-server.mjs start",
+    "vai:stop": "node scripts/vai-server.mjs stop",
+    "vai:restart": "node scripts/vai-server.mjs restart",
+    "vai:status": "node scripts/vai-server.mjs status",
+    "vai:test": "node scripts/test-live.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

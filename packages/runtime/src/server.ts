@@ -6,6 +6,7 @@ import { registerChatRoutes } from './routes/chat.js';
 import { registerConversationRoutes } from './routes/conversations.js';
 import { registerModelRoutes } from './routes/models.js';
 import { registerIngestRoutes } from './routes/ingest.js';
+import { registerImageRoutes } from './routes/images.js';
 
 export interface ServerOptions {
   port?: number;
@@ -26,16 +27,27 @@ export async function createServer(options?: ServerOptions) {
   // Ingestion pipeline — how VAI learns from the world
   const pipeline = new IngestPipeline(db, vaiEngine);
 
+  // Hydrate engine from persisted sources in DB
+  const hydrated = pipeline.hydrate();
+  console.log(`[VAI] Hydrated: ${hydrated.sourcesLoaded} sources, ${hydrated.chunksLoaded} chunks, ${hydrated.imagesLoaded} images loaded into engine`);
+
   console.log('[VAI] VeggaAI engine initialized');
   const stats = vaiEngine.getStats();
-  console.log(`[VAI] Vocab: ${stats.vocabSize} | Knowledge: ${stats.knowledgeEntries} entries | Docs: ${stats.documentsIndexed} | N-grams: ${stats.ngramContexts}`);
+  console.log(`[VAI] Vocab: ${stats.vocabSize} | Knowledge: ${stats.knowledgeEntries} entries | Docs: ${stats.documentsIndexed} | Concepts: ${stats.conceptsExtracted} | N-grams: ${stats.ngramContexts}`);
 
   const chatService = new ChatService(db, models);
 
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, bodyLimit: 15 * 1024 * 1024 }); // 15MB for image uploads
 
   await app.register(cors, { origin: true });
   await app.register(websocket);
+
+  app.get('/', async () => ({
+    name: 'VeggaAI',
+    version: '0.1.0',
+    engine: 'vai:v0',
+    docs: { health: '/health', train: 'POST /api/train', chat: '/api/chat', capture: 'POST /api/capture' },
+  }));
 
   app.get('/health', async () => ({
     status: 'ok',
@@ -57,6 +69,7 @@ export async function createServer(options?: ServerOptions) {
   registerModelRoutes(app, models);
   registerChatRoutes(app, chatService);
   registerIngestRoutes(app, pipeline);
+  registerImageRoutes(app, pipeline, chatService);
 
   return { app, port, db, models, chatService, vaiEngine, pipeline };
 }

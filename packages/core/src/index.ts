@@ -19,12 +19,13 @@ export type { KnowledgeEntry } from './models/vai-engine.js';
 
 // Chat
 export { ChatService } from './chat/service.js';
-export type { ConversationRecord, MessageRecord } from './chat/types.js';
+export type { ImageInput } from './chat/service.js';
+export type { ConversationRecord, MessageRecord, ImageRecord } from './chat/types.js';
 
 // Ingestion
 export { IngestPipeline } from './ingest/pipeline.js';
 export type { IngestResult, RawCapture } from './ingest/pipeline.js';
-export { scrapeWebPage } from './ingest/web.js';
+export { scrapeWebPage, extractLinks } from './ingest/web.js';
 export { fetchYouTubeTranscript, extractVideoId, createYouTubeCapture } from './ingest/youtube.js';
 export { fetchGitHubRepo, parseGitHubUrl, createGitHubCapture } from './ingest/github.js';
 
