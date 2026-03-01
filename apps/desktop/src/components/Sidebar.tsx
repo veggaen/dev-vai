@@ -1,8 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
 import { useEngineStore } from '../stores/engineStore.js';
 import { BuildStatusBadge } from './BuildStatusBadge.js';
+import { SidebarSearch } from './SidebarSearch.js';
+import { Search } from 'lucide-react';
 
 export function Sidebar() {
   const {
@@ -16,14 +18,26 @@ export function Sidebar() {
   const { models, selectedModelId, setSelectedModelId, fetchModels } =
     useSettingsStore();
   const { status: engineStatus, stats } = useEngineStore();
+  const [showSearch, setShowSearch] = useState(false);
 
   useEffect(() => {
     fetchModels();
     fetchConversations();
   }, []);
 
+  // Ctrl+F in sidebar opens search
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setShowSearch((v) => !v);
+      }
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, []);
+
   const handleNewChat = () => {
-    // Deselect active conversation → ChatWindow shows fresh welcome state
     useChatStore.setState({ activeConversationId: null, messages: [] });
   };
 
@@ -70,15 +84,36 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* Navigation */}
-      <div className="p-3">
+      {/* Search + New Chat row */}
+      <div className="flex items-center gap-2 p-3">
         <button
           onClick={handleNewChat}
-          className="w-full rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-zinc-800"
+          className="flex-1 rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-zinc-800"
         >
           + New Chat
         </button>
+        <button
+          onClick={() => setShowSearch((v) => !v)}
+          className={`rounded-lg border p-2 transition-colors ${
+            showSearch
+              ? 'border-blue-500/50 bg-blue-500/10 text-blue-400'
+              : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+          }`}
+          title="Search chats (Ctrl+Shift+F)"
+        >
+          <Search className="h-4 w-4" />
+        </button>
       </div>
+
+      {/* Search panel */}
+      {showSearch && (
+        <SidebarSearch
+          onSelectConversation={(id) => {
+            handleSelectConversation(id);
+          }}
+          onClose={() => setShowSearch(false)}
+        />
+      )}
 
       {/* Conversation List */}
       <div className="flex-1 overflow-y-auto px-3">

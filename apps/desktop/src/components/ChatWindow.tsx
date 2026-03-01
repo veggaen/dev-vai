@@ -4,7 +4,10 @@ import { useSettingsStore } from '../stores/settingsStore.js';
 import { useLayoutStore, MODE_PLACEHOLDERS } from '../stores/layoutStore.js';
 import { MessageBubble } from './MessageBubble.js';
 import { ModeSelector } from './ModeSelector.js';
-import { Code, Zap, Sparkles, BookOpen, Shield, MessageCircle } from 'lucide-react';
+import {
+  Code, Zap, Sparkles, BookOpen, Shield, MessageCircle,
+  Paperclip, X, FileText, ArrowUp, Image as ImageIcon, Square,
+} from 'lucide-react';
 
 /* ── Preset suggestions shown when no messages ── */
 const PRESETS = [
@@ -16,6 +19,25 @@ const PRESETS = [
   { label: 'Compare Prisma vs Drizzle', icon: MessageCircle, category: 'Learn' },
 ];
 
+/* ── File extension detection ── */
+const CODE_PATTERNS: { test: RegExp; ext: string }[] = [
+  { test: /^import\s+.*from\s+['"]|^export\s+(default\s+)?/m, ext: 'tsx' },
+  { test: /^const\s+\w+\s*[:=]|^let\s+|^var\s+|^function\s+\w+\s*\(|=>\s*\{/m, ext: 'ts' },
+  { test: /^<\w+[\s>]|<\/\w+>/m, ext: 'html' },
+  { test: /^\.\w+\s*\{|^@media|^@import/m, ext: 'css' },
+  { test: /^{[\s\n]*"/m, ext: 'json' },
+  { test: /^#!/m, ext: 'sh' },
+  { test: /^def\s+\w+|^class\s+\w+|^import\s+\w+$/m, ext: 'py' },
+];
+
+function detectFileExtension(text: string): string {
+  for (const p of CODE_PATTERNS) {
+    if (p.test.test(text)) return p.ext;
+  }
+  // Long text without code patterns → markdown
+  return 'md';
+}
+
 interface PastedImage {
   data: string;
   mimeType: string;
@@ -24,6 +46,16 @@ interface PastedImage {
   width?: number;
   height?: number;
 }
+
+interface FileAttachment {
+  id: string;
+  name: string;
+  content: string;
+  language: string;
+  sizeBytes: number;
+}
+
+const LARGE_PASTE_THRESHOLD = 500; // chars — above this, isolate as file
 
 export function ChatWindow() {
   const {
@@ -40,11 +72,14 @@ export function ChatWindow() {
   const [pastedImage, setPastedImage] = useState<PastedImage | null>(null);
   const [imageDescription, setImageDescription] = useState('');
   const [imageQuestion, setImageQuestion] = useState('');
+  const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const hasMessages = activeConversationId && messages.length > 0;
+  const hasContent = input.trim().length > 0 || pastedImage || attachedFiles.length > 0;
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -63,10 +98,12 @@ export function ChatWindow() {
 
   useEffect(() => { resizeTextarea(); }, [input, resizeTextarea]);
 
-  // Image paste
+  // Image paste + smart text paste
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
+
+    // Check for image
     for (const item of items) {
       if (item.type.startsWith('image/')) {
         e.preventDefault();
@@ -88,6 +125,61 @@ export function ChatWindow() {
         return;
       }
     }
+
+    // Smart text paste — detect large code/text blocks
+    const text = e.clipboardData?.getData('text/plain');
+    if (text && text.length > LARGE_PASTE_THRESHOLD) {
+      e.preventDefault();
+      const ext = detectFileExtension(text);
+      const lineCount = text.split('\n').length;
+      const name = `pasted-${attachedFiles.length + 1}.${ext}`;
+      setAttachedFiles((prev) => [
+        ...prev,
+        {
+          id: `file-${Date.now()}`,
+          name,
+          content: text,
+          language: ext,
+          sizeBytes: new Blob([text]).size,
+        },
+      ]);
+      // Optionally set a short reference in the input
+      if (!input.trim()) {
+        setInput(`Analyze attached ${ext} file (${lineCount} lines)`);
+      }
+    }
+  }, [attachedFiles.length, input]);
+
+  // File upload handler
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const content = reader.result as string;
+        const ext = file.name.split('.').pop() || detectFileExtension(content);
+        setAttachedFiles((prev) => [
+          ...prev,
+          {
+            id: `file-${Date.now()}-${file.name}`,
+            name: file.name,
+            content,
+            language: ext,
+            sizeBytes: file.size,
+          },
+        ]);
+      };
+      reader.readAsText(file);
+    });
+
+    // Reset input
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
+
+  const removeFile = useCallback((id: string) => {
+    setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
   }, []);
 
   const clearImage = useCallback(() => {
@@ -98,14 +190,14 @@ export function ChatWindow() {
 
   /**
    * Send message — auto-creates a conversation if none is active.
-   * This is the key fix: no conversation required before typing.
+   * Requires text when images or files are attached.
    */
   const handleSend = async (overrideText?: string) => {
     const text = (overrideText ?? input).trim();
     if (isStreaming) return;
 
-    // Need text or image
-    if (!text && !pastedImage) return;
+    // Must have text — images and files require description/context
+    if (!text) return;
     if (pastedImage && !imageDescription.trim()) {
       descriptionRef.current?.focus();
       return;
@@ -119,9 +211,18 @@ export function ChatWindow() {
     }
     if (!convId) return;
 
+    // Build message content with file attachments inline
+    let fullContent = text;
+    if (attachedFiles.length > 0) {
+      const fileSections = attachedFiles.map(
+        (f) => `\n\n---\n📎 **${f.name}** (${f.language}, ${(f.sizeBytes / 1024).toFixed(1)}KB)\n\`\`\`${f.language}\n${f.content}\n\`\`\``
+      );
+      fullContent = text + fileSections.join('');
+    }
+
     // Send
     if (pastedImage) {
-      sendMessage(text, {
+      sendMessage(fullContent, {
         data: pastedImage.data,
         mimeType: pastedImage.mimeType,
         description: imageDescription.trim(),
@@ -132,10 +233,11 @@ export function ChatWindow() {
       });
       clearImage();
     } else {
-      sendMessage(text);
+      sendMessage(fullContent);
     }
 
     setInput('');
+    setAttachedFiles([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
   };
 
@@ -144,9 +246,19 @@ export function ChatWindow() {
   };
 
   const charCount = input.length;
+  const canSend = (input.trim().length > 0) && !isStreaming && (!pastedImage || imageDescription.trim().length > 0);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept=".txt,.md,.tsx,.ts,.js,.jsx,.json,.css,.html,.py,.sh,.yaml,.yml,.toml,.xml,.sql,.csv,.env,.log"
+        onChange={handleFileUpload}
+        className="hidden"
+      />
       {/* Messages / Welcome area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden">
         {!hasMessages ? (
@@ -281,11 +393,31 @@ export function ChatWindow() {
             </div>
           )}
 
-          {/* Text input */}
-          <div className="relative flex items-end rounded-xl border border-zinc-700 bg-zinc-900 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
-            <div className="flex shrink-0 items-center pl-1.5 pb-1.5">
-              <ModeSelector />
+          {/* Attached files chips */}
+          {attachedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pb-1">
+              {attachedFiles.map((file) => (
+                <div
+                  key={file.id}
+                  className="flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800/80 px-2 py-1 text-xs text-zinc-300"
+                >
+                  <FileText className="h-3 w-3 text-zinc-500" />
+                  <span className="max-w-[120px] truncate">{file.name}</span>
+                  <span className="text-[10px] text-zinc-600">{(file.sizeBytes / 1024).toFixed(1)}KB</span>
+                  <button
+                    onClick={() => removeFile(file.id)}
+                    className="ml-0.5 rounded p-0.5 text-zinc-600 hover:bg-zinc-700 hover:text-zinc-300"
+                    title="Remove file"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
             </div>
+          )}
+
+          {/* Text input */}
+          <div className="relative flex flex-col rounded-xl border border-zinc-700 bg-zinc-900 focus-within:border-zinc-500 focus-within:ring-1 focus-within:ring-zinc-500/50">
             <textarea
               ref={textareaRef}
               value={input}
@@ -297,28 +429,49 @@ export function ChatWindow() {
                   handleSend();
                 }
               }}
-              placeholder={pastedImage ? 'Add a message (optional with image)' : MODE_PLACEHOLDERS[mode]}
+              placeholder={pastedImage ? 'Describe what you need help with...' : MODE_PLACEHOLDERS[mode]}
               rows={1}
-              className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-4 py-3 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none"
+              className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none"
             />
-            <div className="flex shrink-0 items-center gap-2 px-2 pb-2">
-              {charCount > 0 && (
-                <span className="text-xs text-zinc-600">{charCount}</span>
-              )}
-              <button
-                onClick={() => handleSend()}
-                disabled={(!input.trim() && !pastedImage) || isStreaming || (!!pastedImage && !imageDescription.trim())}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white transition-all hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500"
-                title="Send message (Enter)"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                  <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
-                </svg>
-              </button>
+            {/* Bottom toolbar */}
+            <div className="flex items-center justify-between px-2 pb-2">
+              <div className="flex items-center gap-1">
+                <ModeSelector />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+                  title="Attach files"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                {charCount > 0 && (
+                  <span className="text-[11px] tabular-nums text-zinc-600">{charCount}</span>
+                )}
+                {isStreaming ? (
+                  <button
+                    onClick={() => {/* TODO: stop streaming */}}
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-700 text-zinc-300 transition-all hover:bg-zinc-600"
+                    title="Stop generating"
+                  >
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleSend()}
+                    disabled={!canSend}
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-zinc-900 transition-all hover:bg-zinc-200 disabled:bg-zinc-700 disabled:text-zinc-500"
+                    title="Send message (Enter)"
+                  >
+                    <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
           <p className="mt-1.5 text-center text-xs text-zinc-700">
-            Ctrl+V to paste images · Shift+Enter for new line
+            Ctrl+V to paste images · Paperclip to attach files · Shift+Enter for new line
           </p>
         </div>
       </div>
