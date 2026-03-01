@@ -4,6 +4,7 @@ import { join, dirname } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { getTemplate, SANDBOX_TEMPLATES, type SandboxTemplate } from './templates.js';
 
 export interface SandboxProject {
   id: string;
@@ -61,6 +62,26 @@ export class SandboxManager {
   /** Get a sandbox project by ID */
   get(id: string): SandboxProject | undefined {
     return this.projects.get(id);
+  }
+
+  /** List all available templates */
+  listTemplates(): SandboxTemplate[] {
+    return SANDBOX_TEMPLATES;
+  }
+
+  /** Create a project pre-populated from a template */
+  async createFromTemplate(templateId: string, name?: string): Promise<SandboxProject> {
+    const template = getTemplate(templateId);
+    if (!template) throw new Error(`Unknown template: ${templateId}`);
+
+    const projectName = name || template.name.toLowerCase().replace(/\s+/g, '-');
+    const project = await this.create(projectName);
+
+    // Write template files
+    await this.writeFiles(project.id, template.files);
+    project.logs.push(`Scaffolded from template: ${template.name}`);
+
+    return project;
   }
 
   /** List all active projects */

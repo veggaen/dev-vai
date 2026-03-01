@@ -2,6 +2,35 @@ import type { FastifyInstance } from 'fastify';
 import type { SandboxManager, FileWrite } from '../sandbox/manager.js';
 
 export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxManager) {
+  /** List available templates */
+  app.get('/api/sandbox/templates', async () => {
+    return sandbox.listTemplates().map((t) => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      category: t.category,
+      fileCount: t.files.length,
+    }));
+  });
+
+  /** Create project from template */
+  app.post<{ Body: { templateId: string; name?: string } }>(
+    '/api/sandbox/from-template',
+    async (request) => {
+      const project = await sandbox.createFromTemplate(
+        request.body.templateId,
+        request.body.name,
+      );
+      return {
+        id: project.id,
+        name: project.name,
+        rootDir: project.rootDir,
+        status: project.status,
+        files: Object.keys(project.files),
+      };
+    },
+  );
+
   /** Create a new sandbox project */
   app.post<{ Body: { name: string } }>(
     '/api/sandbox',

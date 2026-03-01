@@ -6,6 +6,14 @@ export interface SandboxFile {
   content: string;
 }
 
+export interface SandboxTemplateInfo {
+  id: string;
+  name: string;
+  description: string;
+  category: 'frontend' | 'backend' | 'fullstack';
+  fileCount: number;
+}
+
 export type SandboxStatus = 'idle' | 'creating' | 'writing' | 'installing' | 'building' | 'running' | 'failed';
 
 interface SandboxState {
@@ -16,6 +24,7 @@ interface SandboxState {
   files: string[];
   logs: string[];
   error: string | null;
+  templates: SandboxTemplateInfo[];
 
   createProject: (name: string) => Promise<string>;
   writeFiles: (files: SandboxFile[]) => Promise<void>;
@@ -24,11 +33,15 @@ interface SandboxState {
   stopDev: () => Promise<void>;
   fetchLogs: () => Promise<void>;
   fetchFiles: () => Promise<void>;
+  fetchTemplates: () => Promise<void>;
   destroyProject: () => Promise<void>;
   reset: () => void;
 
   /** Full pipeline: create → write files → install → start */
   scaffold: (name: string, files: SandboxFile[]) => Promise<void>;
+
+  /** Full pipeline from template: create from template → install → start */
+  scaffoldFromTemplate: (templateId: string, name?: string) => Promise<void>;
 }
 
 export const useSandboxStore = create<SandboxState>((set, get) => ({
@@ -39,6 +52,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
   files: [],
   logs: [],
   error: null,
+  templates: [],
 
   createProject: async (name: string) => {
     set({ status: 'creating', error: null });
@@ -130,6 +144,14 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
     } catch { /* ok */ }
   },
 
+  fetchTemplates: async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/sandbox/templates`);
+      const data = await res.json() as SandboxTemplateInfo[];
+      set({ templates: data });
+    } catch { /* ok */ }
+  },
+
   destroyProject: async () => {
     const { projectId } = get();
     if (!projectId) return;
@@ -160,5 +182,28 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
 
     // Start dev server
     await get().startDev();
+  },
+
+  scaffoldFromTemplate: async (templateId: string, name?: string) => {
+    set({ status: 'creating', error: null });
+    try {
+      // Create from template (writes files on server)
+      const res = await fetch(`${API_BASE}/api/sandbox/from-template`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateId, name }),
+      });
+      const data = await res.json() as { id: string; name: string; files: string[] };
+      set({ projectId: data.id, projectName: data.name, files: data.files });
+
+      // Install deps
+      const ok = await get().installDeps();
+      if (!ok) return;
+
+      // Start dev server
+      await get().startDev();
+    } catch (err) {
+      set({ status: 'failed', error: (err as Error).message });
+    }
   },
 }));

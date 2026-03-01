@@ -6,6 +6,7 @@ import { PreviewPanel } from './components/PreviewPanel.js';
 import { DebugConsole } from './components/DebugConsole.js';
 import { useEngineStore } from './stores/engineStore.js';
 import { useLayoutStore } from './stores/layoutStore.js';
+import { useSandboxStore } from './stores/sandboxStore.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 
 function BootScreen() {
@@ -51,10 +52,14 @@ function BootScreen() {
 
 export function App() {
   const { status, startPolling } = useEngineStore();
-  const { view, showDebugConsole } = useLayoutStore();
+  const { showDebugConsole } = useLayoutStore();
+  const { projectId } = useSandboxStore();
 
   useEffect(() => { startPolling(); }, [startPolling]);
   useKeyboardShortcuts();
+
+  // Show preview/debug whenever there's an active sandbox build
+  const hasActiveSandbox = projectId !== null;
 
   if (status !== 'ready') {
     return <BootScreen />;
@@ -77,8 +82,8 @@ export function App() {
         {/* Main content area */}
         <ChatWindow />
 
-        {/* Preview panel — slides in for builder mode */}
-        {view === 'builder' && (
+        {/* Preview + Debug — visible whenever a sandbox project is active */}
+        {hasActiveSandbox && (
           <div className="flex w-[40%] min-w-[350px] flex-col border-l border-zinc-800">
             <div className="flex-1">
               <PreviewPanel />

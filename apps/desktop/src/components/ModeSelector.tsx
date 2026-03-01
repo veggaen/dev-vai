@@ -14,7 +14,7 @@ const MODES: { id: ChatMode; label: string; icon: typeof Bot; shortcut: string }
  * Compact dropdown mode selector — sits inside the chat input bar.
  */
 export function ModeSelector() {
-  const { mode, setMode, builderEnabled } = useLayoutStore();
+  const { mode, setMode } = useLayoutStore();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -50,24 +50,18 @@ export function ModeSelector() {
           {MODES.map((m) => {
             const Icon = m.icon;
             const isActive = mode === m.id;
-            const isDisabled = m.id === 'builder' && !builderEnabled;
 
             return (
               <button
                 key={m.id}
                 onClick={() => {
-                  if (!isDisabled) {
-                    setMode(m.id);
-                    setOpen(false);
-                  }
+                  setMode(m.id);
+                  setOpen(false);
                 }}
-                disabled={isDisabled}
                 className={`group flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors ${
                   isActive
                     ? 'bg-blue-600/15 text-blue-400'
-                    : isDisabled
-                      ? 'cursor-not-allowed text-zinc-600'
-                      : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
                 }`}
                 title={MODE_DESCRIPTIONS[m.id]}
               >

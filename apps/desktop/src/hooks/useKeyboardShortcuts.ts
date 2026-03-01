@@ -12,12 +12,10 @@ const MODE_KEYS: Record<string, ChatMode> = {
 /**
  * Global keyboard shortcuts:
  *   Ctrl+1-5   — Switch mode (chat / agent / builder / plan / debate)
- *   Ctrl+B     — Toggle builder view
  *   Ctrl+J     — Toggle debug console
  */
 export function useKeyboardShortcuts() {
-  const { setMode, enterBuilder, exitBuilder, view, toggleDebugConsole } =
-    useLayoutStore();
+  const { setMode, toggleDebugConsole } = useLayoutStore();
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -37,16 +35,6 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      if (ctrl && key.toLowerCase() === 'b') {
-        e.preventDefault();
-        if (view === 'builder') {
-          exitBuilder();
-        } else {
-          enterBuilder();
-        }
-        return;
-      }
-
       if (ctrl && key.toLowerCase() === 'j') {
         e.preventDefault();
         toggleDebugConsole();
@@ -56,5 +44,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setMode, enterBuilder, exitBuilder, view, toggleDebugConsole]);
+  }, [setMode, toggleDebugConsole]);
 }
