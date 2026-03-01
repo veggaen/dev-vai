@@ -10,12 +10,14 @@ export function registerChatRoutes(app: FastifyInstance, chatService: ChatServic
             conversationId: string;
             content: string;
             image?: ImageInput;
+            systemPrompt?: string;
           };
 
           for await (const chunk of chatService.sendMessage(
             data.conversationId,
             data.content,
             data.image,
+            data.systemPrompt,
           )) {
             socket.send(JSON.stringify(chunk));
           }

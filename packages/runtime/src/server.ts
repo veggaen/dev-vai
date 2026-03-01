@@ -8,6 +8,8 @@ import { registerConversationRoutes } from './routes/conversations.js';
 import { registerModelRoutes } from './routes/models.js';
 import { registerIngestRoutes } from './routes/ingest.js';
 import { registerImageRoutes } from './routes/images.js';
+import { registerSandboxRoutes } from './routes/sandbox.js';
+import { SandboxManager } from './sandbox/manager.js';
 
 export interface ServerOptions {
   port?: number;
@@ -50,6 +52,7 @@ export async function createServer(options?: ServerOptions) {
   console.log(`[VAI] Vocab: ${stats.vocabSize} | Knowledge: ${stats.knowledgeEntries} entries | Docs: ${stats.documentsIndexed} | Concepts: ${stats.conceptsExtracted} | N-grams: ${stats.ngramContexts}`);
 
   const chatService = new ChatService(db, models);
+  const sandboxManager = new SandboxManager();
 
   const app = Fastify({ logger: false, bodyLimit: 15 * 1024 * 1024 }); // 15MB for image uploads
 
@@ -124,6 +127,7 @@ export async function createServer(options?: ServerOptions) {
   registerChatRoutes(app, chatService);
   registerIngestRoutes(app, pipeline);
   registerImageRoutes(app, pipeline, chatService);
+  registerSandboxRoutes(app, sandboxManager);
 
-  return { app, port, db, models, chatService, vaiEngine, pipeline };
+  return { app, port, db, models, chatService, vaiEngine, pipeline, sandboxManager };
 }

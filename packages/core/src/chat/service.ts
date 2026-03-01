@@ -117,6 +117,7 @@ export class ChatService {
     conversationId: string,
     content: string,
     image?: ImageInput,
+    systemPrompt?: string,
   ): AsyncGenerator<ChatChunk> {
     const conv = this.db
       .select()
@@ -157,12 +158,17 @@ export class ChatService {
       toolCallId: m.toolCallId ?? undefined,
     }));
 
+    // Prepend system prompt if provided (from mode selection)
+    const finalMessages: Message[] = systemPrompt
+      ? [{ role: 'system' as const, content: systemPrompt }, ...chatMessages]
+      : chatMessages;
+
     // Stream from model
     const adapter = this.models.get(conv.modelId);
     let fullText = '';
     let totalUsage = { promptTokens: 0, completionTokens: 0 };
 
-    for await (const chunk of adapter.chatStream({ messages: chatMessages })) {
+    for await (const chunk of adapter.chatStream({ messages: finalMessages })) {
       if (chunk.type === 'text_delta' && chunk.textDelta) {
         fullText += chunk.textDelta;
       }

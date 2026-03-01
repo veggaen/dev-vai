@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
-import { useLayoutStore, MODE_PLACEHOLDERS } from '../stores/layoutStore.js';
+import { useLayoutStore, MODE_PLACEHOLDERS, MODE_SYSTEM_PROMPTS } from '../stores/layoutStore.js';
 import { MessageBubble } from './MessageBubble.js';
 import { ModeSelector } from './ModeSelector.js';
 import {
@@ -220,6 +220,9 @@ export function ChatWindow() {
       fullContent = text + fileSections.join('');
     }
 
+    // Get system prompt for current mode
+    const systemPrompt = MODE_SYSTEM_PROMPTS[mode] || undefined;
+
     // Send
     if (pastedImage) {
       sendMessage(fullContent, {
@@ -230,10 +233,10 @@ export function ChatWindow() {
         width: pastedImage.width,
         height: pastedImage.height,
         sizeBytes: pastedImage.sizeBytes,
-      });
+      }, systemPrompt);
       clearImage();
     } else {
-      sendMessage(fullContent);
+      sendMessage(fullContent, undefined, systemPrompt);
     }
 
     setInput('');

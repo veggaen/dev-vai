@@ -37,7 +37,7 @@ interface ChatState {
   createConversation: (modelId: string) => Promise<string>;
   selectConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
-  sendMessage: (content: string, image?: ImageAttachment) => void;
+  sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string) => void;
   appendToLastMessage: (text: string) => void;
 }
 
@@ -99,7 +99,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await get().fetchConversations();
   },
 
-  sendMessage: (content: string, image?: ImageAttachment) => {
+  sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string) => {
     const state = get();
     if (!state.activeConversationId) return;
 
@@ -152,6 +152,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           height: image.height,
           sizeBytes: image.sizeBytes,
         };
+      }
+      if (systemPrompt) {
+        payload.systemPrompt = systemPrompt;
       }
       ws!.send(JSON.stringify(payload));
     };

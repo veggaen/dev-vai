@@ -2,15 +2,16 @@ import { useEffect } from 'react';
 import { useLayoutStore, type ChatMode } from '../stores/layoutStore.js';
 
 const MODE_KEYS: Record<string, ChatMode> = {
-  '1': 'agent',
-  '2': 'builder',
-  '3': 'plan',
-  '4': 'debate',
+  '1': 'chat',
+  '2': 'agent',
+  '3': 'builder',
+  '4': 'plan',
+  '5': 'debate',
 };
 
 /**
  * Global keyboard shortcuts:
- *   Ctrl+1-4   — Switch mode (chat / builder / plan / debate)
+ *   Ctrl+1-5   — Switch mode (chat / agent / builder / plan / debate)
  *   Ctrl+B     — Toggle builder view
  *   Ctrl+J     — Toggle debug console
  */
