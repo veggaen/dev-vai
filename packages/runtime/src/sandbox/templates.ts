@@ -472,6 +472,145 @@ const flaskApi: SandboxTemplate = {
   ],
 };
 
+/* ── Vinext (Next.js API on Vite + Cloudflare Workers) ── */
+const vinext: SandboxTemplate = {
+  id: 'vinext',
+  name: 'Vinext',
+  description: 'Next.js API on Vite — deploy to Cloudflare Workers',
+  category: 'fullstack',
+  files: [
+    {
+      path: 'package.json',
+      content: JSON.stringify({
+        name: 'vai-sandbox-vinext',
+        private: true,
+        type: 'module',
+        scripts: {
+          dev: 'vinext dev',
+          build: 'vinext build',
+          start: 'vinext start',
+          deploy: 'vinext deploy',
+        },
+        dependencies: {
+          vinext: 'latest',
+          react: '^19.0.0',
+          'react-dom': '^19.0.0',
+        },
+        devDependencies: {
+          '@types/react': '^19.0.0',
+          '@types/node': '^22.0.0',
+          '@vitejs/plugin-rsc': 'latest',
+          autoprefixer: '^10.4.20',
+          postcss: '^8.4.49',
+          tailwindcss: '^3.4.17',
+          typescript: '^5.7.0',
+          vite: '^7.0.0',
+        },
+      }, null, 2),
+    },
+    {
+      path: 'vite.config.ts',
+      content: [
+        `import { defineConfig } from 'vite';`,
+        `import vinext from 'vinext';`,
+        `import rsc from '@vitejs/plugin-rsc';`,
+        ``,
+        `export default defineConfig({`,
+        `  plugins: [`,
+        `    vinext(),`,
+        `    rsc({`,
+        `      entries: {`,
+        `        rsc: 'virtual:vinext-rsc-entry',`,
+        `        ssr: 'virtual:vinext-app-ssr-entry',`,
+        `        client: 'virtual:vinext-app-browser-entry',`,
+        `      },`,
+        `    }),`,
+        `  ],`,
+        `});`,
+        ``,
+      ].join('\n'),
+    },
+    {
+      path: 'tsconfig.json',
+      content: JSON.stringify({
+        compilerOptions: {
+          target: 'ES2022',
+          lib: ['dom', 'dom.iterable', 'esnext'],
+          module: 'esnext',
+          moduleResolution: 'bundler',
+          jsx: 'react-jsx',
+          strict: true,
+          esModuleInterop: true,
+          skipLibCheck: true,
+          paths: { '@/*': ['./src/*'] },
+        },
+        include: ['**/*.ts', '**/*.tsx'],
+        exclude: ['node_modules'],
+      }, null, 2),
+    },
+    {
+      path: 'tailwind.config.js',
+      content: `/** @type {import('tailwindcss').Config} */\nexport default {\n  content: ['./src/**/*.{ts,tsx}'],\n  theme: { extend: {} },\n  plugins: [],\n};\n`,
+    },
+    {
+      path: 'postcss.config.cjs',
+      content: `module.exports = {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n};\n`,
+    },
+    {
+      path: 'src/app/layout.tsx',
+      content: [
+        `import type { Metadata } from 'next';`,
+        `import './globals.css';`,
+        ``,
+        `export const metadata: Metadata = {`,
+        `  title: 'Vai Sandbox — Vinext',`,
+        `  description: 'Built with VeggaAI on Vinext',`,
+        `};`,
+        ``,
+        `export default function RootLayout({ children }: { children: React.ReactNode }) {`,
+        `  return (`,
+        `    <html lang="en">`,
+        `      <body>{children}</body>`,
+        `    </html>`,
+        `  );`,
+        `}`,
+        ``,
+      ].join('\n'),
+    },
+    {
+      path: 'src/app/globals.css',
+      content: `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\nbody { margin: 0; font-family: system-ui, -apple-system, sans-serif; }\n`,
+    },
+    {
+      path: 'src/app/page.tsx',
+      content: [
+        `export default function Home() {`,
+        `  return (`,
+        `    <div className="flex min-h-screen items-center justify-center bg-zinc-950">`,
+        `      <div className="text-center">`,
+        `        <h1 className="text-4xl font-bold text-white">Hello from Vai Sandbox</h1>`,
+        `        <p className="mt-4 text-zinc-400">Powered by Vinext — Next.js API on Vite</p>`,
+        `      </div>`,
+        `    </div>`,
+        `  );`,
+        `}`,
+        ``,
+      ].join('\n'),
+    },
+    {
+      path: 'src/app/api/health/route.ts',
+      content: [
+        `import { NextResponse } from 'next/server';`,
+        ``,
+        `export async function GET() {`,
+        `  return NextResponse.json({ status: 'ok', runtime: 'vinext' });`,
+        `}`,
+        ``,
+      ].join('\n'),
+    },
+  ],
+};
+
 /** All available templates */
 export const SANDBOX_TEMPLATES: SandboxTemplate[] = [
   reactVite,
@@ -484,6 +623,7 @@ export const SANDBOX_TEMPLATES: SandboxTemplate[] = [
   astro,
   solidVite,
   flaskApi,
+  vinext,
 ];
 
 /** Lookup by ID */
