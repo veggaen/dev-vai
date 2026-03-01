@@ -490,6 +490,158 @@ const CORE_QUESTIONS: TestQuestion[] = [
     variant: 2,
     tests: 'Short question generation'
   },
+
+  // ─── Scaling React Apps ───
+  {
+    id: 'scale-1',
+    category: 'architecture',
+    question: 'How do you implement code splitting and lazy loading in a React application?',
+    requiredKeywords: ['lazy', 'import'],
+    bonusKeywords: ['Suspense', 'React.lazy', 'dynamic', 'bundle', 'route', 'split'],
+    minWords: 20,
+    variant: 1,
+    tests: 'Code splitting knowledge'
+  },
+  {
+    id: 'scale-2',
+    category: 'pattern',
+    question: 'How do you render a list of 10000 items efficiently in React?',
+    requiredKeywords: ['virtual'],
+    bonusKeywords: ['react-window', 'TanStack', 'virtualize', 'visible', 'overscan', 'performance'],
+    minWords: 15,
+    variant: 2,
+    tests: 'Virtual list pattern'
+  },
+  {
+    id: 'scale-3',
+    category: 'concept',
+    question: 'What is React.memo and when should you use it?',
+    requiredKeywords: ['memo', 're-render'],
+    bonusKeywords: ['props', 'comparison', 'performance', 'skip', 'React.memo', 'shallow'],
+    minWords: 15,
+    variant: 3,
+    tests: 'React.memo understanding'
+  },
+  {
+    id: 'scale-4',
+    category: 'pattern',
+    question: 'What is the difference between useMemo and useCallback in React?',
+    requiredKeywords: ['useMemo', 'useCallback'],
+    bonusKeywords: ['memoize', 'function', 'value', 'reference', 'dependency', 'render'],
+    minWords: 15,
+    variant: 4,
+    tests: 'Hook optimization patterns'
+  },
+
+  // ─── UI/UX Polish ───
+  {
+    id: 'uiux-1',
+    category: 'pattern',
+    question: 'What is a skeleton loading screen and how do you build one with Tailwind?',
+    requiredKeywords: ['skeleton', 'loading'],
+    bonusKeywords: ['animate-pulse', 'placeholder', 'layout', 'perceived', 'bg-zinc', 'rounded'],
+    minWords: 15,
+    variant: 1,
+    tests: 'Skeleton screen pattern'
+  },
+  {
+    id: 'uiux-2',
+    category: 'pattern',
+    question: 'How do you implement toast notifications in a React app?',
+    requiredKeywords: ['toast'],
+    bonusKeywords: ['sonner', 'notification', 'success', 'error', 'position', 'Toaster'],
+    minWords: 15,
+    variant: 2,
+    tests: 'Toast notification pattern'
+  },
+  {
+    id: 'uiux-3',
+    category: 'code-gen',
+    question: 'Write a React ErrorBoundary component that shows a fallback and retry button.',
+    requiredKeywords: ['error', 'boundary'],
+    bonusKeywords: ['getDerivedStateFromError', 'fallback', 'retry', 'children', 'render', 'catch'],
+    minWords: 15,
+    variant: 3,
+    tests: 'Error boundary code generation'
+  },
+  {
+    id: 'uiux-4',
+    category: 'concept',
+    question: 'What are empty states in UI design and why are they important?',
+    requiredKeywords: ['empty'],
+    bonusKeywords: ['state', 'data', 'action', 'user', 'helpful', 'CTA', 'onboarding'],
+    minWords: 15,
+    variant: 4,
+    tests: 'Empty state UX knowledge'
+  },
+
+  // ─── Responsive Design ───
+  {
+    id: 'resp-1',
+    category: 'pattern',
+    question: 'How does mobile-first responsive design work in Tailwind CSS?',
+    requiredKeywords: ['mobile', 'breakpoint'],
+    bonusKeywords: ['sm:', 'md:', 'lg:', 'first', 'responsive', 'prefix', 'screen'],
+    minWords: 15,
+    variant: 1,
+    tests: 'Mobile-first responsive pattern'
+  },
+  {
+    id: 'resp-2',
+    category: 'code-gen',
+    question: 'Write a responsive sidebar layout that collapses on mobile using Tailwind.',
+    requiredKeywords: ['sidebar'],
+    bonusKeywords: ['hidden', 'md:', 'flex', 'translate', 'mobile', 'overlay', 'w-64'],
+    minWords: 15,
+    variant: 2,
+    tests: 'Responsive sidebar code generation'
+  },
+
+  // ─── State Management ───
+  {
+    id: 'state-1',
+    category: 'pattern',
+    question: 'How do Zustand selectors help with React performance?',
+    requiredKeywords: ['selector', 're-render'],
+    bonusKeywords: ['Zustand', 'subscribe', 'shallow', 'store', 'performance', 'specific'],
+    minWords: 15,
+    variant: 1,
+    tests: 'Zustand selector pattern'
+  },
+  {
+    id: 'state-2',
+    category: 'architecture',
+    question: 'How do you split a large Zustand store into slices?',
+    requiredKeywords: ['slice', 'store'],
+    bonusKeywords: ['Zustand', 'create', 'combine', 'interface', 'middleware', 'persist'],
+    minWords: 15,
+    variant: 2,
+    tests: 'Zustand store slicing'
+  },
+
+  // ─── Accessibility ───
+  {
+    id: 'a11y-1',
+    category: 'concept',
+    question: 'What are the most important accessibility practices for React web apps?',
+    requiredKeywords: ['accessible'],
+    bonusKeywords: ['ARIA', 'semantic', 'keyboard', 'screen reader', 'focus', 'label', 'contrast'],
+    minWords: 20,
+    variant: 1,
+    tests: 'Accessibility fundamentals'
+  },
+
+  // ─── Design System ───
+  {
+    id: 'design-1',
+    category: 'architecture',
+    question: 'How do you build a component-based design system with Tailwind and React?',
+    requiredKeywords: ['component', 'design'],
+    bonusKeywords: ['token', 'CSS variable', 'consistent', 'primitive', 'theme', 'reusable'],
+    minWords: 20,
+    variant: 1,
+    tests: 'Design system architecture'
+  },
 ];
 
 // ─── Test Runner ────────────────────────────────────────────────

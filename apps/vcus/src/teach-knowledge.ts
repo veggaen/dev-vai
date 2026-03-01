@@ -996,6 +996,10 @@ Key technique: strip "I want to know", "Can you tell me", "How do I", etc. Keep 
     url: 'https://tailwindui.com/components',
     content: `# Tailwind CSS Component Examples
 
+## What is Tailwind CSS utility-first framework
+
+Tailwind CSS is a **utility-first CSS framework** that provides low-level utility classes to build designs directly in your markup. Unlike traditional CSS frameworks (Bootstrap, Foundation) that give you pre-designed components, Tailwind gives you utility classes like \`flex\`, \`pt-4\`, \`text-center\`, and \`bg-blue-500\` to compose designs without writing custom CSS. It differs from traditional approaches by being utility-first rather than component-first, offering JIT compilation, and supporting responsive prefixes (\`sm:\`, \`md:\`, \`lg:\`).
+
 ## Responsive Card Component
 
 \`\`\`tsx
@@ -1073,6 +1077,1116 @@ export function Button({ className, variant, size, ...props }: ButtonProps) {
 }
 \`\`\``,
   },
+
+  // ═══ Scaling React Apps ═══
+  {
+    title: 'Scaling React Applications with Code Splitting and Lazy Loading',
+    url: 'https://react.dev/reference/react/lazy',
+    content: `# Scaling React Applications
+
+## React lazy loading and code splitting
+
+**Code splitting** breaks your app into smaller bundles loaded on demand. React provides \`React.lazy()\` and \`Suspense\` for component-level code splitting.
+
+\`\`\`tsx
+import { lazy, Suspense } from 'react';
+
+// ❌ Static import — entire component loaded upfront
+import Dashboard from './pages/Dashboard';
+import Settings from './pages/Settings';
+
+// ✅ Lazy import — only loaded when rendered
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+
+function App() {
+  return (
+    <Suspense fallback={<LoadingSkeleton />}>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/analytics" element={<Analytics />} />
+      </Routes>
+    </Suspense>
+  );
+}
+\`\`\`
+
+## Route-based code splitting with React Router
+
+Split your app by route to keep initial bundle small:
+
+\`\`\`tsx
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+
+const Home = lazy(() => import('./pages/Home'));
+const Profile = lazy(() => import('./pages/Profile'));
+const AdminPanel = lazy(() => import('./pages/AdminPanel'));
+
+export function AppRouter() {
+  return (
+    <BrowserRouter>
+      <Suspense fallback={<div className="flex h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+      </div>}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/profile/:id" element={<Profile />} />
+          <Route path="/admin/*" element={<AdminPanel />} />
+        </Routes>
+      </Suspense>
+    </BrowserRouter>
+  );
+}
+\`\`\`
+
+## Virtualized lists for large datasets
+
+When rendering thousands of items, use react-window or TanStack Virtual to only render visible items:
+
+\`\`\`tsx
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useRef } from 'react';
+
+function VirtualList({ items }: { items: string[] }) {
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 48,
+    overscan: 5,
+  });
+
+  return (
+    <div ref={parentRef} className="h-[600px] overflow-auto">
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {virtualizer.getVirtualItems().map((virtualItem) => (
+          <div
+            key={virtualItem.key}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: virtualItem.size,
+              transform: \`translateY(\${virtualItem.start}px)\`,
+            }}
+          >
+            {items[virtualItem.index]}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+\`\`\`
+
+## Dynamic imports for heavy libraries
+
+Load heavy libraries only when needed:
+
+\`\`\`tsx
+async function exportToPDF() {
+  const { jsPDF } = await import('jspdf');
+  const doc = new jsPDF();
+  doc.text('Report', 10, 10);
+  doc.save('report.pdf');
+}
+
+async function highlightCode(code: string, lang: string) {
+  const { highlight } = await import('prismjs');
+  return highlight(code, lang);
+}
+\`\`\`
+
+## Scale checklist
+- **Code split by route** — each page is a lazy-loaded chunk
+- **Virtualize long lists** — only render visible items (react-window, TanStack Virtual)
+- **Dynamic imports** — load heavy libs (chart.js, pdf, markdown) on demand
+- **Image optimization** — lazy loading, srcset, WebP/AVIF format
+- **Bundle analysis** — use \`vite-bundle-visualizer\` or \`source-map-explorer\` to find bloat
+- **Tree shaking** — import only what you use: \`import { map } from 'lodash-es'\` not \`import _ from 'lodash'\`
+- **Prefetching** — preload likely next routes: \`<link rel="prefetch" href="/settings.js">\`
+
+## How to render 10000 items virtualize large list React
+
+When rendering thousands of items or a large list, you must virtualize — only render the items currently visible in the viewport. Libraries like **react-window** and **@tanstack/react-virtual** handle this. A virtual list measures the scroll container, calculates which items are in view (plus overscan for smooth scrolling), and only mounts those DOM nodes. This reduces DOM size from 10,000+ nodes to ~20-50 visible ones, dramatically improving re-render performance. Without virtualization, React must diff and reconcile all 10,000 list items on every state change, causing severe jank.`,
+  },
+
+  // ═══ React Performance Optimization ═══
+  {
+    title: 'React Performance Optimization with memo useMemo useCallback',
+    url: 'https://react.dev/reference/react/memo',
+    content: `# React Performance Optimization
+
+## React.memo for preventing unnecessary re-renders
+
+\`React.memo\` wraps a component to skip re-rendering when props haven't changed:
+
+\`\`\`tsx
+import { memo } from 'react';
+
+// ❌ Re-renders every time parent renders, even if props are same
+function ExpensiveList({ items }: { items: Item[] }) {
+  return items.map(item => <ItemCard key={item.id} item={item} />);
+}
+
+// ✅ Only re-renders when items actually change
+const ExpensiveList = memo(function ExpensiveList({ items }: { items: Item[] }) {
+  return items.map(item => <ItemCard key={item.id} item={item} />);
+});
+\`\`\`
+
+## useMemo for expensive computations
+
+Cache the result of expensive calculations:
+
+\`\`\`tsx
+import { useMemo } from 'react';
+
+function Dashboard({ transactions }: { transactions: Transaction[] }) {
+  // ❌ Recalculates on every render
+  const stats = calculateStats(transactions);
+
+  // ✅ Only recalculates when transactions change
+  const stats = useMemo(() => calculateStats(transactions), [transactions]);
+
+  // ✅ Expensive filtering + sorting
+  const filtered = useMemo(() =>
+    transactions
+      .filter(t => t.amount > 0)
+      .sort((a, b) => b.date - a.date)
+      .slice(0, 100),
+    [transactions]
+  );
+
+  return <StatsTable data={stats} items={filtered} />;
+}
+\`\`\`
+
+## useCallback for stable function references
+
+Prevent child re-renders caused by new function references:
+
+\`\`\`tsx
+import { useCallback, memo } from 'react';
+
+const SearchInput = memo(function SearchInput({
+  onSearch,
+}: {
+  onSearch: (q: string) => void;
+}) {
+  return <input onChange={(e) => onSearch(e.target.value)} />;
+});
+
+function Page() {
+  const [query, setQuery] = useState('');
+
+  // ❌ New function every render → SearchInput re-renders
+  const handleSearch = (q: string) => setQuery(q);
+
+  // ✅ Stable reference → SearchInput skips re-render
+  const handleSearch = useCallback((q: string) => setQuery(q), []);
+
+  return <SearchInput onSearch={handleSearch} />;
+}
+\`\`\`
+
+## When NOT to optimize
+- Don't wrap everything in \`memo\` — it adds comparison overhead
+- Don't use \`useMemo\` for simple calculations (string concat, basic math)
+- Don't use \`useCallback\` if the child isn't memoized with \`memo\`
+- Profile first with React DevTools Profiler before optimizing
+- Premature optimization causes more bugs than it fixes
+
+## What is React.memo when should you use it
+
+React.memo is a higher-order component that prevents unnecessary re-renders. When you wrap a component with \`memo()\`, React will skip re-rendering that component if its props have not changed (shallow comparison). You should use React.memo when: (1) the component renders often with the same props, (2) the component is expensive to re-render (large lists, complex DOM), (3) parent re-renders frequently but child props stay stable. Combine with \`useCallback\` for function props and \`useMemo\` for object/array props.`,
+  },
+
+  // ═══ UI Polish: Loading States, Skeletons, Transitions ═══
+  {
+    title: 'UI Polish Loading States Skeleton Screens Transitions',
+    url: 'https://ui.shadcn.com/docs/components',
+    content: `# UI Polish: Loading States & Transitions
+
+## Skeleton loading screens
+
+Skeleton screens show the layout shape while content loads, reducing perceived loading time:
+
+\`\`\`tsx
+function MessageSkeleton() {
+  return (
+    <div className="animate-pulse space-y-3 p-4">
+      <div className="flex items-start gap-3">
+        <div className="h-8 w-8 rounded-full bg-zinc-800" />
+        <div className="flex-1 space-y-2">
+          <div className="h-4 w-24 rounded bg-zinc-800" />
+          <div className="h-3 w-full rounded bg-zinc-800" />
+          <div className="h-3 w-3/4 rounded bg-zinc-800" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatSkeleton() {
+  return (
+    <div className="space-y-4">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <MessageSkeleton key={i} />
+      ))}
+    </div>
+  );
+}
+\`\`\`
+
+## Smooth transitions with CSS
+
+Use Tailwind transitions for micro-interactions:
+
+\`\`\`tsx
+// Button with hover + active feedback
+<button className="
+  rounded-lg bg-blue-600 px-4 py-2 text-white
+  transition-all duration-150 ease-out
+  hover:bg-blue-500 hover:shadow-lg hover:shadow-blue-500/25
+  active:scale-[0.98] active:bg-blue-700
+  disabled:opacity-50 disabled:cursor-not-allowed
+">
+  Send Message
+</button>
+
+// Sidebar item with smooth highlight
+<div className="
+  cursor-pointer rounded-lg px-3 py-2 text-sm
+  transition-colors duration-100
+  text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200
+">
+  Conversation Title
+</div>
+
+// Smooth fade-in for new content
+<div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+  {newContent}
+</div>
+\`\`\`
+
+## Toast notifications
+
+Show non-blocking feedback with toast notifications:
+
+\`\`\`tsx
+import { Toaster, toast } from 'sonner';
+
+// In your layout
+function Layout({ children }) {
+  return (
+    <>
+      {children}
+      <Toaster position="bottom-right" theme="dark" richColors />
+    </>
+  );
+}
+
+// Usage anywhere
+function SaveButton() {
+  const handleSave = async () => {
+    try {
+      await saveData();
+      toast.success('Changes saved');
+    } catch (err) {
+      toast.error('Failed to save', {
+        description: err.message,
+        action: { label: 'Retry', onClick: handleSave },
+      });
+    }
+  };
+  return <button onClick={handleSave}>Save</button>;
+}
+\`\`\`
+
+## Error boundaries for graceful failure
+
+Catch rendering errors without crashing the whole app:
+
+\`\`\`tsx
+import { Component, type ReactNode } from 'react';
+
+interface Props { children: ReactNode; fallback?: ReactNode; }
+interface State { hasError: boolean; error?: Error; }
+
+class ErrorBoundary extends Component<Props, State> {
+  state: State = { hasError: false };
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback ?? (
+        <div className="flex flex-col items-center justify-center gap-3 p-8">
+          <p className="text-sm text-red-400">Something went wrong</p>
+          <button
+            onClick={() => this.setState({ hasError: false })}
+            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Usage
+<ErrorBoundary fallback={<ChatErrorFallback />}>
+  <ChatWindow />
+</ErrorBoundary>
+\`\`\`
+
+## ErrorBoundary class getDerivedStateFromError fallback
+
+A React **ErrorBoundary** is a class component that catches JavaScript errors in its child component tree, logs the error, and displays a fallback UI instead of crashing the whole app. It uses \`getDerivedStateFromError()\` to update state when an error occurs, and \`componentDidCatch()\` for logging. The boundary wraps children and shows a fallback with a retry button that resets the error state: \`this.setState({ hasError: false })\`. Every major React app should wrap critical sections (chat windows, data panels, forms) in error boundaries for graceful degradation.
+
+## Empty states
+
+Show helpful content when there's no data:
+
+\`\`\`tsx
+function EmptyState({ icon, title, description, action }: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  action?: { label: string; onClick: () => void };
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
+      <div className="rounded-full bg-zinc-800 p-4 text-zinc-400">{icon}</div>
+      <div>
+        <h3 className="text-lg font-medium text-zinc-200">{title}</h3>
+        <p className="mt-1 text-sm text-zinc-500">{description}</p>
+      </div>
+      {action && (
+        <button
+          onClick={action.onClick}
+          className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500"
+        >
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
+}
+\`\`\``,
+  },
+
+  // ═══ Responsive Design Patterns ═══
+  {
+    title: 'Responsive Design Patterns with Tailwind CSS',
+    url: 'https://tailwindcss.com/docs/responsive-design',
+    content: `# Responsive Design with Tailwind CSS
+
+## Mobile-first responsive breakpoints
+
+Tailwind uses mobile-first breakpoints. Styles without a prefix apply to ALL screen sizes, then you override for larger screens:
+
+\`\`\`tsx
+// Mobile: single column. sm: 2 columns. lg: 3 columns. xl: 4 columns
+<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+  {items.map(item => <Card key={item.id} item={item} />)}
+</div>
+
+// Mobile: stack vertically. md: side-by-side layout
+<div className="flex flex-col md:flex-row md:gap-6">
+  <aside className="w-full md:w-64 md:shrink-0">
+    <Sidebar />
+  </aside>
+  <main className="min-w-0 flex-1">
+    <Content />
+  </main>
+</div>
+
+// Responsive text sizes
+<h1 className="text-2xl font-bold sm:text-3xl lg:text-4xl">
+  Dashboard
+</h1>
+
+// Hide/show based on screen size
+<nav className="hidden md:flex">Desktop navigation</nav>
+<button className="md:hidden">Mobile menu button</button>
+\`\`\`
+
+## Responsive sidebar layout
+
+Common pattern for apps with a collapsible sidebar:
+
+\`\`\`tsx
+function AppLayout({ children }: { children: ReactNode }) {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  return (
+    <div className="flex h-screen">
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside className={\`
+        fixed inset-y-0 left-0 z-50 w-64 transform bg-zinc-950 border-r border-zinc-800
+        transition-transform duration-200 ease-in-out
+        md:relative md:translate-x-0
+        \${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+      \`}>
+        <Sidebar />
+      </aside>
+
+      {/* Main content */}
+      <main className="min-w-0 flex-1 overflow-y-auto">
+        <header className="flex items-center gap-3 border-b border-zinc-800 px-4 py-3 md:hidden">
+          <button onClick={() => setSidebarOpen(true)}>☰</button>
+          <span className="text-sm font-medium">VeggaAI</span>
+        </header>
+        {children}
+      </main>
+    </div>
+  );
+}
+\`\`\`
+
+## Container queries
+
+Use container queries for component-level responsive design (Tailwind v3.4+):
+
+\`\`\`tsx
+<div className="@container">
+  <div className="flex flex-col @md:flex-row @md:items-center gap-4">
+    <img src={avatar} className="h-16 w-16 rounded-full @md:h-20 @md:w-20" />
+    <div>
+      <h3 className="text-sm @md:text-base font-semibold">{name}</h3>
+      <p className="text-xs @md:text-sm text-zinc-400">{bio}</p>
+    </div>
+  </div>
+</div>
+\`\`\``,
+  },
+
+  // ═══ Accessibility Best Practices ═══
+  {
+    title: 'Accessibility Best Practices for React Web Apps',
+    url: 'https://www.w3.org/WAI/ARIA/apg/',
+    content: `# Accessibility (a11y) in React
+
+## ARIA labels and semantic HTML
+
+Use semantic HTML first, then ARIA when needed:
+
+\`\`\`tsx
+// ❌ Div soup — no semantics, no keyboard support
+<div onClick={handleClick} className="btn">Submit</div>
+
+// ✅ Semantic HTML — keyboard accessible, screen reader friendly
+<button onClick={handleClick} className="btn">Submit</button>
+
+// ✅ Landmarks give screen readers page structure
+<header>
+  <nav aria-label="Main navigation">
+    <ul role="list">
+      <li><a href="/">Home</a></li>
+      <li><a href="/chat">Chat</a></li>
+    </ul>
+  </nav>
+</header>
+<main>
+  <h1>Chat</h1>
+  <section aria-label="Messages" role="log" aria-live="polite">
+    {messages.map(msg => <MessageBubble key={msg.id} {...msg} />)}
+  </section>
+</main>
+\`\`\`
+
+## Keyboard navigation
+
+All interactive elements must be keyboard accessible:
+
+\`\`\`tsx
+function SidebarItem({ title, onClick, isActive }: {
+  title: string;
+  onClick: () => void;
+  isActive: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      role="tab"
+      aria-selected={isActive}
+      tabIndex={0}
+      className={\`w-full text-left rounded-lg px-3 py-2 text-sm
+        \${isActive ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900'}
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500
+      \`}
+    >
+      {title}
+    </button>
+  );
+}
+\`\`\`
+
+## Focus management
+
+Manage focus for modals, dialogs, and dynamic content:
+
+\`\`\`tsx
+import { useRef, useEffect } from 'react';
+
+function Dialog({ isOpen, onClose, title, children }: DialogProps) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (isOpen) closeRef.current?.focus();
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dialog-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onKeyDown={(e) => e.key === 'Escape' && onClose()}
+    >
+      <div className="w-full max-w-md rounded-xl bg-zinc-900 p-6 shadow-xl">
+        <h2 id="dialog-title" className="text-lg font-semibold text-zinc-100">{title}</h2>
+        {children}
+        <button ref={closeRef} onClick={onClose} className="mt-4 rounded-lg bg-zinc-800 px-4 py-2 text-sm">
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+\`\`\`
+
+## Screen reader announcements
+
+Use aria-live regions for dynamic updates:
+
+\`\`\`tsx
+function ChatInput() {
+  const [status, setStatus] = useState('');
+
+  const sendMessage = async () => {
+    setStatus('Sending message...');
+    await send();
+    setStatus('Message sent');
+  };
+
+  return (
+    <>
+      <input />
+      <button onClick={sendMessage}>Send</button>
+      {/* Screen readers announce this automatically */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {status}
+      </span>
+    </>
+  );
+}
+\`\`\`
+
+## Color contrast and visual accessibility
+- Minimum contrast ratio: 4.5:1 for normal text, 3:1 for large text
+- Never use color alone to convey meaning (add icons or text labels)
+- Support \`prefers-reduced-motion\` for animations
+- Support \`prefers-color-scheme\` for dark/light modes
+- Use \`focus-visible\` ring for keyboard-only focus indicators`,
+  },
+
+  // ═══ Design System Patterns ═══
+  {
+    title: 'Building a Design System with Tailwind and React Components',
+    url: 'https://ui.shadcn.com/docs',
+    content: `# Design System Patterns
+
+## Design tokens with CSS custom properties
+
+Define your design tokens as CSS variables for consistency:
+
+\`\`\`css
+/* globals.css */
+:root {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --primary: 217.2 91.2% 59.8%;
+  --primary-foreground: 0 0% 100%;
+  --destructive: 0 62.8% 30.6%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --border: 240 3.7% 15.9%;
+  --ring: 217.2 91.2% 59.8%;
+  --radius: 0.5rem;
+}
+\`\`\`
+
+\`\`\`js
+// tailwind.config.js
+module.exports = {
+  theme: {
+    extend: {
+      colors: {
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        primary: { DEFAULT: 'hsl(var(--primary))', foreground: 'hsl(var(--primary-foreground))' },
+        destructive: { DEFAULT: 'hsl(var(--destructive))', foreground: 'hsl(var(--destructive-foreground))' },
+        muted: { DEFAULT: 'hsl(var(--muted))', foreground: 'hsl(var(--muted-foreground))' },
+        border: 'hsl(var(--border))',
+        ring: 'hsl(var(--ring))',
+      },
+      borderRadius: {
+        lg: 'var(--radius)',
+        md: 'calc(var(--radius) - 2px)',
+        sm: 'calc(var(--radius) - 4px)',
+      },
+    },
+  },
+};
+\`\`\`
+
+## Consistent spacing and typography scale
+
+Use Tailwind's built-in scale for consistency:
+
+\`\`\`tsx
+// ❌ Inconsistent hardcoded values
+<div style={{ padding: '13px', fontSize: '15px', gap: '7px' }}>
+
+// ✅ Use Tailwind's 4px grid system
+<div className="p-3 text-sm gap-2">          {/* 12px, 14px, 8px */}
+<div className="p-4 text-base gap-3">        {/* 16px, 16px, 12px */}
+<div className="p-6 text-lg gap-4">          {/* 24px, 18px, 16px */}
+
+// Typography hierarchy
+<h1 className="text-3xl font-bold tracking-tight">Page Title</h1>
+<h2 className="text-xl font-semibold">Section</h2>
+<h3 className="text-base font-medium">Subsection</h3>
+<p className="text-sm text-muted-foreground">Body text</p>
+<span className="text-xs text-muted-foreground">Caption</span>
+\`\`\`
+
+## Component composition pattern
+
+Build complex UI from small, reusable primitives:
+
+\`\`\`tsx
+// Card primitive — reusable container
+function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("rounded-xl border border-border bg-card p-6", className)} {...props} />;
+}
+
+function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("flex flex-col space-y-1.5", className)} {...props} />;
+}
+
+function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
+  return <h3 className={cn("text-lg font-semibold leading-none tracking-tight", className)} {...props} />;
+}
+
+function CardDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {
+  return <p className={cn("text-sm text-muted-foreground", className)} {...props} />;
+}
+
+function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("pt-0", className)} {...props} />;
+}
+
+// Usage — compose like building blocks
+<Card>
+  <CardHeader>
+    <CardTitle>Knowledge Base</CardTitle>
+    <CardDescription>1,088 entries learned</CardDescription>
+  </CardHeader>
+  <CardContent>
+    <SearchInput />
+    <SourceList sources={sources} />
+  </CardContent>
+</Card>
+\`\`\`
+
+## Icon system
+- Use lucide-react for consistent icons across the app
+- Keep icon sizes consistent: 16px (small), 20px (default), 24px (large)
+- Always pair icons with text labels for accessibility
+\`\`\`tsx
+import { Send, Plus, Search, Trash2, Settings } from 'lucide-react';
+
+<button className="flex items-center gap-2">
+  <Send className="h-4 w-4" />
+  <span>Send</span>
+</button>
+\`\`\``,
+  },
+
+  // ═══ State Management at Scale ═══
+  {
+    title: 'Scaling State Management with Zustand React',
+    url: 'https://zustand.docs.pmnd.rs/',
+    content: `# Scaling State Management with Zustand
+
+## Zustand store slicing pattern
+
+Split large stores into focused slices for maintainability:
+
+\`\`\`tsx
+import { create } from 'zustand';
+import { devtools, persist } from 'zustand/middleware';
+
+// ✅ Separate concerns into slice creators
+interface ChatSlice {
+  messages: Message[];
+  isStreaming: boolean;
+  sendMessage: (content: string) => void;
+  clearMessages: () => void;
+}
+
+interface UISlice {
+  sidebarOpen: boolean;
+  theme: 'dark' | 'light';
+  toggleSidebar: () => void;
+  setTheme: (theme: 'dark' | 'light') => void;
+}
+
+interface SettingsSlice {
+  model: string;
+  temperature: number;
+  setModel: (model: string) => void;
+  setTemperature: (temp: number) => void;
+}
+
+// Combine slices into one store
+type AppStore = ChatSlice & UISlice & SettingsSlice;
+
+const useAppStore = create<AppStore>()(
+  devtools(
+    persist(
+      (set, get) => ({
+        // Chat slice
+        messages: [],
+        isStreaming: false,
+        sendMessage: (content) => { /* ... */ },
+        clearMessages: () => set({ messages: [] }),
+
+        // UI slice
+        sidebarOpen: true,
+        theme: 'dark',
+        toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+        setTheme: (theme) => set({ theme }),
+
+        // Settings slice
+        model: 'vai-local',
+        temperature: 0.7,
+        setModel: (model) => set({ model }),
+        setTemperature: (temp) => set({ temperature: temp }),
+      }),
+      { name: 'vai-store', partialize: (state) => ({ theme: state.theme, model: state.model }) }
+    )
+  )
+);
+\`\`\`
+
+## Zustand selectors for performance
+
+Use selectors to prevent unnecessary re-renders:
+
+\`\`\`tsx
+// ❌ Re-renders on ANY store change
+function ChatView() {
+  const store = useChatStore();
+  return <div>{store.messages.length} messages</div>;
+}
+
+// ✅ Only re-renders when messages change
+function ChatView() {
+  const messages = useChatStore((s) => s.messages);
+  return <div>{messages.length} messages</div>;
+}
+
+// ✅ Multiple selectors with shallow comparison
+import { useShallow } from 'zustand/react/shallow';
+
+function Header() {
+  const { status, stats } = useEngineStore(
+    useShallow((s) => ({ status: s.status, stats: s.stats }))
+  );
+  return <StatusBadge status={status} entries={stats?.knowledgeEntries} />;
+}
+\`\`\`
+
+## Async actions pattern
+
+Handle async operations cleanly in Zustand:
+
+\`\`\`tsx
+interface DataSlice {
+  data: Item[] | null;
+  loading: boolean;
+  error: string | null;
+  fetchData: () => Promise<void>;
+}
+
+const useDataStore = create<DataSlice>((set) => ({
+  data: null,
+  loading: false,
+  error: null,
+  fetchData: async () => {
+    set({ loading: true, error: null });
+    try {
+      const res = await fetch('/api/data');
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data = await res.json();
+      set({ data, loading: false });
+    } catch (err) {
+      set({ error: (err as Error).message, loading: false });
+    }
+  },
+}));
+\`\`\``,
+  },
+
+  // ═══ API Layer Architecture ═══
+  {
+    title: 'API Layer Architecture for Frontend React Apps',
+    url: 'https://tanstack.com/query/latest',
+    content: `# API Layer Architecture
+
+## Centralized API client
+
+Create a typed API client for all backend communication:
+
+\`\`\`tsx
+// lib/api-client.ts
+const BASE = import.meta.env.VITE_API_URL || '';
+
+class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(\`\${BASE}\${path}\`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new ApiError(res.status, body || res.statusText);
+  }
+
+  return res.json() as Promise<T>;
+}
+
+export const api = {
+  chat: {
+    send: (conversationId: string, content: string) =>
+      request<{ answer: string }>('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({ conversationId, content }),
+      }),
+    history: (conversationId: string) =>
+      request<Message[]>(\`/api/conversations/\${conversationId}/messages\`),
+  },
+  conversations: {
+    list: () => request<Conversation[]>('/api/conversations'),
+    create: (modelId: string) =>
+      request<{ id: string }>('/api/conversations', {
+        method: 'POST',
+        body: JSON.stringify({ modelId }),
+      }),
+    delete: (id: string) =>
+      request(\`/api/conversations/\${id}\`, { method: 'DELETE' }),
+  },
+  knowledge: {
+    search: (q: string) => request<SearchResult[]>(\`/api/search?q=\${encodeURIComponent(q)}\`),
+    sources: () => request<Source[]>('/api/sources'),
+    ingest: (url: string) =>
+      request<IngestResult>('/api/ingest/web', {
+        method: 'POST',
+        body: JSON.stringify({ url }),
+      }),
+  },
+  health: () => request<HealthResponse>('/health'),
+};
+\`\`\`
+
+## React Query / TanStack Query for server state
+
+Use TanStack Query for caching, refetching, and optimistic updates:
+
+\`\`\`tsx
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
+function ConversationList() {
+  const { data: conversations, isLoading } = useQuery({
+    queryKey: ['conversations'],
+    queryFn: api.conversations.list,
+    staleTime: 30_000,
+  });
+
+  const queryClient = useQueryClient();
+  const deleteMutation = useMutation({
+    mutationFn: api.conversations.delete,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+    },
+  });
+
+  if (isLoading) return <ConversationSkeleton />;
+
+  return conversations?.map(conv => (
+    <ConversationItem
+      key={conv.id}
+      conversation={conv}
+      onDelete={() => deleteMutation.mutate(conv.id)}
+    />
+  ));
+}
+\`\`\`
+
+## Optimistic updates for instant feedback
+
+\`\`\`tsx
+const sendMessageMutation = useMutation({
+  mutationFn: ({ conversationId, content }: { conversationId: string; content: string }) =>
+    api.chat.send(conversationId, content),
+  onMutate: async ({ conversationId, content }) => {
+    // Optimistically add user message immediately
+    await queryClient.cancelQueries({ queryKey: ['messages', conversationId] });
+    const previous = queryClient.getQueryData(['messages', conversationId]);
+    queryClient.setQueryData(['messages', conversationId], (old: Message[] = []) => [
+      ...old,
+      { id: \`temp-\${Date.now()}\`, role: 'user', content },
+    ]);
+    return { previous };
+  },
+  onError: (_err, _vars, context) => {
+    // Rollback on error
+    queryClient.setQueryData(['messages', conversationId], context?.previous);
+  },
+  onSettled: () => {
+    queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+  },
+});
+\`\`\``,
+  },
+
+  // ═══ Dark Mode and Theming ═══
+  {
+    title: 'Dark Mode Implementation and Theme System React Tailwind',
+    url: 'https://tailwindcss.com/docs/dark-mode',
+    content: `# Dark Mode & Theme System
+
+## Tailwind dark mode with class strategy
+
+\`\`\`js
+// tailwind.config.js
+module.exports = {
+  darkMode: 'class', // or 'media' for OS preference only
+};
+\`\`\`
+
+\`\`\`tsx
+// Theme toggle component
+function ThemeToggle() {
+  const [theme, setTheme] = useState<'dark' | 'light'>(() =>
+    document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+  );
+
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.classList.toggle('dark');
+    localStorage.setItem('theme', next);
+    setTheme(next);
+  };
+
+  return (
+    <button onClick={toggleTheme} className="rounded-lg p-2 hover:bg-zinc-800">
+      {theme === 'dark' ? '☀️' : '🌙'}
+    </button>
+  );
+}
+
+// Components use dark: prefix
+<div className="bg-white text-gray-900 dark:bg-zinc-950 dark:text-zinc-100">
+  <p className="text-gray-600 dark:text-zinc-400">
+    Adapts to theme automatically
+  </p>
+</div>
+\`\`\`
+
+## System preference detection and persistence
+
+\`\`\`tsx
+// Initialize theme from localStorage or system preference
+function initTheme() {
+  const stored = localStorage.getItem('theme');
+  if (stored === 'dark' || stored === 'light') {
+    document.documentElement.classList.toggle('dark', stored === 'dark');
+    return;
+  }
+  // Follow system preference
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.classList.toggle('dark', prefersDark);
+}
+
+// Call in main.tsx before React renders
+initTheme();
+\`\`\`
+
+## CSS variable theming
+
+Use CSS variables for dynamic theme values:
+
+\`\`\`css
+:root {
+  --bg: #ffffff;
+  --fg: #09090b;
+  --accent: #2563eb;
+  --muted: #71717a;
+  --border: #e4e4e7;
+}
+
+.dark {
+  --bg: #09090b;
+  --fg: #fafafa;
+  --accent: #3b82f6;
+  --muted: #a1a1aa;
+  --border: #27272a;
+}
+\`\`\``,
+  },
 ];
 
 // ─── Main ───────────────────────────────────────────────────────
@@ -1085,6 +2199,12 @@ async function main() {
     console.error('❌ VAI server not running at', BASE);
     process.exit(1);
   }
+
+  // Clear old taught entries before re-teaching (ensures stale patterns are removed)
+  try {
+    await fetch(`${BASE}/api/teach`, { method: 'DELETE' });
+    console.log('  🧹 Cleared old taught entries');
+  } catch { /* endpoint may not exist yet */ }
 
   console.log(`\n${'═'.repeat(60)}`);
   console.log(`  📚 Teaching VAI — ${KNOWLEDGE.length} knowledge entries`);

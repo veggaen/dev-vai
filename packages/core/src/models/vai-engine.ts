@@ -241,6 +241,13 @@ export class KnowledgeStore {
   addEntry(pattern: string, response: string, source: string, language: KnowledgeEntry['language'] = 'en'): void {
     const existing = this.entries.find((e) => e.pattern === pattern.toLowerCase());
     if (existing) {
+      // If new source is vcus-taught, always upgrade — vcus entries take priority
+      // over ingested/hydrated entries with the same pattern
+      if (source.includes('vcus') && !existing.source.includes('vcus')) {
+        existing.source = source;
+        existing.response = response;
+        existing.language = language;
+      }
       existing.frequency++;
       return;
     }
@@ -257,6 +264,29 @@ export class KnowledgeStore {
     for (const w of words) {
       if (!this.entryWordIndex.has(w)) this.entryWordIndex.set(w, new Set());
       this.entryWordIndex.get(w)!.add(idx);
+    }
+  }
+
+  /**
+   * Remove all taught entries (source includes 'vcus' or 'user-taught').
+   * Rebuilds invertedindex after removal.
+   */
+  clearTaughtEntries(): void {
+    const kept: KnowledgeEntry[] = [];
+    for (const e of this.entries) {
+      if (!e.source.includes('vcus') && e.source !== 'user-taught') {
+        kept.push(e);
+      }
+    }
+    this.entries = kept;
+    // Rebuild inverted index
+    this.entryWordIndex.clear();
+    for (let i = 0; i < this.entries.length; i++) {
+      const words = this.entries[i].pattern.split(/\s+/).filter(w => w.length > 1);
+      for (const w of words) {
+        if (!this.entryWordIndex.has(w)) this.entryWordIndex.set(w, new Set());
+        this.entryWordIndex.get(w)!.add(i);
+      }
     }
   }
 

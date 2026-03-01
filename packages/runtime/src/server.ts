@@ -92,12 +92,15 @@ export async function createServer(options?: ServerOptions) {
         const pattern = entry.pattern.toLowerCase();
         vaiEngine.knowledge.addEntry(pattern, entry.response, source, 'en');
 
-        // Persist to DB (deduplicate by pattern+source hash)
+        // Persist to DB — upsert by ID (pattern+source hash)
         try {
           const id = `teach-${Buffer.from(pattern + source).toString('base64url').slice(0, 40)}`;
           db.insert(schema.taughtEntries)
             .values({ id, pattern, response: entry.response, source, language: 'en', createdAt: new Date() })
-            .onConflictDoNothing()
+            .onConflictDoUpdate({
+              target: schema.taughtEntries.id,
+              set: { response: entry.response, pattern },
+            })
             .run();
         } catch { /* persistence failure — in-memory still works */ }
         added++;
@@ -105,6 +108,16 @@ export async function createServer(options?: ServerOptions) {
       return { ok: true, added, stats: vaiEngine.getStats() };
     },
   );
+
+  // Clear all taught entries (useful for re-teaching from scratch)
+  app.delete('/api/teach', async () => {
+    try {
+      db.delete(schema.taughtEntries).run();
+      // Also clear from in-memory knowledge store
+      vaiEngine.knowledge.clearTaughtEntries();
+    } catch { /* ok */ }
+    return { ok: true, cleared: true };
+  });
 
   registerConversationRoutes(app, chatService);
   registerModelRoutes(app, models);
