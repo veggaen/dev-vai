@@ -114,6 +114,31 @@ const MIGRATION_SQL = [
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_taught_entries_source ON taught_entries(source)`,
+  // Agent session logger tables
+  `CREATE TABLE IF NOT EXISTS agent_sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    agent_name TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'completed', 'failed')),
+    stats TEXT NOT NULL DEFAULT '{}',
+    tags TEXT NOT NULL DEFAULT '[]'
+  )`,
+  `CREATE TABLE IF NOT EXISTS session_events (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES agent_sessions(id),
+    type TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    duration_ms INTEGER,
+    content TEXT NOT NULL,
+    meta TEXT NOT NULL DEFAULT '{}'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_session_events_session ON session_events(session_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(type)`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_sessions_status ON agent_sessions(status)`,
 ];
 
 /**
@@ -130,6 +155,7 @@ function runMigrations(sqlite: InstanceType<typeof Database>): void {
 }
 
 let dbInstance: VaiDatabase | null = null;
+let rawDbInstance: InstanceType<typeof Database> | null = null;
 
 export function getDb(path?: string): VaiDatabase {
   if (dbInstance) return dbInstance;
@@ -140,6 +166,7 @@ export function getDb(path?: string): VaiDatabase {
   sqlite.exec(CREATE_TABLES_SQL);
   runMigrations(sqlite);
 
+  rawDbInstance = sqlite;
   dbInstance = drizzle(sqlite, { schema });
   return dbInstance;
 }
@@ -150,9 +177,16 @@ export function createDb(path?: string): VaiDatabase {
   sqlite.pragma('foreign_keys = ON');
   sqlite.exec(CREATE_TABLES_SQL);
   runMigrations(sqlite);
+  rawDbInstance = sqlite;
   return drizzle(sqlite, { schema });
+}
+
+/** Get the underlying better-sqlite3 Database instance */
+export function getRawDb(): InstanceType<typeof Database> | null {
+  return rawDbInstance;
 }
 
 export function resetDbInstance(): void {
   dbInstance = null;
+  rawDbInstance = null;
 }

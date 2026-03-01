@@ -1,0 +1,24 @@
+export { SessionService, SESSION_TABLES_SQL } from './service.js';
+export type {
+  AgentSession,
+  SessionEvent,
+  SessionStats,
+  SessionEventType,
+  EventMeta,
+  MessageMeta,
+  ThinkingMeta,
+  FileCreateMeta,
+  FileEditMeta,
+  FileReadMeta,
+  FileDeleteMeta,
+  TerminalMeta,
+  SearchMeta,
+  TodoUpdateMeta,
+  TodoItem,
+  StateChangeMeta,
+  ErrorMeta,
+  ToolCallMeta,
+  SummaryMeta,
+  NoteMeta,
+} from './types.js';
+export { createSessionId, createEventId, EVENT_TYPE_CONFIG } from './types.js';

@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
 import { useEngineStore } from '../stores/engineStore.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 import { BuildStatusBadge } from './BuildStatusBadge.js';
 import { SidebarSearch } from './SidebarSearch.js';
-import { Search } from 'lucide-react';
+import { Search, Brain } from 'lucide-react';
 
 export function Sidebar() {
   const {
@@ -18,6 +19,7 @@ export function Sidebar() {
   const { models, selectedModelId, setSelectedModelId, fetchModels } =
     useSettingsStore();
   const { status: engineStatus, stats } = useEngineStore();
+  const { view, setView } = useLayoutStore();
   const [showSearch, setShowSearch] = useState(false);
 
   useEffect(() => {
@@ -84,13 +86,24 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* Search + New Chat row */}
+      {/* Search + New Chat + Dev Logs row */}
       <div className="flex items-center gap-2 p-3">
         <button
           onClick={handleNewChat}
           className="flex-1 rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-zinc-800"
         >
           + New Chat
+        </button>
+        <button
+          onClick={() => setView(view === 'devlogs' ? 'chat' : 'devlogs')}
+          className={`rounded-lg border p-2 transition-colors ${
+            view === 'devlogs'
+              ? 'border-purple-500/50 bg-purple-500/10 text-purple-400'
+              : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+          }`}
+          title="Dev Logs (Agent Sessions)"
+        >
+          <Brain className="h-4 w-4" />
         </button>
         <button
           onClick={() => setShowSearch((v) => !v)}

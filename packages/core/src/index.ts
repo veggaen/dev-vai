@@ -1,5 +1,5 @@
 // Database
-export { getDb, createDb, resetDbInstance } from './db/client.js';
+export { getDb, createDb, resetDbInstance, getRawDb } from './db/client.js';
 export type { VaiDatabase } from './db/client.js';
 export * as schema from './db/schema.js';
 
@@ -32,3 +32,13 @@ export { fetchGitHubRepo, deepFetchGitHubRepo, parseGitHubUrl, createGitHubCaptu
 // Tools
 export { ToolRegistry } from './tools/registry.js';
 export type { Tool, ToolContext, ToolResult } from './tools/interface.js';
+
+// Sessions (Agent Dev Logs)
+export { SessionService, SESSION_TABLES_SQL } from './sessions/index.js';
+export type {
+  AgentSession, SessionEvent, SessionStats, SessionEventType,
+  EventMeta, MessageMeta, ThinkingMeta, FileCreateMeta, FileEditMeta,
+  FileReadMeta, TerminalMeta, SearchMeta, TodoUpdateMeta, TodoItem,
+  StateChangeMeta, ErrorMeta, ToolCallMeta, SummaryMeta, NoteMeta,
+} from './sessions/index.js';
+export { createSessionId, createEventId, EVENT_TYPE_CONFIG } from './sessions/index.js';

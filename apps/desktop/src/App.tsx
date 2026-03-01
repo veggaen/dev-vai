@@ -4,6 +4,8 @@ import { Sidebar } from './components/Sidebar.js';
 import { ChatWindow } from './components/ChatWindow.js';
 import { PreviewPanel } from './components/PreviewPanel.js';
 import { DebugConsole } from './components/DebugConsole.js';
+import { SessionViewer } from './components/SessionViewer.js';
+import { SessionList } from './components/SessionList.js';
 import { useEngineStore } from './stores/engineStore.js';
 import { useLayoutStore } from './stores/layoutStore.js';
 import { useSandboxStore } from './stores/sandboxStore.js';
@@ -54,7 +56,7 @@ function BootScreen() {
 
 export function App() {
   const { status, startPolling } = useEngineStore();
-  const { showDebugConsole, showFileExplorer, showBuilderPanel } = useLayoutStore();
+  const { showDebugConsole, showFileExplorer, showBuilderPanel, view } = useLayoutStore();
   const { projectId } = useSandboxStore();
 
   useEffect(() => { startPolling(); }, [startPolling]);
@@ -81,27 +83,42 @@ export function App() {
         {/* Sidebar — always visible */}
         <Sidebar />
 
-        {/* Main content area */}
-        <ChatWindow />
-
-        {/* Builder panel — always visible (toggleable via Ctrl+B) */}
-        {showBuilderPanel && (
-          <div className="flex w-[40%] min-w-[350px] flex-col border-l border-zinc-800">
-            {/* File Explorer — only when sandbox is active */}
-            {hasActiveSandbox && showFileExplorer && (
-              <div className="h-[30%] min-h-[120px] border-b border-zinc-800">
-                <FileExplorer />
-              </div>
-            )}
-            <div className="flex-1">
-              <PreviewPanel />
+        {/* Main content area — switches between Chat and Dev Logs */}
+        {view === 'devlogs' ? (
+          <div className="flex flex-1">
+            {/* Session list sidebar */}
+            <div className="w-72 min-w-[260px] border-r border-zinc-800">
+              <SessionList />
             </div>
-            {hasActiveSandbox && showDebugConsole && (
-              <div className="h-[35%] min-h-[120px]">
-                <DebugConsole />
+            {/* Session viewer */}
+            <div className="flex-1">
+              <SessionViewer />
+            </div>
+          </div>
+        ) : (
+          <>
+            <ChatWindow />
+
+            {/* Builder panel — always visible (toggleable via Ctrl+B) */}
+            {showBuilderPanel && (
+              <div className="flex w-[40%] min-w-[350px] flex-col border-l border-zinc-800">
+                {/* File Explorer — only when sandbox is active */}
+                {hasActiveSandbox && showFileExplorer && (
+                  <div className="h-[30%] min-h-[120px] border-b border-zinc-800">
+                    <FileExplorer />
+                  </div>
+                )}
+                <div className="flex-1">
+                  <PreviewPanel />
+                </div>
+                {hasActiveSandbox && showDebugConsole && (
+                  <div className="h-[35%] min-h-[120px]">
+                    <DebugConsole />
+                  </div>
+                )}
               </div>
             )}
-          </div>
+          </>
         )}
       </div>
     </>

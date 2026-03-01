@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
-import { createDb, ModelRegistry, ChatService, VaiEngine, IngestPipeline, schema } from '@vai/core';
+import { createDb, ModelRegistry, ChatService, VaiEngine, IngestPipeline, schema, SessionService } from '@vai/core';
 import { eq } from 'drizzle-orm';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerConversationRoutes } from './routes/conversations.js';
@@ -9,6 +9,7 @@ import { registerModelRoutes } from './routes/models.js';
 import { registerIngestRoutes } from './routes/ingest.js';
 import { registerImageRoutes } from './routes/images.js';
 import { registerSandboxRoutes } from './routes/sandbox.js';
+import { registerSessionRoutes } from './routes/sessions.js';
 import { SandboxManager } from './sandbox/manager.js';
 
 export interface ServerOptions {
@@ -129,5 +130,10 @@ export async function createServer(options?: ServerOptions) {
   registerImageRoutes(app, pipeline, chatService);
   registerSandboxRoutes(app, sandboxManager);
 
-  return { app, port, db, models, chatService, vaiEngine, pipeline, sandboxManager };
+  // Agent session logger
+  const sessionService = new SessionService(db);
+  sessionService.ensureTables();
+  registerSessionRoutes(app, sessionService);
+
+  return { app, port, db, models, chatService, vaiEngine, pipeline, sandboxManager, sessionService };
 }
