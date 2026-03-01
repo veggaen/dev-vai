@@ -1,0 +1,62 @@
+﻿ÔòöÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòù
+Ôòæ     VAI OSI/TCP-IP PRECISION BENCHMARK ÔÇö 33 Tests    Ôòæ
+Ôòæ     Senior+ Engineer ÔÇó 100% Deterministic Answers    Ôòæ
+ÔòÜÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòØ
+
+Server healthy ÔÇö vocab: 108520, knowledge: 1067
+
+Conversation: 01KJJY36FD0KBMYH5V35CT62N4
+
+  [01/33] List all 7 OSI layers with correct names and order                Ô£à PASS
+  [02/33] HTTP operates at OSI Layer 7 (Application)                        Ô£à PASS
+  [03/33] Layer 6 (Presentation) handles encryption and compression         Ô£à PASS
+  [04/33] Layer 2 PDU is a Frame                                            Ô£à PASS
+  [05/33] TCP/IP model has 4 layers                                         Ô£à PASS
+  [06/33] Lists: Application, Transport, Internet, Network Access           Ô£à PASS
+  [07/33] OSI has 7 layers, TCP/IP has 4; OSI is theoretical, TCP/IP is practical Ô£à PASS
+  [08/33] Application layer of TCP/IP maps to OSI 5, 6, 7                   Ô£à PASS
+  [09/33] HTTP default port is 80                                           Ô£à PASS
+  [10/33] HTTPS default port is 443                                         Ô£à PASS
+  [11/33] SSH default port is 22                                            Ô£à PASS
+  [12/33] DNS default port is 53                                            Ô£à PASS
+  [13/33] TCP is connection-oriented/reliable, UDP is connectionless/fast   Ô£à PASS
+  [14/33] SYN ÔåÆ SYN-ACK ÔåÆ ACK sequence                                      Ô£à PASS
+  [15/33] Explains all 4 flags: SYN=synchronize, ACK=acknowledge, FIN=finish, RST=reset Ô£à PASS
+  [16/33] MSS default 536, typical 1460 on Ethernet                         Ô£à PASS
+  [17/33] IPv4 is 32 bits                                                   Ô£à PASS
+  [18/33] IPv6 is 128 bits                                                  Ô£à PASS
+  [19/33] Subnet mask is 255.255.255.0                                      Ô£à PASS
+  [20/33] /24 has 254 usable hosts (2^8 - 2)                                Ô£à PASS
+  [21/33] DNS = Domain Name System                                          Ô£à PASS
+  [22/33] A record maps to IP, CNAME maps to another domain name            Ô£à PASS
+  [23/33] TTL = Time to Live ÔÇö cache duration for DNS records               Ô£à PASS
+  [24/33] Python TCP server with socket, bind, listen, accept               Ô£à PASS
+  [25/33] Python UDP client with SOCK_DGRAM, sendto                         Ô£à PASS
+  [26/33] Raw HTTP GET over TCP socket ÔÇö GET / HTTP/1.1                     Ô£à PASS
+  [27/33] Blocking waits for data, non-blocking returns immediately         Ô£à PASS
+  [28/33] TLS at OSI Layer 6 (Presentation) / between Layer 4-7             Ô£à PASS
+  [29/33] Symmetric = 1 key, fast; Asymmetric = 2 keys (public/private)     Ô£à PASS
+  [30/33] TLS handshake: ClientHello ÔåÆ ServerHello ÔåÆ keys ÔåÆ encrypted       Ô£à PASS
+  [31/33] Lists 7 OSI layers in Norwegian (Lag 1-7)                         Ô£à PASS
+  [32/33] TCP vs UDP explained in Norwegian                                 Ô£à PASS
+  [33/33] DNS = Domain Name System (Norwegian explanation)                  Ô£à PASS
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+                OSI/TCP-IP SCORECARD
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  ­ƒƒó dns              ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê 3/3 (100%)
+  ­ƒƒó ip-addressing    ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê 4/4 (100%)
+  ­ƒƒó net-code         ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê 4/4 (100%)
+  ­ƒƒó norwegian        ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê 3/3 (100%)
+  ­ƒƒó osi-layers       ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê 4/4 (100%)
+  ­ƒƒó port-numbers     ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê 4/4 (100%)
+  ­ƒƒó security         ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê 3/3 (100%)
+  ­ƒƒó tcp-ip           ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê 4/4 (100%)
+  ­ƒƒó tcp-udp          ÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûêÔûê 4/4 (100%)
+
+ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  TOTAL:  33/33  (100%)
+ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+
+  ­ƒÅå PERFECT SCORE ÔÇö 33/33 OSI/TCP-IP precision tasks correct!
+

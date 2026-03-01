@@ -1,0 +1,227 @@
+Q1: what is the past tense of the Norwegian verb 'å gå'
+  R1 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://quillbot.com/translate/english-to-norwegian, https://www.google.com/search?q=norsk+test+eksamen+i+skriving+download&sca_esv=643cd21dc826a565&rlz=1C1ONGR_enNO1084NO1084&biw=1422&bih=1564&sxsrf=ANbL-n4pR0bEwcomd809basBR0JxImUq8A%3A1772283424230&ei=IOaiaarfDfDRwPAP-M3SsAI&ved=0ahUKEwiq78SfnvySAxXwKBAIHfimFCYQ4dUDCBE&uact=5&oq=norsk+test+eksamen+i+skriving+download&gs_lp=Egxnd3Mtd2l6LXNlcnAiJm5vcnNrIHRlc3QgZWt
+  FOLLOW-UP: can you conjugate 'å gå' in all tenses: present, past, future, and present perfect
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://tailwindcss.com/plus/templates?ref=sidebar, https://mswjs.io/docs/cli/init, https://www.zenarmor.com/docs/network-basics/tcp-vs-udp. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104719 words learned, 5870 sources indexed)
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q2: what is the correct Norwegian word order in a main clause
+  R1 [MAYBE]: Order was automatically preserved because the model literally couldn’t see the next word until it finished the previous one
+
+[Source: https://grok.com/c/9ff370dc-e359-4992-ac78-f1fe59eb98b8?rid=1041dd5e-738d-4b1a-829b-a6d29f6b251d]
+  FOLLOW-UP: what happens to word order in a Norwegian subordinate clause (bisetning)
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://www.youtube.com/watch?v=TR2mxd4O_Io&list=PLEvoVHoL8DxPe8qwf4pUZvYD11y8Nb6jL&index=10, https://quillbot.com/translate/english-to-norwegian, https://www.google.com/search?q=norsk+test+eksamen+i+skriving+download&sca_esv=643cd21dc826a565&rlz=1C1ONGR_enNO1084NO1084&biw=1422&bih=1564&sxsrf=ANbL-n4pR0bEwcomd809basBR0JxImUq8A%3A1772283424230&ei=IOaiaarfDfDRwPAP-M3SsAI&ved=0ahUKEwiq78SfnvySAxXwKBAIHfimFCYQ4dUDCBE&
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q3: what are the three genders of Norwegian nouns (bokmål)
+  R1 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://tailwindcss.com/plus/ui-blocks/marketing/sections/pricing, https://quillbot.com/translate/english-to-norwegian, https://tailwindcss.com/plus/ui-blocks/marketing/sections/bento-grids. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104735 words learned, 5870 sources indexed)
+  FOLLOW-UP: give me an example noun for each gender with its definite form
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://grok.com/c/c6101fb2-a01d-4876-873d-3223ce0389ed?rid=cc9f14a0-3a4d-4fb5-bc89-3934437c79a7, https://x.com/leerob/status/1551273570713698304, https://x.com/realDonaldTrump. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104739 words learned, 5870 sources indexed)
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q4: what is the difference between 'i' and 'på' in Norwegian prepositions
+  R1 [MAYBE]: It means more PRs and more orchestration to make sure people don't step on each other's toes and that things don't break in egregious ways
+
+[Source: https://www.youtube.com/watch?v=p2aea9dytpE]
+  FOLLOW-UP: when do you use 'hos' vs 'på' in Norwegian
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://nextjs.org/docs/app/api-reference/directives, https://quillbot.com/translate/english-to-norwegian, https://nextjs.org/docs/app/guides/testing/jest. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104746 words learned, 5870 sources indexed)
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q5: how do you write a formal email greeting in Norwegian
+  R1 [NONE]: Here's Hello World in **javascript**:
+
+```javascript
+console.log("Hello, World!");
+```
+  FOLLOW-UP: what is the correct way to end a formal Norwegian email
+  R2 [MAYBE]: AI is great, but if you do not keep up with refactoring, your code base is gonna be an unmaintainable mess
+
+[Source: https://www.youtube.com/watch?v=p2aea9dytpE]
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q6: what is the difference between present perfect and past simple in English
+  R1 [MAYBE]: The difference is that revalidatePath purges the Data Cache and Full Route Cache, whereas router
+
+[Source: https://nextjs.org/docs/app/guides/caching]
+  FOLLOW-UP: when do you use 'have been' vs 'went' in English
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://quillbot.com/translate/english-to-norwegian, https://chatgpt.com/c/699d6528-91d8-838f-a434-019bafe42089, https://nextjs.org/docs/app/api-reference/directives. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104753 words learned, 5870 sources indexed)
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q7: what is a dangling modifier in English grammar
+  R1 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://quillbot.com/translate/english-to-norwegian, https://www.youtube.com/watch?v=WEiy8v5LtMo, https://chatgpt.com/c/699d6528-91d8-838f-a434-019bafe42089. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104755 words learned, 5870 sources indexed)
+  FOLLOW-UP: give me an example of a dangling modifier and how to fix it
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://grok.com/c/c6101fb2-a01d-4876-873d-3223ce0389ed?rid=cc9f14a0-3a4d-4fb5-bc89-3934437c79a7, https://x.com/leerob/status/1551273570713698304, https://x.com/realDonaldTrump. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104758 words learned, 5870 sources indexed)
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q8: what is the difference between 'affect' and 'effect' in English
+  R1 [MAYBE]: The difference is that revalidatePath purges the Data Cache and Full Route Cache, whereas router
+
+[Source: https://nextjs.org/docs/app/guides/caching]
+  FOLLOW-UP: use both 'affect' and 'effect' correctly in a sentence
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://nextjs.org/docs/app/api-reference/directives, https://nextjs.org/docs/app/guides/testing/jest, https://nextjs.org/docs/app/api-reference/directives/use-cache-remote. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104759 words learned, 5870 sources indexed)
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q9: what are the 8 parts of speech in English
+  R1 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://quillbot.com/translate/english-to-norwegian, https://pubmed.ncbi.nlm.nih.gov/?term=%22J%20Speech%20Lang%20Hear%20Res%22%5Bjour%5D&filter=years.2022-2026&sort=date&page=2, https://www.youtube.com/watch?v=WEiy8v5LtMo. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104761 words learned, 5870 sources indexed)
+  FOLLOW-UP: what is the difference between an adverb and an adjective
+  R2 [MAYBE]: The difference is that revalidatePath purges the Data Cache and Full Route Cache, whereas router
+
+[Source: https://nextjs.org/docs/app/guides/caching]
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q10: what is subject-verb agreement in English
+  R1 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://quillbot.com/translate/english-to-norwegian, https://www.youtube.com/watch?v=WEiy8v5LtMo, https://chatgpt.com/c/699d6528-91d8-838f-a434-019bafe42089. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104767 words learned, 5870 sources indexed)
+  FOLLOW-UP: is it 'the team is' or 'the team are' in English
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://quillbot.com/translate/english-to-norwegian, https://tailwindcss.com/plus/ui-blocks?ref=sidebar, https://www.youtube.com/watch?v=WEiy8v5LtMo. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104769 words learned, 5870 sources indexed)
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q11: what does MERN stack stand for
+  R1 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://huggingface.co/datasets/bigcode/the-stack-v2. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104771 words learned, 5870 sources indexed)
+  FOLLOW-UP: what role does each technology play in the MERN stack
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://tailwindcss.com/docs/installation/using-vite, https://huggingface.co/datasets/bigcode/the-stack-v2, https://nextjs.org/docs/app/guides/third-party-libraries. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104774 words learned, 5870 sources indexed)
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q12: what is the difference between MERN and PERN stack
+  R1 [MAYBE]: The difference is that revalidatePath purges the Data Cache and Full Route Cache, whereas router
+
+[Source: https://nextjs.org/docs/app/guides/caching]
+  FOLLOW-UP: when would you choose PostgreSQL over MongoDB in a web stack
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://huggingface.co/datasets/bigcode/the-stack-v2, https://nextjs.org/docs/app/guides/progressive-web-apps. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104777 words learned, 5870 sources indexed)
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q13: what is Express.js used for in the MERN stack
+  R1 [NONE]: ACK is short for ACKnowledge)
+
+[Source: https://www.9tut.com/tcp-and-udp-tutorial]
+  FOLLOW-UP: what is middleware in Express.js
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://nextjs.org/docs/app/guides/upgrading/version-16, https://nextjs.org/docs/app/guides/upgrading/codemods, https://nextjs.org/docs/app/guides/mcp. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104781 words learned, 5870 sources indexed)
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q14: what does MEVN stack stand for
+  R1 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://huggingface.co/datasets/bigcode/the-stack-v2. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104785 words learned, 5870 sources indexed)
+  FOLLOW-UP: what is the difference between React and Vue.js in these stacks
+  R2 [MAYBE]: These are the drawbacks of TCP packet transmission: It uses more bandwidth and is slower than UDP
+
+[Source: https://www.avast.com/c-tcp-vs-udp-difference]
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q15: hva er forskjellen mellom MERN og MEVN stack
+  R1 [NONE]: Jeg er VeggaAI (VAI), en lokal AI bygget fra bunnen av. Jeg laerer fra kilder du gir meg.
+  FOLLOW-UP: hva er fordelene med Vue.js sammenlignet med React
+  R2 [NONE]: Jeg er VeggaAI (VAI), en lokal AI bygget fra bunnen av. Jeg laerer fra kilder du gir meg.
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q16: what is an ORM and give an example
+  R1 [MAYBE]: And is there any otherway to fill the text box from the original page
+
+[Source: https://www.google.com/search?q=how+to+google+via+javascript&sca_esv=8910885c1c2cfd19&rlz=1C1ONGR_enNO1084NO1084&biw=1438&bih=1564&sxsrf=ANbL-n5S1A-t8ud51YHy7orxp3g16_TFcA%3A1772237121597&ei=QTGiaYeXJPK4wPAPoMqM4A8&oq=how+to+google+via+javascri&gs_lp=Egxnd3Mtd2l6LXNlcnAiGmhvdyB0byBnb29nbGUgdmlhIGphdmFzY3JpKgIIADIHECEYoAEYCjIHECEYoAEYCjIFECEYnwUyBRAhGJ8FMgUQIRifBTIFECEYnwUyBRAhGJ8FMgUQIRifBUihGFDXBlipDnACeAGQAQCYAX6gA
+  FOLLOW-UP: what is Prisma and how does it compare to Sequelize
+  R2 [MAYBE]: It means more PRs and more orchestration to make sure people don't step on each other's toes and that things don't break in egregious ways
+
+[Source: https://www.youtube.com/watch?v=p2aea9dytpE]
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q17: what is the difference between SQL and NoSQL databases
+  R1 [MAYBE]: Data is transferred, and UDP doesn’t check to see if the server was ready to receive any data or if the data was even received at all
+
+[Source: https://surfshark.com/blog/tcp-vs-udp]
+  FOLLOW-UP: when should you use MongoDB vs PostgreSQL
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://nextjs.org/docs/app/api-reference/directives, https://nextjs.org/docs/app/guides/testing/jest, https://nextjs.org/docs/app/api-reference/directives/use-cache-remote. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104796 words learned, 5870 sources indexed)
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q18: what is REST API
+  R1 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://nextjs.org/docs/app/guides/draft-mode, https://www.google.com/search?q=how+to+google+via+javascript&sca_esv=8910885c1c2cfd19&rlz=1C1ONGR_enNO1084NO1084&biw=1438&bih=1564&sxsrf=ANbL-n5S1A-t8ud51YHy7orxp3g16_TFcA%3A1772237121597&ei=QTGiaYeXJPK4wPAPoMqM4A8&oq=how+to+google+via+javascri&gs_lp=Egxnd3Mtd2l6LXNlcnAiGmhvdyB0byBnb29nbGUgdmlhIGphdmFzY3JpKgIIADIHECEYoAEYCjIHECEYoAEYCjIFECEYnwUyBRAhGJ8FMgUQIRifBTIFECE
+  FOLLOW-UP: what is the difference between REST and GraphQL
+  R2 [GOOD]: The difference is that revalidatePath purges the Data Cache and Full Route Cache, whereas router
+
+[Source: https://nextjs.org/docs/app/guides/caching]
+  CONCLUSION: PARTIAL
+
+---
+
+Q19: hva er en database migration
+  R1 [NONE]: Jeg er VeggaAI (VAI), en lokal AI bygget fra bunnen av. Jeg laerer fra kilder du gir meg.
+  FOLLOW-UP: hvorfor er database migrations viktig i et team-prosjekt
+  R2 [FALLBACK]: I couldn't find a strong match for that question, but I have related content from: https://nextjs.org/docs/app/api-reference/directives/use-cache-remote, https://chatgpt.com/c/69a21ac6-45c8-8385-86fe-9d89d3130759, https://sonans.no/eksamenshjelpen/oppgavetyper/norsk-skriftlig. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104800 words learned, 5870 sources indexed)
+  CONCLUSION: NO KNOWLEDGE
+
+---
+
+Q20: what is the difference between server-side rendering and client-side rendering
+  R1 [GOOD]: The difference is that revalidatePath purges the Data Cache and Full Route Cache, whereas router
+
+[Source: https://nextjs.org/docs/app/guides/caching]
+  FOLLOW-UP: what is Next.js and how does it handle SSR
+  R2 [MAYBE]: It means more PRs and more orchestration to make sure people don't step on each other's toes and that things don't break in egregious ways
+
+[Source: https://www.youtube.com/watch?v=p2aea9dytpE]
+  CONCLUSION: PARTIAL

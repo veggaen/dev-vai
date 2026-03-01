@@ -1,0 +1,198 @@
+﻿
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  ­ƒº¬ VCUS Knowledge Test ÔÇö 40 questions
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  [1/40] comp-variant-1: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: variant, prop, component
+     Q: What is a variant prop in a React component and how is it typically implemented?
+     A: **ARIA** (Accessible Rich Internet Applications) ÔÇö attributes that enhance HTML for screen readers.
+
+**Key attributes:**
+- `role="navigation"` ÔÇö defin...
+  [2/40] comp-variant-2: ­ƒö┤ 44/100 ÔÇö ÔØî Missing key concepts: variant
+     Q: How does shadcn/ui implement button variants using cva?
+     A: **shadcn/ui** is a collection of re-usable components built with **Radix UI** + **Tailwind CSS**.
+
+**Key philosophy:**
+- NOT a component library ÔÇö cod...
+  [3/40] comp-variant-3: ­ƒƒó 95/100 ÔÇö Ô£à Excellent understanding
+  [4/40] comp-variant-4: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: variant
+     Q: What is class-variance-authority (cva) and why would you use it instead of manual className conditionals?
+     A: **ARIA** (Accessible Rich Internet Applications) ÔÇö attributes that enhance HTML for screen readers.
+
+**Key attributes:**
+- `role="navigation"` ÔÇö defin...
+  [5/40] nextjs-approuter-1: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: app, page
+     Q: What is the difference between the Next.js pages directory and the app directory?
+     A: We represent points with little dots and some capital letter, making sure to realize that the dot we draw is infinitely larger than the point it is me...
+  [6/40] nextjs-approuter-2: ­ƒö┤ 30/100 ÔÇö ÔØî Missing key concepts: file, route
+     Q: How does file-based routing work in Next.js app directory?
+     A: I couldn't find a strong match for that question, but I have related content from: https://nextjs.org/docs/app/guides/custom-server, https://nextjs.or...
+  [7/40] nextjs-approuter-3: ­ƒƒó 83/100 ÔÇö Ô£à Excellent understanding
+  [8/40] nextjs-approuter-4: ­ƒö┤ 15/100 ÔÇö ÔØî Missing key concepts: layout, children
+     Q: Write a Next.js app router layout.tsx that wraps children with a navigation header.
+     A: **Client-side navigation in Next.js:**
+
+**`<Link>` component:**
+```tsx
+import Link from "next/link";
+<Link href="/">Home</Link>
+<Link href="/about" pr...
+  [9/40] trpc-1: ­ƒƒó 95/100 ÔÇö Ô£à Excellent understanding
+  [10/40] trpc-2: ­ƒƒó 83/100 ÔÇö Ô£à Excellent understanding
+  [11/40] trpc-3: ­ƒƒó 87/100 ÔÇö Ô£à Excellent understanding
+  [12/40] trpc-4: ­ƒƒó 83/100 ÔÇö Ô£à Excellent understanding
+  [13/40] t3-1: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: Next.js
+     Q: What is the T3 Stack and what technologies does it include?
+     A: It means that we are differentiating something with respect to x, which is the same thing as taking the derivative of something, so just as f prime of...
+  [14/40] t3-2: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: src
+     Q: How does create-t3-app structure its project?
+     A: I couldn't find a strong match for that question, but I have related content from: https://grok.com/c/371a99e1-80ce-4e84-9b77-1901b3d7777b?rid=6d76620...
+  [15/40] t3-3: ­ƒö┤ 14/100 ÔÇö ÔØî Missing key concepts: type
+     Q: Why is the T3 Stack considered typesafe from database to frontend?
+     A: I couldn't find a strong match for that question, but I have related content from: https://github.com/trpc/trpc, https://create.t3.gg, https://www.you...
+  [16/40] t3-4: ­ƒƒí 74/100 ÔÇö Ô£à Good, but could be more detailed
+  [17/40] tw-1: ­ƒƒó 84/100 ÔÇö Ô£à Excellent understanding
+  [18/40] tw-2: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [19/40] tw-3: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: class
+     Q: Write a responsive card component using Tailwind CSS classes.
+     A: I couldn't find a strong match for that question, but I have related content from: https://tailwindcss.com/docs/installation/using-vite, https://nextj...
+  [20/40] tw-4: ­ƒö┤ 14/100 ÔÇö ÔØî Missing key concepts: class, merge
+     Q: How does the cn() utility function work and why is it used with Tailwind?
+     A: I couldn't find a strong match for that question, but I have related content from: https://ui.shadcn.com/docs/installation, https://github.com/f/promp...
+  [21/40] mono-1: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [22/40] mono-2: ­ƒö┤ 14/100 ÔÇö ÔØî Missing key concepts: cache
+     Q: How does Turborepo handle caching and task dependencies?
+     A: **Monorepo** ÔÇö a single repository containing multiple projects/packages.
+
+**When to use:**
+- Shared code between frontend, backend, and packages
+- At...
+  [23/40] mono-3: ­ƒƒí 77/100 ÔÇö Ô£à Good, but could be more detailed
+  [24/40] mono-4: ­ƒƒó 95/100 ÔÇö Ô£à Excellent understanding
+  [25/40] db-1: ­ƒƒó 88/100 ÔÇö Ô£à Excellent understanding
+  [26/40] db-2: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [27/40] db-3: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [28/40] db-4: ­ƒƒó 84/100 ÔÇö Ô£à Excellent understanding
+  [29/40] api-1: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: GET, POST
+     Q: What is REST and what are the main HTTP methods?
+     A: And is there any otherway to fill the text box from the original page
+
+[Source: https://www.google.com/search?q=how+to+google+via+javascript&sca_esv=8...
+  [30/40] api-2: ­ƒƒó 88/100 ÔÇö Ô£à Excellent understanding
+  [31/40] api-3: ­ƒö┤ 14/100 ÔÇö ÔØî Missing key concepts: route
+     Q: How does Next.js handle API routes in the app directory?
+     A: I couldn't find a strong match for that question, but I have related content from: https://nextjs.org/docs/app/guides/custom-server, https://nextjs.or...
+  [32/40] api-4: ­ƒö┤ 14/100 ÔÇö ÔØî Missing key concepts: POST
+     Q: Write a Next.js API route handler that accepts POST requests with JSON body.
+     A: **JSON (JavaScript Object Notation):**
+
+JSON is a lightweight data format for storing and exchanging data.
+
+```json
+{
+  "name": "Vegga",
+  "age": 25,
+...
+  [33/40] auth-1: ­ƒƒó 81/100 ÔÇö Ô£à Excellent understanding
+  [34/40] auth-2: ­ƒö┤ 40/100 ÔÇö ÔØî Missing key concepts: session
+     Q: How do you protect a page or API route with authentication in Next.js?
+     A: **Authentication options for Next.js:**
+
+| Solution | Type | Pros | Cons |
+|---|---|---|---|
+| **NextAuth.js (Auth.js)** | Self-hosted | Free, flexibl...
+  [35/40] ecom-1: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: headless
+     Q: How is a headless e-commerce system typically architected?
+     A: I couldn't find a strong match for that question, but I have related content from: https://nextjs.org/docs/app/guides/draft-mode, https://www.youtube....
+  [36/40] ecom-2: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: commerce
+     Q: What is Medusa.js and how does it compare to Shopify?
+     A: It means that we are differentiating something with respect to x, which is the same thing as taking the derivative of something, so just as f prime of...
+  [37/40] chat-1: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: message
+     Q: What are the key components of a chat application architecture?
+     A: It means that we are differentiating something with respect to x, which is the same thing as taking the derivative of something, so just as f prime of...
+  [38/40] chat-2: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: stream
+     Q: How does a ChatGPT-style streaming response work in a web application?
+     A: I couldn't find a strong match for that question, but I have related content from: https://mswjs.io/docs/http/mocking-responses/, http://localhost:517...
+  [39/40] short-q-1: ­ƒö┤ 6/100 ÔÇö ÔØî Missing key concepts: question, search
+     Q: What is a "short question" for search engines? Give examples.
+     A: Here's Hello World in **javascript**:
+
+```javascript
+console.log("Hello, World!");
+```
+  [40/40] short-q-2: ­ƒö┤ 27/100 ÔÇö ÔØî Missing key concepts: NextAuth
+     Q: Convert this to a short Google query: "I want to know how to set up authentication in a Next.js application using NextAuth"
+     A: ## Next.js Best Practices
+
+**Rendering Strategies:**
+- Use **Server-Side Rendering (SSR)** with `getServerSideProps` for dynamic data that changes per...
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  ­ƒôè TEST RESULTS
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  Total:   40 questions
+  Passed:  18 (45%)
+  Failed:  22
+  Average: 48/100
+
+  By Category:
+    pattern         4/13 passed, avg 40/100
+    architecture    3/7 passed, avg 45/100
+    code-gen        4/7 passed, avg 55/100
+    concept         7/13 passed, avg 52/100
+
+  By Variant (pattern depth):
+    Variant 1:  5/12 passed, avg 42/100
+    Variant 2:  4/12 passed, avg 45/100
+    Variant 3:  5/8 passed, avg 59/100
+    Variant 4:  4/8 passed, avg 49/100
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Failed Questions:
+    comp-variant-1: ÔØî Missing key concepts: variant, prop, component
+      Missing: variant, prop, component
+    comp-variant-2: ÔØî Missing key concepts: variant
+      Missing: variant
+    comp-variant-4: ÔØî Missing key concepts: variant
+      Missing: variant
+    nextjs-approuter-1: ÔØî Missing key concepts: app, page
+      Missing: app, page
+    nextjs-approuter-2: ÔØî Missing key concepts: file, route
+      Missing: file, route
+    nextjs-approuter-4: ÔØî Missing key concepts: layout, children
+      Missing: layout, children
+    t3-1: ÔØî Missing key concepts: Next.js
+      Missing: Next.js
+    t3-2: ÔØî Missing key concepts: src
+      Missing: src
+    t3-3: ÔØî Missing key concepts: type
+      Missing: type
+    tw-3: ÔØî Missing key concepts: class
+      Missing: class
+    tw-4: ÔØî Missing key concepts: class, merge
+      Missing: class, merge
+    mono-2: ÔØî Missing key concepts: cache
+      Missing: cache
+    api-1: ÔØî Missing key concepts: GET, POST
+      Missing: GET, POST
+    api-3: ÔØî Missing key concepts: route
+      Missing: route
+    api-4: ÔØî Missing key concepts: POST
+      Missing: POST
+    auth-2: ÔØî Missing key concepts: session
+      Missing: session
+    ecom-1: ÔØî Missing key concepts: headless
+      Missing: headless
+    ecom-2: ÔØî Missing key concepts: commerce
+      Missing: commerce
+    chat-1: ÔØî Missing key concepts: message
+      Missing: message
+    chat-2: ÔØî Missing key concepts: stream
+      Missing: stream
+    short-q-1: ÔØî Missing key concepts: question, search
+      Missing: question, search
+    short-q-2: ÔØî Missing key concepts: NextAuth
+      Missing: NextAuth
+

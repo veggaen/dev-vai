@@ -1,0 +1,136 @@
+﻿
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  ­ƒº¬ VCUS Knowledge Test ÔÇö 40 questions
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  [1/40] comp-variant-1: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: variant, prop, component
+     Q: What is a variant prop in a React component and how is it typically implemented?
+     A: **ARIA** (Accessible Rich Internet Applications) ÔÇö attributes that enhance HTML for screen readers.
+
+**Key attributes:**
+- `role="navigation"` ÔÇö defin...
+  [2/40] comp-variant-2: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [3/40] comp-variant-3: ­ƒƒó 90/100 ÔÇö Ô£à Excellent understanding
+  [4/40] comp-variant-4: ­ƒƒó 95/100 ÔÇö Ô£à Excellent understanding
+  [5/40] nextjs-approuter-1: ­ƒƒó 80/100 ÔÇö Ô£à Excellent understanding
+  [6/40] nextjs-approuter-2: ­ƒƒó 95/100 ÔÇö Ô£à Excellent understanding
+  [7/40] nextjs-approuter-3: ­ƒƒó 87/100 ÔÇö Ô£à Excellent understanding
+  [8/40] nextjs-approuter-4: ­ƒö┤ 15/100 ÔÇö ÔØî Missing key concepts: layout, children
+     Q: Write a Next.js app router layout.tsx that wraps children with a navigation header.
+     A: **Client-side navigation in Next.js:**
+
+**`<Link>` component:**
+```tsx
+import Link from "next/link";
+<Link href="/">Home</Link>
+<Link href="/about" pr...
+  [9/40] trpc-1: ­ƒƒó 95/100 ÔÇö Ô£à Excellent understanding
+  [10/40] trpc-2: ­ƒƒó 83/100 ÔÇö Ô£à Excellent understanding
+  [11/40] trpc-3: ­ƒƒó 87/100 ÔÇö Ô£à Excellent understanding
+  [12/40] trpc-4: ­ƒƒó 83/100 ÔÇö Ô£à Excellent understanding
+  [13/40] t3-1: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: Next.js
+     Q: What is the T3 Stack and what technologies does it include?
+     A: It means that we are differentiating something with respect to x, which is the same thing as taking the derivative of something, so just as f prime of...
+  [14/40] t3-2: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [15/40] t3-3: ­ƒƒó 95/100 ÔÇö Ô£à Excellent understanding
+  [16/40] t3-4: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [17/40] tw-1: ­ƒƒó 84/100 ÔÇö Ô£à Excellent understanding
+  [18/40] tw-2: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [19/40] tw-3: ­ƒƒó 92/100 ÔÇö Ô£à Excellent understanding
+  [20/40] tw-4: ­ƒö┤ 14/100 ÔÇö ÔØî Missing key concepts: class, merge
+     Q: How does the cn() utility function work and why is it used with Tailwind?
+     A: I couldn't find a strong match for that question, but I have related content from: https://ui.shadcn.com/docs/installation, https://github.com/f/promp...
+  [21/40] mono-1: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [22/40] mono-2: ­ƒƒó 84/100 ÔÇö Ô£à Excellent understanding
+  [23/40] mono-3: ­ƒƒí 77/100 ÔÇö Ô£à Good, but could be more detailed
+  [24/40] mono-4: ­ƒƒó 95/100 ÔÇö Ô£à Excellent understanding
+  [25/40] db-1: ­ƒƒó 88/100 ÔÇö Ô£à Excellent understanding
+  [26/40] db-2: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [27/40] db-3: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [28/40] db-4: ­ƒƒó 84/100 ÔÇö Ô£à Excellent understanding
+  [29/40] api-1: ­ƒƒó 84/100 ÔÇö Ô£à Excellent understanding
+  [30/40] api-2: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: REST
+     Q: What are the differences between REST and GraphQL?
+     A: - **Resources** are identified by URLs: `/api/users`, `/api/posts/123`
+- **HTTP methods** define the action (GET, POST, PUT, DELETE)
+- **Status codes*...
+  [31/40] api-3: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [32/40] api-4: ­ƒö┤ 14/100 ÔÇö ÔØî Missing key concepts: POST
+     Q: Write a Next.js API route handler that accepts POST requests with JSON body.
+     A: **JSON (JavaScript Object Notation):**
+
+JSON is a lightweight data format for storing and exchanging data.
+
+```json
+{
+  "name": "Vegga",
+  "age": 25,
+...
+  [33/40] auth-1: ­ƒƒí 74/100 ÔÇö Ô£à Good, but could be more detailed
+  [34/40] auth-2: ­ƒö┤ 40/100 ÔÇö ÔØî Missing key concepts: session
+     Q: How do you protect a page or API route with authentication in Next.js?
+     A: **Authentication options for Next.js:**
+
+| Solution | Type | Pros | Cons |
+|---|---|---|---|
+| **NextAuth.js (Auth.js)** | Self-hosted | Free, flexibl...
+  [35/40] ecom-1: ­ƒƒó 88/100 ÔÇö Ô£à Excellent understanding
+  [36/40] ecom-2: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [37/40] chat-1: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+  [38/40] chat-2: ­ƒƒó 87/100 ÔÇö Ô£à Excellent understanding
+  [39/40] short-q-1: ­ƒö┤ 6/100 ÔÇö ÔØî Missing key concepts: question, search
+     Q: What is a "short question" for search engines? Give examples.
+     A: Here's Hello World in **javascript**:
+
+```javascript
+console.log("Hello, World!");
+```
+  [40/40] short-q-2: ­ƒö┤ 27/100 ÔÇö ÔØî Missing key concepts: NextAuth
+     Q: Convert this to a short Google query: "I want to know how to set up authentication in a Next.js application using NextAuth"
+     A: ## Next.js Best Practices
+
+**Rendering Strategies:**
+- Use **Server-Side Rendering (SSR)** with `getServerSideProps` for dynamic data that changes per...
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  ­ƒôè TEST RESULTS
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  Total:   40 questions
+  Passed:  31 (78%)
+  Failed:  9
+  Average: 72/100
+
+  By Category:
+    pattern         10/13 passed, avg 74/100
+    architecture    7/7 passed, avg 88/100
+    code-gen        5/7 passed, avg 69/100
+    concept         9/13 passed, avg 63/100
+
+  By Variant (pattern depth):
+    Variant 1:  9/12 passed, avg 67/100
+    Variant 2:  9/12 passed, avg 73/100
+    Variant 3:  8/8 passed, avg 89/100
+    Variant 4:  5/8 passed, avg 61/100
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Failed Questions:
+    comp-variant-1: ÔØî Missing key concepts: variant, prop, component
+      Missing: variant, prop, component
+    nextjs-approuter-4: ÔØî Missing key concepts: layout, children
+      Missing: layout, children
+    t3-1: ÔØî Missing key concepts: Next.js
+      Missing: Next.js
+    tw-4: ÔØî Missing key concepts: class, merge
+      Missing: class, merge
+    api-2: ÔØî Missing key concepts: REST
+      Missing: REST
+    api-4: ÔØî Missing key concepts: POST
+      Missing: POST
+    auth-2: ÔØî Missing key concepts: session
+      Missing: session
+    short-q-1: ÔØî Missing key concepts: question, search
+      Missing: question, search
+    short-q-2: ÔØî Missing key concepts: NextAuth
+      Missing: NextAuth
+

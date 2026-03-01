@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useChatStore } from '../stores/chatStore.js';
+import { useLayoutStore, MODE_PLACEHOLDERS } from '../stores/layoutStore.js';
 import { MessageBubble } from './MessageBubble.js';
 
 interface PastedImage {
@@ -119,20 +120,14 @@ export function ChatWindow() {
 
   const charCount = input.length;
 
+  const { mode } = useLayoutStore();
+
   if (!activeConversationId) {
     return (
       <div className="flex min-w-0 flex-1 items-center justify-center">
         <div className="px-6 text-center">
-          <h2 className="mb-3 text-3xl font-bold text-zinc-200">VeggaAI</h2>
-          <p className="mb-6 text-sm text-zinc-500">
-            Select a conversation or start a new chat
-          </p>
-          <div className="mx-auto max-w-sm space-y-2 text-left text-xs text-zinc-600">
-            <p>Try saying:</p>
-            <p className="rounded-lg border border-zinc-800 px-3 py-2 text-zinc-400">&quot;hello&quot;</p>
-            <p className="rounded-lg border border-zinc-800 px-3 py-2 text-zinc-400">&quot;what can you do?&quot;</p>
-            <p className="rounded-lg border border-zinc-800 px-3 py-2 text-zinc-400">&quot;React is a JavaScript library&quot;</p>
-          </div>
+          <h2 className="mb-3 text-2xl font-bold text-zinc-300">No conversation selected</h2>
+          <p className="text-sm text-zinc-500">Start a new chat from the sidebar</p>
         </div>
       </div>
     );
@@ -256,7 +251,7 @@ export function ChatWindow() {
                   handleSend();
                 }
               }}
-              placeholder={pastedImage ? "Add a message (optional with image)" : "Message VeggaAI... (Ctrl+V to paste image, Shift+Enter for new line)"}
+              placeholder={pastedImage ? "Add a message (optional with image)" : MODE_PLACEHOLDERS[mode]}
               rows={1}
               className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-4 py-3 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none"
             />

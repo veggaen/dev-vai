@@ -1,0 +1,97 @@
+﻿
+>   [2/40] comp-variant-2: ­ƒö┤ 44/100 ÔÇö ÔØî Missing key concepts: variant
+       Q: How does shadcn/ui implement button variants using cva?
+       A: **shadcn/ui** is a collection of re-usable components built with 
+**Radix UI** + **Tailwind CSS**.
+  
+  **Key philosophy:**
+>   [4/40] comp-variant-4: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: variant
+       Q: What is class-variance-authority (cva) and why would you use it 
+instead of manual className conditionals?
+       A: **ARIA** (Accessible Rich Internet Applications) ÔÇö attributes that 
+enhance HTML for screen readers.
+  
+  **Key attributes:**
+>   [9/40] trpc-1: ­ƒö┤ 40/100 ÔÇö ÔØî Missing key concepts: safe
+       Q: What is tRPC and what problem does it solve?
+       A: `cn()` is a utility function that combines **clsx** (conditional 
+class joining) with **tailwind-merge** (Tailwind class deduplication). It's 
+the stand...
+    [10/40] trpc-2: ­ƒƒó 83/100 ÔÇö Ô£à Excellent understanding
+    [11/40] trpc-3: ­ƒƒó 87/100 ÔÇö Ô£à Excellent understanding
+>   [20/40] tw-4: ­ƒö┤ 14/100 ÔÇö ÔØî Missing key concepts: class, merge
+       Q: How does the cn() utility function work and why is it used with 
+Tailwind?
+       A: I couldn't find a strong match for that question, but I have related 
+content from: https://ui.shadcn.com/docs/installation, 
+https://github.com/f/promp...
+>   [21/40] mono-1: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: monorepo
+       Q: What is a monorepo and what are its advantages?
+       A: A **variant prop** is a prop passed to a React component that 
+controls its visual style. Instead of passing individual style-related props 
+(color, siz...
+    [22/40] mono-2: ­ƒƒó 84/100 ÔÇö Ô£à Excellent understanding
+>   [23/40] mono-3: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: package
+       Q: What is the difference between internal packages and published 
+packages in a monorepo?
+       A: A **variant prop** is a prop passed to a React component that 
+controls its visual style. Instead of passing individual style-related props 
+(color, siz...
+    [24/40] mono-4: ­ƒƒó 95/100 ÔÇö Ô£à Excellent understanding
+    [25/40] db-1: ­ƒƒó 88/100 ÔÇö Ô£à Excellent understanding
+>   [29/40] api-1: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: GET, POST
+       Q: What is REST and what are the main HTTP methods?
+       A: The **T3 Stack** is a full-stack TypeScript web development stack 
+focused on type safety and developer experience. It was created by Theo 
+(t3.gg) and ...
+    [30/40] api-2: ­ƒƒó 88/100 ÔÇö Ô£à Excellent understanding
+    [31/40] api-3: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+>   [34/40] auth-2: ­ƒö┤ 40/100 ÔÇö ÔØî Missing key concepts: session
+       Q: How do you protect a page or API route with authentication in 
+Next.js?
+       A: **Authentication options for Next.js:**
+  
+  | Solution | Type | Pros | Cons |
+>   [35/40] ecom-1: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: headless
+       Q: How is a headless e-commerce system typically architected?
+       A: I couldn't find a strong match for that question, but I have related 
+content from: https://nextjs.org/docs/app/guides/draft-mode, 
+https://www.youtube....
+>   [36/40] ecom-2: ­ƒö┤ 10/100 ÔÇö ÔØî Missing key concepts: commerce
+       Q: What is Medusa.js and how does it compare to Shopify?
+       A: It means that we are differentiating something with respect to x, 
+which is the same thing as taking the derivative of something, so just as f 
+prime of...
+    [37/40] chat-1: ­ƒƒó 91/100 ÔÇö Ô£à Excellent understanding
+    [38/40] chat-2: ­ƒƒó 87/100 ÔÇö Ô£à Excellent understanding
+>     comp-variant-2: ÔØî Missing key concepts: variant
+        Missing: variant
+>     comp-variant-4: ÔØî Missing key concepts: variant
+        Missing: variant
+      nextjs-approuter-4: ÔØî Missing key concepts: layout, children
+        Missing: layout, children
+>     trpc-1: ÔØî Missing key concepts: safe
+        Missing: safe
+      t3-2: ÔØî Missing key concepts: src
+        Missing: src
+>     tw-4: ÔØî Missing key concepts: class, merge
+        Missing: class, merge
+>     mono-1: ÔØî Missing key concepts: monorepo
+        Missing: monorepo
+>     mono-3: ÔØî Missing key concepts: package
+        Missing: package
+>     api-1: ÔØî Missing key concepts: GET, POST
+        Missing: GET, POST
+      api-4: ÔØî Missing key concepts: POST
+        Missing: POST
+>     auth-2: ÔØî Missing key concepts: session
+        Missing: session
+>     ecom-1: ÔØî Missing key concepts: headless
+        Missing: headless
+>     ecom-2: ÔØî Missing key concepts: commerce
+        Missing: commerce
+      short-q-2: ÔØî Missing key concepts: NextAuth
+        Missing: NextAuth
+  
+
+

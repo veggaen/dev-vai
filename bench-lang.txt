@@ -1,0 +1,21 @@
+﻿ÔòöÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòù
+Ôòæ   Language & Web-Stack Benchmark ÔÇö 100 + 100 FU     Ôòæ
+ÔòÜÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòØ
+
+Engine: vai:v0 Ôöé vocab=108737 knowledge=1067
+
+
+ÔòÉÔòÉ Norwegian Grammar (25 questions + 25 follow-ups) ÔòÉÔòÉ
+
+  Q  1: [32mPASS[0m Ôöé FU: [32mPASS[0m  Preteritum av ├Ñ g├Ñ
+  Q  2: [32mPASS[0m Ôöé FU: [32mPASS[0m  V2-regelen
+  Q  3: [32mPASS[0m Ôöé FU: [32mPASS[0m  Tre kj├©nn
+  Q  4: [32mPASS[0m Ôöé FU: [32mPASS[0m  Preposisjoner
+  Q  5: [32mPASS[0m Ôöé FU: [32mPASS[0m  Formell e-post
+  Q  6: [32mPASS[0m Ôöé FU: [32mPASS[0m  Bestemt form
+  Q  7: [32mPASS[0m Ôöé FU: [32mPASS[0m  Modalverb
+  Q  8: [32mPASS[0m Ôöé FU: [32mPASS[0m  Konjunksjoner
+  Q  9: [32mPASS[0m Ôöé FU: [32mPASS[0m  Adjektivb├©yning
+  Q 10: [32mPASS[0m Ôöé FU: [32mPASS[0m  Negasjon
+  Q 11: [32mPASS[0m Ôöé FU: [32mPASS[0m  Refleksive verb
+  Q 12: [32mPASS[0m Ôöé FU: [32mPASS[0m  Sp├©rsm├Ñlsformasjon

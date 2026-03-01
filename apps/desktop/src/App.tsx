@@ -1,8 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Toaster } from 'sonner';
 import { Sidebar } from './components/Sidebar.js';
 import { ChatWindow } from './components/ChatWindow.js';
 import { KnowledgePanel } from './components/KnowledgePanel.js';
+import { LandingPage } from './components/LandingPage.js';
+import { BuilderLayout } from './components/BuilderLayout.js';
 import { useEngineStore } from './stores/engineStore.js';
+import { useLayoutStore } from './stores/layoutStore.js';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 
 function BootScreen() {
   const { status, error, retry } = useEngineStore();
@@ -45,24 +51,77 @@ function BootScreen() {
   );
 }
 
+const pageVariants = {
+  enter: { opacity: 0, y: 12 },
+  center: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -12 },
+};
+
 export function App() {
   const { status, startPolling } = useEngineStore();
-  const [view, setView] = useState<'chat' | 'knowledge'>('chat');
+  const { view } = useLayoutStore();
 
   useEffect(() => { startPolling(); }, [startPolling]);
+  useKeyboardShortcuts();
 
   if (status !== 'ready') {
     return <BootScreen />;
   }
 
   return (
-    <div className="flex h-screen bg-zinc-950">
-      <Sidebar onViewChange={setView} currentView={view} />
-      {view === 'chat' ? (
-        <ChatWindow />
-      ) : (
-        <KnowledgePanel onClose={() => setView('chat')} />
-      )}
-    </div>
+    <>
+      <Toaster
+        position="bottom-right"
+        theme="dark"
+        toastOptions={{
+          className: 'bg-zinc-900 border-zinc-800 text-zinc-100',
+        }}
+      />
+
+      <AnimatePresence mode="wait">
+        {view === 'landing' && (
+          <motion.div
+            key="landing"
+            variants={pageVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.2 }}
+            className="h-screen"
+          >
+            <LandingPage />
+          </motion.div>
+        )}
+
+        {view === 'chat' && (
+          <motion.div
+            key="chat"
+            variants={pageVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.2 }}
+            className="flex h-screen bg-zinc-950"
+          >
+            <Sidebar />
+            <ChatWindow />
+          </motion.div>
+        )}
+
+        {view === 'builder' && (
+          <motion.div
+            key="builder"
+            variants={pageVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.2 }}
+            className="h-screen"
+          >
+            <BuilderLayout />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }

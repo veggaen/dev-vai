@@ -1,0 +1,411 @@
+﻿==================================================
+        VAI Live API Benchmark Test
+==================================================
+
+Server: vai:v0 | Vocab: 108135 | Docs: 5963
+
+Conversation: 01KJJY26PRRES59J81RJMFM3EB
+
+[PASS] [greetings] Basic greeting response
+   Q: "hello"
+   A: Hey! I'm VeggaAI ÔÇö I've learned from 5963 sources and extracted 917 concepts so far. What would you like to know?
+
+[PASS] [greetings] Casual greeting response
+   Q: "hey there"
+   A: Hey! I'm VeggaAI ÔÇö I've learned from 5963 sources and extracted 917 concepts so far. What would you like to know?
+
+[PASS] [identity] Should identify as VAI/VeggaAI
+   Q: "who are you"
+   A: I am VeggaAI (VAI), a local-first AI built from scratch. I learn from sources you give me ÔÇö web pages, transcripts, code, and conversations. I understand English and Norwegian.
+
+[PASS] [identity] Should describe capabilities
+   Q: "what can you do"
+   A: Here's how to use VeggaAI:
+
+**Teach me:** Use the Chrome extension to capture web pages, YouTube transcripts, and GitHub repos. I learn from everything you feed me.
+
+**Chat:** Ask me questions about what I've learned. I get better with more data.
+
+**Direct teaching:** Tell me facts like "Python is a...
+
+[PASS] [math] Basic addition
+   Q: "whats 10+10"
+   A: 10+10 = **20**
+
+[PASS] [math] Basic multiplication
+   Q: "whats 5 * 5"
+   A: 5*5 = **25**
+
+[PASS] [math] Basic division
+   Q: "what is 100 / 4"
+   A: 100/4 = **25**
+
+[PASS] [math] Exponentiation
+   Q: "whats 2 to the power of 10"
+   A: 2^10 = **1024**
+
+[PASS] [math] Percentage calculation
+   Q: "calculate 15% of 200"
+   A: 15% of 200 = **30**
+
+[PASS] [math] Division (144/12)
+   Q: "what is 144 / 12"
+   A: 144/12 = **12**
+
+[PASS] [math] Addition (boundary)
+   Q: "whats 99 + 1"
+   A: 99+1 = **100**
+
+[PASS] [math] Power notation
+   Q: "calculate 3^4"
+   A: 3^4 = **81**
+
+[PASS] [creative-code] JS calculator ÔÇö should have functions for operations
+   Q: "make me a javascript calculator"
+   A: Here's a **calculator** in **javascript**:
+
+```javascript
+// Simple Calculator
+class Calculator {
+  add(a, b) { return a + b; }
+  subtract(a, b) { return a - b; }
+  multiply(a, b) { return a * b; }
+  divide(a, b) {
+    if (b === 0) throw new Error('Cannot divide by zero');
+    return a / b;
+  }
+  mo...
+
+[PASS] [creative-code] Python todo list ÔÇö should have add/remove/list functions
+   Q: "build a todo list in python"
+   A: Here's a **todo list** in **python**:
+
+```python
+# Todo List Manager
+class TodoList:
+    def __init__(self):
+        self.tasks = []
+
+    def add(self, task):
+        self.tasks.append({"text": task, "done": False})
+        print(f"Added: {task}")
+
+    def remove(self, index):
+        if 0 <= index ...
+
+[PASS] [creative-code] React counter ÔÇö should use useState and render count
+   Q: "create a simple counter component in react"
+   A: Here's a **counter component** in **React**:
+
+```jsx
+import { useState } from 'react';
+
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div style={{ textAlign: 'center', padding: '2rem' }}>
+      <h1>Counter: {count}</h1>
+      <button onClick={() => setCount(c => c - ...
+
+[PASS] [creative-code] FizzBuzz ÔÇö classic interview question
+   Q: "write a fizzbuzz function in javascript"
+   A: Here's **FizzBuzz** in **javascript**:
+
+```javascript
+function fizzBuzz(n) {
+  const result = [];
+  for (let i = 1; i <= n; i++) {
+    if (i % 15 === 0) result.push('FizzBuzz');
+    else if (i % 3 === 0) result.push('Fizz');
+    else if (i % 5 === 0) result.push('Buzz');
+    else result.push(i.toStr...
+
+[PASS] [creative-code] Python HTTP server
+   Q: "make a simple http server in python"
+   A: Here's a **simple HTTP server** in **python**:
+
+```python
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import json
+
+class MyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-Type...
+
+[PASS] [creative-code] Java linked list implementation
+   Q: "write a linked list class in java"
+   A: Here's a **linked list** implementation in **java**:
+
+```java
+public class LinkedList<T> {
+    private static class Node<T> {
+        T data;
+        Node<T> next;
+        Node(T data) { this.data = data; this.next = null; }
+    }
+
+    private Node<T> head;
+    private int size;
+
+    public LinkedLi...
+
+[PASS] [code-gen] Java hello world
+   Q: "how to program in java and make a command print hello world"
+   A: Here's Hello World in **java**:
+
+```java
+public class HelloWorld {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+    }
+}
+```
+
+[PASS] [code-gen] Python hello world
+   Q: "write hello world in python"
+   A: Here's Hello World in **python**:
+
+```python
+print("Hello, World!")
+```
+
+[PASS] [code-gen] C# hello world
+   Q: "write hello world in c#"
+   A: Here's Hello World in **csharp**:
+
+```csharp
+using System;
+
+class Program {
+    static void Main() {
+        Console.WriteLine("Hello, World!");
+    }
+}
+```
+
+[PASS] [code-gen] C program (not C#)
+   Q: "write a C program that handles access control"
+   A: Here's a C access control program:
+
+```c
+#include <stdio.h>
+#include <string.h>
+#include <stdbool.h>
+
+#define MAX_USERS 100
+#define MAX_NAME_LEN 64
+
+typedef struct {
+    char users[MAX_USERS][MAX_NAME_LEN];
+    int count;
+} SecurityGateway;
+
+void sg_init(SecurityGateway* sg) {
+    sg->count = 0;
+}
+
+...
+
+[PASS] [code-gen] JS function example
+   Q: "how to make a function in javascript"
+   A: Here's how to write a function in **javascript**:
+
+```javascript
+function greet(name) {
+  return `Hello, ${name}!`;
+}
+
+// Usage:
+console.log(greet("World")); // "Hello, World!"
+```
+
+[PASS] [advanced-code] TS type ÔÇö should have User with fields
+   Q: "generate a TypeScript type for a user"
+   A: Here's a TypeScript type **User**:
+
+```typescript
+type User = {
+  id: string;
+  status: string;
+  createdAt: Date;
+};
+```
+
+[PASS] [advanced-code] Rust enum ÔÇö Red/Green/Yellow
+   Q: "create a Rust enum for traffic lights"
+   A: Here's a Rust enum **TrafficLights**:
+
+```rust
+#[derive(Debug, Clone, PartialEq)]
+pub enum TrafficLights {
+    Red,
+    Yellow,
+    Green,
+}
+
+impl TrafficLights {
+    pub fn is_allowed(&self) -> bool {
+        matches!(self, TrafficLights::Red)
+    }
+}
+```
+
+[PASS] [advanced-code] C++ class ÔÇö Car with attributes
+   Q: "write a C++ class for a car"
+   A: Here's a C++ class **Car**:
+
+```cpp
+#include <string>
+#include <iostream>
+
+class Car {
+private:
+    std::string make_;
+    std::string model_;
+    int year_;
+    int speed_;
+
+public:
+    Car(const std::string& make, const std::string& model, int year, int speed)
+        : make_(make), model_(model),...
+
+[PASS] [advanced-code] Python class ÔÇö BankAccount with deposit/withdraw
+   Q: "create a python class for a bank account"
+   A: Here's a Python class **BankAccount**:
+
+```python
+class BankAccount:
+    def __init__(self, owner: str, balance: float):
+        self.owner = owner
+        self.balance = balance
+
+    def deposit(self):
+        # TODO: implement deposit
+        pass
+    def withdraw(self):
+        # TODO: implement ...
+
+[PASS] [best-practices] Next.js best practices ÔÇö should mention SSR, routing, etc.
+   Q: "what are best practices for nextjs"
+   A: ## Next.js Best Practices
+
+**Rendering Strategies:**
+- Use **Server-Side Rendering (SSR)** with `getServerSideProps` for dynamic data that changes per request
+- Use **Static Site Generation (SSG)** with `getStaticProps` for pages that can be pre-built at build time
+- Use **Incremental Static Regener...
+
+[PASS] [best-practices] Vite best practices ÔÇö should mention HMR, plugins, config, etc.
+   Q: "what are best practices for vite"
+   A: ## Vite Best Practices
+
+**Configuration:**
+- Keep `vite.config.ts` clean ÔÇö use the `defineConfig` helper for TypeScript autocompletion
+- Set `resolve.alias` for cleaner imports (e.g., `@/` ÔåÆ `src/`)
+- Use environment variables with the `VITE_` prefix for client-exposed values
+
+**Performance & HMR:**...
+
+[PASS] [best-practices] TypeScript best practices ÔÇö should mention strict mode, types, etc.
+   Q: "what are best practices for typescript"
+   A: ## TypeScript Best Practices
+
+**Strictness:**
+- Enable **strict mode** in `tsconfig.json` ÔÇö it activates `strictNullChecks`, `noImplicitAny`, `strictFunctionTypes`, and more
+- Never use `any` ÔÇö prefer `unknown` for truly unknown types, then narrow with type guards
+- Enable `noUncheckedIndexedAccess`...
+
+[PASS] [binary] Binary -> "RISK"
+   Q: "decode 01010010 01001001 01010011 01001011"
+   A: **Binary decoded:** "RISK"
+
+**Breakdown:**
+`01010010` ÔåÆ 82 ÔåÆ 'R'
+`01001001` ÔåÆ 73 ÔåÆ 'I'
+`01010011` ÔåÆ 83 ÔåÆ 'S'
+`01001011` ÔåÆ 75 ÔåÆ 'K'
+
+The binary sequence spells: **RISK**
+
+[PASS] [binary] Binary -> "HI"
+   Q: "decode 01001000 01001001"
+   A: **Binary decoded:** "HI"
+
+**Breakdown:**
+`01001000` ÔåÆ 72 ÔåÆ 'H'
+`01001001` ÔåÆ 73 ÔåÆ 'I'
+
+The binary sequence spells: **HI**
+
+[PASS] [knowledge] US president ÔÇö should mention Trump
+   Q: "who is president in us"
+   A: The President of the United States is Donald Trump (47th president). He took office on January 20, 2025. Trump previously served as the 45th president from 2017 to 2021.
+
+[PASS] [knowledge] Circle K CEO ÔÇö should return relevant info
+   Q: "who is the CEO of Circle K"
+   A: Circle K is an international chain of convenience stores and gas stations, headquartered in Tempe, Arizona. It is a subsidiary of Alimentation Couche-Tard, a Canadian company. Circle K operates over 14,000 stores globally. The current CEO is Alex Miller.
+
+[PASS] [knowledge] Anthropic-Pentagon news
+   Q: "what happened with Anthropic and the Pentagon"
+   A: On January 3, 2026, Venezuela's Maduro regime publicly acknowledged running intelligence operations using Anthropic's Claude models for surveillance purposes. On February 27, 2026, U.S. Defense Secretary Pete Hegseth designated Anthropic a "supply chain risk to national security" and threatened to c...
+
+[PASS] [knowledge] Hommersak location ÔÇö Norway
+   Q: "where is Hommers├Ñk"
+   A: Hommers├Ñk is a village in Sandnes municipality in Rogaland county, Norway. It is located on the Ryfylke coast, about 15 km north of Sandnes. Typical temperatures: summer 15-20┬░C, winter 0-5┬░C. January average around 1-3┬░C, July average around 15-17┬░C. The temperature varies with North Sea weather pa...
+
+[PASS] [knowledge] Hommersak details
+   Q: "tell me about Hommers├Ñk"
+   A: Hommers├Ñk is a village in Sandnes municipality in Rogaland county, Norway. It is located on the Ryfylke coast, about 15 km north of Sandnes. Typical temperatures: summer 15-20┬░C, winter 0-5┬░C. January average around 1-3┬░C, July average around 15-17┬░C. The temperature varies with North Sea weather pa...
+
+[PASS] [knowledge] Circle K business description
+   Q: "what does Circle K do"
+   A: Circle K is an international chain of convenience stores and gas stations, headquartered in Tempe, Arizona. It is a subsidiary of Alimentation Couche-Tard, a Canadian company. Circle K operates over 14,000 stores globally. The current CEO is Alex Miller.
+
+[PASS] [norwegian] Norwegian sentence ÔÇö should contain Norwegian words
+   Q: "write to me a sentence in norwegian"
+   A: Kunnskap er makt, og sammen kan vi bygge noe helt fantastisk.
+
+[PASS] [unknown] Mars sky ÔÇö should admit unknown (NOT Tailwind CSS)
+   Q: "what color is the sky on mars"
+   A: I couldn't find a strong match for that question, but I have related content from: https://grok.com/c/feaff2fe-a9d4-4c40-996e-4c387e623ace?rid=efaddbf0-dff2-4663-8b31-4bb056f76c0e, https://tailwindcss.com/docs/hover-focus-and-other-states, https://lovdata.no/dokument/NL/lov/2017-06-16-65/KAPITTEL_9#...
+
+[PASS] [unknown] 2030 world cup ÔÇö should admit unknown (future event)
+   Q: "who won the 2030 world cup"
+   A: I couldn't find a strong match for that question, but I have related content from: https://www.youtube.com/about/, https://nextjs.org/docs/app/guides/upgrading/codemods, https://www.youtube.com/watch?v=iuIdBfjL62s. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(108394 words le...
+
+[PASS] [unknown] Fictional planet ÔÇö should admit unknown
+   Q: "what is the population of planet zorblax"
+   A: I couldn't find a strong match for that question, but I have related content from: https://pubmed.ncbi.nlm.nih.gov/41746192/. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(108397 words learned, 5963 sources indexed)
+
+[PASS] [unknown] Future/unknown event ÔÇö should admit unknown
+   Q: "who won the 2028 olympics gold in swimming"
+   A: I couldn't find a strong match for that question, but I have related content from: https://pubmed.ncbi.nlm.nih.gov/41738998/, https://chatgpt.com/c/69a2e0af-1b80-8396-b6d4-736e4df67065. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(108402 words learned, 5963 sources indexed)
+
+
+==================================================
+                   SCORECARD
+==================================================
+  advanced-code        4/4 (100%)
+  best-practices       3/3 (100%)
+  binary               2/2 (100%)
+  code-gen             5/5 (100%)
+  creative-code        6/6 (100%)
+  greetings            2/2 (100%)
+  identity             2/2 (100%)
+  knowledge            6/6 (100%)
+  math                 8/8 (100%)
+  norwegian            1/1 (100%)
+  unknown              4/4 (100%)
+--------------------------------------------------
+  TOTAL: 43/43 passed (100.0%)
+==================================================
+
+=== Benchmark Complete ===

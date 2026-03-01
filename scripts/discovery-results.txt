@@ -1,0 +1,370 @@
+╔════════════════════════════════════════════════════════╗
+║   VAI DISCOVERY CHAT — 50 OSI/TCP-IP Questions       ║
+╚════════════════════════════════════════════════════════╝
+
+Server healthy
+
+Conversation: 01KJJBD6A3RAMKKTAMACZBSX0W
+
+  [01/51] what are the 7 layers of the OSI model → ✅ HAS KNOWLEDGE
+  [02/51] what layer of the OSI model does HTTP operate on → ✅ HAS KNOWLEDGE
+  [03/51] what is the difference between layer 2 and layer 3 of the OSI model → ✅ HAS KNOWLEDGE
+  [04/51] which OSI layer handles encryption and data compression → ✅ HAS KNOWLEDGE
+  [05/51] what protocols operate at the transport layer of the OSI model → ✅ HAS KNOWLEDGE
+  [06/51] what is the data unit called at layer 2 of the OSI model → ✅ HAS KNOWLEDGE
+  [07/51] what is the purpose of the session layer in the OSI model → ✅ HAS KNOWLEDGE
+  [08/51] name 3 protocols that operate at the network layer → ✅ HAS KNOWLEDGE
+  [09/51] how many layers does the TCP/IP model have → ✅ HAS KNOWLEDGE
+  [10/51] what are the 4 layers of the TCP/IP model → ✅ HAS KNOWLEDGE
+  [11/51] what is the difference between the OSI model and TCP/IP model → ✅ HAS KNOWLEDGE
+  [12/51] which TCP/IP layer corresponds to OSI layers 5 6 and 7 → ✅ HAS KNOWLEDGE
+  [13/51] what layer does ARP operate on in the TCP/IP model → ✅ HAS KNOWLEDGE
+  [14/51] what is the difference between TCP and UDP → ✅ HAS KNOWLEDGE
+  [15/51] what is the TCP three-way handshake → ✅ HAS KNOWLEDGE
+  [16/51] what are the TCP flags SYN ACK FIN RST → ✅ HAS KNOWLEDGE
+  [17/51] what is the default port number for HTTP → ✅ HAS KNOWLEDGE
+  [18/51] what is the default port number for HTTPS → ✅ HAS KNOWLEDGE
+  [19/51] what is the default port number for SSH → ✅ HAS KNOWLEDGE
+  [20/51] what is the default port number for DNS → ✅ HAS KNOWLEDGE
+  [21/51] what is the maximum size of a TCP segment → ✅ HAS KNOWLEDGE
+  [22/51] how many bits in an IPv4 address → ✅ HAS KNOWLEDGE
+  [23/51] how many bits in an IPv6 address → ✅ HAS KNOWLEDGE
+  [24/51] what is the subnet mask for a /24 network → ✅ HAS KNOWLEDGE
+  [25/51] what is the broadcast address for 192.168.1.0/24 → ✅ HAS KNOWLEDGE
+  [26/51] what class is the IP address 172.16.0.1 → ✅ HAS KNOWLEDGE
+  [27/51] what is the loopback address in IPv4 → ✅ HAS KNOWLEDGE
+  [28/51] what does DNS stand for → ✅ HAS KNOWLEDGE
+  [29/51] what port does DNS use → ✅ HAS KNOWLEDGE
+  [30/51] what is the difference between an A record and a CNAME record → ✅ HAS KNOWLEDGE
+  [31/51] what is a DNS TTL → ✅ HAS KNOWLEDGE
+  [32/51] write a TCP server in Python that listens on port 8080 → ✅ HAS KNOWLEDGE
+  [33/51] write a UDP client in Python that sends hello to localhost port 9000 → ⚠️  PARTIAL
+  [34/51] write a simple HTTP GET request using Python sockets → ✅ HAS KNOWLEDGE
+  [35/51] what is a socket in networking programming → ✅ HAS KNOWLEDGE
+  [36/51] what is the difference between blocking and non-blocking sockets → ✅ HAS KNOWLEDGE
+  [37/51] how many usable hosts in a /24 subnet → ✅ HAS KNOWLEDGE
+  [38/51] how many subnets can you create from a /16 with /24 subnets → ✅ HAS KNOWLEDGE
+  [39/51] convert 192.168.1.1 to binary → ✅ HAS KNOWLEDGE
+  [40/51] what is the binary representation of subnet mask 255.255.255.0 → ✅ HAS KNOWLEDGE
+  [41/51] what layer does TLS operate on → ✅ HAS KNOWLEDGE
+  [42/51] what is the TLS handshake process → ✅ HAS KNOWLEDGE
+  [43/51] what is the difference between symmetric and asymmetric encryption → ✅ HAS KNOWLEDGE
+  [44/51] hva er de 7 lagene i OSI-modellen → ✅ HAS KNOWLEDGE
+  [45/51] hva er forskjellen mellom TCP og UDP → ✅ HAS KNOWLEDGE
+  [46/51] hva betyr DNS → ✅ HAS KNOWLEDGE
+  [47/51] hva er en IP-adresse → ✅ HAS KNOWLEDGE
+  [48/51] hva er standardporten for HTTP → ✅ HAS KNOWLEDGE
+  [49/51] what is NAT and how does it work → ✅ HAS KNOWLEDGE
+  [50/51] what is the MTU for ethernet → ❌ NO KNOWLEDGE
+  [51/51] what is a VLAN → ❌ NO KNOWLEDGE
+
+════════════════════════════════════════════════════════════
+                   DISCOVERY SUMMARY
+════════════════════════════════════════════════════════════
+  ✅ HAS KNOWLEDGE:  48/51
+  ⚠️  PARTIAL:        1/51
+  ❌ NO KNOWLEDGE:   2/51
+════════════════════════════════════════════════════════════
+
+════════════════════════════════════════════════════════════
+                   DETAILED RESPONSES
+════════════════════════════════════════════════════════════
+
+[Q01] what are the 7 layers of the OSI model
+[A] I am VeggaAI (VAI), a local-first AI built from scratch. I learn from sources you give me — web pages, transcripts, code, and conversations. I understand English and Norwegian.
+────────────────────────────────────────────────────────────
+
+[Q02] what layer of the OSI model does HTTP operate on
+[A] I couldn't find a strong match for that question, but I have related content from: https://mswjs.io/docs/http/, https://www.linode.com/docs/guides/difference-between-tcp-and-udp/, https://mswjs.io/docs/sse/. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104973 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q03] what is the difference between layer 2 and layer 3 of the OSI model
+[A] The difference is that revalidatePath purges the Data Cache and Full Route Cache, whereas router
+
+[Source: https://nextjs.org/docs/app/guides/caching]
+────────────────────────────────────────────────────────────
+
+[Q04] which OSI layer handles encryption and data compression
+[A] I couldn't find a strong match for that question, but I have related content from: https://www.zenarmor.com/docs/network-basics/tcp-vs-udp, https://www.youtube.com/watch?v=jkkmAYC6YfI, https://www.linode.com/docs/guides/difference-between-tcp-and-udp/. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104974 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q05] what protocols operate at the transport layer of the OSI model
+[A] I couldn't find a strong match for that question, but I have related content from: https://www.linode.com/docs/guides/difference-between-tcp-and-udp/, https://www.9tut.com/tcp-and-udp-tutorial, https://www.zenarmor.com/docs/network-basics/tcp-vs-udp. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104975 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q06] what is the data unit called at layer 2 of the OSI model
+[A] It means more PRs and more orchestration to make sure people don't step on each other's toes and that things don't break in egregious ways
+
+[Source: https://www.youtube.com/watch?v=p2aea9dytpE]
+────────────────────────────────────────────────────────────
+
+[Q07] what is the purpose of the session layer in the OSI model
+[A] The session is now completely reliable
+
+[Source: https://www.zenarmor.com/docs/network-basics/tcp-vs-udp]
+────────────────────────────────────────────────────────────
+
+[Q08] name 3 protocols that operate at the network layer
+[A] I couldn't find a strong match for that question, but I have related content from: https://www.zenarmor.com/docs/network-basics/tcp-vs-udp, https://www.linode.com/docs/guides/difference-between-tcp-and-udp/. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104976 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q09] how many layers does the TCP/IP model have
+[A] I couldn't find a strong match for that question, but I have related content from: https://tailwindcss.com/docs/styling-with-utility-classes, https://humandigitalagency.medium.com/tcp-vs-udp-everything-you-need-to-know-d2a58c8bb105, https://www.linode.com/docs/guides/difference-between-tcp-and-udp/. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104977 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q10] what are the 4 layers of the TCP/IP model
+[A] I am VeggaAI (VAI), a local-first AI built from scratch. I learn from sources you give me — web pages, transcripts, code, and conversations. I understand English and Norwegian.
+────────────────────────────────────────────────────────────
+
+[Q11] what is the difference between the OSI model and TCP/IP model
+[A] TCP is best used for direct communication in which a reliable connection is needed, such as web browsing, email, text messaging, and file transfers
+
+[Source: https://www.avast.com/c-tcp-vs-udp-difference]
+────────────────────────────────────────────────────────────
+
+[Q12] which TCP/IP layer corresponds to OSI layers 5 6 and 7
+[A] I couldn't find a strong match for that question, but I have related content from: https://www.linode.com/docs/guides/difference-between-tcp-and-udp/, https://humandigitalagency.medium.com/tcp-vs-udp-everything-you-need-to-know-d2a58c8bb105. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104978 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q13] what layer does ARP operate on in the TCP/IP model
+[A] I couldn't find a strong match for that question, but I have related content from: https://www.linode.com/docs/guides/difference-between-tcp-and-udp/, https://humandigitalagency.medium.com/tcp-vs-udp-everything-you-need-to-know-d2a58c8bb105, https://grok.com/c/d6494818-139b-49ff-8117-486db41493e8. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104979 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q14] what is the difference between TCP and UDP
+[A] What Is the Difference Between TCP and UDP. The IP layer assembles and addresses the packets and the link layer transmits them. The TCP protocol requires the receiver to acknowledge the packets it has received. TCP is the more complex and heavyweight protocol. The main transport protocols are TCP and UDP. It only forwards the data directly to the application. TCP establishes a connection and maintains it for the duration of the session. At the destination, the IP layer receives the packets and p
+  ... (635 chars total)
+────────────────────────────────────────────────────────────
+
+[Q15] what is the TCP three-way handshake
+[A] TCP is best used for direct communication in which a reliable connection is needed, such as web browsing, email, text messaging, and file transfers
+
+[Source: https://www.avast.com/c-tcp-vs-udp-difference]
+────────────────────────────────────────────────────────────
+
+[Q16] what are the TCP flags SYN ACK FIN RST
+[A] TCP is best used for direct communication in which a reliable connection is needed, such as web browsing, email, text messaging, and file transfers
+
+[Source: https://www.avast.com/c-tcp-vs-udp-difference]
+────────────────────────────────────────────────────────────
+
+[Q17] what is the default port number for HTTP
+[A] I couldn't find a strong match for that question, but I have related content from: https://mswjs.io/docs/http/, https://www.zenarmor.com/docs/network-basics/tcp-vs-udp, https://mswjs.io/docs/sse/. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104980 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q18] what is the default port number for HTTPS
+[A] I couldn't find a strong match for that question, but I have related content from: https://www.zenarmor.com/docs/network-basics/tcp-vs-udp, https://en.wikipedia.org/wiki/Numeral_system, https://www.linode.com/docs/guides/difference-between-tcp-and-udp/. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104981 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q19] what is the default port number for SSH
+[A] I couldn't find a strong match for that question, but I have related content from: https://www.google.com/search?q=how+to+google+via+ssh&sca_esv=8910885c1c2cfd19&rlz=1C1ONGR_enNO1084NO1084&sxsrf=ANbL-n5hGNGgmTRPjzMOUx5SbcuUhEy5sQ%3A1772237076058&ei=FDGiafmkA7-5wPAP64eZuQc&biw=1438&bih=1564&ved=0ahUKEwj5_oDL8fqSAxW_HBAIHetDJncQ4dUDCBE&uact=5&oq=how+to+google+via+ssh&gs_lp=Egxnd3Mtd2l6LXNlcnAiFWhvdyB0byBnb29nbGUgdmlhIHNzaDIFECEYoAEyBRAhGKABMgUQIRifBUjSFFCtBVjjE3ABeAGQAQCYAWOgAekEqgEBOLgBA8gBAPgBAZ
+  ... (948 chars total)
+────────────────────────────────────────────────────────────
+
+[Q20] what is the default port number for DNS
+[A] DNS is a service for mapping domain names to their respective IP addresses
+
+[Source: https://humandigitalagency.medium.com/tcp-vs-udp-everything-you-need-to-know-d2a58c8bb105]
+────────────────────────────────────────────────────────────
+
+[Q21] what is the maximum size of a TCP segment
+[A] TCP is best used for direct communication in which a reliable connection is needed, such as web browsing, email, text messaging, and file transfers
+
+[Source: https://www.avast.com/c-tcp-vs-udp-difference]
+────────────────────────────────────────────────────────────
+
+[Q22] how many bits in an IPv4 address
+[A] I couldn't find a strong match for that question, but I have related content from: https://tailwindcss.com/docs/styling-with-utility-classes, https://huggingface.co/email_confirmation, https://www.zenarmor.com/docs/network-basics/tcp-vs-udp. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104983 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q23] how many bits in an IPv6 address
+[A] I couldn't find a strong match for that question, but I have related content from: https://tailwindcss.com/docs/styling-with-utility-classes, https://huggingface.co/email_confirmation, https://www.zenarmor.com/docs/network-basics/tcp-vs-udp. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104984 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q24] what is the subnet mask for a /24 network
+[A] I couldn't find a strong match for that question, but I have related content from: https://www.zenarmor.com/docs/network-basics/tcp-vs-udp, https://mswjs.io/docs/http/mocking-responses/network-errors, https://chatgpt.com/c/6977551e-a874-8328-af18-9db81eb7f744. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104985 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q25] what is the broadcast address for 192.168.1.0/24
+[A] I couldn't find a strong match for that question, but I have related content from: https://huggingface.co/email_confirmation, https://www.zenarmor.com/docs/network-basics/tcp-vs-udp, https://www.avast.com/c-tcp-vs-udp-difference. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104986 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q26] what class is the IP address 172.16.0.1
+[A] I couldn't find a strong match for that question, but I have related content from: https://tailwindcss.com/docs/hover-focus-and-other-states, https://huggingface.co/email_confirmation, https://www.zenarmor.com/docs/network-basics/tcp-vs-udp. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104987 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q27] what is the loopback address in IPv4
+[A] ACK is short for ACKnowledge)
+
+[Source: https://www.9tut.com/tcp-and-udp-tutorial]
+────────────────────────────────────────────────────────────
+
+[Q28] what does DNS stand for
+[A] I couldn't find a strong match for that question, but I have related content from: https://nordvpn.com/blog/tcp-or-udp-which-is-better/, https://mswjs.io/docs/http/mocking-responses/network-errors, https://www.9tut.com/tcp-and-udp-tutorial. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104988 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q29] what port does DNS use
+[A] I couldn't find a strong match for that question, but I have related content from: https://nextjs.org/docs/app/api-reference/directives, https://www.zenarmor.com/docs/network-basics/tcp-vs-udp, https://www.linode.com/docs/guides/difference-between-tcp-and-udp/. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104989 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q30] what is the difference between an A record and a CNAME record
+[A] The difference is that revalidatePath purges the Data Cache and Full Route Cache, whereas router
+
+[Source: https://nextjs.org/docs/app/guides/caching]
+────────────────────────────────────────────────────────────
+
+[Q31] what is a DNS TTL
+[A] DNS is a service for mapping domain names to their respective IP addresses
+
+[Source: https://humandigitalagency.medium.com/tcp-vs-udp-everything-you-need-to-know-d2a58c8bb105]
+────────────────────────────────────────────────────────────
+
+[Q32] write a TCP server in Python that listens on port 8080
+[A] I couldn't find a strong match for that question, but I have related content from: https://www.youtube.com/watch?v=Q7IrYPOKmsM&list=PLEvoVHoL8DxOl4Of6bnQUwE0iUfjAhhmK&index=35, https://www.linode.com/docs/guides/difference-between-tcp-and-udp/, https://www.zenarmor.com/docs/network-basics/tcp-vs-udp. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104990 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q33] write a UDP client in Python that sends hello to localhost port 9000
+[A] Here's Hello World in **python**:
+
+```python
+print("Hello, World!")
+```
+────────────────────────────────────────────────────────────
+
+[Q34] write a simple HTTP GET request using Python sockets
+[A] I couldn't find a strong match for that question, but I have related content from: https://www.youtube.com/watch?v=Q7IrYPOKmsM&list=PLEvoVHoL8DxOl4Of6bnQUwE0iUfjAhhmK&index=35, https://tailwindcss.com/plus/ui-blocks/marketing/elements/flyout-menus, https://tailwindcss.com/docs/installation/using-vite. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104991 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q35] what is a socket in networking programming
+[A] So is songwriting
+
+[Source: https://www.reddit.com/r/explainlikeimfive/comments/1gma4gi/eli5_why_do_humans_enjoy_rhyming_words/#:~:text=Poetry%20and%20song%20must%20be,%E2%80%A2%201y%20ago]
+────────────────────────────────────────────────────────────
+
+[Q36] what is the difference between blocking and non-blocking sockets
+[A] So is songwriting
+
+[Source: https://www.reddit.com/r/explainlikeimfive/comments/1gma4gi/eli5_why_do_humans_enjoy_rhyming_words/#:~:text=Poetry%20and%20song%20must%20be,%E2%80%A2%201y%20ago]
+────────────────────────────────────────────────────────────
+
+[Q37] how many usable hosts in a /24 subnet
+[A] I couldn't find a strong match for that question, but I have related content from: https://tailwindcss.com/docs/styling-with-utility-classes, https://nextjs.org/docs/app/guides/local-development, https://tailwindcss.com/plus/templates/spotlight. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104992 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q38] how many subnets can you create from a /16 with /24 subnets
+[A] I couldn't find a strong match for that question, but I have related content from: https://tailwindcss.com/docs/styling-with-utility-classes, https://nextjs.org/docs/app/guides/data-security, https://nextjs.org/docs/app/guides/migrating. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104993 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q39] convert 192.168.1.1 to binary
+[A] Binary conversion: convert 192.168.1.1 (String (UTF-8)) = 01100011011011110110111001110110011001010111001001110100001000000011000100111001001100100010111000110001001101100011100000101110001100010010111000110001 (Binary)
+
+[Source: DuckDuckGo Instant Answer]
+────────────────────────────────────────────────────────────
+
+[Q40] what is the binary representation of subnet mask 255.255.255.0
+[A] I couldn't find a strong match for that question, but I have related content from: https://en.wikipedia.org/wiki/Numeral_system, https://chatgpt.com/c/69a21ac6-45c8-8385-86fe-9d89d3130759, https://www.youtube.com/results?search_query=binary+code+lesson. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104994 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q41] what layer does TLS operate on
+[A] I couldn't find a strong match for that question, but I have related content from: https://www.linode.com/docs/guides/difference-between-tcp-and-udp/, https://grok.com/c/bc3a86ce-64a0-48e9-a115-5b15dabe01dc?rid=7394ab4d-4023-4d65-87b3-0b41ef4d5069, https://grok.com/c/bc3a86ce-64a0-48e9-a115-5b15dabe01dc?rid=95e59f6f-160d-4250-b201-f11b938ca822. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104995 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q42] what is the TLS handshake process
+[A] And is there any otherway to fill the text box from the original page
+
+[Source: https://www.google.com/search?q=how+to+google+via+javascript&sca_esv=8910885c1c2cfd19&rlz=1C1ONGR_enNO1084NO1084&biw=1438&bih=1564&sxsrf=ANbL-n5S1A-t8ud51YHy7orxp3g16_TFcA%3A1772237121597&ei=QTGiaYeXJPK4wPAPoMqM4A8&oq=how+to+google+via+javascri&gs_lp=Egxnd3Mtd2l6LXNlcnAiGmhvdyB0byBnb29nbGUgdmlhIGphdmFzY3JpKgIIADIHECEYoAEYCjIHECEYoAEYCjIFECEYnwUyBRAhGJ8FMgUQIRifBTIFECEYnwUyBRAhGJ8FMgUQIRifBUihGFDXBlipDnACeAGQAQCYAX6gA
+  ... (652 chars total)
+────────────────────────────────────────────────────────────
+
+[Q43] what is the difference between symmetric and asymmetric encryption
+[A] The difference is that revalidatePath purges the Data Cache and Full Route Cache, whereas router
+
+[Source: https://nextjs.org/docs/app/guides/caching]
+────────────────────────────────────────────────────────────
+
+[Q44] hva er de 7 lagene i OSI-modellen
+[A] Jeg er VeggaAI (VAI), en lokal AI bygget fra bunnen av. Jeg laerer fra kilder du gir meg.
+────────────────────────────────────────────────────────────
+
+[Q45] hva er forskjellen mellom TCP og UDP
+[A] Jeg er VeggaAI (VAI), en lokal AI bygget fra bunnen av. Jeg laerer fra kilder du gir meg.
+────────────────────────────────────────────────────────────
+
+[Q46] hva betyr DNS
+[A] I couldn't find a strong match for that question, but I have related content from: https://chatgpt.com/c/69a21ac6-45c8-8385-86fe-9d89d3130759. Try rephrasing or ask "what do you know about [topic]?" to explore.
+
+(104996 words learned, 5876 sources indexed)
+────────────────────────────────────────────────────────────
+
+[Q47] hva er en IP-adresse
+[A] Jeg er VeggaAI (VAI), en lokal AI bygget fra bunnen av. Jeg laerer fra kilder du gir meg.
+────────────────────────────────────────────────────────────
+
+[Q48] hva er standardporten for HTTP
+[A] Jeg er VeggaAI (VAI), en lokal AI bygget fra bunnen av. Jeg laerer fra kilder du gir meg.
+────────────────────────────────────────────────────────────
+
+[Q49] what is NAT and how does it work
+[A] It means more PRs and more orchestration to make sure people don't step on each other's toes and that things don't break in egregious ways
+
+[Source: https://www.youtube.com/watch?v=p2aea9dytpE]
+────────────────────────────────────────────────────────────
+
+[Q50] what is the MTU for ethernet
+[A] From what I've learned:
+
+the mtu for ipv6 is 1280 bytes, but the mtu for ethernet is 1500 bytes. network packets have a maximum size known as the maximum transmission unit (mtu), which is dependent on the underlying network layer protocol. the network layer protocol's mtu is not exceeded by the data segments thanks to tcp segmentation, which allocates a sequence number to each segment for segment reordering and error detection.
+
+[Source: https://www.zenarmor.com/docs/network-basics/tcp-vs-udp]
+────────────────────────────────────────────────────────────
+
+[Q51] what is a VLAN
+[A] From what I've learned:
+
+ccna 200-301 ccna faqs & tips basic questions topology architecture questions cloud & virtualization questions cdp & lldp questions switch questions vlan & trunking questions vlan & trunking questions 2 stp & vtp questions etherchannel questions tcp & udp questions ip address & subnetting questions ...
+
+[Source: https://www.9tut.com/tcp-and-udp-tutorial]
+────────────────────────────────────────────────────────────

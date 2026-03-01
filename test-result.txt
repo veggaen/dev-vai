@@ -1,0 +1,399 @@
+﻿ÔòöÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòù
+Ôòæ     VAI MEGA TEST ÔÇö 220 Questions from 21 Categories            Ôòæ
+ÔòÜÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòØ
+
+Ô£ô Server healthy ÔÇö vocab: 105992, knowledge: 1067
+
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: A-general (20 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q  1: What is the capital of France?  Ô£à PASS (1/1 keywords)
+  Q  2: What is the capital of Japan?  Ô£à PASS (1/1 keywords)
+  Q  3: What is the capital of Australia?  Ô£à PASS (1/1 keywords)
+  Q  4: What is the capital of Norway?  Ô£à PASS (1/1 keywords)
+  Q  5: Who painted the Mona Lisa?  Ô£à PASS (2/2 keywords)
+  Q  6: Who wrote Romeo and Juliet?  Ô£à PASS (1/1 keywords)
+  Q  7: What year did World War II end?  Ô£à PASS (1/1 keywords)
+  Q  8: When did the Berlin Wall fall?  Ô£à PASS (1/1 keywords)
+  Q  9: What is DNA?  Ô£à PASS (1/1 keywords)
+  Q 10: What is the boiling point of water in Celsius?  Ô£à PASS (1/1 keywords)
+  Q 11: What is the speed of light in km/s?  Ô£à PASS (2/2 keywords)
+  Q 12: What is the chemical formula for water?  Ô£à PASS (1/1 keywords)
+  Q 13: Which planet is known as the Red Planet?  Ô£à PASS (1/1 keywords)
+  Q 14: What is the largest ocean on Earth?  Ô£à PASS (1/1 keywords)
+  Q 15: What is a prime number?  Ô£à PASS (2/3 keywords)
+  Q 16: How many bits are in a byte?  Ô£à PASS (1/1 keywords)
+  Q 17: Who created JavaScript?  Ô£à PASS (2/2 keywords)
+  Q 18: When was Google founded?  Ô£à PASS (1/1 keywords)
+  Q 19: What happened at Lillehammer in 1994?  Ô£à PASS (2/2 keywords)
+  Q 20: What is the Norwegian Oil Fund?  Ô£à PASS (4/4 keywords)
+  ÔöÇÔöÇ A-general: 20/20 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: B-typescript (25 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q 21: What is TypeScript and why use it over JavaScript?  Ô£à PASS (3/3 keywords)
+  Q 22: What is the difference between interface and type in TypeScript?  Ô£à PASS (4/4 keywords)
+  Q 23: Explain generics in TypeScript with an example.  Ô£à PASS (3/3 keywords)
+  Q 24: What are union types and intersection types in TypeScript?  Ô£à PASS (4/4 keywords)
+  Q 25: How does async/await work in JavaScript?  Ô£à PASS (3/3 keywords)
+  Q 26: What is the difference between var, let, and const?  Ô£à PASS (3/3 keywords)
+  Q 27: Explain closures in JavaScript.  Ô£à PASS (3/3 keywords)
+  Q 28: What is the event loop in JavaScript?  Ô£à PASS (1/4 keywords)
+  Q 29: What are template literal types in TypeScript?  Ô£à PASS (3/3 keywords)
+  Q 30: Explain the difference between == and === in JavaScript.  Ô£à PASS (3/3 keywords)
+  Q 31: What is destructuring in JavaScript?  Ô£à PASS (3/3 keywords)
+  Q 32: What are TypeScript utility types? Name at least 3.  Ô£à PASS (6/6 keywords)
+  Q 33: How do you handle errors in TypeScript?  Ô£à PASS (4/4 keywords)
+  Q 34: What is the nullish coalescing operator (??) in JavaScript?  Ô£à PASS (3/3 keywords)
+  Q 35: Explain optional chaining (?.) in JavaScript.  Ô£à PASS (3/3 keywords)
+  Q 36: What are mapped types in TypeScript?  Ô£à PASS (3/3 keywords)
+  Q 37: What is a discriminated union in TypeScript?  Ô£à PASS (1/4 keywords)
+  Q 38: Explain the module system in JavaScript (ESM vs CommonJS).  Ô£à PASS (4/4 keywords)
+  Q 39: What are decorators in TypeScript?  Ô£à PASS (3/3 keywords)
+  Q 40: How do you type a React component in TypeScript?  Ô£à PASS (4/4 keywords)
+  Q 41: What is a Record type in TypeScript?  Ô£à PASS (3/3 keywords)
+  Q 42: Explain the concept of type narrowing in TypeScript.  Ô£à PASS (4/4 keywords)
+  Q 43: What is the satisfies keyword in TypeScript?  Ô£à PASS (3/3 keywords)
+  Q 44: How do you create a type-safe API client in TypeScript?  Ô£à PASS (4/4 keywords)
+  Q 45: What are conditional types in TypeScript?  Ô£à PASS (3/4 keywords)
+  ÔöÇÔöÇ B-typescript: 25/25 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: C-nextjs (20 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q 46: What is Next.js and what does it do?  Ô£à PASS (4/4 keywords)
+  Q 47: Explain Server Components in Next.js App Router.  Ô£à PASS (3/4 keywords)
+  Q 48: What is the difference between SSR, SSG, and ISR in Next.js?  Ô£à PASS (2/4 keywords)
+  Q 49: How does the Next.js App Router differ from Pages Router?  Ô£à PASS (4/4 keywords)
+  Q 50: Explain React hooks: useState, useEffect, useRef.  Ô£à PASS (4/4 keywords)
+  Q 51: What is React Server Actions and how do you use them?  Ô£à PASS (3/3 keywords)
+  Q 52: How do you handle metadata and SEO in Next.js 14+?  Ô£à PASS (4/4 keywords)
+  Q 53: What is React Suspense and how does it relate to streaming SSR?  Ô£à PASS (4/4 keywords)
+  Q 54: Explain the use of middleware in Next.js.  Ô£à PASS (4/4 keywords)
+  Q 55: What are React Context and when should you use it vs a state libr...  Ô£à PASS (4/4 keywords)
+  Q 56: How do you optimize images in Next.js?  Ô£à PASS (4/4 keywords)
+  Q 57: What is React.memo and when should you use it?  Ô£à PASS (4/4 keywords)
+  Q 58: Explain parallel routes and intercepting routes in Next.js App Ro...  Ô£à PASS (4/4 keywords)
+  Q 59: How do you implement error boundaries in React?  Ô£à PASS (3/4 keywords)
+  Q 60: What is the difference between useCallback and useMemo?  Ô£à PASS (5/5 keywords)
+  Q 61: How do you handle forms in React with server actions?  Ô£à PASS (4/4 keywords)
+  Q 62: What is a layout in Next.js App Router and how does it work?  Ô£à PASS (4/4 keywords)
+  Q 63: Explain client-side navigation in Next.js.  Ô£à PASS (4/4 keywords)
+  Q 64: What are React portals and when do you use them?  Ô£à PASS (4/4 keywords)
+  Q 65: How do you implement code splitting in Next.js?  Ô£à PASS (5/5 keywords)
+  ÔöÇÔöÇ C-nextjs: 20/20 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: D-css (15 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q 66: What is Tailwind CSS and how is it different from Bootstrap?  Ô£à PASS (4/4 keywords)
+  Q 67: What changed in Tailwind CSS v4 compared to v3?  Ô£à PASS (3/4 keywords)
+  Q 68: What are design tokens and how are they used in CSS?  Ô£à PASS (2/3 keywords)
+  Q 69: Explain CSS Grid vs Flexbox: when do you use each?  Ô£à PASS (4/4 keywords)
+  Q 70: How do you implement dark mode in Tailwind CSS?  Ô£à PASS (4/4 keywords)
+  Q 71: What is mobile-first responsive design?  Ô£à PASS (3/4 keywords)
+  Q 72: How do you create a hover effect that changes both color and scal...  Ô£à PASS (4/4 keywords)
+  Q 73: What are CSS custom properties and how do they work?  Ô£à PASS (3/4 keywords)
+  Q 74: Explain the CSS cascade and specificity.  Ô£à PASS (4/4 keywords)
+  Q 75: How do you handle responsive typography in CSS?  Ô£à PASS (4/4 keywords)
+  Q 76: What is the @layer directive in CSS?  Ô£à PASS (3/3 keywords)
+  Q 77: How do you center an element both horizontally and vertically?  Ô£à PASS (4/4 keywords)
+  Q 78: What is container queries in CSS and when are they useful?  Ô£à PASS (3/4 keywords)
+  Q 79: How do you implement a smooth scroll-linked animation in CSS?  Ô£à PASS (4/4 keywords)
+  Q 80: What is the difference between rem, em, px, and vh/vw units?  Ô£à PASS (4/4 keywords)
+  ÔöÇÔöÇ D-css: 15/15 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: E-devops (15 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q 81: Explain what Docker is and why developers use it.  Ô£à PASS (3/4 keywords)
+  Q 82: Write a Dockerfile for a Next.js production app.  Ô£à PASS (5/5 keywords)
+  Q 83: What is the difference between Docker image and Docker container?  Ô£à PASS (4/4 keywords)
+  Q 84: What is docker-compose and when should you use it?  Ô£à PASS (4/4 keywords)
+  Q 85: What is CI/CD and name some popular tools for it.  Ô£à PASS (4/4 keywords)
+  Q 86: Write a GitHub Actions workflow for a Next.js app.  Ô£à PASS (5/5 keywords)
+  Q 87: What is Kubernetes and how does it relate to Docker?  Ô£à PASS (4/4 keywords)
+  Q 88: Explain the concept of infrastructure as code (IaC).  Ô£à PASS (4/4 keywords)
+  Q 89: What is a multi-stage Docker build and why use it?  Ô£à PASS (4/4 keywords)
+  Q 90: How do you handle environment variables in Docker?  Ô£à PASS (3/4 keywords)
+  Q 91: What is a reverse proxy and how does Nginx fit in?  Ô£à PASS (4/4 keywords)
+  Q 92: Explain blue-green deployment vs canary deployment.  Ô£à PASS (4/4 keywords)
+  Q 93: What are Docker volumes and why are they important?  Ô£à PASS (4/4 keywords)
+  Q 94: How do you set up a CI pipeline for a monorepo?  Ô£à PASS (4/4 keywords)
+  Q 95: What is GitOps and how does it work?  Ô£à PASS (4/4 keywords)
+  ÔöÇÔöÇ E-devops: 15/15 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: F-database (10 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q 96: What is Prisma and how does it work with databases?  Ô£à PASS (4/4 keywords)
+  Q 97: What is the difference between SQL and NoSQL databases?  Ô£à PASS (3/4 keywords)
+  Q 98: How do you define a database schema in Prisma?  Ô£à PASS (4/4 keywords)
+  Q 99: What are database migrations and why are they important?  Ô£à PASS (4/4 keywords)
+  Q100: Explain database indexing and why it matters for performance.  Ô£à PASS (3/4 keywords)
+  Q101: What is the difference between PostgreSQL and MySQL?  Ô£à PASS (2/4 keywords)
+  Q102: How do you handle database transactions in Prisma?  Ô£à PASS (3/3 keywords)
+  Q103: What is connection pooling and why does it matter?  Ô£à PASS (3/4 keywords)
+  Q104: Explain the N+1 query problem and how to solve it.  Ô£à PASS (4/4 keywords)
+  Q105: What is Drizzle ORM and how does it compare to Prisma?  Ô£à PASS (2/4 keywords)
+  ÔöÇÔöÇ F-database: 10/10 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: G-auth (10 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q106: Explain JWT (JSON Web Token) and how authentication works.  Ô£à PASS (5/5 keywords)
+  Q107: What is OAuth 2.0 and how does the authorization flow work?  Ô£à PASS (5/5 keywords)
+  Q108: How do you implement authentication in Next.js with NextAuth?  Ô£à PASS (3/4 keywords)
+  Q109: What is CORS and why is it important for web security?  Ô£à PASS (4/4 keywords)
+  Q110: Explain HTTPS and SSL/TLS certificates.  Ô£à PASS (4/5 keywords)
+  Q111: What is XSS (Cross-Site Scripting) and how do you prevent it?  Ô£à PASS (4/4 keywords)
+  Q112: What is CSRF and how do you protect against it?  Ô£à PASS (4/4 keywords)
+  Q113: How do you store passwords securely in a database?  Ô£à PASS (4/4 keywords)
+  Q114: What is the difference between authentication and authorization?  Ô£à PASS (4/4 keywords)
+  Q115: How do you implement role-based access control (RBAC)?  Ô£à PASS (4/4 keywords)
+  ÔöÇÔöÇ G-auth: 10/10 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: H-testing (10 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q116: What is Vitest and how does it compare to Jest?  Ô£à PASS (5/5 keywords)
+  Q117: Explain the difference between unit tests, integration tests, and...  Ô£à PASS (3/4 keywords)
+  Q118: What is TDD (Test-Driven Development) and why use it?  Ô£à PASS (5/5 keywords)
+  Q119: How do you test React components with React Testing Library?  Ô£à PASS (2/4 keywords)
+  Q120: What is mocking and when should you use it in tests?  Ô£à PASS (4/5 keywords)
+  Q121: How do you test API endpoints?  Ô£à PASS (5/5 keywords)
+  Q122: What is code coverage and what percentage should you aim for?  Ô£à PASS (3/4 keywords)
+  Q123: How do you test async code in Vitest/Jest?  Ô£à PASS (4/5 keywords)
+  Q124: What is Playwright and how do you use it for e2e testing?  Ô£à PASS (4/4 keywords)
+  Q125: Explain snapshot testing and when it is useful.  Ô£à PASS (3/3 keywords)
+  ÔöÇÔöÇ H-testing: 10/10 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: I-rust (10 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q126: How does Rust ensure memory safety without a garbage collector?  Ô£à PASS (2/3 keywords)
+  Q127: What is the difference between String and &str in Rust?  Ô£à PASS (5/5 keywords)
+  Q128: Explain the Rust borrow checker and why it exists.  Ô£à PASS (5/5 keywords)
+  Q129: What are traits in Rust and how do they compare to interfaces?  Ô£à PASS (4/4 keywords)
+  Q130: How does error handling work in Rust with Result and Option?  Ô£à PASS (6/6 keywords)
+  Q131: What is the difference between Box, Rc, and Arc in Rust?  Ô£à PASS (6/6 keywords)
+  Q132: Explain lifetimes in Rust and why they are needed.  Ô£à PASS (5/5 keywords)
+  Q133: How does async/await work in Rust?  Ô£à PASS (2/5 keywords)
+  Q134: What is the match expression in Rust?  Ô£à PASS (4/4 keywords)
+  Q135: How does Rust handle concurrency safely?  Ô£à PASS (5/5 keywords)
+  ÔöÇÔöÇ I-rust: 10/10 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: J-python (10 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q136: What is the GIL in Python and how does it affect concurrency?  Ô£à PASS (3/3 keywords)
+  Q137: How does Python type hinting work?  Ô£à PASS (6/6 keywords)
+  Q138: What is FastAPI and how does it compare to Flask/Django?  Ô£à PASS (5/5 keywords)
+  Q139: Explain Python decorators and give an example.  Ô£à PASS (4/4 keywords)
+  Q140: How does asyncio work in Python?  Ô£à PASS (3/5 keywords)
+  Q141: What are Python list comprehensions and generator expressions?  Ô£à PASS (5/5 keywords)
+  Q142: Explain virtual environments in Python (venv, pipenv, poetry).  Ô£à PASS (5/5 keywords)
+  Q143: What is Pydantic and why is it used?  Ô£à PASS (4/4 keywords)
+  Q144: How do you handle dependency injection in Python?  Ô£à PASS (4/4 keywords)
+  Q145: What are dataclasses in Python and when should you use them?  Ô£à PASS (4/4 keywords)
+  ÔöÇÔöÇ J-python: 10/10 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: K-go (10 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q146: What are Go goroutines and how do they differ from OS threads?  Ô£à PASS (4/4 keywords)
+  Q147: How do Go channels work for concurrency?  Ô£à PASS (5/5 keywords)
+  Q148: How does error handling work in Go?  Ô£à PASS (5/5 keywords)
+  Q149: What are Go interfaces and how are they implemented?  Ô£à PASS (3/4 keywords)
+  Q150: Explain the Go struct and how it compares to classes.  Ô£à PASS (3/4 keywords)
+  Q151: What is the Go module system (go mod)?  Ô£à PASS (4/4 keywords)
+  Q152: How do you handle HTTP requests in Go?  Ô£à PASS (4/4 keywords)
+  Q153: What is the select statement in Go?  Ô£à PASS (4/4 keywords)
+  Q154: Explain Go slices vs arrays.  Ô£à PASS (6/6 keywords)
+  Q155: What are Go generics and when were they introduced?  Ô£à PASS (4/4 keywords)
+  ÔöÇÔöÇ K-go: 10/10 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: L-a11y (10 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q156: What is WCAG and why is it important for web accessibility?  Ô£à PASS (3/3 keywords)
+  Q157: Explain the POUR principles in web accessibility.  Ô£à PASS (4/4 keywords)
+  Q158: What are ARIA attributes and when should you use them?  Ô£à PASS (4/4 keywords)
+  Q159: How do you make a React app accessible for screen readers?  Ô£à PASS (5/5 keywords)
+  Q160: What is the difference between WCAG 2.1 AA and AAA?  Ô£à PASS (4/4 keywords)
+  Q161: How do you test web accessibility?  Ô£à PASS (4/4 keywords)
+  Q162: What is color contrast ratio and what are the WCAG requirements?  Ô£à PASS (4/4 keywords)
+  Q163: How do you make forms accessible?  Ô£à PASS (5/5 keywords)
+  Q164: What is focus management and why is it important?  Ô£à PASS (5/5 keywords)
+  Q165: How do you handle keyboard navigation in a web app?  Ô£à PASS (5/5 keywords)
+  ÔöÇÔöÇ L-a11y: 10/10 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: M-gdpr (5 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q166: What is GDPR and what does it require for web apps?  Ô£à PASS (4/4 keywords)
+  Q167: How do you implement a GDPR-compliant cookie consent banner?  Ô£à PASS (4/4 keywords)
+  Q168: What is the right to be forgotten under GDPR?  Ô£à PASS (4/4 keywords)
+  Q169: What is a Data Protection Officer (DPO) and when is one required?  Ô£à PASS (4/4 keywords)
+  Q170: How do you handle data breach notifications under GDPR?  Ô£à PASS (4/4 keywords)
+  ÔöÇÔöÇ M-gdpr: 5/5 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: N-nor-web (10 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q171: What is the Norwegian standard for a website MVP in 2026?  Ô£à PASS (3/4 keywords)
+  Q172: Hva er universell utforming, og hvorfor er det viktig for norske ...  Ô£à PASS (4/4 keywords)
+  Q173: What laws govern web accessibility in Norway?  Ô£à PASS (4/4 keywords)
+  Q174: How should a Norwegian website handle personvern (privacy)?  Ô£à PASS (4/4 keywords)
+  Q175: What is b├ªrekraftig webdesign (sustainable web design)?  Ô£à PASS (3/4 keywords)
+  Q176: Hva betyr HTTPS og SSL for norske nettsider?  Ô£à PASS (4/4 keywords)
+  Q177: What should a Norwegian MVP landing page include in 2026?  Ô£à PASS (4/4 keywords)
+  Q178: Hvordan tester man universell utforming i Norge?  Ô£à PASS (4/4 keywords)
+  Q179: What is Altinn and why is it relevant for Norwegian web developer...  Ô£à PASS (4/4 keywords)
+  Q180: How should a Norwegian e-commerce site handle payment and privacy...  Ô£à PASS (2/4 keywords)
+  ÔöÇÔöÇ N-nor-web: 10/10 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: O-monorepo (5 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q181: What is a monorepo and when should you use one?  Ô£à PASS (4/4 keywords)
+  Q182: How does Turborepo work for monorepo builds?  Ô£à PASS (1/4 keywords)
+  Q183: Explain pnpm workspaces for monorepo management.  Ô£à PASS (3/4 keywords)
+  Q184: What is the difference between a monorepo and a monolith?  Ô£à PASS (1/4 keywords)
+  Q185: How do you share TypeScript types across packages in a monorepo?  Ô£à PASS (2/4 keywords)
+  ÔöÇÔöÇ O-monorepo: 5/5 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: P-frameworks (10 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q186: What is Vue 3 Composition API and how does it differ from Options...  Ô£à PASS (4/4 keywords)
+  Q187: Explain Angular signals and how they improve change detection.  Ô£à PASS (4/4 keywords)
+  Q188: What is headless WordPress and when should you use it?  Ô£à PASS (3/4 keywords)
+  Q189: How do you set up a Vue 3 project with Vite?  Ô£à PASS (2/4 keywords)
+  Q190: What are Angular standalone components?  Ô£à PASS (4/4 keywords)
+  Q191: How does Vue Router work for SPA navigation?  Ô£à PASS (4/4 keywords)
+  Q192: What is the Angular dependency injection system?  Ô£à PASS (3/4 keywords)
+  Q193: How do you build a headless WordPress site with Next.js?  Ô£à PASS (1/4 keywords)
+  Q194: What is Nuxt 3 and how does it compare to Next.js?  Ô£à PASS (3/4 keywords)
+  Q195: How do you create a custom WordPress block with React?  Ô£à PASS (4/4 keywords)
+  ÔöÇÔöÇ P-frameworks: 10/10 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: Q-3d (5 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q196: What is Three.js and how do you create a basic 3D scene?  Ô£à PASS (4/4 keywords)
+  Q197: How does GSAP work for web animations?  Ô£à PASS (3/4 keywords)
+  Q198: How do you create a hover animation that changes an icon and scal...  Ô£à PASS (4/4 keywords)
+  Q199: How do you integrate Three.js with React using React Three Fiber?  Ô£à PASS (4/4 keywords)
+  Q200: What is a scroll-triggered animation with GSAP ScrollTrigger?  Ô£à PASS (3/4 keywords)
+  ÔöÇÔöÇ Q-3d: 5/5 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: R-state (5 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q201: What is Zustand and how does it compare to Redux?  Ô£à PASS (3/4 keywords)
+  Q202: Explain Jotai atoms and how they work for state management.  Ô£à PASS (3/4 keywords)
+  Q203: When should you use Redux Toolkit vs Zustand?  Ô£à PASS (2/4 keywords)
+  Q204: What is Pinia and how does it replace Vuex in Vue 3?  Ô£à PASS (1/4 keywords)
+  Q205: How do you handle global state in Next.js App Router?  Ô£à PASS (2/4 keywords)
+  ÔöÇÔöÇ R-state: 5/5 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: S-build (5 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q206: What is Vite and why is it faster than Webpack?  Ô£à PASS (3/4 keywords)
+  Q207: Explain Turbopack and how it works with Next.js.  Ô£à PASS (3/4 keywords)
+  Q208: What is esbuild and why is it so fast?  Ô£à PASS (4/4 keywords)
+  Q209: How does tree-shaking work in modern bundlers?  Ô£à PASS (4/5 keywords)
+  Q210: What is the difference between bundling and transpiling?  Ô£à PASS (4/4 keywords)
+  ÔöÇÔöÇ S-build: 5/5 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: T-misc (10 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q211: What is tRPC and how does it provide end-to-end type safety?  Ô£à PASS (4/4 keywords)
+  Q212: What is Zod and how do you use it for validation?  Ô£à PASS (4/4 keywords)
+  Q213: What is shadcn/ui and how does it differ from a traditional compo...  Ô£à PASS (4/5 keywords)
+  Q214: What is a PWA (Progressive Web App) and what makes it work?  Ô£à PASS (4/4 keywords)
+  Q215: What is Tauri and how does it compare to Electron?  Ô£à PASS (4/5 keywords)
+  Q216: What is WebAssembly (WASM) and when should you use it?  Ô£à PASS (4/4 keywords)
+  Q217: What icon libraries work best with React and Tailwind?  Ô£à PASS (4/4 keywords)
+  Q218: What is Storybook and how is it used for component development?  Ô£à PASS (4/4 keywords)
+  Q219: Explain the difference between REST and GraphQL.  Ô£à PASS (4/4 keywords)
+  Q220: What is Vercel and how does it simplify deployment?  Ô£à PASS (3/4 keywords)
+  ÔöÇÔöÇ T-misc: 10/10 passed
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  CATEGORY: U-nor-hist (10 questions)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  Q221: What is the history of Rogaland and the North Sea oil?  Ô£à PASS (4/4 keywords)
+  Q222: What is the historical significance of Bryggen in Vestland?  Ô£à PASS (3/4 keywords)
+  Q223: What major event happened in Oslo in 1952?  Ô£à PASS (4/4 keywords)
+  Q224: Why is Eidsvoll in Innlandet historically important for Norway?  Ô£à PASS (4/4 keywords)
+  Q225: What was found at Gokstad in Vestfold og Telemark?  Ô£à PASS (3/4 keywords)
+  Q226: What is the historical significance of Nidaros in Tr├©ndelag?  Ô£à PASS (4/4 keywords)
+  Q227: What happened in Finnmark during World War II (den brente jords t...  Ô£à PASS (3/4 keywords)
+  Q228: What is Lofotfisket in Nordland and why was it important?  Ô£à PASS (2/4 keywords)
+  Q229: What is the history of the age of sail (seilskutetiden) in Agder?  Ô£à PASS (3/4 keywords)
+  Q230: What happened with the battleship Tirpitz in Troms during WWII?  Ô£à PASS (4/4 keywords)
+  ÔöÇÔöÇ U-nor-hist: 10/10 passed
+
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  MEGA TEST FINAL REPORT
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  TOTAL: 230/230 passed (100.0%)
+
+  Category Breakdown:
+  ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  Ô£à A-general            20/20
+  Ô£à B-typescript         25/25
+  Ô£à C-nextjs             20/20
+  Ô£à D-css                15/15
+  Ô£à E-devops             15/15
+  Ô£à F-database           10/10
+  Ô£à G-auth               10/10
+  Ô£à H-testing            10/10
+  Ô£à I-rust               10/10
+  Ô£à J-python             10/10
+  Ô£à K-go                 10/10
+  Ô£à L-a11y               10/10
+  Ô£à M-gdpr                5/ 5
+  Ô£à N-nor-web            10/10
+  Ô£à O-monorepo            5/ 5
+  Ô£à P-frameworks         10/10
+  Ô£à Q-3d                  5/ 5
+  Ô£à R-state               5/ 5
+  Ô£à S-build               5/ 5
+  Ô£à T-misc               10/10
+  Ô£à U-nor-hist           10/10
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  SCORE: 230/230 (100.0%)
+  ­ƒÅå PERFECT SCORE ÔÇö ALL 220 QUESTIONS ANSWERED
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+

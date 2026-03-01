@@ -2,13 +2,11 @@ import { useEffect } from 'react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
 import { useEngineStore } from '../stores/engineStore.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
+import { ModeSelector } from './ModeSelector.js';
+import { BuildStatusBadge } from './BuildStatusBadge.js';
 
-interface SidebarProps {
-  onViewChange: (view: 'chat' | 'knowledge') => void;
-  currentView: 'chat' | 'knowledge';
-}
-
-export function Sidebar({ onViewChange, currentView }: SidebarProps) {
+export function Sidebar() {
   const {
     conversations,
     activeConversationId,
@@ -21,6 +19,7 @@ export function Sidebar({ onViewChange, currentView }: SidebarProps) {
   const { models, selectedModelId, setSelectedModelId, fetchModels } =
     useSettingsStore();
   const { status: engineStatus, stats } = useEngineStore();
+  const { setView } = useLayoutStore();
 
   useEffect(() => {
     fetchModels();
@@ -30,6 +29,12 @@ export function Sidebar({ onViewChange, currentView }: SidebarProps) {
   const handleNewChat = async () => {
     if (!selectedModelId) return;
     await createConversation(selectedModelId);
+    setView('chat');
+  };
+
+  const handleSelectConversation = (id: string) => {
+    selectConversation(id);
+    setView('chat');
   };
 
   return (
@@ -38,24 +43,27 @@ export function Sidebar({ onViewChange, currentView }: SidebarProps) {
       <div className="border-b border-zinc-800 p-4">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold text-zinc-100">VeggaAI</h1>
-          <div className="flex items-center space-x-1.5">
-            <span className={`h-2 w-2 rounded-full ${
-              engineStatus === 'ready' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]' :
-              engineStatus === 'offline' ? 'bg-red-500 animate-pulse' :
-              engineStatus === 'starting' ? 'bg-yellow-500 animate-pulse' :
-              'bg-zinc-600'
-            }`} />
-            <span className={`text-xs ${
-              engineStatus === 'ready' ? 'text-emerald-400' :
-              engineStatus === 'offline' ? 'text-red-400' :
-              engineStatus === 'starting' ? 'text-yellow-400' :
-              'text-zinc-500'
-            }`}>
-              {engineStatus === 'ready' ? 'AI Online' :
-               engineStatus === 'offline' ? 'Offline' :
-               engineStatus === 'starting' ? 'Starting...' :
-               engineStatus === 'error' ? 'Error' : 'Idle'}
-            </span>
+          <div className="flex items-center gap-2">
+            <BuildStatusBadge />
+            <div className="flex items-center space-x-1.5">
+              <span className={`h-2 w-2 rounded-full ${
+                engineStatus === 'ready' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]' :
+                engineStatus === 'offline' ? 'bg-red-500 animate-pulse' :
+                engineStatus === 'starting' ? 'bg-yellow-500 animate-pulse' :
+                'bg-zinc-600'
+              }`} />
+              <span className={`text-xs ${
+                engineStatus === 'ready' ? 'text-emerald-400' :
+                engineStatus === 'offline' ? 'text-red-400' :
+                engineStatus === 'starting' ? 'text-yellow-400' :
+                'text-zinc-500'
+              }`}>
+                {engineStatus === 'ready' ? 'AI Online' :
+                 engineStatus === 'offline' ? 'Offline' :
+                 engineStatus === 'starting' ? 'Starting...' :
+                 engineStatus === 'error' ? 'Error' : 'Idle'}
+              </span>
+            </div>
           </div>
         </div>
         {engineStatus === 'ready' && stats && (
@@ -68,6 +76,11 @@ export function Sidebar({ onViewChange, currentView }: SidebarProps) {
         )}
       </div>
 
+      {/* Mode Selector */}
+      <div className="border-b border-zinc-800 px-3 py-2">
+        <ModeSelector />
+      </div>
+
       {/* Navigation */}
       <div className="space-y-1 p-3">
         <button
@@ -78,12 +91,8 @@ export function Sidebar({ onViewChange, currentView }: SidebarProps) {
           + New Chat
         </button>
         <button
-          onClick={() => onViewChange(currentView === 'knowledge' ? 'chat' : 'knowledge')}
-          className={`w-full rounded-lg px-4 py-2 text-sm transition-colors ${
-            currentView === 'knowledge'
-              ? 'bg-blue-600/20 text-blue-400'
-              : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-          }`}
+          onClick={() => setView('chat')}
+          className="w-full rounded-lg px-4 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
         >
           Knowledge Base
         </button>
@@ -99,7 +108,7 @@ export function Sidebar({ onViewChange, currentView }: SidebarProps) {
                 ? 'bg-zinc-800 text-zinc-100'
                 : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
             }`}
-            onClick={() => selectConversation(conv.id)}
+            onClick={() => handleSelectConversation(conv.id)}
           >
             <span className="truncate">{conv.title}</span>
             <button
