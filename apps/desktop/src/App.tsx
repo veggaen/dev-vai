@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Toaster } from 'sonner';
+import { PanelLeft } from 'lucide-react';
 import { Sidebar } from './components/Sidebar.js';
 import { ChatWindow } from './components/ChatWindow.js';
 import { PreviewPanel } from './components/PreviewPanel.js';
@@ -56,7 +57,7 @@ function BootScreen() {
 
 export function App() {
   const { status, startPolling } = useEngineStore();
-  const { showDebugConsole, showFileExplorer, showBuilderPanel, view } = useLayoutStore();
+  const { showDebugConsole, showFileExplorer, showBuilderPanel, showSidebar, toggleSidebar, view } = useLayoutStore();
   const { projectId } = useSandboxStore();
 
   useEffect(() => { startPolling(); }, [startPolling]);
@@ -80,8 +81,19 @@ export function App() {
       />
 
       <div className="flex h-screen bg-zinc-950">
-        {/* Sidebar — always visible */}
-        <Sidebar />
+        {/* Sidebar — toggleable */}
+        {showSidebar && <Sidebar />}
+
+        {/* Show-sidebar button when hidden */}
+        {!showSidebar && (
+          <button
+            onClick={toggleSidebar}
+            title="Show sidebar"
+            className="flex h-full w-8 flex-shrink-0 items-start pt-3 justify-center border-r border-zinc-800 bg-zinc-950 text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-300"
+          >
+            <PanelLeft className="h-4 w-4" />
+          </button>
+        )}
 
         {/* Main content area — switches between Chat and Dev Logs */}
         {view === 'devlogs' ? (

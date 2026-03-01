@@ -12,6 +12,7 @@ export type AppView = 'chat' | 'devlogs';
 interface LayoutState {
   mode: ChatMode;
   view: AppView;
+  showSidebar: boolean;
   showDebugConsole: boolean;
   showFileExplorer: boolean;
   showBuilderPanel: boolean;
@@ -19,6 +20,7 @@ interface LayoutState {
 
   setMode: (mode: ChatMode) => void;
   setView: (view: AppView) => void;
+  toggleSidebar: () => void;
   toggleDebugConsole: () => void;
   toggleFileExplorer: () => void;
   toggleBuilderPanel: () => void;
@@ -28,6 +30,7 @@ interface LayoutState {
 export const useLayoutStore = create<LayoutState>((set) => ({
   mode: 'chat',
   view: 'chat',
+  showSidebar: true,
   showDebugConsole: true,
   showFileExplorer: false,
   showBuilderPanel: true,
@@ -35,6 +38,7 @@ export const useLayoutStore = create<LayoutState>((set) => ({
 
   setMode: (mode) => set({ mode }),
   setView: (view) => set({ view }),
+  toggleSidebar: () => set((s) => ({ showSidebar: !s.showSidebar })),
   toggleDebugConsole: () => set((s) => ({ showDebugConsole: !s.showDebugConsole })),
   toggleFileExplorer: () => set((s) => ({ showFileExplorer: !s.showFileExplorer })),
   toggleBuilderPanel: () => set((s) => ({ showBuilderPanel: !s.showBuilderPanel })),

@@ -5,7 +5,7 @@ import { useEngineStore } from '../stores/engineStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { BuildStatusBadge } from './BuildStatusBadge.js';
 import { SidebarSearch } from './SidebarSearch.js';
-import { Search, Brain } from 'lucide-react';
+import { Search, Brain, PanelLeftClose } from 'lucide-react';
 
 export function Sidebar() {
   const {
@@ -19,7 +19,7 @@ export function Sidebar() {
   const { models, selectedModelId, setSelectedModelId, fetchModels } =
     useSettingsStore();
   const { status: engineStatus, stats } = useEngineStore();
-  const { view, setView } = useLayoutStore();
+  const { view, setView, toggleSidebar } = useLayoutStore();
   const [showSearch, setShowSearch] = useState(false);
 
   useEffect(() => {
@@ -52,7 +52,16 @@ export function Sidebar() {
       {/* Header + Engine Status */}
       <div className="border-b border-zinc-800 p-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-lg font-bold text-zinc-100">VeggaAI</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-bold text-zinc-100">VeggaAI</h1>
+            <button
+              onClick={toggleSidebar}
+              className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+              title="Hide sidebar"
+            >
+              <PanelLeftClose className="h-3.5 w-3.5" />
+            </button>
+          </div>
           <div className="flex items-center gap-2">
             <BuildStatusBadge />
             <div className="flex items-center space-x-1.5">

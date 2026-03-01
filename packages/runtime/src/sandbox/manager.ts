@@ -209,7 +209,13 @@ export class SandboxManager {
       const scripts = pkg.scripts ?? {};
       if (scripts.dev) {
         cmd = existsSync(join(project.rootDir, 'pnpm-lock.yaml')) ? 'pnpm' : 'npm';
-        args = ['run', 'dev', '--', '--port', String(port), '--host'];
+        // Next.js uses --hostname, not --host
+        const isNextjs = typeof scripts.dev === 'string' && scripts.dev.includes('next');
+        if (isNextjs) {
+          args = ['run', 'dev', '--', '--port', String(port), '--hostname', '0.0.0.0'];
+        } else {
+          args = ['run', 'dev', '--', '--port', String(port), '--host'];
+        }
       } else if (scripts.start) {
         cmd = existsSync(join(project.rootDir, 'pnpm-lock.yaml')) ? 'pnpm' : 'npm';
         args = ['run', 'start'];

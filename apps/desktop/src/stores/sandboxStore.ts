@@ -190,9 +190,15 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
 
   destroyProject: async () => {
     const { projectId } = get();
-    if (!projectId) return;
-    await fetch(`${API_BASE}/api/sandbox/${projectId}`, { method: 'DELETE' });
-    set({ projectId: null, projectName: null, status: 'idle', devPort: null, files: [], logs: [], error: null });
+    if (projectId) {
+      await fetch(`${API_BASE}/api/sandbox/${projectId}`, { method: 'DELETE' }).catch(() => {});
+    }
+    set({
+      projectId: null, projectName: null, status: 'idle', devPort: null,
+      files: [], logs: [], error: null,
+      deployPhase: 'idle', deploySteps: [], deployStartTime: 0,
+      deployStackName: '', deployTierName: '',
+    });
   },
 
   reset: () => {
