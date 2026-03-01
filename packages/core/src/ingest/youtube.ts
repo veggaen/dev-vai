@@ -10,9 +10,9 @@
  */
 
 import { execFile } from 'node:child_process';
-import { readFile, unlink } from 'node:fs/promises';
+import { readFile, readdir, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import type { RawCapture } from './pipeline.js';
 
 export function extractVideoId(url: string): string | null {
@@ -72,13 +72,17 @@ async function fetchViaYtDlp(videoId: string): Promise<{ title: string; transcri
     const title = await runYtDlp(['--get-title', '--no-warnings', ytUrl]);
 
     // Try each language separately — yt-dlp exits with error if any language
-    // in a comma-separated list fails, even if others succeed
+    // in a comma-separated list fails, even if others succeed.
+    // Auto-generated captions use codes like "en-orig", "en-en", "en-ar",
+    // "no-en", "no-ar" so we glob for files matching the language prefix.
+    const tmpDir = join(tmpBase, '..');
+    const tmpName = basename(tmpBase);
     for (const lang of ['en', 'no']) {
       try {
         await runYtDlp([
           '--write-subs',
           '--write-auto-subs',
-          '--sub-lang', lang,
+          '--sub-lang', `${lang}.*,${lang}`,
           '--sub-format', 'json3',
           '--skip-download',
           '--no-warnings',
@@ -89,16 +93,36 @@ async function fetchViaYtDlp(videoId: string): Promise<{ title: string; transcri
         // This language failed (429, not available, etc.)
       }
 
-      const subFile = `${tmpBase}.${lang}.json3`;
+      // yt-dlp creates files like: base.en.json3, base.en-orig.json3, base.en-en.json3
+      // Find ALL matching subtitle files for this language prefix
       try {
-        const data = await readFile(subFile, 'utf-8');
-        const transcript = parseJson3Subtitles(data);
-        await unlink(subFile).catch(() => {});
-        if (transcript.length > 10) {
-          return { title: title.trim(), transcript, lang };
+        const files = await readdir(tmpDir);
+        const subFiles = files
+          .filter(f => {
+            // Match files like: tmpName.en.json3, tmpName.en-orig.json3, tmpName.en-en.json3
+            const re = new RegExp(`^${tmpName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.${lang}(?:-[a-z]+)?\\.json3$`, 'i');
+            return re.test(f);
+          })
+          .map(f => join(tmpDir, f));
+
+        for (const subFile of subFiles) {
+          try {
+            const data = await readFile(subFile, 'utf-8');
+            const transcript = parseJson3Subtitles(data);
+            await unlink(subFile).catch(() => {});
+            if (transcript.length > 10) {
+              // Clean up any remaining subtitle files
+              for (const sf of subFiles) await unlink(sf).catch(() => {});
+              return { title: title.trim(), transcript, lang };
+            }
+          } catch {
+            // File read or parse failed, try next
+          }
         }
+        // Clean up files that didn't work
+        for (const sf of subFiles) await unlink(sf).catch(() => {});
       } catch {
-        // File doesn't exist for this language, try next
+        // readdir failed, try next language
       }
     }
 

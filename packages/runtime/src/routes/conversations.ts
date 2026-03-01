@@ -22,6 +22,34 @@ export function registerConversationRoutes(app: FastifyInstance, chatService: Ch
     },
   );
 
+  // HTTP chat endpoint — send a message and get the full response (non-streaming).
+  // Used by VCUS test runner, scripts, and any client that doesn't want WebSocket.
+  app.post<{ Params: { id: string }; Body: { content: string } }>(
+    '/api/conversations/:id/messages',
+    async (request) => {
+      const { id } = request.params;
+      const { content } = request.body;
+
+      let fullText = '';
+      let usage = { promptTokens: 0, completionTokens: 0 };
+
+      for await (const chunk of chatService.sendMessage(id, content)) {
+        if (chunk.type === 'text_delta' && chunk.textDelta) {
+          fullText += chunk.textDelta;
+        }
+        if (chunk.type === 'done' && chunk.usage) {
+          usage = chunk.usage;
+        }
+      }
+
+      return {
+        role: 'assistant',
+        content: fullText,
+        usage,
+      };
+    },
+  );
+
   app.delete<{ Params: { id: string } }>(
     '/api/conversations/:id',
     async (request) => {

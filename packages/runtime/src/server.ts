@@ -1,7 +1,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
-import { createDb, ModelRegistry, ChatService, VaiEngine, IngestPipeline } from '@vai/core';
+import { createDb, ModelRegistry, ChatService, VaiEngine, IngestPipeline, schema } from '@vai/core';
+import { eq } from 'drizzle-orm';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerConversationRoutes } from './routes/conversations.js';
 import { registerModelRoutes } from './routes/models.js';
@@ -30,6 +31,19 @@ export async function createServer(options?: ServerOptions) {
   // Hydrate engine from persisted sources in DB
   const hydrated = pipeline.hydrate();
   console.log(`[VAI] Hydrated: ${hydrated.sourcesLoaded} sources, ${hydrated.chunksLoaded} chunks, ${hydrated.imagesLoaded} images loaded into engine`);
+
+  // Load persisted taught entries (VCUS teaching) into knowledge store
+  try {
+    const rows = db.select().from(schema.taughtEntries).all();
+    let taughtCount = 0;
+    for (const row of rows) {
+      vaiEngine.knowledge.addEntry(row.pattern, row.response, row.source, row.language as 'en' | 'no' | 'code' | 'mixed');
+      taughtCount++;
+    }
+    if (taughtCount > 0) console.log(`[VAI] Loaded ${taughtCount} taught entries from database`);
+  } catch {
+    // Table may not exist yet — will be created on first teach
+  }
 
   console.log('[VAI] VeggaAI engine initialized');
   const stats = vaiEngine.getStats();
@@ -62,6 +76,33 @@ export async function createServer(options?: ServerOptions) {
       const { text, source, language } = request.body;
       vaiEngine.train(text, source, (language as 'en' | 'no' | 'code' | 'mixed') ?? 'en');
       return { ok: true, stats: vaiEngine.getStats() };
+    },
+  );
+
+  // Teach endpoint — add pattern-response knowledge entries directly
+  // These are used by findBestTaughtMatch (Strategy 1.515) and bypass TF-IDF noise
+  // Entries are persisted to SQLite so they survive server restarts
+  app.post<{ Body: { entries: Array<{ pattern: string; response: string; source?: string }> } }>(
+    '/api/teach',
+    async (request) => {
+      const { entries } = request.body;
+      let added = 0;
+      for (const entry of entries) {
+        const source = entry.source ?? 'vcus-teaching';
+        const pattern = entry.pattern.toLowerCase();
+        vaiEngine.knowledge.addEntry(pattern, entry.response, source, 'en');
+
+        // Persist to DB (deduplicate by pattern+source hash)
+        try {
+          const id = `teach-${Buffer.from(pattern + source).toString('base64url').slice(0, 40)}`;
+          db.insert(schema.taughtEntries)
+            .values({ id, pattern, response: entry.response, source, language: 'en', createdAt: new Date() })
+            .onConflictDoNothing()
+            .run();
+        } catch { /* persistence failure — in-memory still works */ }
+        added++;
+      }
+      return { ok: true, added, stats: vaiEngine.getStats() };
     },
   );
 

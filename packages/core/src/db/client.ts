@@ -85,6 +85,16 @@ const CREATE_TABLES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source_id);
   CREATE INDEX IF NOT EXISTS idx_eval_scores_run ON eval_scores(run_id);
   CREATE INDEX IF NOT EXISTS idx_images_conversation ON images(conversation_id);
+
+  CREATE TABLE IF NOT EXISTS taught_entries (
+    id TEXT PRIMARY KEY,
+    pattern TEXT NOT NULL,
+    response TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'vcus-teaching',
+    language TEXT NOT NULL DEFAULT 'en',
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_taught_entries_source ON taught_entries(source);
 `;
 
 /**
@@ -94,6 +104,16 @@ const CREATE_TABLES_SQL = `
 const MIGRATION_SQL = [
   // Add image_id column to messages (may already exist in fresh DBs)
   `ALTER TABLE messages ADD COLUMN image_id TEXT REFERENCES images(id)`,
+  // Add taught_entries table for VCUS teaching persistence
+  `CREATE TABLE IF NOT EXISTS taught_entries (
+    id TEXT PRIMARY KEY,
+    pattern TEXT NOT NULL,
+    response TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'vcus-teaching',
+    language TEXT NOT NULL DEFAULT 'en',
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_taught_entries_source ON taught_entries(source)`,
 ];
 
 /**

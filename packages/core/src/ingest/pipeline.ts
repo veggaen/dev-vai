@@ -267,6 +267,46 @@ export class IngestPipeline {
   }
 
   /**
+   * Fix hasTranscript meta for all YouTube sources based on actual content.
+   * Returns how many were corrected.
+   */
+  fixYouTubeMeta(): { total: number; fixed: number; alreadyCorrect: number } {
+    const ytSources = this.db.select().from(sources)
+      .all()
+      .filter(s => s.sourceType === 'youtube');
+
+    let fixed = 0;
+    let alreadyCorrect = 0;
+
+    for (const src of ytSources) {
+      const l0 = this.db.select().from(chunks)
+        .where(eq(chunks.sourceId, src.id))
+        .all()
+        .filter(c => c.level === 0)
+        .sort((a, b) => a.ordinal - b.ordinal);
+
+      const content = l0.map(c => c.content).join(' ');
+      const hasPlaceholder = /\[no transcript|\[no captions|\[failed to parse/i.test(content);
+      const tooShort = content.split(/\s+/).filter(Boolean).length < 50;
+      const reallyHasTranscript = !hasPlaceholder && !tooShort;
+
+      const meta = src.meta ? JSON.parse(src.meta) : {};
+      const currentFlag = meta.hasTranscript;
+
+      if (currentFlag !== reallyHasTranscript) {
+        meta.hasTranscript = reallyHasTranscript;
+        this.db.update(sources).set({ meta: JSON.stringify(meta) })
+          .where(eq(sources.id, src.id)).run();
+        fixed++;
+      } else {
+        alreadyCorrect++;
+      }
+    }
+
+    return { total: ytSources.length, fixed, alreadyCorrect };
+  }
+
+  /**
    * Re-process all existing sources: re-clean L0 chunks with improved cleaning,
    * re-generate L1 summaries and L2 bullets, and re-train the engine.
    * This does NOT re-fetch content — it uses the existing L0 chunks in the DB.

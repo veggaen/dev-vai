@@ -360,6 +360,93 @@ export class KnowledgeStore {
   }
 
   /**
+   * Find best match AND return the similarity score.
+   * Used for early high-confidence escapes in the generation pipeline.
+   */
+  findBestMatchWithScore(input: string): { entry: KnowledgeEntry; score: number } | null {
+    const match = this.findBestMatch(input);
+    if (!match) return null;
+    const query = input.toLowerCase();
+    const base = this.similarity(query, match.pattern);
+    // Estimate the final score (including boosts applied in findBestMatch)
+    let score = base;
+    if (query.includes(match.pattern.toLowerCase())) {
+      const patternLen = match.pattern.split(/\s+/).length;
+      const queryLen = query.split(/\s+/).length;
+      const coverage = patternLen / Math.max(queryLen, 1);
+      if (coverage > 0.25) score = Math.max(score, 0.3 + Math.min(0.5, patternLen * 0.15));
+    }
+    if (match.pattern.toLowerCase().includes(query) && query.split(/\s+/).length > 1) {
+      score = Math.max(score, 0.5);
+    }
+    if (match.source === 'user-taught' || match.source.startsWith('bootstrap')) score += 0.15;
+    return { entry: match, score };
+  }
+
+  /**
+   * Find best match among VCUS-taught entries only.
+   * Used for early high-priority retrieval (Strategy 1.515) —
+   * these entries are explicitly taught and should override greedy hardcoded strategies.
+   * Only checks entries with source containing 'vcus' or 'user-taught'.
+   * Uses STRICT matching with stop-word filtering to avoid false positives.
+   */
+  findBestTaughtMatch(input: string): KnowledgeEntry | null {
+    const query = input.toLowerCase();
+    // Normalize: strip punctuation, split into words, filter stop words
+    // Keep length > 1 (not > 2) to preserve short tech terms like "cn", "db", "ui"
+    const normalize = (text: string): string[] =>
+      text.replace(/[^a-z0-9\s\-_.]/g, '').split(/\s+/)
+        .filter(w => w.length > 1 && !KnowledgeStore.STOP_WORDS.has(w));
+    const meaningfulQuery = normalize(query);
+    if (meaningfulQuery.length === 0) return null;
+
+    let best: KnowledgeEntry | null = null;
+    let bestScore = 0;
+
+    for (let i = 0; i < this.entries.length; i++) {
+      const entry = this.entries[i];
+      // Only consider VCUS-taught entries
+      if (!entry.source.includes('vcus') && entry.source !== 'user-taught') continue;
+
+      const patternWords = normalize(entry.pattern);
+      if (patternWords.length === 0) continue;
+
+      // Compute Jaccard on MEANINGFUL words only (no stop words)
+      const qSet = new Set(meaningfulQuery);
+      const pSet = new Set(patternWords);
+      const intersection = [...qSet].filter(w => pSet.has(w));
+      const union = new Set([...qSet, ...pSet]);
+      let score = intersection.length / union.size;
+
+      // Boost if ALL pattern words appear in query (high pattern coverage)
+      const patternCoverage = intersection.length / pSet.size;
+      if (patternCoverage >= 0.8) score += 0.1;
+
+      // Require at least one meaningful content word overlap
+      if (intersection.length === 0) continue;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = entry;
+      }
+    }
+
+    // Require a reasonable match score
+    if (bestScore <= 0.15 || !best) return null;
+    return best;
+  }
+
+  /**
+   * TF-IDF retrieval with score: find the single best document chunk for a query.
+   * Returns null if no chunk scores above threshold.
+   */
+  findBestDocumentMatch(query: string, threshold = 0.15): { text: string; source: string; score: number } | null {
+    const results = this.retrieveRelevant(query, 1);
+    if (results.length === 0 || results[0].score < threshold) return null;
+    return results[0];
+  }
+
+  /**
    * Generate text continuation using n-gram model.
    */
   generateFromNgrams(seed: string, maxTokens: number): string {
@@ -831,6 +918,12 @@ export class VaiEngine implements ModelAdapter {
     // Strategy 1.51: English language knowledge — grammar, tenses, vocabulary
     const engLang = this.tryEnglishLanguage(lower);
     if (engLang) return engLang;
+
+    // Strategy 1.515: VCUS-taught knowledge — explicit pattern-response entries
+    // These fire BEFORE greedy hardcoded strategies to ensure taught content
+    // (CVA variants, T3 Stack, App Router, headless commerce, etc.) takes priority.
+    const taughtMatch = this.knowledge.findBestTaughtMatch(input);
+    if (taughtMatch) return taughtMatch.response;
 
     // Strategy 1.52: Web stack knowledge — MERN/PERN/MEVN, ORM, REST, SSR
     const webStack = this.tryWebStackKnowledge(lower);

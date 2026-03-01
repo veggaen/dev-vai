@@ -27,7 +27,7 @@ export { IngestPipeline } from './ingest/pipeline.js';
 export type { IngestResult, RawCapture } from './ingest/pipeline.js';
 export { scrapeWebPage, extractLinks } from './ingest/web.js';
 export { fetchYouTubeTranscript, extractVideoId, createYouTubeCapture } from './ingest/youtube.js';
-export { fetchGitHubRepo, parseGitHubUrl, createGitHubCapture } from './ingest/github.js';
+export { fetchGitHubRepo, deepFetchGitHubRepo, parseGitHubUrl, createGitHubCapture } from './ingest/github.js';
 
 // Tools
 export { ToolRegistry } from './tools/registry.js';

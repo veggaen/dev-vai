@@ -1,0 +1,20 @@
+{
+  "name": "@vai/vcus",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VAI Code Understanding Sandbox — teach VAI to build real apps by ingesting GitHub repos, testing pattern knowledge, and running code in a sandbox",
+  "type": "module",
+  "scripts": {
+    "teach": "tsx src/teach.ts",
+    "test:vai": "tsx src/test-vai.ts",
+    "sandbox": "tsx src/sandbox-runner.ts",
+    "ingest:repo": "tsx src/ingest-deep.ts"
+  },
+  "dependencies": {
+    "@vai/core": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.7.0"
+  }
+}

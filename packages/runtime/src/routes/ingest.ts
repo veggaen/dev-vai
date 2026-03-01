@@ -5,6 +5,7 @@ import {
   extractLinks,
   fetchYouTubeTranscript,
   fetchGitHubRepo,
+  deepFetchGitHubRepo,
   createYouTubeCapture,
   createGitHubCapture,
 } from '@vai/core';
@@ -36,6 +37,32 @@ export function registerIngestRoutes(
     const capture = await fetchGitHubRepo(url);
     const result = pipeline.ingest(capture);
     return result;
+  });
+
+  // Deep-ingest a GitHub repo: fetch actual source files, group by pattern.
+  // This is the "teach VAI about a repo" endpoint — much richer than basic /api/ingest/github.
+  app.post<{ Body: { url: string; maxFiles?: number } }>('/api/ingest/github/deep', async (request) => {
+    const { url, maxFiles } = request.body;
+    const captures = await deepFetchGitHubRepo(url, {
+      maxFiles: maxFiles ?? 60,
+      onProgress: (msg) => console.log(`[DeepIngest] ${msg}`),
+    });
+
+    const results = [];
+    for (const capture of captures) {
+      const result = pipeline.ingest(capture);
+      results.push({ title: result.title, tokens: result.tokensLearned, group: (capture.meta as Record<string, unknown>)?.group });
+    }
+
+    const totalTokens = results.reduce((s, r) => s + r.tokens, 0);
+    console.log(`[DeepIngest] ${url}: ${captures.length} groups, ${totalTokens} total tokens`);
+
+    return {
+      repo: url,
+      groups: results,
+      totalGroups: results.length,
+      totalTokens,
+    };
   });
 
   // Capture endpoint — receives data from Chrome extension
@@ -110,6 +137,13 @@ export function registerIngestRoutes(
       }
     });
     console.log(`[VAI] Reprocess complete: ${result.processed}/${result.total} sources, ${result.errors} errors`);
+    return result;
+  });
+
+  // Fix YouTube hasTranscript meta based on actual content
+  app.post('/api/fix-youtube-meta', async () => {
+    const result = pipeline.fixYouTubeMeta();
+    console.log(`[VAI] YouTube meta fix: ${result.fixed} fixed, ${result.alreadyCorrect} already correct`);
     return result;
   });
 

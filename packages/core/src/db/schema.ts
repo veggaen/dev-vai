@@ -66,6 +66,17 @@ export const chunks = sqliteTable('chunks', {
   meta: text('meta'),
 });
 
+// ---- VCUS Taught Knowledge ----
+
+export const taughtEntries = sqliteTable('taught_entries', {
+  id: text('id').primaryKey(),
+  pattern: text('pattern').notNull(),
+  response: text('response').notNull(),
+  source: text('source').notNull().default('vcus-teaching'),
+  language: text('language').notNull().default('en'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
 // ---- VCUS Eval ----
 
 export const evalRuns = sqliteTable('eval_runs', {
