@@ -1,7 +1,9 @@
 import { useState, useCallback } from 'react';
 import { MarkdownRenderer } from '@vai/ui';
 import { API_BASE } from '../lib/api.js';
-import { Copy, Check, FileText } from 'lucide-react';
+import { Copy, Check, FileText, Rocket } from 'lucide-react';
+import { useSandboxStore } from '../stores/sandboxStore.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 
 interface FileAttachment {
   name: string;
@@ -20,6 +22,9 @@ interface MessageBubbleProps {
 export function MessageBubble({ role, content, imageId, imagePreview, files }: MessageBubbleProps) {
   const isUser = role === 'user';
   const [copied, setCopied] = useState(false);
+  const deployStack = useSandboxStore((s) => s.deployStack);
+  const toggleBuilderPanel = useLayoutStore((s) => s.toggleBuilderPanel);
+  const showBuilderPanel = useLayoutStore((s) => s.showBuilderPanel);
 
   const handleCopyAll = useCallback(() => {
     navigator.clipboard.writeText(content).then(() => {
@@ -27,6 +32,21 @@ export function MessageBubble({ role, content, imageId, imagePreview, files }: M
       setTimeout(() => setCopied(false), 2000);
     });
   }, [content]);
+
+  // Parse {{deploy:stackId:tier:Display Name}} markers
+  const deployPattern = /\{\{deploy:(\w+):([a-z-]+):([^}]+)\}\}/g;
+  const deployActions: Array<{ stackId: string; tier: string; name: string }> = [];
+  let match: RegExpExecArray | null;
+  while ((match = deployPattern.exec(content)) !== null) {
+    deployActions.push({ stackId: match[1], tier: match[2], name: match[3] });
+  }
+  // Strip deploy markers from display content
+  const displayContent = content.replace(deployPattern, '').trim();
+
+  const handleDeploy = (action: { stackId: string; tier: string; name: string }) => {
+    if (!showBuilderPanel) toggleBuilderPanel();
+    deployStack(action.stackId, action.tier, action.name, action.tier);
+  };
 
   // Determine image source: preview (pasted, not yet persisted) or server URL
   const imageSrc = imagePreview || (imageId ? `${API_BASE}/api/images/${imageId}/raw` : null);
@@ -83,7 +103,23 @@ export function MessageBubble({ role, content, imageId, imagePreview, files }: M
           <p className="whitespace-pre-wrap break-words text-sm">{content}</p>
         ) : (
           <div className="overflow-x-auto">
-            <MarkdownRenderer content={content} />
+            <MarkdownRenderer content={displayContent} />
+          </div>
+        )}
+
+        {/* Deploy action buttons from Vai's suggestions */}
+        {deployActions.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2 border-t border-zinc-700/50 pt-3">
+            {deployActions.map((action, i) => (
+              <button
+                key={i}
+                onClick={() => handleDeploy(action)}
+                className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-500"
+              >
+                <Rocket className="h-3.5 w-3.5" />
+                Deploy {action.name}
+              </button>
+            ))}
           </div>
         )}
       </div>

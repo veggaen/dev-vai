@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { API_BASE, WS_BASE } from '../lib/api.js';
+import { getActiveCapture } from '../lib/sessionCapture.js';
 
 interface ImageAttachment {
   data: string;
@@ -158,6 +159,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         payload.systemPrompt = systemPrompt;
       }
       ws!.send(JSON.stringify(payload));
+
+      // Capture user message in dev logs
+      const capture = getActiveCapture();
+      if (capture) {
+        capture.message('user', content);
+      }
     };
 
     ws.onmessage = (event) => {
@@ -171,6 +178,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         get().appendToLastMessage(chunk.textDelta);
       } else if (chunk.type === 'done') {
         set({ isStreaming: false });
+        // Capture assistant response in dev logs
+        const capture = getActiveCapture();
+        if (capture) {
+          const msgs = get().messages;
+          const lastMsg = msgs[msgs.length - 1];
+          if (lastMsg?.role === 'assistant' && lastMsg.content) {
+            capture.message('assistant', lastMsg.content);
+          }
+        }
         ws?.close();
         ws = null;
         // Refresh conversations to get updated titles/timestamps
