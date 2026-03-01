@@ -37,7 +37,8 @@ export type { Tool, ToolContext, ToolResult } from './tools/interface.js';
 export { SessionService, SESSION_TABLES_SQL } from './sessions/index.js';
 export type {
   AgentSession, SessionEvent, SessionStats, SessionEventType,
-  EventMeta, MessageMeta, ThinkingMeta, FileCreateMeta, FileEditMeta,
+  EventMeta, MessageMeta, ThinkingMeta, PlanningMeta, ContextGatherMeta,
+  FileCreateMeta, FileEditMeta,
   FileReadMeta, TerminalMeta, SearchMeta, TodoUpdateMeta, TodoItem,
   StateChangeMeta, ErrorMeta, ToolCallMeta, SummaryMeta, NoteMeta,
 } from './sessions/index.js';

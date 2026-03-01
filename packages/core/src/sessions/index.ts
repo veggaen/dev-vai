@@ -7,6 +7,8 @@ export type {
   EventMeta,
   MessageMeta,
   ThinkingMeta,
+  PlanningMeta,
+  ContextGatherMeta,
   FileCreateMeta,
   FileEditMeta,
   FileReadMeta,

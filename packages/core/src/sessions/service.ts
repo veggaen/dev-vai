@@ -343,6 +343,8 @@ export class SessionService {
         s.messageCount++;
         break;
       case 'thinking':
+      case 'planning':
+      case 'context-gather':
         s.thinkingBlocks++;
         break;
       case 'file-create':

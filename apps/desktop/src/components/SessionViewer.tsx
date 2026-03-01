@@ -1,7 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   MessageSquare,
   Brain,
+  Compass,
+  BookOpen,
   FilePlus,
   FileEdit,
   FileSearch2,
@@ -21,6 +23,7 @@ import {
   Download,
   Trash2,
   Filter,
+  Radio,
   type LucideIcon,
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore.js';
@@ -29,6 +32,8 @@ import type {
   SessionEventType,
   MessageMeta,
   ThinkingMeta,
+  PlanningMeta,
+  ContextGatherMeta,
   FileCreateMeta,
   FileEditMeta,
   FileReadMeta,
@@ -46,6 +51,8 @@ import type {
 const ICON_MAP: Record<SessionEventType, LucideIcon> = {
   message: MessageSquare,
   thinking: Brain,
+  planning: Compass,
+  'context-gather': BookOpen,
   'file-create': FilePlus,
   'file-edit': FileEdit,
   'file-read': FileSearch2,
@@ -63,6 +70,8 @@ const ICON_MAP: Record<SessionEventType, LucideIcon> = {
 const COLOR_MAP: Record<SessionEventType, string> = {
   message: 'text-blue-400',
   thinking: 'text-purple-400',
+  planning: 'text-violet-400',
+  'context-gather': 'text-teal-400',
   'file-create': 'text-emerald-400',
   'file-edit': 'text-amber-400',
   'file-read': 'text-zinc-400',
@@ -80,6 +89,8 @@ const COLOR_MAP: Record<SessionEventType, string> = {
 const BG_MAP: Record<SessionEventType, string> = {
   message: 'bg-blue-500/10 border-blue-500/20',
   thinking: 'bg-purple-500/10 border-purple-500/20',
+  planning: 'bg-violet-500/10 border-violet-500/20',
+  'context-gather': 'bg-teal-500/10 border-teal-500/20',
   'file-create': 'bg-emerald-500/10 border-emerald-500/20',
   'file-edit': 'bg-amber-500/10 border-amber-500/20',
   'file-read': 'bg-zinc-500/10 border-zinc-500/20',
@@ -97,6 +108,8 @@ const BG_MAP: Record<SessionEventType, string> = {
 const LABEL_MAP: Record<SessionEventType, string> = {
   message: 'Message',
   thinking: 'Thinking',
+  planning: 'Planning',
+  'context-gather': 'Context Gathering',
   'file-create': 'Created File',
   'file-edit': 'Edited File',
   'file-read': 'Read File',
@@ -151,10 +164,24 @@ function ThinkingCard({ event }: { event: SessionEvent }) {
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-xs text-purple-300/70">
         {meta.label && <span className="italic">{meta.label}</span>}
+        {meta.intent && (
+          <span className="rounded bg-purple-500/20 px-1.5 py-0.5 text-purple-300">
+            Intent: {meta.intent}
+          </span>
+        )}
         {event.durationMs && (
           <span className="text-zinc-500">{formatDuration(event.durationMs)}</span>
         )}
       </div>
+      {meta.constraints && meta.constraints.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {meta.constraints.map((c, i) => (
+            <span key={i} className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400">
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
       <div
         className="cursor-pointer rounded-md bg-purple-500/5 p-3 font-mono text-xs text-zinc-300"
         onClick={() => setExpanded(!expanded)}
@@ -168,6 +195,98 @@ function ThinkingCard({ event }: { event: SessionEvent }) {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+function PlanningCard({ event }: { event: SessionEvent }) {
+  const [expanded, setExpanded] = useState(false);
+  const meta = event.meta as PlanningMeta;
+
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-medium text-violet-300">
+        {meta.intent}
+      </div>
+      <div className="text-xs text-zinc-400">{meta.approach}</div>
+      {meta.steps && meta.steps.length > 0 && (
+        <div className="space-y-1 pl-2 border-l-2 border-violet-500/30">
+          {meta.steps.map((step, i) => (
+            <div key={i} className="flex items-start gap-2 text-xs text-zinc-300">
+              <span className="mt-0.5 h-4 w-4 shrink-0 rounded-full bg-violet-500/20 text-center text-violet-400 text-[10px] leading-4">
+                {i + 1}
+              </span>
+              {step}
+            </div>
+          ))}
+        </div>
+      )}
+      {meta.decisions && meta.decisions.length > 0 && (
+        <>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-xs text-violet-400/70 hover:text-violet-300"
+          >
+            {expanded ? 'Hide decisions' : `${meta.decisions.length} decision(s)`}
+          </button>
+          {expanded && (
+            <div className="space-y-1">
+              {meta.decisions.map((d, i) => (
+                <div key={i} className="rounded bg-violet-500/5 px-2 py-1 text-xs text-zinc-400">
+                  {d}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      {event.content && (
+        <div className="text-xs text-zinc-500 whitespace-pre-wrap">{event.content}</div>
+      )}
+    </div>
+  );
+}
+
+function ContextGatherCard({ event }: { event: SessionEvent }) {
+  const [showFiles, setShowFiles] = useState(false);
+  const meta = event.meta as ContextGatherMeta;
+
+  return (
+    <div className="space-y-2">
+      <div className="text-sm text-zinc-300">{meta.findings}</div>
+      <div className="flex flex-wrap gap-2">
+        {meta.filesRead.length > 0 && (
+          <button
+            onClick={() => setShowFiles(!showFiles)}
+            className="flex items-center gap-1 rounded bg-teal-500/10 px-1.5 py-0.5 text-xs text-teal-400 hover:bg-teal-500/20"
+          >
+            <FileSearch2 className="h-3 w-3" />
+            {meta.filesRead.length} files
+          </button>
+        )}
+        {meta.queriesRun.length > 0 && (
+          <span className="flex items-center gap-1 rounded bg-cyan-500/10 px-1.5 py-0.5 text-xs text-cyan-400">
+            <Search className="h-3 w-3" />
+            {meta.queriesRun.length} queries
+          </span>
+        )}
+      </div>
+      {showFiles && (
+        <div className="space-y-0.5 pl-2">
+          {meta.filesRead.map((f, i) => (
+            <div key={i} className="text-xs text-zinc-500">{shortPath(f)}</div>
+          ))}
+        </div>
+      )}
+      {meta.queriesRun.length > 0 && (
+        <div className="space-y-0.5">
+          {meta.queriesRun.map((q, i) => (
+            <div key={i} className="rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-400">
+              {q}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -422,6 +541,8 @@ function EventRow({ event, isLast }: { event: SessionEvent; isLast: boolean }) {
   const renderContent = () => {
     switch (event.type) {
       case 'thinking': return <ThinkingCard event={event} />;
+      case 'planning': return <PlanningCard event={event} />;
+      case 'context-gather': return <ContextGatherCard event={event} />;
       case 'message': return <MessageCard event={event} />;
       case 'file-create': return <FileCreateCard event={event} />;
       case 'file-edit': return <FileEditCard event={event} />;
@@ -636,7 +757,33 @@ function EventFilter() {
 /* ── Main SessionViewer ────────────────────────────────────────── */
 
 export function SessionViewer() {
-  const { activeSession, events, eventTypeFilter, isLoading } = useSessionStore();
+  const {
+    activeSession,
+    events,
+    eventTypeFilter,
+    isLoading,
+    isPolling,
+    startPolling,
+    stopPolling,
+  } = useSessionStore();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const prevEventCount = useRef(0);
+
+  // Auto-start polling when viewing an active session
+  useEffect(() => {
+    if (activeSession?.status === 'active') {
+      startPolling(2000);
+    }
+    return () => stopPolling();
+  }, [activeSession?.id, activeSession?.status, startPolling, stopPolling]);
+
+  // Auto-scroll to bottom when new events arrive during live polling
+  useEffect(() => {
+    if (events.length > prevEventCount.current && isPolling && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+    prevEventCount.current = events.length;
+  }, [events.length, isPolling]);
 
   const filteredEvents = useMemo(() => {
     if (eventTypeFilter === 'all') return events;
@@ -667,8 +814,22 @@ export function SessionViewer() {
       <SessionHeader />
       <EventFilter />
 
+      {/* Live indicator */}
+      {isPolling && activeSession?.status === 'active' && (
+        <div className="flex items-center gap-2 border-b border-zinc-800 bg-blue-500/5 px-4 py-1.5">
+          <Radio className="h-3 w-3 animate-pulse text-blue-400" />
+          <span className="text-xs text-blue-400">Live — auto-refreshing every 2s</span>
+          <button
+            onClick={stopPolling}
+            className="ml-auto text-xs text-zinc-500 hover:text-zinc-300"
+          >
+            Pause
+          </button>
+        </div>
+      )}
+
       {/* Timeline */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
         {filteredEvents.length === 0 ? (
           <div className="text-center text-sm text-zinc-600">
             No events{eventTypeFilter !== 'all' ? ` of type "${eventTypeFilter}"` : ''} in this session

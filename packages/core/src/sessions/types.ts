@@ -52,6 +52,8 @@ export interface SessionStats {
 export type SessionEventType =
   | 'message'        // User or assistant chat message
   | 'thinking'       // Agent reasoning / thinking block
+  | 'planning'       // Agent planning / intent analysis
+  | 'context-gather' // Reading codebase for context
   | 'file-create'    // File created
   | 'file-edit'      // File modified (with diff info)
   | 'file-read'      // File read for context
@@ -84,6 +86,8 @@ export interface SessionEvent {
 export type EventMeta =
   | MessageMeta
   | ThinkingMeta
+  | PlanningMeta
+  | ContextGatherMeta
   | FileCreateMeta
   | FileEditMeta
   | FileReadMeta
@@ -106,6 +110,24 @@ export interface MessageMeta {
 export interface ThinkingMeta {
   eventType: 'thinking';
   label?: string;              // e.g. "Evaluating...", "Analyzing..."
+  reasoning?: string;          // Full chain-of-thought reasoning
+  intent?: string;             // What the agent intends to do
+  constraints?: string[];      // Constraints the agent identified
+}
+
+export interface PlanningMeta {
+  eventType: 'planning';
+  intent: string;              // What the user wants
+  approach: string;            // How the agent plans to do it
+  steps?: string[];            // Planned steps
+  decisions?: string[];        // Key technical decisions made
+}
+
+export interface ContextGatherMeta {
+  eventType: 'context-gather';
+  filesRead: string[];         // Files examined
+  queriesRun: string[];        // Search queries executed
+  findings: string;            // What was discovered
 }
 
 export interface FileCreateMeta {
@@ -213,18 +235,20 @@ export const EVENT_TYPE_CONFIG: Record<
   SessionEventType,
   { icon: string; color: string; label: string }
 > = {
-  message:      { icon: 'MessageSquare', color: 'blue',    label: 'Message'   },
-  thinking:     { icon: 'Brain',         color: 'purple',  label: 'Thinking'  },
-  'file-create':{ icon: 'FilePlus',      color: 'emerald', label: 'Created'   },
-  'file-edit':  { icon: 'FileEdit',      color: 'amber',   label: 'Edited'    },
-  'file-read':  { icon: 'FileSearch',    color: 'zinc',    label: 'Read'      },
-  'file-delete':{ icon: 'FileX',         color: 'red',     label: 'Deleted'   },
-  terminal:     { icon: 'Terminal',       color: 'green',   label: 'Terminal'  },
-  search:       { icon: 'Search',        color: 'cyan',    label: 'Search'    },
-  'todo-update':{ icon: 'ListChecks',    color: 'indigo',  label: 'Todos'     },
-  'state-change':{ icon: 'Activity',     color: 'yellow',  label: 'Status'    },
-  error:        { icon: 'AlertTriangle', color: 'red',     label: 'Error'     },
-  'tool-call':  { icon: 'Wrench',        color: 'orange',  label: 'Tool'      },
-  summary:      { icon: 'FileText',      color: 'slate',   label: 'Summary'   },
-  note:         { icon: 'StickyNote',    color: 'pink',    label: 'Note'      },
+  message:          { icon: 'MessageSquare', color: 'blue',    label: 'Message'   },
+  thinking:         { icon: 'Brain',         color: 'purple',  label: 'Thinking'  },
+  planning:         { icon: 'Compass',       color: 'violet',  label: 'Planning'  },
+  'context-gather': { icon: 'BookOpen',      color: 'teal',    label: 'Context'   },
+  'file-create':    { icon: 'FilePlus',      color: 'emerald', label: 'Created'   },
+  'file-edit':      { icon: 'FileEdit',      color: 'amber',   label: 'Edited'    },
+  'file-read':      { icon: 'FileSearch',    color: 'zinc',    label: 'Read'      },
+  'file-delete':    { icon: 'FileX',         color: 'red',     label: 'Deleted'   },
+  terminal:         { icon: 'Terminal',       color: 'green',   label: 'Terminal'  },
+  search:           { icon: 'Search',        color: 'cyan',    label: 'Search'    },
+  'todo-update':    { icon: 'ListChecks',    color: 'indigo',  label: 'Todos'     },
+  'state-change':   { icon: 'Activity',      color: 'yellow',  label: 'Status'    },
+  error:            { icon: 'AlertTriangle', color: 'red',     label: 'Error'     },
+  'tool-call':      { icon: 'Wrench',        color: 'orange',  label: 'Tool'      },
+  summary:          { icon: 'FileText',      color: 'slate',   label: 'Summary'   },
+  note:             { icon: 'StickyNote',    color: 'pink',    label: 'Note'      },
 };

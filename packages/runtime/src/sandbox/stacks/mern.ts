@@ -29,7 +29,7 @@ const basicFiles: { path: string; content: string }[] = [
           '@types/react-dom': '^19.0.0',
           '@vitejs/plugin-react': '^4.3.0',
           typescript: '^5.7.0',
-          vite: '^6.0.0',
+          vite: '^7.3.0',
         },
       },
       null,
@@ -358,7 +358,7 @@ const solidOverrides: { path: string; content: string }[] = [
         },
         devDependencies: {
           '@types/react': '^19.0.0', '@types/react-dom': '^19.0.0',
-          '@vitejs/plugin-react': '^4.3.0', typescript: '^5.7.0', vite: '^6.0.0',
+          '@vitejs/plugin-react': '^4.3.0', typescript: '^5.7.0', vite: '^7.3.0',
         },
       },
       null,
@@ -502,7 +502,7 @@ const battleTestedOverrides: { path: string; content: string }[] = [
         dependencies: { react: '^19.0.0', 'react-dom': '^19.0.0', zod: '^3.23.0' },
         devDependencies: {
           '@types/react': '^19.0.0', '@types/react-dom': '^19.0.0',
-          '@vitejs/plugin-react': '^4.3.0', typescript: '^5.7.0', vite: '^6.0.0', vitest: '^3.0.0',
+          '@vitejs/plugin-react': '^4.3.0', typescript: '^5.7.0', vite: '^7.3.0', vitest: '^4.0.0',
         },
       },
       null,
@@ -684,7 +684,7 @@ const vaiOverrides: { path: string; content: string }[] = [
         dependencies: { react: '^19.0.0', 'react-dom': '^19.0.0', zod: '^3.23.0' },
         devDependencies: {
           '@types/react': '^19.0.0', '@types/react-dom': '^19.0.0',
-          '@vitejs/plugin-react': '^4.3.0', typescript: '^5.7.0', vite: '^6.0.0', vitest: '^3.0.0',
+          '@vitejs/plugin-react': '^4.3.0', typescript: '^5.7.0', vite: '^7.3.0', vitest: '^4.0.0',
         },
       },
       null,

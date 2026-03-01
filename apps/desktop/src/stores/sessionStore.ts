@@ -4,6 +4,7 @@ import type {
   AgentSession,
   SessionEvent,
   SessionEventType,
+  EventMeta,
 } from '@vai/core';
 
 /* ── Types ─────────────────────────────────────────────────────── */
@@ -15,6 +16,10 @@ interface SessionState {
   activeSession: AgentSession | null;
   events: SessionEvent[];
   isLoading: boolean;
+
+  /* Live polling */
+  isPolling: boolean;
+  pollIntervalId: ReturnType<typeof setInterval> | null;
 
   /* Filters */
   statusFilter: 'all' | 'active' | 'completed' | 'failed';
@@ -34,6 +39,17 @@ interface SessionState {
   importSession: (data: object) => Promise<string | null>;
   setStatusFilter: (filter: 'all' | 'active' | 'completed' | 'failed') => void;
   setEventTypeFilter: (filter: SessionEventType | 'all') => void;
+
+  /* New: push events + session management */
+  pushEvents: (sessionId: string, events: Array<{
+    type: SessionEventType;
+    content: string;
+    meta?: EventMeta;
+  }>) => Promise<void>;
+  updateTitle: (sessionId: string, title: string) => Promise<void>;
+  refreshActiveSession: () => Promise<void>;
+  startPolling: (intervalMs?: number) => void;
+  stopPolling: () => void;
 }
 
 /* ── Store ─────────────────────────────────────────────────────── */
@@ -44,6 +60,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   activeSession: null,
   events: [],
   isLoading: false,
+  isPolling: false,
+  pollIntervalId: null,
   statusFilter: 'all',
   eventTypeFilter: 'all',
   totalSessions: 0,
@@ -163,5 +181,91 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   setEventTypeFilter: (filter) => {
     set({ eventTypeFilter: filter });
+  },
+
+  /* ── Push events to an active session ─────────────────────── */
+  pushEvents: async (sessionId, events) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events }),
+      });
+      if (!res.ok) throw new Error('Failed to push events');
+      // If we're viewing this session, append the new events locally for instant UI
+      const { activeSessionId } = get();
+      if (activeSessionId === sessionId) {
+        const data = await res.json() as { ids: string[] };
+        // Re-fetch to get the full event objects with timestamps
+        await get().refreshActiveSession();
+        void data; // ids available if needed
+      }
+    } catch (err) {
+      console.error('Failed to push events:', err);
+    }
+  },
+
+  /* ── Update session title ─────────────────────────────────── */
+  updateTitle: async (sessionId, title) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) throw new Error('Failed to update title');
+      // Update in local state
+      set((state) => ({
+        sessions: state.sessions.map((s) =>
+          s.id === sessionId ? { ...s, title } : s
+        ),
+        activeSession: state.activeSession?.id === sessionId
+          ? { ...state.activeSession, title }
+          : state.activeSession,
+      }));
+    } catch (err) {
+      console.error('Failed to update title:', err);
+    }
+  },
+
+  /* ── Refresh active session (re-fetch events) ────────────── */
+  refreshActiveSession: async () => {
+    const { activeSessionId } = get();
+    if (!activeSessionId) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/sessions/${activeSessionId}`);
+      if (!res.ok) return;
+      const data = await res.json() as { session: AgentSession; events: SessionEvent[] };
+      set({
+        activeSession: data.session,
+        events: data.events,
+      });
+    } catch {
+      // Silent fail for polling
+    }
+  },
+
+  /* ── Live polling controls ────────────────────────────────── */
+  startPolling: (intervalMs = 2000) => {
+    const { pollIntervalId } = get();
+    if (pollIntervalId) return; // Already polling
+
+    const id = setInterval(() => {
+      const { activeSession } = get();
+      // Only poll for active sessions
+      if (activeSession?.status === 'active') {
+        void get().refreshActiveSession();
+      }
+    }, intervalMs);
+
+    set({ isPolling: true, pollIntervalId: id });
+  },
+
+  stopPolling: () => {
+    const { pollIntervalId } = get();
+    if (pollIntervalId) {
+      clearInterval(pollIntervalId);
+    }
+    set({ isPolling: false, pollIntervalId: null });
   },
 }));
