@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { API_BASE, WS_BASE } from '../lib/api.js';
-import { getActiveCapture } from '../lib/sessionCapture.js';
+import { getActiveCapture, startSessionCapture } from '../lib/sessionCapture.js';
+import type { SessionCapture } from '../lib/sessionCapture.js';
 
 interface ImageAttachment {
   data: string;
@@ -44,6 +45,44 @@ interface ChatState {
 }
 
 let ws: WebSocket | null = null;
+
+/**
+ * Generate a clean session title from the first user message.
+ * Strips markdown, collapses whitespace, truncates at word boundary.
+ */
+function deriveSessionTitle(content: string): string {
+  const cleaned = content
+    .replace(/```[\s\S]*?```/g, '[code]')  // collapse code blocks
+    .replace(/\[.*?\]\(.*?\)/g, '')        // remove links
+    .replace(/[#*_`~]/g, '')              // strip markdown
+    .replace(/\n+/g, ' ')                 // flatten newlines
+    .replace(/\s+/g, ' ')                 // collapse whitespace
+    .trim();
+
+  if (cleaned.length <= 60) return cleaned || 'Chat Session';
+  const truncated = cleaned.slice(0, 60);
+  const lastSpace = truncated.lastIndexOf(' ');
+  return (lastSpace > 30 ? truncated.slice(0, lastSpace) : truncated) + '...';
+}
+
+/**
+ * Ensure there's an active SessionCapture for dev logs.
+ * Auto-creates one on the first message if none exists.
+ */
+async function ensureCapture(firstMessage: string, modelId?: string): Promise<SessionCapture | null> {
+  const existing = getActiveCapture();
+  if (existing) return existing;
+
+  // Auto-start a new dev logs session
+  const title = deriveSessionTitle(firstMessage);
+  const capture = await startSessionCapture(
+    title,
+    'VeggaAI',
+    modelId || 'unknown',
+    { batched: true, flushInterval: 2000 },
+  );
+  return capture;
+}
 
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
@@ -105,6 +144,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const state = get();
     if (!state.activeConversationId) return;
 
+    // Find conversation to get model ID
+    const conv = state.conversations.find((c) => c.id === state.activeConversationId);
+    const modelId = conv?.modelId;
+
     // Build display content for user message
     let displayContent = content;
     if (image) {
@@ -160,31 +203,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       ws!.send(JSON.stringify(payload));
 
-      // Capture user message in dev logs
-      const capture = getActiveCapture();
-      if (capture) {
-        capture.message('user', content);
-      }
+      // Auto-create session + capture user message in dev logs
+      void ensureCapture(content, modelId).then((capture) => {
+        if (capture) {
+          capture.message('user', content);
+        }
+      });
     };
+
+    // Track reasoning text separately
+    let reasoningText = '';
 
     ws.onmessage = (event) => {
       const chunk = JSON.parse(event.data as string) as {
         type: string;
         textDelta?: string;
+        reasoningDelta?: string;
         error?: string;
       };
 
       if (chunk.type === 'text_delta' && chunk.textDelta) {
         get().appendToLastMessage(chunk.textDelta);
+      } else if (chunk.type === 'reasoning_delta' && chunk.reasoningDelta) {
+        // Accumulate reasoning text for dev logs capture
+        reasoningText += chunk.reasoningDelta;
       } else if (chunk.type === 'done') {
         set({ isStreaming: false });
-        // Capture assistant response in dev logs
+        // Capture assistant response + reasoning in dev logs
         const capture = getActiveCapture();
         if (capture) {
           const msgs = get().messages;
           const lastMsg = msgs[msgs.length - 1];
           if (lastMsg?.role === 'assistant' && lastMsg.content) {
-            capture.message('assistant', lastMsg.content);
+            capture.message('assistant', lastMsg.content, modelId);
+          }
+          if (reasoningText) {
+            capture.thinking(reasoningText, { label: 'Model Reasoning' });
           }
         }
         ws?.close();
@@ -194,6 +248,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       } else if (chunk.type === 'error') {
         set({ isStreaming: false });
         get().appendToLastMessage(`\n\nError: ${chunk.error}`);
+        // Log error in dev logs
+        const capture = getActiveCapture();
+        if (capture) {
+          capture.error(`Chat error: ${chunk.error}`, { errorType: 'stream' });
+        }
         ws?.close();
         ws = null;
       }
@@ -202,6 +261,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     ws.onerror = () => {
       set({ isStreaming: false });
       get().appendToLastMessage('\n\nConnection error');
+      const capture = getActiveCapture();
+      if (capture) {
+        capture.error('WebSocket connection error', { errorType: 'connection' });
+      }
     };
   },
 

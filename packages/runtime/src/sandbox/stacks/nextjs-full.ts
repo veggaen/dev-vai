@@ -18,7 +18,7 @@ const basicFiles: { path: string; content: string }[] = [
     path: 'package.json',
     content: JSON.stringify(
       {
-        name: 'nextjs-fullstack',
+        name: 'nextjs-basic',
         private: true,
         scripts: { dev: 'next dev', build: 'next build', start: 'next start' },
         dependencies: { next: '^16.1.0', react: '^19.2.0', 'react-dom': '^19.2.0', 'lucide-react': '^0.513.0', clsx: '^2.1.1' },
@@ -518,10 +518,12 @@ const battleTestedOverrides: { path: string; content: string }[] = [
         dependencies: {
           next: '^16.1.0', react: '^19.2.0', 'react-dom': '^19.2.0',
           '@prisma/client': '^7.4.0', zod: '^4.3.0',
+          'lucide-react': '^0.513.0', clsx: '^2.1.1',
         },
         devDependencies: {
           '@types/react': '^19.0.0', '@types/node': '^22.0.0',
           prisma: '^7.4.0', typescript: '^5.9.0', vitest: '^4.0.0',
+          '@tailwindcss/postcss': '^4.1.0', tailwindcss: '^4.1.0', postcss: '^8.5.0',
         },
       },
       null,
@@ -682,10 +684,12 @@ const vaiOverrides: { path: string; content: string }[] = [
         dependencies: {
           next: '^16.1.0', react: '^19.2.0', 'react-dom': '^19.2.0',
           '@prisma/client': '^7.4.0', zod: '^4.3.0',
+          'lucide-react': '^0.513.0', clsx: '^2.1.1',
         },
         devDependencies: {
           '@types/react': '^19.0.0', '@types/node': '^22.0.0',
           prisma: '^7.4.0', typescript: '^5.9.0', vitest: '^4.0.0',
+          '@tailwindcss/postcss': '^4.1.0', tailwindcss: '^4.1.0', postcss: '^8.5.0',
         },
       },
       null,

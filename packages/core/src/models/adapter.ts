@@ -32,8 +32,9 @@ export interface ChatResponse {
 }
 
 export interface ChatChunk {
-  type: 'text_delta' | 'tool_call_delta' | 'done';
+  type: 'text_delta' | 'reasoning_delta' | 'tool_call_delta' | 'done';
   textDelta?: string;
+  reasoningDelta?: string;
   toolCallDelta?: { id: string; name: string; argumentsDelta: string };
   usage?: { promptTokens: number; completionTokens: number };
 }

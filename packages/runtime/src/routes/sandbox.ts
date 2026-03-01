@@ -1,6 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import type { SandboxManager, FileWrite } from '../sandbox/manager.js';
-import { ALL_STACKS, getStack, getStackTemplate } from '../sandbox/stacks/index.js';
+import {
+  getAllStacks,
+  getStack,
+  getStackTemplate,
+  registerCustomStack,
+  unregisterCustomStack,
+  getCustomStacks,
+  isCustomStack,
+} from '../sandbox/stacks/index.js';
+import type { CustomStackConfig } from '../sandbox/stacks/index.js';
 import { deployStack, type DeployEvent } from '../sandbox/deploy.js';
 
 export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxManager) {
@@ -8,7 +17,7 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
 
   /** List all available stacks with their tiers */
   app.get('/api/sandbox/stacks', async () => {
-    return ALL_STACKS.map((s) => ({
+    return getAllStacks().map((s) => ({
       id: s.id,
       name: s.name,
       tagline: s.tagline,
@@ -234,6 +243,61 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
     '/api/sandbox/:id',
     async (request) => {
       await sandbox.destroy(request.params.id);
+      return { ok: true };
+    },
+  );
+
+  /* ── Custom Stack Management ───────────────────────────────── */
+
+  /** List all custom stacks */
+  app.get('/api/sandbox/custom-stacks', async () => {
+    return getCustomStacks().map((s) => ({
+      id: s.id,
+      name: s.name,
+      tagline: s.tagline,
+      description: s.description,
+      techStack: s.techStack,
+      icon: s.icon,
+      color: s.color,
+      templateCount: s.templates.length,
+    }));
+  });
+
+  /** Register a new custom stack from config */
+  app.post<{ Body: CustomStackConfig }>(
+    '/api/sandbox/custom-stacks',
+    async (request, reply) => {
+      try {
+        const stack = registerCustomStack(request.body);
+        return {
+          ok: true,
+          stack: {
+            id: stack.id,
+            name: stack.name,
+            tagline: stack.tagline,
+            techStack: stack.techStack,
+            templateCount: stack.templates.length,
+          },
+        };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Invalid custom stack config';
+        return reply.status(400).send({ error: msg });
+      }
+    },
+  );
+
+  /** Remove a custom stack */
+  app.delete<{ Params: { stackId: string } }>(
+    '/api/sandbox/custom-stacks/:stackId',
+    async (request, reply) => {
+      const { stackId } = request.params;
+      if (!isCustomStack(stackId)) {
+        return reply.status(400).send({ error: 'Cannot delete built-in stacks' });
+      }
+      const deleted = unregisterCustomStack(stackId);
+      if (!deleted) {
+        return reply.status(404).send({ error: 'Custom stack not found' });
+      }
       return { ok: true };
     },
   );

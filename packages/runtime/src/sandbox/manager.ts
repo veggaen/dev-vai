@@ -1,9 +1,10 @@
 import { mkdir, writeFile, readFile, rm, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:net';
 import { getTemplate, SANDBOX_TEMPLATES, type SandboxTemplate } from './templates.js';
 
 export interface SandboxProject {
@@ -21,6 +22,28 @@ export interface SandboxProject {
 export interface FileWrite {
   path: string;   // relative to project root, e.g. "src/App.tsx"
   content: string;
+}
+
+/** Check if a port is available by attempting to listen on it */
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, '0.0.0.0');
+  });
+}
+
+/** Find the next available port starting from the given port */
+async function findFreePort(start: number): Promise<number> {
+  let port = start;
+  while (!(await isPortFree(port))) {
+    port++;
+    if (port > 65535) throw new Error('No free ports available');
+  }
+  return port;
 }
 
 /**
@@ -194,7 +217,8 @@ export class SandboxManager {
       project.devProcess = null;
     }
 
-    const port = this.nextPort++;
+    const port = await findFreePort(this.nextPort);
+    this.nextPort = port + 1;
     project.devPort = port;
     project.status = 'building';
     project.logs.push(`Starting dev server on port ${port}...`);
@@ -262,7 +286,14 @@ export class SandboxManager {
     const project = this.projects.get(projectId);
     if (!project) return;
     if (project.devProcess) {
-      project.devProcess.kill();
+      // On Windows, kill the entire process tree (shell: true means child spawns a sub-process)
+      if (process.platform === 'win32' && project.devProcess.pid) {
+        try {
+          execSync(`taskkill /PID ${project.devProcess.pid} /T /F`, { stdio: 'ignore' });
+        } catch { /* Best effort */ }
+      } else {
+        project.devProcess.kill('SIGTERM');
+      }
       project.devProcess = null;
     }
     project.status = 'idle';

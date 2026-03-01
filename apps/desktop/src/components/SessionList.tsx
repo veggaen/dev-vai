@@ -142,6 +142,11 @@ export function SessionList() {
 
   useEffect(() => {
     fetchSessions();
+    // Auto-refresh session list every 10 seconds to pick up new sessions
+    const interval = setInterval(() => {
+      fetchSessions();
+    }, 10_000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleImport = () => {

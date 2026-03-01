@@ -2,9 +2,15 @@
  * Stack template types — the tier-based production template system.
  * Stacks are fullstack app templates (PERN, MERN, Next.js, T3) with
  * progressive complexity tiers (Basic → Solid → Battle-Tested → Vai).
+ *
+ * Also supports user-defined custom stacks for flexible technology choices.
  */
 
-export type StackId = 'pern' | 'mern' | 'nextjs' | 't3';
+/** Built-in stack IDs */
+export type BuiltinStackId = 'pern' | 'mern' | 'nextjs' | 't3';
+
+/** All stack IDs (built-in + custom) — custom stacks use `custom-{slug}` format */
+export type StackId = BuiltinStackId | `custom-${string}`;
 export type TierId = 'basic' | 'solid' | 'battle-tested' | 'vai';
 
 export interface StackTemplate {
@@ -86,4 +92,93 @@ export function mergeFiles(
   const map = new Map(base.map((f) => [f.path, f]));
   for (const f of overrides) map.set(f.path, f);
   return Array.from(map.values());
+}
+
+/* ── Custom Stack Support ──────────────────────────────────────── */
+
+/**
+ * User-defined custom stack configuration.
+ * Users can mix and match technologies to create their own stack.
+ *
+ * Usage flow:
+ * 1. User selects technologies via UI (or Vai suggests them)
+ * 2. System generates a CustomStackConfig
+ * 3. Config is saved to DB and registered as a StackDefinition
+ * 4. Deployed through the same pipeline as built-in stacks
+ */
+export interface CustomStackConfig {
+  /** User-chosen name, e.g. "My SaaS Stack" */
+  name: string;
+  /** Auto-generated slug from name, e.g. "my-saas-stack" */
+  slug: string;
+  /** User description */
+  description?: string;
+  /** Icon emoji chosen by user (default: 🛠) */
+  icon?: string;
+  /** Color for UI accent (default: 'zinc') */
+  color?: string;
+
+  /** Technology selections */
+  frontend: {
+    framework: 'react' | 'vue' | 'svelte' | 'solid' | 'vanilla';
+    styling: 'tailwind' | 'css-modules' | 'styled-components' | 'vanilla-css';
+    bundler: 'vite' | 'webpack' | 'turbopack';
+  };
+  backend: {
+    runtime: 'node' | 'bun' | 'deno';
+    framework: 'express' | 'fastify' | 'hono' | 'next-api' | 'trpc';
+    orm?: 'prisma' | 'drizzle' | 'mongoose' | 'none';
+  };
+  database?: {
+    type: 'postgresql' | 'mysql' | 'sqlite' | 'mongodb' | 'none';
+    provider?: string; // e.g. 'neon', 'planetscale', 'supabase'
+  };
+  extras?: {
+    auth?: 'clerk' | 'next-auth' | 'lucia' | 'none';
+    testing?: 'vitest' | 'jest' | 'playwright' | 'none';
+    docker?: boolean;
+    ci?: 'github-actions' | 'none';
+  };
+
+  /** Files to scaffold (generated from tech selections or provided directly) */
+  files: { path: string; content: string }[];
+
+  /** Created timestamp */
+  createdAt?: number;
+}
+
+/**
+ * Convert a CustomStackConfig into a StackDefinition for the deploy pipeline.
+ */
+export function customConfigToStack(config: CustomStackConfig): StackDefinition {
+  const stackId = `custom-${config.slug}` as StackId;
+  const techStack = [
+    config.frontend.framework,
+    config.frontend.styling === 'tailwind' ? 'Tailwind CSS' : config.frontend.styling,
+    config.backend.framework,
+    config.database?.type ?? 'no DB',
+  ].filter(Boolean);
+
+  return {
+    id: stackId,
+    name: config.name,
+    tagline: config.description || `Custom stack: ${techStack.join(' + ')}`,
+    description: config.description || `User-defined stack with ${techStack.join(', ')}`,
+    techStack,
+    icon: config.icon || '🛠',
+    color: config.color || 'zinc',
+    templates: [
+      {
+        id: `${stackId}-basic`,
+        stackId,
+        tier: 'basic',
+        name: `${config.name} — Custom`,
+        description: `Custom ${config.name} stack`,
+        features: techStack.map((t) => `${t} configured`),
+        files: config.files,
+        hasDocker: config.extras?.docker ?? false,
+        hasTests: config.extras?.testing !== 'none' && config.extras?.testing !== undefined,
+      },
+    ],
+  };
 }
