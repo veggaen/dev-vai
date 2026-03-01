@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
 import { useEngineStore } from '../stores/engineStore.js';
-import { useLayoutStore } from '../stores/layoutStore.js';
 import { ModeSelector } from './ModeSelector.js';
 import { BuildStatusBadge } from './BuildStatusBadge.js';
 
@@ -11,7 +10,6 @@ export function Sidebar() {
     conversations,
     activeConversationId,
     fetchConversations,
-    createConversation,
     selectConversation,
     deleteConversation,
   } = useChatStore();
@@ -19,22 +17,19 @@ export function Sidebar() {
   const { models, selectedModelId, setSelectedModelId, fetchModels } =
     useSettingsStore();
   const { status: engineStatus, stats } = useEngineStore();
-  const { setView } = useLayoutStore();
 
   useEffect(() => {
     fetchModels();
     fetchConversations();
   }, []);
 
-  const handleNewChat = async () => {
-    if (!selectedModelId) return;
-    await createConversation(selectedModelId);
-    setView('chat');
+  const handleNewChat = () => {
+    // Deselect active conversation → ChatWindow shows fresh welcome state
+    useChatStore.setState({ activeConversationId: null, messages: [] });
   };
 
   const handleSelectConversation = (id: string) => {
     selectConversation(id);
-    setView('chat');
   };
 
   return (
@@ -82,19 +77,12 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <div className="space-y-1 p-3">
+      <div className="p-3">
         <button
           onClick={handleNewChat}
-          disabled={!selectedModelId}
-          className="w-full rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-zinc-800 disabled:opacity-50"
+          className="w-full rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-zinc-800"
         >
           + New Chat
-        </button>
-        <button
-          onClick={() => setView('chat')}
-          className="w-full rounded-lg px-4 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
-        >
-          Knowledge Base
         </button>
       </div>
 

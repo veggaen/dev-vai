@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type LayoutView = 'landing' | 'chat' | 'builder';
+export type LayoutView = 'chat' | 'builder';
 export type ChatMode = 'chat' | 'builder' | 'plan' | 'debate';
 
 export interface BuildStatus {
@@ -23,14 +23,12 @@ interface LayoutState {
   setBuildStatus: (status: BuildStatus) => void;
   setBuilderEnabled: (enabled: boolean) => void;
 
-  /** Transition to builder mode — sets view + mode together */
   enterBuilder: () => void;
-  /** Transition back to chat — resets to chat view + mode */
   exitBuilder: () => void;
 }
 
 export const useLayoutStore = create<LayoutState>((set) => ({
-  view: 'landing',
+  view: 'chat',
   mode: 'chat',
   showDebugConsole: false,
   showFileExplorer: false,
@@ -42,7 +40,7 @@ export const useLayoutStore = create<LayoutState>((set) => ({
     if (mode === 'builder') {
       set({ mode, view: 'builder', showDebugConsole: true });
     } else {
-      set({ mode });
+      set((s) => ({ mode, view: s.view === 'builder' ? 'chat' : s.view }));
     }
   },
   toggleDebugConsole: () => set((s) => ({ showDebugConsole: !s.showDebugConsole })),
@@ -56,10 +54,10 @@ export const useLayoutStore = create<LayoutState>((set) => ({
 
 /** Mode-specific input placeholders */
 export const MODE_PLACEHOLDERS: Record<ChatMode, string> = {
-  chat: 'Message VeggaAI... (Ctrl+V to paste image, Shift+Enter for new line)',
-  builder: 'Tell Vai what to implement next...',
+  chat: 'Message VeggaAI...',
+  builder: 'Tell Vai what to build...',
   plan: 'Describe the plan, not the code...',
-  debate: 'Debate mode: Vai will push back and challenge ideas...',
+  debate: 'Vai will play devil\'s advocate...',
 };
 
 /** Mode-specific system prompts (prepended to user message context) */

@@ -1,11 +1,9 @@
 import { useEffect } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import { Toaster } from 'sonner';
 import { Sidebar } from './components/Sidebar.js';
 import { ChatWindow } from './components/ChatWindow.js';
-import { KnowledgePanel } from './components/KnowledgePanel.js';
-import { LandingPage } from './components/LandingPage.js';
-import { BuilderLayout } from './components/BuilderLayout.js';
+import { PreviewPanel } from './components/PreviewPanel.js';
+import { DebugConsole } from './components/DebugConsole.js';
 import { useEngineStore } from './stores/engineStore.js';
 import { useLayoutStore } from './stores/layoutStore.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
@@ -51,15 +49,9 @@ function BootScreen() {
   );
 }
 
-const pageVariants = {
-  enter: { opacity: 0, y: 12 },
-  center: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -12 },
-};
-
 export function App() {
   const { status, startPolling } = useEngineStore();
-  const { view } = useLayoutStore();
+  const { view, showDebugConsole } = useLayoutStore();
 
   useEffect(() => { startPolling(); }, [startPolling]);
   useKeyboardShortcuts();
@@ -78,50 +70,27 @@ export function App() {
         }}
       />
 
-      <AnimatePresence mode="wait">
-        {view === 'landing' && (
-          <motion.div
-            key="landing"
-            variants={pageVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.2 }}
-            className="h-screen"
-          >
-            <LandingPage />
-          </motion.div>
-        )}
+      <div className="flex h-screen bg-zinc-950">
+        {/* Sidebar — always visible */}
+        <Sidebar />
 
-        {view === 'chat' && (
-          <motion.div
-            key="chat"
-            variants={pageVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.2 }}
-            className="flex h-screen bg-zinc-950"
-          >
-            <Sidebar />
-            <ChatWindow />
-          </motion.div>
-        )}
+        {/* Main content area */}
+        <ChatWindow />
 
+        {/* Preview panel — slides in for builder mode */}
         {view === 'builder' && (
-          <motion.div
-            key="builder"
-            variants={pageVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.2 }}
-            className="h-screen"
-          >
-            <BuilderLayout />
-          </motion.div>
+          <div className="flex w-[40%] min-w-[350px] flex-col border-l border-zinc-800">
+            <div className="flex-1">
+              <PreviewPanel />
+            </div>
+            {showDebugConsole && (
+              <div className="h-[35%] min-h-[120px]">
+                <DebugConsole />
+              </div>
+            )}
+          </div>
         )}
-      </AnimatePresence>
+      </div>
     </>
   );
 }
