@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useLayoutStore, type ChatMode } from '../stores/layoutStore.js';
 
 const MODE_KEYS: Record<string, ChatMode> = {
-  '1': 'chat',
+  '1': 'agent',
   '2': 'builder',
   '3': 'plan',
   '4': 'debate',

@@ -3,6 +3,7 @@ import { useChatStore } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
 import { useLayoutStore, MODE_PLACEHOLDERS } from '../stores/layoutStore.js';
 import { MessageBubble } from './MessageBubble.js';
+import { ModeSelector } from './ModeSelector.js';
 import { Code, Zap, Sparkles, BookOpen, Shield, MessageCircle } from 'lucide-react';
 
 /* ── Preset suggestions shown when no messages ── */
@@ -282,6 +283,9 @@ export function ChatWindow() {
 
           {/* Text input */}
           <div className="relative flex items-end rounded-xl border border-zinc-700 bg-zinc-900 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
+            <div className="flex shrink-0 items-center pl-1.5 pb-1.5">
+              <ModeSelector />
+            </div>
             <textarea
               ref={textareaRef}
               value={input}

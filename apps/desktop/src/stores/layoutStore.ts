@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 export type LayoutView = 'chat' | 'builder';
-export type ChatMode = 'chat' | 'builder' | 'plan' | 'debate';
+export type ChatMode = 'agent' | 'builder' | 'plan' | 'debate';
 
 export interface BuildStatus {
   step: 'idle' | 'generating' | 'writing' | 'installing' | 'building' | 'testing' | 'fixing' | 'ready' | 'failed';
@@ -29,7 +29,7 @@ interface LayoutState {
 
 export const useLayoutStore = create<LayoutState>((set) => ({
   view: 'chat',
-  mode: 'chat',
+  mode: 'agent',
   showDebugConsole: false,
   showFileExplorer: false,
   buildStatus: { step: 'idle' },
@@ -40,7 +40,11 @@ export const useLayoutStore = create<LayoutState>((set) => ({
     if (mode === 'builder') {
       set({ mode, view: 'builder', showDebugConsole: true });
     } else {
-      set((s) => ({ mode, view: s.view === 'builder' ? 'chat' : s.view }));
+      set((s) => ({
+        mode,
+        view: s.view === 'builder' ? 'chat' : s.view,
+        ...(s.view === 'builder' ? { showDebugConsole: false } : {}),
+      }));
     }
   },
   toggleDebugConsole: () => set((s) => ({ showDebugConsole: !s.showDebugConsole })),
@@ -49,12 +53,12 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   setBuilderEnabled: (builderEnabled) => set({ builderEnabled }),
 
   enterBuilder: () => set({ view: 'builder', mode: 'builder', showDebugConsole: true }),
-  exitBuilder: () => set({ view: 'chat', mode: 'chat', showDebugConsole: false }),
+  exitBuilder: () => set({ view: 'chat', mode: 'agent', showDebugConsole: false }),
 }));
 
 /** Mode-specific input placeholders */
 export const MODE_PLACEHOLDERS: Record<ChatMode, string> = {
-  chat: 'Message VeggaAI...',
+  agent: 'Message VeggaAI...',
   builder: 'Tell Vai what to build...',
   plan: 'Describe the plan, not the code...',
   debate: 'Vai will play devil\'s advocate...',
@@ -62,7 +66,7 @@ export const MODE_PLACEHOLDERS: Record<ChatMode, string> = {
 
 /** Mode-specific system prompts (prepended to user message context) */
 export const MODE_SYSTEM_PROMPTS: Record<ChatMode, string> = {
-  chat: '',
+  agent: '',
   builder: 'You are in Builder mode. Generate complete, runnable code. Extract all code into files with clear paths. Generate Playwright test files alongside components.',
   plan: 'You are in Plan mode. Structure your response as numbered steps with clear decisions, verification criteria, and "watch out for" notes per step. Present ranked alternatives when uncertain.',
   debate: 'You are in Debate mode. Present at least 2 opposing perspectives with evidence, then synthesize a conclusion. Challenge assumptions explicitly. Label what you know from data vs. inference.',
