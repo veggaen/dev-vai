@@ -11,11 +11,13 @@ interface LayoutState {
   mode: ChatMode;
   showDebugConsole: boolean;
   showFileExplorer: boolean;
+  showBuilderPanel: boolean;
   buildStatus: BuildStatus;
 
   setMode: (mode: ChatMode) => void;
   toggleDebugConsole: () => void;
   toggleFileExplorer: () => void;
+  toggleBuilderPanel: () => void;
   setBuildStatus: (status: BuildStatus) => void;
 }
 
@@ -23,11 +25,13 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   mode: 'chat',
   showDebugConsole: true,
   showFileExplorer: false,
+  showBuilderPanel: true,
   buildStatus: { step: 'idle' },
 
   setMode: (mode) => set({ mode }),
   toggleDebugConsole: () => set((s) => ({ showDebugConsole: !s.showDebugConsole })),
   toggleFileExplorer: () => set((s) => ({ showFileExplorer: !s.showFileExplorer })),
+  toggleBuilderPanel: () => set((s) => ({ showBuilderPanel: !s.showBuilderPanel })),
   setBuildStatus: (buildStatus) => set({ buildStatus }),
 }));
 

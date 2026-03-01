@@ -54,14 +54,13 @@ function BootScreen() {
 
 export function App() {
   const { status, startPolling } = useEngineStore();
-  const { showDebugConsole, showFileExplorer } = useLayoutStore();
+  const { showDebugConsole, showFileExplorer, showBuilderPanel } = useLayoutStore();
   const { projectId } = useSandboxStore();
 
   useEffect(() => { startPolling(); }, [startPolling]);
   useKeyboardShortcuts();
   useAutoSandbox();
 
-  // Show preview/debug whenever there's an active sandbox build
   const hasActiveSandbox = projectId !== null;
 
   if (status !== 'ready') {
@@ -85,11 +84,11 @@ export function App() {
         {/* Main content area */}
         <ChatWindow />
 
-        {/* Preview + Debug — visible whenever a sandbox project is active */}
-        {hasActiveSandbox && (
+        {/* Builder panel — always visible (toggleable via Ctrl+B) */}
+        {showBuilderPanel && (
           <div className="flex w-[40%] min-w-[350px] flex-col border-l border-zinc-800">
-            {/* File Explorer — collapsible panel */}
-            {showFileExplorer && (
+            {/* File Explorer — only when sandbox is active */}
+            {hasActiveSandbox && showFileExplorer && (
               <div className="h-[30%] min-h-[120px] border-b border-zinc-800">
                 <FileExplorer />
               </div>
@@ -97,7 +96,7 @@ export function App() {
             <div className="flex-1">
               <PreviewPanel />
             </div>
-            {showDebugConsole && (
+            {hasActiveSandbox && showDebugConsole && (
               <div className="h-[35%] min-h-[120px]">
                 <DebugConsole />
               </div>

@@ -14,9 +14,10 @@ const MODE_KEYS: Record<string, ChatMode> = {
  *   Ctrl+1-5   — Switch mode (chat / agent / builder / plan / debate)
  *   Ctrl+J     — Toggle debug console
  *   Ctrl+E     — Toggle file explorer
+ *   Ctrl+B     — Toggle builder panel
  */
 export function useKeyboardShortcuts() {
-  const { setMode, toggleDebugConsole, toggleFileExplorer } = useLayoutStore();
+  const { setMode, toggleDebugConsole, toggleFileExplorer, toggleBuilderPanel } = useLayoutStore();
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -47,9 +48,15 @@ export function useKeyboardShortcuts() {
         toggleFileExplorer();
         return;
       }
+
+      if (ctrl && key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleBuilderPanel();
+        return;
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setMode, toggleDebugConsole, toggleFileExplorer]);
+  }, [setMode, toggleDebugConsole, toggleFileExplorer, toggleBuilderPanel]);
 }
