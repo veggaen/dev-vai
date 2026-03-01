@@ -1,6 +1,8 @@
-import { useSandboxStore, type SandboxTemplateInfo } from '../stores/sandboxStore.js';
-import { Globe, RefreshCw, Smartphone, Tablet, Monitor, Package, Layers } from 'lucide-react';
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useSandboxStore } from '../stores/sandboxStore.js';
+import { Globe, RefreshCw, Smartphone, Tablet, Monitor } from 'lucide-react';
+import { useState, useCallback, useRef } from 'react';
+import { TemplateGallery } from './TemplateGallery.js';
+import { DeployProgress } from './DeployProgress.js';
 
 type BreakpointKey = 'mobile' | 'tablet' | 'desktop';
 
@@ -12,63 +14,17 @@ const BREAKPOINTS: Record<BreakpointKey, { width: number; icon: typeof Smartphon
 
 const STEP_ORDER = ['creating', 'writing', 'installing', 'building', 'running'] as const;
 
-const CATEGORY_COLORS: Record<string, string> = {
-  frontend: 'text-blue-400 bg-blue-500/10',
-  backend: 'text-emerald-400 bg-emerald-500/10',
-  fullstack: 'text-purple-400 bg-purple-500/10',
-};
-
-/**
- * Template picker shown when no sandbox project is active.
- */
-function TemplatePicker() {
-  const { templates, fetchTemplates, scaffoldFromTemplate, status } = useSandboxStore();
-
-  useEffect(() => {
-    if (templates.length === 0) fetchTemplates();
-  }, [templates.length, fetchTemplates]);
-
-  const isWorking = status !== 'idle' && status !== 'failed';
-
-  return (
-    <div className="flex h-full flex-col items-center justify-center p-6">
-      <Layers className="mb-3 h-10 w-10 text-zinc-700" />
-      <h3 className="mb-1 text-sm font-medium text-zinc-300">Start a Sandbox</h3>
-      <p className="mb-5 text-xs text-zinc-600">Pick a framework to scaffold a new project</p>
-
-      {templates.length === 0 ? (
-        <p className="text-xs text-zinc-600">Loading templates...</p>
-      ) : (
-        <div className="grid w-full max-w-md grid-cols-2 gap-2">
-          {templates.map((t: SandboxTemplateInfo) => (
-            <button
-              key={t.id}
-              onClick={() => scaffoldFromTemplate(t.id)}
-              disabled={isWorking}
-              className="group rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2.5 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-800/50 disabled:opacity-40"
-            >
-              <div className="flex items-center gap-2">
-                <Package className="h-3.5 w-3.5 text-zinc-500 group-hover:text-zinc-300" />
-                <span className="text-xs font-medium text-zinc-300">{t.name}</span>
-              </div>
-              <p className="mt-1 text-[10px] leading-tight text-zinc-600">{t.description}</p>
-              <span className={`mt-1.5 inline-block rounded px-1 py-0.5 text-[9px] font-medium ${CATEGORY_COLORS[t.category] ?? 'text-zinc-500 bg-zinc-800'}`}>
-                {t.category}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /**
  * Preview panel — shows iframe of running sandbox app + build stepper.
- * When no project is active, shows template picker.
+ * When no project is active, shows TemplateGallery for stack deployment.
+ * During deploy, shows DeployProgress with live step tracking.
  */
 export function PreviewPanel() {
-  const { status, devPort, projectName, projectId } = useSandboxStore();
+  const {
+    status, devPort, projectName, projectId,
+    deployPhase, deploySteps, deployStartTime, deployStackName, deployTierName,
+    deployStack,
+  } = useSandboxStore();
   const [breakpoint, setBreakpoint] = useState<BreakpointKey>('desktop');
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -83,16 +39,39 @@ export function PreviewPanel() {
     }
   }, []);
 
-  // No active project — show template picker
-  if (!projectId && status === 'idle') {
+  // No active project — show template gallery or deploy progress
+  if (!projectId && status === 'idle' && deployPhase === 'idle') {
     return (
       <div className="flex h-full flex-col bg-zinc-950">
         <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-1.5">
           <Globe className="h-3.5 w-3.5 text-zinc-500" />
-          <span className="flex-1 text-xs text-zinc-500">No active project</span>
+          <span className="flex-1 text-xs text-zinc-500">Deploy a stack</span>
         </div>
-        <div className="flex-1">
-          <TemplatePicker />
+        <div className="flex-1 overflow-hidden">
+          <TemplateGallery
+            onDeploy={(stackId, tier) => deployStack(stackId, tier)}
+            isDeploying={false}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Deploy in progress or failed — show step-by-step progress
+  if (deployPhase === 'deploying' || deployPhase === 'failed') {
+    return (
+      <div className="flex h-full flex-col bg-zinc-950">
+        <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-1.5">
+          <Globe className="h-3.5 w-3.5 text-zinc-500" />
+          <span className="flex-1 text-xs text-zinc-400">Deploying...</span>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          <DeployProgress
+            steps={deploySteps}
+            stackName={deployStackName}
+            tierName={deployTierName}
+            startTime={deployStartTime}
+          />
         </div>
       </div>
     );

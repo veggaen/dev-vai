@@ -16,6 +16,26 @@ export interface SandboxTemplateInfo {
 
 export type SandboxStatus = 'idle' | 'creating' | 'writing' | 'installing' | 'building' | 'running' | 'failed';
 
+export type DeployPhase = 'idle' | 'deploying' | 'ready' | 'failed';
+
+export interface DeployStepState {
+  id: string;
+  label: string;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+  message?: string;
+  elapsed?: number;
+}
+
+const INITIAL_DEPLOY_STEPS: DeployStepState[] = [
+  { id: 'scaffold', label: 'Scaffolding project', status: 'pending' },
+  { id: 'install', label: 'Installing packages', status: 'pending' },
+  { id: 'build', label: 'Building application', status: 'pending' },
+  { id: 'docker', label: 'Docker verification', status: 'pending' },
+  { id: 'test', label: 'Running tests', status: 'pending' },
+  { id: 'start', label: 'Starting dev server', status: 'pending' },
+  { id: 'verify', label: 'Health check', status: 'pending' },
+];
+
 interface SandboxState {
   projectId: string | null;
   projectName: string | null;
@@ -25,6 +45,13 @@ interface SandboxState {
   logs: string[];
   error: string | null;
   templates: SandboxTemplateInfo[];
+
+  /** Deploy pipeline state */
+  deployPhase: DeployPhase;
+  deploySteps: DeployStepState[];
+  deployStartTime: number;
+  deployStackName: string;
+  deployTierName: string;
 
   createProject: (name: string) => Promise<string>;
   writeFiles: (files: SandboxFile[]) => Promise<void>;
@@ -42,12 +69,21 @@ interface SandboxState {
 
   /** Full pipeline from template: create from template → install → start */
   scaffoldFromTemplate: (templateId: string, name?: string) => Promise<void>;
+
+  /** Streaming deploy from stack template with progress tracking */
+  deployStack: (stackId: string, tier: string, stackName?: string, tierName?: string) => Promise<void>;
 }
 
 export const useSandboxStore = create<SandboxState>((set, get) => ({
   projectId: null,
   projectName: null,
   status: 'idle',
+
+  deployPhase: 'idle' as DeployPhase,
+  deploySteps: [] as DeployStepState[],
+  deployStartTime: 0,
+  deployStackName: '',
+  deployTierName: '',
   devPort: null,
   files: [],
   logs: [],
@@ -204,6 +240,107 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       await get().startDev();
     } catch (err) {
       set({ status: 'failed', error: (err as Error).message });
+    }
+  },
+
+  deployStack: async (stackId: string, tier: string, stackName?: string, tierName?: string) => {
+    set({
+      deployPhase: 'deploying',
+      deploySteps: INITIAL_DEPLOY_STEPS.map((s) => ({ ...s })),
+      deployStartTime: Date.now(),
+      deployStackName: stackName || stackId.toUpperCase(),
+      deployTierName: tierName || tier,
+      error: null,
+      projectId: null,
+      projectName: null,
+      devPort: null,
+    });
+
+    try {
+      const res = await fetch(`${API_BASE}/api/sandbox/deploy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stackId, tier }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Deploy request failed' }));
+        set({ deployPhase: 'failed', error: (err as { error: string }).error });
+        return;
+      }
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line) as {
+              step: string;
+              status: string;
+              message?: string;
+              elapsed?: number;
+              projectId?: string;
+              port?: number;
+            };
+
+            // Update the matching step
+            set((state) => ({
+              deploySteps: state.deploySteps.map((s) =>
+                s.id === event.step
+                  ? {
+                      ...s,
+                      status: event.status as DeployStepState['status'],
+                      message: event.message ?? s.message,
+                      elapsed: event.elapsed ?? s.elapsed,
+                    }
+                  : s,
+              ),
+            }));
+
+            // Capture projectId and port when available
+            if (event.projectId) {
+              set({ projectId: event.projectId, projectName: stackName || stackId });
+            }
+            if (event.port) {
+              set({ devPort: event.port });
+            }
+          } catch {
+            // Skip malformed lines
+          }
+        }
+      }
+
+      // Determine final phase
+      const { deploySteps } = get();
+      const hasFailed = deploySteps.some((s) => s.status === 'failed');
+      const verifyStep = deploySteps.find((s) => s.id === 'verify');
+      const isReady = verifyStep?.status === 'done';
+
+      if (isReady) {
+        set({ deployPhase: 'ready', status: 'running' });
+      } else if (hasFailed) {
+        // Still might be usable — check if dev server started
+        const startStep = deploySteps.find((s) => s.id === 'start');
+        if (startStep?.status === 'done') {
+          set({ deployPhase: 'ready', status: 'running' });
+        } else {
+          set({ deployPhase: 'failed', error: 'Deployment had failures' });
+        }
+      } else {
+        set({ deployPhase: 'ready', status: 'running' });
+      }
+    } catch (err) {
+      set({ deployPhase: 'failed', error: (err as Error).message });
     }
   },
 }));

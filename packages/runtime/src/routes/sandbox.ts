@@ -1,7 +1,97 @@
 import type { FastifyInstance } from 'fastify';
 import type { SandboxManager, FileWrite } from '../sandbox/manager.js';
+import { ALL_STACKS, getStack, getStackTemplate } from '../sandbox/stacks/index.js';
+import { deployStack, type DeployEvent } from '../sandbox/deploy.js';
 
 export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxManager) {
+  /* ── Stack-based template system ── */
+
+  /** List all available stacks with their tiers */
+  app.get('/api/sandbox/stacks', async () => {
+    return ALL_STACKS.map((s) => ({
+      id: s.id,
+      name: s.name,
+      tagline: s.tagline,
+      description: s.description,
+      techStack: s.techStack,
+      icon: s.icon,
+      color: s.color,
+      templates: s.templates.map((t) => ({
+        id: t.id,
+        tier: t.tier,
+        name: t.name,
+        description: t.description,
+        features: t.features,
+        fileCount: t.files.length,
+        hasDocker: t.hasDocker,
+        hasTests: t.hasTests,
+        comingSoon: t.comingSoon ?? false,
+      })),
+    }));
+  });
+
+  /** Get a specific stack */
+  app.get<{ Params: { stackId: string } }>(
+    '/api/sandbox/stacks/:stackId',
+    async (request) => {
+      const stack = getStack(request.params.stackId);
+      if (!stack) return { error: 'Stack not found' };
+      return {
+        ...stack,
+        templates: stack.templates.map((t) => ({
+          id: t.id,
+          tier: t.tier,
+          name: t.name,
+          description: t.description,
+          features: t.features,
+          fileCount: t.files.length,
+          hasDocker: t.hasDocker,
+          hasTests: t.hasTests,
+          comingSoon: t.comingSoon ?? false,
+        })),
+      };
+    },
+  );
+
+  /** Deploy a stack template — streams NDJSON progress events */
+  app.post<{ Body: { stackId: string; tier: string; name?: string } }>(
+    '/api/sandbox/deploy',
+    async (request, reply) => {
+      const { stackId, tier, name } = request.body;
+
+      // Validate template exists
+      const template = getStackTemplate(stackId, tier);
+      if (!template) {
+        return reply.status(400).send({ error: `Template not found: ${stackId}-${tier}` });
+      }
+      if (template.comingSoon) {
+        return reply.status(400).send({ error: `${template.name} is coming soon` });
+      }
+
+      // Stream NDJSON progress
+      reply.raw.writeHead(200, {
+        'Content-Type': 'application/x-ndjson',
+        'Cache-Control': 'no-cache',
+        'Transfer-Encoding': 'chunked',
+        'X-Content-Type-Options': 'nosniff',
+      });
+
+      const emit = (event: DeployEvent) => {
+        try {
+          reply.raw.write(JSON.stringify(event) + '\n');
+        } catch {
+          /* connection closed */
+        }
+      };
+
+      await deployStack(sandbox, stackId, tier, name, emit);
+
+      reply.raw.end();
+    },
+  );
+
+  /* ── Legacy template system (backward compat) ── */
+
   /** List available templates */
   app.get('/api/sandbox/templates', async () => {
     return sandbox.listTemplates().map((t) => ({
