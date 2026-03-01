@@ -38,6 +38,7 @@ interface ChatState {
   selectConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
   sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string) => void;
+  stopStreaming: () => void;
   appendToLastMessage: (text: string) => void;
 }
 
@@ -186,6 +187,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ isStreaming: false });
       get().appendToLastMessage('\n\nConnection error');
     };
+  },
+
+  stopStreaming: () => {
+    if (ws) {
+      ws.close();
+      ws = null;
+    }
+    set({ isStreaming: false });
   },
 
   appendToLastMessage: (text: string) => {

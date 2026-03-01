@@ -8,6 +8,8 @@ import { useEngineStore } from './stores/engineStore.js';
 import { useLayoutStore } from './stores/layoutStore.js';
 import { useSandboxStore } from './stores/sandboxStore.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
+import { useAutoSandbox } from './hooks/useAutoSandbox.js';
+import { FileExplorer } from './components/FileExplorer.js';
 
 function BootScreen() {
   const { status, error, retry } = useEngineStore();
@@ -52,11 +54,12 @@ function BootScreen() {
 
 export function App() {
   const { status, startPolling } = useEngineStore();
-  const { showDebugConsole } = useLayoutStore();
+  const { showDebugConsole, showFileExplorer } = useLayoutStore();
   const { projectId } = useSandboxStore();
 
   useEffect(() => { startPolling(); }, [startPolling]);
   useKeyboardShortcuts();
+  useAutoSandbox();
 
   // Show preview/debug whenever there's an active sandbox build
   const hasActiveSandbox = projectId !== null;
@@ -85,6 +88,12 @@ export function App() {
         {/* Preview + Debug — visible whenever a sandbox project is active */}
         {hasActiveSandbox && (
           <div className="flex w-[40%] min-w-[350px] flex-col border-l border-zinc-800">
+            {/* File Explorer — collapsible panel */}
+            {showFileExplorer && (
+              <div className="h-[30%] min-h-[120px] border-b border-zinc-800">
+                <FileExplorer />
+              </div>
+            )}
             <div className="flex-1">
               <PreviewPanel />
             </div>

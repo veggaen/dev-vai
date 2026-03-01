@@ -40,14 +40,21 @@ function CopyButton({ text, className = '' }: { text: string; className?: string
   );
 }
 
-/* ── Code block with language label + copy ── */
-function CodeBlock({ code, language }: { code: string; language: string }) {
+/* ── Code block with language label + file path + copy ── */
+function CodeBlock({ code, language, title }: { code: string; language: string; title?: string }) {
   return (
     <div className="group/code relative my-3 overflow-hidden rounded-lg border border-zinc-700/60 bg-zinc-900">
       <div className="flex items-center justify-between border-b border-zinc-700/60 bg-zinc-800/50 px-3 py-1.5">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-          {language || 'code'}
-        </span>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+            {language || 'code'}
+          </span>
+          {title && (
+            <span className="truncate text-[10px] text-zinc-400">
+              {title}
+            </span>
+          )}
+        </div>
         <CopyButton text={code} />
       </div>
       <pre className="overflow-x-auto p-3 text-[13px] leading-relaxed">
@@ -60,11 +67,12 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
 /* ── Parsed segment types ── */
 type Segment =
   | { type: 'text'; content: string }
-  | { type: 'code'; code: string; language: string };
+  | { type: 'code'; code: string; language: string; title?: string };
 
 function parseMarkdown(content: string): Segment[] {
   const segments: Segment[] = [];
-  const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
+  // Match code fences with optional title="..." attribute
+  const codeBlockRegex = /```(\w*)(?:\s+title=["']([^"']+)["'])?\s*\n([\s\S]*?)```/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -72,7 +80,7 @@ function parseMarkdown(content: string): Segment[] {
     if (match.index > lastIndex) {
       segments.push({ type: 'text', content: content.slice(lastIndex, match.index) });
     }
-    segments.push({ type: 'code', code: match[2].trimEnd(), language: match[1] });
+    segments.push({ type: 'code', code: match[3].trimEnd(), language: match[1], title: match[2] || undefined });
     lastIndex = match.index + match[0].length;
   }
 
@@ -109,7 +117,7 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
     <div className={`prose prose-invert prose-sm max-w-none ${className}`}>
       {segments.map((seg, i) =>
         seg.type === 'code' ? (
-          <CodeBlock key={i} code={seg.code} language={seg.language} />
+          <CodeBlock key={i} code={seg.code} language={seg.language} title={seg.title} />
         ) : (
           <div
             key={i}

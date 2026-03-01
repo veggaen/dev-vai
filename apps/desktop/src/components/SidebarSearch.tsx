@@ -14,6 +14,18 @@ import {
 
 export type SearchLayer = 1 | 2 | 3;
 
+/**
+ * Smart case-preserving replace: if the matched text is UPPER, replace is UPPER;
+ * if Title Case, replacement is Title Case; otherwise lowercase.
+ */
+function smartCaseReplace(text: string, regex: RegExp, replacement: string): string {
+  return text.replace(regex, (match) => {
+    if (match === match.toUpperCase()) return replacement.toUpperCase();
+    if (match[0] === match[0].toUpperCase()) return replacement[0].toUpperCase() + replacement.slice(1);
+    return replacement.toLowerCase();
+  });
+}
+
 const LAYER_LABELS: Record<SearchLayer, string> = {
   1: 'Chat only',
   2: 'Chat + Files',
@@ -133,6 +145,67 @@ export function SidebarSearch({ onSelectConversation, onClose }: SidebarSearchPr
 
   const totalCount = results.reduce((sum, r) => sum + r.matchCount, 0);
 
+  // Build a regex from current search settings
+  const buildSearchRegex = useCallback((): RegExp | null => {
+    if (!query.trim()) return null;
+    try {
+      if (useRegex) {
+        return new RegExp(query, matchCase ? 'g' : 'gi');
+      }
+      const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = wholeWord ? `\\b${escaped}\\b` : escaped;
+      return new RegExp(pattern, matchCase ? 'g' : 'gi');
+    } catch {
+      return null;
+    }
+  }, [query, matchCase, wholeWord, useRegex]);
+
+  // Replace first match in the current conversation's last assistant message
+  const handleReplace = useCallback(() => {
+    if (!query || !replaceText || !activeConversationId) return;
+    const regex = buildSearchRegex();
+    if (!regex) return;
+
+    const store = useChatStore.getState();
+    // Find first matching message and replace first occurrence
+    const msgs = [...store.messages];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const msg = msgs[i];
+      if (regex.test(msg.content)) {
+        // Reset regex lastIndex for replace
+        regex.lastIndex = 0;
+        // Only replace first occurrence: use non-global version
+        const singleRegex = new RegExp(regex.source, regex.flags.replace('g', ''));
+        msgs[i] = {
+          ...msg,
+          content: preserveCase ? smartCaseReplace(msg.content, singleRegex, replaceText) : msg.content.replace(singleRegex, replaceText),
+        };
+        useChatStore.setState({ messages: msgs });
+        break;
+      }
+    }
+  }, [query, replaceText, activeConversationId, buildSearchRegex, preserveCase]);
+
+  // Replace all matches in the current conversation
+  const handleReplaceAll = useCallback(() => {
+    if (!query || !replaceText || !activeConversationId) return;
+    const regex = buildSearchRegex();
+    if (!regex) return;
+
+    const store = useChatStore.getState();
+    const msgs = store.messages.map((msg) => {
+      if (regex.test(msg.content)) {
+        regex.lastIndex = 0;
+        return {
+          ...msg,
+          content: preserveCase ? smartCaseReplace(msg.content, regex, replaceText) : msg.content.replace(regex, replaceText),
+        };
+      }
+      return msg;
+    });
+    useChatStore.setState({ messages: msgs });
+  }, [query, replaceText, activeConversationId, buildSearchRegex, preserveCase]);
+
   return (
     <div className="flex flex-col border-b border-zinc-800 bg-zinc-950">
       {/* Search input row */}
@@ -189,16 +262,16 @@ export function SidebarSearch({ onSelectConversation, onClose }: SidebarSearchPr
           </div>
           <div className="flex items-center gap-0.5">
             <button
-              onClick={() => {/* TODO: replace current match */}}
-              disabled={!query || totalCount === 0}
+              onClick={handleReplace}
+              disabled={!query || totalCount === 0 || !replaceText}
               className="rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-30"
               title="Replace (Ctrl+Shift+1)"
             >
               <Replace className="h-3.5 w-3.5" />
             </button>
             <button
-              onClick={() => {/* TODO: replace all matches */}}
-              disabled={!query || totalCount === 0}
+              onClick={handleReplaceAll}
+              disabled={!query || totalCount === 0 || !replaceText}
               className="rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-30"
               title="Replace All (Ctrl+Alt+Enter)"
             >

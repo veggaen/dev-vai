@@ -63,6 +63,7 @@ export function ChatWindow() {
     activeConversationId,
     isStreaming,
     sendMessage,
+    stopStreaming,
     createConversation,
   } = useChatStore();
   const { selectedModelId } = useSettingsStore();
@@ -454,7 +455,7 @@ export function ChatWindow() {
                 )}
                 {isStreaming ? (
                   <button
-                    onClick={() => {/* TODO: stop streaming */}}
+                    onClick={stopStreaming}
                     className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-700 text-zinc-300 transition-all hover:bg-zinc-600"
                     title="Stop generating"
                   >
