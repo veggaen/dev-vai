@@ -905,6 +905,10 @@ export class VaiEngine implements ModelAdapter {
     const mathResult = this.tryMath(lower);
     if (mathResult !== null) return mathResult;
 
+    // Strategy 0.1: Scaffold / deploy intent — detect build requests and offer deploy buttons
+    const scaffoldResult = this.tryScaffoldIntent(lower);
+    if (scaffoldResult) return scaffoldResult;
+
     // Strategy 0.3: Binary/hex decode — detect binary or hex sequences
     const binaryResult = this.tryBinaryDecode(lower);
     if (binaryResult !== null) return binaryResult;
@@ -9288,6 +9292,95 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
     }
 
     return `From what I've learned (${parts.length} sources):\n\n${parts.join('\n\n---\n\n')}\n\n[Sources: ${Array.from(sources).join(', ')}]`;
+  }
+
+  /* ── Strategy 0.1: Scaffold / Deploy Intent Detection ──────────── */
+
+  /**
+   * Detect when user wants to scaffold, build, or deploy a project.
+   * Returns a friendly response with {{deploy:stackId:tier:Name}} markers
+   * that MessageBubble renders as clickable deploy buttons.
+   */
+  private tryScaffoldIntent(input: string): string | null {
+    // Keywords indicating intent to build/scaffold/deploy
+    const buildIntent = /\b(scaffold|deploy|build|create|start|set\s*up|spin\s*up|launch|init|generate|make)\b/i;
+    const projectWords = /\b(app|project|stack|template|site|website|application|starter)\b/i;
+    // Question patterns — user is asking ABOUT something, not requesting a build
+    const questionPattern = /^(what|how|why|when|where|who|which|is|are|do|does|can|could|tell|explain|describe|show|compare|difference)\b/i;
+
+    // Must have a build verb — this is the primary gate
+    const hasBuildIntent = buildIntent.test(input);
+    const hasProjectWord = projectWords.test(input);
+    const isQuestion = questionPattern.test(input);
+
+    // If this looks like a question, don't trigger deploy
+    if (isQuestion && !hasBuildIntent) return null;
+    // Must have a build verb at minimum
+    if (!hasBuildIntent) return null;
+
+    // Direct stack detection patterns
+    const stackPatterns: Array<{ pattern: RegExp; stackId: string; label: string; tagline: string }> = [
+      { pattern: /\bnext\.?js\b|next\.?js\s+app/i, stackId: 'nextjs', label: 'Next.js', tagline: 'Notes dashboard with App Router' },
+      { pattern: /\bpern\b|postgres.*react|react.*postgres|express.*react.*node/i, stackId: 'pern', label: 'PERN', tagline: 'Board task manager' },
+      { pattern: /\bmern\b|mongo.*react|react.*mongo|express.*react.*mongo/i, stackId: 'mern', label: 'MERN', tagline: 'Bookmark collection manager' },
+      { pattern: /\bt3\b|trpc.*react|react.*trpc|t3\s*stack/i, stackId: 't3', label: 'T3', tagline: 'Expense tracker with tRPC + Zod' },
+    ];
+
+    // Check for a specific stack mention
+    let matchedStack: typeof stackPatterns[0] | null = null;
+    for (const sp of stackPatterns) {
+      if (sp.pattern.test(input)) {
+        matchedStack = sp;
+        break;
+      }
+    }
+
+    // Need build intent + (stack name OR project word)
+    if (!matchedStack && !hasProjectWord) return null;
+
+    // Check for tier hints
+    let suggestedTier = 'basic';
+    if (/\b(production|prod|deploy|docker|ci\/?cd|battle[- ]?tested)\b/i.test(input)) {
+      suggestedTier = 'battle-tested';
+    } else if (/\b(prisma|orm|database|db|validation|zod|solid)\b/i.test(input)) {
+      suggestedTier = 'solid';
+    } else if (/\b(vai|full|enterprise|monitoring|health[- ]?check)\b/i.test(input)) {
+      suggestedTier = 'vai';
+    }
+
+    // If a specific stack was identified, offer it with tier options
+    if (matchedStack) {
+      const { stackId, label, tagline } = matchedStack;
+      return [
+        `I'll set up a **${label} Stack** for you — ${tagline}! Pick a tier:`,
+        '',
+        `{{deploy:${stackId}:basic:${label} Basic}} — Polished app with Tailwind, in-memory API`,
+        `{{deploy:${stackId}:solid:${label} Solid}} — Adds Prisma ORM + Zod validation + real database`,
+        `{{deploy:${stackId}:battle-tested:${label} Battle-Tested}} — Docker, CI/CD, tests, PostgreSQL`,
+        `{{deploy:${stackId}:vai:${label} Vai}} — Production-hardened with monitoring & health checks`,
+      ].join('\n');
+    }
+
+    // Generic build request — no specific stack mentioned, offer all 4
+    return [
+      "Let's get building! Here are the stacks I can deploy for you — pick one:",
+      '',
+      '**PERN** — PostgreSQL + Express + React + Node.js',
+      `{{deploy:pern:${suggestedTier}:PERN ${this.capitalize(suggestedTier)}}}`,
+      '',
+      '**MERN** — MongoDB + Express + React + Node.js',
+      `{{deploy:mern:${suggestedTier}:MERN ${this.capitalize(suggestedTier)}}}`,
+      '',
+      '**Next.js** — App Router + API Routes + React',
+      `{{deploy:nextjs:${suggestedTier}:Next.js ${this.capitalize(suggestedTier)}}}`,
+      '',
+      '**T3** — tRPC + Zod + React + TypeScript',
+      `{{deploy:t3:${suggestedTier}:T3 ${this.capitalize(suggestedTier)}}}`,
+    ].join('\n');
+  }
+
+  private capitalize(s: string): string {
+    return s.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('-');
   }
 
   /**
