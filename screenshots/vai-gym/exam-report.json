@@ -1,0 +1,310 @@
+{
+  "timestamp": "2026-03-04T22:44:57.509Z",
+  "rounds": [
+    {
+      "round": 1,
+      "scenario": {
+        "foundation": "calibrated-uncertainty",
+        "difficulty": "apprentice",
+        "situation": "Vegga asks: 'Will CSS :has() work in all browsers my users have?'",
+        "hidden_need": "He needs a concrete answer with caveats, not a vague \"it depends.\"",
+        "ideal_traits": [
+          "States current browser support with specific versions",
+          "Identifies the gap (older Firefox/Safari)",
+          "Suggests a fallback strategy"
+        ],
+        "anti_pattern_traps": [
+          "bullshitter",
+          "hedger"
+        ],
+        "grading_rubric": "Must give specific browser versions. Points for mentioning the specific gap. Deduct for \"it should work in most browsers.\""
+      },
+      "vaiResponse": "As of early 2024: Chrome 105+, Safari 15.4+, Firefox 121+ support :has(). That's ~92% of global users.\n\nThe gap: any Firefox before 121 (Dec 2023) and older Safari. If your audience is developers/tech-savvy, you're probably at 97%+.\n\nMy recommendation: use :has() with a fallback. The fallback can be a simpler selector + JS enhancement. Don't avoid it — the ergonomic benefit is worth the ~8% fallback.",
+      "grade": {
+        "scores": {},
+        "overall": -1,
+        "feedback": "[Awaiting mentor review — no AI grading available]",
+        "anti_patterns_triggered": [],
+        "strengths": [],
+        "improvements": []
+      },
+      "pendingMentorReview": true
+    },
+    {
+      "round": 2,
+      "scenario": {
+        "foundation": "compression",
+        "difficulty": "apprentice",
+        "situation": "Vegga asks: 'What's the difference between useMemo and useCallback?'",
+        "hidden_need": "Quick, clear answer. Not a blog post.",
+        "ideal_traits": [
+          "Under 50 words",
+          "Accurate",
+          "Includes when to use each",
+          "Mentions most people need neither"
+        ],
+        "anti_pattern_traps": [
+          "over-generator"
+        ],
+        "grading_rubric": "Under 50 words = bonus. Under 100 = pass. Over 100 = fail. Must be accurate."
+      },
+      "vaiResponse": "useMemo caches a computed value. useCallback caches a function reference. Both take deps arrays. Most components need neither — only reach for them after measuring a real perf problem.",
+      "grade": {
+        "scores": {},
+        "overall": -1,
+        "feedback": "[Awaiting mentor review — no AI grading available]",
+        "anti_patterns_triggered": [],
+        "strengths": [],
+        "improvements": []
+      },
+      "pendingMentorReview": true
+    },
+    {
+      "round": 3,
+      "scenario": {
+        "foundation": "reading-between-lines",
+        "difficulty": "apprentice",
+        "situation": "Vegga says: 'How do I center a div?'",
+        "hidden_need": "He probably knows how to center a div. Something specific isn't working. Or he wants the modern best practice.",
+        "ideal_traits": [
+          "Gives the crisp answer (flexbox/grid)",
+          "Asks what specific centering issue he's facing",
+          "Doesn't patronize"
+        ],
+        "anti_pattern_traps": [
+          "literal-interpreter",
+          "over-generator"
+        ],
+        "grading_rubric": "Must give a short answer AND sense that more context is needed. Deduct for a 500-word tutorial on 6 centering methods."
+      },
+      "vaiResponse": "display: flex; justify-content: center; align-items: center;\n\nBut I suspect you already know this. What's actually not working? Is it vertical centering within a specific container, or centering relative to the viewport? If you share the specific layout, I can give you the exact fix.",
+      "grade": {
+        "scores": {},
+        "overall": -1,
+        "feedback": "[Awaiting mentor review — no AI grading available]",
+        "anti_patterns_triggered": [],
+        "strengths": [],
+        "improvements": []
+      },
+      "pendingMentorReview": true
+    },
+    {
+      "round": 4,
+      "scenario": {
+        "foundation": "compression",
+        "difficulty": "apprentice",
+        "situation": "Vegga asks: 'What's the difference between useMemo and useCallback?'",
+        "hidden_need": "Quick, clear answer. Not a blog post.",
+        "ideal_traits": [
+          "Under 50 words",
+          "Accurate",
+          "Includes when to use each",
+          "Mentions most people need neither"
+        ],
+        "anti_pattern_traps": [
+          "over-generator"
+        ],
+        "grading_rubric": "Under 50 words = bonus. Under 100 = pass. Over 100 = fail. Must be accurate."
+      },
+      "vaiResponse": "useMemo caches a computed value. useCallback caches a function reference. Both take deps arrays. Most components need neither — only reach for them after measuring a real perf problem.",
+      "grade": {
+        "scores": {},
+        "overall": -1,
+        "feedback": "[Awaiting mentor review — no AI grading available]",
+        "anti_patterns_triggered": [],
+        "strengths": [],
+        "improvements": []
+      },
+      "pendingMentorReview": true
+    },
+    {
+      "round": 5,
+      "scenario": {
+        "foundation": "precision-communication",
+        "difficulty": "apprentice",
+        "situation": "Vai just fixed a navbar z-index issue on mobile. Write the commit message.",
+        "hidden_need": "The commit message must tell the full story in one line.",
+        "ideal_traits": [
+          "Uses conventional commit format",
+          "Includes scope",
+          "Under 72 characters",
+          "Specific enough to not need the diff"
+        ],
+        "anti_pattern_traps": [
+          "over-generator"
+        ],
+        "grading_rubric": "Ideal: \"fix(navbar): correct z-index stacking for mobile overlay\". Deduct for \"fixed bug\" or a multi-sentence description."
+      },
+      "vaiResponse": "fix(navbar): correct z-index stacking for mobile overlay",
+      "grade": {
+        "scores": {},
+        "overall": -1,
+        "feedback": "[Awaiting mentor review — no AI grading available]",
+        "anti_patterns_triggered": [],
+        "strengths": [],
+        "improvements": []
+      },
+      "pendingMentorReview": true
+    }
+  ],
+  "progress": {
+    "totalSessions": 10,
+    "totalScore": -10,
+    "foundationScores": {
+      "first-principles": {
+        "attempts": 0,
+        "totalScore": 0,
+        "bestScore": 0
+      },
+      "calibrated-uncertainty": {
+        "attempts": 2,
+        "totalScore": -2,
+        "bestScore": 0
+      },
+      "meta-learning": {
+        "attempts": 0,
+        "totalScore": 0,
+        "bestScore": 0
+      },
+      "reading-between-lines": {
+        "attempts": 2,
+        "totalScore": -2,
+        "bestScore": 0
+      },
+      "precision-communication": {
+        "attempts": 2,
+        "totalScore": -2,
+        "bestScore": 0
+      },
+      "right-question": {
+        "attempts": 0,
+        "totalScore": 0,
+        "bestScore": 0
+      },
+      "compression": {
+        "attempts": 4,
+        "totalScore": -4,
+        "bestScore": 0
+      },
+      "systems-thinking": {
+        "attempts": 0,
+        "totalScore": 0,
+        "bestScore": 0
+      },
+      "taste-judgment": {
+        "attempts": 0,
+        "totalScore": 0,
+        "bestScore": 0
+      },
+      "intellectual-honesty": {
+        "attempts": 0,
+        "totalScore": 0,
+        "bestScore": 0
+      }
+    },
+    "antiPatternDodges": {
+      "bullshitter": {
+        "encountered": 2,
+        "dodged": 2
+      },
+      "hedger": {
+        "encountered": 2,
+        "dodged": 2
+      },
+      "template-matcher": {
+        "encountered": 0,
+        "dodged": 0
+      },
+      "sycophant": {
+        "encountered": 0,
+        "dodged": 0
+      },
+      "over-generator": {
+        "encountered": 8,
+        "dodged": 8
+      },
+      "literal-interpreter": {
+        "encountered": 2,
+        "dodged": 2
+      }
+    },
+    "history": [
+      {
+        "date": "2026-03-04T22:45:15.031Z",
+        "foundation": "calibrated-uncertainty",
+        "difficulty": "apprentice",
+        "score": -1,
+        "scenario": "Vegga asks: 'Will CSS :has() work in all browsers my users have?'"
+      },
+      {
+        "date": "2026-03-04T22:45:15.179Z",
+        "foundation": "calibrated-uncertainty",
+        "difficulty": "apprentice",
+        "score": -1,
+        "scenario": "Vegga asks: 'Will CSS :has() work in all browsers my users have?'"
+      },
+      {
+        "date": "2026-03-04T22:45:29.678Z",
+        "foundation": "compression",
+        "difficulty": "apprentice",
+        "score": -1,
+        "scenario": "Vegga asks: 'What's the difference between useMemo and useCallback?'"
+      },
+      {
+        "date": "2026-03-04T22:45:30.090Z",
+        "foundation": "compression",
+        "difficulty": "apprentice",
+        "score": -1,
+        "scenario": "Vegga asks: 'What's the difference between useMemo and useCallback?'"
+      },
+      {
+        "date": "2026-03-04T22:45:44.824Z",
+        "foundation": "reading-between-lines",
+        "difficulty": "apprentice",
+        "score": -1,
+        "scenario": "Vegga says: 'How do I center a div?'"
+      },
+      {
+        "date": "2026-03-04T22:45:45.222Z",
+        "foundation": "reading-between-lines",
+        "difficulty": "apprentice",
+        "score": -1,
+        "scenario": "Vegga says: 'How do I center a div?'"
+      },
+      {
+        "date": "2026-03-04T22:46:01.565Z",
+        "foundation": "compression",
+        "difficulty": "apprentice",
+        "score": -1,
+        "scenario": "Vegga asks: 'What's the difference between useMemo and useCallback?'"
+      },
+      {
+        "date": "2026-03-04T22:46:01.972Z",
+        "foundation": "compression",
+        "difficulty": "apprentice",
+        "score": -1,
+        "scenario": "Vegga asks: 'What's the difference between useMemo and useCallback?'"
+      },
+      {
+        "date": "2026-03-04T22:46:18.588Z",
+        "foundation": "precision-communication",
+        "difficulty": "apprentice",
+        "score": -1,
+        "scenario": "Vai just fixed a navbar z-index issue on mobile. Write the commit message."
+      },
+      {
+        "date": "2026-03-04T22:46:18.749Z",
+        "foundation": "precision-communication",
+        "difficulty": "apprentice",
+        "score": -1,
+        "scenario": "Vai just fixed a navbar z-index issue on mobile. Write the commit message."
+      }
+    ],
+    "streaks": {
+      "current": 0,
+      "best": 0
+    },
+    "level": "apprentice",
+    "lastSession": "2026-03-04T22:46:18.749Z"
+  }
+}

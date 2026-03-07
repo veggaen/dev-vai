@@ -22,5 +22,9 @@ export type {
   ToolCallMeta,
   SummaryMeta,
   NoteMeta,
+  PinnedNote,
+  PinnedNoteCategory,
+  ContextSummary,
+  SearchResult,
 } from './types.js';
-export { createSessionId, createEventId, EVENT_TYPE_CONFIG } from './types.js';
+export { createSessionId, createEventId, createPinnedNoteId, EVENT_TYPE_CONFIG } from './types.js';

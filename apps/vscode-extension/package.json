@@ -1,0 +1,106 @@
+{
+  "name": "vai-devlogs",
+  "displayName": "VeggaAI Dev Logs",
+  "description": "Zero-discipline auto-capture of all VS Code activity into VeggaAI Dev Logs — file edits, terminal commands, searches, editor focus, and more.",
+  "version": "0.6.0",
+  "publisher": "v3gga",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "chatParticipants": [
+      {
+        "id": "vai.devlogs",
+        "fullName": "VeggaAI Dev Logs",
+        "name": "vai",
+        "description": "Chat with Copilot while auto-logging to VeggaAI Dev Logs",
+        "isSticky": false
+      }
+    ],
+    "commands": [
+      {
+        "command": "vai.startSession",
+        "title": "VeggaAI: Start Dev Log Session",
+        "icon": "$(radio-tower)"
+      },
+      {
+        "command": "vai.endSession",
+        "title": "VeggaAI: End Dev Log Session",
+        "icon": "$(stop-circle)"
+      },
+      {
+        "command": "vai.sessionStatus",
+        "title": "VeggaAI: Show Session Status",
+        "icon": "$(info)"
+      },
+      {
+        "command": "vai.viewLogs",
+        "title": "VeggaAI: View Dev Logs",
+        "icon": "$(book)"
+      },
+      {
+        "command": "vai.exportMarkdown",
+        "title": "VeggaAI: Export Session as Markdown",
+        "icon": "$(markdown)"
+      }
+    ],
+    "configuration": {
+      "title": "VeggaAI Dev Logs",
+      "properties": {
+        "vai.runtimeUrl": {
+          "type": "string",
+          "default": "http://localhost:3006",
+          "description": "URL of the VeggaAI runtime server"
+        },
+        "vai.autoStartSession": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start a dev log session on activation"
+        },
+        "vai.captureFileEdits": {
+          "type": "boolean",
+          "default": true,
+          "description": "Track file saves and document changes"
+        },
+        "vai.captureTerminal": {
+          "type": "boolean",
+          "default": true,
+          "description": "Track terminal commands and output"
+        },
+        "vai.captureEditorFocus": {
+          "type": "boolean",
+          "default": true,
+          "description": "Track active editor/tab switches"
+        },
+        "vai.captureOutputChannels": {
+          "type": "boolean",
+          "default": true,
+          "description": "Monitor Copilot and GitHub output channels"
+        },
+        "vai.flushIntervalMs": {
+          "type": "number",
+          "default": 500,
+          "description": "Event buffer flush interval in milliseconds"
+        },
+        "vai.excludePatterns": {
+          "type": "array",
+          "default": ["**/node_modules/**", "**/.git/**", "**/out/**", "**/.vegai-dev-logs/**"],
+          "description": "Glob patterns for files/folders to exclude from tracking"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npx @vscode/vsce package --no-dependencies --allow-missing-repository",
+    "install-local": "npx @vscode/vsce package --no-dependencies --allow-missing-repository && code --install-extension vai-devlogs-0.2.0.vsix"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.95.0",
+    "typescript": "^5.7.0"
+  }
+}

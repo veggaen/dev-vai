@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { createServer } from './server.js';
 
 const isWindows = process.platform === 'win32';
@@ -26,7 +26,7 @@ function killPortHolder(port: number): boolean {
       }
       for (const pid of pids) {
         console.log(`[VAI] Killing stale process on port ${port} (PID ${pid})`);
-        try { execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'pipe' }); } catch {}
+        try { execFileSync('taskkill', ['/F', '/T', '/PID', pid], { stdio: 'pipe' }); } catch {}
       }
       return pids.size > 0;
     } else {
@@ -49,7 +49,11 @@ function killPortHolder(port: number): boolean {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const { app, port } = await createServer();
+const { app, port, vaiEngine } = await createServer();
+
+// Flush knowledge persistence on shutdown
+process.on('SIGINT', () => { vaiEngine.flushPersist(); process.exit(0); });
+process.on('SIGTERM', () => { vaiEngine.flushPersist(); process.exit(0); });
 
 async function startWithRetry(maxRetries = 2) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {

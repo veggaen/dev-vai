@@ -28,10 +28,12 @@ export interface DeployEvent {
 
 export type DeployEmitter = (event: DeployEvent) => void;
 
-/** Check if Docker is available on this system */
+/** Check if Docker CLI is installed AND daemon is running */
 function isDockerAvailable(): boolean {
   try {
     execSync('docker --version', { stdio: 'pipe', timeout: 5000 });
+    // Also verify daemon is responsive — `docker version` requires a running daemon
+    execSync('docker version', { stdio: 'pipe', timeout: 10000 });
     return true;
   } catch {
     return false;
@@ -153,7 +155,7 @@ export async function deployStack(
         execSync(`docker build -t ${tag} .`, {
           cwd: project.rootDir,
           stdio: 'pipe',
-          timeout: 180_000,
+          timeout: 300_000,
           ...EXEC_SHELL,
         });
         // Clean up verification image

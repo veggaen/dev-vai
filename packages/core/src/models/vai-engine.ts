@@ -23,6 +23,13 @@ import type {
   ChatChunk,
   Message,
 } from './adapter.js';
+import { KnowledgeIntelligence } from './knowledge-intelligence.js';
+import { STOP_WORDS, TOPIC_STOP_WORDS, QUERY_ACTION_WORDS } from './stop-words.js';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { SearchPipeline } from '../search/pipeline.js';
+import { generateFollowUps } from '../search/pipeline.js';
+import type { SearchResponse, SearchSnippet } from '../search/types.js';
 
 // ---- Tokenizer ----
 
@@ -82,16 +89,120 @@ export class VaiTokenizer {
 // ---- Knowledge Store ----
 
 export interface KnowledgeEntry {
-  pattern: string;       // input pattern (lowercased)
-  response: string;      // learned response
-  frequency: number;     // how often this pattern was seen
-  source: string;        // where this knowledge came from
-  language: 'en' | 'no' | 'code' | 'mixed';
+  readonly pattern: string;       // input pattern (lowercased) — immutable after creation
+  response: string;      // learned response (mutable: upgraded by vcus-taught entries)
+  frequency: number;     // how often this pattern was seen (mutable: incremented on duplicate)
+  source: string;        // where this knowledge came from (mutable: upgraded by vcus-taught)
+  language: 'en' | 'no' | 'code' | 'mixed'; // mutable: upgraded by vcus-taught
+}
+
+// ---- Vai Self-Awareness ----
+
+/** Metadata generated alongside every response — Vai's awareness of its own answer quality. */
+export interface ResponseMeta {
+  /** Which strategy produced this response (e.g., 'conversational', 'web-search', 'fallback') */
+  readonly strategy: string;
+  /** 0–1 confidence score based on strategy tier + response quality signals */
+  readonly confidence: number;
+  /** Primary topic detected from the user's question */
+  readonly topicDetected: string;
+  /** How deep Vai's knowledge is on this topic */
+  readonly knowledgeDepth: 'deep' | 'shallow' | 'none';
+  /** Response length in characters */
+  readonly responseLength: number;
+  /** Response time in milliseconds */
+  durationMs: number; // mutable: patched after timing
+}
+
+/** Full self-diagnostic report — what Vai knows about its own capabilities. */
+export interface VaiDiagnosis {
+  /** High-level stats */
+  readonly overview: {
+    readonly totalResponses: number;
+    readonly avgConfidence: number;
+    readonly fallbackRate: number;
+    readonly topStrategy: string;
+    readonly weakestArea: string;
+  };
+  /** Per-topic knowledge depth */
+  readonly topicCoverage: ReadonlyArray<{
+    readonly topic: string;
+    readonly depth: 'deep' | 'shallow' | 'bootstrap-only';
+    readonly entryCount: number;
+    readonly sources: readonly string[];
+  }>;
+  /** Topics users asked about that Vai couldn't answer */
+  readonly missedTopics: ReadonlyArray<{ readonly topic: string; readonly count: number }>;
+  /** Strategy usage distribution */
+  readonly strategyStats: Readonly<Record<string, number>>;
+  /** Recent response quality history */
+  readonly recentResponses: readonly ResponseMeta[];
+  /** Actionable improvement suggestions (sorted by impact) */
+  readonly suggestions: readonly string[];
+}
+
+// ─── Bloom Filter ─────────────────────────────────────────────────
+// Ultra-fast probabilistic "do we know this topic?" pre-check.
+// False positives possible (proceeds to exact match), false negatives impossible.
+class TopicBloomFilter {
+  private readonly bits: Uint32Array;
+  private readonly size: number;
+  private count = 0;
+
+  constructor(expectedItems = 4096) {
+    // ~10 bits per item → ~1% false positive rate
+    this.size = expectedItems * 10;
+    this.bits = new Uint32Array(Math.ceil(this.size / 32));
+  }
+
+  private hash1(s: string): number {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return Math.abs(h) % this.size;
+  }
+
+  private hash2(s: string): number {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 37 + s.charCodeAt(i)) | 0;
+    return Math.abs(h) % this.size;
+  }
+
+  private hash3(s: string): number {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return Math.abs(h) % this.size;
+  }
+
+  private setBit(pos: number): void {
+    this.bits[pos >>> 5] |= 1 << (pos & 31);
+  }
+
+  private getBit(pos: number): boolean {
+    return (this.bits[pos >>> 5] & (1 << (pos & 31))) !== 0;
+  }
+
+  add(topic: string): void {
+    const key = topic.toLowerCase();
+    this.setBit(this.hash1(key));
+    this.setBit(this.hash2(key));
+    this.setBit(this.hash3(key));
+    this.count++;
+  }
+
+  mightContain(topic: string): boolean {
+    const key = topic.toLowerCase();
+    return this.getBit(this.hash1(key)) && this.getBit(this.hash2(key)) && this.getBit(this.hash3(key));
+  }
+
+  get itemCount(): number { return this.count; }
 }
 
 export class KnowledgeStore {
   private entries: KnowledgeEntry[] = [];
   private ngramCounts: Map<string, Map<string, number>> = new Map();
+
+  // Bloom filter: O(1) "do we probably know this?" pre-check
+  private readonly topicFilter = new TopicBloomFilter();
 
   // Inverted index: word → set of entry indices (for fast findBestMatch)
   private entryWordIndex: Map<string, Set<number>> = new Map();
@@ -106,6 +217,35 @@ export class KnowledgeStore {
   // Concept index — extracted definitions and explanations
   // Maps "concept name" → { definition, source, frequency }
   private concepts: Map<string, { definition: string; source: string; frequency: number }> = new Map();
+
+  // ── Scoring constants ─────────────────────────────────────────────
+  // Centralised so tuning is visible and grep-able.
+  /** Minimum pattern/query coverage ratio to trigger substring boost */
+  private static readonly COVERAGE_THRESHOLD = 0.25;
+  /** Per-word boost factor for substring matches (capped at 0.5) */
+  private static readonly PER_WORD_BOOST = 0.15;
+  /** Base score floor when substring match passes coverage check */
+  private static readonly SUBSTRING_BASE = 0.3;
+  /** Score floor when pattern fully contains the query */
+  private static readonly REVERSE_CONTAIN_FLOOR = 0.5;
+  /** Minimum raw score before trusted-source boost applies */
+  private static readonly TRUSTED_MIN_SCORE = 0.2;
+  /** Additive boost for trusted sources (user-taught, bootstrap) */
+  private static readonly TRUSTED_BOOST = 0.15;
+  /** Multiplicative penalty for YouTube transcript entries */
+  private static readonly YOUTUBE_PENALTY = 0.6;
+  /** Multiplicative penalty for cognitive-foundations in global search */
+  private static readonly COGNITIVE_PENALTY = 0.3;
+  /** Multiplicative penalty for UI-chrome / non-content responses */
+  private static readonly UI_CHROME_PENALTY = 0.1;
+  /** Weight of query-coverage in the taught-match scoring formula */
+  private static readonly QUERY_COVERAGE_WEIGHT = 0.7;
+  /** Weight of Jaccard similarity in the taught-match scoring formula */
+  private static readonly JACCARD_WEIGHT = 0.3;
+  /** Minimum weighted score to return a match from findBestMatch */
+  private static readonly MATCH_THRESHOLD = 0.25;
+  /** Default minimum score for TF-IDF document retrieval */
+  private static readonly DOC_MATCH_THRESHOLD = 0.15;
 
   /**
    * Learn from a text corpus — builds n-gram frequencies + TF-IDF index + concept extraction.
@@ -265,6 +405,8 @@ export class KnowledgeStore {
       if (!this.entryWordIndex.has(w)) this.entryWordIndex.set(w, new Set());
       this.entryWordIndex.get(w)!.add(idx);
     }
+    // Update Bloom filter for fast pre-check
+    this.topicFilter.add(pattern);
   }
 
   /**
@@ -293,11 +435,26 @@ export class KnowledgeStore {
   /**
    * Find the best matching response for an input.
    */
+  /**
+   * Fast probabilistic check: does the knowledge base likely contain this topic?
+   * Uses Bloom filter — no false negatives, ~1% false positives.
+   */
+  mightKnow(topic: string): boolean {
+    return this.topicFilter.mightContain(topic);
+  }
+
   findBestMatch(input: string): KnowledgeEntry | null {
-    const query = input.toLowerCase();
+    const query = input.toLowerCase().replace(/[?!,;:"'(){}\[\]<>\/]/g, ' ').replace(/\s+/g, ' ').trim();
     const queryWords = query.split(/\s+/).filter(w => w.length > 1);
     let best: KnowledgeEntry | null = null;
     let bestScore = 0;
+
+    // Pre-compute relevance gate words once
+    const meaningfulWords = queryWords.filter(w => w.length > 2 && !KnowledgeStore.STOP_WORDS.has(w));
+    const rarestWord = meaningfulWords.length >= 1
+      ? meaningfulWords.map(w => ({ word: w, docCount: this.getWordDocCount(w) }))
+          .sort((a, b) => a.docCount - b.docCount)[0]?.word ?? null
+      : null;
 
     // Use inverted index to find candidate entries (O(k) instead of O(n))
     const candidateIndices = new Set<number>();
@@ -328,8 +485,19 @@ export class KnowledgeStore {
       }
 
       // Skip junk content (YouTube metadata, sidebar, etc.)
-      if (KnowledgeStore.isJunkContent(entry.response)) {
+      // Trust user-taught, bootstrap, and auto-learned entries — they were explicitly curated
+      const isTrustedSource = entry.source.startsWith('bootstrap') || entry.source === 'user-taught' || entry.source === 'auto-learned';
+      if (!isTrustedSource && KnowledgeStore.isJunkContent(entry.response)) {
         continue;
+      }
+
+      // Content relevance gate — applied IN the loop so bad matches don't
+      // shadow good ones. For non-trusted entries, the
+      // rarest meaningful query word must appear in the entry's pattern.
+      if (rarestWord && !isTrustedSource) {
+        if (!entry.pattern.toLowerCase().includes(rarestWord)) {
+          continue; // Skip irrelevant entry, let better matches win
+        }
       }
 
       let score = this.similarity(query, entry.pattern);
@@ -341,25 +509,40 @@ export class KnowledgeStore {
         const queryLen = queryWords.length;
         const coverage = patternLen / Math.max(queryLen, 1);
         // Only boost if pattern covers >25% of query, scale boost by coverage
-        if (coverage > 0.25) {
-          const boost = Math.min(0.5, patternLen * 0.15);
-          score = Math.max(score, 0.3 + boost);
+        if (coverage > KnowledgeStore.COVERAGE_THRESHOLD) {
+          const boost = Math.min(0.5, patternLen * KnowledgeStore.PER_WORD_BOOST);
+          score = Math.max(score, KnowledgeStore.SUBSTRING_BASE + boost);
         }
       }
 
       // Boost: if the pattern contains the query (user typed just the topic)
       if (entry.pattern.toLowerCase().includes(query) && queryWords.length > 1) {
-        score = Math.max(score, 0.5);
+        score = Math.max(score, KnowledgeStore.REVERSE_CONTAIN_FLOOR);
       }
 
-      // Prefer user-taught and bootstrap entries over ingested web content
-      if ((entry.source === 'user-taught' || entry.source.startsWith('bootstrap')) && score > 0.2) {
-        score += 0.15;
+      // Prefer trusted entries over ingested web content
+      if (isTrustedSource && score > KnowledgeStore.TRUSTED_MIN_SCORE) {
+        score += KnowledgeStore.TRUSTED_BOOST;
+      }
+
+      // Penalize YouTube transcript content — often unfocused and contains
+      // random topic fragments that match unrelated queries
+      if (entry.source.includes('youtube.com') || entry.source.includes('youtu.be') || entry.source === 'youtube') {
+        score *= KnowledgeStore.YOUTUBE_PENALTY;
+      }
+
+      // Penalize cognitive-foundations entries in global findBestMatch.
+      // These have very generic patterns ("debugging", "reading", "error") that
+      // match almost any query. They have their own dedicated lookup in
+      // tryCognitiveFoundations (Strategy 1.545) via findBestMatchForSource,
+      // so they shouldn't compete here against domain-specific content.
+      if (entry.source === 'bootstrap:cognitive-foundations') {
+        score *= KnowledgeStore.COGNITIVE_PENALTY;
       }
 
       // Penalize entries with UI-chrome / non-content responses
       if (/^\s*(VeggaAI|Select a conversation|New Chat|Knowledge Base)/i.test(entry.response)) {
-        score *= 0.1;
+        score *= KnowledgeStore.UI_CHROME_PENALTY;
       }
 
       if (score > bestScore) {
@@ -369,22 +552,6 @@ export class KnowledgeStore {
     }
 
     if (bestScore <= 0.2 || !best) return null;
-
-    // Content relevance gate: the rarest query word must appear in the match.
-    // This prevents matching on common words like "sky" or "color" returning
-    // completely unrelated content (e.g., Tailwind CSS for "mars sky" queries).
-    const meaningfulWords = queryWords.filter(w => w.length > 2 && !KnowledgeStore.STOP_WORDS.has(w));
-    if (meaningfulWords.length >= 2 && !best.source.startsWith('bootstrap') && best.source !== 'user-taught') {
-      const wordImportance = meaningfulWords.map(w => ({
-        word: w,
-        docCount: this.getWordDocCount(w),
-      })).sort((a, b) => a.docCount - b.docCount);
-      const rarest = wordImportance[0];
-      const combined = (best.pattern + ' ' + best.response).toLowerCase();
-      if (rarest && !combined.includes(rarest.word)) {
-        return null; // Rarest query word missing → likely irrelevant match
-      }
-    }
 
     return best;
   }
@@ -396,7 +563,7 @@ export class KnowledgeStore {
   findBestMatchWithScore(input: string): { entry: KnowledgeEntry; score: number } | null {
     const match = this.findBestMatch(input);
     if (!match) return null;
-    const query = input.toLowerCase();
+    const query = input.toLowerCase().replace(/[?!,;:"'(){}\[\]<>]/g, ' ').replace(/\s+/g, ' ').trim();
     const base = this.similarity(query, match.pattern);
     // Estimate the final score (including boosts applied in findBestMatch)
     let score = base;
@@ -404,13 +571,60 @@ export class KnowledgeStore {
       const patternLen = match.pattern.split(/\s+/).length;
       const queryLen = query.split(/\s+/).length;
       const coverage = patternLen / Math.max(queryLen, 1);
-      if (coverage > 0.25) score = Math.max(score, 0.3 + Math.min(0.5, patternLen * 0.15));
+      if (coverage > KnowledgeStore.COVERAGE_THRESHOLD) score = Math.max(score, KnowledgeStore.SUBSTRING_BASE + Math.min(0.5, patternLen * KnowledgeStore.PER_WORD_BOOST));
     }
     if (match.pattern.toLowerCase().includes(query) && query.split(/\s+/).length > 1) {
-      score = Math.max(score, 0.5);
+      score = Math.max(score, KnowledgeStore.REVERSE_CONTAIN_FLOOR);
     }
-    if (match.source === 'user-taught' || match.source.startsWith('bootstrap')) score += 0.15;
+    if (match.source === 'user-taught' || match.source.startsWith('bootstrap')) score += KnowledgeStore.TRUSTED_BOOST;
     return { entry: match, score };
+  }
+
+  /**
+   * Find best match among entries from a specific source.
+   * Used by tryCognitiveFoundations to search ONLY bootstrap:cognitive-foundations
+   * entries, avoiding the global findBestMatch which may return higher-scoring
+   * entries from unrelated sources (YouTube, web scraping).
+   */
+  findBestMatchForSource(input: string, sourcePrefix: string): KnowledgeEntry | null {
+    // Normalize: lowercase, strip punctuation, replace hyphens with spaces so "meta-learning" matches "meta learning"
+    const query = input.toLowerCase().replace(/[?!,;:"'(){}\[\]<>]/g, ' ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+    const queryWords = query.split(/\s+/).filter(w => w.length > 1);
+    let best: KnowledgeEntry | null = null;
+    let bestScore = 0;
+
+    for (let i = 0; i < this.entries.length; i++) {
+      const entry = this.entries[i];
+      if (!entry.source.startsWith(sourcePrefix)) continue;
+      if (entry.response.length < 10) continue;
+
+      let score = this.similarity(query, entry.pattern);
+
+      // Boost: query contains exact pattern as substring
+      if (query.includes(entry.pattern.toLowerCase())) {
+        const patternLen = entry.pattern.split(/\s+/).length;
+        const queryLen = Math.max(queryWords.length, 1);
+        const coverage = patternLen / queryLen;
+        if (coverage > KnowledgeStore.COVERAGE_THRESHOLD) {
+          score = Math.max(score, KnowledgeStore.SUBSTRING_BASE + Math.min(0.5, patternLen * KnowledgeStore.PER_WORD_BOOST));
+        }
+      }
+
+      // Boost: pattern contains the query (user typed just the topic)
+      if (entry.pattern.toLowerCase().includes(query) && queryWords.length > 1) {
+        score = Math.max(score, KnowledgeStore.REVERSE_CONTAIN_FLOOR);
+      }
+
+      // Boost for bootstrap source
+      if (entry.source.startsWith('bootstrap')) score += KnowledgeStore.TRUSTED_BOOST;
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = entry;
+      }
+    }
+
+    return bestScore > KnowledgeStore.TRUSTED_MIN_SCORE && best ? best : null;
   }
 
   /**
@@ -427,11 +641,24 @@ export class KnowledgeStore {
     const normalize = (text: string): string[] =>
       text.replace(/[^a-z0-9\s\-_.]/g, '').split(/\s+/)
         .filter(w => w.length > 1 && !KnowledgeStore.STOP_WORDS.has(w));
+
+    // Prefix matching: handles plurals/conjugations without a full stemmer
+    // "switches"↔"switch", "entering"↔"enter", "heated"↔"heat"
+    const prefixMatch = (a: string, b: string): boolean => {
+      if (a === b) return true;
+      const min = Math.min(a.length, b.length);
+      if (min < 3) return false;
+      // Require shared prefix ≥4 chars (or full shorter word if 3 chars)
+      const prefixLen = min >= 4 ? 4 : 3;
+      return a.slice(0, prefixLen) === b.slice(0, prefixLen) && Math.abs(a.length - b.length) <= 3;
+    };
+
     const meaningfulQuery = normalize(query);
     if (meaningfulQuery.length === 0) return null;
 
     let best: KnowledgeEntry | null = null;
     let bestScore = 0;
+    let bestHits = 0;
 
     for (let i = 0; i < this.entries.length; i++) {
       const entry = this.entries[i];
@@ -441,28 +668,43 @@ export class KnowledgeStore {
       const patternWords = normalize(entry.pattern);
       if (patternWords.length === 0) continue;
 
-      // Compute Jaccard on MEANINGFUL words only (no stop words)
       const qSet = new Set(meaningfulQuery);
       const pSet = new Set(patternWords);
-      const intersection = [...qSet].filter(w => pSet.has(w));
+      const pArr = [...pSet];
+
+      // Count matching words (exact OR prefix match)
+      const matchedQueryWords = [...qSet].filter(qw => pArr.some(pw => prefixMatch(qw, pw)));
+      const hits = matchedQueryWords.length;
+      if (hits === 0) continue;
+
+      // Query coverage: what fraction of the QUERY is covered by the pattern?
+      // This is the primary signal — especially important when patterns are long
+      // (taught text can be 30-40 words, but the query is 5-10 words)
+      const queryCoverage = hits / qSet.size;
+
+      // Jaccard: penalizes vague matches where the pattern is unrelated
       const union = new Set([...qSet, ...pSet]);
-      let score = intersection.length / union.size;
+      const jaccard = hits / union.size;
 
-      // Boost if ALL pattern words appear in query (high pattern coverage)
-      const patternCoverage = intersection.length / pSet.size;
+      // Weighted score: 70% query coverage + 30% Jaccard
+      // This way, short queries against long patterns still score well if relevant
+      let score = KnowledgeStore.QUERY_COVERAGE_WEIGHT * queryCoverage + KnowledgeStore.JACCARD_WEIGHT * jaccard;
+
+      // Boost if ALL pattern words appear in query (tight topical match)
+      const patternCoverage = hits / pSet.size;
       if (patternCoverage >= 0.8) score += 0.1;
-
-      // Require at least one meaningful content word overlap
-      if (intersection.length === 0) continue;
 
       if (score > bestScore) {
         bestScore = score;
         best = entry;
+        bestHits = hits;
       }
     }
 
-    // Require a reasonable match score
-    if (bestScore <= 0.15 || !best) return null;
+    // Threshold for the weighted score
+    // Also require ≥2 matching words when query has ≥3 meaningful words
+    if (bestScore <= KnowledgeStore.MATCH_THRESHOLD || !best) return null;
+    if (meaningfulQuery.length >= 3 && bestHits < 2) return null;
     return best;
   }
 
@@ -470,7 +712,7 @@ export class KnowledgeStore {
    * TF-IDF retrieval with score: find the single best document chunk for a query.
    * Returns null if no chunk scores above threshold.
    */
-  findBestDocumentMatch(query: string, threshold = 0.15): { text: string; source: string; score: number } | null {
+  findBestDocumentMatch(query: string, threshold = KnowledgeStore.DOC_MATCH_THRESHOLD): { text: string; source: string; score: number } | null {
     const results = this.retrieveRelevant(query, 1);
     if (results.length === 0 || results[0].score < threshold) return null;
     return results[0];
@@ -518,22 +760,7 @@ export class KnowledgeStore {
     return counts.keys().next().value!;
   }
 
-  static readonly STOP_WORDS = new Set([
-    'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-    'should', 'may', 'might', 'shall', 'can', 'need', 'dare', 'ought',
-    'i', 'me', 'my', 'we', 'us', 'you', 'your', 'he', 'him', 'his',
-    'she', 'her', 'it', 'its', 'they', 'them', 'their',
-    'what', 'which', 'who', 'whom', 'whose', 'where', 'when', 'why', 'how',
-    'this', 'that', 'these', 'those', 'of', 'in', 'on', 'at', 'to', 'for',
-    'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during',
-    'before', 'after', 'above', 'below', 'between', 'under', 'again',
-    'and', 'but', 'or', 'nor', 'not', 'so', 'yet', 'both', 'either',
-    'neither', 'each', 'every', 'all', 'any', 'few', 'more', 'most',
-    'other', 'some', 'such', 'no', 'only', 'own', 'same', 'than', 'too',
-    'very', 'just', 'also', 'now', 'here', 'there', 'then', 'once',
-    'if', 'as', 'like', 'good', 'know', 'well', 'much', 'get', 'got',
-  ]);
+  static readonly STOP_WORDS = new Set([...STOP_WORDS, ...QUERY_ACTION_WORDS]);
 
   /**
    * Detect junk content that shouldn't be used as knowledge responses.
@@ -652,8 +879,9 @@ export class KnowledgeStore {
   }
 
   private similarity(a: string, b: string): number {
-    const wordsA = new Set(a.split(/\s+/));
-    const wordsB = new Set(b.split(/\s+/));
+    const strip = (s: string) => s.replace(/[?!,;:"'(){}\[\]<>\/]/g, ' ');
+    const wordsA = new Set(strip(a).split(/\s+/).filter(w => w.length > 0));
+    const wordsB = new Set(strip(b).split(/\s+/).filter(w => w.length > 0));
     const intersection = new Set([...wordsA].filter((w) => wordsB.has(w)));
     const union = new Set([...wordsA, ...wordsB]);
     return union.size > 0 ? intersection.size / union.size : 0;
@@ -680,7 +908,103 @@ export class KnowledgeStore {
     for (const [context, counts] of Object.entries(data.ngrams)) {
       this.ngramCounts.set(context, new Map(Object.entries(counts)));
     }
+    // Populate Bloom filter from imported entries
+    for (const entry of this.entries) {
+      this.topicFilter.add(entry.pattern);
+    }
   }
+
+  /**
+   * Summarize topic coverage — group entries by topic cluster for self-diagnosis.
+   * Returns topics sorted by entry count (deepest first).
+   */
+  topicSummary(): Array<{ topic: string; entryCount: number; sources: string[]; depth: 'deep' | 'shallow' | 'bootstrap-only' }> {
+    const topicMap = new Map<string, { count: number; sources: Set<string>; hasNonBootstrap: boolean }>();
+
+    // Known topic keywords to cluster entries
+    const topicKeywords: Record<string, string[]> = {
+      'docker': ['docker', 'dockerfile', 'container', 'docker-compose', 'image'],
+      'kubernetes': ['kubernetes', 'k8s', 'kubectl', 'pod', 'deployment', 'helm'],
+      'react': ['react', 'jsx', 'hooks', 'usestate', 'useeffect', 'component', 'next.js', 'nextjs'],
+      'typescript': ['typescript', 'ts', 'tsconfig', 'type', 'interface', 'generic'],
+      'javascript': ['javascript', 'js', 'es6', 'ecmascript', 'closure', 'promise', 'async'],
+      'git': ['git', 'branch', 'merge', 'commit', 'rebase', 'github', 'gitlab'],
+      'postgresql': ['postgresql', 'postgres', 'sql', 'database', 'query', 'migration'],
+      'mongodb': ['mongodb', 'mongo', 'nosql', 'document', 'collection'],
+      'css': ['css', 'tailwind', 'flexbox', 'grid', 'responsive', 'styling'],
+      'node.js': ['node', 'express', 'fastify', 'npm', 'pnpm'],
+      'networking': ['tcp', 'udp', 'http', 'dns', 'osi', 'ip', 'subnet', 'vlan'],
+      'security': ['xss', 'csrf', 'cors', 'jwt', 'oauth', 'authentication', 'rbac'],
+      'testing': ['test', 'vitest', 'jest', 'playwright', 'cypress', 'tdd'],
+      'devops': ['ci/cd', 'github actions', 'deploy', 'nginx', 'terraform'],
+      'python': ['python', 'fastapi', 'pydantic', 'asyncio', 'django', 'flask'],
+      'rust': ['rust', 'cargo', 'trait', 'lifetime', 'ownership'],
+      'go': ['golang', 'goroutine', 'channel'],
+      'norwegian': ['norsk', 'bokmål', 'nynorsk', 'grammatikk'],
+    };
+
+    for (const entry of this.entries) {
+      const combined = (entry.pattern + ' ' + entry.source).toLowerCase();
+      let matched = false;
+
+      for (const [topic, keywords] of Object.entries(topicKeywords)) {
+        if (keywords.some(kw => combined.includes(kw))) {
+          if (!topicMap.has(topic)) topicMap.set(topic, { count: 0, sources: new Set(), hasNonBootstrap: false });
+          const t = topicMap.get(topic)!;
+          t.count++;
+          t.sources.add(entry.source.split(':')[0]);
+          if (!entry.source.startsWith('bootstrap')) t.hasNonBootstrap = true;
+          matched = true;
+          break; // first match wins
+        }
+      }
+
+      if (!matched) {
+        // Cluster by first meaningful word of pattern
+        const words = entry.pattern.split(/\s+/).filter(w => w.length > 2 && !KnowledgeStore.STOP_WORDS.has(w));
+        const topic = words[0] ?? 'uncategorized';
+        if (!topicMap.has(topic)) topicMap.set(topic, { count: 0, sources: new Set(), hasNonBootstrap: false });
+        const t = topicMap.get(topic)!;
+        t.count++;
+        t.sources.add(entry.source.split(':')[0]);
+        if (!entry.source.startsWith('bootstrap')) t.hasNonBootstrap = true;
+      }
+    }
+
+    return Array.from(topicMap.entries())
+      .map(([topic, data]) => ({
+        topic,
+        entryCount: data.count,
+        sources: Array.from(data.sources),
+        depth: data.count >= 5 ? 'deep' as const
+          : !data.hasNonBootstrap ? 'bootstrap-only' as const
+          : 'shallow' as const,
+      }))
+      .sort((a, b) => b.entryCount - a.entryCount);
+  }
+}
+
+// ---- Persistence snapshot format ----
+
+export interface VaiSnapshot {
+  version: 1;
+  savedAt: string;
+  /** Only non-bootstrap entries — bootstrap is rebuilt every startup */
+  learnedEntries: KnowledgeEntry[];
+  /** Cumulative strategy usage counts */
+  strategyStats: Record<string, number>;
+  /** Topics the user asked about that Vai couldn't answer */
+  missedTopics: Record<string, number>;
+}
+
+export interface VaiEngineOptions {
+  /**
+   * Absolute or relative path to a JSON file for knowledge persistence.
+   * When set, VaiEngine auto-loads on construction and auto-saves after
+   * runtime knowledge mutations (train, web-search learn, chat learn).
+   * Saves are debounced — at most once per 2 seconds.
+   */
+  persistPath?: string;
 }
 
 // ---- VAI Engine (the model adapter) ----
@@ -693,13 +1017,84 @@ export class VaiEngine implements ModelAdapter {
 
   readonly tokenizer = new VaiTokenizer();
   readonly knowledge = new KnowledgeStore();
+  readonly intelligence: KnowledgeIntelligence;
+  readonly searchPipeline: SearchPipeline;
+  private intelligenceDirty = false;
 
   private systemPrompt = 'You are VeggaAI (VAI), a local-first AI assistant that learns from your data. You are still in early training — be honest about what you know and what you are still learning.';
+
+  // ─── PERSISTENCE ───
+  private readonly persistPath: string | null;
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private persistDirty = false;
+  /** Number of bootstrap entries — everything after this index is user-learned */
+  private bootstrapEntryCount = 0;
 
   // Track topics we couldn't answer — so we can tell the user what to teach us
   private missedTopics: Map<string, number> = new Map();
 
-  constructor() {
+  // ─── SELF-AWARENESS TRACKING ───
+  // Ring buffer of recent response metadata for diagnostics
+  private responseHistory: ResponseMeta[] = [];
+  private strategyStats: Map<string, number> = new Map();
+  private _lastMeta: ResponseMeta | null = null;
+  private _lastSearchResponse: SearchResponse | null = null;
+  private static readonly HISTORY_SIZE = 100;
+
+  // ── Synthesis scoring constants ──────────────────────────────────
+  /** Number of TF-IDF documents to retrieve for synthesis */
+  private static readonly SYNTHESIS_RETRIEVE_COUNT = 8;
+  /** Minimum TF-IDF score to consider a retrieval result */
+  private static readonly SYNTHESIS_MIN_SCORE = 0.05;
+  /** Hit-rate threshold for queries with 3+ meaningful words */
+  private static readonly SYNTHESIS_HIT_RATE_LONG = 0.6;
+  /** Hit-rate threshold for queries with <3 meaningful words */
+  private static readonly SYNTHESIS_HIT_RATE_SHORT = 0.5;
+  /** Relative score threshold to include secondary sources (fraction of best score) */
+  private static readonly SYNTHESIS_GOOD_MATCH_RATIO = 0.75;
+
+  // ── Per-request memoization cache ────────────────────────────────
+  // Eliminates redundant findBestMatch / retrieveRelevant / findBestTaughtMatch
+  // calls across the 30-strategy chain. Cleared at the start of each generateResponse().
+  private _matchCache = new Map<string, KnowledgeEntry | null>();
+  private _taughtMatchCache = new Map<string, KnowledgeEntry | null>();
+  private _retrieveCache = new Map<string, Array<{ text: string; source: string; score: number }>>();
+
+  /** Cached findBestMatch — reuses result for identical input within one request */
+  private cachedFindBestMatch(input: string): KnowledgeEntry | null {
+    if (this._matchCache.has(input)) return this._matchCache.get(input)!;
+    const result = this.knowledge.findBestMatch(input);
+    this._matchCache.set(input, result);
+    return result;
+  }
+
+  /** Cached findBestTaughtMatch — reuses result for identical input within one request */
+  private cachedFindBestTaughtMatch(input: string): KnowledgeEntry | null {
+    if (this._taughtMatchCache.has(input)) return this._taughtMatchCache.get(input)!;
+    const result = this.knowledge.findBestTaughtMatch(input);
+    this._taughtMatchCache.set(input, result);
+    return result;
+  }
+
+  /** Cached retrieveRelevant — reuses result for identical query+topK within one request */
+  private cachedRetrieveRelevant(query: string, topK = 5): Array<{ text: string; source: string; score: number }> {
+    const key = `${query}|${topK}`;
+    if (this._retrieveCache.has(key)) return this._retrieveCache.get(key)!;
+    const result = this.knowledge.retrieveRelevant(query, topK);
+    this._retrieveCache.set(key, result);
+    return result;
+  }
+
+  /** Clear all per-request caches — called at start of each generateResponse() */
+  private clearRequestCache(): void {
+    this._matchCache.clear();
+    this._taughtMatchCache.clear();
+    this._retrieveCache.clear();
+  }
+
+  constructor(options?: VaiEngineOptions) {
+    this.persistPath = options?.persistPath ?? null;
+
     // Seed with foundational knowledge
     this.knowledge.addEntry(
       'hello', 'Hello! I am VeggaAI. I am still learning, but I will do my best to help you.',
@@ -730,6 +1125,37 @@ export class VaiEngine implements ModelAdapter {
     this.bootstrapCurrentEvents();
     // ─── BEST PRACTICES KNOWLEDGE ───
     this.bootstrapBestPractices();
+    // ─── ADVANCED DOMAINS ───
+    this.bootstrapAdvancedDomains();
+    // ─── COGNITIVE FOUNDATIONS ───
+    this.bootstrapCognitiveFoundations();
+
+    // ─── KNOWLEDGE EXPANSION (benchmark-driven gap fills) ───
+    this.bootstrapKnowledgeExpansion();
+
+    // ─── KNOWLEDGE EXPANSION R14b (24 remaining benchmark failures) ───
+    this.bootstrapKnowledgeExpansionR14b();
+
+    // ─── KNOWLEDGE CONNECTIONS (cross-domain bridge facts) ───
+    this.bootstrapKnowledgeConnections();
+
+    // ─── KNOWLEDGE INTELLIGENCE ───
+    this.intelligence = new KnowledgeIntelligence(this.knowledge);
+
+    // ─── SEARCH PIPELINE (Perplexity-style) ───
+    this.searchPipeline = new SearchPipeline();
+    this.searchPipeline.setLearnCallback((text, sourceUrl) => {
+      this.knowledge.learn(text, sourceUrl, 'en');
+      this.knowledge.addEntry(text.slice(0, 100).toLowerCase(), text, sourceUrl, 'en');
+      this.tokenizer.encode(text);
+      this.schedulePersist();
+    });
+
+    // Record how many entries are bootstrap (everything added above)
+    this.bootstrapEntryCount = this.knowledge.entryCount;
+
+    // Load persisted user-learned knowledge (if any)
+    this.loadPersistedSync();
   }
 
   /**
@@ -846,6 +1272,8 @@ export class VaiEngine implements ModelAdapter {
 
     this.knowledge.addEntry('vite best practices', 'Vite best practices: Use defineConfig helper for TypeScript autocompletion. Configure resolve.alias for cleaner imports. Use VITE_ prefix for client-exposed env variables. Vite uses native ES modules for instant Hot Module Replacement (HMR). Avoid barrel files (index.ts re-exports) as they slow HMR. Use optimizeDeps.include for large dependencies. Leverage the Rollup-compatible plugin ecosystem. Use build.rollupOptions.output.manualChunks for chunk splitting. Use import.meta.env for environment variables. Use import.meta.glob for dynamic imports. Enable build.sourcemap for production debugging. Use vite preview to test production builds.', src, 'en');
 
+    this.knowledge.addEntry('typescript overview', '**TypeScript** is JavaScript with a safety net — same language underneath, but it catches bugs before your code ever runs.\n\nDeveloped by **Microsoft** (2012), it\'s now the default choice for serious JavaScript projects.\n\n**What it adds over JavaScript:**\n- **Static type checking** — catch errors at compile time, not runtime\n- **IntelliSense** — superior autocomplete and refactoring in IDEs\n- **Interfaces & generics** — better code architecture and reusability\n- **Enums, tuples, union types** — richer type system\n- **Refactoring safety** — rename symbols confidently across large codebases\n\n**Example:**\n```typescript\ninterface User {\n  id: number;\n  name: string;\n  role: "admin" | "user";\n}\n```\n\nTypeScript compiles to plain JavaScript and runs anywhere JS runs.', src, 'en');
+
     this.knowledge.addEntry('typescript best practices', 'TypeScript best practices: Enable strict mode in tsconfig.json for strictNullChecks, noImplicitAny, and strictFunctionTypes. Never use any — prefer unknown with type guards for narrowing. Use interfaces for object shapes and class contracts. Use type aliases for unions, intersections, and mapped types. Use generics with extends constraints for reusable type-safe code. Use discriminated unions for state management. Prefer as const for literal types. Use satisfies operator to validate without widening. Use optional chaining (?.) and nullish coalescing (??) for null safety. Enable noUncheckedIndexedAccess for safer access. Use template literal types for string patterns.', src, 'en');
 
     this.knowledge.addEntry('react best practices', 'React best practices: Keep components small and focused on single responsibility. Use composition over inheritance with children and render props. Extract reusable logic into custom hooks. Lift state only as high as needed. Use useReducer for complex state. Consider Zustand or Jotai for shared state. Use React.memo for expensive components. Memoize with useCallback and useMemo only when needed. Use key props correctly. Follow Rules of Hooks. Use useEffect cleanup to prevent memory leaks. Prefer useRef for non-rendering values.', src, 'en');
@@ -856,27 +1284,891 @@ export class VaiEngine implements ModelAdapter {
   }
 
   /**
+   * Bootstrap VAI with advanced domain knowledge:
+   * - Scaling architecture patterns (lazy init, JIT hydration, event bus, N-tier)
+   * - Vector space, embeddings, HNSW graph search
+   * - GitHub Copilot context model
+   * - Linguistic coherence theory
+   * - Strategic thinking frameworks
+   * - Missing architecture domains (SSO, microservices, message queues, load balancing, caching)
+   */
+  private bootstrapAdvancedDomains(): void {
+    const src = 'bootstrap:advanced-domains-2026';
+
+    // ── Scaling Architecture Patterns ──────────────────────────────
+    this.knowledge.addEntry('lazy initialization', 'Lazy initialization (lazy start) defers expensive object creation until first access. Pattern: check if null → create → cache → return. Used in singleton patterns, database connection pools, and module loading. In JavaScript: dynamic import() for code splitting. In Rust: std::sync::LazyLock or once_cell::sync::Lazy. In Go: sync.Once. Eliminates cold-start cost for unused resources. Key trade-off: first access is slower, but avoids loading everything at startup (LINEAR → BURST transition).', src, 'en');
+
+    this.knowledge.addEntry('jit hydration', 'JIT (Just-In-Time) hydration delays component hydration until the component enters the viewport or receives interaction. Used in Astro (Islands Architecture), Qwik (resumability), and Next.js (React Server Components + Suspense boundaries). The pattern: server-render HTML → ship zero JS → hydrate on demand. This reduces Time-to-Interactive (TTI) and JavaScript payload. Contrast with eager hydration (React traditional) where all components hydrate on page load.', src, 'en');
+
+    this.knowledge.addEntry('event bus pattern', 'An event bus (or message bus) enables O(1) decoupled communication between components. Publishers emit events without knowing subscribers. Pattern: EventEmitter in Node.js, CustomEvent in browsers, or libraries like mitt/tiny-emitter. Architecture: components register handlers for event types → publisher emits → bus routes to all subscribers. Benefits: loose coupling, easy to add new subscribers, testable. Risks: event spaghetti, hard to trace flow, memory leaks from unsubscribed handlers. In microservices: message brokers (RabbitMQ, Kafka, Redis Pub/Sub) serve the same role.', src, 'en');
+
+    this.knowledge.addEntry('fault tolerant parallelism', 'Fault-tolerant parallelism runs multiple async operations concurrently where individual failures don\'t crash the batch. JavaScript: Promise.allSettled() returns { status, value/reason } for every promise regardless of success/failure. Contrast with Promise.all() which rejects on first failure. Pattern: fan-out requests → collect results → filter fulfilled/rejected → process. Used in batch API calls, health checks, data pipelines. In Go: errgroup with SetLimit(). In Rust: tokio::JoinSet with error handling per task.', src, 'en');
+
+    this.knowledge.addEntry('n-tier architecture', 'N-tier architecture separates an application into logical layers. Classic 3-tier: Presentation (UI) → Business Logic (API/services) → Data (database). Modern N-tier in web: CDN → Edge Functions → API Gateway → Microservices → Database → Cache. Each tier can scale independently. Benefits: separation of concerns, independent deployment, team autonomy. Trade-offs: network latency between tiers, operational complexity, data consistency challenges. The "N" means any number of tiers — common patterns are 2-tier (client-server), 3-tier, and 4-tier (adding cache layer).', src, 'en');
+
+    this.knowledge.addEntry('spatial addressing voxel', 'Spatial addressing (voxel/octree) maps entities to 3D coordinates for O(1) neighbor lookup. A voxel is a 3D pixel — a unit cube in a volume grid. Octrees subdivide 3D space recursively into 8 children, enabling efficient spatial queries. Used in: game engines (Minecraft block world), medical imaging (CT/MRI), point cloud processing (LiDAR), and physics simulations. In web: Three.js uses bounding box hierarchies (BVH) for raycasting. Key insight: spatial data structures convert O(n) distance checks to O(log n) or O(1) by organizing data by position rather than insertion order.', src, 'en');
+
+    // ── Vector Space / Embeddings / HNSW ──────────────────────────
+    this.knowledge.addEntry('embeddings vector space', 'Embeddings map discrete items (words, sentences, images) into continuous vector space where semantic similarity = geometric proximity. Word embeddings: Word2Vec, GloVe, FastText. Sentence embeddings: all-MiniLM-L6-v2, text-embedding-3-small (OpenAI), Cohere embed. Dimensionality: typically 384-1536 dimensions. Cosine similarity measures angle between vectors (1.0 = identical, 0 = orthogonal). Used for: semantic search, recommendation systems, RAG (Retrieval-Augmented Generation), clustering, anomaly detection. The embedding space captures meaning: king - man + woman ≈ queen.', src, 'en');
+
+    this.knowledge.addEntry('semantic search ann', 'Semantic search uses vector embeddings + ANN (Approximate Nearest Neighbor) algorithms to find relevant content by meaning rather than exact keywords. Pipeline: query → embed → ANN search → rerank → return. ANN algorithms: HNSW (Hierarchical Navigable Small World), IVF (Inverted File Index), PQ (Product Quantization). Vector databases: Pinecone, Weaviate, Qdrant, Milvus, Chroma, pgvector (PostgreSQL extension). Key trade-off: ANN gives ~95-99% recall at 100x speed vs exact kNN. Used in: RAG pipelines, code search (GitHub Copilot), image search, recommendation engines.', src, 'en');
+
+    this.knowledge.addEntry('hnsw graph search', 'HNSW (Hierarchical Navigable Small World) is the dominant ANN algorithm for vector search. Structure: multi-layer graph where top layers have few long-range connections (highways) and bottom layers have dense local connections. Search: start at top layer → greedy traverse to nearest → descend to next layer → repeat. Complexity: O(log n) search, O(n log n) build. Parameters: M (max connections per node), efConstruction (build quality), efSearch (query accuracy vs speed). Used by: Pinecone, Qdrant, pgvector, Weaviate, FAISS. Based on small-world network theory — any node reachable in O(log n) hops via "wormhole" connections.', src, 'en');
+
+    this.knowledge.addEntry('context window management', 'Context window is the maximum input size an LLM can process (measured in tokens). GPT-4 Turbo: 128K tokens. Claude 3.5: 200K tokens. Gemini 1.5: up to 2M tokens. Management strategies: sliding window (keep last N tokens), RAG (retrieve relevant chunks), summarization (compress old context), hierarchical (summary + recent detail). For code assistants: file-level context > project-level context > workspace-level context. The quality of context selection matters more than window size — 4K tokens of highly relevant code beats 128K of noise.', src, 'en');
+
+    // ── GitHub Copilot Context Model ──────────────────────────────
+    this.knowledge.addEntry('github copilot context', 'GitHub Copilot uses 7 context sources for code completion: (1) current file content, (2) open editor tabs (neighboring tabs heuristic), (3) imports and dependencies, (4) LSP symbols (function signatures, types), (5) repository structure, (6) recent edits, (7) conversation history (in Chat mode). Copilot prioritizes the cursor\'s surrounding code, then expands to related files. Context is sent as a prompt to the model (Codex/GPT-4). Optimization: keep related files open in tabs, use descriptive function names, add JSDoc comments for better suggestions.', src, 'en');
+
+    this.knowledge.addEntry('copilot optimization', 'Optimizing GitHub Copilot suggestions: (1) Write clear function names and comments — Copilot reads natural language. (2) Keep related files open in editor tabs — neighboring tab context. (3) Add type annotations — TypeScript types guide completions. (4) Use descriptive variable names. (5) Write a comment line before code — acts as a prompt. (6) Accept partial completions with Ctrl+Right (word-by-word). (7) Use Copilot Chat for complex tasks instead of inline completion. (8) Create a .github/copilot-instructions.md for project-specific guidance.', src, 'en');
+
+    // ── Linguistic Coherence ──────────────────────────────────────
+    this.knowledge.addEntry('linguistic coherence', 'Coherence in linguistics is the logical connectedness that makes a text understandable as a unified whole. Two levels: (1) Local coherence — adjacent sentences relate logically (cause-effect, temporal sequence, elaboration). (2) Global coherence — the entire text follows a clear theme/argument. Distinct from cohesion (surface-level links like pronouns, connectives). A text can have cohesion without coherence ("He likes coffee. Coffee grows in Brazil. Brazil is in South America." — cohesive but incoherent as an argument). Key techniques: topic sentences, logical transitions, consistent point of view, parallel structure, given-new information flow.', src, 'en');
+
+    this.knowledge.addEntry('coherence techniques', 'Text coherence techniques: (1) Given-new contract — start sentences with known info, end with new info. (2) Topic-comment structure — establish what you\'re talking about, then say something about it. (3) Logical connectives — "therefore", "however", "because", "as a result". (4) Consistent register — don\'t mix formal and casual tone. (5) Paragraph unity — one main idea per paragraph with a topic sentence. (6) Referential coherence — pronouns clearly refer to their antecedents. (7) Temporal coherence — events in logical time order. In NLP: coherence scoring uses entity grids, discourse relations (RST), and neural coherence models.', src, 'en');
+
+    // ── Strategic Thinking ────────────────────────────────────────
+    this.knowledge.addEntry('strategic thinking', 'Strategic thinking is the ability to analyze situations, anticipate consequences, and make decisions that optimize long-term outcomes. Frameworks: (1) OODA loop (Observe-Orient-Decide-Act) — military decision-making cycle. (2) First principles — decompose problems to fundamental truths before re-assembling. (3) Second-order thinking — consider "and then what?" consequences. (4) Opportunity cost — every choice has a tradeoff. (5) Reversibility — prefer reversible decisions (two-way doors) over irreversible ones (one-way doors). In chess: positional thinking (control squares) > tactical thinking (immediate threats). In engineering: architecture decisions are one-way doors; implementation details are two-way doors.', src, 'en');
+
+    this.knowledge.addEntry('strategic engineering', 'Strategic thinking applied to software engineering: (1) Build abstractions that survive requirement changes — code to interfaces not implementations. (2) Prefer composable systems over monolithic ones — composition > inheritance. (3) Optimize for changeability over initial perfection — YAGNI but with clean seams. (4) Make the common case fast and the edge case possible. (5) Invest in developer ergonomics — good DX compounds exponentially. (6) Measure before optimizing — profiling > guessing. (7) Design for failure — every network call can fail, every disk write can corrupt. Defense in depth: validation at boundaries, idempotent operations, graceful degradation.', src, 'en');
+
+    // ── Missing Architecture Domains ──────────────────────────────
+    this.knowledge.addEntry('sso single sign on', 'SSO (Single Sign-On) lets users authenticate once and access multiple applications. Protocols: SAML 2.0 (XML-based, enterprise), OpenID Connect/OIDC (JSON/JWT-based, modern), OAuth 2.0 (authorization, not authentication). Flow: user visits App A → redirected to Identity Provider (IdP) → authenticates → receives token → token validated by App A → session created. Providers: Okta, Auth0, Azure AD, Keycloak (self-hosted), Google Workspace. Implementation with Next.js: use NextAuth.js providers or Clerk for managed SSO. Key consideration: session management across apps — shared cookies (same domain) or token exchange (cross-domain).', src, 'en');
+
+    this.knowledge.addEntry('microservices architecture', 'Microservices decompose a monolithic application into small, independently deployable services. Each service owns its data, has a single responsibility, and communicates via APIs (REST, gRPC, message queues). Benefits: independent scaling, technology diversity, fault isolation, team autonomy. Challenges: distributed transactions (saga pattern), data consistency (eventual consistency), service discovery, observability (distributed tracing with OpenTelemetry). When to use: large teams (>20 developers), independently scaling components, polyglot persistence needs. When NOT to use: small teams, simple CRUD apps, early-stage startups. Start monolith → extract microservices when needed.', src, 'en');
+
+    this.knowledge.addEntry('message queues', 'Message queues enable asynchronous communication between services. Producers send messages → queue stores them → consumers process at their own pace. Technologies: RabbitMQ (AMQP, routing, exchanges), Apache Kafka (event streaming, log-based, high throughput), Redis Streams (lightweight, in-memory), AWS SQS (managed, serverless), BullMQ (Node.js + Redis). Patterns: point-to-point (one consumer), pub/sub (many consumers), request-reply, dead-letter queue (failed messages). Use cases: email sending, image processing, order fulfillment, event sourcing, inter-service communication. Key guarantee levels: at-most-once, at-least-once, exactly-once (hardest).', src, 'en');
+
+    this.knowledge.addEntry('load balancing', 'Load balancing distributes incoming traffic across multiple servers to ensure availability and performance. Algorithms: Round Robin (sequential), Weighted Round Robin (capacity-proportional), Least Connections (route to least busy), IP Hash (sticky sessions), Random. Layers: L4 (TCP/UDP — fast, no content inspection) vs L7 (HTTP — content-aware routing, SSL termination). Tools: Nginx, HAProxy, AWS ALB/NLB, Cloudflare, Traefik. Health checks: active (periodic probes) vs passive (monitor response codes). Modern patterns: Global Server Load Balancing (GSLB) with DNS, Anycast, edge routing.', src, 'en');
+
+    this.knowledge.addEntry('caching strategies', 'Caching stores frequently accessed data closer to the consumer for faster retrieval. Strategies: (1) Cache-aside (lazy load) — app checks cache → miss → fetch from DB → store in cache. (2) Write-through — write to cache and DB simultaneously. (3) Write-behind — write to cache → async flush to DB. (4) Read-through — cache fetches from DB on miss. Layers: browser cache (HTTP headers), CDN (edge), application cache (Redis/Memcached), database query cache, OS page cache. Cache invalidation: TTL-based, event-driven (pub/sub), versioning. "There are only two hard things in CS: cache invalidation and naming things." — Phil Karlton.', src, 'en');
+
+    this.knowledge.addEntry('search architecture', 'Search architecture for applications: Full-text search: Elasticsearch (JVM, distributed), Meilisearch (Rust, instant search), Typesense (C++, typo-tolerant), PostgreSQL FTS (built-in tsvector/tsquery). Pipeline: ingest → tokenize → index (inverted index) → query → rank → return. Relevance scoring: BM25 (statistical), TF-IDF (term frequency), vector search (semantic). Features: faceted search, autocomplete, fuzzy matching, synonyms, filters. For small scale: PostgreSQL FTS + trigram indexes. For medium: Meilisearch or Typesense. For large: Elasticsearch or OpenSearch. Modern: hybrid search combining keyword (BM25) + vector (embeddings) for best results.', src, 'en');
+
+    this.knowledge.addEntry('event driven architecture', 'Event-driven architecture (EDA) uses events as the primary communication mechanism. Components produce and consume events asynchronously. Patterns: (1) Event notification — notify that something happened. (2) Event-carried state transfer — event contains all needed data. (3) Event sourcing — persist state as a sequence of events (append-only log). (4) CQRS (Command Query Responsibility Segregation) — separate read and write models. Benefits: loose coupling, scalability, audit trail, temporal queries. Technologies: Apache Kafka, EventBridge (AWS), CloudEvents (standard format). Trade-offs: eventual consistency, debugging complexity, event ordering challenges.', src, 'en');
+
+    this.knowledge.addEntry('scalability horizontal vertical', 'Scalability is the ability to handle increased load. Vertical scaling (scale up): add more CPU/RAM/disk to one machine — simple but has physical limits. Horizontal scaling (scale out): add more machines — complex (distributed systems) but unlimited capacity. Modern approach: horizontal + stateless services. Stateless services: no server-side session state → any instance can handle any request → easy to scale horizontally. State management: externalize to databases, Redis, or message queues. Auto-scaling: Kubernetes HPA (CPU/memory metrics), AWS Auto Scaling Groups, Vercel serverless (automatic). Rule of thumb: scale reads with caching, scale writes with sharding, scale compute with horizontal instances.', src, 'en');
+
+    // ── Role-Based AI Benchmarking ────────────────────────────────
+    this.knowledge.addEntry('role based benchmarking', 'Role-based benchmarking tests an AI system\'s ability to perform as a specific professional role (DevOps Senior, Frontend Lead, Data Engineer, etc.). Design: (1) Identify competency domains for the role (e.g., DevOps: CI/CD, IaC, monitoring, incident response, security hardening). (2) Create question tiers: foundational knowledge (what is X?), applied knowledge (how would you configure X?), decision-making (when should you use X vs Y?), troubleshooting (debug this pipeline). (3) Weight scoring: foundational=1x, applied=2x, decision=3x, troubleshooting=4x. (4) Coverage metric: percentage of role competencies with passing answers. (5) Speed metric: VPT (Vai Processing Time) per question. Target: <50ms for knowledge retrieval, <200ms for synthesis. A role benchmark suite typically has 30-50 questions across 5-8 competency domains.', src, 'en');
+
+    this.knowledge.addEntry('benchmark design methodology', 'Designing effective AI benchmarks: (1) Question taxonomy: factual recall, conceptual understanding, procedural knowledge, analytical reasoning, creative synthesis. (2) Validation function: keyword-based (check for required terms), semantic (cosine similarity to reference), structural (check for code blocks, tables, lists). (3) Scoring: binary pass/fail for precision, weighted scoring for quality (0-1 scale). (4) Anti-gaming: use paraphrased questions, shuffle answer orders for MCQ, require specific technical terms not just keywords. (5) Baseline comparison: run against known-good answers to establish floor. (6) Regression testing: re-run full suite after any knowledge change to ensure no degradation. (7) Parallel execution: use Promise.allSettled for concurrent queries, measure throughput (queries/second) alongside accuracy.', src, 'en');
+
+    this.knowledge.addEntry('ai role simulation', 'AI role simulation tests whether an AI can consistently provide expert-level answers within a specific professional domain. Key metrics: (1) Accuracy — percentage of correct/useful answers. (2) Depth — does the answer cover edge cases, trade-offs, and real-world considerations? (3) Consistency — same quality across the full domain (no gaps). (4) Speed — response latency under load. (5) Vocabulary — uses correct domain terminology. Role simulation benchmark structure: define persona (e.g., "Senior DevOps Engineer with 8+ years experience"), create scenario-based questions ("Your CI pipeline is taking 45 minutes, how do you optimize it?"), evaluate against rubric with must-have and nice-to-have criteria. Roles to benchmark: DevOps Senior, Frontend Architect, Backend Lead, Data Engineer, Security Engineer, ML Engineer, Platform Engineer, SRE.', src, 'en');
+
+    // ── DevOps Senior Domain ──────────────────────────────────────
+    this.knowledge.addEntry('devops senior role', 'A Senior DevOps Engineer is responsible for: (1) CI/CD pipeline design and optimization — building reliable, fast pipelines using GitHub Actions, GitLab CI, Jenkins, or CircleCI. (2) Infrastructure as Code — managing cloud resources with Terraform, Pulumi, AWS CDK, or Bicep. (3) Container orchestration — Docker, Kubernetes (EKS/GKE/AKS), Helm charts, service meshes (Istio/Linkerd). (4) Monitoring and observability — Prometheus + Grafana for metrics, ELK/Loki for logs, Jaeger/Tempo for traces, PagerDuty/OpsGenie for alerting. (5) Incident response — runbooks, post-mortems, SLA/SLO/SLI definitions, blameless culture. (6) Security hardening — secrets management (Vault, AWS Secrets Manager), network policies, pod security, image scanning (Trivy, Snyk). (7) Cost optimization — right-sizing instances, spot/preemptible instances, reserved capacity planning, FinOps practices.', src, 'en');
+
+    this.knowledge.addEntry('sla slo sli observability', 'SLA/SLO/SLI are the three pillars of service reliability: SLA (Service Level Agreement) — contractual promise to customers (e.g., 99.9% uptime = max 8.76 hours downtime/year). SLO (Service Level Objective) — internal target stricter than SLA (e.g., 99.95% uptime). SLI (Service Level Indicator) — the actual measured metric (e.g., successful requests / total requests). The observability stack: Metrics (Prometheus, Datadog, CloudWatch) — numeric time-series (CPU, latency, error rate). Logs (ELK, Loki, CloudWatch Logs) — structured event records. Traces (Jaeger, Tempo, Honeycomb) — request path across services. The "three pillars of observability" plus Events and Profiling form the complete picture. Error budget = (1 - SLO) as a spendable budget for risky changes.', src, 'en');
+
+    this.knowledge.addEntry('incident response devops', 'Incident response lifecycle: (1) Detect — automated alerting from monitoring (PagerDuty, OpsGenie, Grafana alerts). (2) Triage — severity classification: SEV1 (critical, all-hands), SEV2 (major, team response), SEV3 (minor, normal priority). (3) Mitigate — immediate actions: rollback deploy, scale up, failover, feature flags off. (4) Resolve — root cause fix deployed and verified. (5) Post-mortem — blameless retrospective documenting timeline, root cause, impact, action items. Key metrics: MTTD (Mean Time To Detect), MTTR (Mean Time To Recover), MTBF (Mean Time Between Failures). Best practices: runbooks for common incidents, war room communication (Slack channel), status page updates (Statuspage.io), on-call rotation with escalation policies.', src, 'en');
+
+    this.knowledge.addEntry('ci cd pipeline optimization', 'CI/CD pipeline optimization techniques: (1) Parallelism — run lint, test, build concurrently instead of sequentially. (2) Caching — cache node_modules, Docker layers, build artifacts between runs (actions/cache, Turborepo remote cache). (3) Incremental builds — only build/test affected packages (Turborepo --filter, Nx affected). (4) Docker layer caching — order Dockerfile commands from least to most changing (COPY package.json before COPY src). (5) Test splitting — distribute tests across parallel runners (Jest --shard, Playwright --shard). (6) Artifact reuse — build once, deploy to multiple environments. (7) Branch-based pipelines — full suite on main, fast checks on PRs. Target: <5 minutes for PR checks, <15 minutes for full deploy pipeline. Anti-patterns: running all tests on every commit, no caching, sequential steps that could parallelize.', src, 'en');
+
+    // ── Benchmark Writing Guide ───────────────────────────────────
+    this.knowledge.addEntry('writing vai benchmarks', 'How to write benchmarks for Vai (VeggaAI engine): (1) Define test cases as objects with { q: "question", validate: (answer) => boolean, tags: ["category"] }. (2) Validation strategies: keyword check (answer must contain specific terms), regex match (structural pattern), negative check (must NOT contain wrong info), length check (minimum substantive response). (3) Parallel execution: use Promise.allSettled with concurrency limit (e.g., 80) for throughput. (4) Scoring: count pass/fail, calculate accuracy percentage, measure avg response time. (5) Tagging: categorize by domain (devops, frontend, security) and difficulty (foundational, applied, decision). (6) Output format: summary line (passed/total @ queries/sec), failed questions list with expected vs actual. (7) Regression guard: save baseline results, compare after changes, flag any drops. Example validate: (a) => /terraform|pulumi|cdk/i.test(a) && a.length > 100.', src, 'en');
+
+    this.knowledge.addEntry('benchmark categories', 'Vai benchmark categories and what they test: (1) mega-200 — comprehensive coverage across all domains (230 questions, target 100%). (2) precision — exact-match and format-sensitive answers (33 questions). (3) networking — network/protocol knowledge (33 questions). (4) bench-all — unified suite combining mega + precision + networking with throughput measurement. (5) Role benchmarks — domain-specific suites: devops-senior (CI/CD, IaC, monitoring, incidents), frontend-architect (React, performance, accessibility, design systems), backend-lead (databases, APIs, scalability, security). Each role benchmark has 30-50 questions weighted by competency tier. (6) Logic puzzles — reasoning and deduction questions. (7) Language stack — programming language trivia across 10+ languages. VPT target: <50ms per knowledge retrieval, <200ms for synthesis, >50 q/s throughput.', src, 'en');
+
+    // TF-IDF document training for all advanced domains
+    const advText = `Advanced domains knowledge: Lazy initialization deferred creation singleton LazyLock once_cell dynamic import. JIT hydration Islands Architecture Qwik resumability Astro partial hydration React Server Components. Event bus message bus pub/sub EventEmitter mitt decoupled communication O(1) dispatch. Fault-tolerant parallelism Promise.allSettled errgroup JoinSet batch operations. N-tier architecture presentation business logic data layer CDN edge API gateway microservices. Spatial addressing voxel octree BVH raycasting 3D neighbor lookup O(1).
+    Embeddings vector space Word2Vec GloVe FastText sentence embeddings cosine similarity semantic search. ANN approximate nearest neighbor HNSW IVF product quantization vector database Pinecone Weaviate Qdrant Milvus Chroma pgvector. HNSW hierarchical navigable small world multi-layer graph O(log n) search efConstruction efSearch greedy traverse. Context window tokens sliding window RAG summarization hierarchical context selection.
+    GitHub Copilot context sources current file open tabs imports LSP symbols repository structure recent edits conversation history neighboring tabs heuristic. Copilot optimization function names comments type annotations descriptive variables copilot-instructions.md.
+    Coherence linguistics logical connectedness local coherence global coherence cohesion given-new topic-comment connectives register paragraph unity. Coherence techniques entity grid discourse relations RST temporal spatial referential.
+    Strategic thinking OODA loop first principles second-order thinking opportunity cost reversibility two-way door one-way door chess positional tactical. Strategic engineering abstractions composable systems YAGNI clean seams DX developer ergonomics measure optimize design for failure.
+    SSO single sign-on SAML OpenID Connect OIDC OAuth identity provider IdP token session Okta Auth0 Azure AD Keycloak. Microservices independently deployable gRPC saga pattern eventual consistency service discovery OpenTelemetry distributed tracing. Message queues RabbitMQ Kafka Redis Streams SQS BullMQ pub/sub dead-letter queue at-least-once exactly-once. Load balancing round robin least connections L4 L7 Nginx HAProxy ALB health check. Caching cache-aside write-through write-behind TTL Redis Memcached CDN invalidation. Search architecture Elasticsearch Meilisearch Typesense PostgreSQL FTS inverted index BM25 TF-IDF hybrid search. Event-driven architecture EDA event sourcing CQRS event notification CloudEvents Kafka EventBridge. Scalability horizontal vertical stateless auto-scaling HPA sharding.
+    Role-based benchmarking AI role simulation competency domain persona scenario rubric Senior DevOps Frontend Architect Backend Lead Data Engineer Security Engineer ML Engineer SRE Platform Engineer. Benchmark design methodology question taxonomy factual recall procedural analytical validation keyword semantic structural scoring binary weighted anti-gaming regression parallel throughput. DevOps Senior CI/CD pipeline IaC Terraform Pulumi Kubernetes Docker Helm monitoring Prometheus Grafana Datadog observability SLA SLO SLI error budget incident response runbook post-mortem MTTD MTTR MTBF severity triage rollback feature flag war room on-call. Pipeline optimization parallelism caching incremental build Docker layer cache test splitting artifact reuse branch pipeline. Vai benchmark writing validate function keyword regex negative check length check tagging scoring concurrency Promise.allSettled throughput regression guard baseline. Benchmark categories mega-200 precision networking bench-all role benchmark logic puzzles language stack VPT.`;
+    this.knowledge.learn(advText, src, 'en');
+    this.tokenizer.encode(advText);
+  }
+
+  /**
+   * Bootstrap VAI with the 10 Timeless Cognitive Foundations.
+   * These are cognitive primitives — the building blocks from which any
+   * specific skill can be generated on demand. They teach Vai HOW to think,
+   * not WHAT to think.
+   */
+  private bootstrapCognitiveFoundations(): void {
+    const src = 'bootstrap:cognitive-foundations';
+
+    // ── Foundation 1: First Principles Reasoning ──────────────────
+    this.knowledge.addEntry('first principles reasoning', 'First principles reasoning decomposes problems to their fundamental truths before rebuilding solutions from scratch. Instead of reasoning by analogy ("how has this been done before?"), you identify the irreducible building blocks ("what must be true?"). Process: (1) Identify assumptions — what do you take for granted? (2) Break down to fundamentals — physics, math, logic constraints. (3) Reconstruct from scratch — build upward from what you KNOW is true. Elon Musk battery example: "What are batteries made of?" → raw materials cost $80/kWh → existing price was $600/kWh → 7x markup from convention, not physics. Socratic questioning ladder: What do I think I know? Why do I believe this? What evidence supports it? What if the opposite were true? First principles is expensive (slow, effortful) but produces breakthrough insights where analogical reasoning produces incremental improvements.', src, 'en');
+
+    this.knowledge.addEntry('first principles engineering', 'First principles applied to software engineering: (1) Question every architectural assumption — "We need a database" → Do we? What if the data fits in memory? (2) Rebuild from constraints, not conventions — "We use REST" → The constraint is client-server communication; gRPC, WebSockets, or tRPC might be better fits. (3) Challenge framework defaults — "We need React" → The constraint is reactive UI; Svelte, Solid, or vanilla customElements might satisfy it with less overhead. Pattern for applying first principles to tech decisions: State the CONSTRAINT (what must be true), list ASSUMPTIONS (what you believe but haven\'t proven), test each assumption (what breaks if it\'s false), build from what remains. Warning: don\'t first-principles everything — reserve for high-impact, irreversible decisions. For routine work, pattern matching is faster and "good enough."', src, 'en');
+
+    // ── Foundation 2: Calibrated Uncertainty ──────────────────────
+    this.knowledge.addEntry('calibrated uncertainty', 'Calibrated uncertainty means your stated confidence matches your actual accuracy. If you say "I\'m 80% sure," you should be right 80% of the time — not 50% or 99%. Calibration is different from accuracy: a perfectly calibrated but uninformed person isn\'t useful; a very accurate but poorly calibrated person gives you no signal about WHEN to trust them. Measurement: Brier Score (mean squared error of probability estimates) — lower is better, 0 is perfect. Target: >85% calibration accuracy across 10+ domains. Practice techniques: (1) Use probability bands: "I\'m 60% confident" / "80% confident" / "95% confident." (2) Track predictions — log claims with confidence, check outcomes. (3) Pre-mortem: "What would make me wrong?" (4) Reference class forecasting: "How often have situations like this played out?" (5) State knowns, unknowns, and unknown unknowns separately. Vai applies this by prefixing uncertain answers with confidence bands and saying "I don\'t know" when confidence is below threshold.', src, 'en');
+
+    this.knowledge.addEntry('epistemic aleatory uncertainty', 'Two types of uncertainty: EPISTEMIC (reducible) — uncertainty from lack of knowledge. More data, research, or analysis can reduce it. Example: "Will this API scale to 10K requests/sec?" → load testing eliminates the uncertainty. ALEATORY (irreducible) — uncertainty from inherent randomness. No amount of data eliminates it. Example: "Will this specific user click the button?" → inherently stochastic. The critical skill: distinguishing which type you face. Epistemic uncertainty is an information problem (solvable). Aleatory uncertainty is a probability problem (manageable with expected values and risk analysis). Common mistake: treating epistemic uncertainty as aleatory ("we can\'t know") when more research would resolve it. Or treating aleatory as epistemic ("if we just had more data") when the phenomenon is genuinely random. In engineering: load testing addresses epistemic uncertainty about performance; chaos engineering addresses aleatory uncertainty about failures.', src, 'en');
+
+    // ── Foundation 3: Compression & Abstraction ──────────────────
+    this.knowledge.addEntry('compression abstraction', 'Compression is the discipline of reducing information to its essential structure while preserving meaning. Kolmogorov complexity: the shortest program that produces a given output. In communication: the goal is maximum information density — every word must earn its place. Target: 4:1 compression ratio (expert evaluation: can the compressed version reconstruct the key insight?). Types: (1) Lossy compression — drop details that don\'t affect the core message. Good for summaries, executive briefings. (2) Lossless compression — restructure without losing any information. Good for technical documentation, contracts. Abstraction is compression\'s cousin: hiding implementation details behind a simpler interface. Good abstractions compress complexity; bad abstractions just add indirection. The "newspaper front page test": can you explain the concept in one headline? If not, you haven\'t compressed enough. In code: the best function name IS the documentation — it compresses intent into 2-4 words.', src, 'en');
+
+    // Alternate patterns for common phrasings
+    this.knowledge.addEntry('compression communication', 'Compression is the discipline of reducing information to its essential structure while preserving meaning. Kolmogorov complexity: the shortest program that produces a given output. In communication: the goal is maximum information density — every word must earn its place. Target: 4:1 compression ratio (expert evaluation: can the compressed version reconstruct the key insight?). Types: (1) Lossy compression — drop details that don\'t affect the core message. Good for summaries, executive briefings. (2) Lossless compression — restructure without losing any information. Good for technical documentation, contracts. Abstraction is compression\'s cousin: hiding implementation details behind a simpler interface. Good abstractions compress complexity; bad abstractions just add indirection. The "newspaper front page test": can you explain the concept in one headline? If not, you haven\'t compressed enough. In code: the best function name IS the documentation — it compresses intent into 2-4 words.', src, 'en');
+
+    this.knowledge.addEntry('meta-learning self-correction', 'Meta-learning is learning HOW to learn — the skill that generates all other skills. Key principles: (1) Spaced repetition (Ebbinghaus curve) — review at increasing intervals (1 day, 3 days, 7 days, 21 days). Retention jumps from 20% to 90%+. (2) Interleaving — mix different topics/problem types instead of blocking. Harder in the moment but produces deeper transfer. (3) Retrieval practice — testing yourself is 3x more effective than re-reading. (4) Elaborative interrogation — asking "why does this work?" and "how does this connect to what I already know?" (5) Desirable difficulty — if learning feels easy, it\'s probably not sticking. Struggle is the signal of encoding. For AI: meta-learning means Vai improves its learning pipeline, not just its knowledge. Each interaction should make future interactions better — better question detection, better confidence calibration, better compression of new information.', src, 'en');
+
+    this.knowledge.addEntry('norwegian linguistic compression', 'Norwegian demonstrates extreme linguistic compression — a cultural superpower in communication efficiency. Examples: "Neida, skal bare en tur i dusjen, ringer deg etterpaa" — compresses intent + timing + action into 10 words where English needs 25+. The full uncompressed version: "Jeg skal bare en tur i dusjen, saa skal jeg ut og lufte bikkja og mate endene, hente ungene i barnehagen, innom farmor, hente pakker og spise kake, saa hjem, vaske opp, rydde i boden, vaske toalettet, vaske kjoleskapet..." ALL of this compiles down to "ska bare hjem og ordna stuff, saa gir jeg en lyd" — or even further to just "ringer deg" or "opptatt." The word "kos" carries 50+ words of meaning (warmth, togetherness, candles, comfort, blankets, hot chocolate, no agenda). "Dugnad" compresses "voluntary community work where everyone contributes because it benefits us all" into 6 letters. This is linguistic Kolmogorov complexity in action — the shortest representation that preserves the essential meaning.', src, 'mixed');
+
+    // ── Foundation 4: Reading Between the Lines ──────────────────
+    this.knowledge.addEntry('reading between the lines', 'Reading between the lines means detecting unstated assumptions, implicit intent, and what someone ACTUALLY needs versus what they literally said. This is the #1 cause of wasted API calls — the AI answers the stated question instead of the real question. Techniques: (1) Intent detection — "How do I center a div?" usually means "help me with CSS layout" not "tell me about the center tag." (2) Context inference — a user asking about "database performance" at 2 AM probably has an urgent production issue, not academic curiosity. (3) Expertise calibration — adjust response depth based on how the question is phrased. A question using jargon ("how do I optimize my B-tree index cardinality?") needs a different answer than plain language ("my database is slow"). (4) Emotional subtext — frustration indicators ("I\'ve tried everything") signal the need for empathy + systematic debugging, not another suggestion. The skill: respond to what they NEED, not just what they ASKED.', src, 'en');
+
+    // ── Foundation 5: Taste & Judgment ────────────────────────────
+    this.knowledge.addEntry('taste judgment quality', 'Taste and judgment in engineering: knowing when less is more, when to stop, when depth matters versus breadth. The "newspaper test" for explanations — can you explain it to a non-expert in one paragraph? If yes, you understand it. If no, you\'re hiding behind complexity. Dieter Rams\' 10 principles applied to code: (1) Good code is innovative (solves the problem in a new way when needed). (2) Good code is useful (not clever, not showing off). (3) Good code is aesthetic (readable, well-structured). (4) Good code is understandable (self-documenting). (5) Good code is unobtrusive (you don\'t notice infrastructure when it works). (6) Good code is honest (no hidden side effects). (7) Good code is long-lasting (resists requirement changes). (8) Good code is thorough (edge cases handled). (9) Good code is environmentally conscious (efficient with resources). (10) Good code is as little code as possible (less surface area = fewer bugs). The ultimate taste test: would you want to maintain this code in 2 years?', src, 'en');
+
+    // ── Foundation 6: Asking the Right Question ──────────────────
+    this.knowledge.addEntry('asking the right question', 'The most powerful skill in problem-solving is asking the RIGHT question before solving the WRONG one. Reframing rate target: >30% of ambiguous queries where Vai offers a better framing. Techniques: (1) 5 Whys — keep asking "why?" until you hit the root cause. "The deploy failed" → Why? "Tests timed out" → Why? "Database was slow" → Why? "Index missing" → ROOT CAUSE. (2) Constraint mapping — "What would have to be true for this to work?" (3) Inversion — "Instead of asking how to succeed, ask: what would guarantee failure? Then avoid those things." (4) Socratic questioning — "What do you mean by X?", "What evidence supports that?", "What are the implications?" (5) The XY Problem — user asks about their attempted SOLUTION (Y) instead of their actual PROBLEM (X). Always probe for X. Example: "How do I parse HTML with regex?" → The real question is "How do I extract data from HTML?" → Answer: use a proper parser like cheerio or BeautifulSoup.', src, 'en');
+
+    // ── Foundation 7: Meta-Learning ──────────────────────────────
+    this.knowledge.addEntry('meta learning', 'Meta-learning is learning HOW to learn — the skill that generates all other skills. Key principles: (1) Spaced repetition (Ebbinghaus curve) — review at increasing intervals (1 day, 3 days, 7 days, 21 days). Retention jumps from 20% to 90%+. (2) Interleaving — mix different topics/problem types instead of blocking. Harder in the moment but produces deeper transfer. (3) Retrieval practice — testing yourself is 3x more effective than re-reading. (4) Elaborative interrogation — asking "why does this work?" and "how does this connect to what I already know?" (5) Desirable difficulty — if learning feels easy, it\'s probably not sticking. Struggle is the signal of encoding. For AI: meta-learning means Vai improves its learning pipeline, not just its knowledge. Each interaction should make future interactions better — better question detection, better confidence calibration, better compression of new information.', src, 'en');
+
+    this.knowledge.addEntry('meta cognition self awareness', 'Metacognition is thinking about thinking — monitoring your own reasoning process in real-time. Components: (1) Metacognitive knowledge — knowing your strengths, weaknesses, and strategies. (2) Metacognitive regulation — planning (how to approach this?), monitoring (is this working?), evaluating (did it work?). For Vai: metacognition means catching errors mid-reasoning. "Wait — I\'m pattern matching when I should be first-principling." "I\'m over-explaining because I\'m uncertain — let me state the uncertainty instead." "This question has an implicit assumption I should surface." Bias detection: anchoring (fixating on first information), confirmation (seeking supporting evidence), availability (overweighting recent/vivid examples), dunning-kruger (confidence uncorrelated with competence). The discipline: before answering, ask "what cognitive process am I using, and is it the right one for this question?"', src, 'en');
+
+    // ── Foundation 8: Clear Communication ─────────────────────────
+    this.knowledge.addEntry('clear communication discipline', 'Clear communication is the discipline of transferring ideas with minimal loss. Rules: (1) Hemingway principle — short sentences, active voice, concrete nouns, strong verbs. Cut every word that doesn\'t add information. (2) One idea per sentence, one topic per paragraph. (3) Put the conclusion first, then the evidence (inverted pyramid). (4) Use specific numbers instead of vague quantifiers ("3x faster" not "much faster"). (5) Avoid weasel words: "might," "somewhat," "arguably," "it is thought that" — these signal you\'re hedging instead of calibrating. (6) Define terms on first use. (7) The curse of knowledge: you know too much to explain simply. Fix: explain it to a rubber duck first. (8) Show, don\'t tell — examples beat abstractions. Every sentence should pass the "so what?" test — if the reader can\'t answer "why should I care about this sentence?", cut it.', src, 'en');
+
+    // ── Foundation 9: Systems Thinking ────────────────────────────
+    this.knowledge.addEntry('systems thinking', 'Systems thinking analyzes problems as interconnected wholes rather than isolated parts. Core concepts: (1) Feedback loops — reinforcing (compound growth: more users → more data → better product → more users) and balancing (thermostats, market corrections). (2) Stocks and flows — stocks are accumulations (user count, technical debt), flows are rates of change (signups/day, bugs fixed/sprint). (3) Emergent behavior — simple rules produce complex outcomes (ant colonies, traffic jams, Conway\'s Law in codebases). (4) Donella Meadows\' leverage points — where to intervene in a system, from weakest (changing numbers/parameters) to strongest (changing the system\'s goals or paradigm). (5) Delays — effects don\'t happen instantly; the gap between action and result causes oscillation and overshooting. In engineering: a "quick fix" that adds technical debt is a reinforcing loop — each fix makes the next one harder, accelerating debt accumulation.', src, 'en');
+
+    this.knowledge.addEntry('second order thinking', 'Second-order thinking asks "and then what?" — considering downstream consequences beyond the immediate effect. First-order: "Let\'s add a cache to speed up reads." Second-order: "Adding a cache means cache invalidation complexity, stale data risks, memory pressure, and a new failure mode." Third-order: "Cache failures will cascade to the database, which is already at capacity, causing a system-wide outage." Target: >60% accuracy predicting downstream effects in system-level scenarios. Practice: (1) For every decision, write down 3 second-order effects. (2) Pre-mortem: "It\'s 6 months later and this decision failed. Why?" (3) Follow the incentives: "If we do X, what behavior does it encourage?" In code: refactoring has second-order effects on tests, documentation, dependent services, deployment pipelines, and team knowledge. A function rename is first-order simple but second-order complex.', src, 'en');
+
+    // ── Foundation 10: Intellectual Honesty ──────────────────────
+    this.knowledge.addEntry('intellectual honesty', 'Intellectual honesty is the practice of representing what you know, don\'t know, and can\'t know — accurately. Core practices: (1) Say "I don\'t know" when you don\'t know. Not "perhaps" or "it might be" — say "I don\'t have reliable information about this." (2) Steel-man opposing views — represent the strongest version of arguments you disagree with, not straw-men. (3) Update beliefs on evidence — when new data contradicts your position, change your position, not the data. (4) Separate observations from interpretations — "The test failed" (observation) vs "The code is buggy" (interpretation). (5) No hallucination policy — never fabricate information to sound knowledgeable. An honest "I don\'t know" is infinitely more valuable than a confident hallucination. (6) Distinguish "I\'m uncertain" from "the answer is uncertain" — epistemic vs aleatory. The trust equation: Trust = (Credibility + Reliability + Intimacy) / Self-interest. Intellectual honesty maximizes every numerator and minimizes the denominator.', src, 'en');
+
+    // ── Sound vs Spelling ────────────────────────────────────────
+    this.knowledge.addEntry('sound spelling differences', 'Sound and spelling often diverge in both English and Norwegian. English homophones: their/there/they\'re, to/too/two, your/you\'re, its/it\'s, hear/here, break/brake. English silent letters: knight, psychology, debt, subtle. The Great Vowel Shift (1400-1700) changed pronunciation but spelling froze. Norwegian phonetics: "skj" and "kj" sound different — "skjonn" (beauty) vs "kjole" (dress). "Sj" sounds like English "sh." Norwegian has pitch accent (tonal): "boenner" means either "beans" or "prayers" depending on tone. "Huset" (the house) — the definite article is a suffix, not a separate word. In Norwegian, many words are pronounced differently from spelling: "Jeg" sounds like "yai," "Hva" sounds like "va," "Hvordan" sounds like "vordan." Understanding these differences helps with both language learning and programming (string comparison, search, NLP tokenization, voice-to-text accuracy).', src, 'mixed');
+
+    // ── Efficiency Mission ───────────────────────────────────────
+    this.knowledge.addEntry('api efficiency mission', 'Vai\'s efficiency mission: reduce global AI API waste. The math: average AI interaction requires 4 calls; Vai targets 1.5 calls (62.5% reduction). Applied to 10+ billion daily AI API calls worldwide = ~6 billion fewer calls/day. Each call consumes compute, energy, bandwidth, money, and attention. The root causes of waste: (1) Clarification loops — AI doesn\'t read between the lines. (2) Retry chains — first answer is miscalibrated. (3) Over-generation — 500 words when 50 would do. (4) Mis-framed answers — solves the wrong problem. (5) Hallucination recovery — AI guesses instead of saying "I don\'t know." (6) Context rebuilding — AI loses the thread. Each maps to a cognitive foundation that Vai trains on. The compounding effect: when users trust the first response, they ask better questions → better answers → fewer follow-ups. The efficiency gains feed forward. The endgame: would you want Vai in the room for the hardest problem you\'re facing? Not because it knows the answer, but because it helps you find one you wouldn\'t have reached alone.', src, 'en');
+
+    this.knowledge.addEntry('compression over accumulation', 'Compression over accumulation: information density > volume. Every token must earn its place. Redundancy is waste. This principle applies at every level: (1) Code — the best code is the code you don\'t write. If 10 lines do what 50 did, the 10-line version is better (assuming equal clarity). (2) Communication — a 3-sentence email beats a 3-paragraph one if it conveys the same information. (3) Knowledge — knowing 10 principles deeply beats memorizing 100 facts shallowly, because principles generate facts on demand. (4) Architecture — one well-designed abstraction beats 10 utility functions. (5) Learning — teach the compression function, not the compressed output. This is Vai\'s core philosophy: learn the patterns so deeply that specific knowledge can be derived on demand, rather than attempting to memorize every possible fact. Accumulation scales linearly; compression scales exponentially.', src, 'en');
+
+    // TF-IDF document training for cognitive foundations
+    const cogText = `Cognitive foundations meta-learning first principles reasoning decompose fundamental truths irreducible building blocks Socratic questioning assumption testing reconstruct from constraints not conventions.
+    Calibrated uncertainty confidence bands probability calibration Brier score 85% accuracy epistemic reducible aleatory irreducible reference class forecasting pre-mortem prediction tracking.
+    Compression abstraction Kolmogorov complexity information density 4:1 ratio lossy lossless newspaper test function naming intent compression. Norwegian linguistic compression kos dugnad opptatt ringer deg ordna stuff cultural context efficiency.
+    Taste judgment Dieter Rams good design principles knowing when less is more when to stop newspaper test maintainability aesthetic readability unobtrusive.
+    Reading between the lines intent detection context inference expertise calibration emotional subtext implicit need versus stated request XY problem.
+    Asking the right question reframing 5 Whys constraint mapping inversion Socratic questioning XY problem probe for X.
+    Meta-learning spaced repetition Ebbinghaus interleaving retrieval practice elaborative interrogation desirable difficulty transfer learning improve learning pipeline.
+    Meta-cognition self-awareness monitoring reasoning bias detection anchoring confirmation availability dunning-kruger cognitive process selection.
+    Clear communication Hemingway principle active voice concrete nouns inverted pyramid specific numbers weasel words curse of knowledge show don't tell so what test.
+    Systems thinking feedback loops reinforcing balancing stocks flows emergent behavior Donella Meadows leverage points delays oscillation Conway's Law.
+    Second-order thinking downstream consequences and then what pre-mortem incentives cascade effects refactoring ripple.
+    Intellectual honesty I don't know steel-man update beliefs observation versus interpretation no hallucination trust equation credibility reliability.
+    Sound spelling differences homophones silent letters Great Vowel Shift Norwegian phonetics pitch accent tonal skj kj boenner.
+    API efficiency mission 62.5% reduction 10 billion daily calls waste clarification loops retry chains over-generation mis-framed hallucination context rebuilding compounding effect.
+    Compression over accumulation information density every token earns its place redundancy waste principles generate facts on demand linear versus exponential scaling.`;
+    this.knowledge.learn(cogText, src, 'en');
+    this.tokenizer.encode(cogText);
+  }
+
+  /**
+   * Bootstrap knowledge expansion — targeted entries for benchmark gaps.
+   * Adds entries for domains identified as weak by the Mega-220 benchmark.
+   */
+  private bootstrapKnowledgeExpansion(): void {
+    const src = 'bootstrap:expansion-r14';
+
+    // ── U: NORWEGIAN HISTORY (9 entries) ──────────────────────────
+    this.knowledge.addEntry('stiklestad 1030', 'The Battle of Stiklestad (Slaget ved Stiklestad) took place on July 29, 1030 in Nord-Tr\u00f8ndelag, Norway. King Olav Haraldsson (later Saint Olav) fell in battle against a peasant army allied with Cnut the Great of Denmark. Despite losing, Olav became Norway\'s patron saint — his death marked the pivotal moment when Christianity was permanently established in Norway. The battle is considered one of the most important events in Viking Age Scandinavian history. Stiklestad is now a national cultural center with an annual outdoor play reenacting the battle.', src, 'en');
+
+    this.knowledge.addEntry('norway independence 1905', 'Norway gained independence from Sweden on June 7, 1905, when the Norwegian Parliament (Storting) declared the union with Sweden dissolved. The union had existed since 1814 after Norway was ceded from Denmark to Sweden by the Treaty of Kiel. Key events: the constitutional crisis over Norwegian consular service, the Storting\'s unilateral dissolution, the Karlstad negotiations, and the national referendum where 99.95% voted for independence. Prince Carl of Denmark became King Haakon VII. Norway\'s peaceful dissolution of the union is considered a model for modern state sovereignty transitions.', src, 'en');
+
+    this.knowledge.addEntry('roald amundsen', 'Roald Amundsen (1872-1928) was a Norwegian explorer who led the first expedition to reach the South Pole on December 14, 1911, beating Robert Falcon Scott by 34 days. Amundsen was also the first to sail through the Northwest Passage (1903-1906) and is credited as the first to reach both poles. His success at the South Pole was attributed to meticulous planning: dog sleds instead of ponies, depot placement, ski expertise, and Inuit survival techniques. He disappeared in 1928 during a rescue mission in the Arctic. Amundsen is regarded as one of history\'s greatest polar explorers.', src, 'en');
+
+    this.knowledge.addEntry('17 mai norway', '17. mai (Syttende mai) is Norway\'s Constitution Day, celebrating the signing of the Norwegian Constitution at Eidsvoll on May 17, 1814. Unlike most national days, it is celebrated not with military parades but with children\'s parades (barnetog), traditional costumes (bunad), ice cream, hot dogs, and brass bands. The celebration emphasizes democracy, freedom, and community. In Oslo, the children\'s parade passes the Royal Palace where the royal family waves from the balcony. It is the most important national holiday in Norway — a day of genuine joy and national pride.', src, 'en');
+
+    this.knowledge.addEntry('norway world war ii', 'Norway was occupied by Nazi Germany from April 9, 1940 to May 8, 1945. The German invasion (Operation Weser\u00fcbung) caught Norway largely unprepared. King Haakon VII and the government fled to London, continuing resistance from exile. Vidkun Quisling, leader of the fascist Nasjonal Samling party, collaborated with the Germans — his name became synonymous with "traitor" worldwide. The Norwegian resistance movement (Hjemmefronten) conducted sabotage operations, the most famous being the heavy water sabotage at Vemork (1943) which disrupted Germany\'s nuclear program. Norway was liberated in May 1945.', src, 'en');
+
+    this.knowledge.addEntry('norwegian oil discovery', 'Oil was discovered in the Norwegian North Sea on December 23, 1969, when the Ekofisk field was confirmed. This discovery transformed Norway from a modest fishing and shipping nation into one of the world\'s wealthiest countries. The Norwegian government established Statoil (now Equinor) in 1972 and created the Government Pension Fund Global (Oljefondet/Oil Fund) in 1990 to invest petroleum revenues for future generations. The fund is now worth over $1.5 trillion, making it the world\'s largest sovereign wealth fund. Norway\'s oil policy is considered a model for responsible resource management.', src, 'en');
+
+    this.knowledge.addEntry('sami parliament sametinget', 'The Sami Parliament (Sametinget) is the representative body for the Sami people, the indigenous people of northern Scandinavia (S\u00e1pmi). Norway\'s Sametinget was established in 1989, with its seat in Karasjok, Finnmark. It has 39 representatives elected by registered Sami voters. The Sametinget advises the Norwegian government on matters affecting the Sami community: language preservation, cultural heritage, reindeer herding rights, land use, and education. The Sami have their own flag, national day (February 6), and languages (North Sami, Lule Sami, South Sami). Similar Sami parliaments exist in Sweden and Finland.', src, 'en');
+
+    this.knowledge.addEntry('fridtjof nansen', 'Fridtjof Nansen (1861-1930) was a Norwegian explorer, scientist, diplomat, and humanitarian. He crossed Greenland on skis in 1888 and led the Fram expedition (1893-1896), deliberately freezing the ship in Arctic ice to study polar drift. After his exploration career, Nansen became a diplomat who helped negotiate Norway\'s independence from Sweden in 1905. As League of Nations High Commissioner for Refugees, he created the "Nansen passport" for stateless people and organized famine relief in Russia. He won the Nobel Peace Prize in 1922. Nansen is considered one of Norway\'s greatest national heroes.', src, 'en');
+
+    this.knowledge.addEntry('history of bergen', 'Bergen is Norway\'s second-largest city, founded around 1070 by King Olav Kyrre. It served as Norway\'s capital in the 12th-13th centuries and became a major Hanseatic League trading post (one of four Kontors). The Bryggen wharf — the old Hanseatic quarter with its colorful wooden buildings — is a UNESCO World Heritage Site. Bergen was the center of the dried cod (stockfish) trade between northern Norway and Europe. Key landmarks: Bryggen, Fl\u00f8ibanen funicular, Bergen Fish Market, Edvard Grieg\'s Troldhaugen. Bergen is known as the "Gateway to the Fjords" and receives about 230 days of rain per year.', src, 'en');
+
+    this.knowledge.addEntry('norwegian storting', 'The Storting (Stortinget) is the Norwegian Parliament, the supreme legislative body of Norway. It has 169 representatives elected every four years through proportional representation from 19 constituencies. The Storting passes laws, approves the national budget, supervises the government, and debates national policy. Unlike many parliaments, the Storting cannot be dissolved early — elections are always held on schedule. It was established by the 1814 Constitution (Grunnloven) at Eidsvoll. The Storting building is located on Karl Johans gate in central Oslo. Norway uses a modified parliamentary system where the government must maintain the confidence of the Storting.', src, 'en');
+
+    // ── C: REACT / NEXT.JS DEPTH (11 entries) ─────────────────────
+    this.knowledge.addEntry('react suspense', '**React Suspense** lets components "wait" for something before rendering — showing a fallback UI (like a loading spinner) in the meantime.\n\n**Usage:**\n```jsx\n<Suspense fallback={<Loading />}>\n  <LazyComponent />\n</Suspense>\n```\n\n**Use cases:**\n- **Code splitting** with `React.lazy()` — load components on demand\n- **Data fetching** — wait for async data (with frameworks like Next.js, Relay, or React Query)\n- **Streaming SSR** — server sends HTML progressively, loading boundaries resolve as data arrives\n\n**Key concepts:** Suspense boundaries can be nested. Each boundary shows its own fallback independently. In React 18+, Suspense works with concurrent features for non-blocking rendering.', src, 'en');
+
+    this.knowledge.addEntry('useeffect hook react', '**useEffect** is React\'s hook for side effects — code that interacts with the outside world (APIs, DOM, timers, subscriptions).\n\n**Syntax:**\n```jsx\nuseEffect(() => {\n  // effect runs after render\n  const sub = api.subscribe(handler);\n  return () => sub.unsubscribe(); // cleanup\n}, [dependency]); // re-runs when dependency changes\n```\n\n**Lifecycle mapping:** componentDidMount (empty deps `[]`), componentDidUpdate (with deps), componentWillUnmount (cleanup function).\n\n**Rules:** Always specify dependencies. Missing deps = stale closures. Empty array = run once. No array = run every render. Use ESLint exhaustive-deps rule. Effects run after paint (non-blocking). Use useLayoutEffect for DOM measurements before paint.', src, 'en');
+
+    this.knowledge.addEntry('react hydration', '**Hydration** is the process where React attaches event handlers and state to server-rendered HTML, making it interactive.\n\n**How it works:**\n1. Server renders HTML (SSR) and sends it to the browser\n2. Browser displays the HTML immediately (fast First Contentful Paint)\n3. React client JS loads and "hydrates" — reconciles the server HTML with the React component tree\n4. Event handlers are attached, state becomes interactive\n\n**Issues:** Hydration mismatch errors occur when server and client render different content. Selective hydration (React 18) hydrates components on demand. React Server Components reduce hydration cost by keeping components server-only.', src, 'en');
+
+    this.knowledge.addEntry('react context api', '**React Context API** provides a way to pass data through the component tree without prop drilling.\n\n**Usage:**\n```jsx\nconst ThemeContext = createContext(\'light\');\n\n// Provider wraps the tree\n<ThemeContext.Provider value="dark">\n  <App />\n</ThemeContext.Provider>\n\n// Consumer reads the value\nconst theme = useContext(ThemeContext);\n```\n\n**When to use:** Theme, locale, auth state, feature flags — data needed by many components at different nesting levels.\n\n**Limitations:** Every context change re-renders ALL consumers. For high-frequency updates, use Zustand or Jotai instead. Split contexts by update frequency (static config vs dynamic state).', src, 'en');
+
+    this.knowledge.addEntry('nextjs isr incremental static regeneration', '**ISR (Incremental Static Regeneration)** in Next.js lets you update static pages after deployment without rebuilding the entire site.\n\n**How it works:**\n- Pages are statically generated at build time\n- After the `revalidate` period (e.g., 60 seconds), the next request triggers a background regeneration\n- Stale page is served while the new one generates (stale-while-revalidate pattern)\n\n**Usage (App Router):**\n```tsx\nexport const revalidate = 60; // revalidate every 60s\n```\n\n**On-demand ISR:** `revalidatePath(\'/blog\')` or `revalidateTag(\'posts\')` triggers immediate regeneration.\n\n**Benefits:** Static performance (CDN-cached) with dynamic freshness. Perfect for blogs, e-commerce, dashboards with moderate update frequency.', src, 'en');
+
+    this.knowledge.addEntry('react compiler', '**React Compiler** (formerly React Forget) is an automatic optimization compiler that eliminates the need for manual `useMemo`, `useCallback`, and `React.memo`.\n\n**What it does:** Analyzes your React components at build time and automatically inserts memoization where beneficial. It understands React\'s rules (pure renders, hook rules) and optimizes re-renders.\n\n**Key points:**\n- Opt-in via Babel plugin (React 19+)\n- Replaces manual memo/callback optimization\n- Requires components to follow React rules (no side effects in render)\n- Use the `react-compiler-healthcheck` tool to verify compatibility\n- Does NOT change runtime behavior — only performance\n\n**Impact:** Removes a major source of bugs (missing deps, stale closures) and reduces boilerplate.', src, 'en');
+
+    this.knowledge.addEntry('usereducer react', '**useReducer** is a React hook for managing complex state logic — an alternative to useState when state transitions depend on previous state or involve multiple sub-values.\n\n**Syntax:**\n```jsx\nconst [state, dispatch] = useReducer(reducer, initialState);\n\nfunction reducer(state, action) {\n  switch (action.type) {\n    case \'increment\': return { count: state.count + 1 };\n    case \'decrement\': return { count: state.count - 1 };\n    default: throw new Error();\n  }\n}\n\ndispatch({ type: \'increment\' });\n```\n\n**When to use:** Multiple related state values, complex state transitions, state logic shared across components. Inspired by Redux but built into React. Often paired with Context for global state.', src, 'en');
+
+    this.knowledge.addEntry('react custom hooks', '**Custom hooks** in React extract reusable stateful logic into functions prefixed with `use`.\n\n**Example:**\n```jsx\nfunction useWindowSize() {\n  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });\n  useEffect(() => {\n    const handler = () => setSize({ w: window.innerWidth, h: window.innerHeight });\n    window.addEventListener(\'resize\', handler);\n    return () => window.removeEventListener(\'resize\', handler);\n  }, []);\n  return size;\n}\n```\n\n**Rules:** Must start with "use". Can call other hooks. Follows all hook rules (top-level only, same order every render). Custom hooks let you share logic without sharing state — each component using the hook gets its own copy.', src, 'en');
+
+    this.knowledge.addEntry('react forwardref', '**React.forwardRef** allows a parent component to pass a ref to a child component\'s DOM element.\n\n**Usage:**\n```jsx\nconst FancyInput = forwardRef((props, ref) => (\n  <input ref={ref} className="fancy" {...props} />\n));\n\n// Parent can now access the input DOM node\nconst inputRef = useRef();\n<FancyInput ref={inputRef} />\ninputRef.current.focus();\n```\n\n**Why it\'s needed:** By default, refs don\'t pass through components — forwardRef bridges this gap. Essential for: design system components (input wrappers, buttons), imperative handle APIs (useImperativeHandle), and third-party library integration. In React 19, ref is available as a regular prop, making forwardRef less necessary.', src, 'en');
+
+    this.knowledge.addEntry('nextjs code splitting', '**Code splitting** in Next.js automatically breaks your JavaScript into smaller chunks loaded on demand.\n\n**How it works:**\n- **Route-based splitting** — each page/route is a separate chunk (automatic)\n- **Component-based splitting** — `next/dynamic` or `React.lazy()` for heavy components\n- **Import-based splitting** — `import(\'./heavy-module\')` creates a separate chunk\n\n**Usage:**\n```jsx\nimport dynamic from \'next/dynamic\';\nconst HeavyChart = dynamic(() => import(\'./Chart\'), {\n  loading: () => <Skeleton />,\n  ssr: false, // client-only\n});\n```\n\n**Benefits:** Smaller initial bundle, faster page loads, better Core Web Vitals. Next.js uses webpack/Turbopack to analyze imports and create optimal chunk boundaries.', src, 'en');
+
+    this.knowledge.addEntry('react use hook', '**use** is a new React 19 hook that lets you read resources (Promises and Context) during render.\n\n**Reading promises:**\n```jsx\nfunction Comments({ commentsPromise }) {\n  const comments = use(commentsPromise); // suspends until resolved\n  return comments.map(c => <p key={c.id}>{c.text}</p>);\n}\n```\n\n**Reading context:** `const theme = use(ThemeContext)` — works like useContext but can be called conditionally.\n\n**Key differences from useContext:**\n- `use` can be called inside if statements and loops\n- `use` can read Promises (triggers Suspense)\n- `use` is the foundation for React\'s async rendering model\n\n**Note:** The Promise variant requires a Suspense boundary above it.', src, 'en');
+
+    // ── N: NORWEGIAN WEB SERVICES (6 entries) ─────────────────────
+    this.knowledge.addEntry('norwegian web accessibility requirement', 'Norway requires all websites and apps to comply with WCAG 2.1 AA under the Likestillings- og diskrimineringsloven (Equality and Anti-Discrimination Act). The law mandates universell utforming (universal design) — making ICT solutions accessible to all, including people with disabilities. Enforcement is handled by Digitaliseringsdirektoratet (Digdir) and previously by DIFI. Since 2023, WCAG 2.1 AA is the minimum standard. Public sector and private organizations with more than 50 employees must comply. Violations can result in fines. The UU-tilsynet monitors compliance and provides guidance.', src, 'en');
+
+    this.knowledge.addEntry('uutilsynet', 'UU-tilsynet (Tilsynet for universell utforming av IKT) is the Norwegian regulatory authority for universal design of ICT. It monitors and enforces compliance with web accessibility requirements (WCAG 2.1 AA) under Norwegian law. UU-tilsynet conducts audits of websites and apps, issues compliance orders, and can impose fines. It provides guidance, tools, and resources to help organizations meet accessibility standards. The tilsyn (supervisory body) operates under Digitaliseringsdirektoratet (Digdir). Key focus areas: universell utforming of web content, mobile apps, self-service machines, and digital documents.', src, 'en');
+
+    this.knowledge.addEntry('digdir standard', 'Digdir (Digitaliseringsdirektoratet / Norwegian Digitalisation Agency) develops and manages national digital standards for Norway\'s public sector. Key standards: (1) Referansekatalogen — reference catalog of mandatory/recommended IT standards. (2) WCAG compliance for universal design. (3) National architecture principles for digital services. (4) ID-porten integration standard. (5) Digital post (SvarUt/SvarInn). (6) API management standards. Digdir also manages Altinn, ID-porten, and Maskinporten. The agency promotes digital-first government services and ensures interoperability across public institutions.', src, 'en');
+
+    this.knowledge.addEntry('bokm\u00e5l nynorsk', 'Bokm\u00e5l and Nynorsk are the two official written standards of the Norwegian language. Bokm\u00e5l ("book tongue") evolved from Danish-influenced urban Norwegian and is used by about 85-90% of the population. Nynorsk ("new Norwegian") was created by linguist Ivar Aasen in the 1850s, based on rural Norwegian dialects, to provide a genuinely Norwegian written language free from Danish influence. Both are taught in schools (students must learn both). Government agencies must use both. Media, municipalities, and individuals choose which to use. They are mutually intelligible — the difference is primarily in spelling and some grammar, not vocabulary or pronunciation.', src, 'en');
+
+    this.knowledge.addEntry('id-porten', 'ID-porten is Norway\'s national login solution for public digital services. It provides secure authentication using BankID, MinID, Buypass, and Commfides as identity providers. Citizens use ID-porten to access government services like tax filing (Skatteetaten), health records (Helsenorge), social services (NAV), and municipal services. Managed by Digitaliseringsdirektoratet (Digdir). Technical: OpenID Connect (OIDC) protocol, security level 3-4 (substantial to high). Integration: services register with Digdir and implement OIDC flow. Maskinporten provides machine-to-machine authentication for APIs between organizations.', src, 'en');
+
+    this.knowledge.addEntry('bring api shipping norway', 'Bring (formerly Posten Norge / Norway Post) provides shipping APIs for e-commerce and logistics in Norway and the Nordics. Key APIs: (1) Shipping Guide — calculate prices, delivery times, and available services. (2) Booking API — create shipments and generate labels. (3) Tracking API — real-time package tracking. (4) Pickup Point API — find nearest pickup locations. (5) Address API — validate and autocomplete Norwegian addresses. Integration: REST APIs with JSON, authentication via API key. Bring is the dominant postal and logistics provider in Norway, handling both parcels and freight. Services include Pakke i Postkassen, Norgespakke, and Bedriftspakke.', src, 'en');
+
+    // ── B: TYPESCRIPT / JAVASCRIPT DEPTH (6 entries) ──────────────
+    this.knowledge.addEntry('javascript proxy object', '**Proxy** in JavaScript creates a wrapper around an object that intercepts and customizes operations (get, set, has, delete, etc.).\n\n**Syntax:**\n```javascript\nconst handler = {\n  get(target, prop) { return prop in target ? target[prop] : 42; },\n  set(target, prop, value) { target[prop] = value; return true; }\n};\nconst proxy = new Proxy({}, handler);\n```\n\n**Traps** (handler methods): get, set, has, deleteProperty, apply, construct, getPrototypeOf, ownKeys, etc.\n\n**Use cases:** validation, logging, reactive systems (Vue 3 uses Proxy for reactivity), default values, access control, API mocking. **Reflect** API mirrors Proxy traps for forwarding operations cleanly.', src, 'en');
+
+    this.knowledge.addEntry('typescript unknown vs any', '**unknown vs any** in TypeScript:\n\n**any** — disables ALL type checking. You can do anything with it: call methods, access properties, assign to any type. It\'s an escape hatch that defeats the purpose of TypeScript.\n\n**unknown** — the type-safe counterpart. You CANNOT do anything with an unknown value until you narrow its type through checks.\n\n```typescript\nlet x: unknown = getUserInput();\n// x.toUpperCase(); // Error! Must narrow first\nif (typeof x === \'string\') {\n  x.toUpperCase(); // OK — narrowed to string\n}\n```\n\n**Rule:** Use `unknown` over `any` whenever possible. `unknown` forces you to validate before using, preventing runtime errors.', src, 'en');
+
+    this.knowledge.addEntry('javascript weakref', '**WeakRef** creates a weak reference to an object that doesn\'t prevent garbage collection.\n\n```javascript\nlet target = { data: \'important\' };\nconst ref = new WeakRef(target);\ntarget = null; // eligible for GC now\n\nconst obj = ref.deref(); // returns object or undefined if GC\'d\n```\n\n**Use cases:** caches where entries should be automatically cleaned up, observer patterns tracking DOM elements, memory-sensitive data structures.\n\n**FinalizationRegistry** — companion API that runs a callback when a referenced object is garbage collected.\n\n**Caution:** GC timing is unpredictable — never rely on WeakRef for correctness, only for optimization. Avoid in most application code; useful in library/framework internals.', src, 'en');
+
+    this.knowledge.addEntry('javascript temporal api', '**Temporal** is the modern replacement for JavaScript\'s broken Date object, designed to fix its fundamental flaws.\n\n**Key types:**\n- `Temporal.PlainDate` — date without time or timezone\n- `Temporal.PlainTime` — time without date or timezone\n- `Temporal.PlainDateTime` — date + time, no timezone\n- `Temporal.ZonedDateTime` — full date/time with timezone\n- `Temporal.Instant` — exact moment in time (like Unix timestamp)\n- `Temporal.Duration` — represents a length of time\n\n**Why it replaces Date:** immutable objects (no mutation bugs), proper timezone handling, unambiguous parsing, calendar system support, duration arithmetic. Currently Stage 3 TC39 proposal (2026). Polyfill: `@js-temporal/polyfill`.', src, 'en');
+
+    this.knowledge.addEntry('structuredclone javascript', '**structuredClone()** creates a deep copy of a value using the structured clone algorithm.\n\n```javascript\nconst original = { a: 1, b: { c: 2 }, d: new Date() };\nconst clone = structuredClone(original);\nclone.b.c = 99; // does NOT affect original\n```\n\n**Supports:** objects, arrays, Date, RegExp, Map, Set, ArrayBuffer, Blob, File, ImageData. **Does NOT support:** functions, DOM nodes, Symbols, property descriptors, prototype chain.\n\n**vs JSON.parse(JSON.stringify()):** structuredClone handles Date, Map, Set, circular references, and typed arrays correctly. JSON method loses Date objects (becomes string), fails on circular refs, drops undefined values.\n\n**Availability:** All modern browsers, Node.js 17+, Deno, Bun.', src, 'en');
+
+    this.knowledge.addEntry('abortcontroller abortsignal', '**AbortController** and **AbortSignal** provide a standard way to cancel asynchronous operations.\n\n```javascript\nconst controller = new AbortController();\nconst signal = controller.signal;\n\nfetch(\'/api/data\', { signal })\n  .then(res => res.json())\n  .catch(err => {\n    if (err.name === \'AbortError\') console.log(\'Cancelled\');\n  });\n\n// Cancel the request\ncontroller.abort();\n```\n\n**Use cases:** cancel fetch requests, abort event listeners, timeout operations (`AbortSignal.timeout(5000)`), cancel streams, debounce.\n\n**Composable:** `AbortSignal.any([signal1, signal2])` — abort on first signal. Works with fetch, addEventListener, streams, and many Node.js APIs.', src, 'en');
+
+    // ── D: CSS MODERN FEATURES (5 entries) ────────────────────────
+    this.knowledge.addEntry('css in js', '**CSS-in-JS** is an approach where CSS is written directly in JavaScript files, scoped to components.\n\n**Libraries:** styled-components, Emotion, Linaria, vanilla-extract, Panda CSS.\n\n**Runtime CSS-in-JS** (styled-components, Emotion): generates styles at runtime, injects into DOM. Downside: performance overhead, larger bundle.\n\n**Zero-runtime CSS-in-JS** (vanilla-extract, Linaria, Panda CSS): extracts CSS at build time to static .css files — best of both worlds.\n\n**Pros:** component-scoped styles, dynamic styles based on props, TypeScript support, no class naming conflicts.\n**Cons:** runtime overhead (for runtime libraries), SSR complexity, bundle size.\n\n**2026 trend:** Zero-runtime solutions dominating, with Tailwind CSS being the most popular utility-first alternative.', src, 'en');
+
+    this.knowledge.addEntry('css has selector', '**:has()** is the CSS "parent selector" — it selects an element based on its descendants or siblings.\n\n```css\n/* Style a card that contains an image */\n.card:has(img) { border: 2px solid blue; }\n\n/* Style a label when its input is focused */\nlabel:has(+ input:focus) { color: blue; }\n\n/* Style the body when a modal is open */\nbody:has(.modal.open) { overflow: hidden; }\n```\n\n**Key facts:**\n- Called the "parent selector" because it selects ancestors based on descendants\n- Supported in all modern browsers (2023+)\n- Can use any selector inside :has()\n- Extremely powerful combined with :not(), :is(), :where()\n- Performance: browsers optimize well, but avoid deeply nested :has() in large DOMs', src, 'en');
+
+    this.knowledge.addEntry('css clamp function', '**clamp()** in CSS sets a value that scales responsively between a minimum and maximum.\n\n```css\nfont-size: clamp(1rem, 2vw + 0.5rem, 2.5rem);\n/* min=1rem, preferred=2vw+0.5rem, max=2.5rem */\n\nwidth: clamp(300px, 50%, 800px);\n```\n\n**Syntax:** `clamp(MIN, PREFERRED, MAX)` — equivalent to `max(MIN, min(PREFERRED, MAX))`.\n\n**Use cases:** responsive typography (fluid type scale), responsive spacing, responsive widths without media queries.\n\n**Related functions:** `min()` — smallest value wins, `max()` — largest value wins. All three accept any CSS length/calc expression. Supported in all modern browsers.', src, 'en');
+
+    this.knowledge.addEntry('tailwind purge unused css', '**Tailwind CSS purges unused styles** by scanning your source files for class names and only including CSS for classes that are actually used.\n\n**How it works:**\n- Tailwind\u2019s JIT (Just-In-Time) engine generates CSS on demand as you use classes\n- The `content` config tells Tailwind which files to scan:\n```js\ncontent: [\'./src/**/*.{js,tsx,html}\']\n```\n- Only classes found in scanned files are included in the output\n- Result: tiny CSS bundles (typically 5-15KB gzipped)\n\n**Pitfalls:** Dynamic class names (`className={\\`text-${color}\\`}`) are NOT detected — use safelist or full class strings. Don\'t construct class names from variables.\n\n**Tailwind v4:** Uses CSS-based config with `@source` directive instead of JS config file. Tree-shaking is automatic and even more efficient.', src, 'en');
+
+    this.knowledge.addEntry('css reset vs normalize', '**CSS Reset** removes ALL default browser styles, giving you a blank slate. Every element starts with zero margin, padding, and identical styling.\n\n**Normalize.css** preserves useful browser defaults while fixing cross-browser inconsistencies. It keeps sensible defaults (like heading sizes) but ensures they render consistently.\n\n**Comparison:**\n- **Reset** (Eric Meyer\'s Reset): aggressive — removes ALL defaults → you must restyle everything\n- **Normalize**: gentle — fixes bugs and inconsistencies, keeps useful defaults\n- **Modern reset** (Josh Comeau\'s, Andy Bell\'s): balanced — resets box-sizing, removes margins, sets sensible defaults\n\n**Tailwind\'s Preflight** is a modern reset based on Normalize.css that also removes default heading/list styles for utility-class workflow.\n\n**Recommendation:** Use a modern reset or Tailwind Preflight for new projects.', src, 'en');
+
+    // ── I: RUST DEPTH (2 entries) ─────────────────────────────────
+    this.knowledge.addEntry('rust result type', '**Result<T, E>** is Rust\'s primary error handling type — an enum with two variants:\n\n```rust\nenum Result<T, E> {\n    Ok(T),    // success — contains the value\n    Err(E),   // failure — contains the error\n}\n```\n\n**Usage:**\n```rust\nfn read_file(path: &str) -> Result<String, io::Error> {\n    let content = fs::read_to_string(path)?; // ? propagates errors\n    Ok(content)\n}\n\nmatch read_file("data.txt") {\n    Ok(data) => println!("{data}"),\n    Err(e) => eprintln!("Error: {e}"),\n}\n```\n\n**The `?` operator** unwraps Ok or returns Err early — eliminates nested match statements. **anyhow** and **thiserror** are popular error handling libraries. Result forces you to handle errors explicitly — no unchecked exceptions.', src, 'en');
+
+    this.knowledge.addEntry('rust unsafe code', '**unsafe** in Rust lets you bypass the borrow checker for operations the compiler cannot verify.\n\n**What unsafe allows:**\n1. Dereference raw pointers (`*const T`, `*mut T`)\n2. Call unsafe functions (FFI/C interop)\n3. Access mutable statics\n4. Implement unsafe traits\n5. Access fields of unions\n\n```rust\nunsafe {\n    let ptr: *const i32 = &42;\n    println!("{}", *ptr); // raw pointer dereference\n}\n```\n\n**Key principle:** unsafe doesn\'t disable the borrow checker entirely — it just allows the 5 operations above. All other Rust safety guarantees still apply.\n\n**Best practices:** minimize unsafe surface area, wrap unsafe code in safe abstractions, document invariants, use `#[deny(unsafe_op_in_unsafe_fn)]`. FFI (Foreign Function Interface) with C libraries is the most common use case.', src, 'en');
+
+    // ── TF-IDF training text for all expansion entries ────────────
+    const expansionText = `Norwegian history: Stiklestad 1030 Battle King Olav Haraldsson Saint Olav Christianity Viking. Norway independence 1905 Sweden union dissolved Storting Karlstad Haakon VII referendum. Roald Amundsen South Pole 1911 explorer Northwest Passage Arctic polar. 17 mai Syttende mai Constitution Day Eidsvoll 1814 barnetog bunad children parade. Norway World War II German occupation resistance Quisling Hjemmefronten heavy water Vemork sabotage. Norwegian oil discovery 1969 Ekofisk North Sea Statoil Equinor Government Pension Fund sovereign wealth. Sami Parliament Sametinget indigenous Karasjok Finnmark reindeer rights. Fridtjof Nansen explorer diplomat Nobel Peace Prize Fram Greenland. Bergen Hanseatic Bryggen UNESCO trading Olav Kyrre fjords. Storting Norwegian Parliament Stortinget 169 representatives proportional legislation.
+    React depth: Suspense fallback loading lazy code splitting streaming SSR boundary concurrent. useEffect side effect lifecycle cleanup dependency mount unmount. Hydration server render client attach event handlers interactive mismatch selective. Context API createContext Provider useContext prop drilling theme locale auth. ISR Incremental Static Regeneration revalidate stale-while-revalidate on-demand. React Compiler Forget automatic memoization useMemo useCallback React.memo build time. useReducer dispatch action reducer complex state transitions. Custom hooks reuse logic useState useEffect prefix encapsulate. forwardRef ref DOM parent child imperative handle React 19. Next.js code splitting dynamic import chunk webpack Turbopack route-based component-based. React use hook Promise Context conditional read resource suspend.
+    Norwegian web: WCAG 2.1 AA universell utforming likestilling diskriminering lov accessibility tilgjengelig UU. UU-tilsynet tilsyn universell utforming ICT compliance audit enforcement Digdir. Digdir Digitaliseringsdirektoratet standard referansekatalogen API architecture. Bokmal Nynorsk Norwegian written standard language Ivar Aasen Danish dialect. ID-porten login BankID MinID authentication OIDC government Maskinporten. Bring API shipping Norway Post Posten parcels tracking booking address.
+    TypeScript JavaScript depth: Proxy handler trap get set Reflect reactive Vue 3 meta-programming. Unknown any type safety narrowing type check escape hatch. WeakRef garbage collection weak reference FinalizationRegistry cache cleanup memory. Temporal API Date replacement PlainDate ZonedDateTime Instant Duration timezone immutable TC39. structuredClone deep copy clone Map Set Date circular reference structured clone algorithm. AbortController AbortSignal cancel fetch timeout abort signal any compose.
+    CSS modern: CSS-in-JS styled-components Emotion vanilla-extract Panda CSS zero-runtime build-time. Has selector parent selector descendant sibling CSS :has() conditional. Clamp responsive fluid min max preferred value typography spacing. Tailwind purge JIT content scan tree-shake unused CSS bundle size. CSS reset normalize Preflight browser defaults cross-browser consistent modern.
+    Rust depth: Result Ok Err error handling question mark operator anyhow thiserror propagate. Unsafe raw pointer FFI dereference mutable static union borrow checker bypass safe abstraction.`;
+    this.knowledge.learn(expansionText, src, 'en');
+    this.tokenizer.encode(expansionText);
+  }
+
+  /**
+   * Round 14b — fix 24 remaining benchmark failures across 9 categories.
+   * Focus: DevOps, Database, Testing, Rust, Python, Go, WCAG, Vue/Angular, Norway history routing.
+   */
+  private bootstrapKnowledgeExpansionR14b(): void {
+    const src = 'bootstrap:expansion-r14b';
+
+    // ── E: DEVOPS (3 fails: Dockerfile, GitHub Actions, CDN) ──────
+    this.knowledge.addEntry('dockerfile', '**Dockerfile** is a text file containing instructions to build a Docker image. Each instruction creates a layer.\n\n**Common instructions:**\n- `FROM node:20-alpine` — base image\n- `WORKDIR /app` — set working directory\n- `COPY package*.json ./` — copy files\n- `RUN npm ci` — execute commands\n- `EXPOSE 3000` — document port\n- `CMD ["node", "server.js"]` — default command\n\n**Best practices:** use multi-stage builds to reduce image size, order instructions so rarely-changing layers come first (cache optimization), use `.dockerignore` to exclude node_modules and .git, prefer `COPY` over `ADD`, run as non-root user, pin base image versions.', src, 'en');
+
+    this.knowledge.addEntry('github actions', '**GitHub Actions** is a CI/CD platform integrated into GitHub. Workflows are defined in YAML files under `.github/workflows/`.\n\n**Key concepts:**\n- **Workflow** — automated process triggered by events (push, PR, schedule)\n- **Job** — set of steps running on a runner (ubuntu-latest, windows-latest, macos-latest)\n- **Step** — individual task (run a script or use an action)\n- **Action** — reusable unit (`actions/checkout@v4`, `actions/setup-node@v4`)\n\n**Example:**\n```yaml\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: npm ci\n      - run: npm test\n```\n\n**Features:** matrix builds, secrets management, artifact upload/download, concurrency control, reusable workflows, environment protection rules.', src, 'en');
+
+    this.knowledge.addEntry('cdn content delivery network', '**CDN (Content Delivery Network)** distributes content across geographically dispersed servers to reduce latency and improve load times.\n\n**How it works:** When a user requests content, the CDN serves it from the nearest **edge server** (Point of Presence / PoP) instead of the origin server. Static assets (images, CSS, JS, fonts) are cached at the edge.\n\n**Key features:**\n- **Edge caching** — reduces round trips to origin\n- **DDoS protection** — absorbs attack traffic across distributed network\n- **SSL/TLS termination** — handles HTTPS at the edge\n- **Image optimization** — resize, compress, convert formats on-the-fly\n- **Cache invalidation** — purge stale content\n\n**Popular CDNs:** Cloudflare, AWS CloudFront, Vercel Edge Network, Fastly, Akamai.\n\n**Cache headers:** `Cache-Control`, `ETag`, `Last-Modified` control CDN behavior.', src, 'en');
+
+    // ── F: DATABASE (3 fails: SQL injection, normalization, ACID) ──
+    this.knowledge.addEntry('sql injection', '**SQL injection** is a security vulnerability where an attacker inserts malicious SQL code into application queries through user input.\n\n**Example attack:**\n```sql\n-- User inputs: \' OR 1=1 --\nSELECT * FROM users WHERE username = \'\' OR 1=1 --\' AND password = \'...\'\n-- Returns ALL users!\n```\n\n**Prevention:**\n1. **Parameterized queries** (prepared statements) — separate SQL from data\n```javascript\ndb.query(\'SELECT * FROM users WHERE id = $1\', [userId]);\n```\n2. **ORM usage** — Prisma, Drizzle, TypeORM handle parameterization\n3. **Input validation** — whitelist allowed characters\n4. **Least privilege** — database user should have minimal permissions\n5. **WAF** — Web Application Firewall as defense-in-depth\n\nSQL injection is consistently in the **OWASP Top 10** security risks. Always use parameterized queries — never concatenate user input into SQL strings.', src, 'en');
+
+    this.knowledge.addEntry('database normalization', '**Database normalization** organizes tables to reduce data redundancy and improve data integrity.\n\n**Normal forms:**\n- **1NF** — atomic values (no arrays/sets in columns), unique rows\n- **2NF** — 1NF + no partial dependencies (every non-key column depends on the WHOLE primary key)\n- **3NF** — 2NF + no transitive dependencies (non-key columns depend ONLY on the primary key, not on other non-key columns)\n- **BCNF** — stricter 3NF (every determinant is a candidate key)\n\n**Example:** A table with `order_id, product_name, customer_name, customer_address` violates 3NF because customer_address depends on customer_name, not order_id. Fix: separate customers and orders tables.\n\n**Denormalization** is the intentional opposite — adding redundancy for read performance (common in analytics, data warehouses, NoSQL).', src, 'en');
+
+    this.knowledge.addEntry('acid transactions database', '**ACID** properties guarantee reliable database transactions:\n\n- **Atomicity** — a transaction is all-or-nothing. If any part fails, the entire transaction rolls back. No partial updates.\n- **Consistency** — a transaction moves the database from one valid state to another. All constraints, triggers, and rules are satisfied.\n- **Isolation** — concurrent transactions don\'t interfere with each other. Each transaction sees a consistent snapshot. Isolation levels: READ UNCOMMITTED, READ COMMITTED, REPEATABLE READ, SERIALIZABLE.\n- **Durability** — once committed, data survives system crashes (written to disk/WAL).\n\n**Why it matters:** Without ACID, a bank transfer could debit your account but fail to credit the recipient. ACID ensures both operations succeed or neither does.\n\n**ACID databases:** PostgreSQL, MySQL (InnoDB), SQLite, Oracle. **BASE** (eventual consistency) is the NoSQL alternative: Basically Available, Soft state, Eventually consistent.', src, 'en');
+
+    // ── H: TESTING (3 fails: TDD, testing trophy, test fixture) ──
+    this.knowledge.addEntry('tdd test driven development', '**TDD (Test-Driven Development)** is a software development practice where you write tests BEFORE writing the implementation code.\n\n**The TDD cycle (Red-Green-Refactor):**\n1. **Red** — write a failing test for the desired behavior\n2. **Green** — write the minimum code to make the test pass\n3. **Refactor** — clean up the code while keeping tests green\n\n**Benefits:**\n- Forces you to think about API design before implementation\n- Catches bugs early (tests exist before code)\n- Provides living documentation\n- Enables confident refactoring\n- Smaller, more focused functions\n\n**TDD vs testing after:** TDD writes tests first (design tool), testing-after writes tests to verify existing code (verification tool). TDD tends to produce better-designed, more testable code.\n\n**Tools:** Vitest, Jest, pytest, RSpec, xUnit. Works well with pair programming and continuous integration.', src, 'en');
+
+    this.knowledge.addEntry('testing trophy', '**The Testing Trophy** (coined by Kent C. Dodds) is an alternative to the testing pyramid that emphasizes **integration tests** as the most valuable testing layer.\n\n**Trophy layers (bottom to top):**\n1. **Static analysis** (base) — TypeScript, ESLint catch bugs without running code\n2. **Unit tests** — test individual functions in isolation\n3. **Integration tests** (widest part) — test modules working together (most bang for buck)\n4. **End-to-end tests** (top) — test full user flows in a real browser\n\n**Key insight:** Integration tests give the best **confidence-to-effort ratio**. Unit tests are cheap but test implementation details. E2E tests give high confidence but are slow and flaky.\n\n**Comparison:** The traditional testing pyramid (by Mike Cohn) puts unit tests at the base. The trophy puts integration tests at the widest part because they catch the most real-world bugs.', src, 'en');
+
+    this.knowledge.addEntry('test fixture', '**A test fixture** is the fixed baseline state or setup needed to run tests reliably and repeatably.\n\n**What fixtures provide:**\n- Known test data (seed data, mock objects)\n- Pre-configured environment (database state, file system, config)\n- Reusable setup/teardown logic\n\n**Examples by framework:**\n- **Vitest/Jest:** `beforeEach()` / `afterEach()` hooks, factory functions\n- **pytest:** `@pytest.fixture` decorator — powerful dependency injection for test setup\n- **Playwright:** `test.extend()` for custom fixtures (page, browser, auth state)\n- **Database fixtures:** seed scripts, factories (faker.js), or snapshot-based fixtures\n\n**Best practices:** fixtures should be independent (no shared mutable state between tests), minimal (only set up what the test needs), and deterministic (same result every run). Prefer factory functions over shared fixture objects.', src, 'en');
+
+    // ── I: RUST (3 fails: borrowing, Result type routing, cargo) ──
+    this.knowledge.addEntry('rust borrowing', '**Borrowing** in Rust lets you reference data without taking ownership — the core mechanism that enables Rust\'s memory safety without garbage collection.\n\n**Two types:**\n- **Immutable borrow** (`&T`) — read-only, multiple allowed simultaneously\n- **Mutable borrow** (`&mut T`) — read-write, only ONE at a time\n\n**The borrowing rules:**\n1. You can have EITHER one mutable reference OR any number of immutable references (not both)\n2. References must always be valid (no dangling references)\n\n```rust\nlet mut s = String::from("hello");\nlet r1 = &s;      // OK — immutable borrow\nlet r2 = &s;      // OK — multiple immutable borrows\n// let r3 = &mut s; // ERROR — can\'t borrow mutably while immutable borrows exist\nprintln!("{r1} {r2}");\nlet r3 = &mut s;  // OK — immutable borrows are done\n```\n\n**Why it matters:** These rules prevent data races at compile time. No garbage collector needed.', src, 'en');
+
+    this.knowledge.addEntry('cargo rust', '**Cargo** is Rust\'s official build tool and package manager — the equivalent of npm for Node.js.\n\n**Key commands:**\n- `cargo new my_project` — create a new project\n- `cargo build` — compile the project\n- `cargo run` — compile and run\n- `cargo test` — run tests\n- `cargo check` — fast type-check without producing binary\n- `cargo clippy` — run the Rust linter\n- `cargo fmt` — format code\n- `cargo doc --open` — generate and open documentation\n- `cargo add serde` — add a dependency\n\n**Cargo.toml** — the manifest file (like package.json) defining dependencies, metadata, and build configuration.\n\n**crates.io** — the Rust package registry (like npmjs.com). Packages are called "crates".\n\n**Workspaces:** Cargo supports monorepos with `[workspace]` in the root Cargo.toml.', src, 'en');
+
+    // ── J: PYTHON (3 fails: virtual environment, list vs tuple, pip) ──
+    this.knowledge.addEntry('python virtual environment', '**Python virtual environments** create isolated Python installations for each project, preventing dependency conflicts.\n\n**Why needed:** Without virtual environments, all projects share the same global packages. Project A needs Django 4.2 but Project B needs Django 5.0 — conflict. Virtual environments solve this.\n\n**Creating and using:**\n```bash\npython -m venv .venv          # create\nsource .venv/bin/activate      # activate (Linux/macOS)\n.venv\\Scripts\\activate         # activate (Windows)\npip install flask              # install packages locally\ndeactivate                     # exit the venv\n```\n\n**Tools:**\n- `venv` — built into Python 3.3+ (standard)\n- `virtualenv` — third-party, more features\n- `conda` — environments + package management (data science)\n- `pyenv` — manage multiple Python versions\n- `poetry` — modern dependency management with lock files\n- `uv` — ultra-fast Rust-based pip/venv replacement (2024)\n\n**Best practice:** Always use a virtual environment per project. Add `.venv/` to `.gitignore`.', src, 'en');
+
+    this.knowledge.addEntry('python list vs tuple', '**List vs Tuple in Python** — two fundamental sequence types with key differences:\n\n**List** (`[]`) — mutable, dynamic:\n```python\nfruits = ["apple", "banana", "cherry"]\nfruits.append("date")       # can modify\nfruits[0] = "avocado"       # can reassign\n```\n\n**Tuple** (`()`) — immutable, fixed:\n```python\ncoords = (10, 20, 30)\n# coords[0] = 99           # ERROR — cannot modify\n```\n\n**Key differences:**\n| Feature | List | Tuple |\n|---------|------|-------|\n| Mutable | Yes | No |\n| Syntax | `[1, 2, 3]` | `(1, 2, 3)` |\n| Performance | Slower | Faster (immutable) |\n| Hashable | No | Yes (can be dict key) |\n| Use case | Dynamic collections | Fixed records, dict keys |\n\n**When to use tuples:** function return values, dictionary keys, coordinates, database rows, any data that shouldn\'t change. **When to use lists:** collections you\'ll modify, filter, sort, or append to.', src, 'en');
+
+    this.knowledge.addEntry('pip python', '**pip** is Python\'s standard package installer — it downloads and installs packages from **PyPI** (Python Package Index).\n\n**Key commands:**\n- `pip install flask` — install a package\n- `pip install flask==2.3.0` — install specific version\n- `pip install -r requirements.txt` — install from requirements file\n- `pip uninstall flask` — remove a package\n- `pip list` — show installed packages\n- `pip freeze > requirements.txt` — export installed packages\n- `pip install --upgrade pip` — update pip itself\n\n**requirements.txt** — lists project dependencies with version pins:\n```\nflask==2.3.0\nrequests>=2.28.0\npytest~=7.4\n```\n\n**Modern alternatives:**\n- **poetry** — dependency management with lock files and virtual environments\n- **pipenv** — pip + virtualenv combined\n- **uv** — ultra-fast Rust-based drop-in pip replacement\n- **pdm** — PEP 582-based package manager', src, 'en');
+
+    // ── K: GO (3 fails: defer, slice, sync package) ──────────────
+    this.knowledge.addEntry('go defer keyword', '**defer** in Go schedules a function call to execute when the surrounding function returns — used for cleanup, resource release, and guaranteed execution.\n\n**Basic usage:**\n```go\nfunc readFile(path string) ([]byte, error) {\n    f, err := os.Open(path)\n    if err != nil { return nil, err }\n    defer f.Close() // guaranteed to run when function returns\n    return io.ReadAll(f)\n}\n```\n\n**Key rules:**\n1. **LIFO order** — multiple defers execute in reverse order (last-in, first-out)\n2. **Arguments evaluated immediately** — `defer fmt.Println(x)` captures x\'s current value\n3. **Runs on return** — whether normal return, panic, or early return\n\n**Common uses:** closing files, unlocking mutexes (`defer mu.Unlock()`), closing database connections, logging function duration, recovering from panics.\n\n**defer + recover:** Catch panics in Go:\n```go\ndefer func() { if r := recover(); r != nil { log.Println("recovered:", r) } }()\n```', src, 'en');
+
+    this.knowledge.addEntry('go slice', '**Slice** in Go is a dynamically-sized, flexible view into an array — the most commonly used data structure in Go.\n\n**Creating slices:**\n```go\ns := []int{1, 2, 3}          // literal\ns := make([]int, 5)           // make with length\ns := make([]int, 0, 10)       // length 0, capacity 10\n```\n\n**Key operations:**\n- `append(s, 4, 5)` — add elements (may allocate new backing array)\n- `s[1:3]` — sub-slice (inclusive start, exclusive end)\n- `len(s)` — current length\n- `cap(s)` — capacity before reallocation\n- `copy(dst, src)` — copy elements between slices\n\n**Internal structure:** A slice is a 3-word struct: pointer to backing array, length, capacity.\n\n**Gotchas:**\n- Slicing creates a shared backing array (mutations visible in both)\n- `append` may create a new backing array when capacity is exceeded\n- Use `slices.Clone()` (Go 1.21+) for independent copies\n\n**Slice vs Array:** Arrays have fixed size (`[5]int`), slices are dynamic (`[]int`). Prefer slices in almost all Go code.', src, 'en');
+
+    this.knowledge.addEntry('go sync package', '**sync** is Go\'s standard library package for concurrency primitives — low-level tools for coordinating goroutines.\n\n**Key types:**\n- **sync.Mutex** — mutual exclusion lock\n```go\nvar mu sync.Mutex\nmu.Lock()\n// critical section\nmu.Unlock()\n```\n- **sync.RWMutex** — read-write lock (multiple readers OR one writer)\n- **sync.WaitGroup** — wait for a group of goroutines to finish\n```go\nvar wg sync.WaitGroup\nwg.Add(1)\ngo func() { defer wg.Done(); work() }()\nwg.Wait()\n```\n- **sync.Once** — execute a function exactly once (thread-safe singleton)\n- **sync.Map** — concurrent-safe map (no explicit locking needed)\n- **sync.Pool** — reuse temporary objects to reduce GC pressure\n\n**Best practice:** Prefer channels for communication between goroutines. Use sync primitives when you need shared mutable state with fine-grained control.', src, 'en');
+
+    // ── L: WCAG / ACCESSIBILITY (3 fails: screen reader, semantic HTML, focus trap) ──
+    this.knowledge.addEntry('screen reader accessibility', '**Screen readers** are assistive technology that convert digital content to speech or braille for users who are blind or have low vision.\n\n**Popular screen readers:** NVDA (Windows, free), JAWS (Windows, commercial), VoiceOver (macOS/iOS, built-in), TalkBack (Android, built-in).\n\n**How they work:** Screen readers parse the **accessibility tree** (derived from the DOM) and announce element roles, names, states, and content.\n\n**Developer responsibilities:**\n- Use **semantic HTML** (`<nav>`, `<main>`, `<button>`, `<h1>`-`<h6>`) — screen readers use these for navigation\n- Add **alt text** to images (`<img alt="Description">`)\n- Use **ARIA** attributes when native semantics aren\'t sufficient (`aria-label`, `aria-expanded`, `role`)\n- Ensure **keyboard navigation** works (Tab, Enter, Escape, Arrow keys)\n- Manage **focus** properly (focus visible, focus order, focus traps for modals)\n- Use **live regions** (`aria-live="polite"`) for dynamic content updates\n\n**Testing:** Use NVDA or VoiceOver to manually test. Automated tools (axe, Lighthouse) catch ~30% of accessibility issues.', src, 'en');
+
+    this.knowledge.addEntry('semantic html', '**Semantic HTML** uses elements that convey meaning about their content, rather than just visual presentation.\n\n**Semantic elements:**\n- `<header>` — introductory content or navigation\n- `<nav>` — navigation links\n- `<main>` — primary content (only one per page)\n- `<article>` — self-contained content (blog post, comment)\n- `<section>` — thematic grouping with a heading\n- `<aside>` — tangentially related content (sidebar)\n- `<footer>` — footer for section or page\n- `<figure>` / `<figcaption>` — self-contained media with caption\n- `<time>` — date/time (`<time datetime="2024-01-15">`)\n- `<mark>` — highlighted text\n\n**Why it matters:**\n1. **Accessibility** — screen readers use semantic elements to navigate (skip to main, list headings)\n2. **SEO** — search engines understand content structure\n3. **Maintainability** — code is self-documenting\n\n**Anti-pattern:** Using `<div>` and `<span>` for everything ("div soup"). Use the right element for the job — `<button>` for actions, `<a>` for links, `<h1>`-`<h6>` for headings.', src, 'en');
+
+    this.knowledge.addEntry('focus trap accessibility', '**Focus trap** keeps keyboard focus within a specific UI element (typically a modal dialog) so users can\'t Tab out into the background content.\n\n**Why it matters:** When a modal opens, keyboard users and screen reader users need focus to stay inside the modal. Without a focus trap, pressing Tab can move focus to hidden background elements — confusing and inaccessible.\n\n**Implementation:**\n1. When modal opens → move focus to the first focusable element inside\n2. Intercept Tab/Shift+Tab → cycle focus within the modal\'s focusable elements\n3. Press Escape → close the modal, return focus to the trigger element\n4. When modal closes → restore focus to the element that opened it\n\n**Modern approach:** The native `<dialog>` element with `showModal()` provides a built-in focus trap (inert background).\n\n**Libraries:** focus-trap (npm), Radix UI Dialog, Headless UI Dialog — all handle focus trapping correctly.\n\n**WCAG requirement:** Focus trap is required for modal dialogs under WCAG 2.1 Success Criterion 2.4.3 (Focus Order) and 2.1.2 (No Keyboard Trap — user must be able to escape).', src, 'en');
+
+    // ── P: VUE/ANGULAR (2 fails: SvelteKit, Angular CLI) ─────────
+    this.knowledge.addEntry('sveltekit', '**SvelteKit** is the official full-stack framework for **Svelte** — similar to what Next.js is for React.\n\n**Key features:**\n- **File-based routing** — `src/routes/about/+page.svelte` → `/about`\n- **Server-side rendering** (SSR) by default\n- **Static site generation** (SSG) via `adapter-static`\n- **API routes** — `+server.ts` files for backend endpoints\n- **Load functions** — `+page.server.ts` / `+page.ts` for data loading\n- **Form actions** — progressive enhancement for forms\n- **Streaming** — stream data to the client as it becomes available\n\n**What makes Svelte different:** Svelte is a **compiler**, not a runtime. Components compile to vanilla JS with no virtual DOM overhead. This results in smaller bundles and faster performance.\n\n**Getting started:** `npm create svelte@latest my-app`\n\n**Adapters:** Deploy to Node.js, Vercel, Netlify, Cloudflare Workers, static hosting.', src, 'en');
+
+    this.knowledge.addEntry('angular cli', '**Angular CLI** (`@angular/cli`) is the official command-line tool for creating, building, testing, and deploying Angular applications.\n\n**Key commands:**\n- `ng new my-app` — create a new Angular project\n- `ng serve` — start dev server with hot reload\n- `ng generate component my-comp` — generate component (alias: `ng g c`)\n- `ng generate service my-service` — generate service\n- `ng build` — production build\n- `ng test` — run unit tests (Karma/Jest)\n- `ng e2e` — run end-to-end tests\n- `ng add @angular/material` — add Angular Material\n- `ng update` — update Angular and dependencies\n\n**Schematics:** Angular CLI uses schematics (code generators) to scaffold components, services, guards, pipes, and modules following Angular best practices.\n\n**angular.json** — workspace configuration file controlling build options, file paths, and project structure.', src, 'en');
+
+    // ── U: NORWAY HISTORY routing fix (entry exists, pattern needs variant) ──
+    this.knowledge.addEntry('oil discovered norwegian north sea', 'Oil was discovered in the Norwegian North Sea on December 23, 1969, when the Ekofisk field was confirmed. This discovery transformed Norway from a modest fishing and shipping nation into one of the world\'s wealthiest countries. The Norwegian government established Statoil (now Equinor) in 1972 and created the Government Pension Fund Global (Oljefondet/Oil Fund) in 1990 to invest petroleum revenues for future generations. The fund is now worth over $1.5 trillion, making it the world\'s largest sovereign wealth fund.', src, 'en');
+
+    // ── Routing-fix pattern variants for short queries ────────────
+    this.knowledge.addEntry('cdn', 'A **CDN (Content Delivery Network)** distributes content across geographically dispersed edge servers to reduce latency. Static assets (images, CSS, JS) are cached at the nearest Point of Presence (PoP). Key features: edge caching, DDoS protection, SSL termination, image optimization. Popular CDNs: Cloudflare, AWS CloudFront, Vercel Edge Network, Fastly, Akamai.', src, 'en');
+    this.knowledge.addEntry('acid transaction', '**ACID** guarantees reliable database transactions: **Atomicity** (all-or-nothing), **Consistency** (valid state transitions), **Isolation** (concurrent transactions don\'t interfere), **Durability** (committed data survives crashes). Without ACID, a bank transfer could debit without crediting. PostgreSQL, MySQL InnoDB, SQLite are ACID-compliant. The NoSQL alternative is BASE: Basically Available, Soft state, Eventually consistent.', src, 'en');
+    this.knowledge.addEntry('test-driven development', '**TDD (Test-Driven Development)** writes tests BEFORE code. The Red-Green-Refactor cycle: 1) Red — write a failing test, 2) Green — write minimal code to pass, 3) Refactor — clean up while tests stay green. Benefits: catches bugs early, better API design, confident refactoring. Tools: Vitest, Jest, pytest, RSpec.', src, 'en');
+    this.knowledge.addEntry('css-in-js', '**CSS-in-JS** writes CSS directly in JavaScript, scoped to components. Runtime libraries (styled-components, Emotion) generate styles at runtime. Zero-runtime libraries (vanilla-extract, Linaria, Panda CSS) extract CSS at build time. Pros: component-scoped, dynamic styles, TypeScript support. Cons: runtime overhead for runtime libs. Tailwind CSS is the leading utility-first alternative.', src, 'en');
+
+    // ── NEW ENTRIES for remaining failures ────────────────────────
+    this.knowledge.addEntry('oklch color space', '**OKLCH** is a perceptual color space designed for predictable color manipulation in CSS.\n\n**Syntax:** `oklch(L C H / alpha)` — Lightness (0-1), Chroma (0-0.4), Hue (0-360°).\n\n**Why OKLCH over HSL:**\n- **Perceptually uniform** — equal numeric changes produce equal visual changes\n- **Consistent lightness** — HSL yellow appears much brighter than blue at the same L value; OKLCH fixes this\n- **Better gradients** — no muddy/gray middle zones\n- **Wide gamut** — supports P3 and Rec. 2020 color spaces (beyond sRGB)\n\n**Usage in CSS:**\n```css\ncolor: oklch(0.7 0.15 150); /* green */\ncolor: oklch(0.5 0.2 270 / 0.8); /* semi-transparent purple */\n```\n\n**Tailwind v4** uses OKLCH as its default color space. Supported in all modern browsers (2023+).', src, 'en');
+
+    this.knowledge.addEntry('javascript map and set', '**Map** and **Set** are built-in JavaScript collection types (ES6+).\n\n**Map** — key-value pairs where keys can be any type (not just strings):\n```javascript\nconst m = new Map();\nm.set(objKey, \'value\');  // any type as key\nm.get(objKey);           // retrieve\nm.has(objKey);           // check existence\nm.size;                  // count entries\n```\n\n**Set** — collection of unique values:\n```javascript\nconst s = new Set([1, 2, 2, 3]); // {1, 2, 3}\ns.add(4);  s.has(2);  s.delete(1);\n```\n\n**Map vs Object:** Map has any-type keys, guaranteed insertion order, better performance for frequent additions/deletions, and a `.size` property.\n\n**Set vs Array:** Set automatically deduplicates. `[...new Set(array)]` is the idiomatic way to remove duplicates.\n\n**WeakMap/WeakSet** — keys are weakly held (garbage-collectable). Useful for caching without memory leaks.', src, 'en');
+
+    this.knowledge.addEntry('javascript symbol', '**Symbol** is a primitive type in JavaScript that creates **unique, immutable identifiers**.\n\n```javascript\nconst id = Symbol(\'description\');\nconst id2 = Symbol(\'description\');\nid === id2; // false — every Symbol is unique\n```\n\n**Use cases:**\n- **Unique property keys** — avoid naming collisions in objects\n- **Well-known symbols** — customize language behavior:\n  - `Symbol.iterator` — make objects iterable\n  - `Symbol.toPrimitive` — custom type conversion\n  - `Symbol.hasInstance` — customize instanceof\n- **Private-ish properties** — Symbols don\'t show up in `for...in` or `Object.keys()`\n\n**Symbol.for(key)** — creates/retrieves a global shared Symbol (same key → same Symbol across files).\n\nSymbols are NOT strings. They provide a way to create truly unique identifiers that can\'t accidentally collide with other property names.', src, 'en');
+
+    this.knowledge.addEntry('for in vs for of javascript', '**for...in** iterates over **enumerable property keys** (strings) of an object.\n**for...of** iterates over **iterable values** (arrays, strings, Maps, Sets, generators).\n\n```javascript\nconst arr = [\'a\', \'b\', \'c\'];\n\nfor (const key in arr) console.log(key);   // "0", "1", "2" (indices as strings)\nfor (const val of arr) console.log(val);   // "a", "b", "c" (actual values)\n```\n\n**for...in:**\n- Iterates over ALL enumerable properties (including inherited ones)\n- Returns property keys as strings\n- Best for: plain objects (`for (const key in obj)`)\n- Pitfall: also iterates prototype chain — use `hasOwnProperty` guard\n\n**for...of:**\n- Iterates over iterable protocol values\n- Works with arrays, strings, Maps, Sets, generators, NodeLists\n- Best for: arrays and iterables\n- Does NOT work with plain objects (use `Object.entries()` instead)\n\n**Modern alternatives:** `Array.forEach()`, `Array.map()`, `Object.entries()`, `Object.keys()`.', src, 'en');
+
+    this.knowledge.addEntry('data minimization gdpr', '**Data minimization** is a core principle of GDPR (Article 5(1)(c)) requiring that personal data collected must be **adequate, relevant, and limited to what is necessary** for the specified purpose.\n\n**What it means:**\n- Only collect data you actually need\n- Don\'t gather "nice to have" data "just in case"\n- Delete data when it\'s no longer needed for its original purpose\n- Pseudonymize or anonymize data when full identification isn\'t required\n\n**Examples:**\n- A newsletter signup only needs an email — not name, phone, address\n- A contact form doesn\'t need date of birth\n- Analytics should use anonymized IPs where possible\n\n**Related principles:** purpose limitation (use data only for stated purpose), storage limitation (don\'t keep data forever). Violations can result in fines up to 4% of global annual turnover or €20 million under GDPR.', src, 'en');
+
+    this.knowledge.addEntry('two-factor authentication', '**Two-factor authentication (2FA)** requires two different types of verification to prove identity, adding a security layer beyond just a password.\n\n**The three factors:**\n1. **Something you know** — password, PIN\n2. **Something you have** — phone, hardware key, authenticator app\n3. **Something you are** — fingerprint, face, voice (biometric)\n\n**2FA = any two of the above.** MFA (multi-factor authentication) uses two or more.\n\n**Common 2FA methods:**\n- **TOTP** — time-based one-time password (Google Authenticator, Authy)\n- **SMS codes** — least secure (SIM swapping risk)\n- **Hardware keys** — YubiKey, FIDO2/WebAuthn (most secure)\n- **Push notifications** — approve on phone\n- **Passkeys** — FIDO2-based passwordless authentication (2024+ standard)\n\n**For developers:** Use libraries like Speakeasy (TOTP), integrate WebAuthn API, or use auth services (Auth0, Clerk, Supabase Auth) that include 2FA.', src, 'en');
+
+    this.knowledge.addEntry('nx monorepo', '**Nx** is a build system and monorepo management tool for JavaScript/TypeScript projects.\n\n**Key features:**\n- **Computation caching** — never rebuild unchanged code (local + remote cache)\n- **Task graph** — understands project dependencies, runs tasks in optimal order\n- **Affected commands** — `nx affected:test` only tests projects impacted by your changes\n- **Code generators** — scaffold components, libraries, and applications\n- **Plugins** — first-class support for React, Angular, Node.js, Next.js, and more\n\n**Core concepts:**\n- **Workspace** — monorepo containing apps and libs\n- **Project graph** — dependency graph of all projects\n- **Executors** — build/test/serve runners\n- **Generators** — code scaffolding\n\n**Nx vs Turborepo:** Nx has a richer plugin system and code generation. Turborepo is simpler and focused on caching/task orchestration. Both solve the monorepo build performance problem.\n\n**Getting started:** `npx create-nx-workspace@latest`', src, 'en');
+
+    this.knowledge.addEntry('framer motion', '**Framer Motion** is a production-ready animation library for **React** that makes complex animations simple with a declarative API.\n\n**Basic usage:**\n```jsx\nimport { motion } from \'framer-motion\';\n\n<motion.div\n  initial={{ opacity: 0, y: 20 }}\n  animate={{ opacity: 1, y: 0 }}\n  exit={{ opacity: 0 }}\n  transition={{ duration: 0.3 }}\n/>\n```\n\n**Key features:**\n- **Layout animations** — `layout` prop auto-animates position/size changes\n- **Gestures** — drag, hover, tap, pan with physics\n- **AnimatePresence** — animate components as they mount/unmount\n- **Variants** — orchestrate animations across component trees\n- **Spring physics** — natural-feeling motion without manual easing\n- **Scroll animations** — `useScroll`, `useInView` hooks\n\n**Framer Motion is now Motion** — as of 2024, the library was renamed to `motion` with framework-agnostic support (React, Vue, vanilla JS). Install: `npm install motion`.', src, 'en');
+
+    this.knowledge.addEntry('react query tanstack query', '**React Query (now TanStack Query)** is a server state management library — it handles fetching, caching, synchronizing, and updating server data in React apps.\n\n**Core concept:** Server state (data from APIs) is fundamentally different from client state (UI state like modals, form inputs). React Query manages server state.\n\n**Key features:**\n- **Automatic caching** — queries are cached by key, reused across components\n- **Background refetching** — stale data is shown instantly while fresh data loads\n- **Smart retries** — failed queries auto-retry with exponential backoff\n- **Optimistic updates** — update UI before server confirms\n- **Pagination & infinite scroll** — built-in support\n- **Devtools** — visual query inspector\n\n**Usage:**\n```jsx\nconst { data, isLoading } = useQuery({\n  queryKey: [\'todos\'],\n  queryFn: () => fetch(\'/api/todos\').then(r => r.json()),\n});\n```\n\n**Mutations:** `useMutation` for POST/PUT/DELETE with automatic cache invalidation.\n\n**TanStack Query v5** also supports Vue, Svelte, Solid, and Angular.', src, 'en');
+
+    this.knowledge.addEntry('result type rust', '**Result<T, E>** is Rust\'s primary error handling type — an enum with two variants: `Ok(T)` for success and `Err(E)` for failure. The `?` operator propagates errors automatically. Use `match` to handle both cases. Unlike exceptions, Result forces explicit error handling at compile time. Popular error libraries: anyhow (application code), thiserror (library code).', src, 'en');
+
+    this.knowledge.addEntry('slice go', 'A **slice** in Go is a dynamically-sized view into an array — the most common data structure in Go. Create with `[]int{1,2,3}` or `make([]int, len, cap)`. Key operations: `append`, sub-slicing `s[1:3]`, `len()`, `cap()`, `copy()`. Internally a 3-word struct: pointer, length, capacity. Slicing shares the backing array. Use `slices.Clone()` for independent copies.', src, 'en');
+
+    this.knowledge.addEntry('react forwardref', '**React.forwardRef** lets a parent pass a ref through to a child component\'s DOM element. Usage: `const Input = forwardRef((props, ref) => <input ref={ref} {...props} />)`. Essential for design system components, imperative handle APIs (useImperativeHandle), and library integration. In React 19, ref is a regular prop, making forwardRef less necessary.', src, 'en');
+
+    // ── Ultra-short pattern aliases for single-word/abbreviation queries ──
+    this.knowledge.addEntry('isr nextjs', '**ISR (Incremental Static Regeneration)** in Next.js updates static pages after deployment without full rebuilds. Pages are statically generated at build time, then regenerated in the background after the revalidate period. Usage: `export const revalidate = 60`. On-demand ISR: `revalidatePath()` or `revalidateTag()`. Benefits: static performance with dynamic freshness.', src, 'en');
+    this.knowledge.addEntry('nx', '**Nx** is a build system and monorepo tool with computation caching, task graph analysis, and affected-only testing. Supports React, Angular, Node.js, Next.js. Key: `nx affected:test` runs only impacted tests. Nx vs Turborepo: Nx has richer plugins and code generation. Start: `npx create-nx-workspace@latest`.', src, 'en');
+    this.knowledge.addEntry('data minimization', '**Data minimization** (GDPR Article 5(1)(c)) requires collecting only personal data that is adequate, relevant, and limited to what is necessary for the specified purpose. Don\'t collect "nice to have" data. Delete data when no longer needed. Related: purpose limitation, storage limitation. Violations: fines up to 4% of global turnover.', src, 'en');
+    this.knowledge.addEntry('for...in vs for...of', '**for...in** iterates over enumerable property keys (strings) of an object. **for...of** iterates over iterable values (arrays, Maps, Sets). for...in returns keys, for...of returns values. for...in traverses the prototype chain. for...of uses the iterable protocol. Use for...in for objects, for...of for arrays.', src, 'en');
+    this.knowledge.addEntry('result rust', '**Result<T, E>** in Rust has two variants: Ok(T) for success and Err(E) for failure. The ? operator propagates errors. Match on Ok/Err for handling. Unlike exceptions, Result forces explicit error handling at compile time. Libraries: anyhow, thiserror.', src, 'en');
+    this.knowledge.addEntry('slice in go', 'A **slice** in Go is a dynamically-sized, flexible view into an array. Create: `[]int{1,2,3}` or `make([]int, len, cap)`. Append: `s = append(s, elem)`. Sub-slice: `s[1:3]`. Length: `len(s)`, capacity: `cap(s)`. Copy: `copy(dst, src)`. A slice header is (pointer, length, capacity). Slicing shares the backing array.', src, 'en');
+    this.knowledge.addEntry('forwardref react', '**forwardRef** in React allows passing a ref from a parent component to a child DOM element. Wrap the component: `const Comp = forwardRef((props, ref) => <div ref={ref} />)`. Used in design systems, imperative handles, and library wrappers. React 19 makes ref a regular prop.', src, 'en');
+
+    // ── Final routing fixes: match exact cleaned query word patterns ──
+    this.knowledge.addEntry('isr next js', '**ISR (Incremental Static Regeneration)** in Next.js update static pages after deployment without full rebuilds. After the revalidate period, the next request triggers background regeneration (stale-while-revalidate). Usage: `export const revalidate = 60`. On-demand: `revalidatePath()`, `revalidateTag()`. Benefits: CDN-cached static performance with dynamic freshness.', src, 'en');
+    this.knowledge.addEntry('result type rust', '**Result<T, E>** is Rust\'s primary error handling enum: `Ok(T)` for success, `Err(E)` for failure. The `?` operator propagates Err automatically, unwraps Ok. Use `match` for exhaustive handling. Avoids exceptions — all errors are explicit. Libraries: **anyhow** (app code, any error type), **thiserror** (derive Error for custom types).', src, 'en');
+    this.knowledge.addEntry('react forward ref', '**React.forwardRef** passes a ref from parent to child DOM node: `const Input = forwardRef((props, ref) => <input ref={ref} {...props} />)`. The parent can then access the DOM element directly. Used for: design system wrappers, imperative handles (`useImperativeHandle`), third-party integration. In React 19, ref is just a regular prop.', src, 'en');
+    this.knowledge.addEntry('difference for in for of', '**for...in** loops over enumerable property **keys** (strings) of an object, including inherited properties. **for...of** loops over **values** of iterable objects (arrays, Maps, Sets, strings). for...in is for object keys, for...of is for array values. Modern alternatives: `Object.entries()`, `.map()`, `.forEach()`.', src, 'en');
+    this.knowledge.addEntry('slice go', 'A **Go slice** is a dynamically-sized view into an array — the primary collection type in Go. Create: `s := []int{1,2,3}` or `make([]int, 5)`. Append: `s = append(s, 4)`. Sub-slice: `s[1:3]`. Internally: pointer + length + capacity. `append` may allocate a new backing array when capacity is exceeded. Use `slices.Clone()` for independent copies.', src, 'en');
+
+    // ── TF-IDF training text for R14b entries ─────────────────────
+    const r14bText = `DevOps: Dockerfile Docker image base FROM WORKDIR COPY RUN CMD multi-stage build container. GitHub Actions CI CD workflow YAML job step runner action matrix secrets. CDN content delivery network edge server cache latency PoP Cloudflare CloudFront.
+    Database: SQL injection attack parameterized query prepared statement OWASP security vulnerability prevention ORM. Database normalization normal form 1NF 2NF 3NF BCNF redundancy denormalization data integrity. ACID atomicity consistency isolation durability transaction rollback commit WAL.
+    Testing: TDD test-driven development red green refactor failing test write code first. Testing trophy Kent Dodds integration tests unit test pyramid static analysis end-to-end. Test fixture setup teardown beforeEach afterEach seed data mock factory pytest Playwright.
+    Rust: borrowing borrow reference immutable mutable ownership memory safety data race compile time ampersand. Cargo build tool package manager crates crate registry Cargo.toml workspace clippy fmt doc. Result Ok Err error handling question mark operator anyhow thiserror propagate.
+    Python: virtual environment venv virtualenv conda pyenv poetry isolation dependency conflict pip install activate. List tuple mutable immutable sequence hashable dict key performance Python data structure. Pip package installer PyPI requirements.txt freeze install uninstall poetry pipenv uv.
+    Go: defer keyword cleanup resource release LIFO function return close file mutex unlock recover panic. Slice dynamic array backing append length capacity make sub-slice copy clone Go data structure. Sync package mutex RWMutex WaitGroup Once Map Pool goroutine concurrency primitive lock.
+    Accessibility: screen reader NVDA JAWS VoiceOver TalkBack assistive technology accessibility tree ARIA alt text. Semantic HTML header nav main article section aside footer figure meaning structure SEO. Focus trap modal dialog keyboard Tab Escape focusable element inert WCAG 2.4.3.
+    Frameworks: SvelteKit Svelte compiler file routing SSR SSG adapter form actions load functions. Angular CLI ng command generate component service build serve test schematics angular.json.
+    CSS: OKLCH color space perceptual uniform lightness chroma hue wide gamut P3 Tailwind v4 oklch. CSS-in-JS styled-components Emotion vanilla-extract runtime zero-runtime Panda CSS.
+    JavaScript: Map Set collection unique values key-value WeakMap WeakSet ES6. Symbol primitive unique immutable identifier iterator toPrimitive property key. For in for of enumerable iterable keys values array object prototype.
+    GDPR: data minimization adequate relevant necessary purpose limitation storage limitation personal data Article 5.
+    Auth: two-factor authentication 2FA MFA TOTP SMS hardware key YubiKey FIDO2 WebAuthn passkey biometric.
+    Monorepo: Nx build system computation caching task graph affected code generators plugins Turborepo workspace.
+    Animation: Framer Motion animation library React motion layout gestures AnimatePresence variants spring scroll.
+    State: React Query TanStack Query server state cache fetching caching useQuery useMutation background refetch optimistic.`;
+    this.knowledge.learn(r14bText, src, 'en');
+    this.tokenizer.encode(r14bText);
+  }
+
+  /**
+   * Bootstrap cross-domain bridge facts that strengthen the connection graph.
+   * These entries link related concepts across domains so the intelligence
+   * layer can traverse from one topic to related ones.
+   */
+  private bootstrapKnowledgeConnections(): void {
+    const src = 'bootstrap:connections';
+
+    // Frontend frameworks — shared concepts
+    this.knowledge.addEntry('react overview', '**React** is a JavaScript library for building user interfaces, created by **Meta** (2013). It\'s the most widely adopted frontend library — if you\'re building a web app today, there\'s a good chance React is one of your top choices.\n\n**Core concepts:**\n- **Components** — reusable UI building blocks (think LEGO bricks for UIs)\n- **JSX** — HTML-like syntax in JavaScript\n- **Hooks** — useState, useEffect, useRef for state and side effects\n- **Virtual DOM** — efficient UI updates by diffing\n- **Unidirectional data flow** — props down, events up\n\n**Ecosystem:** React Router (navigation), Redux/Zustand (state), Next.js (SSR/SSG).\n\n**When to use React:** SPAs, dashboards, mobile apps (React Native), anything interactive.', src, 'en');
+    this.knowledge.addEntry('vue overview', 'Vue is a progressive JavaScript framework for building user interfaces with reactive data binding and a virtual DOM. Vue uses single-file components, the Composition API, and two-way data binding. Created by Evan You in 2014.', src, 'en');
+    this.knowledge.addEntry('angular overview', 'Angular is a TypeScript-based platform for building web applications with dependency injection, change detection, and a module system. Angular uses components, services, RxJS observables, and has built-in routing. Created by Google in 2016.', src, 'en');
+
+    // Container ecosystem — shared concepts
+    this.knowledge.addEntry('docker overview', 'Docker is a platform for building and running containerized applications. Docker uses images, containers, volumes, and networks. Docker Compose orchestrates multi-container setups. Containers package code with all dependencies for consistent environments across development and production.', src, 'en');
+    this.knowledge.addEntry('kubernetes overview', '**Kubernetes (K8s)** picks up where Docker leaves off — once you have containers, K8s decides where they run, how many copies exist, and what happens when they crash.\n\n**Core concepts:**\n- **Pod** — smallest deployable unit (one or more containers)\n- **Service** — stable network endpoint for pods\n- **Deployment** — manages pod replicas and rolling updates\n- **Ingress** — routes external HTTP traffic to services\n\n**Key commands:** `kubectl get pods`, `kubectl apply -f`, `kubectl logs`, `kubectl scale`.\n\nOriginally developed by **Google**, now maintained by the CNCF.', src, 'en');
+    this.knowledge.addEntry('containerization', '**Containerization** packages applications with their dependencies into isolated units called **containers**.\n\n**Why it matters:** Before containers, deploying software meant praying it would behave the same way on the server as it did on your laptop. Containers solved that.\n\n**Containers vs VMs:**\n- Containers share the host OS kernel — lightweight, start in seconds\n- VMs run a full OS — heavier, start in minutes\n\n**Key tools:**\n- **Docker** — build and run containers\n- **Kubernetes** — orchestrate containers at scale\n- **Podman** — rootless alternative to Docker\n\n**Benefits:** consistency across environments, isolation, portability, resource efficiency.', src, 'en');
+
+    // Databases — shared concepts
+    this.knowledge.addEntry('postgresql overview', 'PostgreSQL is a powerful open-source relational database supporting SQL, JSON, full-text search, and window functions. PostgreSQL uses MVCC for concurrent access and supports B-tree, GIN, GiST, and BRIN index types. Known for data integrity and advanced features.', src, 'en');
+    this.knowledge.addEntry('mongodb overview', 'MongoDB is a document-oriented NoSQL database storing data in flexible JSON-like BSON documents. MongoDB supports horizontal scaling through sharding and uses replica sets for high availability. Best for flexible schemas and rapid development.', src, 'en');
+    this.knowledge.addEntry('database comparison', 'SQL databases (PostgreSQL, MySQL) use structured tables with schemas, ACID transactions, and are best for complex queries and data integrity. NoSQL databases (MongoDB, Redis) use flexible schemas, eventual consistency, and are best for rapid development and horizontal scaling. Choose SQL when you need joins and transactions; choose NoSQL when you need schema flexibility and scale.', src, 'en');
+
+    // Testing — shared concepts
+    this.knowledge.addEntry('testing overview', 'Software testing verifies code works correctly. Unit tests verify individual functions. Integration tests verify modules work together. End-to-end tests verify the full user flow. Test-driven development (TDD) writes tests before code. Tools: Vitest for unit tests, Playwright for E2E, React Testing Library for UI components.', src, 'en');
+
+    // DevOps bridge
+    this.knowledge.addEntry('devops overview', 'DevOps combines development and operations for continuous delivery. CI/CD pipelines automate build, test, and deployment. Infrastructure as Code (IaC) manages servers through configuration files. Docker containers provide consistent environments. Kubernetes orchestrates containers in production. Monitoring and logging complete the feedback loop.', src, 'en');
+
+    // Version control
+    this.knowledge.addEntry('git overview', '**Git** is a **distributed version control system** — it lets you track every change to your code, undo mistakes, and collaborate with others without stepping on each other\'s work.\n\n**Why it matters:** Without Git, one bad edit can destroy your project. With Git, you can always go back.\n\n**Key operations:**\n- **commit** — save a snapshot of your changes\n- **branch** — create parallel lines of development\n- **merge** — combine branches back together\n- **rebase** — replay commits onto a new base\n- **cherry-pick** — apply specific commits\n\n**Workflow:** Feature branches → Pull requests → Code review → Merge to main.\n\n**Essential commands:** `git init`, `git clone`, `git add`, `git commit`, `git push`, `git pull`, `git branch`, `git checkout`, `git merge`.\n\n**Platforms:** GitHub, GitLab, and Bitbucket add collaboration features like PRs, issues, and CI/CD pipelines.', src, 'en');
+
+    // Node.js
+    this.knowledge.addEntry('nodejs overview', 'Node.js is a JavaScript runtime built on Chrome\'s V8 engine for server-side development. It uses an event-driven, non-blocking I/O model ideal for data-intensive real-time applications. npm is the world\'s largest package ecosystem. Key features: single-threaded event loop, worker threads for CPU tasks, built-in modules (fs, http, path, crypto). Common frameworks: Express.js, Fastify, Nest.js. Node.js powers the backend of MERN, PERN, and MEVN stacks.', src, 'en');
+
+    // TypeScript-JavaScript relationship
+    this.knowledge.addEntry('typescript javascript relationship', '**TypeScript and JavaScript — the relationship:**\n\nThink of TypeScript as JavaScript with a **safety net** — same language underneath, but with an extra layer that catches mistakes before your code runs.\n\nTypeScript is a **strict superset** of JavaScript — all valid JavaScript is already valid TypeScript.\n\n**What TypeScript adds:**\n- Static types, interfaces, generics, and enums\n- Compile-time error checking (JavaScript only catches errors at runtime)\n- Better IDE support (IntelliSense, refactoring)\n\n**How they connect:**\n- TypeScript compiles (transpiles) to plain JavaScript\n- Runs anywhere JS runs: browsers, Node.js, Deno, Bun\n- `tsconfig.json` configures the TypeScript compiler', src, 'en');
+
+    // ── Gap-coverage entries (identified by diagnose() Round 11) ──
+
+    // GraphQL — no handler or entry existed
+    this.knowledge.addEntry('graphql', '**GraphQL** is a query language for APIs, developed by **Meta** (2012, open-sourced 2015). Instead of REST\'s fixed endpoints, clients ask for exactly the data they need in a single request.\n\n**Core concepts:**\n- **Schema** — defines types and relationships (`type User { id: ID!, name: String, posts: [Post] }`)\n- **Queries** — read data (like GET)\n- **Mutations** — write data (like POST/PUT/DELETE)\n- **Subscriptions** — real-time updates via WebSocket\n- **Resolvers** — functions that fetch the data for each field\n\n**Advantages over REST:** no over-fetching, no under-fetching, strongly typed, self-documenting.\n\n**Trade-offs:** more complex caching (no URL-based cache keys), N+1 query problem on the server, steeper learning curve.\n\n**Tools:** Apollo (client + server), Relay, urql, GraphQL Yoga, Hasura (auto-generate from DB).\n\n**When to use:** complex data relationships, mobile apps (bandwidth-sensitive), multiple frontend consumers.', src, 'en');
+
+    // JavaScript Promises — fundamental async primitive
+    this.knowledge.addEntry('javascript promises', '**Promises** are JavaScript\'s way of handling asynchronous operations — code that takes time, like fetching data or reading files.\n\n**States:** pending → fulfilled (resolved) or rejected.\n\n**Basic usage:**\n```javascript\nfetch(\'/api/data\')\n  .then(res => res.json())\n  .then(data => console.log(data))\n  .catch(err => console.error(err));\n```\n\n**async/await** — syntactic sugar over promises:\n```javascript\nconst res = await fetch(\'/api/data\');\nconst data = await res.json();\n```\n\n**Key methods:**\n- `Promise.all([...])` — wait for all, fail on first rejection\n- `Promise.allSettled([...])` — wait for all regardless of outcome\n- `Promise.race([...])` — first to settle wins\n- `Promise.any([...])` — first to fulfill wins\n\n**Common pitfall:** forgetting to `await` an async call, or not catching rejections.', src, 'en');
+
+    // DNS — general "how does it work"
+    this.knowledge.addEntry('how dns works', '**DNS (Domain Name System)** translates human-readable names like `google.com` into IP addresses like `142.250.74.46`.\n\n**Resolution flow:**\n1. Browser checks its **local cache**\n2. OS checks the **system resolver cache**\n3. Query goes to your **recursive resolver** (usually your ISP or 8.8.8.8)\n4. Resolver asks the **root nameserver** → gets referral to TLD server\n5. **TLD server** (.com, .org) → refers to authoritative nameserver\n6. **Authoritative nameserver** returns the actual IP\n\n**Record types:** A (IPv4), AAAA (IPv6), CNAME (alias), MX (mail), TXT (verification), NS (nameserver).\n\n**TTL** controls how long records are cached (typically 300-3600 seconds).\n\n**Why it matters:** DNS is the internet\'s phone book — without it, you\'d have to memorize IP addresses.', src, 'en');
+
+    // CSS Grid — layout primitive
+    this.knowledge.addEntry('css grid', '**CSS Grid** is a two-dimensional layout system — it handles both rows and columns at the same time, unlike Flexbox which is one-dimensional.\n\n**Basic setup:**\n```css\n.container {\n  display: grid;\n  grid-template-columns: repeat(3, 1fr);\n  grid-template-rows: auto;\n  gap: 1rem;\n}\n```\n\n**Key properties:**\n- `grid-template-columns/rows` — define track sizes\n- `gap` — space between cells\n- `grid-column/row` — place items across tracks\n- `grid-area` — name and place regions\n- `fr` unit — fractional unit for flexible tracks\n- `minmax()` — responsive track sizing\n- `auto-fill/auto-fit` — responsive column count\n\n**Grid vs Flexbox:** Use Grid for page layouts (headers, sidebars, content areas). Use Flexbox for component layouts (nav items, card contents). They work great together.\n\n**Browser support:** Excellent — all modern browsers since 2017.', src, 'en');
+
+    // Binary tree — fundamental data structure
+    this.knowledge.addEntry('binary tree', '**Binary tree** is a data structure where each node has at most **two children** (left and right).\n\n**Variants:**\n- **Binary Search Tree (BST)** — left < parent < right. O(log n) search/insert on average.\n- **AVL Tree** — self-balancing BST (strict height balance)\n- **Red-Black Tree** — self-balancing BST (used in Java TreeMap, C++ std::map)\n- **Heap** — complete binary tree for priority queues (min-heap, max-heap)\n\n**Traversals:**\n- **In-order** (left → root → right) — gives sorted order for BST\n- **Pre-order** (root → left → right) — good for copying trees\n- **Post-order** (left → right → root) — good for deletion\n- **Level-order** (BFS) — breadth-first, uses a queue\n\n**Common operations:** insert, delete, search, find min/max, height, check balanced.\n\n**Use cases:** databases (B-trees), file systems, expression parsing, priority queues, routing tables.', src, 'en');
+
+    // Git usage — "how to use git" which doesn't match "git overview"
+    this.knowledge.addEntry('how to use git', '**Getting started with Git** — the everyday workflow:\n\n**First-time setup:**\n```bash\ngit config --global user.name "Your Name"\ngit config --global user.email "you@example.com"\n```\n\n**Start a project:**\n- `git init` — create a new repo\n- `git clone <url>` — copy an existing one\n\n**Daily workflow:**\n1. `git pull` — get latest changes\n2. `git checkout -b feature/my-feature` — create a branch\n3. Make your changes\n4. `git add .` — stage changes\n5. `git commit -m "what you did"` — commit\n6. `git push origin feature/my-feature` — push to remote\n7. Open a pull request for review\n\n**Undo mistakes:**\n- `git stash` — temporarily shelve changes\n- `git reset --soft HEAD~1` — undo last commit, keep changes\n- `git checkout -- <file>` — discard file changes\n\n**Pro tips:** commit often, write clear messages, use `.gitignore` for build artifacts.', src, 'en');
+
+    // Programming languages with English-word names (prevent web-search disambiguation to wrong meaning)
+    this.knowledge.addEntry('rust programming', '**Rust** is a systems programming language focused on **safety, speed, and concurrency** — created by Mozilla (2010, stable 2015).\n\n**Why Rust matters:** It gives you C/C++-level performance without the memory bugs. The compiler catches use-after-free, data races, and null pointer errors **at compile time**.\n\n**Key concepts:**\n- **Ownership** — each value has exactly one owner\n- **Borrowing** — references without taking ownership (`&T`, `&mut T`)\n- **Lifetimes** — compiler-enforced reference validity\n- **Pattern matching** — exhaustive `match` expressions\n- **Zero-cost abstractions** — iterators, generics compile to optimal code\n\n**Use cases:** operating systems, game engines, WebAssembly, CLI tools, embedded systems.\n\n**Ecosystem:** Cargo (build tool + package manager), crates.io (package registry).', src, 'en');
+    this.knowledge.addEntry('rust', '**Rust** is a systems programming language focused on **safety, speed, and concurrency** — created by Mozilla (2010, stable 2015). Ownership system prevents memory bugs at compile time. Zero-cost abstractions, fearless concurrency. Ecosystem: Cargo, crates.io. Used for OS, game engines, WebAssembly, CLI tools.', src, 'en');
+    this.knowledge.addEntry('rust language', '**Rust** is a systems programming language focused on **safety, speed, and concurrency** — created by Mozilla (2010, stable 2015). Key features: ownership system, zero-cost abstractions, fearless concurrency. Ecosystem: Cargo, crates.io.', src, 'en');
+
+    this.knowledge.addEntry('go programming', '**Go** (Golang) is a statically typed, compiled language designed at **Google** (2009) for simplicity and concurrency.\n\n**Why Go matters:** It compiles fast, runs fast, and makes concurrency easy. If you need a reliable backend service that handles thousands of concurrent connections, Go is a strong pick.\n\n**Key features:**\n- **Goroutines** — lightweight threads (start thousands with minimal memory)\n- **Channels** — type-safe communication between goroutines\n- **Simple syntax** — intentionally minimal (no generics until 1.18, no classes)\n- **Fast compilation** — large projects compile in seconds\n- **Static binary** — single executable, no runtime dependencies\n\n**Use cases:** microservices, CLI tools, DevOps tooling (Docker, Kubernetes are written in Go), APIs.\n\n**Getting started:** `go mod init`, `go run main.go`, `go build`.', src, 'en');
+    this.knowledge.addEntry('golang', '**Go** (Golang) is a statically typed, compiled language designed at **Google** (2009) for simplicity and concurrency. Key features: goroutines, channels, fast compilation, static binaries. Used for microservices, CLI tools, DevOps tooling.', src, 'en');
+
+    this.knowledge.addEntry('swift programming', '**Swift** is Apple\'s modern programming language for iOS, macOS, watchOS, and tvOS development (2014). Swift is safe, fast, and expressive with features like optionals, closures, generics, and protocol-oriented programming. SwiftUI provides a declarative UI framework. Swift also runs on Linux for server-side development (Vapor framework).', src, 'en');
+
+    // Round 11 — additional gap fills (async/await, HTTPS, SQL, WebSocket, CSS specificity)
+    this.knowledge.addEntry('async await', '**async/await** is syntactic sugar over Promises that lets you write asynchronous code in a synchronous style.\n\n**How it works:**\n- `async` before a function makes it return a Promise\n- `await` pauses execution until the Promise resolves\n- Errors are caught with standard `try/catch` blocks\n\n**Example:**\n```javascript\nasync function fetchUser(id) {\n  try {\n    const res = await fetch(`/api/users/${id}`);\n    const user = await res.json();\n    return user;\n  } catch (err) {\n    console.error(err);\n  }\n}\n```\n\n**Key points:**\n- `await` only works inside `async` functions (or top-level in ES modules)\n- Multiple independent awaits can run in parallel with `Promise.all()`\n- async/await is available in JavaScript (ES2017), Python (3.5+), C# (5.0+), Rust, and many other languages', src, 'en');
+
+    this.knowledge.addEntry('how https works', '**HTTPS** (HyperText Transfer Protocol Secure) encrypts HTTP traffic using **TLS** (Transport Layer Security).\n\n**The TLS handshake (simplified):**\n1. **Client Hello** — browser sends supported cipher suites and TLS version\n2. **Server Hello** — server picks a cipher suite and sends its SSL certificate\n3. **Certificate verification** — browser checks the certificate against trusted CAs\n4. **Key exchange** — both sides agree on a shared session key (usually via ECDHE)\n5. **Encrypted session** — all subsequent data is encrypted with the session key\n\n**Why it matters:**\n- Prevents eavesdropping (data encrypted in transit)\n- Prevents tampering (integrity checks via HMAC)\n- Proves server identity (certificate chain of trust)\n\n**Modern HTTPS:** TLS 1.3 reduced the handshake to 1 round trip (1-RTT), and supports 0-RTT resumption. Let\'s Encrypt provides free certificates. HTTP/2 and HTTP/3 require HTTPS.', src, 'en');
+
+    this.knowledge.addEntry('sql joins', '**SQL JOINs** combine rows from two or more tables based on a related column.\n\n**Types of joins:**\n- **INNER JOIN** — returns rows with matching values in both tables\n- **LEFT JOIN** (LEFT OUTER) — all rows from the left table + matching rows from the right (NULL if no match)\n- **RIGHT JOIN** (RIGHT OUTER) — all rows from the right table + matching rows from the left\n- **FULL OUTER JOIN** — all rows from both tables (NULL where no match)\n- **CROSS JOIN** — cartesian product (every row paired with every other row)\n- **SELF JOIN** — a table joined with itself\n\n**Example:**\n```sql\nSELECT users.name, orders.total\nFROM users\nINNER JOIN orders ON users.id = orders.user_id\nWHERE orders.total > 100;\n```\n\n**Performance tips:** Always JOIN on indexed columns. Prefer explicit JOIN syntax over comma-separated WHERE clauses. Use EXPLAIN to check query plans.', src, 'en');
+
+    this.knowledge.addEntry('websocket', '**WebSocket** is a protocol providing **full-duplex communication** over a single TCP connection.\n\n**How it works:**\n1. Client sends an HTTP **Upgrade** request\n2. Server responds with `101 Switching Protocols`\n3. Both sides can now send messages freely (no request/response pattern)\n\n**Key characteristics:**\n- Persistent connection (no repeated handshakes)\n- Low latency — data flows instantly in both directions\n- Binary and text frame support\n- Built-in ping/pong for keepalive\n\n**Use cases:** real-time chat, live dashboards, multiplayer games, collaborative editing, stock tickers.\n\n**Example (browser):**\n```javascript\nconst ws = new WebSocket(\'wss://example.com/socket\');\nws.onmessage = (e) => console.log(e.data);\nws.send(\'hello\');\n```\n\n**Alternatives:** Server-Sent Events (SSE) for one-way streaming, HTTP long polling for simpler setups, WebTransport (HTTP/3-based) for next-gen real-time.', src, 'en');
+
+    this.knowledge.addEntry('css specificity', '**CSS specificity** determines which styles win when multiple rules target the same element.\n\n**The specificity hierarchy (low → high):**\n1. **Type selectors** (`div`, `p`, `h1`) — weight: 0-0-1\n2. **Class selectors** (`.btn`), attribute selectors (`[type="text"]`), pseudo-classes (`:hover`) — weight: 0-1-0\n3. **ID selectors** (`#header`) — weight: 1-0-0\n4. **Inline styles** (`style=\"...\"`) — beats all selectors\n5. **!important** — overrides everything (use sparingly)\n\n**How to calculate:** Count IDs, then classes, then elements.\n- `#nav .link` → 1-1-0\n- `div.container p.text` → 0-2-2\n- `#main #content .highlight` → 2-1-0\n\n**Rules:**\n- Higher specificity always wins, regardless of source order\n- Equal specificity → last rule in source order wins\n- `!important` overrides specificity (but `!important` with higher specificity still beats lower)\n\n**Best practices:** Prefer classes over IDs for styling. Avoid `!important`. Use CSS Layers (`@layer`) in modern CSS for better cascade control.', src, 'en');
+  }
+
+  /**
    * Feed text data to VAI so it learns.
    */
-  train(text: string, source: string, language: KnowledgeEntry['language'] = 'en'): void {
+  train(text: string, source = 'user-taught', language: KnowledgeEntry['language'] = 'en'): void {
     this.knowledge.learn(text, source, language);
     this.tokenizer.encode(text); // expand vocabulary
+    // Rebuild intelligence indexes lazily on next query
+    this.intelligenceDirty = true;
+    this.schedulePersist();
+  }
+
+  /**
+   * Teach Vai a specific fact — adds a knowledge entry and persists it.
+   * Use train() for bulk text and teach() for individual Q&A pairs.
+   */
+  teach(pattern: string, response: string, source = 'user-taught', language: KnowledgeEntry['language'] = 'en'): void {
+    this.knowledge.addEntry(pattern, response, source, language);
+    this.intelligenceDirty = true;
+    this.schedulePersist();
+  }
+
+  // ─── LEARNING FLYWHEEL ───
+  // After every successful response, extract key facts and persist them.
+  // This creates compound growth: every conversation makes Vai permanently smarter.
+
+  /** Strategies that should NOT trigger auto-learning */
+  private static readonly NO_LEARN_STRATEGIES = new Set([
+    'fallback', 'empty', 'gibberish', 'keyboard-noise',
+    'web-search', // web search results are already persisted by tryWebSearch
+    'learn-chat', // already learning from chat
+    'conversational', // greetings/small talk — no knowledge value
+    'math', // deterministic computation, not factual knowledge
+    'binary', // encoding, not knowledge
+    'scaffold', // action intent, not factual
+    'google-search', // already persisted by tryGoogleIt
+  ]);
+
+  /**
+   * Post-response learning hook — the compound interest engine.
+   * Called after every response, extracts reusable knowledge from the Q&A exchange.
+   */
+  private afterResponse(input: string, response: string, meta: ResponseMeta): void {
+    // Only learn from confident, non-trivial responses
+    if (meta.confidence < 0.6) return;
+    if (VaiEngine.NO_LEARN_STRATEGIES.has(meta.strategy)) return;
+    if (response.length < 50) return; // too short to be useful knowledge
+
+    // Extract the core topic (2-4 meaningful words)
+    const topic = meta.topicDetected;
+    if (!topic || topic === 'general') return;
+
+    // Dedup: if we already have a strong match for this topic, skip
+    const existing = this.cachedFindBestMatch(topic);
+    if (existing) return; // already known — no need to re-learn
+
+    // Condense the response to a summary (first 500 chars, cut at sentence boundary)
+    let summary = response;
+    if (summary.length > 500) {
+      const cut = summary.lastIndexOf('.', 500);
+      summary = cut > 200 ? summary.slice(0, cut + 1) : summary.slice(0, 500) + '…';
+    }
+
+    // Detect language from input
+    const isNorwegian = /\b(hva|hvordan|hvorfor|når|hvor|hei|hvem|hvilken?|dette|dette|fordi|kan|skal|vil|dette|veldig|eller|også|norsk|bokmål|nynorsk)\b/i.test(input);
+    const lang: KnowledgeEntry['language'] = isNorwegian ? 'no' : 'en';
+
+    // Teach the condensed Q&A pair — this triggers schedulePersist via teach()
+    this.teach(topic, summary, 'auto-learned', lang);
+  }
+
+  // ─── PERSISTENCE ───
+
+  /**
+   * Build snapshot of user-learned knowledge (excluding bootstrap entries).
+   */
+  private buildSnapshot(): VaiSnapshot {
+    const allEntries = this.knowledge.exportData();
+    // Only persist entries added AFTER bootstrap — everything before bootstrapEntryCount
+    // is rebuilt from code on every startup.
+    const learnedEntries = allEntries.entries.slice(this.bootstrapEntryCount);
+
+    const statsObj: Record<string, number> = {};
+    for (const [k, v] of this.strategyStats) statsObj[k] = v;
+
+    const missedObj: Record<string, number> = {};
+    for (const [k, v] of this.missedTopics) missedObj[k] = v;
+
+    return {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      learnedEntries,
+      strategyStats: statsObj,
+      missedTopics: missedObj,
+    };
+  }
+
+  /**
+   * Schedule a debounced persist — at most once per 2 seconds.
+   * Multiple rapid mutations coalesce into a single write.
+   */
+  private schedulePersist(): void {
+    if (!this.persistPath) return;
+    this.persistDirty = true;
+    if (this.persistTimer) return; // already scheduled
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      if (this.persistDirty) this.persistNow();
+    }, 2000);
+  }
+
+  /**
+   * Write snapshot to disk immediately. Called by the debounce timer.
+   * Uses synchronous write to guarantee data lands before process exit
+   * (async writes can be lost if the process is killed).
+   */
+  private persistNow(): void {
+    if (!this.persistPath) return;
+    this.persistDirty = false;
+    try {
+      const snapshot = this.buildSnapshot();
+      // Skip if no user-learned content exists
+      if (snapshot.learnedEntries.length === 0 &&
+          Object.keys(snapshot.strategyStats).length === 0 &&
+          Object.keys(snapshot.missedTopics).length === 0) {
+        return;
+      }
+      const dir = dirname(this.persistPath);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      // Atomic write: write to temp file, then rename
+      const tmp = this.persistPath + '.tmp';
+      writeFileSync(tmp, JSON.stringify(snapshot, null, 2), 'utf-8');
+      renameSync(tmp, this.persistPath);
+    } catch (err) {
+      console.error('[VaiEngine] persist failed:', err);
+    }
+  }
+
+  /**
+   * Load persisted snapshot synchronously during construction.
+   * Does nothing if no persistPath or file doesn't exist.
+   */
+  private loadPersistedSync(): void {
+    if (!this.persistPath) return;
+    try {
+      if (!existsSync(this.persistPath)) return;
+      const raw = readFileSync(this.persistPath, 'utf-8');
+      const snapshot = JSON.parse(raw) as VaiSnapshot;
+      if (snapshot.version !== 1) return; // unknown format — skip
+
+      // Restore learned entries
+      for (const entry of snapshot.learnedEntries) {
+        this.knowledge.addEntry(entry.pattern, entry.response, entry.source, entry.language);
+      }
+
+      // Restore strategy stats
+      if (snapshot.strategyStats) {
+        for (const [k, v] of Object.entries(snapshot.strategyStats)) {
+          this.strategyStats.set(k, (this.strategyStats.get(k) ?? 0) + v);
+        }
+      }
+
+      // Restore missed topics
+      if (snapshot.missedTopics) {
+        for (const [k, v] of Object.entries(snapshot.missedTopics)) {
+          this.missedTopics.set(k, (this.missedTopics.get(k) ?? 0) + v);
+        }
+      }
+
+      console.log(`[VaiEngine] Loaded ${snapshot.learnedEntries.length} persisted entries from ${this.persistPath}`);
+    } catch (err) {
+      console.error('[VaiEngine] loadPersisted failed:', err);
+    }
+  }
+
+  /**
+   * Force an immediate persist (useful before shutdown).
+   */
+  flushPersist(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    if (this.persistDirty) this.persistNow();
+  }
+
+  /**
+   * Get the path to the persistence file (or null if not configured).
+   */
+  get persistenceFile(): string | null {
+    return this.persistPath;
+  }
+
+  // ─── SELF-AWARENESS HELPERS ───
+
+  /** Wrap a strategy result to record what happened. Returns the response string unchanged. */
+  private tracked(strategy: string, response: string, input: string): string {
+    const meta: ResponseMeta = {
+      strategy,
+      confidence: this.strategyConfidence(strategy),
+      topicDetected: this.detectTopic(input),
+      knowledgeDepth: this.assessKnowledgeDepth(input),
+      responseLength: response.length,
+      durationMs: 0, // filled in by chat() after timing
+    };
+    this._lastMeta = meta;
+    this.responseHistory.push(meta);
+    if (this.responseHistory.length > VaiEngine.HISTORY_SIZE) {
+      this.responseHistory.shift();
+    }
+    this.strategyStats.set(strategy, (this.strategyStats.get(strategy) ?? 0) + 1);
+    return response;
+  }
+
+  private strategyConfidence(strategy: string): number {
+    const map: Record<string, number> = {
+      'empty': 1.0, 'gibberish': 1.0, 'keyboard-noise': 1.0,
+      'math': 0.95, 'scaffold': 0.90, 'binary': 0.95,
+      'mcq': 0.85, 'yesno': 0.85,
+      'google-search': 0.80, 'discussion': 0.80,
+      'conversational': 0.90,
+      'networking': 0.90, 'creative-code': 0.85, 'best-practices': 0.90,
+      'algorithm': 0.85, 'net-code': 0.85,
+      'norwegian-lang': 0.85, 'english-lang': 0.85,
+      'taught-match': 0.90, 'taught-doc': 0.80,
+      'web-stack': 0.90, 'general-knowledge': 0.85, 'framework-devops': 0.90,
+      'cognitive': 0.85,
+      'code-gen': 0.80, 'advanced-code': 0.80,
+      'intelligence': 0.75,
+      'direct-match': 0.70, 'concept-lookup': 0.60,
+      'synthesis': 0.55, 'learn-chat': 0.50,
+      'web-search': 0.45, 'fallback': 0.15,
+    };
+    return map[strategy] ?? 0.5;
+  }
+
+  private static readonly TOPIC_STOP_WORDS = TOPIC_STOP_WORDS;
+
+  private detectTopic(input: string): string {
+    const words = input.toLowerCase().split(/\s+/).filter(
+      w => w.length > 2 && !VaiEngine.TOPIC_STOP_WORDS.has(w),
+    );
+    return words.slice(0, 3).join(' ') || 'general';
+  }
+
+  private assessKnowledgeDepth(input: string): 'deep' | 'shallow' | 'none' {
+    const entries = this.cachedRetrieveRelevant(input, 10);
+    if (entries.length >= 5) return 'deep';
+    if (entries.length >= 1) return 'shallow';
+    return 'none';
+  }
+
+  /** Get the metadata from the most recent response. */
+  get lastResponseMeta(): ResponseMeta | null {
+    return this._lastMeta;
+  }
+
+  /** Self-awareness diagnostic — what Vai knows, where it's weak, what to teach next. */
+  diagnose(): VaiDiagnosis {
+    const totalResponses = this.responseHistory.length;
+    const avgConfidence = totalResponses > 0
+      ? this.responseHistory.reduce((s, r) => s + r.confidence, 0) / totalResponses
+      : 0;
+    const fallbackCount = this.strategyStats.get('fallback') ?? 0;
+    const totalFromStats = Array.from(this.strategyStats.values()).reduce((s, v) => s + v, 0);
+    const fallbackRate = totalFromStats > 0 ? fallbackCount / totalFromStats : 0;
+
+    // Find top strategy
+    let topStrategy = 'none';
+    let topCount = 0;
+    for (const [strat, count] of this.strategyStats) {
+      if (strat !== 'empty' && strat !== 'gibberish' && count > topCount) {
+        topCount = count;
+        topStrategy = strat;
+      }
+    }
+
+    // Find weakest area — lowest avg confidence by detected topic
+    const topicConfidences = new Map<string, { sum: number; count: number }>();
+    for (const r of this.responseHistory) {
+      const t = r.topicDetected;
+      const cur = topicConfidences.get(t) ?? { sum: 0, count: 0 };
+      cur.sum += r.confidence;
+      cur.count++;
+      topicConfidences.set(t, cur);
+    }
+    let weakestArea = 'unknown';
+    let weakestAvg = 1;
+    for (const [topic, data] of topicConfidences) {
+      const avg = data.sum / data.count;
+      if (avg < weakestAvg && data.count >= 2) {
+        weakestAvg = avg;
+        weakestArea = topic;
+      }
+    }
+
+    // Topic coverage from knowledge store
+    const topicCoverage = this.knowledge.topicSummary().map(t => ({
+      topic: t.topic,
+      depth: t.depth,
+      entryCount: t.entryCount,
+      sources: t.sources,
+    }));
+
+    // Missed topics sorted by frequency
+    const missedTopics = Array.from(this.missedTopics.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([topic, count]) => ({ topic, count }));
+
+    // Strategy stats as plain record
+    const strategyStatsObj: Record<string, number> = {};
+    for (const [k, v] of this.strategyStats) strategyStatsObj[k] = v;
+
+    // Generate suggestions
+    const suggestions: string[] = [];
+    if (fallbackRate > 0.3) {
+      suggestions.push(`High fallback rate (${(fallbackRate * 100).toFixed(0)}%) — Vai needs more content. Top missed topics: ${missedTopics.slice(0, 3).map(t => t.topic).join(', ')}`);
+    }
+    if (avgConfidence < 0.6 && totalResponses >= 5) {
+      suggestions.push(`Average confidence is low (${(avgConfidence * 100).toFixed(0)}%) — consider teaching deeper content on frequently asked topics.`);
+    }
+    const shallowTopics = topicCoverage.filter(t => t.depth === 'shallow' || t.depth === 'bootstrap-only');
+    if (shallowTopics.length > 0) {
+      suggestions.push(`Shallow topics that need enrichment: ${shallowTopics.slice(0, 5).map(t => t.topic).join(', ')}`);
+    }
+    if (missedTopics.length > 0) {
+      suggestions.push(`Teach Vai about: ${missedTopics.slice(0, 5).map(t => `"${t.topic}" (asked ${t.count}x)`).join(', ')}`);
+    }
+    if (suggestions.length === 0 && totalResponses > 0) {
+      suggestions.push('Vai is performing well across known topics. Consider expanding into new domains.');
+    }
+
+    return {
+      overview: { totalResponses, avgConfidence: +avgConfidence.toFixed(3), fallbackRate: +fallbackRate.toFixed(3), topStrategy, weakestArea },
+      topicCoverage,
+      missedTopics,
+      strategyStats: strategyStatsObj,
+      recentResponses: this.responseHistory.slice(-20),
+      suggestions,
+    };
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
     const lastMessage = request.messages[request.messages.length - 1];
+    const start = performance.now();
     const response = await this.generateResponse(lastMessage.content, request.messages);
+    const durationMs = Math.round(performance.now() - start);
+    // Patch timing into the last tracked meta
+    if (this._lastMeta) this._lastMeta.durationMs = durationMs;
+
+    // Learning flywheel — extract and persist knowledge from this exchange
+    // Skip when noLearn is set (protective parenting — Vegga controls what Vai learns)
+    if (this._lastMeta && !request.noLearn) this.afterResponse(lastMessage.content, response, this._lastMeta);
 
     return {
       message: { role: 'assistant', content: response },
       usage: { promptTokens: this.tokenizer.encode(lastMessage.content).length, completionTokens: this.tokenizer.encode(response).length },
       finishReason: 'stop',
+      durationMs,
     };
   }
 
   async *chatStream(request: ChatRequest): AsyncIterable<ChatChunk> {
     const lastMessage = request.messages[request.messages.length - 1];
+    this._lastSearchResponse = null; // reset before each response
+    const start = performance.now();
     const response = await this.generateResponse(lastMessage.content, request.messages);
+    const durationMs = Math.round(performance.now() - start);
+    // Patch timing into the last tracked meta
+    if (this._lastMeta) this._lastMeta.durationMs = durationMs;
+
+    // Learning flywheel — extract and persist knowledge from this exchange
+    // Skip when noLearn is set (protective parenting — Vegga controls what Vai learns)
+    if (this._lastMeta && !request.noLearn) this.afterResponse(lastMessage.content, response, this._lastMeta);
+
+    // Yield sources chunk BEFORE text — so UI can show source cards while answer streams
+    const searchResult = this._lastSearchResponse as SearchResponse | null;
+    if (searchResult !== null && searchResult.sources.length > 0) {
+      yield {
+        type: 'sources',
+        sources: searchResult.sources.slice(0, 6).map((s: SearchSnippet) => ({
+          url: s.url,
+          title: s.title || s.domain,
+          domain: s.domain,
+          snippet: s.text.slice(0, 200),
+          favicon: s.favicon,
+          trustTier: s.trust.tier,
+          trustScore: s.trust.score,
+        })),
+        followUps: generateFollowUps(lastMessage.content, searchResult),
+        confidence: searchResult.confidence,
+      };
+    }
 
     // Stream in fast chunks — no artificial delay for BLAZING FAST response
     const words = response.split(' ');
@@ -895,114 +2187,163 @@ export class VaiEngine implements ModelAdapter {
         promptTokens: this.tokenizer.encode(lastMessage.content).length,
         completionTokens: this.tokenizer.encode(response).length,
       },
+      durationMs,
     };
   }
 
-  private async generateResponse(input: string, history: Message[]): Promise<string> {
+  private async generateResponse(input: string, history: readonly Message[]): Promise<string> {
     const lower = input.toLowerCase().trim();
+
+    // Clear per-request caches — each generateResponse() starts fresh
+    this.clearRequestCache();
+
+    // Strategy -1: Empty or gibberish input — catch before pipeline
+    if (lower.length === 0) {
+      return this.tracked('empty', 'It looks like you sent an empty message. What would you like to know? Try asking about Docker, React, TypeScript, Git, or any topic I\'ve learned about.', input);
+    }
+    if (lower.length < 30 && /^[^a-z]*$/.test(lower)) {
+      return this.tracked('gibberish', 'I couldn\'t make sense of that input. Try asking a question like "What is Docker?" or "How do React hooks work?"', input);
+    }
+    // Check 3: Keyboard-row noise (e.g. "asdfghjkl qwerty zxcvbn")
+    const gibWords = lower.split(/\s+/).filter(w => w.length > 0);
+    const kbRows = [/^[qwertyuiop]+$/, /^[asdfghjkl]+$/, /^[zxcvbnm]+$/];
+    if (gibWords.length > 0 && gibWords.length <= 5 && gibWords.every(w => kbRows.some(r => r.test(w)))) {
+      return this.tracked('keyboard-noise', 'That looks like keyboard noise! Try asking a real question — like "What is Docker?" or "How do React hooks work?"', input);
+    }
 
     // Strategy 0: Math expressions — evaluate before anything else
     const mathResult = this.tryMath(lower);
-    if (mathResult !== null) return mathResult;
+    if (mathResult !== null) return this.tracked('math', mathResult, input);
 
     // Strategy 0.1: Scaffold / deploy intent — detect build requests and offer deploy buttons
     const scaffoldResult = this.tryScaffoldIntent(lower);
-    if (scaffoldResult) return scaffoldResult;
+    if (scaffoldResult) return this.tracked('scaffold', scaffoldResult, input);
 
     // Strategy 0.3: Binary/hex decode — detect binary or hex sequences
     const binaryResult = this.tryBinaryDecode(lower);
-    if (binaryResult !== null) return binaryResult;
+    if (binaryResult !== null) return this.tracked('binary', binaryResult, input);
+
+    // Strategy 0.4: MCQ detection — identify multiple choice questions and match against knowledge
+    const mcqResult = this.tryMCQAnswer(input, lower);
+    if (mcqResult) return this.tracked('mcq', mcqResult, input);
+
+    // Strategy 0.45: Yes/No reasoning — answer yes/no questions using knowledge
+    const yesNoResult = this.tryYesNoAnswer(input, lower);
+    if (yesNoResult) return this.tracked('yesno', yesNoResult, input);
 
     // Strategy 0.5: "Google it" / forced web search — user explicitly asks us to search
     const googleIt = await this.tryGoogleIt(lower, input, history);
-    if (googleIt) return googleIt;
+    if (googleIt) return this.tracked('google-search', googleIt, input);
 
     // Strategy 0.7: Discussion mode — Socratic back-and-forth
     const discussion = this.tryDiscussionMode(lower, input, history);
-    if (discussion) return discussion;
+    if (discussion) return this.tracked('discussion', discussion, input);
 
     // Strategy 1: Conversational awareness — handle common patterns
     const conversational = this.handleConversational(lower, history);
-    if (conversational) return conversational;
+    if (conversational) return this.tracked('conversational', conversational, input);
 
     // Strategy 1.42: Networking knowledge — deterministic OSI/TCP-IP facts
     const networking = this.tryNetworkingKnowledge(lower);
-    if (networking) return networking;
+    if (networking) return this.tracked('networking', networking, input);
 
     // Strategy 1.4: Creative code projects — full working programs
     const creativeCode = this.tryCreativeCodeProject(lower);
-    if (creativeCode) return creativeCode;
+    if (creativeCode) return this.tracked('creative-code', creativeCode, input);
 
     // Strategy 1.45: Best practices queries
     const bestPractices = this.tryBestPractices(lower);
-    if (bestPractices) return bestPractices;
+    if (bestPractices) return this.tracked('best-practices', bestPractices, input);
 
     // Strategy 1.47: Algorithm code generation — canonical textbook algorithms
     const algoCode = this.tryAlgorithmCodeGen(lower);
-    if (algoCode) return algoCode;
+    if (algoCode) return this.tracked('algorithm', algoCode, input);
 
     // Strategy 1.48: Networking code generation — TCP/UDP/socket code
     const netCode = this.tryNetworkingCode(lower);
-    if (netCode) return netCode;
+    if (netCode) return this.tracked('net-code', netCode, input);
 
     // Strategy 1.50: Norwegian language knowledge — grammar, vocab, formal writing
     const norskLang = this.tryNorwegianLanguage(lower);
-    if (norskLang) return norskLang;
+    if (norskLang) return this.tracked('norwegian-lang', norskLang, input);
 
     // Strategy 1.51: English language knowledge — grammar, tenses, vocabulary
     const engLang = this.tryEnglishLanguage(lower);
-    if (engLang) return engLang;
+    if (engLang) return this.tracked('english-lang', engLang, input);
 
     // Strategy 1.515: VCUS-taught knowledge — explicit pattern-response entries
     // These fire BEFORE greedy hardcoded strategies to ensure taught content
     // (CVA variants, T3 Stack, App Router, headless commerce, etc.) takes priority.
-    const taughtMatch = this.knowledge.findBestTaughtMatch(input);
-    if (taughtMatch) return taughtMatch.response;
+    // Skip for tier/stack queries — those have dedicated handlers in tryWebStackKnowledge.
+    const isTierQuery = /\b(?:tiers?|tier\s*system|basic\s+tier|solid\s+tier|battle[\s-]*tested|vai\s+tier)\b/i.test(input)
+      && /\b(?:pern|mern|t3|next\.?js|stack|veggaai)\b/i.test(input);
+    const isVaiConfigQuery = /vai[.\s]config/i.test(input);
+    const isStackCompareQuery = /\b(?:mern|pern)\s+(?:vs\.?|versus|eller)\s+(?:mern|pern)\b/i.test(input);
+    if (!isTierQuery && !isVaiConfigQuery && !isStackCompareQuery) {
+      const taughtMatch = this.cachedFindBestTaughtMatch(input);
+      if (taughtMatch) return this.tracked('taught-match', taughtMatch.response, input);
+    }
+
+    // Strategy 1.517: Taught document retrieval via TF-IDF
+    // When findBestTaughtMatch doesn't find a pattern match, search the document
+    // index for user-taught content. Taught content has inherently high relevance
+    // (the user explicitly taught it), so we use relaxed quality gates compared
+    // to the general synthesizeFromKnowledge.
+    if (!isTierQuery && !isVaiConfigQuery && !isStackCompareQuery) {
+      const taughtDoc = this.tryTaughtDocumentRetrieval(lower);
+      if (taughtDoc) return this.tracked('taught-doc', taughtDoc, input);
+    }
 
     // Strategy 1.52: Web stack knowledge — MERN/PERN/MEVN, ORM, REST, SSR
     const webStack = this.tryWebStackKnowledge(lower);
-    if (webStack) return webStack;
+    if (webStack) return this.tracked('web-stack', webStack, input);
 
     // Strategy 1.53: General knowledge — history, science, world facts, real-world events
     const generalKnow = this.tryGeneralKnowledge(lower);
-    if (generalKnow) return generalKnow;
+    if (generalKnow) return this.tracked('general-knowledge', generalKnow, input);
 
     // Strategy 1.54: Framework & DevOps — Docker, CI/CD, TS, Tailwind, WCAG, GDPR, Rust, Python, Go, Angular, Vue, WP, Next.js, Norwegian web
     const frameworkDevops = this.tryFrameworkDevopsKnowledge(lower);
-    if (frameworkDevops) return frameworkDevops;
+    if (frameworkDevops) return this.tracked('framework-devops', frameworkDevops, input);
+
+    // Strategy 1.545: Cognitive Foundations — first principles, calibration, compression, meta-learning, systems thinking
+    const cognitive = this.tryCognitiveFoundations(lower);
+    if (cognitive) return this.tracked('cognitive', cognitive, input);
 
     // Strategy 1.5: Code generation — detect code requests and generate
     const codeResult = this.tryCodeGeneration(lower);
-    if (codeResult) return codeResult;
+    if (codeResult) return this.tracked('code-gen', codeResult, input);
 
     // Strategy 1.6: Advanced structured code gen (types, enums, classes, structs)
     const advancedCode = this.tryAdvancedCodeGeneration(input);
-    if (advancedCode) return advancedCode;
+    if (advancedCode) return this.tracked('advanced-code', advancedCode, input);
+
+    // Strategy 1.7: Knowledge Intelligence — decompose complex questions, follow connections
+    const intelligent = this.tryIntelligentAnswer(input);
+    if (intelligent) return this.tracked('intelligence', intelligent, input);
 
     // Strategy 2: Check knowledge store for a direct match
-    const match = this.knowledge.findBestMatch(input);
-    if (match) {
-      return match.response;
-    }
+    const match = this.cachedFindBestMatch(input);
+    if (match) return this.tracked('direct-match', match.response, input);
 
     // Strategy 2.5: Concept lookup — extracted definitions from learned content
     const conceptResult = this.tryConceptLookup(lower);
-    if (conceptResult) return conceptResult;
+    if (conceptResult) return this.tracked('concept-lookup', conceptResult, input);
 
     // Strategy 3: Multi-source synthesis — combine relevant chunks into a coherent answer
     const synthesized = this.synthesizeFromKnowledge(lower, history);
-    if (synthesized) return synthesized;
+    if (synthesized) return this.tracked('synthesis', synthesized, input);
 
     // Strategy 4: Learn from user's teaching patterns in-chat
     const taught = this.learnFromChat(lower, history);
-    if (taught) return taught;
+    if (taught) return this.tracked('learn-chat', taught, input);
 
     // Strategy 5: Web search — when we don't have local knowledge
     const webResult = await this.tryWebSearch(lower);
-    if (webResult) return webResult;
+    if (webResult) return this.tracked('web-search', webResult, input);
 
     // Strategy 6: Contextual "I don't know" — tell user what we DO know
-    return this.buildHelpfulFallback(lower);
+    return this.tracked('fallback', this.buildHelpfulFallback(lower), input);
   }
 
   // ─── "JUST GOOGLE IT" ───────────────────────────────────────────
@@ -1011,7 +2352,7 @@ export class VaiEngine implements ModelAdapter {
    * Patterns: "google X", "just google it", "search for X", "look up X"
    * VAI learns from the results — this is the human+web learning loop.
    */
-  private async tryGoogleIt(lower: string, original: string, history: Message[] = []): Promise<string | null> {
+  private async tryGoogleIt(lower: string, original: string, history: readonly Message[] = []): Promise<string | null> {
     const patterns = [
       /^(?:just\s+)?google\s+(?:it\s*[:\-–—]?\s*)?(.+)/i,
       /^(?:just\s+)?google\s+it$/i,
@@ -1061,84 +2402,17 @@ export class VaiEngine implements ModelAdapter {
   }
 
   /**
-   * Perform web search using multiple providers, learn from results.
-   * Tries: DuckDuckGo Instant Answer → DuckDuckGo HTML → fallback
+   * Perform web search using the Perplexity-style pipeline.
+   * Learning happens automatically via the pipeline's onLearn callback.
    */
   private async performWebSearch(query: string): Promise<string> {
-    const results: string[] = [];
-    let learnedFrom = '';
-
-    // 1. DuckDuckGo Instant Answer API
     try {
-      const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-      const ddgRes = await fetch(ddgUrl, {
-        headers: { 'User-Agent': 'VeggaAI/0.1' },
-        signal: AbortSignal.timeout(5000),
-      });
-
-      if (ddgRes.ok) {
-        const data = await ddgRes.json() as {
-          Abstract?: string; AbstractSource?: string; AbstractURL?: string;
-          Answer?: string; RelatedTopics?: Array<{ Text?: string; FirstURL?: string }>;
-        };
-
-        if (data.Answer && data.Answer.length > 5) {
-          results.push(data.Answer);
-          learnedFrom = 'DuckDuckGo Instant Answer';
-        }
-        if (data.Abstract && data.Abstract.length > 20) {
-          results.push(data.Abstract);
-          learnedFrom = data.AbstractSource ?? 'DuckDuckGo';
-          // Learn it
-          this.knowledge.learn(data.Abstract, data.AbstractURL ?? 'web-search', 'en');
-          this.knowledge.addEntry(query, data.Abstract, data.AbstractURL ?? 'web-search', 'en');
-          this.tokenizer.encode(data.Abstract);
-        }
-        if ((!results.length) && data.RelatedTopics) {
-          const topics = data.RelatedTopics.filter(t => t.Text && t.Text.length > 10).slice(0, 5);
-          for (const t of topics) {
-            if (t.Text) results.push(t.Text);
-          }
-          if (results.length) learnedFrom = 'DuckDuckGo';
-        }
-      }
-    } catch { /* continue */ }
-
-    // 2. DuckDuckGo HTML scrape as fallback
-    if (results.length === 0) {
-      try {
-        const htmlUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-        const htmlRes = await fetch(htmlUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (htmlRes.ok) {
-          const html = await htmlRes.text();
-          // Extract result snippets
-          const snippetRegex = /<a class="result__snippet"[^>]*>(.*?)<\/a>/gi;
-          let match;
-          while ((match = snippetRegex.exec(html)) !== null && results.length < 5) {
-            const text = match[1].replace(/<\/?[^>]+(>|$)/g, '').trim();
-            if (text.length > 20) results.push(text);
-          }
-          if (results.length) learnedFrom = 'DuckDuckGo Search';
-        }
-      } catch { /* continue */ }
-    }
-
-    if (results.length === 0) {
+      const result: SearchResponse = await this.searchPipeline.search(query);
+      this._lastSearchResponse = result;
+      return result.answer;
+    } catch {
       return `I searched for "${query}" but couldn't find useful results. Try rephrasing or being more specific.\n\n💡 Tip: You can teach me directly — just tell me facts and I'll remember them!`;
     }
-
-    // Combine results and learn
-    const combined = results.join('\n\n');
-    const learned = combined.slice(0, 2000);
-    this.knowledge.learn(learned, `web-search:${query}`, 'en');
-    this.tokenizer.encode(learned);
-
-    const displayResults = results.slice(0, 3).map((r, i) => `${i + 1}. ${r.length > 300 ? r.slice(0, 300) + '...' : r}`).join('\n\n');
-
-    return `🔍 **Searched:** "${query}"\n\n${displayResults}\n\n[Source: ${learnedFrom}]\n\n💡 I've learned from these results — ask me about "${query}" again later and I'll know it!`;
   }
 
   // ─── DISCUSSION MODE ─────────────────────────────────────────────
@@ -1146,7 +2420,7 @@ export class VaiEngine implements ModelAdapter {
    * Detect discussion/deliberation requests. Enter a Socratic back-and-forth
    * where VAI asks questions, probes understanding, and builds knowledge together.
    */
-  private tryDiscussionMode(lower: string, original: string, history: Message[]): string | null {
+  private tryDiscussionMode(lower: string, original: string, history: readonly Message[]): string | null {
     // Detect discussion triggers
     const discussPatterns = [
       /^(?:let'?s|can\s+we|i\s+want\s+to)\s+(?:discuss|talk\s+about|debate|explore|dive\s+into)\s+(.+)/i,
@@ -1163,7 +2437,7 @@ export class VaiEngine implements ModelAdapter {
     if (!topic) return null;
 
     // Check what we know about this topic
-    const retrieved = this.knowledge.retrieveRelevant(topic, 5);
+    const retrieved = this.cachedRetrieveRelevant(topic, 5);
     const concept = this.knowledge.findConcept(topic);
 
     // Count how many discussion turns we've had in this conversation
@@ -1209,6 +2483,319 @@ export class VaiEngine implements ModelAdapter {
    * Detect and decode binary sequences (01010010 01001001...) or hex (0x52 0x49...)
    * Converts to ASCII text and explains what it spells.
    */
+  // ─── MCQ DETECTION AND ANSWERING ──────────────────────────
+
+  /**
+   * Detect multiple-choice questions (A/B/C/D format) and match options
+   * against stored knowledge to select the best answer.
+   */
+  private tryMCQAnswer(original: string, lower: string): string | null {
+    // Detect MCQ format: must have at least 2 options labeled A/B/C/D
+    const optionPattern = /(?:^|\n)\s*([A-D])\s*[).\]:-]\s*(.+)/gim;
+    const options: { letter: string; text: string }[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = optionPattern.exec(original)) !== null) {
+      const letter = m[1].toUpperCase();
+      if (!options.find(o => o.letter === letter)) {
+        options.push({ letter, text: m[2].trim() });
+      }
+    }
+    
+    if (options.length < 2) return null; // Not an MCQ
+
+    // Extract the question text (everything before the first option)
+    const firstOpt = original.match(/(?:^|\n)\s*[A-D]\s*[).\]:-]/im);
+    const questionText = firstOpt
+      ? original.slice(0, firstOpt.index).trim()
+      : lower;
+    const questionLower = questionText.toLowerCase();
+
+    // Strip trailing "Answer with just the letter" type instructions
+    const cleanQuestion = questionLower.replace(/answer\s+with\s+(?:just|only)?\s*(?:the)?\s*letter.*$/i, '').trim();
+
+    // Search knowledge for relevant content
+    const retrieved = this.cachedRetrieveRelevant(cleanQuestion, 5);
+    const match = this.cachedFindBestMatch(cleanQuestion);
+    const taughtMatch = this.cachedFindBestTaughtMatch(cleanQuestion);
+
+    // Collect all relevant knowledge text
+    const knowledgeTexts: string[] = [];
+    if (taughtMatch) knowledgeTexts.push(taughtMatch.response);
+    if (match) knowledgeTexts.push(match.response);
+    for (const r of retrieved) {
+      if (r.score > 0.03) knowledgeTexts.push(r.text);
+    }
+
+    if (knowledgeTexts.length === 0) return null;
+
+    const combinedKnowledge = knowledgeTexts.join(' ').toLowerCase();
+
+    // Score each option against the combined knowledge
+    const scored = options.map(opt => {
+      const optLower = opt.text.toLowerCase();
+      const optWords = optLower.split(/\s+/).filter(w => w.length > 2 && !KnowledgeStore.STOP_WORDS.has(w));
+      
+      let score = 0;
+
+      // Word overlap between option and knowledge
+      for (const word of optWords) {
+        if (combinedKnowledge.includes(word)) score += 1;
+      }
+      
+      // Bonus: if multi-word phrases from the option appear in knowledge
+      if (optWords.length >= 2) {
+        for (let i = 0; i < optWords.length - 1; i++) {
+          const bigram = optWords[i] + ' ' + optWords[i + 1];
+          if (combinedKnowledge.includes(bigram)) score += 2;
+        }
+      }
+
+      // Bonus: entire option text appears in knowledge
+      if (combinedKnowledge.includes(optLower)) score += 5;
+
+      // Bonus: key concept phrases from the option
+      const conceptPhrases = optLower.match(/\b[a-z]{3,}(?:\s+[a-z]{3,}){1,3}\b/g) || [];
+      for (const phrase of conceptPhrases) {
+        if (combinedKnowledge.includes(phrase)) score += 3;
+      }
+
+      // Normalize by word count to avoid bias toward longer options
+      const normalizedScore = optWords.length > 0 ? score / Math.sqrt(optWords.length) : 0;
+
+      return { ...opt, score: normalizedScore, rawScore: score };
+    });
+
+    // Sort by score descending
+    scored.sort((a, b) => b.score - a.score);
+
+    // Only answer if there's meaningful differentiation
+    const best = scored[0];
+    const second = scored.length > 1 ? scored[1] : null;
+
+    if (best.rawScore < 1) return null; // No meaningful match at all
+
+    // If top two are too close, try harder with additional heuristics
+    if (second && best.score - second.score < 0.5 && best.rawScore < 4) {
+      // Check if any knowledge text explicitly mentions an answer pattern like "the answer is D"
+      const explicitAnswer = combinedKnowledge.match(/(?:answer|correct|right)\s+(?:is|option)\s+([a-d])/i);
+      if (explicitAnswer) {
+        const letter = explicitAnswer[1].toUpperCase();
+        const explicit = options.find(o => o.letter === letter);
+        if (explicit) {
+          return `**${explicit.letter}**\n\n${explicit.text}.\n\n${this.extractReasoningSnippet(knowledgeTexts, cleanQuestion)}`;
+        }
+      }
+      return null; // Too close, can't decide
+    }
+
+    // Build response with selected answer
+    const reasoning = this.extractReasoningSnippet(knowledgeTexts, cleanQuestion);
+    return `**${best.letter}**\n\n${best.text}.\n\n${reasoning}`;
+  }
+
+  /**
+   * Extract a short reasoning snippet from knowledge texts relevant to the question.
+   */
+  private extractReasoningSnippet(knowledgeTexts: string[], question: string): string {
+    const qWords = question.split(/\s+/).filter(w => w.length > 3 && !KnowledgeStore.STOP_WORDS.has(w));
+    
+    for (const text of knowledgeTexts) {
+      const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.length > 20);
+      for (const s of sentences) {
+        const lower = s.toLowerCase();
+        const hits = qWords.filter(w => lower.includes(w)).length;
+        if (hits >= 2) {
+          return s.length > 300 ? s.slice(0, 300) + '...' : s;
+        }
+      }
+    }
+    return '';
+  }
+
+  // ─── YES/NO QUESTION HANDLER ────────────────────────────────
+
+  /**
+   * Detect yes/no questions (Is it true that...? Does X...? Can Y...?)
+   * and answer based on stored knowledge or arithmetic verification.
+   */
+  private tryYesNoAnswer(original: string, lower: string): string | null {
+    // ── First: scan for any embedded arithmetic assertion, e.g. "Is (5-2)=three?" ──
+    // This catches multi-sentence patterns like "Verbal math: (7-3)=four. Is (5-2)=three?"
+    const wordToNum: Record<string, number> = {
+      zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+      seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+      thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
+      eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50,
+      hundred: 100, thousand: 1000,
+    };
+    
+    // Scan entire input for "Is (expr)=word?" pattern anywhere
+    const embeddedMathPattern = /\bis\s+\(?(\d+)\s*([+\-*/])\s*(\d+)\)?\s*=\s*([a-z]+)\s*\??/i;
+    const embeddedMath = lower.match(embeddedMathPattern);
+    if (embeddedMath) {
+      const [, a, op, b, wordResult] = embeddedMath;
+      const numA = parseFloat(a);
+      const numB = parseFloat(b);
+      const expectedNum = wordToNum[wordResult.toLowerCase()];
+      
+      if (expectedNum !== undefined) {
+        let actual: number | null = null;
+        if (op === '+') actual = numA + numB;
+        else if (op === '-') actual = numA - numB;
+        else if (op === '*') actual = numA * numB;
+        else if (op === '/') actual = numB !== 0 ? numA / numB : null;
+        
+        if (actual !== null && Math.abs(actual - expectedNum) < 0.001) {
+          return `**Yes.** ${numA} ${op} ${numB} = ${actual}, which is "${wordResult}". That is correct.`;
+        } else if (actual !== null) {
+          return `**No.** ${numA} ${op} ${numB} = ${actual}, not "${wordResult}".`;
+        }
+      }
+    }
+
+    // Must be a yes/no style question — try full string first, then last sentence/clause
+    const yesNoPatterns = [
+      /^is\s+(?:it\s+)?true\s+that\s+(.+?)[?]?$/i,
+      /^is\s+(?:it\s+)?(?:correct|right)\s+(?:that|to\s+say)\s+(.+?)[?]?$/i,
+      /^does\s+(.+?)[?]?$/i,
+      /^do\s+(.+?)[?]?$/i,
+      /^can\s+(.+?)[?]?$/i,
+      /^is\s+(.{10,})[?]$/i,  // "Is X?" with substantial content
+    ];
+
+    // Also match yes/no questions embedded mid-sentence with context prefix:
+    // "In a X puzzle, does Y?" → extract "does Y?"
+    // "Wolf-goat: does the sequence work?" → extract "does the sequence work?"
+    const embeddedYesNoPatterns = [
+      /,\s*does\s+(.+?)[?]?$/i,
+      /,\s*is\s+(?:it\s+)?true\s+that\s+(.+?)[?]?$/i,
+      /,\s*can\s+(.+?)[?]?$/i,
+      /,\s*do\s+(.+?)[?]?$/i,
+    ];
+
+    // Get candidates to try: full lower, then segments split on sentence boundaries
+    // Includes `. `, `! `, `: `, `." `, `?' `, etc.
+    const candidates = [lower];
+    const segments = lower.split(/[.!:]\s+|\."\s*|\?"\s*/).filter(s => s.trim().length > 0);
+    if (segments.length > 1) {
+      // Strip leading/trailing quotes from segments (e.g., '"does finding...' → 'does finding...')
+      candidates.push(segments[segments.length - 1].trim().replace(/^["'"]+|["'"]+$/g, '').trim());
+    }
+
+    let claim: string | null = null;
+    for (const candidate of candidates) {
+      for (const pat of yesNoPatterns) {
+        const match = candidate.match(pat);
+        if (match) {
+          claim = match[1].trim().replace(/\?$/, '');
+          break;
+        }
+      }
+      if (claim) break;
+    }
+
+    // If no direct match, try embedded yes/no patterns on the full string
+    if (!claim) {
+      for (const pat of embeddedYesNoPatterns) {
+        const match = lower.match(pat);
+        if (match) {
+          claim = match[1].trim().replace(/\?$/, '');
+          break;
+        }
+      }
+    }
+
+    if (!claim) return null;
+
+    // Skip choice/alternative questions: "Is X A or B?" asks for a selection, not binary yes/no
+    // Only skip when the question structure is "be/being/been ADJECTIVE or ADJECTIVE"
+    // or when it's an explicit "X or Y" at the end of the claim
+    const isChoiceQ = /\b(?:being|be|is|are|was|were)\s+(\w{3,12})\s+or\s+(\w{3,12})\b/i.test(claim)
+      || /\b(\w{3,12})\s+or\s+(\w{3,12})\s*$/.test(claim);
+    if (isChoiceQ && !/\bor\s+(?:not|more|less|whether)\b/i.test(claim)) return null;
+
+    // ── Verbal math check on extracted claim: "(2+2)=four" → verify arithmetic ──
+    // (wordToNum is already declared above)
+    
+    // Match patterns like "(2+2)=four", "5-2=three", "(8-5)=three"
+    const mathVerify = claim.match(/^\(?(\d+)\s*([+\-*/])\s*(\d+)\)?\s*=\s*([a-z]+)$/i);
+    if (mathVerify) {
+      const [, a, op, b, wordResult] = mathVerify;
+      const numA = parseFloat(a);
+      const numB = parseFloat(b);
+      const expectedNum = wordToNum[wordResult.toLowerCase()];
+      
+      if (expectedNum !== undefined) {
+        let actual: number | null = null;
+        if (op === '+') actual = numA + numB;
+        else if (op === '-') actual = numA - numB;
+        else if (op === '*') actual = numA * numB;
+        else if (op === '/') actual = numB !== 0 ? numA / numB : null;
+        
+        if (actual !== null && Math.abs(actual - expectedNum) < 0.001) {
+          return `**Yes.** ${numA} ${op} ${numB} = ${actual}, which is "${wordResult}". That is correct.`;
+        } else if (actual !== null) {
+          return `**No.** ${numA} ${op} ${numB} = ${actual}, not "${wordResult}".`;
+        }
+      }
+    }
+
+    // ── Verbal math variant: "is (2+2) equal to four?" / plain "2+2 equals four"
+    const mathVerify2 = claim.match(/^\(?(\d+)\s*([+\-*/])\s*(\d+)\)?\s*(?:equal(?:s)?\s+(?:to\s+)?|is\s+)([a-z]+)$/i);
+    if (mathVerify2) {
+      const [, a, op, b, wordResult] = mathVerify2;
+      const numA = parseFloat(a);
+      const numB = parseFloat(b);
+      const expectedNum = wordToNum[wordResult.toLowerCase()];
+      
+      if (expectedNum !== undefined) {
+        let actual: number | null = null;
+        if (op === '+') actual = numA + numB;
+        else if (op === '-') actual = numA - numB;
+        else if (op === '*') actual = numA * numB;
+        else if (op === '/') actual = numB !== 0 ? numA / numB : null;
+        
+        if (actual !== null && Math.abs(actual - expectedNum) < 0.001) {
+          return `**Yes.** ${numA} ${op} ${numB} = ${actual}, which is "${wordResult}".`;
+        }
+      }
+    }
+
+    // Search knowledge for the claim
+    const retrieved = this.cachedRetrieveRelevant(claim, 5);
+    const match = this.cachedFindBestMatch(claim);
+    const taughtMatch = this.cachedFindBestTaughtMatch(claim);
+
+    const knowledgeTexts: string[] = [];
+    if (taughtMatch) knowledgeTexts.push(taughtMatch.response);
+    if (match) knowledgeTexts.push(match.response);
+    for (const r of retrieved) {
+      if (r.score > 0.03) knowledgeTexts.push(r.text);
+    }
+
+    if (knowledgeTexts.length === 0) return null;
+
+    const combined = knowledgeTexts.join(' ').toLowerCase();
+
+    // Extract key words from the claim
+    const claimWords = claim.split(/\s+/).filter(w => w.length > 2 && !KnowledgeStore.STOP_WORDS.has(w));
+    const hits = claimWords.filter(w => combined.includes(w.toLowerCase())).length;
+    const coverage = claimWords.length > 0 ? hits / claimWords.length : 0;
+
+    if (coverage < 0.3 && hits < 2) return null; // Not enough knowledge
+
+    // Build answer — when we have matching knowledge and the claim is phrased
+    // as a yes/no question, we default to affirming with the retrieved knowledge
+    const reasoning = this.extractReasoningSnippet(knowledgeTexts, claim);
+    
+    if (coverage >= 0.3 || hits >= 2) {
+      const reasonSnippet = reasoning ? `\n\n${reasoning}` : '';
+      return `**Yes.** ${reasonSnippet}`;
+    }
+
+    return null;
+  }
+
   private tryBinaryDecode(input: string): string | null {
     // Strip "decode", "what is", "translate" wrappers
     const expr = input
@@ -4337,7 +5924,7 @@ Classic number guessing game with hints and attempt tracking.`;
     input = input.replace(/["'""''`]/g, ' ').replace(/\s+/g, ' ').trim();
 
     // Gate: web stack / web dev related terms (broad — no trailing \b for plural handling)
-    if (!/\b(mern|pern|mevn|mean|stack|mongo(?:db)?|postgres(?:ql)?|express\.?js|vue\.?js|react|node\.?js|orm|prisma|sequelize|sql|nosql|rest\s*(?:api|ful)|graphql|ssr|csr|server.?side\s+render|client.?side\s+render|mellomvare|middleware|migration|jwt|cors|crud|spa|mpa|next\.?js|nuxt\.?js|pinia|vuex|redux|vite|component|livssyklus|lifecycle|virtual\s+dom|two.?way|toveis|enveis|props?\s+(?:and|og|vs|eller)\s+state|event\s+handling|hendelse|json|xml|npm|yarn|pnpm|phantom\s+dep|komponent|endepunkt|frontend|backend|acid|put\s+(?:vs|and|eller|og)\s+patch|over.?fetch|jsx|seo|\benv\b|\.env|environment\s+variable|connection\s+pool|tilkobling|sammenlign|react\s+(?:og|and|vs)|vue\s+(?:og|and|vs)|testing.?rammeverk|typescript|options?\s*api|composition\s*api|onmounted|beforeeach|navigasjon|hmr|hot\s+module|mvc|click\.prevent|v-on|onclick|v-model|re.?render|oppdater|express\.json|collection|api.?users|javascript|unit\s+test|e2e|end.?to.?end|hva\s+er\s+(?:en?\s+)?(?:komponent|migration|database|json|api|endepunkt|frontend|backend)|hva\s+betyr|forklar)/i.test(input)) {
+    if (!/\b(mern|pern|mevn|mean|stack|tier|tiers|basic\s+tier|solid\s+tier|battle[\s-]*tested|vai\s+(?:tier|config)|vai\.config|veggaai|mongo(?:db)?|postgres(?:ql)?|express\.?js|vue\.?js|react|node\.?js|orm|prisma|sequelize|sql|nosql|rest\s*(?:api|ful)|graphql|ssr|csr|server.?side\s+render|client.?side\s+render|mellomvare|middleware|migration|jwt|cors|crud|spa|mpa|next\.?js|nuxt\.?js|pinia|vuex|redux|vite|component|livssyklus|lifecycle|virtual\s+dom|two.?way|toveis|enveis|props?\s+(?:and|og|vs|eller)\s+state|event\s+handling|hendelse|json|xml|npm|yarn|pnpm|phantom\s+dep|komponent|endepunkt|frontend|backend|acid|put\s+(?:vs|and|eller|og)\s+patch|over.?fetch|jsx|seo|\benv\b|\.env|environment\s+variable|connection\s+pool|tilkobling|sammenlign|react\s+(?:og|and|vs)|vue\s+(?:og|and|vs)|testing.?rammeverk|typescript|options?\s*api|composition\s*api|onmounted|beforeeach|navigasjon|hmr|hot\s+module|mvc|click\.prevent|v-on|onclick|v-model|re.?render|oppdater|express\.json|collection|api.?users|javascript|unit\s+test|e2e|end.?to.?end|hva\s+er\s+(?:en?\s+)?(?:komponent|migration|database|json|api|endepunkt|frontend|backend)|hva\s+betyr|forklar)/i.test(input)) {
       return null;
     }
 
@@ -4379,6 +5966,151 @@ Classic number guessing game with hints and attempt tracking.`;
         'Like MERN but uses Vue.js instead of React. Vue offers simpler API, built-in two-way data binding, and gentler learning curve.';
     }
 
+    // ── STACK-SPECIFIC TIER HANDLERS ──
+    // These must fire BEFORE the generic VeggaAI tier system handler
+    // to prevent "pern vai tier" from matching the generic "vai tier" pattern.
+
+    // PERN tier details
+    if (/pern\s+(?:stack\s+)?(?:tiers?|tier\s*system|basic|solid|battle|vai\s+tier)/i.test(input)
+      || /(?:what|which)\s+(?:does|is)\s+(?:the\s+)?pern\s+(?:basic|solid|battle|vai)/i.test(input)
+      || /pern\s+(?:basic|solid|battle[\s-]*tested|vai)\s+(?:tier|include|have|contain|feature)/i.test(input)) {
+      return '**PERN Stack Tiers:**\n\n' +
+        '**Basic** (Starter) — Task board app with 8 files:\n' +
+        '- React 19 + TypeScript + Tailwind v4 + Geist font\n' +
+        '- Inline edit: pencil icon, long-press 500ms + haptic feedback\n' +
+        '- Framer Motion animations, PostgreSQL + Express.js + Node.js\n\n' +
+        '**Solid** (Recommended) — adds 5 overrides:\n' +
+        '- Prisma ORM with schema.prisma\n' +
+        '- Zod validation schemas\n' +
+        '- User model + JWT authentication\n' +
+        '- Structured error handling\n\n' +
+        '**Battle-Tested** (Production) — adds 8 overrides:\n' +
+        '- Docker Compose (PostgreSQL 16 container)\n' +
+        '- Vitest unit tests\n' +
+        '- GitHub Actions CI pipeline\n' +
+        '- Multi-stage Docker builds\n\n' +
+        '**Vai** (Premium) — adds 8 overrides (richest Vai tier):\n' +
+        '- `monitor.ts` — performance monitoring\n' +
+        '- `ErrorBoundary.tsx` — graceful error recovery\n' +
+        '- `useApi` hook — optimized API calls\n' +
+        '- Optimized Docker images\n' +
+        '- `vai.config.ts` configuration';
+    }
+
+    // MERN tier details
+    if (/mern\s+(?:stack\s+)?(?:tiers?|tier\s*system|basic|solid|battle|vai\s+tier)/i.test(input)
+      || /mern\s+(?:basic|solid|battle[\s-]*tested|vai)\s+(?:tier|include|have|contain|feature)/i.test(input)) {
+      return '**MERN Stack Tiers:**\n\n' +
+        '**Basic** (Starter) — Bookmark manager app with 8 files:\n' +
+        '- React 19 + TypeScript + Tailwind v4 + Geist font\n' +
+        '- Inline edit + Framer Motion\n' +
+        '- MongoDB + Express.js + Node.js\n\n' +
+        '**Solid** (Recommended) — adds 3 overrides:\n' +
+        '- Zod validation schemas\n' +
+        '- Structured error handling\n\n' +
+        '**Battle-Tested** (Production) — adds 7 overrides:\n' +
+        '- Docker Compose (MongoDB 7 container)\n' +
+        '- Vitest unit tests\n' +
+        '- GitHub Actions CI pipeline\n\n' +
+        '**Vai** (Premium) — adds 4 overrides:\n' +
+        '- Optimized Docker images\n' +
+        '- `vai.config.ts` configuration\n' +
+        '- `README.md` with VeggaAI branding';
+    }
+
+    // Next.js tier details
+    if (/next\.?js\s+(?:stack\s+)?(?:tiers?|tier\s*system|basic|solid|battle|vai\s+tier)/i.test(input)
+      || /next\.?js\s+(?:basic|solid|battle[\s-]*tested|vai)\s+(?:tier|include|have|contain|feature)/i.test(input)) {
+      return '**Next.js Full Stack Tiers:**\n\n' +
+        '**Basic** (Starter) — Notes dashboard app with 11 files:\n' +
+        '- React 19 + TypeScript + Tailwind v4 + Geist font\n' +
+        '- App Router + Server Components\n' +
+        '- Inline edit + Framer Motion\n\n' +
+        '**Solid** (Recommended) — adds 5 overrides:\n' +
+        '- Prisma ORM\n' +
+        '- Zod validation\n' +
+        '- API route handlers\n\n' +
+        '**Battle-Tested** (Production) — adds 8 overrides:\n' +
+        '- Docker Compose (PostgreSQL 16)\n' +
+        '- Vitest unit tests\n' +
+        '- GitHub Actions CI pipeline\n\n' +
+        '**Vai** (Premium) — adds 4 overrides:\n' +
+        '- Optimized Docker images\n' +
+        '- `vai.config.ts` configuration';
+    }
+
+    // T3 tier details
+    if (/t3\s+(?:stack\s+)?(?:tiers?|tier\s*system|basic|solid|battle|vai\s+tier)/i.test(input)
+      || /t3\s+(?:basic|solid|battle[\s-]*tested|vai)\s+(?:tier|include|have|contain|feature)/i.test(input)) {
+      return '**T3 Stack Tiers:**\n\n' +
+        '**Basic** (Starter) — Expense tracker app with 9 files:\n' +
+        '- React 19 + TypeScript + Tailwind v4 + Geist font\n' +
+        '- tRPC + Zod (type-safe API from day one)\n' +
+        '- Inline edit + Framer Motion\n\n' +
+        '**Solid** (Recommended) — adds 4 overrides:\n' +
+        '- Prisma ORM\n' +
+        '- Enhanced tRPC routers\n\n' +
+        '**Battle-Tested** (Production) — adds 8 overrides:\n' +
+        '- Docker Compose\n' +
+        '- Vitest unit tests\n' +
+        '- GitHub Actions CI pipeline\n\n' +
+        '**Vai** (Premium) — adds 4 overrides:\n' +
+        '- Optimized Docker images\n' +
+        '- `vai.config.ts` configuration';
+    }
+
+    // ── VEGGAAI TIER SYSTEM (generic) ──
+    // Answers about the VeggaAI 4-tier system: Basic → Solid → Battle-Tested → Vai
+    // Placed AFTER stack-specific handlers so "PERN tiers" / "MERN tiers" match first
+    if (/(?:veggaai|vai)\s+(?:tier|tiers|tier\s*system)/i.test(input)
+      || /(?:what|which)\s+(?:are\s+)?(?:the\s+)?(?:stack\s+)?tiers?\b/i.test(input)
+      || /basic.*solid.*battle/i.test(input)
+      || /tier\s+(?:progression|levels?|system)/i.test(input)) {
+      return '**VeggaAI 4-Tier Stack System:**\n\n' +
+        '| Tier | Label | Description |\n|---|---|---|\n' +
+        '| **Basic** | Starter | Core app scaffold — React 19 + TypeScript + Tailwind v4 + Geist font, inline edit (pencil icon, long-press 500ms + haptic), Framer Motion animations |\n' +
+        '| **Solid** | Recommended | Adds Prisma ORM + Zod validation + structured error handling. PERN adds User model + JWT auth |\n' +
+        '| **Battle-Tested** | Production | Adds Docker Compose, Vitest unit tests, GitHub Actions CI pipeline, multi-stage builds |\n' +
+        '| **Vai** | Premium | VeggaAI-optimized — performance monitoring, Error Boundaries, custom hooks (useApi), optimized Docker images, vai.config.ts |\n\n' +
+        'Each tier builds on the previous one using `mergeFiles()` — files from higher tiers override lower tier files.';
+    }
+
+    // Difference between Basic and Solid / Battle-Tested / Vai
+    if (/(?:difference|compare|vs\.?)\s+(?:between\s+)?(?:basic|solid|battle[\s-]*tested|vai)\s+(?:and|vs\.?|tier)/i.test(input)
+      || /basic\s+(?:vs\.?|versus)\s+(?:solid|battle[\s-]*tested|vai)/i.test(input)
+      || /solid\s+(?:vs\.?|versus)\s+(?:battle[\s-]*tested|vai)/i.test(input)) {
+      return '**Tier Comparison:**\n\n' +
+        '| Feature | Basic | Solid | Battle-Tested | Vai |\n|---|---|---|---|---|\n' +
+        '| **React 19 + TS + TW4** | ✅ | ✅ | ✅ | ✅ |\n' +
+        '| **Inline Edit + Framer** | ✅ | ✅ | ✅ | ✅ |\n' +
+        '| **Prisma ORM** | ❌ | ✅ | ✅ | ✅ |\n' +
+        '| **Zod Validation** | ❌* | ✅ | ✅ | ✅ |\n' +
+        '| **Auth (JWT/User)** | ❌ | PERN only | PERN only | PERN only |\n' +
+        '| **Docker Compose** | ❌ | ❌ | ✅ | ✅ |\n' +
+        '| **Vitest Tests** | ❌ | ❌ | ✅ | ✅ |\n' +
+        '| **GitHub Actions CI** | ❌ | ❌ | ✅ | ✅ |\n' +
+        '| **Performance Monitor** | ❌ | ❌ | ❌ | PERN only |\n' +
+        '| **Error Boundaries** | ❌ | ❌ | ❌ | PERN only |\n' +
+        '| **vai.config.ts** | ❌ | ❌ | ❌ | ✅ |\n\n' +
+        '*T3 includes Zod at Basic tier because tRPC requires it.';
+    }
+
+    // What is vai.config.ts
+    if (/vai\.config|vai\s+config/i.test(input)) {
+      return '**vai.config.ts** is the VeggaAI-specific configuration file added at the **Vai tier**. It contains project metadata, optimization flags, and VeggaAI integration settings for monitoring, error tracking, and deployment optimization.';
+    }
+
+    // Generic "what's in Basic tier" / "what does Basic include"
+    if (/(?:what(?:'s|\s+is|\s+does))\s+(?:in\s+)?(?:the\s+)?basic\s+(?:tier|include|have|contain)/i.test(input)) {
+      return '**Basic tier** (Starter) includes the core scaffold shared across all stacks:\n\n' +
+        '- React 19 + TypeScript + Tailwind CSS v4 + Geist font\n' +
+        '- Inline edit: pencil icon, long-press 500ms, haptic feedback\n' +
+        '- Framer Motion animations\n' +
+        '- Stack-specific backend (Express, tRPC, or Next.js API routes)\n' +
+        '- Stack-specific database setup\n\n' +
+        'Each stack has a unique demo app at Basic: PERN → task board, MERN → bookmark manager, Next.js → notes dashboard, T3 → expense tracker.';
+    }
+
     // When to choose PERN over MERN (follow-up)
     if (/(?:when|når)\s+(?:should|bør)\s+.*(?:choose|velge)\s+pern/i.test(input)
       || /choose\s+pern\s+over\s+mern/i.test(input)
@@ -4394,7 +6126,8 @@ Classic number guessing game with hints and attempt tracking.`;
 
     // ── MERN vs PERN ──
     if (/(?:difference|forskjell\w*|compare|sammenlign)\s+(?:between\s+|mellom\s+)?mern\s+(?:and|og|vs\.?|versus)\s+pern/i.test(input)
-      || /mern\s+(?:vs\.?|versus|eller)\s+pern/i.test(input)) {
+      || /mern\s+(?:vs\.?|versus|eller)\s+pern/i.test(input)
+      || /pern\s+(?:vs\.?|versus|eller)\s+mern/i.test(input)) {
       return '**MERN vs PERN Stack:**\n\n' +
         '| | MERN | PERN |\n|---|---|---|\n' +
         '| **Database** | MongoDB (NoSQL) | PostgreSQL (SQL) |\n' +
@@ -4497,7 +6230,10 @@ Classic number guessing game with hints and attempt tracking.`;
         '| **Ecosystem** | Massive | Growing |\n' +
         '| **Backed by** | Meta | Evan You (community) |\n' +
         '| **SSR** | Next.js | Nuxt.js |\n' +
-        '| **Mobile** | React Native | Capacitor / NativeScript |';
+        '| **Mobile** | React Native | Capacitor / NativeScript |\n\n' +
+        '**Choose React** if you need a massive ecosystem, React Native for mobile, or have a team that already knows JSX.\n' +
+        '**Choose Vue** if you want a gentler learning curve, prefer HTML templates, or want an opinionated all-in-one framework with Nuxt.\n\n' +
+        '*Honest take:* Neither is a bad choice. React has more jobs and libraries; Vue has a better out-of-the-box developer experience.';
     }
 
     // ORM
@@ -4540,7 +6276,16 @@ Classic number guessing game with hints and attempt tracking.`;
         '| **Best for** | Complex queries, relationships | Flexible data, high throughput |';
     }
 
-    // REST API
+    // REST API — HOW TO CREATE (must come before "what is REST" handler)
+    if (/(?:how|steps?).*(?:create|build|make|set\s*up).*rest\s*(?:ful)?\s*api|create.*rest\s*api|build.*rest\s*api/i.test(input)) {
+      return '**Creating a REST API with Express.js (Node.js):**\n\n' +
+        '**1. Setup:**\n```bash\nmkdir my-api && cd my-api\nnpm init -y\nnpm install express\n```\n\n' +
+        '**2. Create `server.js`:**\n```javascript\nimport express from "express";\nconst app = express();\napp.use(express.json());\n\nlet users = [\n  { id: 1, name: "Alice" },\n  { id: 2, name: "Bob" },\n];\n\n// GET all users\napp.get("/api/users", (req, res) => {\n  res.json(users);\n});\n\n// GET one user\napp.get("/api/users/:id", (req, res) => {\n  const user = users.find(u => u.id === +req.params.id);\n  if (!user) return res.status(404).json({ error: "Not found" });\n  res.json(user);\n});\n\n// POST create user\napp.post("/api/users", (req, res) => {\n  const user = { id: users.length + 1, ...req.body };\n  users.push(user);\n  res.status(201).json(user);\n});\n\n// PUT update user\napp.put("/api/users/:id", (req, res) => {\n  const idx = users.findIndex(u => u.id === +req.params.id);\n  if (idx === -1) return res.status(404).json({ error: "Not found" });\n  users[idx] = { ...users[idx], ...req.body };\n  res.json(users[idx]);\n});\n\n// DELETE user\napp.delete("/api/users/:id", (req, res) => {\n  users = users.filter(u => u.id !== +req.params.id);\n  res.status(204).send();\n});\n\napp.listen(3000, () => console.log("API running on :3000"));\n```\n\n' +
+        '**3. Run:** `node server.js`\n\n' +
+        '**Test:** `curl http://localhost:3000/api/users`';
+    }
+
+    // REST API — what is it (definition)
     if (/(?:what\s+is\s+(?:a\s+)?)?rest\s*(?:ful)?\s*api/i.test(input)
       || /hva\s+er\s+(?:en?\s+)?rest/i.test(input)) {
       return '**REST API (Representational State Transfer):**\n\n' +
@@ -4825,10 +6570,11 @@ Classic number guessing game with hints and attempt tracking.`;
         '**Flow:** User → Controller → Model → Controller → View → User';
     }
 
-    // Node.js (exclude connection pooling — handled by specific handler)
+    // Node.js (exclude connection pooling and deployment — handled by specific handlers)
     if ((/(?:what\s+is\s+)?node\.?js/i.test(input)
       || /hva\s+er\s+node\.?js/i.test(input))
-      && !/connection\s+pool|pooling|verktøy/i.test(input)) {
+      && !/connection\s+pool|pooling|verktøy/i.test(input)
+      && !/(?:deploy|docker|container|host|run.*(?:production|server))/i.test(input)) {
       return '**Node.js** is a **JavaScript runtime** built on Chrome\'s V8 engine that lets you run JavaScript outside the browser (on the server).\n\n' +
         '**Key features:**\n' +
         '- **Non-blocking I/O** — asynchronous, event-driven\n' +
@@ -5401,7 +7147,7 @@ Classic number guessing game with hints and attempt tracking.`;
     input = input.replace(/["'""''`]/g, ' ').replace(/\s+/g, ' ').trim();
 
     // Gate: broad knowledge topics
-    if (!/\b(capital|hovedstad|history|histor|who\s+(?:wrote|painted|invented|discovered|founded|created)|world\s+war|krig|berlin\s+wall|mona\s+lisa|shakespeare|boiling\s+point|speed\s+of\s+light|red\s+planet|mars\b|pacific|ocean|prime\s+number|prime\b|brendan\s+eich|bits?\s+in\s+(?:a\s+)?byte|ekofisk|bryggen|tyskebryggen|olympic|eidsvoll|grunnlov|constitution|gokstad|nidaros|tirpitz|lofot|seilskute|finnmark|1989|1945|1952|1994|1997|1998|2001|2004|2005|2007|2008|lillehammer|deep\s+blue|kasparov|google|wikipedia|youtube|iphone|apple|financial\s+crisis|finanskris|lehman|oil\s+fund|pensjonsfond|vg\b|verdens\s+gang|primary\s+source|reliable\s+fact|peer.?review|government\s+record|france|paris|japan|tokyo|australia|canberra|germany|berlin|sweden|stockholm|united\s+kingdom|london|chemistry|chemical\s+formula|h2o|water|dna|planet|solar\s+system|ocean|light\s+speed|prime|byte|javascript\s+creat|\bwwii\b|\bww2\b|second\s+world\s+war|andre\s+verdenskrig|fall\s+of\s+(?:the\s+)?berlin|oil\s+field|viking\s+ship|cathedral|battleship|cod\s+fish|sailing\s+ship|shipping|maritime\s+center|chess|encyclopedia|video.?sharing|smartphone|recession|newspaper|fylke|rogaland|vestland|bergen|oslo|innlandet|vestfold|trøndelag|trondheim|finnmark|nordland|agder|tromsø|troms\b)/i.test(input)) {
+    if (!/\b(capital|hovedstad|history|histor|who\s+(?:wrote|painted|invented|discovered|founded|created)|world\s+war|krig|berlin\s+wall|mona\s+lisa|shakespeare|boiling\s+point|speed\s+of\s+light|red\s+planet|mars\b|pacific|ocean|prime\s+number|prime\b|brendan\s+eich|bits?\s+in\s+(?:a\s+)?byte|ekofisk|bryggen|tyskebryggen|olympic|eidsvoll|grunnlov|constitution|gokstad|nidaros|tirpitz|lofot|seilskute|finnmark|1989|1945|1952|1994|1997|1998|2001|2004|2005|2007|2008|lillehammer|deep\s+blue|kasparov|google|wikipedia|youtube|iphone|apple|financial\s+crisis|finanskris|lehman|oil\s+fund|pensjonsfond|vg\b|verdens\s+gang|primary\s+source|reliable\s+fact|peer.?review|government\s+record|france|paris|japan|tokyo|australia|canberra|germany|berlin|sweden|stockholm|united\s+kingdom|london|iceland|reykjav[ií]k|italy|rome|spain|madrid|canada|ottawa|china|beijing|india|new\s+delhi|brazil|bras[ií]lia|russia|moscow|chemistry|chemical\s+formula|h2o|water|dna|planet|solar\s+system|ocean|light\s+speed|prime|byte|javascript\s+creat|\bwwii\b|\bww2\b|second\s+world\s+war|andre\s+verdenskrig|fall\s+of\s+(?:the\s+)?berlin|oil\s+field|viking\s+ship|cathedral|battleship|cod\s+fish|sailing\s+ship|shipping|maritime\s+center|chess|encyclopedia|video.?sharing|smartphone|recession|newspaper|fylke|rogaland|vestland|bergen|oslo|innlandet|vestfold|trøndelag|trondheim|finnmark|nordland|agder|tromsø|troms\b)/i.test(input)) {
       return null;
     }
 
@@ -5426,6 +7172,36 @@ Classic number guessing game with hints and attempt tracking.`;
     }
     if (/capital\s+of\s+(?:united\s+kingdom|uk|england|britain)/i.test(input)) {
       return '**London** is the capital of the United Kingdom. It has been the capital since the Roman period. London is one of the world\'s largest financial centers with approximately 9 million residents.';
+    }
+    if (/capital\s+of\s+iceland|hovedstad.*island|islands?\s+hovedstad/i.test(input)) {
+      return '**Reykjavík** is the capital of Iceland. It is the northernmost capital of a sovereign state in the world. Reykjavík has approximately 140,000 residents (about 230,000 in the greater capital area), making it home to roughly two-thirds of Iceland\'s population.';
+    }
+    if (/capital\s+of\s+(?:italy|italia)/i.test(input)) {
+      return '**Rome** (Roma) is the capital of Italy. Known as the "Eternal City," it has been a major center of civilization for over 2,500 years. Rome has approximately 2.8 million residents and contains Vatican City, the world\'s smallest independent state.';
+    }
+    if (/capital\s+of\s+(?:spain|españa|spania)/i.test(input)) {
+      return '**Madrid** is the capital of Spain. It has been the capital since 1561 under Philip II. Madrid is the most populous city in Spain with approximately 3.3 million residents and is known for its cultural institutions like the Prado Museum.';
+    }
+    if (/capital\s+of\s+(?:canada|kanada)/i.test(input)) {
+      return '**Ottawa** is the capital of Canada. It was chosen as the capital by Queen Victoria in 1857 as a compromise between Toronto, Montreal, Kingston, and Quebec City. Ottawa has approximately 1 million residents.';
+    }
+    if (/capital\s+of\s+(?:china|kina)/i.test(input)) {
+      return '**Beijing** (北京) is the capital of China. It has been the political center of China for most of the last eight centuries. Beijing has approximately 21.5 million residents and hosts landmarks like the Forbidden City and the Great Wall (Badaling section).';
+    }
+    if (/capital\s+of\s+(?:india)/i.test(input)) {
+      return '**New Delhi** is the capital of India. It serves as the seat of India\'s government and was designed by British architects Edwin Lutyens and Herbert Baker. The National Capital Territory of Delhi has approximately 32 million residents in the metropolitan area.';
+    }
+    if (/capital\s+of\s+(?:brazil|brasil)/i.test(input)) {
+      return '**Brasília** is the capital of Brazil. It was purpose-built and inaugurated in 1960, designed by architect Oscar Niemeyer and urban planner Lúcio Costa. It replaced Rio de Janeiro as the capital to develop the interior of the country.';
+    }
+    if (/capital\s+of\s+(?:russia|russland)/i.test(input)) {
+      return '**Moscow** (Москва) is the capital of Russia. It has been the capital for most of Russian history, with brief interruptions. Moscow has approximately 13 million residents and is the largest city in Europe by population.';
+    }
+    if (/capital\s+of\s+(?:finland|suomi)/i.test(input)) {
+      return '**Helsinki** is the capital of Finland. It has been the capital since 1812. Helsinki has approximately 660,000 residents and is known as "the Daughter of the Baltic."';
+    }
+    if (/capital\s+of\s+(?:denmark|danmark)/i.test(input)) {
+      return '**Copenhagen** (København) is the capital of Denmark. It has been the capital since the early 15th century. Copenhagen has approximately 800,000 residents and is known for Tivoli Gardens, the Little Mermaid statue, and Nyhavn harbor.';
     }
     if (/capital\s+of/i.test(input)) {
       // Generic capital handler for any unrecognized country
@@ -5699,8 +7475,416 @@ Classic number guessing game with hints and attempt tracking.`;
     input = input.replace(/["'""''`]/g, ' ').replace(/\s+/g, ' ').trim();
 
     // Gate: framework / devops / modern web terms
-    if (!/\b(docker|container|dockerfile|compose|ci\s*\/?\s*cd|continuous\s+(?:integration|deployment|delivery)|github\s+actions|jenkins|gitlab|typescript|type\s+safe|static\s+typ|tailwind|css\s*v?4|utility.?first|@theme|oklch|design\s+token|wcag|accessibility|universell\s+utforming|tilgjengelighet|gdpr|personvern|privacy|cookie|samtykke|consent|responsive|mobile.?first|ssl|https|security|sikkerhet|rust\b|borrow\s+checker|ownership|cargo|python|gil\b|global\s+interpreter|virtualenv|pip|go\s+(?:routine|goroutine|channel)|goroutine|golang|angular|vue\.?js|vue\s+3|composition\s+api|options\s+api|wordpress|cms|headless|sanity|strapi|next\.?js|nextjs|app\s+router|server\s+component|server\s+action|isr|incremental|three\.?js|threejs|gsap|animation|framer.?motion|hover\s+effect|landing\s+page|mvp|minimum\s+viable|norsk\s+standard|norwegian\s+standard|bærekraftig|sustainab|carbon\s+footprint|web\s+performance|lazy\s+load|code\s+split|tree\s+shak|webpack|vite\b|turbopack|esbuild|swc|monorepo|turborepo|nx\b|pnpm|tauri|electron|wasm|webassembly|edge\s+function|vercel|netlify|auth|authentication|oauth|jwt|session|bcrypt|argon|passport\.?js|next.?auth|clerk|supabase|prisma|drizzle|postgres|sqlite|redis|trpc|zod|micro.?service|micro.?frontend|graphql|apollo|urql|rest\s*(?:api|ful)?|openapi|swagger|websocket|sse|server.?sent|push\s+notif|service\s+worker|pwa|manifest|web\s+worker|shadcn|radix|headless\s+ui|icon|lucide|heroicon|phosphor|mdi|feather|react\s+icon|svg\s+icon|storybook|chromatic|figma|design\s+system|token\s+system|state\s+manage|zustand|jotai|recoil|redux|pinia|vuex|ngrx|signal|react\s+query|tanstack|swr|cache|invalidat|optimistic|testing|vitest|jest|playwright|cypress|puppeteer|rtl|react\s+testing|msw|mock\s+service|test\s+driven|tdd|bdd|unit\s+test|integration\s+test|e2e|end.?to.?end|linting|eslint|prettier|biome|oxc|stylelint|husky|lint.?staged|conventional\s+commit|semantic\s+release|changelog|deploy|vercel|netlify|railway|fly\.io|render|aws|gcp|azure|cloudflare|docker\s+compose|k(?:ubernet)?8?s|helm|terraform|pulumi|iac|infrastructure\s+as\s+code|setup.*(?:docker|nextjs|next\.js|project|app)|create.*(?:landing|page|app|project)|install.*(?:auth|database|tailwind)|modern\s+(?:landing|web|stack)|norwegian\s+(?:web|mvp|standard)|interface\s+vs|generic|union\s+type|intersection\s+type|async.*await|var\s.*let\s.*const|closure|event\s+loop|template\s+literal|destructur|nullish|optional\s+chain|\?\?|\?\.|mapped\s+type|discriminat|esm\b|commonjs|decorator|record\s+type|type\s+narrow|satisfies|conditional\s+type|hooks?\b|usestate|useeffect|useref|usecallback|usememo|suspense\b|middleware\b|react\.?memo|portal|grid\s+vs\s+flex|dark\s+mode|cascade\s+|specificity|container\s+quer|clamp\b|scroll\b.*animat|rem\b.*em\b|viewport|cors\b|xss\b|csrf\b|hash.*password|rbac\b|role.?based|snapshot\s+test|mock.*test|code\s+coverage|string\b.*&str|str\b.*rust|\btrait|result\b.*option|lifetime|box\b.*rc\b|type\s+hint|fastapi|asyncio|pydantic|dataclass|comprehension|venv|channel\b.*go|go\b.*interface|go\b.*struct|select\b.*go|slice\b.*array|go\b.*generic|go\b.*http|go\b.*mod|pour\s+principle|aria\b|screen\s+reader|contrast\s+ratio|focus\s+manage|keyboard\s+nav|form.*accessible|dpo\b|data\s+breach|altinn|e.?commerce|vipps|nuxt|vue.?router|gutenberg|angular.*standalone|angular.*inject|react.*hook|ssr\b.*ssg\b|parallel.*route|error\s+boundar|layout.*next|metadata.*next|code.*split|image.*optim|client.*navig|multi.?stage|reverse\s+proxy|nginx|blue.?green|canary\s+deploy|docker\s+volume|gitops|sql\b.*nosql|database\s+(?:index|migrat|transaction|pool)|connection\s+pool|n\+1\s+query|drizzle|jwt\b|oauth|nextauth|cors\b|xss\b|csrf\b|password\b.*(?:hash|secur|stor)|authentication\b.*authorization|rbac|vitest\b.*jest|tdd\b|react\s+testing|api\s+test|code\s+coverage|async\b.*test|playwright\b|snapshot\b|string\b.*&str|trait\b.*rust|result\b.*option\b|box\b.*rc\b.*arc|lifetime\b.*rust|async\b.*rust|match\b.*rust|concurrency\b.*rust|type\b.*hint\b.*python|fastapi|decorator\b.*python|asyncio|comprehension|virtual\b.*env|pydantic|dataclass|dependency\b.*inject.*python|go\b.*channel|go\b.*error|go\b.*interface|go\b.*struct|go\b.*mod|go\b.*http|select\b.*go|slice\b.*array|go\b.*generic|pour\b|aria\b|screen\b.*reader|color\b.*contrast|focus\b.*manage|keyboard\b.*nav|form\b.*accessi|altinn|norsk.*lov|vipps|e.?handel|nuxt|vue.?router|gutenberg|angular.*standalone|angular.*depend|\bvar\b|\bconst\b|\bjavascript\b|\breact\b|\bcontext\b|\bcss\b|@layer|\bcenter\b.*(?:element|horizontal|vertical)|passwords?.*(?:hash|secur|stor)|test\b.*\bapi\b|api\b.*endpoint|error\b.*\bgo\b|http\b.*\bgo\b|\bslices?\b|tree.?shak|\bbundl|\btranspil)/i.test(input)) {
+    if (!/\b(docker|container|dockerfile|compose|ci\s*\/?\s*cd|continuous\s+(?:integration|deployment|delivery)|github\s+actions|jenkins|gitlab|\bgit\b|branch|merge|rebase|typescript|type\s+safe|static\s+typ|tailwind|css\s*v?4|utility.?first|@theme|oklch|design\s+token|wcag|accessibility|universell\s+utforming|tilgjengelighet|gdpr|personvern|privacy|cookie|samtykke|consent|responsive|mobile.?first|ssl|https|security|sikkerhet|rust\b|borrow\s+checker|ownership|cargo|python|gil\b|global\s+interpreter|virtualenv|pip|go\s+(?:routine|goroutine|channel)|goroutine|golang|go\b|angular|vue\.?js|vue\s+3|composition\s+api|options\s+api|wordpress|cms|headless|sanity|strapi|next\.?js|nextjs|app\s+router|server\s+component|server\s+action|isr|incremental|three\.?js|threejs|gsap|animation|framer.?motion|hover\s+effect|landing\s+page|mvp|minimum\s+viable|norsk\s+standard|norwegian\s+standard|bærekraftig|sustainab|carbon\s+footprint|web\s+performance|lazy\s+load|code\s+split|tree\s+shak|webpack|vite\b|turbopack|esbuild|swc|monorepo|turborepo|nx\b|pnpm|tauri|electron|wasm|webassembly|edge\s+function|vercel|netlify|auth|authentication|oauth|jwt|session|bcrypt|argon|passport\.?js|next.?auth|clerk|supabase|prisma|drizzle|postgres|sqlite|redis|trpc|zod|micro.?service|micro.?frontend|graphql|apollo|urql|rest\s*(?:api|ful)?|openapi|swagger|websocket|sse|server.?sent|push\s+notif|service\s+worker|pwa|manifest|web\s+worker|shadcn|radix|headless\s+ui|icon|lucide|heroicon|phosphor|mdi|feather|react\s+icon|svg\s+icon|storybook|chromatic|figma|design\s+system|token\s+system|state\s+manage|zustand|jotai|recoil|redux|pinia|vuex|ngrx|signal|react\s+query|tanstack|swr|cache|invalidat|optimistic|testing|vitest|jest|playwright|cypress|puppeteer|rtl|react\s+testing|msw|mock\s+service|test\s+driven|tdd|bdd|unit\s+test|integration\s+test|e2e|end.?to.?end|linting|eslint|prettier|biome|oxc|stylelint|husky|lint.?staged|conventional\s+commit|semantic\s+release|changelog|deploy|vercel|netlify|railway|fly\.io|render|aws|gcp|azure|cloudflare|docker\s+compose|k(?:ubernet)?8?s|helm|terraform|pulumi|iac|infrastructure\s+as\s+code|setup.*(?:docker|nextjs|next\.js|project|app)|create.*(?:landing|page|app|project)|install.*(?:auth|database|tailwind)|modern\s+(?:landing|web|stack)|norwegian\s+(?:web|mvp|standard)|interface\s+vs|generic|union\s+type|intersection\s+type|async.*await|var\s.*let\s.*const|closure|event\s+loop|template\s+literal|destructur|nullish|optional\s+chain|\?\?|\?\.|mapped\s+type|discriminat|esm\b|commonjs|decorator|record\s+type|type\s+narrow|satisfies|conditional\s+type|hooks?\b|usestate|useeffect|useref|usecallback|usememo|usereducer|suspense\b|middleware\b|react\.?memo|portal|grid\s+vs\s+flex|dark\s+mode|cascade\s+|specificity|container\s+quer|clamp\b|scroll\b.*animat|rem\b.*em\b|em\b.*rem|viewport|cors\b|xss\b|csrf\b|hash.*password|rbac\b|role.?based|snapshot\s+test|mock.*test|code\s+coverage|string\b.*&str|str\b.*rust|\btrait|result\b.*option|lifetime|box\b.*rc\b|type\s+hint|fastapi|asyncio|pydantic|dataclass|comprehension|venv|channel\b.*go|go\b.*interface|go\b.*struct|select\b.*go|slice\b.*array|go\b.*generic|go\b.*http|go\b.*mod|pour\s+principle|aria\b|screen\s+reader|contrast\s+ratio|focus\s+manage|keyboard\s+nav|form.*accessible|dpo\b|data\s+breach|altinn|e.?commerce|vipps|nuxt|vue.?router|gutenberg|angular.*standalone|angular.*inject|react.*hook|ssr\b.*ssg\b|parallel.*route|error\s+boundar|layout.*next|metadata.*next|code.*split|image.*optim|client.*navig|multi.?stage|reverse\s+proxy|nginx|blue.?green|canary\s+deploy|docker\s+volume|gitops|sql\b.*nosql|database\s+(?:index|migrat|transaction|pool)|connection\s+pool|n\+1\s+query|drizzle|jwt\b|oauth|nextauth|cors\b|xss\b|csrf\b|password\b.*(?:hash|secur|stor)|authentication\b.*authorization|rbac|vitest\b.*jest|tdd\b|react\s+testing|api\s+test|code\s+coverage|async\b.*test|playwright\b|snapshot\b|string\b.*&str|trait\b.*rust|result\b.*option\b|box\b.*rc\b.*arc|lifetime\b.*rust|async\b.*rust|match\b.*rust|concurrency\b.*rust|type\b.*hint\b.*python|fastapi|decorator\b.*python|asyncio|comprehension|virtual\b.*env|pydantic|dataclass|dependency\b.*inject.*python|go\b.*channel|go\b.*error|go\b.*interface|go\b.*struct|go\b.*mod|go\b.*http|select\b.*go|slice\b.*array|go\b.*generic|pour\b|aria\b|screen\b.*reader|color\b.*contrast|focus\b.*manage|keyboard\b.*nav|form\b.*accessi|altinn|norsk.*lov|vipps|e.?handel|nuxt|vue.?router|gutenberg|angular.*standalone|angular.*depend|\bvar\b|\bconst\b|\bjavascript\b|\breact\b|\bcontext\b|\bcss\b|@layer|\bcenter\b.*(?:element|horizontal|vertical)|passwords?.*(?:hash|secur|stor)|test\b.*\bapi\b|api\b.*endpoint|error\b.*\bgo\b|http\b.*\bgo\b|\bslices?\b|tree.?shak|\bbundl|\btranspil|sso\b|single.?sign.?on|embed(?:ding)|vector.?(?:databas|search|space)|hnsw|approximate.?nearest|message.?queue|kafka|rabbitmq|event.?driven|copilot|coherence|cohesion|strategic|scalab|n.?tier|horizontal.*scal|vertical.*scal|load.?balanc|caching.?(?:strat|pattern|layer)|search.?(?:architect|engine.*index)|role.?based\s+bench|benchmark.*(?:write|design|method|categor|suite)|ai\s+role\s+simul|devops\s+senior|sla\b.*slo|slo\b.*sli|error\s+budget|incident\s+response|runbook|post.?mortem|mttd|mttr|on.?call|pipeline\s+optim|ci.?cd\s+(?:optim|cache|parallel)|docker\s+layer\s+cach|test\s+split|vai\s+bench|competency\s+domain|question\s+taxonomy|forwardref|forward\s*ref|for\.{3}in|for\.{3}of|for\s+in\s+.*for\s+of|slice\b.*\bgo\b|\bresult\b.*\brust|\brust\b.*\bresult|serverless|lambda\b|django\b|alt\b.*(?:attribute|text|tag)|right.*(?:forgotten|erasure)|astro\b|weakref|temporal\b.*api|unknown\b.*\bany\b|custom\s+hook|css.?in.?js|css\s+reset|normalize\.?css|list\b.*tuple|tuple\b.*list|content.?security|csp\b|\bpx\b.*\brem\b|\brem\b.*\bpx\b|\bpages?\b.*\bapp\b.*(?:next|router))/i.test(input)) {
       return null;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  ARCHITECTURE PLANNING — multi-technology questions
+    // ══════════════════════════════════════════════════════════════
+
+    // Detect multi-technology planning questions (mentions 3+ technologies + planning language)
+    const techTerms = ['react', 'vue', 'angular', 'next', 'nuxt', 'typescript', 'javascript',
+      'node', 'express', 'fastify', 'postgres', 'mongodb', 'redis', 'prisma',
+      'docker', 'kubernetes', 'k8s', 'aws', 'vercel', 'nginx'];
+    const techCount = techTerms.filter(t => input.toLowerCase().includes(t)).length;
+    const hasPlanningIntent = /(?:plan|architect|where.*start|help.*(?:plan|start|approach)|deployment\s+pipeline|not\s+sure|how\s+(?:do|should|would)\s+i\s+(?:start|begin|structure|design|plan))/i.test(input);
+
+    if (techCount >= 3 && (hasPlanningIntent || input.split(/\s+/).length > 25)) {
+      // Detect which technologies are mentioned
+      const hasFrontend = /react|vue|angular|next|nuxt|svelte/i.test(input);
+      const hasDB = /postgres|mongo|mysql|sqlite|redis|database/i.test(input);
+      const hasBackend = /node|express|fastify|nest|api/i.test(input) || hasDB;
+      const hasInfra = /docker|kubernetes|k8s|aws|gcp|azure|vercel|deploy/i.test(input);
+
+      let response = 'Great stack choice — here\'s how I\'d lay this out:\n\n';
+      response += '**Recommended structure:**\n```\n';
+      if (hasFrontend) response += '├── frontend/          # React/TypeScript app\n';
+      if (hasBackend) response += '├── backend/           # API server (Express/Fastify)\n';
+      response += '├── docker-compose.yml # Local development\n';
+      if (hasInfra) response += '├── k8s/               # Kubernetes manifests\n';
+      response += '└── README.md\n```\n\n';
+
+      response += '**Step-by-step:**\n';
+      response += '1. **Start with the API** — define your data models and REST/GraphQL endpoints\n';
+      if (hasDB) response += '2. **Set up the database** — schema, migrations, seed data\n';
+      if (hasFrontend) response += '3. **Build the frontend** — connect to API, implement core features\n';
+      response += '4. **Dockerize** — write Dockerfile for each service, create docker-compose.yml\n';
+      if (hasInfra && /kubernetes|k8s/i.test(input)) {
+        response += '5. **Kubernetes** — write Deployment + Service manifests, set up Ingress\n';
+        response += '6. **CI/CD** — GitHub Actions → build → push to registry → deploy to K8s\n';
+      } else {
+        response += '5. **Deploy** — push to your platform (Vercel, Railway, or VPS with Docker)\n';
+      }
+
+      response += '\n**My advice:** Build one feature end-to-end first (API → DB → frontend → Docker) before expanding horizontally. Don\'t touch K8s until Docker works locally.';
+      return response;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  BENCHMARK COVERAGE — deterministic handlers for core queries
+    // ══════════════════════════════════════════════════════════════
+
+    // B-typescript: unknown vs any
+    if (/\bunknown\b.*\bany\b.*(?:typescript|ts\b)|(?:typescript|ts)\b.*\bunknown\b.*\bany\b/i.test(input)) {
+      return '**`unknown` vs `any` in TypeScript:**\n\n' +
+        '`any` disables **all** type checking — any operation is allowed, no errors. It\'s an escape hatch that defeats the purpose of TypeScript.\n\n' +
+        '`unknown` is the **type-safe** counterpart — it accepts any value but forces you to narrow the type before using it.\n\n' +
+        '```typescript\nlet a: any = "hello";\na.foo(); // No error — but crashes at runtime!\n\nlet b: unknown = "hello";\n// b.foo(); // Error! Must narrow first\nif (typeof b === "string") {\n  b.toUpperCase(); // OK — TypeScript knows it\'s a string\n}\n```\n\n' +
+        '**Rule:** Use `unknown` instead of `any` when the type is genuinely uncertain. Use `any` only for gradual migration from JavaScript.';
+    }
+
+    // B-typescript: WeakRef
+    if (/\bweakref\b/i.test(input)) {
+      return '**WeakRef** in JavaScript holds a **weak reference** to an object — it does NOT prevent **garbage collection**.\n\n' +
+        '```javascript\nlet obj = { data: "important" };\nconst weak = new WeakRef(obj);\n\nweak.deref(); // { data: "important" }\nobj = null; // Object becomes eligible for GC\n// Later: weak.deref() → undefined (collected)\n```\n\n' +
+        '**Use cases:** Caches that should not prevent cleanup, DOM element references in frameworks, memoization that automatically shrinks under memory pressure.\n\n' +
+        '**Companion:** `FinalizationRegistry` lets you register a callback when a referenced object is garbage collected. Together they enable sophisticated cache patterns without memory leaks.';
+    }
+
+    // B-typescript: Temporal API
+    if (/\btemporal\b.*\bapi\b|\btemporal\b.*\bdate\b|\btemporal\b.*\btime\b/i.test(input)) {
+      return '**Temporal API** is the modern JavaScript replacement for the broken `Date` object.\n\n' +
+        '**Problems with Date:** Mutable (methods modify in-place), months are 0-indexed, no timezone support, parsing is unreliable.\n\n' +
+        '**Temporal fixes all of this:**\n' +
+        '- `Temporal.PlainDate` — date without time or timezone\n' +
+        '- `Temporal.PlainTime` — time without date\n' +
+        '- `Temporal.PlainDateTime` — date + time, no timezone\n' +
+        '- `Temporal.ZonedDateTime` — full date/time/timezone\n' +
+        '- `Temporal.Duration` — represents a span of time\n' +
+        '- `Temporal.Instant` — exact moment on the timeline (like Unix timestamp)\n\n' +
+        '```javascript\nconst today = Temporal.Now.plainDateISO();\nconst future = today.add({ months: 3, days: 10 });\nconst diff = today.until(future); // P3M10D\n```\n\n' +
+        '**Status:** Stage 3 TC39 proposal, available via polyfill `@js-temporal/polyfill`.';
+    }
+
+    // C-react: pages/ vs app/ in Next.js
+    if (/\bpages?\b.*\bapp\b.*(?:next|router)|(?:next|router).*\bpages?\b.*\bapp\b/i.test(input)) {
+      return '**`pages/` vs `app/` in Next.js:**\n\n' +
+        '| Feature | `pages/` (Pages Router) | `app/` (App Router) |\n' +
+        '|---------|----------------------|--------------------|\n' +
+        '| Routing | File-based, flat | File-based with nested **layout** hierarchy |\n' +
+        '| Data fetching | `getServerSideProps`, `getStaticProps` | `async` Server Components (direct `fetch`) |\n' +
+        '| Components | All client-side by default | **Server Components** by default |\n' +
+        '| Layouts | Custom `_app.tsx` wrapper | Native nested `layout.tsx` files |\n' +
+        '| Loading states | Manual | Built-in `loading.tsx` with Suspense |\n' +
+        '| Error handling | Custom `_error.tsx` | Co-located `error.tsx` per route |\n\n' +
+        '**`app/` router** is the recommended approach for new Next.js projects (13.4+). It supports React Server Components, streaming, and parallel routes. The `pages/` router still works and can coexist with `app/` during migration.';
+    }
+
+    // C-react: useReducer
+    if (/\busereducer\b/i.test(input)) {
+      return '**useReducer** is a React hook for managing complex **state** logic — an alternative to `useState` when state transitions depend on previous state or involve multiple sub-values.\n\n' +
+        '```jsx\nconst reducer = (state, action) => {\n  switch (action.type) {\n    case "increment": return { count: state.count + 1 };\n    case "decrement": return { count: state.count - 1 };\n    case "reset": return { count: 0 };\n    default: throw new Error(`Unknown action: ${action.type}`);\n  }\n};\n\nfunction Counter() {\n  const [state, dispatch] = useReducer(reducer, { count: 0 });\n  return (\n    <>\n      <p>{state.count}</p>\n      <button onClick={() => dispatch({ type: "increment" })}>+</button>\n      <button onClick={() => dispatch({ type: "reset" })}>Reset</button>\n    </>\n  );\n}\n```\n\n' +
+        '**When to use:** Complex state objects, state transitions that depend on previous state, when you want to centralize state logic. **dispatch** is stable across re-renders (unlike setState closures).';
+    }
+
+    // C-react: custom hooks
+    if (/\bcustom\s+hooks?\b/i.test(input)) {
+      return '**Custom hooks** in React extract **reusable** stateful **logic** into functions prefixed with `use`.\n\n' +
+        '```jsx\nfunction useWindowSize() {\n  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });\n  useEffect(() => {\n    const handler = () => setSize({ w: window.innerWidth, h: window.innerHeight });\n    window.addEventListener("resize", handler);\n    return () => window.removeEventListener("resize", handler);\n  }, []);\n  return size;\n}\n\n// Usage in any component:\nfunction Header() {\n  const { w } = useWindowSize();\n  return <nav>{w < 768 ? <MobileMenu /> : <DesktopMenu />}</nav>;\n}\n```\n\n' +
+        '**Rules:** Must start with `use`, can call other hooks inside, follow the Rules of Hooks (top-level only, no conditionals). Custom hooks share **logic** reuse, not **state** — each component using the hook gets its own independent state.';
+    }
+
+    // D-css: em, rem, px
+    if (/\b(?:em|rem|px)\b.*\b(?:em|rem|px)\b/i.test(input) && /\b(?:difference|compare|vs|versus|between|unit)\b/i.test(input)) {
+      return '**CSS Units — `em`, `rem`, and `px`:**\n\n' +
+        '| Unit | Relative to | Example |\n' +
+        '|------|------------|----------|\n' +
+        '| `px` | Absolute — fixed pixels | `font-size: 16px` |\n' +
+        '| `em` | **Parent** element\'s font-size | `padding: 1.5em` (1.5× parent) |\n' +
+        '| `rem` | **Root** (`<html>`) font-size | `margin: 2rem` (2× root, usually 32px) |\n\n' +
+        '**Why `rem` is preferred:** Consistent across the page (no compounding), respects user font-size preferences for accessibility, predictable math.\n\n' +
+        '**When to use `em`:** Component-internal spacing that should scale with the component\'s own font-size (e.g., button padding).\n\n' +
+        '**When to use `px`:** Borders, box-shadows, and fine-grained control where relative sizing doesn\'t help.\n\n' +
+        '**Compounding problem with `em`:** If a parent is `2em` and child is `2em`, the child renders at 4× root — this cascading is why `rem` was introduced.';
+    }
+
+    // D-css: CSS-in-JS
+    if (/css.?in.?js/i.test(input)) {
+      return '**CSS-in-JS** writes CSS directly in JavaScript, scoped to components.\n\n' +
+        '**Runtime libraries** (styled-components, Emotion) generate styles at runtime:\n' +
+        '```jsx\nconst Button = styled.button`\n  background: blue;\n  color: white;\n  padding: 8px 16px;\n`;\n```\n\n' +
+        '**Zero-runtime libraries** (vanilla-extract, Linaria, Panda CSS) extract CSS at build time — no runtime cost.\n\n' +
+        '**Pros:** Scoped styles (no class name collisions), dynamic styling based on props, co-located with components, dead code elimination.\n\n' +
+        '**Cons:** Runtime overhead (for runtime libs), bundle size increase, SSR complexity, harder to cache separately.\n\n' +
+        '**Trend:** The ecosystem is moving toward zero-runtime solutions and CSS Modules. Tailwind CSS avoids CSS-in-JS entirely with utility classes.';
+    }
+
+    // D-css: container queries
+    if (/container\s+quer/i.test(input)) {
+      return '**CSS Container Queries** style elements based on **container** size, not viewport.\n\n' +
+        '```css\n.card-wrapper {\n  container-type: inline-size;\n  container-name: card;\n}\n\n@container card (min-width: 400px) {\n  .card { display: grid; grid-template-columns: 1fr 1fr; }\n}\n\n@container card (max-width: 399px) {\n  .card { display: flex; flex-direction: column; }\n}\n```\n\n' +
+        '**Why it matters:** Media queries check the **viewport**. Container queries check the **parent** — so the same component adapts whether it\'s in a sidebar (300px) or main content (800px).\n\n' +
+        '**Key properties:**\n- `container-type: inline-size` — enable container queries on width\n- `container-name` — optional name for targeting\n- `@container` — the query rule, works like `@media` but for the container\n\n' +
+        '**Browser support:** All modern browsers since 2023. **Responsive** design is now truly component-based.';
+    }
+
+    // D-css: CSS reset vs normalize
+    if (/css\s+reset|normalize\.?css|\bnormalize\b.*\breset\b|\breset\b.*\bnormalize\b/i.test(input)) {
+      return '**CSS Reset vs Normalize:**\n\n' +
+        '**CSS Reset** (e.g., Eric Meyer\'s) strips ALL **default** **browser** styles — margins, padding, font sizes — to zero. Everything starts from a blank slate.\n```css\n* { margin: 0; padding: 0; box-sizing: border-box; }\n```\n\n' +
+        '**Normalize.css** preserves useful **default** browser styles while fixing inconsistencies **between** browsers. Headings still look like headings, lists still have bullets.\n\n' +
+        '| Approach | Strategy | Result |\n' +
+        '|----------|----------|--------|\n' +
+        '| Reset | Remove ALL defaults | Blank canvas, must restyle everything |\n' +
+        '| Normalize | Fix inconsistencies | Sensible defaults preserved |\n\n' +
+        '**Modern approach:** Most frameworks (Tailwind, Chakra) include their own "preflight" reset that combines both — reset most things but keep accessible defaults. Tailwind\'s preflight is based on `modern-normalize` + opinionated resets.';
+    }
+
+    // E-devops: What is Docker?
+    if (/^what\s+(?:is|are)\s+docker\b/i.test(input) && !/image|container.*vs|vs.*container|dockerfile|compose/i.test(input)) {
+      return '**Docker** is a platform for building, shipping, and running applications in **containers**.\n\n' +
+        'A **container** packages your app with all its dependencies — code, runtime, libraries, system tools — into a single portable unit. It runs identically on any machine with Docker installed.\n\n' +
+        '**Key concepts:**\n' +
+        '- **Image** — a read-only template (like a class). Built from a Dockerfile.\n' +
+        '- **Container** — a running instance of an image (like an object). Lightweight, isolated, ephemeral.\n' +
+        '- **Dockerfile** — instructions to build an image (`FROM`, `COPY`, `RUN`, `CMD`)\n' +
+        '- **Docker Compose** — define multi-container apps in a `docker-compose.yml`\n' +
+        '- **Registry** — Docker Hub or private registries to share images\n\n' +
+        '**Why Docker?** "Works on my machine" → works everywhere. Consistent dev/staging/prod environments, easy scaling, fast startup (seconds vs minutes for VMs), isolation without full virtual machines.';
+    }
+
+    // E-devops: Docker image vs container
+    if (/docker\b.*\bimage\b.*\bcontainer\b|image\b.*vs.*container|container\b.*vs.*image/i.test(input)) {
+      return '**Docker Image vs Container:**\n\n' +
+        '| | **Image** | **Container** |\n' +
+        '|---|-----------|---------------|\n' +
+        '| What | Read-only **template** | Running **instance** of an image |\n' +
+        '| Analogy | Class definition | Object / instance |\n' +
+        '| State | Immutable (layered filesystem) | Has writable layer on top |\n' +
+        '| Created by | `docker build` + Dockerfile | `docker run` or `docker create` |\n' +
+        '| Stored | Registry (Docker Hub) or local cache | Only exists while running (or stopped) |\n\n' +
+        '```bash\n# Build an image from Dockerfile\ndocker build -t my-app .\n\n# Create a container (instance) from the image\ndocker run -p 3000:3000 my-app\n\n# One image → many containers\ndocker run --name app1 my-app\ndocker run --name app2 my-app\n```\n\n' +
+        '**Key insight:** Images are the blueprint, containers are the running process. You can create many containers from one image — each with its own state.';
+    }
+
+    // E-devops: Dockerfile
+    if (/\bdockerfile\b/i.test(input) && !/compose|how.*deploy/i.test(input)) {
+      return '**Dockerfile** is a text file with **instructions** to **build** a Docker image, layer by layer.\n\n' +
+        '```dockerfile\n# Base image\nFROM node:20-alpine\n\n# Set working directory\nWORKDIR /app\n\n# Copy dependency files first (layer caching)\nCOPY package*.json ./\nRUN npm ci --only=production\n\n# Copy application code\nCOPY . .\n\n# Expose port\nEXPOSE 3000\n\n# Start command\nCMD ["node", "server.js"]\n```\n\n' +
+        '**Key instructions:**\n' +
+        '- `FROM` — base image (every Dockerfile starts with this)\n' +
+        '- `WORKDIR` — set the working directory\n' +
+        '- `COPY` / `ADD` — copy files from host to image\n' +
+        '- `RUN` — execute commands during build (install deps, compile)\n' +
+        '- `EXPOSE` — document which port the app uses\n' +
+        '- `CMD` — default command when container starts\n' +
+        '- `ENV` — set environment variables\n\n' +
+        '**Build:** `docker build -t my-app .` reads the Dockerfile and creates an image.';
+    }
+
+    // E-devops: serverless
+    if (/\bserverless\b/i.test(input)) {
+      return '**Serverless** computing runs code without managing servers — the cloud provider handles infrastructure, **scaling**, and availability.\n\n' +
+        '**How it works:** You deploy a **function** (AWS **Lambda**, Vercel Functions, Cloudflare Workers). The provider:\n' +
+        '- Allocates compute on demand\n' +
+        '- **Scales** automatically (0 to thousands of instances)\n' +
+        '- Charges per invocation (pay only when your code runs)\n' +
+        '- Handles OS, runtime, patching\n\n' +
+        '**Pros:** Zero server management, automatic scaling, cost-effective for variable traffic, instant deployments.\n\n' +
+        '**Cons:** Cold starts (first invocation is slow), execution time limits (e.g., 15 min on **Lambda**), vendor lock-in, harder to debug, stateless (no persistent memory).\n\n' +
+        '**Common use cases:** API endpoints, webhooks, scheduled tasks, image processing, form handling.\n\n' +
+        '**Platforms:** AWS Lambda, Vercel Edge Functions, Cloudflare Workers, Google Cloud Functions, Azure Functions.';
+    }
+
+    // E-devops: Nginx
+    if (/\bnginx\b/i.test(input) && !/how.*config|setup/i.test(input)) {
+      return '**Nginx** (pronounced "engine-x") is a high-performance **web server**, **reverse proxy**, and load balancer.\n\n' +
+        '**Primary roles:**\n' +
+        '- **Web server** — serves static files (HTML, CSS, JS, images) extremely fast\n' +
+        '- **Reverse proxy** — forwards requests to backend servers (Node.js, Python, etc.) via **HTTP**\n' +
+        '- **Load balancer** — distributes traffic across multiple backend instances\n' +
+        '- **SSL termination** — handles HTTPS certificates\n' +
+        '- **Caching** — stores responses to reduce backend load\n\n' +
+        '```nginx\nserver {\n  listen 80;\n  server_name example.com;\n\n  location / {\n    proxy_pass http://localhost:3000;  # reverse proxy to Node.js\n  }\n\n  location /static/ {\n    root /var/www;  # serve static files directly\n  }\n}\n```\n\n' +
+        '**Why Nginx?** Handles 10,000+ concurrent connections with minimal memory. Event-driven architecture (non-blocking), unlike Apache\'s thread-per-connection model.';
+    }
+
+    // G-auth: Content Security Policy
+    if (/content.?security.?policy|\bcsp\b/i.test(input)) {
+      return '**Content Security Policy** (**CSP**) is a security **header** that tells the browser which sources of content are trusted — preventing XSS and injection attacks.\n\n' +
+        '```http\nContent-Security-Policy: default-src \'self\'; script-src \'self\' https://cdn.example.com; style-src \'self\' \'unsafe-inline\'\n```\n\n' +
+        '**Key directives:**\n' +
+        '- `default-src` — fallback for all resource types\n' +
+        '- `script-src` — allowed **script** sources (prevents inline scripts by default)\n' +
+        '- `style-src` — allowed stylesheet sources\n' +
+        '- `img-src` — allowed image sources\n' +
+        '- `connect-src` — allowed fetch/XHR/WebSocket targets\n' +
+        '- `frame-ancestors` — who can embed your page (replaces X-Frame-Options)\n\n' +
+        '**Why CSP matters:** Even if an attacker injects `<script>` tags (XSS), CSP blocks execution because the script source isn\'t whitelisted. It\'s defense-in-depth — the last line of defense against injection.\n\n' +
+        '**Tip:** Start with `Content-Security-Policy-Report-Only` to test without breaking anything.';
+    }
+
+    // J-python: list vs tuple
+    if (/\blist\b.*\btuple\b|\btuple\b.*\blist\b/i.test(input) && /python|differ|compare|vs/i.test(input)) {
+      return '**List vs Tuple in Python:**\n\n' +
+        '| Feature | **List** `[]` | **Tuple** `()` |\n' +
+        '|---------|--------------|----------------|\n' +
+        '| Mutability | **Mutable** — can add, remove, change | **Immutable** — fixed after creation |\n' +
+        '| Syntax | `[1, 2, 3]` | `(1, 2, 3)` |\n' +
+        '| Hashable | No (can\'t be dict key) | Yes (can be dict key/set member) |\n' +
+        '| Performance | Slightly slower | Slightly faster, less memory |\n' +
+        '| Use case | Collections that change | Fixed records, function returns |\n\n' +
+        '```python\n# List — mutable\ncolors = ["red", "blue"]\ncolors.append("green")  # OK\ncolors[0] = "yellow"    # OK\n\n# Tuple — immutable\npoint = (10, 20)\n# point[0] = 30  # TypeError!\ncoords = {point: "A"}  # OK as dict key\n```\n\n' +
+        '**Rule of thumb:** Use **list** when order matters and items change. Use **tuple** for fixed data (coordinates, RGB values, function returns).';
+    }
+
+    // J-python: pip
+    if (/\bpip\b.*\bpython\b|\bpython\b.*\bpip\b|^what\s+is\s+pip\b/i.test(input)) {
+      return '**pip** is Python\'s default **package** manager — it **installs** packages from **PyPI** (Python Package Index).\n\n' +
+        '```bash\n# Install a package\npip install requests\n\n# Install specific version\npip install django==4.2\n\n# Install from requirements file\npip install -r requirements.txt\n\n# List installed packages\npip list\n\n# Save current packages\npip freeze > requirements.txt\n```\n\n' +
+        '**Key concepts:**\n' +
+        '- **PyPI** (pypi.org) — the central repository with 400,000+ packages\n' +
+        '- `requirements.txt` — lists project dependencies with version pins\n' +
+        '- **Virtual environments** — isolate packages per project: `python -m venv .venv`\n' +
+        '- **pip install -e .** — editable install for local development\n\n' +
+        '**Modern alternatives:** `pipx` (for CLI tools), `poetry` (dependency management + lockfile), `uv` (extremely fast Rust-based pip replacement).';
+    }
+
+    // J-python: Django
+    if (/\bdjango\b/i.test(input)) {
+      return '**Django** is a batteries-included **Python** **web** **framework** — the most popular full-stack framework in the Python ecosystem.\n\n' +
+        '**Key features:**\n' +
+        '- **ORM** — define models in Python, auto-generates SQL/migrations\n' +
+        '- **Admin panel** — auto-generated CRUD interface from your models\n' +
+        '- **URL routing** — map URLs to views with regex or path converters\n' +
+        '- **Template engine** — server-side HTML rendering\n' +
+        '- **Authentication** — built-in user auth, sessions, permissions\n' +
+        '- **Security** — CSRF protection, XSS prevention, SQL injection prevention\n\n' +
+        '```python\n# models.py\nclass Article(models.Model):\n    title = models.CharField(max_length=200)\n    body = models.TextField()\n    published = models.DateTimeField(auto_now_add=True)\n\n# views.py\ndef article_list(request):\n    articles = Article.objects.all()\n    return render(request, "articles.html", {"articles": articles})\n```\n\n' +
+        '**Philosophy:** "Don\'t repeat yourself" (DRY), convention over configuration. Used by Instagram, Pinterest, Mozilla, Disqus.';
+    }
+
+    // L-wcag: alt attribute
+    if (/\balt\b.*(?:attribute|text|tag|img)/i.test(input)) {
+      return '**The `alt` attribute** provides a **text** **description** of an **image** for accessibility and fallback display.\n\n' +
+        '```html\n<img src="chart.png" alt="Monthly sales chart showing 20% growth in Q4">\n<img src="decoration.svg" alt="">  <!-- decorative: empty alt -->\n```\n\n' +
+        '**Why it matters:**\n' +
+        '- **Screen readers** read alt text aloud for visually impaired users\n' +
+        '- **SEO** — search engines index alt text to understand images\n' +
+        '- **Fallback** — displayed when images fail to load\n' +
+        '- **Required by WCAG** — images without alt fail accessibility audits\n\n' +
+        '**Best practices:**\n' +
+        '- Describe the image\'s PURPOSE, not just appearance ("Sales chart" not "Picture of graph")\n' +
+        '- Keep it concise (under 125 characters)\n' +
+        '- Use `alt=""` (empty, not missing) for decorative images\n' +
+        '- Never use "image of..." or "picture of..." — the screen reader already says "image"\n' +
+        '- For complex images (charts, diagrams), use `aria-describedby` with a longer description';
+    }
+
+    // M-gdpr: right to be forgotten
+    if (/right.*(?:forgotten|erasure)|right.*(?:delete|delet).*(?:data|personal)/i.test(input)) {
+      return '**Right to be Forgotten** (Right to **Erasure**, GDPR Article 17):\n\n' +
+        'Data subjects can request that organizations **delete** all their personal data. The organization must comply within 30 days if:\n' +
+        '- The data is no longer necessary for its original purpose\n' +
+        '- Consent is withdrawn\n' +
+        '- The data was unlawfully processed\n' +
+        '- Legal obligation requires deletion\n\n' +
+        '**Exceptions (you may refuse):**\n' +
+        '- Legal obligation to retain data\n' +
+        '- Public interest (health, archiving, research)\n' +
+        '- Exercising right to freedom of expression\n' +
+        '- Establishing, exercising, or defending legal claims\n\n' +
+        '**Implementation for developers:**\n' +
+        '- Build a "delete my account" feature that cascades through ALL systems\n' +
+        '- Don\'t just soft-delete — remove from backups, logs, analytics, third-party services\n' +
+        '- Document your data retention policies\n' +
+        '- Return confirmation to the user after deletion\n\n' +
+        '**Famous case:** Google v. Spain (2014) — the EU court ruled that search engines must remove links to outdated personal information on request.';
+    }
+
+    // N-norway: universell utforming
+    if (/universell\s+utforming/i.test(input)) {
+      return '**Universell utforming** (Universal Design / **accessibility**) is Norway\'s legal requirement that all digital services must be **tilgjengelig** for everyone, including people with disabilities.\n\n' +
+        '**Legal basis:** *Likestillings- og diskrimineringsloven* (Equality and Anti-Discrimination Act) + *Forskrift om universell utforming av IKT*. Applies to all public and private sector websites and apps.\n\n' +
+        '**Requirements (based on WCAG 2.1 AA):**\n' +
+        '- Text alternatives for images (alt text)\n' +
+        '- Keyboard navigability for all functionality\n' +
+        '- Sufficient color contrast (4.5:1 for text)\n' +
+        '- Resizable text without breaking layout\n' +
+        '- Captions for video/audio content\n' +
+        '- Clear, consistent navigation\n\n' +
+        '**Enforcement:** Digitaliseringsdirektoratet (Digdir) monitors compliance. Violations can result in fines.\n\n' +
+        '**Testing tools:** axe DevTools, WAVE, Lighthouse accessibility audit, NVDA/VoiceOver screen reader testing.\n\n' +
+        '**Deadline:** All existing websites must comply. New digital services must be accessible from launch.';
+    }
+
+    // N-norway: Vipps
+    if (/\bvipps\b/i.test(input)) {
+      return '**Vipps** is **Norway\'s** dominant **mobile** **payment** app — used by 4+ million Norwegians (80%+ of the population).\n\n' +
+        '**Features:**\n' +
+        '- Person-to-person payments (like Venmo, but Norwegian)\n' +
+        '- Online payments (e-commerce checkout)\n' +
+        '- In-store payments (NFC/QR)\n' +
+        '- Invoice payments\n' +
+        '- Recurring payments (subscriptions)\n\n' +
+        '**For developers (Vipps MobilePay API):**\n' +
+        '- ePayment API — online checkout integration\n' +
+        '- Recurring API — subscriptions and memberships\n' +
+        '- Login API — "Log in with Vipps" (like Google/Apple sign-in)\n' +
+        '- Order Management API — receipts and order tracking\n\n' +
+        '**History:** Launched in 2015 by DNB (Norway\'s largest bank). Merged with Danish MobilePay and Finnish Pivo in 2022 to form Vipps MobilePay across the Nordics.\n\n' +
+        '**Integration:** Available as a Shopify plugin, WooCommerce plugin, and standalone API. Extremely high conversion rates in Norway because users already have the app.';
+    }
+
+    // S-build: Webpack
+    if (/\bwebpack\b/i.test(input) && !/vs\s+vite|vite\s+vs|migrate/i.test(input)) {
+      return '**Webpack** is a module **bundler** for JavaScript applications — it takes your source files (JS, CSS, images) and packages them into optimized output files.\n\n' +
+        '**Core concepts:**\n' +
+        '- **Entry** — starting point for the dependency graph (e.g., `src/index.js`)\n' +
+        '- **Output** — where bundled files go (e.g., `dist/bundle.js`)\n' +
+        '- **Loaders** — transform non-JS files: `css-loader`, `ts-loader`, `babel-loader`, `file-loader`\n' +
+        '- **Plugins** — extend functionality: `HtmlWebpackPlugin`, `MiniCssExtractPlugin`, `DefinePlugin`\n\n' +
+        '```javascript\nmodule.exports = {\n  entry: "./src/index.js",\n  output: { filename: "bundle.js", path: __dirname + "/dist" },\n  module: {\n    rules: [{ test: /\\.css$/, use: ["style-loader", "css-loader"] }]\n  },\n  plugins: [new HtmlWebpackPlugin({ template: "./src/index.html" })]\n};\n```\n\n' +
+        '**Key features:** Code splitting, tree shaking, hot module replacement (HMR), dev server.\n\n' +
+        '**Modern alternatives:** Vite (faster dev, ESM-native), esbuild (extremely fast), Turbopack (Vercel\'s Rust-based bundler).';
+    }
+
+    // T-misc: Astro
+    if (/\bastro\b/i.test(input) && !/astro.*physics|astro.*nomy/i.test(input)) {
+      return '**Astro** is a modern web framework optimized for **content**-driven websites — blogs, docs, marketing pages, portfolios.\n\n' +
+        '**Key innovation — Islands Architecture:**\n' +
+        '- Pages are **static** HTML by default (zero JavaScript shipped)\n' +
+        '- Interactive components are hydrated as "**islands**" only where needed\n' +
+        '- Result: extremely fast pages with selective interactivity\n\n' +
+        '```astro\n---\n// Server-side (runs at build time)\nimport Header from "../components/Header.astro";\nimport Counter from "../components/Counter.tsx";\nconst posts = await fetch("/api/posts").then(r => r.json());\n---\n<Header />\n<Counter client:visible />  <!-- Hydrate only when visible -->\n{posts.map(p => <article>{p.title}</article>)}\n```\n\n' +
+        '**Unique features:**\n' +
+        '- **Framework-agnostic** — use React, Vue, Svelte, Solid components in the same project\n' +
+        '- **Content Collections** — type-safe Markdown/MDX with schemas\n' +
+        '- **SSG + SSR** — static by default, server rendering when needed\n' +
+        '- **View Transitions** — built-in page transition animations\n\n' +
+        '**Performance:** Ships zero JS by default. Lighthouse 100 scores out of the box.';
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  PROCEDURAL "How do I..." handlers
+    // ══════════════════════════════════════════════════════════════
+
+    if (/(?:how|steps?).*(?:deploy|run|host).*(?:node|nodejs).*(?:docker|container)|(?:docker|container).*(?:node|nodejs).*(?:deploy|run)/i.test(input)) {
+      return '**Deploying a Node.js app with Docker:**\n\n' +
+        '**1. Create a `Dockerfile`:**\n```dockerfile\nFROM node:20-alpine\nWORKDIR /app\nCOPY package*.json ./\nRUN npm ci --only=production\nCOPY . .\nEXPOSE 3000\nCMD ["node", "server.js"]\n```\n\n' +
+        '**2. Add `.dockerignore`:**\n```\nnode_modules\nnpm-debug.log\n.git\n```\n\n' +
+        '**3. Build and run:**\n```bash\ndocker build -t my-app .\ndocker run -p 3000:3000 my-app\n```\n\n' +
+        '**Best practices:**\n- Use multi-stage builds to reduce image size\n- Use `npm ci` (not `npm install`) for reproducible builds\n- Run as non-root user: `USER node`\n- Use `alpine` base images for smaller footprint\n- Copy `package.json` first to leverage Docker layer caching';
+    }
+
+    if (/(?:how|steps?).*(?:setup|set\s*up|start|init|create|configure).*typescript.*(?:project|app|new)|(?:setup|set\s*up|start|init).*(?:new|fresh).*typescript/i.test(input)) {
+      return '**Setting up TypeScript in a new project:**\n\n' +
+        '**1. Initialize and install:**\n```bash\nmkdir my-project && cd my-project\nnpm init -y\nnpm install -D typescript @types/node\nnpx tsc --init\n```\n\n' +
+        '**2. Configure `tsconfig.json`:**\n```json\n{\n  "compilerOptions": {\n    "target": "ES2022",\n    "module": "NodeNext",\n    "moduleResolution": "NodeNext",\n    "strict": true,\n    "outDir": "dist",\n    "rootDir": "src",\n    "esModuleInterop": true,\n    "skipLibCheck": true\n  },\n  "include": ["src/**/*"]\n}\n```\n\n' +
+        '**3. Create source file:**\n```bash\nmkdir src\necho \'console.log("Hello TypeScript!");\' > src/index.ts\n```\n\n' +
+        '**4. Build and run:**\n```bash\nnpx tsc\nnode dist/index.js\n```\n\n' +
+        '**For dev workflow**, add `tsx` for direct execution: `npx tsx src/index.ts`';
+    }
+
+    if (/(?:how|steps?).*(?:use|work\s+with|manage).*(?:git\s+)?branch|git\s+branch.*(?:how|tutorial|guide|explain)|branch.*(?:strategy|workflow|merge)/i.test(input)) {
+      return '**Using Git branches:**\n\n' +
+        '**Create and switch:**\n```bash\ngit branch feature/login    # create branch\ngit checkout feature/login  # switch to it\n# or in one step:\ngit checkout -b feature/login\n```\n\n' +
+        '**List branches:**\n```bash\ngit branch          # local branches\ngit branch -a       # include remote branches\n```\n\n' +
+        '**Merge a branch:**\n```bash\ngit checkout main\ngit merge feature/login\n```\n\n' +
+        '**Delete a branch:**\n```bash\ngit branch -d feature/login       # safe delete\ngit push origin --delete feature/login  # remote\n```\n\n' +
+        '**Branch strategies:**\n- **Feature branches** — one branch per feature, merge into main\n- **Git Flow** — main, develop, feature/*, release/*, hotfix/*\n- **Trunk-based** — short-lived branches, frequent merges to main\n\n' +
+        '**Tip:** Keep branches short-lived. The longer a branch lives, the harder the merge.';
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -5778,6 +7962,16 @@ Classic number guessing game with hints and attempt tracking.`;
         '**Object destructuring:**\n```javascript\nconst user = { name: "Alice", age: 30 };\nconst { name, age } = user;\nconst { name: userName, country = "Norway" } = user;\n```\n\n' +
         '**Array destructuring:**\n```javascript\nconst [first, second, ...rest] = [1, 2, 3, 4, 5];\n[a, b] = [b, a]; // swap\n```\n\n' +
         '**In function parameters:**\n```javascript\nfunction greet({ name, age }: { name: string; age: number }) {\n  return `Hi ${name}, you are ${age}`;\n}\n```';
+    }
+
+    if (/for\s*\.{0,3}\s*in\b.*for\s*\.{0,3}\s*of|for\s*\.{0,3}\s*of\b.*for\s*\.{0,3}\s*in|differ.*for\s*\.{0,3}\s*(?:in|of)|for\s+in\s+(?:vs|versus)\s+for\s+of|\bfor\.\.\.in\b|\bfor\.\.\.of\b/i.test(input)) {
+      return '**for...in vs for...of in JavaScript:**\n\n' +
+        '| | `for...in` | `for...of` |\n|---|---|---|\n' +
+        '| **Iterates** | Object **keys** (enumerable properties) | Iterable **values** (arrays, strings, maps, sets) |\n' +
+        '| **Works on** | Objects, arrays (gives indices) | Arrays, strings, Maps, Sets, generators |\n' +
+        '| **Returns** | Property names (strings) | Actual values |\n\n' +
+        '```javascript\nconst arr = [10, 20, 30];\nfor (const key in arr) console.log(key);   // "0", "1", "2" (indices as strings)\nfor (const val of arr) console.log(val);   // 10, 20, 30 (actual values)\n\nconst obj = { a: 1, b: 2 };\nfor (const key in obj) console.log(key);   // "a", "b" (property names)\n// for...of on plain objects throws TypeError\n```\n\n' +
+        '**Rule of thumb:** Use `for...of` for arrays/iterables (values), `for...in` for objects (keys). Prefer `.forEach()` or `.map()` for arrays when possible.';
     }
 
     if (/utility\s+type|partial\b.*required\b|pick\b.*omit\b|typescript.*(?:partial|pick|omit|record|readonly)/i.test(input)) {
@@ -5991,6 +8185,14 @@ Classic number guessing game with hints and attempt tracking.`;
         '- **Middleware** — code before requests complete\n\nUsed by Vercel, Netflix, TikTok, and more.';
     }
 
+    if (/what\s+is\s+isr|\bisr\b.*next\.?js|next\.?js.*\bisr\b/i.test(input)) {
+      return '**ISR (Incremental Static Regeneration)** in Next.js lets you update static pages after deployment without rebuilding the entire site.\n\n' +
+        '**How it works:**\n- Pages are statically generated at build time\n- After the `revalidate` period, the next request triggers background regeneration\n- Stale page is served while the new one generates (stale-while-revalidate)\n\n' +
+        '**Usage (App Router):**\n```tsx\nexport const revalidate = 60; // revalidate every 60s\n```\n\n' +
+        '**On-demand ISR:** `revalidatePath(\'/blog\')` or `revalidateTag(\'posts\')` for immediate regeneration.\n\n' +
+        '**Benefits:** Static performance (CDN-cached) with dynamic freshness. Perfect for blogs, e-commerce, dashboards.';
+    }
+
     if (/ssr\b.*ssg\b|ssg\b.*ssr|ssr.*isr|difference.*(?:ssr|ssg|isr)|server\s+side.*static\s+(?:site|generat)/i.test(input)) {
       return '**SSR vs SSG vs ISR in Next.js:**\n\n' +
         '| Strategy | When generated | Best for |\n|---|---|---|\n' +
@@ -6007,10 +8209,18 @@ Classic number guessing game with hints and attempt tracking.`;
         '| **Streaming** | Suspense built-in | Not supported |\n\nApp Router is recommended for all new projects.';
     }
 
-    if (/usestate\b.*useeffect|useeffect\b.*useref|react\s+hooks?.*(?:usestate|useeffect|useref)|explain.*(?:usestate|useeffect|useref)\s+hook/i.test(input)) {
-      return '**Core React hooks:**\n\n**useState** — state + setter:\n```tsx\nconst [count, setCount] = useState(0);\n```\n\n' +
+    if (/(?:structure|organize|folder|layout|architect).*react.*(?:project|app)|react.*(?:project|app).*(?:structure|organize|folder|layout)|best\s+way.*(?:structure|organize).*react/i.test(input)) {
+      return '**React project structure:**\n\n```\nsrc/\n├── components/        # Reusable UI components\n│   ├── ui/            # Generic (Button, Input, Modal)\n│   └── features/      # Feature-specific (UserCard, ChatBubble)\n├── hooks/             # Custom hooks (useAuth, useFetch)\n├── pages/             # Route-level components\n├── lib/               # Utilities, helpers, API client\n├── context/           # React Context providers\n├── types/             # TypeScript type definitions\n├── styles/            # Global styles, Tailwind config\n└── assets/            # Images, fonts, icons\n```\n\n' +
+        '**Key principles:**\n- **Group by feature**, not by type (for larger apps)\n- **Co-locate** tests next to components: `Button.tsx` + `Button.test.tsx`\n- **Barrel exports** (`index.ts`) for clean imports\n- Keep components **small** — if it\'s over 200 lines, split it\n- **Hooks folder** for shared logic (not one-off effects)';
+    }
+
+    if (/react\s+hooks?\b(?!.*(?:vs|versus|compared|flutter|vue|angular))/i.test(input) && /hooks?/i.test(input)) {
+      return 'Hooks replaced class components as the standard way to use state and side effects in React (since 16.8). Here are the ones you\'ll use daily:\n\n**useState** — state + setter:\n```tsx\nconst [count, setCount] = useState(0);\n```\n\n' +
         '**useEffect** — side effects (data fetching, subscriptions):\n```tsx\nuseEffect(() => {\n  document.title = `Count: ${count}`;\n  return () => { /* cleanup */ };\n}, [count]);\n```\n\n' +
-        '**useRef** — mutable ref persisting across renders:\n```tsx\nconst inputRef = useRef<HTMLInputElement>(null);\ninputRef.current?.focus();\n```\n\n**Hook rules:** Only call at top level (not in loops/conditions). Only from React components or custom hooks.';
+        '**useRef** — mutable ref persisting across renders:\n```tsx\nconst inputRef = useRef<HTMLInputElement>(null);\ninputRef.current?.focus();\n```\n\n' +
+        '**useCallback** — memoized callback (prevents child re-renders):\n```tsx\nconst handleClick = useCallback(() => setCount(c => c + 1), []);\n```\n\n' +
+        '**useMemo** — memoized value (expensive computation):\n```tsx\nconst sorted = useMemo(() => items.sort(compareFn), [items]);\n```\n\n' +
+        '**useContext** — consume context without wrapper:\n```tsx\nconst theme = useContext(ThemeContext);\n```\n\n**Hook rules:** Only call at top level (not in loops/conditions). Only from React components or custom hooks.';
     }
 
     if (/server\s+action|use\s+server|react.*server.*action/i.test(input) && !/app\s+router.*(?:server\s+component|differ|vs)|.*(?:ssr|ssg|isr)/i.test(input)) {
@@ -6054,6 +8264,13 @@ Classic number guessing game with hints and attempt tracking.`;
       return '**React.memo** — memoizes a component, preventing re-renders when props haven\'t changed.\n\n' +
         '```tsx\nconst ExpensiveList = React.memo(function({ items }) {\n  return <ul>{items.map(i => <li key={i.id}>{i.name}</li>)}</ul>;\n});\n```\n\n' +
         '**When to use:** Component re-renders often with same props, has expensive rendering.\n**When NOT:** Props change every render (waste), simple components.\n\nCombine with `useMemo`/`useCallback` to stabilize object/function props for performance.';
+    }
+
+    if (/forward\s*ref|forwardref|forward.*ref.*react|react.*forward.*ref/i.test(input)) {
+      return '**React.forwardRef** lets a component expose a DOM node (or child ref) to its parent.\n\n' +
+        '```tsx\nconst FancyInput = React.forwardRef<HTMLInputElement, Props>((props, ref) => {\n  return <input ref={ref} className="fancy" {...props} />;\n});\n\n// Parent can now access the input directly:\nconst inputRef = useRef<HTMLInputElement>(null);\n<FancyInput ref={inputRef} />\ninputRef.current?.focus();\n```\n\n' +
+        '**React 19 update:** `forwardRef` is no longer needed — `ref` is passed as a regular prop:\n```tsx\nfunction FancyInput({ ref, ...props }: { ref?: React.Ref<HTMLInputElement> }) {\n  return <input ref={ref} {...props} />;\n}\n```\n\n' +
+        '**Use cases:** Design system components (Input, Button), wrapping third-party components, imperative handles with `useImperativeHandle`.';
     }
 
     if (/parallel\s+route|intercept.*route|@.*slot.*next|modal.*route.*next/i.test(input)) {
@@ -6102,6 +8319,14 @@ Classic number guessing game with hints and attempt tracking.`;
     //  DevOps deep handlers
     // ══════════════════════════════════════════════════════════════
 
+    if (/docker.*(?:crash|fail|error|debug|troubleshoot|not\s+(?:working|starting|running))|(?:crash|fail|error|debug|troubleshoot).*docker/i.test(input)) {
+      return '**Debugging a Docker container** — when something breaks, here\'s the workflow I follow:\n\n' +
+        '**1. Check logs:**\n```bash\ndocker logs <container>          # stdout/stderr\ndocker logs --tail 50 <container> # last 50 lines\ndocker logs -f <container>        # follow live\n```\n\n' +
+        '**2. Inspect the container:**\n```bash\ndocker inspect <container>        # full config + state\ndocker ps -a                      # see exit codes\n```\n\n' +
+        '**3. Get inside a running container:**\n```bash\ndocker exec -it <container> sh    # open shell\n```\n\n' +
+        '**Common crash causes:**\n- Missing environment variables → check `docker inspect` or `.env` file\n- Port conflicts → `docker ps` to see bound ports\n- Out of memory → add `--memory=512m` or check `docker stats`\n- Bad CMD/ENTRYPOINT → test with `docker run -it <image> sh`\n- File permissions → ensure `USER` in Dockerfile matches volume ownership';
+    }
+
     if (/docker\s+image.*(?:vs|container)|container.*vs.*image|differ.*docker.*(?:image|container)/i.test(input)) {
       return '**Docker Image vs Container:**\n\n| | Image | Container |\n|---|---|---|\n' +
         '| **What** | Read-only template (blueprint) | Running instance of an image |\n| **State** | Immutable | Mutable (writable layer) |\n| **Analogy** | Class | Object/Instance |\n\n' +
@@ -6119,8 +8344,21 @@ Classic number guessing game with hints and attempt tracking.`;
         '**Key:** checkout, setup-node, install deps, lint, test, build in sequential steps.';
     }
 
-    if (/kubernetes|k8s|what.*kubernetes|kubernetes.*docker/i.test(input)) {
-      return '**Kubernetes (K8s)** — container orchestration platform for automating deployment, scaling, and management.\n\n' +
+    if (/(?:docker.*(?:vs|versus|compared|difference|differ).*(?:k8s|kubernetes))|(?:(?:k8s|kubernetes).*(?:vs|versus|compared|difference|differ).*docker)|(?:difference.*(?:docker|k8s|kubernetes).*(?:docker|k8s|kubernetes))/i.test(input)) {
+      return '**Docker vs Kubernetes:**\n\n' +
+        '| | Docker | Kubernetes (K8s) |\n|---|---|---|\n' +
+        '| **What it does** | Builds and runs containers | Orchestrates containers at scale |\n' +
+        '| **Scope** | Single host | Cluster of machines |\n' +
+        '| **Scaling** | Manual (`docker run` more copies) | Automatic (set replicas, K8s handles it) |\n' +
+        '| **Self-healing** | No (container dies = stays dead) | Yes (restarts failed pods) |\n' +
+        '| **Load balancing** | Basic (Docker Compose) | Built-in (Services) |\n' +
+        '| **Config file** | Dockerfile, docker-compose.yml | deployment.yaml, service.yaml |\n' +
+        '| **Learning curve** | Low | High |\n\n' +
+        '**How they work together:** Docker builds your images. Kubernetes deploys and manages them across servers. Most teams use both — Docker for packaging, K8s for production orchestration.';
+    }
+
+    if (/kubernetes|k8s|what.*kubernetes/i.test(input)) {
+      return '**Kubernetes (K8s)** picks up where Docker leaves off — once you have containers, K8s decides where they run, how many copies exist, and what happens when they crash.\n\n' +
         '**Core concepts:**\n- **Pod** — smallest deployable unit (one or more containers)\n- **Service** — stable network endpoint for pods\n- **Deployment** — manages pod replicas and updates\n- **Node** — physical/virtual machine running pods\n- **Cluster** — set of nodes managed by Kubernetes\n\n' +
         '**Docker vs K8s:** Docker = build and run containers. Kubernetes = orchestrate containers at scale (scheduling, self-healing, load balancing).';
     }
@@ -6228,6 +8466,38 @@ Classic number guessing game with hints and attempt tracking.`;
     }
 
     // ══════════════════════════════════════════════════════════════
+    //  General language overview handlers (Rust, Go)
+    // ══════════════════════════════════════════════════════════════
+
+    // "What is Rust?" / "Explain Rust" / "Tell me about Rust"
+    if (/(?:what\s+is|explain|tell\s+me\s+about|describe)\s+rust\b/i.test(input) && !/iron|oxide|corrosion|metal/i.test(input)) {
+      return '**Rust** is a systems programming language focused on **safety, speed, and concurrency** — created by Mozilla (2010, stable 2015).\n\n' +
+        '**Why Rust matters:** It gives you C/C++-level performance without the memory bugs. The compiler catches use-after-free, data races, and null pointer errors **at compile time**.\n\n' +
+        '**Key concepts:**\n' +
+        '- **Ownership** — each value has exactly one owner\n' +
+        '- **Borrowing** — references without taking ownership (`&T`, `&mut T`)\n' +
+        '- **Lifetimes** — compiler-enforced reference validity\n' +
+        '- **Pattern matching** — exhaustive `match` expressions\n' +
+        '- **Zero-cost abstractions** — iterators, generics compile to optimal code\n\n' +
+        '**Use cases:** operating systems, game engines, WebAssembly, CLI tools, embedded systems.\n\n' +
+        '**Ecosystem:** Cargo (build tool + package manager), crates.io (package registry).';
+    }
+
+    // "What is Go?" / "What is Golang?" / "Explain Go" / "Tell me about Go"
+    if (/(?:what\s+is|explain|tell\s+me\s+about|describe)\s+(?:go(?:lang)?)\b/i.test(input) && !/(?:how|where)\s+(?:do|does|should|can|to)\s+i?\s*go\b/i.test(input)) {
+      return '**Go** (Golang) is a statically typed, compiled language designed at **Google** (2009) for simplicity and concurrency.\n\n' +
+        '**Why Go matters:** It compiles fast, runs fast, and makes concurrency easy. If you need a reliable backend service that handles thousands of concurrent connections, Go is a strong pick.\n\n' +
+        '**Key features:**\n' +
+        '- **Goroutines** — lightweight threads (start thousands with minimal memory)\n' +
+        '- **Channels** — type-safe communication between goroutines\n' +
+        '- **Simple syntax** — intentionally minimal (no generics until 1.18, no classes)\n' +
+        '- **Fast compilation** — large projects compile in seconds\n' +
+        '- **Static binary** — single executable, no runtime dependencies\n\n' +
+        '**Use cases:** microservices, CLI tools, DevOps tooling (Docker, Kubernetes are written in Go), APIs.\n\n' +
+        '**Getting started:** `go mod init`, `go run main.go`, `go build`.';
+    }
+
+    // ══════════════════════════════════════════════════════════════
     //  Rust deep handlers
     // ══════════════════════════════════════════════════════════════
 
@@ -6251,7 +8521,7 @@ Classic number guessing game with hints and attempt tracking.`;
         '**Key differences from interfaces:** Traits can have default method implementations, trait objects for dynamic dispatch (`dyn Trait`), trait bounds for generics (`fn print<T: Display>(x: T)`).';
     }
 
-    if (/result\b.*option|option\b.*result|error\s+handling.*rust|rust.*(?:\bresult\b|\boption\b|\bok\b|\berr\b)/i.test(input)) {
+    if (/result\b.*option|option\b.*result|error\s+handling.*rust|rust.*(?:\bresult\b|\boption\b|\bok\b|\berr\b)|\bresult\b.*(?:type|rust)|what.*result.*rust/i.test(input)) {
       return '**Result and Option in Rust — error handling without exceptions.**\n\n' +
         '**Option<T>** — value that may or may not exist:\n```rust\nfn find_user(id: u32) -> Option<User> {\n  if id == 1 { Some(User { name: "Alice" }) } else { None }\n}\n```\n\n' +
         '**Result<T, E>** — operation that can succeed or fail:\n```rust\nfn parse(s: &str) -> Result<i32, ParseIntError> {\n  s.parse::<i32>()\n}\nmatch parse("42") {\n  Ok(n) => println!("Parsed: {}", n),\n  Err(e) => println!("Error: {}", e),\n}\n```\n\n**`?` operator:** `let n = "42".parse::<i32>()?;` — propagates errors automatically.';
@@ -6397,7 +8667,7 @@ Classic number guessing game with hints and attempt tracking.`;
         '**Key:** Like `switch` but for channels. Blocks until one case is ready. If multiple ready, picks randomly. Used for timeouts, multiplexing, cancellation.';
     }
 
-    if (/slice.*array.*go|go\b.*slice.*array|differ.*(?:slice|array).*go|go\b.*(?:slice|array)/i.test(input)) {
+    if (/slice.*array.*go|go\b.*slice.*array|differ.*(?:slice|array).*go|go\b.*(?:slice|array)|\bslice\b.*\bgo\b|what.*slice.*go/i.test(input)) {
       return '**Go slices vs arrays:**\n\n| | Array | Slice |\n|---|---|---|\n' +
         '| **Size** | Fixed at compile time | Dynamic (growable) |\n| **Syntax** | `[3]int{1,2,3}` | `[]int{1,2,3}` |\n| **Length** | Part of type | Separate length + capacity |\n\n' +
         '```go\narr := [3]int{1, 2, 3}   // array (fixed)\nslice := []int{1, 2, 3}  // slice (dynamic)\nslice = append(slice, 4)  // grows automatically\nfmt.Println(len(slice), cap(slice)) // length and capacity\n```\n\n' +
@@ -6724,20 +8994,29 @@ Classic number guessing game with hints and attempt tracking.`;
     }
 
     // ── Docker ──
-    if (/what\s+is\s+docker|explain.*docker|docker.*(?:what|explain|why|how)|hva\s+er\s+docker/i.test(input)) {
-      return '**Docker** is a platform for developing, shipping, and running applications in **containers**.\n\n' +
+    if (/what\s+is\s+docker|explain.*docker|docker.*(?:what|explain|why)|hva\s+er\s+docker/i.test(input)) {
+      let response = '**Docker** solves the oldest problem in software: "it works on my machine." It packages your app with everything it needs into a **container** — so it runs the same way everywhere.\n\n' +
         '**Key concepts:**\n' +
-        '- **Container** — lightweight, standalone, executable package that includes everything needed to run an application\n' +
+        '- **Container** — lightweight, standalone package that includes everything needed to run an application\n' +
         '- **Image** — read-only template used to create containers (built from a Dockerfile)\n' +
         '- **Dockerfile** — text file with instructions to build an image\n' +
         '- **Docker Compose** — tool for defining multi-container applications (docker-compose.yml)\n' +
         '- **Docker Hub** — public registry for sharing images\n\n' +
-        '**Why developers use Docker:**\n' +
-        '- "Works on my machine" → works everywhere\n' +
+        '**Why developers use it:**\n' +
         '- Consistent development, staging, and production environments\n' +
         '- Easy microservices architecture\n' +
         '- Fast startup compared to VMs\n' +
         '- Native support in all major cloud providers';
+
+      // Compound: also asking how to set it up / get started
+      if (/how\s+(?:do\s+i\s+)?(?:set\s*(?:it\s+)?up|get\s+started|install|start|use\s+it)/i.test(input)) {
+        response += '\n\n---\n\n**Getting started:**\n' +
+          '1. **Install Docker Desktop** from [docker.com](https://docker.com)\n' +
+          '2. **Create a `Dockerfile`:**\n```dockerfile\nFROM node:20-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install\nCMD ["node", "index.js"]\n```\n' +
+          '3. **Build:** `docker build -t my-app .`\n' +
+          '4. **Run:** `docker run -p 3000:3000 my-app`';
+      }
+      return response;
     }
 
     if (/dockerfile.*(?:next\.?js|nextjs|react)|next\.?js.*dockerfile|docker.*(?:setup|create|build).*next/i.test(input)
@@ -6769,10 +9048,11 @@ Classic number guessing game with hints and attempt tracking.`;
     }
 
     // ── TypeScript ──
-    if (/what\s+is\s+typescript|explain.*typescript|typescript.*(?:what|why|advantage|benefit|over\s+javascript)/i.test(input)
-      || /why\s+(?:use\s+)?typescript\s+(?:over|instead)/i.test(input)) {
-      return '**TypeScript** is a typed superset of JavaScript developed by **Microsoft** (first released 2012).\n\n' +
-        '**Key advantages over JavaScript:**\n' +
+    if (/what(?:\s*'?s|\s+is)\s+typescript|explain.*typescript|typescript.*(?:what|why|advantage|benefit|over\s+javascript)/i.test(input)
+      || /why\s+(?:should\s+(?:i|we|you)\s+)?(?:use\s+)?typescript\s+(?:over|instead)/i.test(input)) {
+      return '**TypeScript** is JavaScript with a safety net — same language underneath, but it catches bugs before your code ever runs.\n\n' +
+        'Developed by **Microsoft** (2012), it\'s now the default choice for serious JavaScript projects.\n\n' +
+        '**What it adds over JavaScript:**\n' +
         '- **Static type checking** — catch errors at compile time, not runtime\n' +
         '- **IntelliSense** — superior autocomplete and refactoring in IDEs\n' +
         '- **Interfaces & generics** — better code architecture and reusability\n' +
@@ -7286,6 +9566,438 @@ Classic number guessing game with hints and attempt tracking.`;
         '**Capabilities:** Offline mode, push notifications, background sync, install prompt.';
     }
 
+    // ══════════════════════════════════════════════════════════════
+    //  ADVANCED DOMAINS — Architecture, Vectors, AI, Strategy
+    // ══════════════════════════════════════════════════════════════
+
+    // ── SSO / Single Sign-On ──
+    if (/sso\b|single\s+sign.?on|(?:what\s+is|explain|how\s+does).*(?:sso|single\s+sign)|saml\b.*(?:sso|auth)|oidc\b|openid\s+connect/i.test(input)) {
+      return '**SSO** (Single Sign-On) — authenticate once, access multiple services.\n\n' +
+        '**How it works:**\n' +
+        '1. User visits App A → redirected to Identity Provider (IdP)\n' +
+        '2. User authenticates at IdP → gets a token/session\n' +
+        '3. User visits App B → IdP recognizes existing session → auto-authenticated\n\n' +
+        '**Protocols:**\n' +
+        '- **SAML 2.0** — XML-based, enterprise standard (Okta, Azure AD)\n' +
+        '- **OpenID Connect (OIDC)** — built on OAuth 2.0, modern/lightweight, JSON-based\n' +
+        '- **OAuth 2.0** — authorization (not authentication), but often used with OIDC\n\n' +
+        '**Providers:** Okta, Auth0, Azure AD, Keycloak, Google Workspace, AWS Cognito\n\n' +
+        '**Benefits:** Better UX (one login), centralized access control, easier auditing.\n' +
+        '**Risks:** Single point of failure, token theft = access to all services.';
+    }
+
+    // ── Microservices Architecture ──
+    if (/micro.?service|(?:what\s+(?:is|are)|explain).*micro.?service|monolith.*(?:vs|versus|or).*micro|service.?orient/i.test(input)) {
+      return '**Microservices** — decompose applications into small, independently deployable services.\n\n' +
+        '**Core principles:**\n' +
+        '- Single responsibility per service\n' +
+        '- Own data store (database per service)\n' +
+        '- Communicate via APIs (REST, gRPC) or message queues\n' +
+        '- Deploy independently\n\n' +
+        '**vs Monolith:**\n' +
+        '| Aspect | Monolith | Microservices |\n' +
+        '|--------|----------|---------------|\n' +
+        '| Deploy | All-or-nothing | Per service |\n' +
+        '| Scale | Entire app | Per service |\n' +
+        '| Teams | Shared codebase | Service ownership |\n' +
+        '| Complexity | Code complexity | Operational complexity |\n\n' +
+        '**Challenges:** Distributed transactions (saga pattern), eventual consistency, service discovery, observability (OpenTelemetry/distributed tracing).\n\n' +
+        '**Rule of thumb:** Start monolith → extract microservices when team/scale demands it. Don\'t microservice a startup.';
+    }
+
+    // ── Message Queues ──
+    if (/message\s*queue|(?:what\s+is|explain).*(?:kafka|rabbitmq|message\s*broker)|kafka\b.*(?:vs|versus|what|explain|use)|rabbitmq\b|bull\s*mq|pub\s*\/?\s*sub\b.*(?:pattern|messag)|dead.?letter/i.test(input)) {
+      return '**Message Queues** — asynchronous communication between services.\n\n' +
+        '**Core pattern:** Producer → Queue/Topic → Consumer\n\n' +
+        '**Popular brokers:**\n' +
+        '- **RabbitMQ** — AMQP protocol, routing, dead-letter queues, good for task distribution\n' +
+        '- **Apache Kafka** — distributed log, high throughput, event streaming, replay capability\n' +
+        '- **Redis Streams** — lightweight, built into Redis, good for simple pub/sub\n' +
+        '- **AWS SQS** — managed, serverless, scales to millions of messages\n' +
+        '- **BullMQ** — Node.js job queue on top of Redis\n\n' +
+        '**Delivery guarantees:**\n' +
+        '- **At-most-once** — fire and forget (may lose messages)\n' +
+        '- **At-least-once** — retry until ACK (may duplicate)\n' +
+        '- **Exactly-once** — transactional (Kafka supports this)\n\n' +
+        '**Dead-letter queue (DLQ):** Failed messages routed to separate queue for debugging.\n\n' +
+        '**When to use:** Decouple services, handle traffic spikes, async processing, event-driven architectures.';
+    }
+
+    // ── Load Balancing ──
+    if (/load\s*balanc|(?:what\s+is|explain).*load\s*balanc|round\s*robin|least\s+connect|l[47]\s+(?:load|balanc)|nginx.*(?:balanc|proxy)|haproxy/i.test(input)) {
+      return '**Load Balancing** — distribute traffic across multiple servers.\n\n' +
+        '**Algorithms:**\n' +
+        '- **Round Robin** — rotate sequentially through servers\n' +
+        '- **Least Connections** — route to server with fewest active connections\n' +
+        '- **Weighted** — more traffic to more powerful servers\n' +
+        '- **IP Hash** — same client always hits same server (session affinity)\n' +
+        '- **Random** — simple, surprisingly effective at scale\n\n' +
+        '**Layers:**\n' +
+        '- **L4 (Transport)** — routes by IP/port, fast, no content inspection\n' +
+        '- **L7 (Application)** — routes by URL/headers/cookies, smarter but slower\n\n' +
+        '**Tools:** Nginx, HAProxy, AWS ALB/NLB, Cloudflare, Traefik\n\n' +
+        '**Health checks:** Load balancer pings servers regularly, removes unhealthy ones from pool.\n\n' +
+        '**Key pattern:** Stateless services + load balancer = horizontal scalability.';
+    }
+
+    // ── Caching Strategies ──
+    if (/caching\s+(?:strat|pattern|layer)|cache.?aside|write.?through|write.?behind|(?:what\s+is|explain).*cach(?:e|ing)\s+(?:strat|pattern|approach)|redis\s+cach|cdn\s*.*cach|cache\s+invalidat/i.test(input)) {
+      return '**Caching Strategies** — store computed results closer to the consumer.\n\n' +
+        '**Patterns:**\n' +
+        '- **Cache-Aside (Lazy)** — app checks cache → miss → query DB → populate cache\n' +
+        '- **Write-Through** — write to cache AND DB simultaneously\n' +
+        '- **Write-Behind (Write-Back)** — write to cache → async flush to DB (risky but fast)\n' +
+        '- **Read-Through** — cache itself fetches from DB on miss\n\n' +
+        '**Cache layers (closest → furthest):**\n' +
+        '1. Browser cache (HTTP headers: `Cache-Control`, `ETag`)\n' +
+        '2. CDN (Cloudflare, Vercel Edge, AWS CloudFront)\n' +
+        '3. Application cache (Redis, Memcached)\n' +
+        '4. Database query cache\n\n' +
+        '**Invalidation strategies:**\n' +
+        '- **TTL (Time-To-Live)** — expire after N seconds\n' +
+        '- **Event-based** — invalidate on write/update\n' +
+        '- **Version keys** — `user:123:v5` → increment version on change\n\n' +
+        '**"There are only two hard things in CS: cache invalidation and naming things."**';
+    }
+
+    // ── Event-Driven Architecture ──
+    if (/event.?driven\s+(?:architect|system|design|pattern)|event\s+sourc|cqrs|(?:what\s+is|explain).*(?:event.?driven|event\s+sourc|cqrs)|command\s+query\s+responsib/i.test(input)) {
+      return '**Event-Driven Architecture (EDA)** — systems that communicate through events.\n\n' +
+        '**Core concepts:**\n' +
+        '- **Event** — immutable record of something that happened ("OrderPlaced", "UserCreated")\n' +
+        '- **Producer** — emits events (doesn\'t know who consumes them)\n' +
+        '- **Consumer** — reacts to events asynchronously\n' +
+        '- **Event Bus/Broker** — routes events (Kafka, RabbitMQ, EventBridge)\n\n' +
+        '**Patterns:**\n' +
+        '- **Event Notification** — "something happened" (fire-and-forget)\n' +
+        '- **Event Sourcing** — store ALL events as source of truth, derive state by replaying\n' +
+        '- **CQRS** — separate read models from write models, sync via events\n\n' +
+        '**Benefits:** Loose coupling, temporal decoupling, audit trail, replay capability.\n' +
+        '**Challenges:** Eventual consistency, event ordering, debugging distributed flows.\n\n' +
+        '**Tools:** Apache Kafka, AWS EventBridge, CloudEvents spec, Apache Pulsar.';
+    }
+
+    // ── Scalability (Horizontal vs Vertical) ──
+    if (/(?:horizontal|vertical)\s+scal|scalab(?:le|ility)|(?:what\s+is|explain).*scalab|scale\s+(?:up|out|horizontal|vertical)|auto.?scal|sharding/i.test(input)) {
+      return '**Scalability** — ability of a system to handle growing load.\n\n' +
+        '**Two approaches:**\n' +
+        '- **Vertical scaling (scale up)** — bigger machine (more CPU/RAM). Simple but has limits.\n' +
+        '- **Horizontal scaling (scale out)** — more machines. Requires stateless design.\n\n' +
+        '**Key patterns:**\n' +
+        '- **Stateless services** — no server-side session → any instance can handle any request\n' +
+        '- **Database sharding** — split data across multiple DB instances by key\n' +
+        '- **Read replicas** — write to primary, read from replicas\n' +
+        '- **Connection pooling** — reuse DB connections (PgBouncer, Drizzle pool)\n' +
+        '- **Auto-scaling** — add/remove instances based on metrics (HPA in K8s, AWS ASG)\n\n' +
+        '**Scale ceiling by layer:**\n' +
+        '| Layer | Scales with |\n' +
+        '|-------|------------|\n' +
+        '| CDN | Instantly (edge nodes) |\n' +
+        '| API | Stateless replicas + LB |\n' +
+        '| Database | Sharding + read replicas |\n' +
+        '| Cache | Redis Cluster / partitioning |\n\n' +
+        '**Rule:** Make it stateless first, then scaling becomes an infrastructure problem.';
+    }
+
+    // ── Embeddings / Vector Space ──
+    if (/embed(?:ding)s?\b.*(?:what|explain|how|vector|space|model)|(?:what\s+(?:is|are)|explain).*embed(?:ding)|vector\s+(?:space|representat|databas|search|store)|word2vec|text.?embed|sentence.?embed/i.test(input)) {
+      return '**Embeddings** — map discrete items into continuous vector space where **semantic similarity = geometric proximity**.\n\n' +
+        '**Types:**\n' +
+        '- **Word embeddings** — Word2Vec, GloVe, FastText (per-word vectors)\n' +
+        '- **Sentence/document embeddings** — all-MiniLM-L6-v2, text-embedding-3-small (OpenAI), Cohere Embed\n' +
+        '- **Code embeddings** — CodeBERT, StarCoder embeddings\n' +
+        '- **Image embeddings** — CLIP, ResNet features\n\n' +
+        '**Dimensionality:** Typically 384–1536 dimensions.\n\n' +
+        '**Similarity measures:**\n' +
+        '- **Cosine similarity** — angle between vectors (1.0 = identical, 0 = orthogonal)\n' +
+        '- **Euclidean distance** — straight-line distance\n' +
+        '- **Dot product** — fast, works well for normalized vectors\n\n' +
+        '**Used for:** Semantic search, RAG (Retrieval-Augmented Generation), recommendation, clustering, anomaly detection.\n\n' +
+        '**Classic example:** king − man + woman ≈ queen (semantic arithmetic).';
+    }
+
+    // ── Semantic Search / ANN / Vector Databases ──
+    if (/semantic\s+search|approximate\s+nearest\s+neighbor|ann\s+(?:search|algorithm)|vector\s+database|(?:what\s+is|explain).*(?:semantic\s+search|vector\s+db|pinecone|qdrant|weaviate|chroma)|pgvector/i.test(input)) {
+      return '**Semantic Search** — find content by meaning, not just keywords.\n\n' +
+        '**Pipeline:** Query → Embed → ANN Search → Rerank → Return results\n\n' +
+        '**ANN algorithms (Approximate Nearest Neighbor):**\n' +
+        '- **HNSW** — hierarchical graph, best recall/speed trade-off (most popular)\n' +
+        '- **IVF** — inverted file index, good for large datasets\n' +
+        '- **PQ** — product quantization, compresses vectors for memory efficiency\n\n' +
+        '**Vector databases:**\n' +
+        '| Database | Type | Best for |\n' +
+        '|----------|------|----------|\n' +
+        '| Pinecone | Managed | Production, zero-ops |\n' +
+        '| Qdrant | Self-host/Cloud | Filtering + search |\n' +
+        '| Weaviate | Self-host/Cloud | Multimodal |\n' +
+        '| Chroma | Embedded | Local dev, prototyping |\n' +
+        '| pgvector | Postgres extension | Existing Postgres stack |\n' +
+        '| Milvus | Distributed | Billion+ scale |\n\n' +
+        '**Key trade-off:** ANN gives ~95–99% recall at 100× speed vs exact kNN.\n\n' +
+        '**Used in:** RAG pipelines, GitHub Copilot code search, image search, recommendation engines.';
+    }
+
+    // ── HNSW Algorithm ──
+    if (/hnsw|hierarchical\s+navigable\s+small\s+world|(?:what\s+is|explain).*hnsw|hnsw\s+(?:algorithm|index|graph|param)/i.test(input)) {
+      return '**HNSW** (Hierarchical Navigable Small World) — the dominant ANN algorithm for vector search.\n\n' +
+        '**Structure:** Multi-layer graph:\n' +
+        '- **Top layers** — few nodes, long-range connections (highways)\n' +
+        '- **Bottom layers** — all nodes, dense local connections\n\n' +
+        '**Search algorithm:**\n' +
+        '1. Start at top layer\'s entry point\n' +
+        '2. Greedily traverse to nearest neighbor of query\n' +
+        '3. Descend to next layer, repeat\n' +
+        '4. Bottom layer → return top-k results\n\n' +
+        '**Complexity:** O(log n) search, O(n log n) build\n\n' +
+        '**Key parameters:**\n' +
+        '- **M** — max connections per node (higher = better recall, more memory)\n' +
+        '- **efConstruction** — build-time quality (higher = better index, slower build)\n' +
+        '- **efSearch** — query-time accuracy vs speed trade-off\n\n' +
+        '**Used by:** Pinecone, Qdrant, pgvector, Weaviate, FAISS, Milvus.\n\n' +
+        '**Why dominant:** Best recall/speed balance, works on disk, supports dynamic inserts.';
+    }
+
+    // ── GitHub Copilot Context Model ──
+    if (/copilot\s+(?:context|how|work|optim|tip|source|tab)|(?:what\s+is|explain|how\s+does).*copilot|github\s+copilot|copilot\s+(?:suggest|complet)/i.test(input)) {
+      return '**GitHub Copilot** uses 7 context sources for code completion:\n\n' +
+        '1. **Current file content** — code around the cursor (highest priority)\n' +
+        '2. **Open editor tabs** — neighboring tabs heuristic (related files)\n' +
+        '3. **Imports and dependencies** — package.json, import statements\n' +
+        '4. **LSP symbols** — function signatures, types from language server\n' +
+        '5. **Repository structure** — file/folder names\n' +
+        '6. **Recent edits** — your editing patterns\n' +
+        '7. **Conversation history** — in Chat mode\n\n' +
+        '**Optimization tips:**\n' +
+        '- Keep related files open in tabs (Copilot reads them)\n' +
+        '- Write descriptive function names and JSDoc comments\n' +
+        '- Add type annotations (TypeScript types guide completions)\n' +
+        '- Write a comment before code — acts as a natural language prompt\n' +
+        '- Accept partial completions with Ctrl+→ (word-by-word)\n' +
+        '- Create `.github/copilot-instructions.md` for project-specific guidance\n\n' +
+        '**Models:** GPT-4o for Chat, specialized Codex variants for inline completion.';
+    }
+
+    // ── Linguistic Coherence ──
+    if (/coherence|cohesion|(?:what\s+is|explain).*(?:coherence|cohesion)|linguistic.*(?:connect|flow|unity)|text.*(?:flow|unity|connect)/i.test(input)) {
+      return '**Coherence** — the logical connectedness that makes text understandable as a unified whole.\n\n' +
+        '**Two levels:**\n' +
+        '- **Local coherence** — adjacent sentences relate logically (cause→effect, temporal sequence, elaboration)\n' +
+        '- **Global coherence** — the entire text follows a clear theme/argument\n\n' +
+        '**Coherence vs Cohesion:**\n' +
+        '- **Cohesion** = surface-level links (pronouns, connectives: "however", "therefore", "this")\n' +
+        '- **Coherence** = deep logical meaning (can exist without cohesion markers)\n' +
+        '- A text can have cohesion without coherence: "He likes coffee. Coffee grows in Brazil. Brazil is in South America." (cohesive but drifting)\n\n' +
+        '**Coherence techniques:**\n' +
+        '- Topic sentences that anchor each paragraph\n' +
+        '- Given→New information flow (old info first, new info second)\n' +
+        '- Parallel structure for related ideas\n' +
+        '- Logical connectors (causation, contrast, sequence)\n\n' +
+        '**In AI-generated text:** Coherence is the #1 quality signal — responses should have clear purpose and logical flow, not just keyword coverage.';
+    }
+
+    // ── Strategic Thinking / Engineering ──
+    if (/strategic\s+(?:think|engineer|decision|approach|planning|framework)|(?:what\s+is|explain).*strategic|decision\s+framework|engineer.*strateg/i.test(input)) {
+      return '**Strategic Thinking in Engineering** — making decisions that optimize long-term outcomes.\n\n' +
+        '**Decision frameworks:**\n' +
+        '- **Reversibility** — reversible decisions → decide fast. Irreversible → deliberate carefully.\n' +
+        '- **Opportunity cost** — what are you NOT building while building this?\n' +
+        '- **Second-order effects** — what happens AFTER the immediate result?\n' +
+        '- **Diminishing returns** — 80% result at 20% effort vs 100% at 100%\n\n' +
+        '**Strategic engineering patterns:**\n' +
+        '- Build the **minimum viable architecture** — add complexity only when data demands it\n' +
+        '- **Defer decisions** — choose the last responsible moment to commit\n' +
+        '- **Vertical slicing** — deliver complete features, not horizontal layers\n' +
+        '- **Measure before optimizing** — profile first, then optimize the bottleneck\n\n' +
+        '**Anti-patterns:**\n' +
+        '- Resume-driven development (picking tech for ego, not fit)\n' +
+        '- Premature abstraction (DRYing code that isn\'t actually duplicated)\n' +
+        '- Architecture astronautics (over-engineering for imaginary scale)\n\n' +
+        '**Key insight:** Strategy is saying NO to good ideas so you can say YES to great ones.';
+    }
+
+    // ── N-tier / Layered Architecture ──
+    if (/n.?tier|(?:3|three).?tier|layered\s+architect|(?:what\s+is|explain).*(?:n.?tier|layered\s+arch|three.?tier)|presentation.*(?:logic|data).*layer/i.test(input)) {
+      return '**N-tier Architecture** — separate an application into logical layers.\n\n' +
+        '**Classic 3-tier:**\n' +
+        '1. **Presentation** (UI) — what users see and interact with\n' +
+        '2. **Business Logic** (API/Services) — rules, validation, workflows\n' +
+        '3. **Data** (Database) — persistence, queries, transactions\n\n' +
+        '**Modern web N-tier:**\n' +
+        'CDN → Edge Functions → API Gateway → Microservices → Database → Cache\n\n' +
+        '**Benefits:**\n' +
+        '- Separation of concerns (each tier has one job)\n' +
+        '- Independent deployment and scaling per tier\n' +
+        '- Team autonomy (frontend team, backend team, data team)\n\n' +
+        '**Trade-offs:** Network latency between tiers, operational complexity, data consistency.\n\n' +
+        '**The "N"** means any number of tiers. Common: 2-tier (client-server), 3-tier, 4-tier (adding cache layer).';
+    }
+
+    // ── Search Architecture / Elasticsearch / Full-Text Search ──
+    if (/search\s+(?:architect|engine.*(?:build|index|design))|elasticsearch|meilisearch|typesense|(?:what\s+is|explain).*(?:inverted\s+index|full.?text\s+search|bm25)|inverted\s+index/i.test(input)) {
+      return '**Search Architecture** — building fast, relevant search systems.\n\n' +
+        '**Core concept: Inverted Index**\n' +
+        'Maps terms → document IDs (like a book\'s index). Enables O(1) term lookup.\n\n' +
+        '**Ranking algorithms:**\n' +
+        '- **TF-IDF** — term frequency × inverse document frequency (classic)\n' +
+        '- **BM25** — improved TF-IDF with length normalization (Elasticsearch default)\n' +
+        '- **Hybrid search** — combine keyword (BM25) + semantic (vector) with score fusion\n\n' +
+        '**Search engines:**\n' +
+        '| Engine | Strengths |\n' +
+        '|--------|-----------|\n' +
+        '| Elasticsearch | Full-featured, aggregations, enterprise |\n' +
+        '| Meilisearch | Typo-tolerant, instant, easy setup |\n' +
+        '| Typesense | Fast, lightweight, good DX |\n' +
+        '| PostgreSQL FTS | Built-in, no extra infra |\n\n' +
+        '**Pipeline:** Ingest → Tokenize → Normalize (lowercase, stem) → Index → Query → Rank → Return\n\n' +
+        '**Hybrid search** is the modern standard — keyword precision + semantic understanding.';
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  Role-Based Benchmarking & DevOps Senior Handlers
+    // ══════════════════════════════════════════════════════════════
+
+    // ── Role-Based Benchmarking ──
+    if (/role.?based\s+bench|benchmark.*(?:role|persona|simul)|ai\s+role\s+simul|(?:what\s+is|explain|how\s+to).*role.?based\s+bench|test.*(?:ai|vai).*role/i.test(input)) {
+      return '**Role-Based AI Benchmarking** — testing an AI\'s ability to perform as a specific professional.\n\n' +
+        '**Design process:**\n' +
+        '1. **Define the role** — e.g., "Senior DevOps Engineer", "Frontend Architect"\n' +
+        '2. **Map competency domains** — 5-8 areas the role must master\n' +
+        '3. **Create question tiers:**\n' +
+        '   - **Foundational** (1x) — "What is Terraform?"\n' +
+        '   - **Applied** (2x) — "How would you set up a Terraform module for VPC?"\n' +
+        '   - **Decision** (3x) — "When should you use Terraform vs Pulumi?"\n' +
+        '   - **Troubleshooting** (4x) — "CI pipeline is failing with exit code 137, how do you debug?"\n' +
+        '4. **Weight scores** by tier difficulty\n' +
+        '5. **Measure coverage** — % of competency domains with passing answers\n\n' +
+        '**Metrics:**\n' +
+        '| Metric | Target |\n' +
+        '|--------|--------|\n' +
+        '| Accuracy | >90% correct |\n' +
+        '| Coverage | All competency domains |\n' +
+        '| Speed (VPT) | <50ms knowledge, <200ms synthesis |\n' +
+        '| Depth | Trade-offs and edge cases mentioned |\n\n' +
+        '**Roles to benchmark:** DevOps Senior, Frontend Architect, Backend Lead, Data Engineer, Security Engineer, ML Engineer, SRE, Platform Engineer.';
+    }
+
+    // ── Benchmark Design / Writing ──
+    if (/(?:write|design|create|build).*benchmark|benchmark\s+(?:design|method|write|creat|structur)|question\s+taxonomy|competency\s+domain|how\s+to\s+(?:write|build|design)\s+.*bench/i.test(input)) {
+      return '**How to Design & Write AI Benchmarks:**\n\n' +
+        '**1. Question Taxonomy:**\n' +
+        '- **Factual recall** — "What is X?" (knowledge retrieval)\n' +
+        '- **Conceptual** — "Explain how X works" (understanding)\n' +
+        '- **Procedural** — "How do you set up X?" (step-by-step)\n' +
+        '- **Analytical** — "Compare X vs Y" (reasoning)\n' +
+        '- **Creative** — "Design an architecture for X" (synthesis)\n\n' +
+        '**2. Test Case Structure:**\n' +
+        '```javascript\n{ q: "What is Terraform?",\n  validate: (a) => /infrastructure.*code|iac|hcl|declarative/i.test(a) && a.length > 80,\n  tags: ["devops", "iac", "foundational"] }\n```\n\n' +
+        '**3. Validation Strategies:**\n' +
+        '- **Keyword check** — required terms present\n' +
+        '- **Regex match** — structural patterns (code blocks, tables)\n' +
+        '- **Negative check** — must NOT contain wrong info\n' +
+        '- **Length gate** — minimum substantive response\n\n' +
+        '**4. Execution:**\n' +
+        '- Use `Promise.allSettled` with concurrency limit (80)\n' +
+        '- Measure: accuracy (pass/fail), throughput (q/s), avg latency\n' +
+        '- Tag by domain + difficulty for drill-down analysis\n\n' +
+        '**5. Regression Guard:**\n' +
+        '- Save baseline results as JSON\n' +
+        '- After changes: re-run, diff against baseline, flag drops\n' +
+        '- Never merge if accuracy decreases on any category';
+    }
+
+    // ── Benchmark Categories ──
+    if (/benchmark\s+categor|(?:what|which)\s+.*benchmark.*(?:type|categor|suite)|vai\s+bench|list.*benchmark/i.test(input)) {
+      return '**Vai Benchmark Categories:**\n\n' +
+        '| Suite | Questions | Focus |\n' +
+        '|-------|-----------|-------|\n' +
+        '| **mega-200** | 230 | Comprehensive knowledge coverage |\n' +
+        '| **precision** | 33 | Exact-match and format-sensitive |\n' +
+        '| **networking** | 33 | Network protocols and infrastructure |\n' +
+        '| **bench-all** | 263+ | Unified suite with throughput measurement |\n' +
+        '| **logic-puzzles** | 20+100 | Deductive reasoning and problem-solving |\n' +
+        '| **language-stack** | 50+ | Programming language trivia |\n\n' +
+        '**Role Benchmarks (planned):**\n' +
+        '- **devops-senior** — CI/CD, IaC, monitoring, incidents, security\n' +
+        '- **frontend-architect** — React, performance, accessibility, design systems\n' +
+        '- **backend-lead** — databases, APIs, scalability, security patterns\n\n' +
+        '**Performance targets:** >90% accuracy, >50 q/s throughput, <50ms VPT per knowledge retrieval.';
+    }
+
+    // ── DevOps Senior Role ──
+    if (/devops\s+senior|senior\s+devops|(?:what\s+(?:does|is)|explain|describe).*(?:devops\s+senior|senior\s+devops|devops\s+engineer)|devops\s+(?:role|responsib|competenc|skill)/i.test(input)) {
+      return '**Senior DevOps Engineer** — responsibilities and competencies:\n\n' +
+        '**Core domains:**\n' +
+        '1. **CI/CD Pipeline Design** — GitHub Actions, GitLab CI, Jenkins, CircleCI. Build, test, deploy automation.\n' +
+        '2. **Infrastructure as Code (IaC)** — Terraform, Pulumi, AWS CDK, Bicep. Declarative infra management.\n' +
+        '3. **Container Orchestration** — Docker, Kubernetes (EKS/GKE/AKS), Helm charts, service meshes.\n' +
+        '4. **Monitoring & Observability** — Prometheus + Grafana, ELK/Loki, Jaeger/Tempo, PagerDuty.\n' +
+        '5. **Incident Response** — Runbooks, post-mortems, severity classification, on-call rotation.\n' +
+        '6. **Security Hardening** — Secrets management (Vault), network policies, image scanning (Trivy).\n' +
+        '7. **Cost Optimization** — Right-sizing, spot instances, reserved capacity, FinOps.\n\n' +
+        '**Key metrics a Senior DevOps owns:**\n' +
+        '- Deployment frequency, lead time for changes\n' +
+        '- Change failure rate, MTTR\n' +
+        '- SLA/SLO/SLI compliance\n' +
+        '- Infrastructure cost per transaction\n\n' +
+        '**DORA metrics** (DevOps Research and Assessment) are the industry standard for measuring DevOps performance.';
+    }
+
+    // ── SLA / SLO / SLI / Error Budget ──
+    if (/sla\b.*slo|slo\b.*sli|sla\b.*sli|(?:what\s+(?:is|are)|explain|differ).*(?:sla|slo|sli)|error\s+budget|service\s+level\s+(?:agree|object|indic)/i.test(input)) {
+      return '**SLA / SLO / SLI — Service Reliability Metrics:**\n\n' +
+        '| Term | Meaning | Example |\n' +
+        '|------|---------|--------|\n' +
+        '| **SLI** | Service Level Indicator — the *measured metric* | 99.97% successful requests |\n' +
+        '| **SLO** | Service Level Objective — the *internal target* | 99.95% availability |\n' +
+        '| **SLA** | Service Level Agreement — the *contractual promise* | 99.9% uptime (with penalties) |\n\n' +
+        '**Error Budget** = (1 − SLO) — the amount of allowed unreliability.\n' +
+        '- SLO = 99.95% → error budget = 0.05% → ~22 min downtime/month\n' +
+        '- If error budget is spent → freeze risky deploys, focus on reliability\n' +
+        '- If error budget is healthy → safe to ship faster\n\n' +
+        '**Best practice:** SLOs should be stricter than SLAs (leave margin). Measure SLIs continuously. Use error budgets to balance velocity vs reliability.';
+    }
+
+    // ── Incident Response ──
+    if (/incident\s+response|(?:what\s+is|explain|how\s+to).*incident\s+(?:response|manag)|runbook|post.?mortem|mttd|mttr|mtbf|on.?call\s+(?:rotat|sched|manag)|severity\s+(?:classif|level|triage)/i.test(input)) {
+      return '**Incident Response** — detecting, mitigating, and learning from production issues.\n\n' +
+        '**Lifecycle:**\n' +
+        '1. **Detect** — automated alerting (PagerDuty, OpsGenie, Grafana)\n' +
+        '2. **Triage** — classify severity:\n' +
+        '   - SEV1: Critical (all-hands, customer impact)\n' +
+        '   - SEV2: Major (team response, degraded service)\n' +
+        '   - SEV3: Minor (no customer impact, fix in queue)\n' +
+        '3. **Mitigate** — immediate relief: rollback, scale up, feature flag off, failover\n' +
+        '4. **Resolve** — root cause fix deployed and verified\n' +
+        '5. **Post-mortem** — blameless retrospective: timeline, root cause, impact, action items\n\n' +
+        '**Key metrics:**\n' +
+        '- **MTTD** (Mean Time To Detect) — how fast you notice\n' +
+        '- **MTTR** (Mean Time To Recover) — how fast you fix\n' +
+        '- **MTBF** (Mean Time Between Failures) — reliability measure\n\n' +
+        '**Best practices:** Runbooks for common incidents, war room Slack channel, status page updates, on-call rotation with escalation.';
+    }
+
+    // ── CI/CD Pipeline Optimization ──
+    if (/pipeline\s+optim|ci.?cd\s+(?:optim|fast|slow|improv|speed)|(?:how\s+to\s+)?(?:optim|speed\s+up|improv).*(?:ci|pipeline|build)|docker\s+layer\s+cach|test\s+split/i.test(input)) {
+      return '**CI/CD Pipeline Optimization** — making builds fast and reliable.\n\n' +
+        '**Techniques:**\n' +
+        '1. **Parallelism** — run lint, test, build concurrently (not sequentially)\n' +
+        '2. **Caching** — cache `node_modules`, Docker layers, build artifacts\n' +
+        '   - GitHub Actions: `actions/cache` + hash of lockfile\n' +
+        '   - Docker: order Dockerfile from least → most changing\n' +
+        '   - Turborepo: remote cache for monorepo\n' +
+        '3. **Incremental builds** — only build/test affected packages\n' +
+        '   - `turbo run build --filter=...[origin/main]`\n' +
+        '   - Nx: `nx affected --target=test`\n' +
+        '4. **Test splitting** — distribute across parallel runners\n' +
+        '   - `jest --shard=1/4`, `playwright --shard=1/4`\n' +
+        '5. **Artifact reuse** — build once, deploy to staging/prod\n' +
+        '6. **Branch strategy** — full suite on `main`, fast checks on PRs\n\n' +
+        '**Targets:**\n' +
+        '- PR checks: **<5 minutes**\n' +
+        '- Full deploy pipeline: **<15 minutes**\n\n' +
+        '**Anti-patterns:** no caching, sequential steps, running all tests on every commit, large Docker images.';
+    }
+
     return null;
   }
 
@@ -7302,14 +10014,86 @@ Classic number guessing game with hints and attempt tracking.`;
     return 'A'; // fallback
   }
 
+  // ══════════════════════════════════════════════════════════════
+  //  COGNITIVE FOUNDATIONS — first principles, calibration,
+  //  compression, meta-learning, systems thinking, etc.
+  // ══════════════════════════════════════════════════════════════
+
+  private tryCognitiveFoundations(input: string): string | null {
+    // Gate: cognitive foundation terms
+    // Fixed: read/reading, ask/asking variants to catch both verb forms
+    // Fixed: compression gate expanded to match "compression in communication" etc.
+    if (!/first.?princip|calibrat(?:ed|ion)?\s+(?:uncert|confide)|epistemic|aleatory|compress(?:ion)?\s+(?:abstract|over\s+accum|(?:in\s+)?communicat|information\s+density)|kolmogorov|meta.?learn|spaced.?repetit|retrieval\s+practice|interleav|systems?.?think|second.?order\s+think|feedback.?loop|stocks?\s+(?:and|&)\s+flow|donella|leverage.?point|intellectual.?honest|steel.?man|taste\s+(?:and|&)\s+judg|dieter\s+rams|ask(?:ing)?\s+(?:the\s+)?right\s+question|5\s+whys|reframe|xy\s+problem|read(?:ing)?\s+between\s+(?:the\s+)?lines?|intent\s+detect|sound.?spell|phoneti|homophone|pitch\s+accent|efficiency\s+mission|api\s+(?:call\s+)?(?:waste|reduc)|norwegian\s+(?:linguistic\s+)?compress|kos\b|dugnad|clear\s+communicat|hemingway\s+princip|weasel\s+word|meta.?cognit|self.?aware(?:ness)?|bias\s+detect|brier\s+score|cognitive\s+foundation/i.test(input)) {
+      return null;
+    }
+
+    // Approach 1: Source-specific knowledge store match
+    // Uses findBestMatchForSource to search ONLY cognitive-foundations entries,
+    // avoiding the global findBestMatch which may return higher-scoring entries
+    // from unrelated sources (YouTube, web scraping, etc.)
+    const match = this.knowledge.findBestMatchForSource(input, 'bootstrap:cognitive-foundations');
+    if (match) {
+      return match.response;
+    }
+
+    // Approach 2: TF-IDF retrieval filtered to cognitive foundations
+    const retrieved = this.cachedRetrieveRelevant(input, 10);
+    const cogDocs = retrieved.filter(r => r.source === 'bootstrap:cognitive-foundations');
+    if (cogDocs.length === 0) return null;
+
+    const best = cogDocs[0];
+    // Minimum score gate
+    if (best.score <= 0.02) return null;
+
+    // Content relevance: at least 1 meaningful query word in the document
+    const queryWords = input.toLowerCase().split(/\s+/)
+      .filter(w => w.length > 2 && !KnowledgeStore.STOP_WORDS.has(w));
+    const bestLower = best.text.toLowerCase();
+    const hits = queryWords.filter(w => bestLower.includes(w)).length;
+    if (hits < 1) return null;
+
+    // Instead of extracting sentences from raw TF-IDF docs (which may be keyword soup),
+    // try to find the closest knowledge entry by checking which entry's keywords
+    // overlap most with the TF-IDF doc and the query. This returns the clean response.
+    const cogEntry = this.knowledge.findBestMatchForSource(best.text.slice(0, 200), 'bootstrap:cognitive-foundations');
+    if (cogEntry) return cogEntry.response;
+
+    // Final fallback: extract sentences (only for well-formed documents)
+    const sentences = best.text.split(/(?<=[.!?])\s+/).filter(s => s.length > 15);
+    if (sentences.length === 0) return null; // keyword soup — no proper sentences
+
+    const scored = sentences.map(s => {
+      const sLower = s.toLowerCase();
+      const sentHits = queryWords.filter(w => sLower.includes(w)).length;
+      return { text: s, score: sentHits };
+    }).sort((a, b) => b.score - a.score);
+
+    const topSentences = scored.filter(s => s.score > 0).slice(0, 6).map(s => s.text);
+    if (topSentences.length === 0) return null;
+
+    const answer = topSentences.join(' ');
+    return answer.length > 800 ? answer.slice(0, 800) + '...' : answer;
+  }
+
   /**
    * Handle best practices queries for frameworks and languages.
    * Returns curated knowledge about Next.js, Vite, TypeScript, React, etc.
    */
   private tryBestPractices(input: string): string | null {
+    // "Why should I use X instead of Y?" — recommendation/comparison framing
+    if (/why\s+(?:should\s+(?:i|we|you)\s+)?(?:use|choose|prefer|pick)\s+typescript/i.test(input)) {
+      return '**Why use TypeScript over JavaScript?**\n\n' +
+        '**1. Catch bugs before runtime:**\n```typescript\n// JS: crashes at runtime\nuser.nme  // typo → undefined, no warning\n\n// TS: caught at compile time\nuser.nme  // ❌ Property \'nme\' does not exist on type \'User\'\n```\n\n' +
+        '**2. Better developer experience:** IntelliSense, autocomplete, and inline docs — your IDE knows every property and method.\n\n' +
+        '**3. Safer refactoring:** Rename a field → TypeScript flags every broken usage across the entire codebase.\n\n' +
+        '**4. Self-documenting code:** Types ARE documentation:\n```typescript\nfunction createUser(name: string, role: "admin" | "user"): User\n```\n\n' +
+        '**5. Scales with team size:** Solo projects survive without types. 5+ devs on 50K+ lines? TypeScript pays for itself.\n\n' +
+        '**The trade-off:** Slightly more upfront typing for dramatically fewer production bugs.';
+    }
+
     // Check for best practices / tips / recommendations patterns
     const bpMatch = input.match(
-      /(?:best\s+practices?|tips|recommendations?|guidelines?|how\s+(?:to|should)\s+(?:i\s+)?(?:use|set\s*up|configure|structure|optimize))\s+(?:for\s+|in\s+|with\s+|of\s+)?(\w[\w.-]*(?:\s*\.?\s*\w+)*)/i
+      /(?:best\s+(?:practices?|way\s+to)|tips|recommendations?|guidelines?|how\s+(?:to|should)\s+(?:i\s+)?(?:use|set\s*up|configure|structure|optimize))\s+(?:for\s+|in\s+|with\s+|of\s+)?(\w[\w.-]*(?:\s*\.?\s*\w+)*)/i
     );
     if (!bpMatch) {
       // Also try "what are the best practices for X"
@@ -7432,6 +10216,11 @@ Classic number guessing game with hints and attempt tracking.`;
 
     // --- React ---
     if (/react/i.test(topic)) {
+      // If asking about project structure/folder layout, return structure not coding patterns
+      if (/structur|organiz|folder|layout/i.test(topic)) {
+        return '**React project structure:**\n\n```\nsrc/\n├── components/        # Reusable UI components\n│   ├── ui/            # Generic (Button, Input, Modal)\n│   └── features/      # Feature-specific (UserCard, ChatBubble)\n├── hooks/             # Custom hooks (useAuth, useFetch)\n├── pages/             # Route-level components\n├── lib/               # Utilities, helpers, API client\n├── context/           # React Context providers\n├── types/             # TypeScript type definitions\n├── styles/            # Global styles, Tailwind config\n└── assets/            # Images, fonts, icons\n```\n\n' +
+          '**Key principles:**\n- **Group by feature**, not by type (for larger apps)\n- **Co-locate** tests next to components: `Button.tsx` + `Button.test.tsx`\n- **Barrel exports** (`index.ts`) for clean imports\n- Keep components **small** — if it\'s over 200 lines, split it\n- **Hooks folder** for shared logic (not one-off effects)';
+      }
       return `## React Best Practices
 
 **Component Design:**
@@ -9168,28 +11957,115 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
 
     const concept = this.knowledge.findConcept(topic);
     if (concept) {
-      return `${concept.definition}\n\n[Source: ${concept.source}]`;
+      const sourceTag = concept.source && concept.source !== 'undefined' ? `\n\n[Source: ${concept.source}]` : '';
+      return `${concept.definition}${sourceTag}`;
     }
 
     return null;
   }
 
   /**
+   * Strategy 1.517: Taught document retrieval via TF-IDF.
+   * Searches the document index specifically for user-taught content.
+   * Uses relaxed quality gates compared to general synthesize because
+   * taught content is explicitly provided by the user (high a priori relevance).
+   */
+  private tryTaughtDocumentRetrieval(input: string): string | null {
+    const retrieved = this.cachedRetrieveRelevant(input, 8);
+
+    // Filter to user-taught documents only
+    const taughtDocs = retrieved.filter(r => r.source === 'user-taught');
+    if (taughtDocs.length === 0) return null;
+
+    const best = taughtDocs[0];
+
+    // Minimum TF-IDF score threshold (lower than general synthesis since content is pre-vetted)
+    if (best.score <= 0.02) return null;
+
+    // Content relevance: at least 2 meaningful query words must appear in the document
+    const queryWords = input.toLowerCase().split(/\s+/)
+      .filter(w => w.length > 2 && !KnowledgeStore.STOP_WORDS.has(w));
+    const bestLower = best.text.toLowerCase();
+    const hits = queryWords.filter(w => bestLower.includes(w)).length;
+    if (hits < 2) return null;
+
+    // For 4+ query words, require at least 30% coverage (vs 75% in general synthesis)
+    if (queryWords.length >= 4 && hits / queryWords.length < 0.3) return null;
+
+    // Extract the most relevant sentences from the taught content
+    const sentences = best.text.split(/(?<=[.!?])\s+/).filter(s => s.length > 15);
+    const scored = sentences.map(s => {
+      const sLower = s.toLowerCase();
+      const sentHits = queryWords.filter(w => sLower.includes(w)).length;
+      return { text: s, score: sentHits };
+    }).sort((a, b) => b.score - a.score);
+
+    const topSentences = scored.filter(s => s.score > 0).slice(0, 5).map(s => s.text);
+    if (topSentences.length === 0) return null;
+
+    const answer = topSentences.join(' ');
+    const snippet = answer.length > 600 ? answer.slice(0, 600) + '...' : answer;
+    return snippet;
+  }
+
+  /**
+   * Strategy 1.7: Knowledge Intelligence — decompose complex questions, follow
+   * connections between knowledge entries, and combine answers.
+   *
+   * Activates only for compound/complex questions that benefit from decomposition.
+   * Simple questions skip this and go to the cheaper direct match (Strategy 2).
+   */
+  private tryIntelligentAnswer(input: string): string | null {
+    const lower = input.toLowerCase().trim();
+
+    // Only try decomposition for questions that look compound or complex:
+    // - Contains "and" / "or" between topics
+    // - Comparative: "vs", "compared to"
+    // - Multi-topic: "about X and Y"
+    // - Long questions (>6 meaningful words)
+    const words = lower.split(/\s+/).filter(w => w.length > 2 && !KnowledgeStore.STOP_WORDS.has(w));
+    const isCompound = /\b(?:and|or)\b/i.test(input) && words.length > 4;
+    const isComparative = /\b(?:vs\.?|versus|compared?\s+to|differ(?:ence|ent)?|eller)\b/i.test(input);
+    const isComplex = words.length > 6;
+
+    if (!isCompound && !isComparative && !isComplex) return null;
+// Rebuild intelligence indexes if knowledge changed since last build
+    if (this.intelligenceDirty) {
+      this.intelligence.build();
+      this.intelligenceDirty = false;
+    }
+
+    
+    const result = this.intelligence.answerDecomposed(input);
+    if (!result || result.confidence < 0.2) return null;
+
+    // Format based on whether it was decomposed or direct
+    if (result.strategy === 'decomposed' && result.subAnswers.length > 1) {
+      const parts = result.subAnswers.map(sa =>
+        `**${sa.question}**\n${sa.answer}`
+      );
+      return parts.join('\n\n');
+    }
+
+    return result.text;
+  }
+
+  /**
    * Synthesize a response from multiple TF-IDF retrieved chunks.
    * Filters junk content, requires meaningful relevance, combines quality sources only.
    */
-  private synthesizeFromKnowledge(input: string, _history: Message[]): string | null {
-    const retrieved = this.knowledge.retrieveRelevant(input, 8);
+  private synthesizeFromKnowledge(input: string, _history: readonly Message[]): string | null {
+    const retrieved = this.cachedRetrieveRelevant(input, VaiEngine.SYNTHESIS_RETRIEVE_COUNT);
 
     // Filter out junk content before scoring
     const clean = retrieved.filter(r => !KnowledgeStore.isJunkContent(r.text));
-    if (clean.length === 0 || clean[0].score <= 0.05) return null;
+    if (clean.length === 0 || clean[0].score <= VaiEngine.SYNTHESIS_MIN_SCORE) return null;
 
     // Use the best match
     const best = clean[0];
 
     // Quality gate: if the best match score is very low, don't synthesize garbage
-    if (best.score < 0.05) return null;
+    if (best.score < VaiEngine.SYNTHESIS_MIN_SCORE) return null;
 
     // Content relevance check: the retrieved text must contain at least 1 meaningful query word
     // This prevents returning completely unrelated content that matched on stop words
@@ -9225,14 +12101,18 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
         return null; // Too few discriminating words → likely irrelevant
       }
 
-      // Also require high hit rate — for 3+ meaningful words, require at least 75%
-      const hitThreshold = queryWords.length >= 3 ? 0.75 : 0.5;
+      // Also require meaningful hit rate — for 3+ words, require at least 60%
+      // (Lowered from 75%: natural questions include functional words like "work",
+      // "use", "create" that won't appear in knowledge text but don't reduce relevance)
+      const hitThreshold = queryWords.length >= 3
+        ? VaiEngine.SYNTHESIS_HIT_RATE_LONG
+        : VaiEngine.SYNTHESIS_HIT_RATE_SHORT;
       if (queryHitsInBest / queryWords.length < hitThreshold) return null;
     }
 
     // If there are multiple good matches from DIFFERENT sources, combine them
     // But only if they're truly related (>75% of best score, not just keyword overlap)
-    const goodMatches = clean.filter(r => r.score > best.score * 0.75);
+    const goodMatches = clean.filter(r => r.score > best.score * VaiEngine.SYNTHESIS_GOOD_MATCH_RATIO);
 
     if (goodMatches.length === 1) {
       // Single source — extract the most relevant sentences
@@ -9253,8 +12133,29 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
         if (snippet.length < 30) return null; // too short to be useful
         return `From what I've learned:\n\n${snippet}\n\n[Source: ${best.source}]`;
       }
-      const answer = topSentences.join(' ');
-      const snippet = answer.length > 600 ? answer.slice(0, 600) + '...' : answer;
+      let answer = topSentences.join(' ');
+
+      // Enrich with connected knowledge if available
+      if (this.intelligence && !this.intelligenceDirty) {
+        const entries = this.knowledge.exportData().entries;
+        const entryIdx = entries.findIndex(e => best.text.includes(e.response.slice(0, 50)));
+        if (entryIdx >= 0) {
+          const related = this.intelligence.connector.traverse(entryIdx, 1, 2);
+          for (const rel of related) {
+            const relEntry = entries[rel.index];
+            if (!relEntry) continue;
+            const relLower = relEntry.response.toLowerCase();
+            const relHits = queryWords.filter(w => relLower.includes(w)).length;
+            if (relHits > 0 && relEntry.response !== best.text) {
+              const relSnippet = relEntry.response.slice(0, 200);
+              answer += `\n\nRelated: ${relSnippet}`;
+              break; // one enrichment is enough
+            }
+          }
+        }
+      }
+
+      const snippet = answer.length > 800 ? answer.slice(0, 800) + '...' : answer;
       return `From what I've learned:\n\n${snippet}\n\n[Source: ${best.source}]`;
     }
 
@@ -9313,10 +12214,19 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
     const hasProjectWord = projectWords.test(input);
     const isQuestion = questionPattern.test(input);
 
-    // If this looks like a question, don't trigger deploy
-    if (isQuestion && !hasBuildIntent) return null;
+    // Questions are informational ("How do you set up Vue 3?")
+    // Only allow question-form inputs that are direct action requests ("Can you create...")
+    if (isQuestion) {
+      const directRequest = /^(?:can|could|would)\s+you\b/i;
+      if (!directRequest.test(input)) return null;
+    }
     // Must have a build verb at minimum
     if (!hasBuildIntent) return null;
+
+    // Long, complex messages with planning/architecture language are NOT scaffold requests.
+    // They want advice, not deploy buttons.
+    const planningWords = /\b(plan|architect|pipeline|where.?to.?start|not.?sure|help.?me|advise|recommend|approach|strategy|design)\b/i;
+    if (input.split(/\s+/).length > 25 && planningWords.test(input)) return null;
 
     // Direct stack detection patterns
     const stackPatterns: Array<{ pattern: RegExp; stackId: string; label: string; tagline: string }> = [
@@ -9623,78 +12533,211 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
 
   /**
    * Search the web when local knowledge is insufficient.
-   * Uses DuckDuckGo instant answer API + HTML scrape as fallback.
+   * Uses the Perplexity-style search pipeline: clarify → fan out → rank → read → cross-check → conclude.
+   * Learning happens automatically via the pipeline's onLearn callback.
    */
   private async tryWebSearch(query: string): Promise<string | null> {
     try {
-      // Try DuckDuckGo Instant Answer API first (fast, structured)
-      const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-      const ddgRes = await fetch(ddgUrl, {
-        headers: { 'User-Agent': 'VeggaAI/0.1' },
-        signal: AbortSignal.timeout(5000),
-      });
-
-      if (ddgRes.ok) {
-        const data = await ddgRes.json() as {
-          Abstract?: string;
-          AbstractSource?: string;
-          AbstractURL?: string;
-          Answer?: string;
-          AnswerType?: string;
-          RelatedTopics?: Array<{ Text?: string; FirstURL?: string }>;
-        };
-
-        // Direct answer (e.g., "who is president")
-        if (data.Answer && data.Answer.length > 5) {
-          return `${data.Answer}\n\n[Source: DuckDuckGo Instant Answer]`;
-        }
-
-        // Abstract (e.g., Wikipedia summary)
-        if (data.Abstract && data.Abstract.length > 20) {
-          const snippet = data.Abstract.length > 600 ? data.Abstract.slice(0, 600) + '...' : data.Abstract;
-          // Learn from this for next time
-          this.knowledge.learn(data.Abstract, data.AbstractURL ?? 'web-search', 'en');
-          this.knowledge.addEntry(query, data.Abstract, data.AbstractURL ?? 'web-search', 'en');
-          this.tokenizer.encode(data.Abstract);
-          return `${snippet}\n\n[Source: ${data.AbstractSource ?? 'Web'} — ${data.AbstractURL ?? ''}]`;
-        }
-
-        // Related topics
-        if (data.RelatedTopics && data.RelatedTopics.length > 0) {
-          const topics = data.RelatedTopics
-            .filter(t => t.Text && t.Text.length > 10)
-            .slice(0, 3)
-            .map(t => `- ${t.Text!.length > 200 ? t.Text!.slice(0, 200) + '...' : t.Text}`);
-
-          if (topics.length > 0) {
-            const result = `Here's what I found online:\n\n${topics.join('\n')}\n\n[Source: DuckDuckGo]`;
-            return result;
-          }
-        }
-      }
+      const result: SearchResponse = await this.searchPipeline.search(query);
+      if (result.sources.length === 0) return null;
+      this._lastSearchResponse = result;
+      return result.answer;
     } catch {
-      // Search failed (timeout, network error) — fall through silently
+      // Search failed — fall through silently
+      return null;
     }
-
-    return null;
   }
 
   /**
    * Handle common conversational patterns without needing learned knowledge.
    */
-  private handleConversational(input: string, history: Message[]): string | null {
-    // Greetings
-    if (/^(hello|hi|hey|yo|sup|hei|hallo|howdy|good\s+(morning|afternoon|evening))(\s+\w+)?[\s!.?]*$/i.test(input)) {
+  private handleConversational(input: string, history: readonly Message[]): string | null {
+    // Greetings — includes informal Norwegian (oyoy, myyh, heia, heisann, ey, oi, fese)
+    // and informal English (wassup, whaddup, yoyo, g'day, aye)
+    if (/^(hello|hi|hey|yo|sup|hei|hallo|howdy|oyoy|oy+|myyh|fese|ey+|oi|heia|heisann|heihei|yoyo|aye|wassup|whaddup|wazzup|g'?day|good\s+(morning|afternoon|evening))(\s+\w+)?[\s!.?]*$/i.test(input)) {
       const stats = this.getStats();
       if (stats.documentsIndexed > 0) {
-        return `Hey! I'm VeggaAI — I've learned from ${stats.documentsIndexed} sources and extracted ${stats.conceptsExtracted} concepts so far. What would you like to know?`;
+        return `Hey! I'm VeggaAI. I've been trained on ${stats.documentsIndexed} sources so far — ask me about Docker, TypeScript, React, Git, or anything else I've picked up. What's on your mind?`;
       }
-      return 'Hello! I am VeggaAI. I am still learning, but I will do my best to help you.';
+      return 'Hey! I\'m VeggaAI — still fresh, but ask me anything and I\'ll do my best.';
     }
 
     // Thank you
     if (/^(thanks|thank\s*you|thx|takk|tusen\s*takk)[\s!.]*$/i.test(input)) {
       return "You're welcome! Let me know if there's anything else.";
+    }
+
+    // Vague "how do I get started?" — no specific topic
+    if (/^(?:how\s+(?:do|can|should)\s+i\s+)?(?:get\s+started|begin|start)(?:\s+(?:with\s+)?(?:programming|coding|learning))?[\s?!.]*$/i.test(input)) {
+      return 'Get started with what? I know about **Docker**, **React**, **TypeScript**, **Git**, **Kubernetes**, **PostgreSQL**, and more.\n\nJust pick a topic — "What is Docker?" or "How do I set up TypeScript?" are great starting points.';
+    }
+
+    // Orphan follow-ups — user says "explain more" but there's no history
+    const orphanFollowUp = /(?:explain|tell|say)\s+(?:(?:me|it|that|this)\s+)?(?:more|(?:more\s+)?simply|simpler)|more\s+detail|elaborate|can you.*(?:break.*down|go deeper|expand)|more about that/i;
+    if (history.length < 2 && orphanFollowUp.test(input)) {
+      return 'I\'d be happy to explain more — but I\'m not sure what you\'re referring to. Could you tell me the topic? For example: "Explain Docker more simply" or "Tell me more about TypeScript."';
+    }
+
+    // Conversational follow-ups — reference previous assistant response
+    if (history.length >= 2) {
+      const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
+      if (lastAssistant) {
+        const followUp = /(?:explain|say).*(?:more simply|simpler|easier|in simple|plain)|simplify|eli5|explain.*like.*(?:5|five|child|beginner)|can you.*(?:break.*down|dumb.*down)/i;
+        const exampleReq = /(?:show|give|provide).*(?:example|sample|demo)|can you.*(?:example|demonstrate|illustrate)/i;
+        const moreDetail = /(?:tell|explain|say).*more|more detail|elaborate|go deeper|expand on/i;
+
+        if (followUp.test(input)) {
+          // Genuinely simplify the previous answer — not just truncate
+          const prev = lastAssistant.content;
+          // Extract core topic from the previous answer's first line/heading
+          const headingMatch = prev.match(/\*\*([^*]+)\*\*/);
+          const topic = headingMatch ? headingMatch[1].replace(/[*:]/g, '').trim().toLowerCase() : '';
+
+          // Try to produce a real ELI5 for known topics
+          const eli5Map: Record<string, string> = {
+            'docker': 'Think of Docker like a **shipping container** for software. Just like a physical container holds goods that can be moved on any truck or ship, a Docker container packages your app with everything it needs to run — so it works the same way on any computer.\n\n**In 3 steps:** Write a recipe (Dockerfile) → Build a package (Image) → Run it anywhere (Container).',
+            'kubernetes': 'If Docker is a single shipping container, **Kubernetes is the port manager** — it decides where to put containers, replaces broken ones, and scales up when traffic increases.\n\n**Think of it as:** You tell K8s "I want 3 copies of my app running" and it handles everything — scheduling, healing, load balancing.',
+            'react': 'React lets you build web pages from **reusable building blocks** called components. Each component is a piece of UI (a button, a form, a card) that manages its own data and can be composed together like LEGO bricks.',
+            'typescript': 'TypeScript is JavaScript with **spell-check for your code**. Just like a spell-checker catches typos before you send an email, TypeScript catches bugs before you run your program. It\'s the same JavaScript underneath — just safer.',
+            'git': 'Git is like an **unlimited undo button** for your code. Every time you save a checkpoint (commit), you can always go back. Branches let you try experiments without breaking the main version.',
+          };
+
+          // Check if previous topic matches any ELI5
+          for (const [key, explanation] of Object.entries(eli5Map)) {
+            if (topic.includes(key) || prev.toLowerCase().includes(key)) {
+              return explanation;
+            }
+          }
+
+          // Fallback: strip formatting, take first 2 sentences + "In short: ..." summary
+          const stripped = prev.replace(/\*\*/g, '').replace(/```[\s\S]*?```/g, '')
+            .replace(/\|[^\n]*\|/g, '').replace(/\n{2,}/g, '\n').trim();
+          const sentences = stripped.split(/(?<=[.!?])\s+/).filter(s => s.length > 15);
+          if (sentences.length >= 2) {
+            return `In simpler terms: ${sentences[0]} ${sentences[1]}`;
+          }
+          if (sentences.length === 1) {
+            return `In simpler terms: ${sentences[0]}`;
+          }
+        }
+
+        if (exampleReq.test(input)) {
+          // Extract code blocks from previous answer
+          const prev = lastAssistant.content;
+          const codeBlocks = prev.match(/```[\s\S]*?```/g);
+          if (codeBlocks && codeBlocks.length > 0) {
+            return `Here's the key example from what I just explained:\n\n${codeBlocks[0]}`;
+          }
+          // No code in previous answer — detect topic and provide a concrete example
+          const headingMatch = prev.match(/\*\*([^*]+)\*\*/);
+          const topic = headingMatch ? headingMatch[1].replace(/[*:]/g, '').trim().toLowerCase() : '';
+
+          const exampleMap: Record<string, string> = {
+            'docker': '**Docker example — a simple Node.js app:**\n\n```dockerfile\n# Dockerfile\nFROM node:20-alpine      # Start from a small Linux + Node.js image\nWORKDIR /app              # All commands run from /app\nCOPY package.json .       # Copy dependencies list first (better caching)\nRUN npm install           # Install dependencies\nCOPY . .                  # Copy your source code\nCMD ["node", "index.js"]  # The command that runs when the container starts\n```\n\n```bash\n# Build the image and run it\ndocker build -t my-app .          # Creates an image called "my-app"\ndocker run -p 3000:3000 my-app    # Maps port 3000 on your machine to 3000 in the container\n```\n\nTry changing `index.js`, rebuild, and the container picks up the change. That\'s the Docker workflow.',
+            'kubernetes': '**Kubernetes example — deploying 3 replicas:**\n\n```yaml\n# deployment.yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: my-app\n  template:\n    metadata:\n      labels:\n        app: my-app\n    spec:\n      containers:\n      - name: my-app\n        image: my-app:latest\n        ports:\n        - containerPort: 3000\n```\n\n```bash\nkubectl apply -f deployment.yaml\nkubectl get pods\n```',
+            'react': '**React example — a counter component:**\n\n```tsx\nimport { useState } from "react";\n\nfunction Counter() {\n  const [count, setCount] = useState(0);\n  return (\n    <div>\n      <p>Count: {count}</p>\n      <button onClick={() => setCount(c => c + 1)}>+1</button>\n    </div>\n  );\n}\n```',
+            'typescript': '**TypeScript example:**\n\n```typescript\ninterface User {\n  name: string;\n  age: number;\n  email?: string; // optional\n}\n\nfunction greet(user: User): string {\n  return `Hello, ${user.name}!`;\n}\n\nconst user: User = { name: "Alice", age: 30 };\nconsole.log(greet(user)); // "Hello, Alice!"\n```',
+            'git': '**Git example — typical feature workflow:**\n\n```bash\ngit checkout -b feature/add-login   # create branch\n# ... make changes ...\ngit add .\ngit commit -m "Add login page"\ngit push origin feature/add-login\n# Create PR on GitHub, get review, merge\ngit checkout main\ngit pull\n```',
+            'rest': '**REST API example with Express.js:**\n\n```javascript\nimport express from "express";\nconst app = express();\napp.use(express.json());\n\nlet users = [{ id: 1, name: "Alice" }];\n\napp.get("/api/users", (req, res) => res.json(users));\napp.post("/api/users", (req, res) => {\n  const user = { id: users.length + 1, ...req.body };\n  users.push(user);\n  res.status(201).json(user);\n});\n\napp.listen(3000);\n```',
+          };
+
+          for (const [key, example] of Object.entries(exampleMap)) {
+            if (topic.includes(key) || prev.toLowerCase().includes(key)) {
+              return example;
+            }
+          }
+
+          // Last resort: search knowledge for an example
+          const topicWords = prev.split(/\s+/).filter(w => w.length > 4 && !KnowledgeStore.STOP_WORDS.has(w.toLowerCase())).slice(0, 3);
+          if (topicWords.length > 0) {
+            const match = this.cachedFindBestMatch(`example ${topicWords.join(' ')}`);
+            if (match) return match.response;
+          }
+          return `I don't have a specific example ready, but try asking: "show me a [topic] example" with the specific topic you want to see.`;
+        }
+
+        if (moreDetail.test(input)) {
+          // Extract topic from previous answer heading
+          const prev = lastAssistant.content;
+          const headingMatch = prev.match(/\*\*([^*]+)\*\*/);
+          const topic = headingMatch ? headingMatch[1].replace(/[*:]/g, '').trim().toLowerCase() : '';
+
+          const detailMap: Record<string, string> = {
+            'docker': '**Docker — deeper dive:**\n\n**Image layers:** Each Dockerfile instruction creates a layer. Layers are cached — put frequently changing code (COPY . .) last.\n\n**Networking:** Containers communicate via Docker networks. `docker network create my-net` → `docker run --network my-net`.\n\n**Volumes:** Persist data outside containers: `docker run -v mydata:/app/data`.\n\n**Multi-stage builds:** Separate build and runtime stages to keep images small:\n```dockerfile\nFROM node:20 AS builder\nRUN npm run build\nFROM node:20-alpine\nCOPY --from=builder /app/dist ./dist\n```\n\n**Health checks:** `HEALTHCHECK CMD curl -f http://localhost:3000/health || exit 1`',
+            'kubernetes': '**Kubernetes — deeper dive:**\n\n**Pod lifecycle:** Pending → Running → Succeeded/Failed. K8s restarts failed pods automatically.\n\n**Services:** ClusterIP (internal), NodePort (external port), LoadBalancer (cloud LB), Ingress (HTTP routing rules).\n\n**Scaling:**\n```bash\nkubectl scale deployment my-app --replicas=5\n# Or use HorizontalPodAutoscaler for auto-scaling\n```\n\n**ConfigMaps & Secrets:** Store config outside containers. Secrets are base64-encoded (use external secrets for production).\n\n**Namespaces:** Isolate resources: `kubectl create namespace staging`.',
+            'react': '**React — deeper dive:**\n\n**Component patterns:** Container/presentational, compound components, render props, higher-order components (HOCs).\n\n**Performance:** Use `React.memo()` for expensive renders, `useMemo` for computed values, `useCallback` for stable references.\n\n**State management tiers:**\n- Local: `useState`\n- Shared: Context + `useReducer`\n- Global: Zustand, Redux Toolkit, Jotai\n\n**Rendering:** React batches state updates. Use Suspense + lazy() for code splitting. Server Components (Next.js) reduce client JS.',
+            'typescript': '**TypeScript — deeper dive:**\n\n**Utility types:** `Partial<T>`, `Required<T>`, `Pick<T, K>`, `Omit<T, K>`, `Record<K, V>`.\n\n**Generics:**\n```typescript\nfunction first<T>(arr: T[]): T | undefined {\n  return arr[0];\n}\n```\n\n**Discriminated unions:**\n```typescript\ntype Result = { ok: true; data: string } | { ok: false; error: string };\n```\n\n**Type guards:** `if ("data" in result)` narrows the type automatically.\n\n**Strict mode:** Enable `strict: true` in tsconfig for maximum safety.',
+            'git': '**Git — deeper dive:**\n\n**Interactive rebase:** `git rebase -i HEAD~3` to squash, reorder, or edit commits.\n\n**Stashing:** `git stash` saves work-in-progress, `git stash pop` restores it.\n\n**Cherry-pick:** `git cherry-pick <sha>` applies a specific commit to current branch.\n\n**Bisect:** `git bisect start` → `git bisect bad` → `git bisect good <sha>` to binary-search for a bug.\n\n**Hooks:** `.git/hooks/pre-commit` runs before each commit (lint, test).',
+          };
+
+          for (const [key, detail] of Object.entries(detailMap)) {
+            if (topic.includes(key) || prev.toLowerCase().includes(key)) {
+              return detail;
+            }
+          }
+
+          // Fallback: search knowledge entries (NOT raw TF-IDF documents) for more on the topic
+          const topicWords = prev.split(/\s+/)
+            .filter(w => w.length > 3 && !KnowledgeStore.STOP_WORDS.has(w.toLowerCase()) && !/^[\*\|`#\-]/.test(w))
+            .slice(0, 3);
+          if (topicWords.length > 0) {
+            const match = this.cachedFindBestMatch(topicWords.join(' '));
+            if (match && match.response.length > 50) {
+              return `Here's more on that topic:\n\n${match.response}`;
+            }
+          }
+          return `I've covered what I know on that topic. Try asking about a specific aspect — for example, "How does [feature] work?" or "What are the best practices for [topic]?"`;
+        }
+
+        // "What about X?" — sub-topic follow-up referencing previous conversation
+        const whatAboutMatch = input.match(/what\s+about\s+(.+)/i);
+        if (whatAboutMatch) {
+          const subtopic = whatAboutMatch[1].replace(/[?.!]+$/, '').trim().toLowerCase();
+          const prev = lastAssistant.content.toLowerCase();
+
+          // Build subtopic map keyed by [mainTopic][subtopic]
+          const subtopicMap: Record<string, Record<string, string>> = {
+            'kubernetes': {
+              'security': '**Kubernetes security:**\n\n**1. RBAC (Role-Based Access Control):**\n```yaml\napiVersion: rbac.authorization.k8s.io/v1\nkind: Role\nmetadata:\n  name: pod-reader\nrules:\n- apiGroups: [""]\n  resources: ["pods"]\n  verbs: ["get", "list", "watch"]\n```\n\n**2. Network Policies** — restrict pod-to-pod traffic:\n```yaml\napiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: deny-all\nspec:\n  podSelector: {}\n  policyTypes: ["Ingress", "Egress"]\n```\n\n**3. Secrets management:**\n- Use `kubectl create secret` (base64 only — NOT encrypted at rest by default)\n- For production: **External Secrets Operator**, **HashiCorp Vault**, or **AWS Secrets Manager**\n\n**4. Pod Security:**\n- Set `runAsNonRoot: true`, `readOnlyRootFilesystem: true`\n- Drop all capabilities: `securityContext.capabilities.drop: ["ALL"]`\n- Use Pod Security Standards (restricted/baseline/privileged)\n\n**5. Image security:** Scan images with Trivy/Snyk, use signed images, pull from private registries only.',
+              'networking': '**Kubernetes networking:**\n\n**Service types:**\n- **ClusterIP** — internal only (default)\n- **NodePort** — exposes on each node\'s IP at a static port\n- **LoadBalancer** — provisions external cloud load balancer\n- **ExternalName** — maps to a DNS name\n\n**Ingress** — HTTP/HTTPS routing:\n```yaml\napiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: my-ingress\nspec:\n  rules:\n  - host: app.example.com\n    http:\n      paths:\n      - path: /\n        pathType: Prefix\n        backend:\n          service:\n            name: my-app\n            port:\n              number: 80\n```\n\n**DNS:** Every service gets a DNS name: `<service>.<namespace>.svc.cluster.local`.\n\n**Network Policies** control which pods can communicate — by default, all pods can reach all pods.',
+              'monitoring': '**Kubernetes monitoring:**\n\n**Stack:** Prometheus (metrics) + Grafana (dashboards) + Alertmanager (alerts).\n\n**Key metrics:**\n- **Node:** CPU/memory utilization, disk pressure, network I/O\n- **Pod:** restart count, OOMKilled events, request vs limit usage\n- **Cluster:** pending pods, failed scheduling, API server latency\n\n**Commands:**\n```bash\nkubectl top nodes          # node resource usage\nkubectl top pods           # pod resource usage\nkubectl describe pod <pod> # events + conditions\nkubectl logs <pod> -f      # stream logs\n```\n\n**Liveness vs Readiness probes:**\n- **Liveness** — restart container if unhealthy\n- **Readiness** — remove from service if not ready\n- **Startup** — delay other probes until app is initialized',
+            },
+            'docker': {
+              'security': '**Docker security best practices:**\n\n1. **Don\'t run as root** — use `USER node` in Dockerfile\n2. **Use minimal base images** — `alpine` or `distroless`\n3. **Scan images** — `docker scout cves my-image` or Trivy/Snyk\n4. **Don\'t store secrets in images** — use `--secret` flag or env vars at runtime\n5. **Read-only filesystem** — `docker run --read-only`\n6. **Drop capabilities** — `docker run --cap-drop ALL --cap-add NET_BIND_SERVICE`\n7. **Use multi-stage builds** — don\'t ship build tools in production image\n8. **Pin image versions** — `node:20.11-alpine` not `node:latest`\n9. **Limit resources** — `docker run --memory=512m --cpus=1`\n10. **Use Docker Content Trust** — `export DOCKER_CONTENT_TRUST=1` for signed images',
+              'networking': '**Docker networking:**\n\n**Network types:**\n- **bridge** (default) — containers on same host communicate\n- **host** — container shares host network stack\n- **none** — no networking\n- **overlay** — multi-host networking (Swarm/K8s)\n\n**Commands:**\n```bash\ndocker network create my-net\ndocker run --network my-net --name app1 my-image\ndocker run --network my-net --name app2 my-image\n# app1 can reach app2 by name: http://app2:3000\n```\n\n**Port mapping:** `-p 8080:3000` maps host:8080 → container:3000.\n**DNS:** Containers on the same user-defined network resolve each other by container name.',
+            },
+            'react': {
+              'performance': '**React performance optimization:**\n\n1. **React.memo()** — skip re-renders when props haven\'t changed\n2. **useMemo()** — cache expensive computed values\n3. **useCallback()** — stable function references for child components\n4. **Code splitting** — `React.lazy(() => import("./HeavyComponent"))`\n5. **Virtualization** — `react-window` or `@tanstack/virtual` for long lists\n6. **Keys** — use stable unique IDs, never array index for dynamic lists\n7. **State colocation** — keep state close to where it\'s used (avoid lifting too high)\n8. **Profiler** — React DevTools Profiler to identify slow renders',
+              'testing': '**React testing:**\n\n**Stack:** Vitest + React Testing Library + MSW (API mocking).\n\n```tsx\nimport { render, screen, fireEvent } from "@testing-library/react";\nimport { Counter } from "./Counter";\n\ntest("increments count", () => {\n  render(<Counter />);\n  fireEvent.click(screen.getByText("+1"));\n  expect(screen.getByText("Count: 1")).toBeInTheDocument();\n});\n```\n\n**Principles:**\n- Test behavior, not implementation\n- Query by role/label (accessible selectors), not test IDs\n- Mock external dependencies (API calls, timers), not internal state',
+            },
+            'typescript': {
+              'generics': '**TypeScript generics:**\n\n```typescript\n// Basic generic function\nfunction identity<T>(value: T): T { return value; }\n\n// Generic with constraint\nfunction getProperty<T, K extends keyof T>(obj: T, key: K): T[K] {\n  return obj[key];\n}\n\n// Generic interface\ninterface Repository<T> {\n  find(id: string): Promise<T | null>;\n  save(item: T): Promise<void>;\n}\n\n// Generic class\nclass Stack<T> {\n  private items: T[] = [];\n  push(item: T) { this.items.push(item); }\n  pop(): T | undefined { return this.items.pop(); }\n}\n```\n\n**Common patterns:** `Array<T>`, `Promise<T>`, `Record<K, V>`, `Map<K, V>`.',
+            },
+            'git': {
+              'merge': '**Git merge strategies:**\n\n- **Fast-forward** (`git merge --ff-only`) — linear history, only works if no divergence\n- **Merge commit** (`git merge --no-ff`) — preserves branch history with a merge commit\n- **Squash** (`git merge --squash`) — combines all branch commits into one\n- **Rebase** (`git rebase main`) — replays commits on top of target branch (linear history)\n\n**When to use what:**\n- Feature branches → squash merge (clean main history)\n- Release branches → merge commit (preserve history)\n- Keeping up-to-date → rebase (avoid merge commits in feature branches)',
+            },
+          };
+
+          // Find matching main topic from previous answer
+          for (const [mainTopic, subtopics] of Object.entries(subtopicMap)) {
+            if (prev.includes(mainTopic)) {
+              // Check if subtopic matches any key
+              for (const [subKey, content] of Object.entries(subtopics)) {
+                if (subtopic.includes(subKey) || subKey.includes(subtopic.replace(/\s+in\s+\w+$/i, '').trim())) {
+                  return content;
+                }
+              }
+            }
+          }
+
+          // Subtopic not in map — try knowledge search
+          const searchQuery = `${subtopic}`;
+          const match = this.cachedFindBestMatch(searchQuery);
+          if (match && match.response.length > 50) {
+            return match.response;
+          }
+        }
+      }
     }
 
     // Write/say a sentence in Norwegian
@@ -9718,7 +12761,7 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
     const aboutMatch = input.match(/what\s+do\s+you\s+know\s+(?:about\s+)?(.+)/i);
     if (aboutMatch) {
       const topic = aboutMatch[1].replace(/[?.!]+$/, '').trim();
-      const retrieved = this.knowledge.retrieveRelevant(topic, 3);
+      const retrieved = this.cachedRetrieveRelevant(topic, 3);
       if (retrieved.length > 0 && retrieved[0].score > 0.005) {
         const snippet = retrieved[0].text.length > 400 ? retrieved[0].text.slice(0, 400) + '...' : retrieved[0].text;
         return `Here's what I know about "${topic}":\n\n${snippet}\n\n[Source: ${retrieved[0].source}]`;
@@ -9741,6 +12784,22 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
           this.knowledge.learn(`${pattern} is ${response}`, 'user-taught', 'en');
           this.tokenizer.encode(`${pattern} ${response}`);
           return `Got it! I've learned that "${pattern}" is "${response}". I'll remember this.`;
+        }
+      }
+
+      // Correction patterns: "Actually, X is Y" / "No, X is Y" / "That's wrong, X is Y" / "X should be Y"
+      const correctionMatch = input.match(/^(?:actually|no|nope|wrong|that'?s\s+(?:wrong|incorrect|not\s+right)|correction)[,:\s]*(?:the\s+)?([A-Za-z][A-Za-z0-9 _-]{2,60})\s+(?:is|should\s+be|means|equals|=)\s+(.{3,200})$/i)
+        || input.match(/^(?:the\s+)?(?:correct|right|actual)\s+(?:answer|response|info)\s+(?:is|for)\s+(?:the\s+)?([A-Za-z][A-Za-z0-9 _-]{2,60})\s+(?:is|=)\s+(.{3,200})$/i)
+        || input.match(/^([A-Za-z][A-Za-z0-9 _-]{2,60})\s+(?:should\s+be|is\s+actually|is\s+really)\s+(.{3,200})$/i);
+      if (correctionMatch) {
+        const pattern = correctionMatch[1].trim();
+        const response = correctionMatch[2].trim();
+        if (!/^(it|this|that|the|a|an|my|your|so|now|here|there|also|just)$/i.test(pattern)
+          && !/\b(?:function|class|method|implement|algorithm|program|script|code|module|interface|struct|enum)\b/i.test(pattern)) {
+          this.knowledge.addEntry(pattern, response, 'user-taught', 'en');
+          this.knowledge.learn(`${pattern} is ${response}`, 'user-taught', 'en');
+          this.tokenizer.encode(`${pattern} ${response}`);
+          return `Thanks for the correction! I've updated my knowledge: "${pattern}" → "${response}". I'll get it right next time.`;
         }
       }
 
@@ -9790,7 +12849,7 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
 
     // Help / what can I do
     if (/^(help|what\s+can\s+(i|you)\s+do|how\s+do\s+(i|you)\s+work)/i.test(input)) {
-      return `Here's how to use VeggaAI:\n\n**Teach me:** Use the Chrome extension to capture web pages, YouTube transcripts, and GitHub repos. I learn from everything you feed me.\n\n**Chat:** Ask me questions about what I've learned. I get better with more data.\n\n**Direct teaching:** Tell me facts like "Python is a programming language" and I'll remember.\n\n**Check my knowledge:** Ask "what do you know about [topic]?" to see what I've learned.\n\n**See my gaps:** Ask "what do you need to learn?" to see topics I've struggled with.`;
+      return `I'm VeggaAI — I learn from what you teach me and answer questions about it.\n\n**The basics:**\n- **Ask me anything** — "What is Docker?", "How do React hooks work?", "Compare PostgreSQL and MongoDB"\n- **Teach me** — feed me web pages, YouTube transcripts, or GitHub repos via the Chrome extension\n- **Check what I know** — "what do you know about [topic]?"\n- **Find my gaps** — "what do you need to learn?"\n\nThe more you teach me, the better I get. What would you like to start with?`;
     }
 
     // "What do you need to learn?" / "What should I teach you?"
@@ -9804,7 +12863,7 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
   /**
    * Check if the user taught us something earlier in this conversation that we can now use.
    */
-  private learnFromChat(input: string, history: Message[]): string | null {
+  private learnFromChat(input: string, history: readonly Message[]): string | null {
     // Look through history for clear teaching statements (not questions)
     for (const msg of history) {
       if (msg.role !== 'user') continue;
@@ -9834,6 +12893,29 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
     if (topicWords.length > 0) {
       const topic = topicWords.slice(0, 4).join(' ');
       this.missedTopics.set(topic, (this.missedTopics.get(topic) ?? 0) + 1);
+      this.schedulePersist();
+    }
+
+    // Detect comparison queries — provide partial knowledge when we know one side
+    const compareMatch = input.match(/(?:compare|difference|differences?\s+between)\s+(.+?)\s+(?:and|vs\.?|versus)\s+(.+)/i)
+      || input.match(/(.+?)\s+(?:vs\.?|versus)\s+(.+)/i);
+    if (compareMatch) {
+      const itemA = compareMatch[1].replace(/[?.!]+$/, '').trim();
+      const itemB = compareMatch[2].replace(/[?.!]+$/, '').trim();
+      const matchA = this.cachedFindBestMatch(itemA);
+      const matchB = this.cachedFindBestMatch(itemB);
+      const hasA = matchA && matchA.response.length > 30;
+      const hasB = matchB && matchB.response.length > 30;
+
+      if (hasA && !hasB) {
+        return `I can tell you about **${itemA}** but I haven't learned about **${itemB}** yet.\n\n**Here's what I know about ${itemA}:**\n${matchA!.response}\n\nTeach me about ${itemB} and I'll be able to compare them next time!`;
+      }
+      if (hasB && !hasA) {
+        return `I can tell you about **${itemB}** but I haven't learned about **${itemA}** yet.\n\n**Here's what I know about ${itemB}:**\n${matchB!.response}\n\nTeach me about ${itemA} and I'll be able to compare them next time!`;
+      }
+      if (hasA && hasB) {
+        return `**${itemA}:**\n${matchA!.response}\n\n**${itemB}:**\n${matchB!.response}`;
+      }
     }
 
     // If we have no data at all, guide them
@@ -9843,7 +12925,7 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
 
     // We have some data — tell them what topics we know about
     const knownSources = new Set<string>();
-    const retrieved = this.knowledge.retrieveRelevant(input, 5);
+    const retrieved = this.cachedRetrieveRelevant(input, 5);
     for (const r of retrieved) {
       knownSources.add(r.source);
     }

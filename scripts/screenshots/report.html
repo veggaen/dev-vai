@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>VeggaAI — Visual Validation Report</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0d0d10; color: #e0e0e0; font-family: system-ui, -apple-system, sans-serif; padding: 2rem; }
+    h1 { color: #a78bfa; margin-bottom: 0.5rem; font-size: 1.8rem; }
+    .subtitle { color: #666; margin-bottom: 2rem; }
+    h2 { color: #c4b5fd; margin: 2rem 0 1rem; border-bottom: 1px solid #333; padding-bottom: 0.5rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+    .card { background: #1a1a24; border-radius: 12px; overflow: hidden; border: 1px solid #2a2a3a; }
+    .card img { width: 100%; display: block; cursor: pointer; transition: transform 0.2s; }
+    .card img:hover { transform: scale(1.02); }
+    .card .info { padding: 1rem; }
+    .card .info h3 { color: #a78bfa; font-size: 0.95rem; margin-bottom: 0.5rem; }
+    .card .info p { color: #888; font-size: 0.82rem; line-height: 1.5; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; margin-right: 4px; }
+    .badge-ok { background: #065f46; color: #6ee7b7; }
+    .badge-warn { background: #78350f; color: #fbbf24; }
+    .badge-info { background: #1e1b4b; color: #a78bfa; }
+    .summary { background: #1a1a24; border: 1px solid #2a2a3a; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; }
+    .summary table { width: 100%; border-collapse: collapse; }
+    .summary th { text-align: left; color: #a78bfa; padding: 6px 12px; border-bottom: 1px solid #333; }
+    .summary td { padding: 6px 12px; border-bottom: 1px solid #1a1a2a; font-size: 0.85rem; }
+    .summary td.num { text-align: right; font-family: 'JetBrains Mono', monospace; }
+    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 9999; justify-content: center; align-items: center; }
+    .modal.open { display: flex; }
+    .modal img { max-width: 95vw; max-height: 95vh; border-radius: 8px; }
+    .modal .close { position: absolute; top: 1rem; right: 1rem; color: #fff; font-size: 2rem; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>VeggaAI — Visual Validation Report</h1>
+  <p class="subtitle">Automated pixel analysis of overlay system, radial menu, cursor, and full feature tour</p>
+
+  <div class="summary">
+    <h2 style="margin-top:0">Validation Summary</h2>
+    <table>
+      <tr><th>Feature</th><th>Status</th><th>Evidence</th></tr>
+      <tr>
+        <td>Vai Cursor</td>
+        <td><span class="badge badge-ok">PASS</span></td>
+        <td>Center purple pixels: 0% → 1.3% when cursor moves to center (+5KB file size delta)</td>
+      </tr>
+      <tr>
+        <td>Radial Menu</td>
+        <td><span class="badge badge-ok">PASS</span></td>
+        <td>File jumps 153→242 KB (+58%). Center bright: 0.7% → 5.8%. Backdrop blur dims full-screen bright from 6.8% → 3.8%</td>
+      </tr>
+      <tr>
+        <td>Radial Sub-Tools</td>
+        <td><span class="badge badge-ok">PASS</span></td>
+        <td>File jumps to 300 KB (+24% over radial-open). Additional visual content in center area</td>
+      </tr>
+      <tr>
+        <td>Demo Buttons</td>
+        <td><span class="badge badge-ok">PASS</span></td>
+        <td>Bottom-right: 25.2% purple consistently. DOM: "Full Tour" + "Vai Demo" buttons visible</td>
+      </tr>
+      <tr>
+        <td>Activity Rail</td>
+        <td><span class="badge badge-ok">PASS</span></td>
+        <td>Left rail: 1.3% purple, 7.7% bright. 6 rail buttons confirmed in DOM</td>
+      </tr>
+      <tr>
+        <td>Full Tour</td>
+        <td><span class="badge badge-ok">PASS</span></td>
+        <td>Tour runs ~45s. Brightness shifts across phases: 6.8% → 22.3% → 2.9% → 1.6% (panels open/close)</td>
+      </tr>
+      <tr>
+        <td>Virtual Keyboard</td>
+        <td><span class="badge badge-warn">PARTIAL</span></td>
+        <td>Type action triggers; file size increases slightly; keyboard may need visibility timing fix</td>
+      </tr>
+    </table>
+  </div>
+
+  <h2>Phase 1 — Overlay States (Interactive)</h2>
+  <div class="grid">
+    <div class="card">
+      <img src="live/01-initial.png" onclick="openModal(this)" />
+      <div class="info">
+        <h3>01 — Initial State <span class="badge badge-info">153 KB</span></h3>
+        <p>Clean dark UI. Demo buttons visible bottom-right (25% purple). Activity rail on left.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="live/02-cursor-visible.png" onclick="openModal(this)" />
+      <div class="info">
+        <h3>02 — Cursor Visible <span class="badge badge-ok">+5 KB</span></h3>
+        <p>Vai cursor at center. Purple area: 0% → 1.3%. Violet glow confirmed.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="live/03-radial-open.png" onclick="openModal(this)" />
+      <div class="info">
+        <h3>03 — Radial Menu Open <span class="badge badge-ok">242 KB (+58%)</span></h3>
+        <p>6-category radial menu. Backdrop blur dims screen. Center bright: 5.8%.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="live/04-radial-tools.png" onclick="openModal(this)" />
+      <div class="info">
+        <h3>04 — Tools Sub-Ring <span class="badge badge-ok">300 KB (peak!)</span></h3>
+        <p>Sub-tools expand. File size peak = most complex visual state of overlay system.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="live/04b-keyboard.png" onclick="openModal(this)" />
+      <div class="info">
+        <h3>04b — Typing + Keyboard <span class="badge badge-warn">167 KB</span></h3>
+        <p>Type action sent. Keyboard renders on typing — may need visibility timing adjustment.</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>Phase 2 — Full Feature Tour (~45s)</h2>
+  <div class="grid">
+    <div class="card">
+      <img src="live/05-tour-3s.png" onclick="openModal(this)" />
+      <div class="info">
+        <h3>05 — Tour @ 3s <span class="badge badge-info">Rail Exploration</span></h3>
+        <p>Tour begins. Cursor explores activity rail. Demo buttons change state.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="live/06-tour-8s.png" onclick="openModal(this)" />
+      <div class="info">
+        <h3>06 — Tour @ 8s <span class="badge badge-ok">Panels Open (22% bright)</span></h3>
+        <p>Full-screen bright: 22.3% (peak!). Sidebar panels opened. Bottom: 26.2% bright.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="live/07-tour-15s.png" onclick="openModal(this)" />
+      <div class="info">
+        <h3>07 — Tour @ 15s <span class="badge badge-info">Radial Phase</span></h3>
+        <p>Center: 5.7% bright — radial open. Backdrop blur active (full: 2.9%).</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="live/08-tour-25s.png" onclick="openModal(this)" />
+      <div class="info">
+        <h3>08 — Tour @ 25s <span class="badge badge-info">Gallery Phase</span></h3>
+        <p>Template gallery or knowledge base interaction. Moderate brightness.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="live/09-tour-35s.png" onclick="openModal(this)" />
+      <div class="info">
+        <h3>09 — Tour @ 35s <span class="badge badge-info">74 KB (darkest)</span></h3>
+        <p>Transition state. Smallest & simplest visual frame. Tour nearing final phase.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="live/10-tour-45s.png" onclick="openModal(this)" />
+      <div class="info">
+        <h3>10 — Tour End <span class="badge badge-info">Final State</span></h3>
+        <p>Tour complete. Center: 8.4% bright — possible summary overlay or radial.</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>Pixel Analysis Data</h2>
+  <div class="summary">
+    <table>
+      <tr><th>Screenshot</th><th>Size</th><th class="num">Full Purple</th><th class="num">Full Bright</th><th class="num">Center Purple</th><th class="num">Center Bright</th><th class="num">BotRight Purple</th></tr>
+      <tr><td>01-initial</td><td>153 KB</td><td class="num">0.7%</td><td class="num">6.8%</td><td class="num">0.0%</td><td class="num">0.7%</td><td class="num">25.2%</td></tr>
+      <tr><td>02-cursor</td><td>158 KB</td><td class="num">0.8%</td><td class="num">6.9%</td><td class="num">1.3%</td><td class="num">3.1%</td><td class="num">25.2%</td></tr>
+      <tr><td>03-radial</td><td>242 KB</td><td class="num">0.5%</td><td class="num">3.8%</td><td class="num">0.5%</td><td class="num">5.8%</td><td class="num">25.2%</td></tr>
+      <tr><td>04-tools</td><td>300 KB</td><td class="num">0.6%</td><td class="num">5.0%</td><td class="num">0.4%</td><td class="num">5.1%</td><td class="num">25.2%</td></tr>
+      <tr><td>04b-keyboard</td><td>167 KB</td><td class="num">0.8%</td><td class="num">7.0%</td><td class="num">0.0%</td><td class="num">0.7%</td><td class="num">25.2%</td></tr>
+      <tr><td>05-tour-3s</td><td>155 KB</td><td class="num">0.3%</td><td class="num">6.6%</td><td class="num">0.0%</td><td class="num">0.7%</td><td class="num">0.0%</td></tr>
+      <tr><td>06-tour-8s</td><td>116 KB</td><td class="num">0.2%</td><td class="num">22.3%</td><td class="num">0.0%</td><td class="num">9.1%</td><td class="num">0.0%</td></tr>
+      <tr><td>07-tour-15s</td><td>177 KB</td><td class="num">0.1%</td><td class="num">2.9%</td><td class="num">0.5%</td><td class="num">5.7%</td><td class="num">0.0%</td></tr>
+      <tr><td>08-tour-25s</td><td>186 KB</td><td class="num">0.2%</td><td class="num">4.5%</td><td class="num">0.0%</td><td class="num">1.6%</td><td class="num">0.0%</td></tr>
+      <tr><td>09-tour-35s</td><td>74 KB</td><td class="num">0.2%</td><td class="num">2.2%</td><td class="num">0.0%</td><td class="num">0.2%</td><td class="num">0.0%</td></tr>
+      <tr><td>10-tour-45s</td><td>162 KB</td><td class="num">0.0%</td><td class="num">1.6%</td><td class="num">0.1%</td><td class="num">8.4%</td><td class="num">0.0%</td></tr>
+    </table>
+  </div>
+
+  <div class="modal" id="modal" onclick="closeModal()">
+    <span class="close">&times;</span>
+    <img id="modalImg" />
+  </div>
+  <script>
+    function openModal(img) {
+      document.getElementById('modalImg').src = img.src;
+      document.getElementById('modal').classList.add('open');
+    }
+    function closeModal() { document.getElementById('modal').classList.remove('open'); }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+  </script>
+</body>
+</html>

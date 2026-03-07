@@ -33,6 +33,8 @@ interface Props {
   stackName: string;
   tierName: string;
   startTime: number;
+  onCancel?: () => void;
+  onRetry?: () => void;
 }
 
 /* ── Constants ── */
@@ -69,33 +71,41 @@ function formatMs(ms: number): string {
 
 /* ── Component ── */
 
-export function DeployProgress({ steps, stackName, tierName, startTime }: Props) {
-  const _completedSteps = steps.filter((s) => s.status === 'done' || s.status === 'skipped');
-  const _activeSteps = steps.filter((s) => s.status !== 'pending' && s.status !== 'skipped');
-  const hasFailed = steps.some((s) => s.status === 'failed');
-  const allDone = steps.every((s) => s.status === 'done' || s.status === 'skipped');
+/** Steps that are skipped because the tier doesn't include them (not failures) */
+const TIER_NA_MESSAGE = 'Not included in this tier';
+
+export function DeployProgress({ steps, stackName, tierName, startTime, onCancel, onRetry }: Props) {
+  // Filter out steps that are N/A for this tier — keeps the list clean
+  const visibleSteps = steps.filter(
+    (s) => !(s.status === 'skipped' && s.message === TIER_NA_MESSAGE),
+  );
+
+  const hasFailed = visibleSteps.some((s) => s.status === 'failed');
+  const allDone = visibleSteps.every((s) => s.status === 'done' || s.status === 'skipped');
 
   const progress = useMemo(() => {
-    if (steps.length === 0) return 0;
-    const weights: Record<string, number> = {
-      scaffold: 5,
+    if (visibleSteps.length === 0) return 0;
+    const baseWeights: Record<string, number> = {
+      scaffold: 10,
       install: 40,
       build: 20,
       docker: 15,
       test: 10,
-      start: 5,
+      start: 10,
       verify: 5,
     };
-    let totalWeight = 0;
-    let completedWeight = 0;
-    for (const step of steps) {
-      const w = weights[step.id] ?? 10;
-      totalWeight += w;
-      if (step.status === 'done' || step.status === 'skipped') completedWeight += w;
-      else if (step.status === 'running') completedWeight += w * 0.5;
+    // Calculate total weight of visible steps, then normalize
+    let rawTotal = 0;
+    for (const step of visibleSteps) rawTotal += baseWeights[step.id] ?? 10;
+
+    let completedFraction = 0;
+    for (const step of visibleSteps) {
+      const w = (baseWeights[step.id] ?? 10) / rawTotal; // normalized 0-1
+      if (step.status === 'done' || step.status === 'skipped') completedFraction += w;
+      else if (step.status === 'running') completedFraction += w * 0.5;
     }
-    return totalWeight > 0 ? Math.round((completedWeight / totalWeight) * 100) : 0;
-  }, [steps]);
+    return Math.min(100, Math.round(completedFraction * 100));
+  }, [visibleSteps]);
 
   const elapsed = Date.now() - startTime;
 
@@ -131,7 +141,7 @@ export function DeployProgress({ steps, stackName, tierName, startTime }: Props)
 
       {/* Steps list */}
       <div className="flex-1 space-y-1 overflow-y-auto">
-        {steps.map((step, i) => {
+        {visibleSteps.map((step, i) => {
           const StepIcon = STEP_ICONS[step.id] ?? Package;
           const isActive = step.status === 'running';
           const isDone = step.status === 'done';
@@ -198,7 +208,7 @@ export function DeployProgress({ steps, stackName, tierName, startTime }: Props)
               </div>
 
               {/* Connector line */}
-              {i < steps.length - 1 && (
+              {i < visibleSteps.length - 1 && (
                 <div className="ml-[15px] h-1 border-l border-zinc-800" />
               )}
             </div>
@@ -215,10 +225,34 @@ export function DeployProgress({ steps, stackName, tierName, startTime }: Props)
         </div>
       )}
       {hasFailed && (
-        <div className="mt-3 rounded-lg border border-red-800/30 bg-red-500/5 p-3 text-center">
-          <p className="text-xs font-medium text-red-400">
+        <div className="mt-3 rounded-lg border border-red-800/30 bg-red-500/5 p-3">
+          <p className="mb-2 text-center text-xs font-medium text-red-400">
             Deploy had issues — check logs above
           </p>
+          <div className="flex items-center justify-center gap-2">
+            {onRetry && (
+              <button onClick={onRetry}
+                className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:bg-zinc-800">
+                Retry
+              </button>
+            )}
+            {onCancel && (
+              <button onClick={onCancel}
+                className="rounded-lg border border-red-800/40 px-3 py-1.5 text-xs text-red-400 transition-colors hover:bg-red-500/10">
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Cancel button — always available during deploy */}
+      {!allDone && !hasFailed && onCancel && (
+        <div className="mt-3 flex justify-center">
+          <button onClick={onCancel}
+            className="rounded-lg border border-zinc-700 px-4 py-1.5 text-xs text-zinc-400 transition-colors hover:border-red-800/40 hover:bg-red-500/10 hover:text-red-400">
+            Cancel deploy
+          </button>
         </div>
       )}
     </div>

@@ -1,0 +1,81 @@
+# ═══════════════════════════════════════════════════════════════
+# VeggaAI Visual Testing — Docker Compose
+#
+# Orchestrates:
+# 1. app        — The template running in dev mode
+# 2. browser    — Selenium Chrome with VNC for visual debugging
+# 3. vai-agent  — Runs demo sequences against the browser
+#
+# Usage:
+#   docker compose -f docker/docker-compose.visual-test.yml up
+#   # View live at: http://localhost:7900 (VNC via browser)
+#   # App at:       http://localhost:4100
+#   # Vai agent:    Runs demo sequence automatically
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  # ── The Template App ──
+  # Runs whichever template is being tested
+  app:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ${TEMPLATE_DIR:-.}:/app
+    command: sh -c "npm install && npm run dev -- --port 4100 --host 0.0.0.0"
+    ports:
+      - "4100:4100"
+    environment:
+      - NODE_ENV=development
+      - PORT=4100
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4100/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    networks:
+      - vai-test
+
+  # ── Selenium Browser with VNC ──
+  # Provides a real Chrome browser that Vai can control
+  # VNC viewable at http://localhost:7900 (no-VNC web viewer)
+  browser:
+    image: selenium/standalone-chrome:latest
+    ports:
+      - "4444:4444"   # Selenium WebDriver
+      - "7900:7900"   # noVNC web viewer (watch the cursor!)
+    environment:
+      - SE_VNC_NO_PASSWORD=1
+      - SE_SCREEN_WIDTH=1920
+      - SE_SCREEN_HEIGHT=1080
+      - SE_NODE_MAX_SESSIONS=1
+    shm_size: "2g"
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - vai-test
+
+  # ── Vai Demo Agent ──
+  # Reads demo.sequence.json and executes it via Selenium WebDriver
+  vai-agent:
+    image: node:22-alpine
+    working_dir: /agent
+    volumes:
+      - ../scripts:/agent/scripts
+      - ${TEMPLATE_DIR:-.}:/template:ro
+    command: sh -c "npm install selenium-webdriver && node /agent/scripts/vai-demo-runner.mjs"
+    environment:
+      - APP_URL=http://app:4100
+      - SELENIUM_URL=http://browser:4444/wd/hub
+      - DEMO_SEQUENCE=/template/demo.sequence.json
+      - SCREENSHOT_DIR=/agent/screenshots
+    depends_on:
+      browser:
+        condition: service_started
+    networks:
+      - vai-test
+
+networks:
+  vai-test:
+    driver: bridge

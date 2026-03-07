@@ -1,0 +1,131 @@
+# ═══════════════════════════════════════════════════════════════
+# VeggaAI — Docker Compose (Production / Staging)
+#
+# Services:
+#   runtime    — VeggaAI backend (Fastify + VaiEngine + SQLite)
+#   desktop    — VeggaAI frontend (Nginx serving React SPA)
+#   postgres   — PostgreSQL 16 (for future multi-user scaling)
+#   traefik    — Reverse proxy + auto-TLS (for public access)
+#
+# Usage:
+#   docker compose up -d                    # Start all services
+#   docker compose up -d runtime desktop    # Start core only
+#   docker compose logs -f runtime          # Watch runtime logs
+#   docker compose exec runtime sh          # Shell into runtime
+#
+# When scaling to multi-user:
+#   1. Flip VAI_DB_DRIVER=postgres in .env
+#   2. Uncomment postgres service
+#   3. Enable Traefik labels for HTTPS
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  # ── VeggaAI Runtime (API + AI Engine) ──
+  runtime:
+    build:
+      context: .
+      target: runtime
+    container_name: vai-runtime
+    restart: unless-stopped
+    ports:
+      - "${VAI_PORT:-3006}:3006"
+    volumes:
+      - vai-data:/app/data
+      - vai-sandboxes:/app/sandboxes
+    environment:
+      - VAI_PORT=3006
+      - VAI_DB_PATH=/app/data/vai.db
+      - VAI_SANDBOX_DIR=/app/sandboxes
+      - NODE_ENV=production
+      # Future: PostgreSQL connection
+      # - DATABASE_URL=postgresql://vai:${POSTGRES_PASSWORD:-vai_secret}@postgres:5432/vai
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3006/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    networks:
+      - vai-net
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.api.rule=Host(`api.vai.local`) || PathPrefix(`/api`)"
+    #   - "traefik.http.services.api.loadbalancer.server.port=3006"
+
+  # ── VeggaAI Desktop (Nginx + React SPA) ──
+  desktop:
+    build:
+      context: .
+      target: desktop
+    container_name: vai-desktop
+    restart: unless-stopped
+    ports:
+      - "${DESKTOP_PORT:-5173}:80"
+    depends_on:
+      runtime:
+        condition: service_healthy
+    networks:
+      - vai-net
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.web.rule=Host(`vai.local`)"
+    #   - "traefik.http.services.web.loadbalancer.server.port=80"
+
+  # ── PostgreSQL (uncomment when scaling to multi-user) ──
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: vai-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: vai
+  #     POSTGRES_USER: vai
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vai_secret}
+  #   volumes:
+  #     - vai-pgdata:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U vai"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 10
+  #   networks:
+  #     - vai-net
+
+  # ── Traefik (uncomment for public access + auto-HTTPS) ──
+  # traefik:
+  #   image: traefik:v3.0
+  #   container_name: vai-proxy
+  #   restart: unless-stopped
+  #   command:
+  #     - "--api.insecure=true"
+  #     - "--providers.docker=true"
+  #     - "--providers.docker.exposedbydefault=false"
+  #     - "--entrypoints.web.address=:80"
+  #     - "--entrypoints.websecure.address=:443"
+  #     - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+  #     - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@vai.ai}"
+  #     - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #     - "8080:8080"   # Traefik dashboard
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #     - vai-certs:/letsencrypt
+  #   networks:
+  #     - vai-net
+
+volumes:
+  vai-data:
+    driver: local
+  vai-sandboxes:
+    driver: local
+  # vai-pgdata:
+  #   driver: local
+  # vai-certs:
+  #   driver: local
+
+networks:
+  vai-net:
+    driver: bridge

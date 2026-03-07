@@ -1,0 +1,88 @@
+[
+  {
+    "step": "scaffold",
+    "status": "running",
+    "message": "Finding template..."
+  },
+  {
+    "step": "scaffold",
+    "status": "running",
+    "message": "Writing 42 files..."
+  },
+  {
+    "step": "scaffold",
+    "status": "done",
+    "message": "42 files written",
+    "projectId": "01eb219f",
+    "elapsed": 33
+  },
+  {
+    "step": "install",
+    "status": "running",
+    "message": "Installing packages..."
+  },
+  {
+    "step": "install",
+    "status": "done",
+    "message": "Dependencies installed",
+    "elapsed": 27986
+  },
+  {
+    "step": "build",
+    "status": "running",
+    "message": "Building application..."
+  },
+  {
+    "step": "build",
+    "status": "done",
+    "message": "Build successful",
+    "elapsed": 41774
+  },
+  {
+    "step": "docker",
+    "status": "running",
+    "message": "Building Docker image..."
+  },
+  {
+    "step": "docker",
+    "status": "done",
+    "message": "Docker build verified",
+    "elapsed": 232327
+  },
+  {
+    "step": "test",
+    "status": "running",
+    "message": "Running test suite..."
+  },
+  {
+    "step": "test",
+    "status": "done",
+    "message": "All tests passed (1)",
+    "elapsed": 233927
+  },
+  {
+    "step": "start",
+    "status": "running",
+    "message": "Starting dev server..."
+  },
+  {
+    "step": "start",
+    "status": "done",
+    "message": "Server starting on port 4107",
+    "port": 4107,
+    "elapsed": 233938
+  },
+  {
+    "step": "verify",
+    "status": "running",
+    "message": "Waiting for server to be ready..."
+  },
+  {
+    "step": "verify",
+    "status": "done",
+    "message": "Server is healthy and ready!",
+    "projectId": "01eb219f",
+    "port": 4107,
+    "elapsed": 233944
+  }
+]

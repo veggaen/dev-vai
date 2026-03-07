@@ -1,0 +1,198 @@
+﻿Vai Training Corpus loaded: 373 scenarios
+
+ÔòöÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòù
+Ôòæ         VAI MENTOR ÔÇö Adaptive Lesson                      Ôòæ
+ÔòÜÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòØ
+
+  Track: Intellectual Honesty
+  Principle: "The most dangerous answer is a confident wrong one. The most valuable response is "I don't know, but here's how I'd find out.""
+  Difficulty: expert
+
+  ÔöÇÔöÇ Situation ÔöÇÔöÇ
+  Vegga asks: "Will AI replace frontend developers in 5 years?"
+  Context: This is a question where many people have strong opinions but nobody has evidence.
+
+  ­ƒÄ» How do you give a calibrated answer on a genuinely uncertain topic? What's the difference between "I think" and "I'm 70% confident"?
+
+  Hints (if stuck):
+    1. Most predictions about technology timelines are overconfident.
+    2. The honest answer separates what you CAN predict from what you CAN'T.
+    3. Calibrated uncertainty = specific confidence levels on specific claims.
+
+  ­ƒÆí Teaching point (after attempting): "Calibration is the skill of matching your confidence to the evidence. "I think" is ambiguous. "I'm 70% confident that X, because Y and Z, but I could be wrong if A" is useful to the person making decisions. The difference matters when actual money or careers are at stake."
+
+ÔòöÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòù
+Ôòæ       VAI VISUAL TRAINING ÔÇö Cursor Autonomy Practice     Ôòæ
+ÔòÜÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòØ
+
+  Mode: ­ƒö┤ BLIND (no JS shortcuts)
+  Drill: 15
+
+  ­ƒÜÇ Launching browser...
+    ­ƒÅÀ´©Å Vai
+  Viewport: 1920├ù1015
+
+    ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    DRILL 15 ÔÇö Mouse & Keyboard Mastery
+    Teaching Vai to navigate with mouse + keyboard.
+    All actions visible: cursor, LiteKeyboard, scroll indicator.
+    ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+
+    Exercise 1: Mouse Movement & Click Precision
+    ­ƒöì Found 28 elements
+      Found 15 buttons to practice with
+      ÔåÆ Moving mouse to "Vai Actions1" at (156, 945)
+    ­ƒû▒´©Å ÔåÆ (156, 945)
+    ­ƒû▒´©Å ÔåÆ (156, 945)
+    ­ƒû▒´©Å Hover @ (156, 945)
+    ­ƒæü´©Å Screenshot: 001-drill15-hover-Vai-Actions1.png
+        Ô£ô Cursor positioned correctly over "Vai Actions1"
+      ÔåÆ Moving mouse to "V" at (24, 26)
+    ­ƒû▒´©Å ÔåÆ (24, 26)
+    ­ƒû▒´©Å ÔåÆ (24, 26)
+    ­ƒû▒´©Å Hover @ (24, 26)
+    ­ƒæü´©Å Screenshot: 002-drill15-hover-V.png
+        Ô£ô Cursor positioned correctly over "V"
+      ÔåÆ Moving mouse to "Preview" at (1879, 22)
+    ­ƒû▒´©Å ÔåÆ (1879, 22)
+    ­ƒû▒´©Å ÔåÆ (1879, 22)
+    ­ƒû▒´©Å Hover @ (1879, 22)
+    ­ƒæü´©Å Screenshot: 003-drill15-hover-Preview.png
+        Ô£ô Cursor positioned correctly over "Preview"
+      Ô£ô PASSED ÔÇö Moved to 3/3 buttons precisely
+
+    Exercise 2: Scroll Discovery & Execution
+    ­ƒöì Found 28 elements
+    ­ƒô£ ÔöÇÔöÇ Scrollable Areas ÔöÇÔöÇ
+    ­ƒô£   Found 1 scrollable regions
+    ­ƒô£   ­ƒô£ "w-72" (288├ù200) Ôåò129px hidden  ÔÇö 1 children
+      Found 1 scrollable areas
+      ÔåÆ Scrolling "w-72" (288├ù200, 129px hidden)
+    ­ƒû▒´©Å ÔåÆ (156, 903)
+    ­ƒô£ Scroll at (156, 903) by 200px
+    ­ƒæü´©Å Screenshot: 004-drill15-scroll-w-72.png
+        Ô£ô Scrolled successfully (scrollTop: 193)
+    ­ƒô£ Scroll at (156, 903) by -200px
+      Ô£ô PASSED ÔÇö Scrolled 1 area(s) with visual feedback
+
+    Exercise 3: Keyboard Single Keys ÔÇö Tab, Enter, Escape
+    ­ƒöì Found 28 elements
+      ÔåÆ Pressing Tab
+    ­ƒöæ Tab
+        Ô£ô Tab pressed ÔÇö visible on LiteKeyboard
+      ÔåÆ Pressing Escape
+    ­ƒöæ Escape
+        Ô£ô Escape pressed ÔÇö visible on LiteKeyboard
+      ÔåÆ Pressing Enter
+    ­ƒöæ Enter
+        Ô£ô Enter pressed ÔÇö visible on LiteKeyboard
+      ÔåÆ Pressing Arrow keys (Ôåæ Ôåô ÔåÉ ÔåÆ)
+    ­ƒöæ ArrowUp
+    ­ƒöæ ArrowDown
+    ­ƒöæ ArrowLeft
+    ­ƒöæ ArrowRight
+        Ô£ô All 4 arrow keys pressed ÔÇö visible on both overlays
+    ­ƒæü´©Å Screenshot: 005-drill15-keyboard-singles.png
+      Ô£ô PASSED ÔÇö 4 key types shown on LiteKeyboard
+
+    Exercise 4: Keyboard Combos ÔÇö Ctrl+A, Ctrl+C, Shift+Tab
+      ÔåÆ Pressing Ctrl+A
+    ­ƒöæ Ôî¿ Ctrl+A
+    ­ƒæü´©Å Screenshot: 006-drill15-combo-ctrl-a.png
+        Ô£ô Ctrl+A ÔÇö visible on LiteKeyboard (Ctrl amber, A violet)
+      ÔåÆ Pressing Ctrl+C
+    ­ƒöæ Ôî¿ Ctrl+C
+        Ô£ô Ctrl+C ÔÇö visible on LiteKeyboard
+      ÔåÆ Pressing Shift+Tab
+    ­ƒöæ Ôî¿ Shift+Tab
+    ­ƒæü´©Å Screenshot: 007-drill15-combo-shift-tab.png
+        Ô£ô Shift+Tab ÔÇö visible on LiteKeyboard
+      ÔåÆ Pressing Ctrl+Shift+P
+    ­ƒöæ Ôî¿ Ctrl+Shift+P
+        Ô£ô Ctrl+Shift+P ÔÇö visible on LiteKeyboard (double modifier)
+    ­ƒæü´©Å Screenshot: 008-drill15-combo-done.png
+      Ô£ô PASSED ÔÇö 4 combos displayed on LiteKeyboard
+
+    Exercise 5: Combined Mouse + Keyboard Workflow
+    ­ƒöì Found 28 elements
+      No dropdown found, trying textarea...
+      Step 1: Click textarea at (984, 910)
+    ­ƒû▒´©Å ÔåÆ (984, 910)
+    ­ƒæå @ (984, 910)
+      Step 2: Ctrl+A to select all text
+    ­ƒöæ Ôî¿ Ctrl+A
+      Step 3: Type new text
+    ­ƒöì Found 28 elements
+    ­ƒÄ» Textarea at (984, 910) 734├ù56
+    ­ƒû▒´©Å ÔåÆ (984, 910)
+    ­ƒæå @ (984, 910)
+    Ôî¿´©Å 37 chars typed, 0 received (Ô£ù)
+    ­ƒæü´©Å Screenshot: 009-drill15-combined-done.png
+      Ô£ô PASSED ÔÇö 3 combined mouse+keyboard steps
+
+    Exercise 6: Self-Directed Navigation ÔÇö Read UI, Plan, Execute
+      Step 1: Read all visible text...
+    ­ƒôû ÔöÇÔöÇ UI Text Comprehension ÔöÇÔöÇ
+    ­ƒôû   2 content blocks, 11 buttons, 0 dropdowns
+    ­ƒôû   ­ƒôî "What shall we think through?" at y=252
+    ­ƒôû   ­ƒöÿ Button: "Vai Actions33" at (156, 787)
+    ­ƒôû   ­ƒöÿ Button: "V" at (24, 26)
+    ­ƒôû   ­ƒöÿ Button: "Preview" at (1879, 22)
+    ­ƒôû   ­ƒöÿ Button: "Scaffold a Next.js appBuild" at (984, 357)
+    ­ƒôû   ­ƒöÿ Button: "Create a REST APIBuild" at (984, 421)
+    ­ƒôû   ­ƒöÿ Button: "Build a landing pageBuild" at (984, 485)
+    ­ƒôû   ­ƒöÿ Button: "Deploy from a templateDeploy" at (984, 549)
+    ­ƒôû   ­ƒöÿ Button: "Explain React 19 featuresLearn" at (984, 613)
+    ­ƒôû   ­ƒöÿ Button: "Compare Prisma vs DrizzleExplore" at (984, 677)
+    ­ƒôû   ­ƒöÿ Button: "Chat" at (702, 954)
+        Found: 1 headings, 11 buttons, 0 dropdowns
+        Ô£ô Successfully read UI text
+      Step 2: Planning navigation based on UI text...
+        Plan: navigate 3 targets
+      Step 3: Executing navigation plan...
+        ÔåÆ Moving to button: "Vai Actions33" at (156, 787)
+    ­ƒû▒´©Å ÔåÆ (156, 787)
+    ­ƒû▒´©Å ÔåÆ (156, 787)
+    ­ƒû▒´©Å Hover @ (156, 787)
+    ­ƒû▒´©Å ÔåÆ (156, 787)
+    ­ƒæå @ (156, 787)
+    ­ƒöæ Escape
+        ÔåÆ Moving to button: "Preview" at (1879, 22)
+    ­ƒû▒´©Å ÔåÆ (1879, 22)
+    ­ƒû▒´©Å ÔåÆ (1879, 22)
+    ­ƒû▒´©Å Hover @ (1879, 22)
+    ­ƒû▒´©Å ÔåÆ (1879, 22)
+    ­ƒæå @ (1879, 22)
+    ­ƒöæ Escape
+        ÔåÆ Moving to button: "Scaffold a Next.js appBuild" at (984, 357)
+    ­ƒû▒´©Å ÔåÆ (984, 357)
+    ­ƒû▒´©Å ÔåÆ (984, 357)
+    ­ƒû▒´©Å Hover @ (984, 357)
+    ­ƒû▒´©Å ÔåÆ (984, 357)
+    ­ƒæå @ (984, 357)
+    ­ƒöæ Escape
+        Ô£ô Executed 3 navigation actions
+    ­ƒæü´©Å Screenshot: 010-drill15-self-nav-done.png
+      Ô£ô PASSED ÔÇö Read ÔåÆ Plan ÔåÆ Execute workflow (3/3 steps)
+
+    ­ƒæü´©Å Screenshot: 011-drill15-mastery-done.png
+
+    Result: 6/6 in 49490ms
+
+    ­ƒæü´©Å Screenshot: 012-training-complete.png
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  VISUAL TRAINING COMPLETE
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  Mode: BLIND
+  Total time: 49630ms (49.6s)
+  Screenshots: 82
+
+  ÔöÇÔöÇ Drill Results ÔöÇÔöÇ
+    mouse-keyboard-mastery       6/6 (100%) 49490ms
+
+  TOTAL: 6/6 (100%)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  ­ƒôï Report: C:\Users\v3gga\Documents\dev-vai\screenshots\vai-gym\visual-training\visual-training-report.json
+  Browser stays open 5s...

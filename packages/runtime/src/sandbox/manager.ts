@@ -1,11 +1,56 @@
 import { mkdir, writeFile, readFile, rm, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { getTemplate, SANDBOX_TEMPLATES, type SandboxTemplate } from './templates.js';
+
+/**
+ * Console bridge script — injected into sandbox HTML files.
+ * Captures console.log/warn/error/info and uncaught errors,
+ * then postMessages them to the parent window so DebugConsole can show them.
+ */
+const CONSOLE_BRIDGE_SCRIPT = `
+<script data-vai-console-bridge>
+(function() {
+  if (window.__vaiConsoleBridge) return;
+  window.__vaiConsoleBridge = true;
+  var methods = ['log', 'warn', 'error', 'info'];
+  methods.forEach(function(method) {
+    var orig = console[method];
+    console[method] = function() {
+      try {
+        var args = Array.prototype.slice.call(arguments).map(function(a) {
+          if (typeof a === 'object') try { return JSON.stringify(a); } catch(e) { return String(a); }
+          return String(a);
+        });
+        window.parent.postMessage({
+          type: 'vai-sandbox-console',
+          method: method,
+          args: args
+        }, '*');
+      } catch(e) {}
+      return orig.apply(console, arguments);
+    };
+  });
+  window.addEventListener('error', function(e) {
+    window.parent.postMessage({
+      type: 'vai-sandbox-console',
+      method: 'error',
+      args: ['[Uncaught] ' + (e.message || e) + (e.filename ? ' at ' + e.filename + ':' + e.lineno : '')]
+    }, '*');
+  });
+  window.addEventListener('unhandledrejection', function(e) {
+    window.parent.postMessage({
+      type: 'vai-sandbox-console',
+      method: 'error',
+      args: ['[UnhandledRejection] ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason))]
+    }, '*');
+  });
+})();
+</script>`;
 
 export interface SandboxProject {
   id: string;
@@ -115,6 +160,15 @@ export class SandboxManager {
     }));
   }
 
+  /** Resolve a file path within the sandbox root, guarding against path traversal. */
+  private safePath(rootDir: string, filePath: string): string {
+    const full = resolve(rootDir, filePath);
+    if (!full.startsWith(rootDir)) {
+      throw new Error(`Path traversal blocked: ${filePath}`);
+    }
+    return full;
+  }
+
   /** Write files to the sandbox project */
   async writeFiles(projectId: string, files: FileWrite[]): Promise<void> {
     const project = this.projects.get(projectId);
@@ -124,10 +178,15 @@ export class SandboxManager {
     project.logs.push(`Writing ${files.length} file(s)...`);
 
     for (const file of files) {
-      const fullPath = join(project.rootDir, file.path);
+      const fullPath = this.safePath(project.rootDir, file.path);
       await mkdir(dirname(fullPath), { recursive: true });
-      await writeFile(fullPath, file.content, 'utf-8');
-      project.files[file.path] = file.content;
+      // Inject console bridge into HTML files so iframe errors are visible
+      let content = file.content;
+      if (file.path.endsWith('.html') && content.includes('<head>') && !content.includes('vai-console-bridge')) {
+        content = content.replace('<head>', '<head>' + CONSOLE_BRIDGE_SCRIPT);
+      }
+      await writeFile(fullPath, content, 'utf-8');
+      project.files[file.path] = content;
       project.logs.push(`  ✓ ${file.path}`);
     }
   }
@@ -136,7 +195,7 @@ export class SandboxManager {
   async readFile(projectId: string, filePath: string): Promise<string> {
     const project = this.projects.get(projectId);
     if (!project) throw new Error(`Sandbox project not found: ${projectId}`);
-    return readFile(join(project.rootDir, filePath), 'utf-8');
+    return readFile(this.safePath(project.rootDir, filePath), 'utf-8');
   }
 
   /** List files in the sandbox project directory tree */
@@ -144,7 +203,7 @@ export class SandboxManager {
     const project = this.projects.get(projectId);
     if (!project) throw new Error(`Sandbox project not found: ${projectId}`);
 
-    const dir = join(project.rootDir, subDir);
+    const dir = this.safePath(project.rootDir, subDir);
     if (!existsSync(dir)) return [];
 
     const result: string[] = [];
@@ -173,7 +232,7 @@ export class SandboxManager {
       // Detect package manager from lockfiles
       const usePnpm = existsSync(join(project.rootDir, 'pnpm-lock.yaml'));
       const cmd = usePnpm ? 'pnpm' : 'npm';
-      const args = ['install'];
+      const args = usePnpm ? ['install'] : ['install', '--legacy-peer-deps'];
 
       const proc = spawn(cmd, args, {
         cwd: project.rootDir,
@@ -222,6 +281,53 @@ export class SandboxManager {
     project.devPort = port;
     project.status = 'building';
     project.logs.push(`Starting dev server on port ${port}...`);
+
+    // Inject console bridge for Next.js projects (no index.html to inject into)
+    const layoutPath = join(project.rootDir, 'src', 'app', 'layout.tsx');
+    if (existsSync(layoutPath)) {
+      try {
+        const bridgeComponentPath = join(project.rootDir, 'src', 'app', 'ConsoleBridge.tsx');
+        if (!existsSync(bridgeComponentPath)) {
+          const bridgeComponent = [
+            "'use client';",
+            "import { useEffect } from 'react';",
+            'export function ConsoleBridge() {',
+            '  useEffect(() => {',
+            '    if ((window as any).__vaiConsoleBridge) return;',
+            '    (window as any).__vaiConsoleBridge = true;',
+            "    const methods = ['log', 'warn', 'error', 'info'] as const;",
+            '    methods.forEach((method) => {',
+            '      const orig = console[method];',
+            '      console[method] = (...a: unknown[]) => {',
+            '        try {',
+            "          const s = a.map((x) => typeof x === 'object' ? JSON.stringify(x) : String(x));",
+            "          window.parent.postMessage({ type: 'vai-sandbox-console', method, args: s }, '*');",
+            '        } catch {}',
+            '        return orig.apply(console, a);',
+            '      };',
+            '    });',
+            "    window.addEventListener('error', (e) => {",
+            "      window.parent.postMessage({ type: 'vai-sandbox-console', method: 'error', args: ['[Uncaught] ' + (e.message || e)] }, '*');",
+            '    });',
+            "    window.addEventListener('unhandledrejection', (e) => {",
+            "      window.parent.postMessage({ type: 'vai-sandbox-console', method: 'error', args: ['[UnhandledRejection] ' + (e.reason?.message || String(e.reason))] }, '*');",
+            '    });',
+            '  }, []);',
+            '  return null;',
+            '}',
+          ].join('\n');
+          await writeFile(bridgeComponentPath, bridgeComponent, 'utf-8');
+          // Inject into layout.tsx
+          let layout = await readFile(layoutPath, 'utf-8');
+          if (!layout.includes('ConsoleBridge')) {
+            layout = "import { ConsoleBridge } from './ConsoleBridge';\n" + layout;
+            layout = layout.replace(/<body([^>]*)>/, '<body$1><ConsoleBridge />');
+            await writeFile(layoutPath, layout, 'utf-8');
+          }
+          project.logs.push('  \u2713 Console bridge injected (Next.js)');
+        }
+      } catch { /* Non-critical \u2014 console capture may not work */ }
+    }
 
     // Detect what to run
     let cmd: string;

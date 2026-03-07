@@ -13,12 +13,30 @@ interface ImageAttachment {
   sizeBytes?: number;
 }
 
-interface ChatMessage {
+export interface SearchSourceUI {
+  url: string;
+  title: string;
+  domain: string;
+  snippet: string;
+  favicon: string;
+  trustTier: 'high' | 'medium' | 'low' | 'untrusted';
+  trustScore: number;
+}
+
+export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   imageId?: string | null;
-  imagePreview?: string; // temp data URL for display before server-side storage
+  imagePreview?: string;
+  /** Search sources attached to this response */
+  sources?: SearchSourceUI[];
+  /** Follow-up question suggestions */
+  followUps?: string[];
+  /** Confidence score (0-1) from search pipeline */
+  confidence?: number;
+  /** User feedback: true = helpful, false = not helpful, undefined = no feedback */
+  feedback?: boolean;
 }
 
 interface Conversation {
@@ -34,6 +52,8 @@ interface ChatState {
   activeConversationId: string | null;
   messages: ChatMessage[];
   isStreaming: boolean;
+  /** When false, Vai will NOT learn from this conversation (protective parenting) */
+  learningEnabled: boolean;
 
   fetchConversations: () => Promise<void>;
   createConversation: (modelId: string) => Promise<string>;
@@ -42,6 +62,8 @@ interface ChatState {
   sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string) => void;
   stopStreaming: () => void;
   appendToLastMessage: (text: string) => void;
+  setFeedback: (messageId: string, helpful: boolean) => void;
+  setLearningEnabled: (enabled: boolean) => void;
 }
 
 let ws: WebSocket | null = null;
@@ -89,6 +111,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeConversationId: null,
   messages: [],
   isStreaming: false,
+  learningEnabled: true,
 
   fetchConversations: async () => {
     try {
@@ -201,6 +224,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (systemPrompt) {
         payload.systemPrompt = systemPrompt;
       }
+      if (!get().learningEnabled) {
+        payload.noLearn = true;
+      }
       ws!.send(JSON.stringify(payload));
 
       // Auto-create session + capture user message in dev logs
@@ -219,10 +245,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
         type: string;
         textDelta?: string;
         reasoningDelta?: string;
+        sources?: SearchSourceUI[];
+        followUps?: string[];
+        confidence?: number;
         error?: string;
       };
 
-      if (chunk.type === 'text_delta' && chunk.textDelta) {
+      if (chunk.type === 'sources' && chunk.sources) {
+        // Attach sources + follow-ups + confidence to the current assistant message
+        set((state) => {
+          const msgs = [...state.messages];
+          const last = msgs[msgs.length - 1];
+          if (last && last.role === 'assistant') {
+            msgs[msgs.length - 1] = {
+              ...last,
+              sources: chunk.sources,
+              followUps: chunk.followUps,
+              confidence: chunk.confidence,
+            };
+          }
+          return { messages: msgs };
+        });
+      } else if (chunk.type === 'text_delta' && chunk.textDelta) {
         get().appendToLastMessage(chunk.textDelta);
       } else if (chunk.type === 'reasoning_delta' && chunk.reasoningDelta) {
         // Accumulate reasoning text for dev logs capture
@@ -286,4 +330,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return { messages: msgs };
     });
   },
+
+  setFeedback: (messageId: string, helpful: boolean) => {
+    set((state) => {
+      const msgs = state.messages.map(m =>
+        m.id === messageId ? { ...m, feedback: helpful } : m,
+      );
+      return { messages: msgs };
+    });
+    // Fire-and-forget feedback to server
+    const convId = get().activeConversationId;
+    if (convId) {
+      fetch(`${API_BASE}/api/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: convId, messageId, helpful }),
+      }).catch(() => { /* silent */ });
+    }
+  },
+
+  setLearningEnabled: (enabled: boolean) => set({ learningEnabled: enabled }),
 }));
+
+// Expose store for demo system (injectResponse needs setState access)
+(window as unknown as Record<string, unknown>).__vai_chat_store = useChatStore;

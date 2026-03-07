@@ -22,6 +22,7 @@ export interface AgentSession {
   modelId: string;             // e.g. "claude-opus-4.6", "gpt-5.1"
   startedAt: number;           // epoch ms
   endedAt?: number;            // epoch ms
+  lastActivityAt?: number;     // epoch ms — latest event timestamp
   status: 'active' | 'completed' | 'failed';
 
   /** Aggregate stats computed from events */
@@ -217,6 +218,54 @@ export interface NoteMeta {
   author?: string;
 }
 
+/* ── Pinned Notes (cross-session decision/blocker tracking) ──── */
+
+export type PinnedNoteCategory =
+  | 'decision'
+  | 'blocker'
+  | 'breakthrough'
+  | 'todo'
+  | 'context'
+  | 'custom';
+
+export interface PinnedNote {
+  id: string;
+  sessionId: string;
+  eventId?: string;           // optional reference to a specific event
+  content: string;
+  category: PinnedNoteCategory;
+  createdAt: number;          // epoch ms
+  resolved: boolean;
+}
+
+/* ── Context Summary (for agents bootstrapping context) ──────── */
+
+export interface ContextSummary {
+  recentSessions: Array<{
+    id: string;
+    title: string;
+    status: string;
+    startedAt: number;
+    endedAt?: number;
+    stats: SessionStats;
+    keyDecisions: string[];
+    filesTouched: string[];
+    errors: string[];
+  }>;
+  unresolvedNotes: PinnedNote[];
+  totalSessions: number;
+  totalEvents: number;
+}
+
+/* ── Search Result ──────────────────────────────────────────── */
+
+export interface SearchResult {
+  event: SessionEvent;
+  sessionTitle: string;
+  sessionId: string;
+  matchScore: number;         // 0-1 relevance
+}
+
 /* ── Helper to create events ──────────────────────────────────── */
 
 let _eventCounter = 0;
@@ -227,6 +276,10 @@ export function createEventId(): string {
 
 export function createSessionId(): string {
   return `ses_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function createPinnedNoteId(): string {
+  return `pin_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /* ── Icon & color mapping for event types ─────────────────────── */

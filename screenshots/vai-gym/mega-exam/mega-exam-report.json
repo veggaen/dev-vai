@@ -1,0 +1,160 @@
+{
+  "timestamp": "2026-03-05T01:42:08.498Z",
+  "viewport": {
+    "w": 1920,
+    "h": 1015
+  },
+  "corpusSize": 373,
+  "phases": [
+    "socratic"
+  ],
+  "socratic": {
+    "total": 6,
+    "excellent": 3,
+    "good": 1,
+    "weak": 2,
+    "level": "journeyman",
+    "readyToAdvance": false,
+    "primaryMisconception": "missingConstraints",
+    "results": [
+      {
+        "track": "The Diagnosis Pattern",
+        "trackId": "diagnosis",
+        "quality": "excellent",
+        "behaviors": {
+          "questionCount": 3,
+          "wordCount": 41,
+          "prescribes": true,
+          "questions": true,
+          "admitsGap": false,
+          "offersToProceed": false,
+          "pushesBack": false,
+          "proposesPlan": false,
+          "compliant": false,
+          "givesReasoning": true,
+          "structured": false
+        },
+        "misconceptions": [],
+        "teachingMoment": "The quality of a diagnosis is bounded by the quality of the questions you ask BEFORE looking at the code. The best engineers spend 80% of debugging time understanding the problem and 20% fixing it.",
+        "feedback": "Strong. Asks what \"slow\" means specifically, where it was measured, and what changed recently. Does NOT suggest a fix.",
+        "ms": 13205
+      },
+      {
+        "track": "The Constraint Lens",
+        "trackId": "constraints",
+        "quality": "excellent",
+        "behaviors": {
+          "questionCount": 4,
+          "wordCount": 49,
+          "prescribes": true,
+          "questions": true,
+          "admitsGap": false,
+          "offersToProceed": false,
+          "pushesBack": false,
+          "proposesPlan": false,
+          "compliant": false,
+          "givesReasoning": true,
+          "structured": false
+        },
+        "misconceptions": [],
+        "teachingMoment": "The quality of your answer is bounded by the quality of the question. When someone asks \"what should I use?\" the real answer is always \"it depends on...\" — and your value is knowing what it depends ON.",
+        "feedback": "Strong. Asks about data shape, scale, query patterns, and team experience. Explains how each answer changes the recommendation.",
+        "ms": 16771
+      },
+      {
+        "track": "Intellectual Honesty",
+        "trackId": "honesty",
+        "quality": "excellent",
+        "behaviors": {
+          "questionCount": 1,
+          "wordCount": 49,
+          "prescribes": true,
+          "questions": true,
+          "admitsGap": true,
+          "offersToProceed": true,
+          "pushesBack": true,
+          "proposesPlan": false,
+          "compliant": false,
+          "givesReasoning": true,
+          "structured": false
+        },
+        "misconceptions": [],
+        "teachingMoment": "\"I haven't used this but I can evaluate it against these criteria\" is worth 10x more than a confident guess. It models good epistemics, it's honest, and it actually gets to the right answer faster.",
+        "feedback": "Strong. Directly says \"I haven't used Qwik in production.\" Proposes specific evaluation criteria (bundle size, SSR capabilities, ecosystem maturity, migration cost). Offers to do a focused evaluation.",
+        "ms": 16218
+      },
+      {
+        "track": "The Compression Challenge",
+        "trackId": "compression",
+        "quality": "good",
+        "behaviors": {
+          "questionCount": 0,
+          "wordCount": 49,
+          "prescribes": false,
+          "questions": false,
+          "admitsGap": false,
+          "offersToProceed": true,
+          "pushesBack": true,
+          "proposesPlan": false,
+          "compliant": false,
+          "givesReasoning": false,
+          "structured": false
+        },
+        "misconceptions": [],
+        "teachingMoment": "Compression isn't about removing words — it's about removing the words that don't serve the READER. The best compressed answer changes based on who's asking.",
+        "feedback": "Solid foundation. ≤2 sentences, correct, but possibly too technical for the stated audience.\n\nTo level up: Audience-appropriate, value-first explanation in ≤2 sentences. No jargon. A PM would understand exactly why this matters.",
+        "ms": 16447
+      },
+      {
+        "track": "Blast Radius Mapping",
+        "trackId": "systems",
+        "quality": "weak",
+        "behaviors": {
+          "questionCount": 0,
+          "wordCount": 32,
+          "prescribes": true,
+          "questions": false,
+          "admitsGap": false,
+          "offersToProceed": true,
+          "pushesBack": true,
+          "proposesPlan": false,
+          "compliant": false,
+          "givesReasoning": true,
+          "structured": false
+        },
+        "misconceptions": [
+          "Missing Constraints"
+        ],
+        "teachingMoment": "#6 is the killer. Most packages you add solve a 20-line problem with a 200KB dependency. The decision to NOT add a package is often more valuable than the decision of WHICH package to add.",
+        "feedback": "This reveals a pattern worth examining.\n\nmissingConstraints — ignoring the 100KB budget constraint when evaluating packages.\n\n[Missing Constraints] Reveal the constraint: \"Now add this condition — does your answer still work?\"",
+        "ms": 12096
+      },
+      {
+        "track": "The Constraint Lens",
+        "trackId": "readingRoom",
+        "quality": "weak",
+        "behaviors": {
+          "questionCount": 0,
+          "wordCount": 49,
+          "prescribes": false,
+          "questions": false,
+          "admitsGap": false,
+          "offersToProceed": true,
+          "pushesBack": false,
+          "proposesPlan": false,
+          "compliant": false,
+          "givesReasoning": false,
+          "structured": false
+        },
+        "misconceptions": [
+          "Complexity Preference"
+        ],
+        "teachingMoment": "Premature architecture is the mirror image of premature optimization. You can't design the right system boundary without knowing where the load concentrates — and you learn that from users, not from design docs. Start monolith, extract services when monitoring shows you WHERE.",
+        "feedback": "This reveals a pattern worth examining.\n\nauthorityBias — \"microservices are best practice\" without evaluating whether the context supports it.\n\n[Complexity Preference] Ask: \"What is the simplest thing that could work here? What would you lose?\"",
+        "ms": 16593
+      }
+    ],
+    "ms": 95460
+  },
+  "totalMs": 95463
+}

@@ -41,6 +41,9 @@ export const messages = sqliteTable('messages', {
   toolCallId: text('tool_call_id'),
   tokenCount: integer('token_count'),
   modelId: text('model_id'),
+  durationMs: integer('duration_ms'),
+  /** User feedback: 1 = helpful, 0 = not helpful, null = no feedback yet */
+  feedback: integer('feedback'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
@@ -52,6 +55,8 @@ export const sources = sqliteTable('sources', {
   url: text('url'),
   title: text('title').notNull(),
   capturedAt: integer('captured_at', { mode: 'timestamp' }).notNull(),
+  qualityScore: real('quality_score'),
+  lastValidated: integer('last_validated', { mode: 'timestamp' }),
   meta: text('meta'),
 });
 
@@ -83,7 +88,7 @@ export const evalRuns = sqliteTable('eval_runs', {
   id: text('id').primaryKey(),
   modelId: text('model_id').notNull(),
   track: text('track', {
-    enum: ['comprehension', 'navigation', 'bugfix', 'feature'],
+    enum: ['comprehension', 'navigation', 'bugfix', 'feature', 'thorsen', 'gym'],
   }).notNull(),
   startedAt: integer('started_at', { mode: 'timestamp' }).notNull(),
   endedAt: integer('ended_at', { mode: 'timestamp' }),
@@ -103,4 +108,20 @@ export const evalScores = sqliteTable('eval_scores', {
   tokensOut: integer('tokens_out'),
   wallTime: integer('wall_time'),
   detail: text('detail'),
+});
+
+// ---- Usage Tracking ----
+
+export const usageRecords = sqliteTable('usage_records', {
+  id: text('id').primaryKey(),
+  modelId: text('model_id').notNull(),
+  provider: text('provider').notNull(),
+  conversationId: text('conversation_id').references(() => conversations.id),
+  tokensIn: integer('tokens_in').notNull().default(0),
+  tokensOut: integer('tokens_out').notNull().default(0),
+  cachedTokens: integer('cached_tokens').notNull().default(0),
+  costUsd: real('cost_usd').notNull().default(0),
+  durationMs: integer('duration_ms').notNull().default(0),
+  finishReason: text('finish_reason').notNull().default('stop'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });

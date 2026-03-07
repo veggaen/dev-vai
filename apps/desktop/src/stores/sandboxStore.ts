@@ -62,6 +62,7 @@ interface SandboxState {
   fetchFiles: () => Promise<void>;
   fetchTemplates: () => Promise<void>;
   destroyProject: () => Promise<void>;
+  cancelDeploy: () => void;
   reset: () => void;
 
   /** Full pipeline: create → write files → install → start */
@@ -73,6 +74,27 @@ interface SandboxState {
   /** Streaming deploy from stack template with progress tracking */
   deployStack: (stackId: string, tier: string, stackName?: string, tierName?: string) => Promise<void>;
 }
+
+// Listen for console bridge messages from sandbox iframes
+if (typeof window !== 'undefined') {
+  window.addEventListener('message', (event) => {
+    if (event.data?.type === 'vai-sandbox-console') {
+      const { method, args } = event.data as { method: string; args: string[] };
+      const prefix = method === 'error' ? '✗ [browser] ' :
+                     method === 'warn' ? '⚠ [browser] ' :
+                     method === 'info' ? 'ℹ [browser] ' : '[browser] ';
+      const line = prefix + args.join(' ');
+      // Push to sandbox store logs
+      const state = useSandboxStore.getState();
+      if (state.projectId) {
+        useSandboxStore.setState({ logs: [...state.logs, line] });
+      }
+    }
+  });
+}
+
+// Module-level AbortController for deploy cancellation
+let deployAbortController: AbortController | null = null;
 
 export const useSandboxStore = create<SandboxState>((set, get) => ({
   projectId: null,
@@ -189,6 +211,11 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
   },
 
   destroyProject: async () => {
+    // Abort any in-flight deploy stream first
+    if (deployAbortController) {
+      deployAbortController.abort();
+      deployAbortController = null;
+    }
     const { projectId } = get();
     if (projectId) {
       await fetch(`${API_BASE}/api/sandbox/${projectId}`, { method: 'DELETE' }).catch(() => {});
@@ -201,8 +228,30 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
     });
   },
 
+  cancelDeploy: () => {
+    if (deployAbortController) {
+      deployAbortController.abort();
+      deployAbortController = null;
+    }
+    set({
+      deployPhase: 'idle', deploySteps: [], deployStartTime: 0,
+      deployStackName: '', deployTierName: '',
+      status: 'idle', error: null, projectId: null, projectName: null,
+      devPort: null, files: [], logs: [],
+    });
+  },
+
   reset: () => {
-    set({ projectId: null, projectName: null, status: 'idle', devPort: null, files: [], logs: [], error: null });
+    if (deployAbortController) {
+      deployAbortController.abort();
+      deployAbortController = null;
+    }
+    set({
+      projectId: null, projectName: null, status: 'idle', devPort: null,
+      files: [], logs: [], error: null,
+      deployPhase: 'idle', deploySteps: [], deployStartTime: 0,
+      deployStackName: '', deployTierName: '',
+    });
   },
 
   scaffold: async (name: string, files: SandboxFile[]) => {
@@ -250,6 +299,13 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
   },
 
   deployStack: async (stackId: string, tier: string, stackName?: string, tierName?: string) => {
+    // Abort any previous deploy stream
+    if (deployAbortController) {
+      deployAbortController.abort();
+    }
+    const controller = new AbortController();
+    deployAbortController = controller;
+
     set({
       deployPhase: 'deploying',
       deploySteps: INITIAL_DEPLOY_STEPS.map((s) => ({ ...s })),
@@ -267,11 +323,14 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stackId, tier }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Deploy request failed' }));
-        set({ deployPhase: 'failed', error: (err as { error: string }).error });
+        if (!controller.signal.aborted) {
+          set({ deployPhase: 'failed', error: (err as { error: string }).error });
+        }
         return;
       }
 
@@ -280,6 +339,9 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       let buffer = '';
 
       while (true) {
+        // Check abort before each read
+        if (controller.signal.aborted) break;
+
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -288,7 +350,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (!line.trim()) continue;
+          if (!line.trim() || controller.signal.aborted) continue;
           try {
             const event = JSON.parse(line) as {
               step: string;
@@ -326,27 +388,43 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
         }
       }
 
+      // Don't update state if aborted (cancelDeploy/destroyProject already reset)
+      if (controller.signal.aborted) return;
+
       // Determine final phase
-      const { deploySteps } = get();
+      const { deploySteps, devPort } = get();
       const hasFailed = deploySteps.some((s) => s.status === 'failed');
       const verifyStep = deploySteps.find((s) => s.id === 'verify');
       const isReady = verifyStep?.status === 'done';
 
-      if (isReady) {
+      if (isReady && devPort) {
         set({ deployPhase: 'ready', status: 'running' });
       } else if (hasFailed) {
-        // Still might be usable — check if dev server started
+        // Still might be usable — check if dev server started AND we have a port
         const startStep = deploySteps.find((s) => s.id === 'start');
-        if (startStep?.status === 'done') {
+        if (startStep?.status === 'done' && devPort) {
           set({ deployPhase: 'ready', status: 'running' });
         } else {
-          set({ deployPhase: 'failed', error: 'Deployment had failures' });
+          const failedStep = deploySteps.find((s) => s.status === 'failed');
+          set({ deployPhase: 'failed', error: failedStep?.message || 'Deployment had failures' });
         }
-      } else {
+      } else if (devPort) {
+        // Stream ended without explicit verification but we have a port
         set({ deployPhase: 'ready', status: 'running' });
+      } else {
+        // Stream ended, no port, no failures — something went wrong silently
+        set({ deployPhase: 'failed', error: 'Deploy completed but no dev server port received' });
       }
     } catch (err) {
-      set({ deployPhase: 'failed', error: (err as Error).message });
+      // AbortError is expected when user cancels — don't overwrite the reset state
+      if ((err as Error).name === 'AbortError') return;
+      if (!controller.signal.aborted) {
+        set({ deployPhase: 'failed', error: (err as Error).message });
+      }
+    } finally {
+      if (deployAbortController === controller) {
+        deployAbortController = null;
+      }
     }
   },
 }));

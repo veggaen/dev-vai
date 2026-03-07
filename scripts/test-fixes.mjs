@@ -86,9 +86,9 @@ console.log(mswOk ? '  ✓ MSW answer correct' : '  ✗ MSW answer wrong');
 
 // 9. Who built VeggaAI (teach + recall)
 console.log('\n=== TEACHING ===');
-await ask(c, 'VeggaAI is a local-first AI built by Vetle (v3gga) from Norway');
+await ask(c, 'VeggaAI is a local-first AI built by Vegga (v3gga) from Norway');
 a = await ask(c, 'Who built VeggaAI?');
-const whoOk = a.includes('Vetle') || a.includes('v3gga');
+const whoOk = a.includes('Vegga') || a.includes('v3gga');
 console.log(whoOk ? '  ✓ Knows who built VeggaAI' : '  ✗ Doesn\'t know');
 
 // 10. Key value parser

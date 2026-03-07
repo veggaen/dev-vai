@@ -3,6 +3,7 @@ import { ulid } from 'ulid';
 import type { VaiDatabase } from '../db/client.js';
 import { conversations, messages, images } from '../db/schema.js';
 import type { ModelRegistry, ChatChunk, Message } from '../models/adapter.js';
+import type { ThorsenAdaptiveController } from '../thorsen/types.js';
 
 export interface ImageInput {
   data: string;      // base64
@@ -19,6 +20,7 @@ export class ChatService {
   constructor(
     private db: VaiDatabase,
     private models: ModelRegistry,
+    private controller?: ThorsenAdaptiveController,
   ) {}
 
   createConversation(modelId: string, title?: string): string {
@@ -118,6 +120,7 @@ export class ChatService {
     content: string,
     image?: ImageInput,
     systemPrompt?: string,
+    noLearn?: boolean,
   ): AsyncGenerator<ChatChunk> {
     const conv = this.db
       .select()
@@ -167,15 +170,22 @@ export class ChatService {
     const adapter = this.models.get(conv.modelId);
     let fullText = '';
     let totalUsage = { promptTokens: 0, completionTokens: 0 };
+    let durationMs: number | undefined;
 
-    for await (const chunk of adapter.chatStream({ messages: finalMessages })) {
+    for await (const chunk of adapter.chatStream({ messages: finalMessages, noLearn })) {
       if (chunk.type === 'text_delta' && chunk.textDelta) {
         fullText += chunk.textDelta;
       }
-      if (chunk.type === 'done' && chunk.usage) {
-        totalUsage = chunk.usage;
+      if (chunk.type === 'done') {
+        if (chunk.usage) totalUsage = chunk.usage;
+        if (chunk.durationMs !== undefined) durationMs = chunk.durationMs;
       }
       yield chunk;
+    }
+
+    // Feed streaming latency back to the adaptive controller
+    if (durationMs !== undefined && this.controller) {
+      this.controller.observe(durationMs);
     }
 
     // Persist assistant message
@@ -187,6 +197,7 @@ export class ChatService {
       content: fullText,
       tokenCount: totalUsage.completionTokens || undefined,
       modelId: conv.modelId,
+      durationMs: durationMs ?? undefined,
       createdAt: new Date(),
     }).run();
 

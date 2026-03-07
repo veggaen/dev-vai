@@ -1,6 +1,9 @@
 import { useSandboxStore } from '../stores/sandboxStore.js';
-import { Terminal, Trash2, FolderTree, Copy, ChevronDown } from 'lucide-react';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  Terminal, Trash2, FolderTree, Copy, ChevronDown,
+  Search, X, Lock, Unlock, Hash, Clock,
+} from 'lucide-react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 
 /* ── Copy filter helpers ── */
 
@@ -38,8 +41,15 @@ function filterLines(logs: string[], filter: CopyFilter): string[] {
   }
 }
 
+/** Strip common ANSI escape sequences for clean display */
+function stripAnsi(str: string): string {
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
+}
+
 /**
  * Debug Console — shows sandbox build output, install logs, and dev server output.
+ * Features: line numbers, timestamps, search, scroll lock, ANSI strip, smart copy.
  */
 export function DebugConsole() {
   const { status, logs, files, projectName, fetchLogs, destroyProject } = useSandboxStore();
@@ -48,6 +58,24 @@ export function DebugConsole() {
   const [copyFeedback, setCopyFeedback] = useState('');
   const copyMenuRef = useRef<HTMLDivElement>(null);
 
+  // New features state
+  const [scrollLocked, setScrollLocked] = useState(false);
+  const [showLineNumbers, setShowLineNumbers] = useState(true);
+  const [showTimestamps, setShowTimestamps] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Track timestamps for each log line
+  const timestampsRef = useRef<Map<number, number>>(new Map());
+  useEffect(() => {
+    const map = timestampsRef.current;
+    const now = Date.now();
+    for (let i = map.size; i < logs.length; i++) {
+      map.set(i, now);
+    }
+  }, [logs.length]);
+
   // Auto-poll logs when not idle
   useEffect(() => {
     if (status === 'idle') return;
@@ -55,12 +83,12 @@ export function DebugConsole() {
     return () => clearInterval(interval);
   }, [status, fetchLogs]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom (unless scroll-locked)
   useEffect(() => {
-    if (scrollRef.current) {
+    if (!scrollLocked && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [logs]);
+  }, [logs, scrollLocked]);
 
   // Close copy menu on outside click
   useEffect(() => {
@@ -74,6 +102,11 @@ export function DebugConsole() {
     return () => document.removeEventListener('mousedown', handler);
   }, [showCopyMenu]);
 
+  // Focus search input when shown
+  useEffect(() => {
+    if (showSearch) searchInputRef.current?.focus();
+  }, [showSearch]);
+
   const handleCopy = useCallback((filter: CopyFilter) => {
     const filtered = filterLines(logs, filter);
     const text = filtered.join('\n');
@@ -84,6 +117,26 @@ export function DebugConsole() {
     });
     setShowCopyMenu(false);
   }, [logs]);
+
+  // Search-filtered logs
+  const displayLogs = useMemo(() => {
+    if (!searchQuery.trim()) return logs.map((line, i) => ({ line, index: i }));
+    const q = searchQuery.toLowerCase();
+    return logs
+      .map((line, i) => ({ line, index: i }))
+      .filter(({ line }) => stripAnsi(line).toLowerCase().includes(q));
+  }, [logs, searchQuery]);
+
+  // Error/warning/success counts
+  const errorCount = useMemo(() => logs.filter(isErrorLine).length, [logs]);
+  const warnCount = useMemo(() => logs.filter(isWarningLine).length, [logs]);
+
+  const formatTimestamp = (idx: number): string => {
+    const ts = timestampsRef.current.get(idx);
+    if (!ts) return '';
+    const d = new Date(ts);
+    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+  };
 
   return (
     <div className="flex h-full flex-col border-t border-zinc-800 bg-zinc-950">
@@ -103,19 +156,67 @@ export function DebugConsole() {
           }`}>
             {status}
           </span>
+
+          {/* Error/warning badges */}
+          {errorCount > 0 && (
+            <span className="rounded-full bg-red-500/15 px-1.5 py-0.5 text-[9px] font-medium text-red-400">
+              {errorCount} error{errorCount !== 1 ? 's' : ''}
+            </span>
+          )}
+          {warnCount > 0 && (
+            <span className="rounded-full bg-yellow-500/15 px-1.5 py-0.5 text-[9px] font-medium text-yellow-400">
+              {warnCount} warn
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           {files.length > 0 && (
             <span className="flex items-center gap-1 text-[10px] text-zinc-600" title={files.join('\n')}>
               <FolderTree className="h-3 w-3" />
-              {files.length} files
+              {files.length}
             </span>
           )}
 
           {/* Copy feedback */}
           {copyFeedback && (
-            <span className="text-[10px] text-emerald-400 animate-in fade-in">{copyFeedback}</span>
+            <span className="text-[10px] text-emerald-400">{copyFeedback}</span>
           )}
+
+          {/* Toggle line numbers */}
+          <button
+            onClick={() => setShowLineNumbers((v) => !v)}
+            className={`rounded p-1 transition-colors ${showLineNumbers ? 'text-violet-400' : 'text-zinc-600'} hover:bg-zinc-800`}
+            title="Toggle line numbers"
+          >
+            <Hash className="h-3 w-3" />
+          </button>
+
+          {/* Toggle timestamps */}
+          <button
+            onClick={() => setShowTimestamps((v) => !v)}
+            className={`rounded p-1 transition-colors ${showTimestamps ? 'text-violet-400' : 'text-zinc-600'} hover:bg-zinc-800`}
+            title="Toggle timestamps"
+          >
+            <Clock className="h-3 w-3" />
+          </button>
+
+          {/* Search toggle */}
+          <button
+            onClick={() => { setShowSearch((v) => !v); if (showSearch) setSearchQuery(''); }}
+            className={`rounded p-1 transition-colors ${showSearch ? 'text-violet-400' : 'text-zinc-600'} hover:bg-zinc-800`}
+            title="Search logs (Ctrl+F)"
+          >
+            <Search className="h-3 w-3" />
+          </button>
+
+          {/* Scroll lock */}
+          <button
+            onClick={() => setScrollLocked((v) => !v)}
+            className={`rounded p-1 transition-colors ${scrollLocked ? 'text-amber-400' : 'text-zinc-600'} hover:bg-zinc-800`}
+            title={scrollLocked ? 'Auto-scroll locked' : 'Auto-scroll active'}
+          >
+            {scrollLocked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+          </button>
 
           {/* Smart copy button */}
           {logs.length > 0 && (
@@ -155,6 +256,21 @@ export function DebugConsole() {
             </div>
           )}
 
+          {/* Clear console */}
+          {logs.length > 0 && (
+            <button
+              onClick={() => {
+                // Clear logs via direct store manipulation
+                useSandboxStore.setState({ logs: [] });
+                timestampsRef.current.clear();
+              }}
+              className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+              title="Clear console"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+
           {projectName && (
             <button
               onClick={destroyProject}
@@ -167,25 +283,75 @@ export function DebugConsole() {
         </div>
       </div>
 
+      {/* Search bar */}
+      {showSearch && (
+        <div className="flex items-center gap-2 border-b border-zinc-800/60 bg-zinc-900/40 px-3 py-1">
+          <Search className="h-3 w-3 text-zinc-600" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search logs..."
+            className="flex-1 bg-transparent text-xs text-zinc-300 placeholder-zinc-600 outline-none"
+          />
+          {searchQuery && (
+            <span className="text-[10px] text-zinc-500">
+              {displayLogs.length} / {logs.length}
+            </span>
+          )}
+          <button
+            onClick={() => { setSearchQuery(''); setShowSearch(false); }}
+            className="rounded p-0.5 text-zinc-600 hover:text-zinc-300"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
       {/* Output area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 font-mono text-xs">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto font-mono text-[11px] leading-5">
         {logs.length === 0 ? (
-          <p className="text-zinc-600">Waiting for build...</p>
+          <p className="px-3 py-4 text-zinc-600">Waiting for build...</p>
         ) : (
-          <div className="space-y-0.5">
-            {logs.map((line, i) => (
-              <p key={i} className={`whitespace-pre-wrap ${
-                isErrorLine(line)
-                  ? 'text-red-400'
-                  : isSuccessLine(line)
-                    ? 'text-emerald-400'
-                    : isWarningLine(line)
-                      ? 'text-yellow-400'
-                      : 'text-zinc-400'
-              }`}>
-                {line}
-              </p>
-            ))}
+          <div>
+            {displayLogs.map(({ line, index }) => {
+              const cleaned = stripAnsi(line);
+              const highlight = searchQuery && cleaned.toLowerCase().includes(searchQuery.toLowerCase());
+              return (
+                <div
+                  key={index}
+                  className={`flex hover:bg-zinc-800/30 ${
+                    highlight ? 'bg-yellow-500/10' : ''
+                  }`}
+                >
+                  {/* Line number */}
+                  {showLineNumbers && (
+                    <span className="w-8 shrink-0 select-none border-r border-zinc-800/40 px-1 text-right text-zinc-700">
+                      {index + 1}
+                    </span>
+                  )}
+                  {/* Timestamp */}
+                  {showTimestamps && (
+                    <span className="w-16 shrink-0 select-none px-1 text-zinc-700">
+                      {formatTimestamp(index)}
+                    </span>
+                  )}
+                  {/* Log line */}
+                  <span className={`flex-1 whitespace-pre-wrap px-2 ${
+                    isErrorLine(cleaned)
+                      ? 'text-red-400'
+                      : isSuccessLine(cleaned)
+                        ? 'text-emerald-400'
+                        : isWarningLine(cleaned)
+                          ? 'text-yellow-400'
+                          : 'text-zinc-400'
+                  }`}>
+                    {cleaned}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

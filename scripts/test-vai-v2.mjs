@@ -128,7 +128,7 @@ const c7 = await createConv('Full Conversation');
 
 await ask(c7, 'Hey VAI!');
 await ask(c7, 'What can you do?');
-await ask(c7, 'VeggaAI is a local-first AI built by Vetle (v3gga). It learns from web pages, YouTube transcripts, and conversations.');
+await ask(c7, 'VeggaAI is a local-first AI built by Vegga (v3gga). It learns from web pages, YouTube transcripts, and conversations.');
 await ask(c7, 'Who built VeggaAI?');
 await ask(c7, 'Write me hello world in JavaScript');
 await ask(c7, 'What is 100 + 200 + 300?');

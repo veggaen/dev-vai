@@ -11,6 +11,23 @@ import {
 } from '@vai/core';
 import type { RawCapture } from '@vai/core';
 
+/** Validate a URL is safe to fetch (no SSRF). */
+function validateUrl(raw: string): URL {
+  const url = new URL(raw);
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error(`Only HTTP/HTTPS URLs allowed, got ${url.protocol}`);
+  }
+  const host = url.hostname.toLowerCase();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1'
+      || host === '0.0.0.0' || host.endsWith('.local')
+      || host.startsWith('10.') || host.startsWith('192.168.')
+      || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+      || host === '169.254.169.254') {
+    throw new Error(`Private/internal URLs are not allowed: ${host}`);
+  }
+  return url;
+}
+
 export function registerIngestRoutes(
   app: FastifyInstance,
   pipeline: IngestPipeline,
@@ -18,6 +35,7 @@ export function registerIngestRoutes(
   // Ingest a web page by URL
   app.post<{ Body: { url: string } }>('/api/ingest/web', async (request) => {
     const { url } = request.body;
+    validateUrl(url);
     const capture = await scrapeWebPage(url);
     const result = pipeline.ingest(capture);
     return result;
@@ -26,6 +44,7 @@ export function registerIngestRoutes(
   // Ingest a YouTube video transcript by URL
   app.post<{ Body: { url: string } }>('/api/ingest/youtube', async (request) => {
     const { url } = request.body;
+    validateUrl(url);
     const capture = await fetchYouTubeTranscript(url);
     const result = pipeline.ingest(capture);
     return result;
@@ -34,6 +53,7 @@ export function registerIngestRoutes(
   // Ingest a GitHub repo by URL
   app.post<{ Body: { url: string } }>('/api/ingest/github', async (request) => {
     const { url } = request.body;
+    validateUrl(url);
     const capture = await fetchGitHubRepo(url);
     const result = pipeline.ingest(capture);
     return result;
@@ -43,6 +63,7 @@ export function registerIngestRoutes(
   // This is the "teach VAI about a repo" endpoint — much richer than basic /api/ingest/github.
   app.post<{ Body: { url: string; maxFiles?: number } }>('/api/ingest/github/deep', async (request) => {
     const { url, maxFiles } = request.body;
+    validateUrl(url);
     const captures = await deepFetchGitHubRepo(url, {
       maxFiles: maxFiles ?? 60,
       onProgress: (msg) => console.log(`[DeepIngest] ${msg}`),

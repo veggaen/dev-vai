@@ -1,0 +1,94 @@
+[
+  {
+    "tag": "vinext-basic",
+    "stackId": "vinext",
+    "tier": "basic",
+    "deployOk": true,
+    "buildOk": true,
+    "serverOk": true,
+    "screenshotOk": true,
+    "healthOk": true,
+    "port": 4119,
+    "projectId": "729d5b4b",
+    "elapsed": 34120,
+    "errors": [],
+    "pageErrors": [
+      "Failed to fetch dynamically imported module: http://localhost:4119/@id/__x00__virtual:vinext-app-browser-entry"
+    ],
+    "pageInfo": {
+      "title": "Aurora — AI Analytics Command Center",
+      "bodyText": "A\n\nAurora\n\nAnalytics Platform\n\n◈\nDashboard\n◆\nAnalytics\n✦\nAI Insights\n▣\nReports\n◎\nTeam\n⚙\nSettings\n\nAI Usage\n\n7,420 / 10,000 queries\n\nCommand Center\n\nReal-time analytics overview\n\n11:37:09\n\nTOTAL REVENU",
+      "hasContent": true,
+      "elementCount": 192
+    }
+  },
+  {
+    "tag": "vinext-solid",
+    "stackId": "vinext",
+    "tier": "solid",
+    "deployOk": true,
+    "buildOk": true,
+    "serverOk": true,
+    "screenshotOk": true,
+    "healthOk": true,
+    "port": 4120,
+    "projectId": "c1ddc04c",
+    "elapsed": 30464,
+    "errors": [],
+    "pageErrors": [
+      "Failed to fetch dynamically imported module: http://localhost:4120/@id/__x00__virtual:vinext-app-browser-entry"
+    ],
+    "pageInfo": {
+      "title": "Fjord — Creative Studio",
+      "bodyText": "F\nFjord\nPortfolio\nProjects\nClients\nBilling\nNew Brief\n\nGod morgon, Vegga\n\nStudio Overview\n+ New Project\n\nActive Projects\n\n14\n\n+3 this month\n\nBillable Hours\n\n847\n\nThis quarter\n\nRevenue\n\nkr 2.1M\n\nQ4 fore",
+      "hasContent": true,
+      "elementCount": 221
+    }
+  },
+  {
+    "tag": "vinext-battle-tested",
+    "stackId": "vinext",
+    "tier": "battle-tested",
+    "deployOk": true,
+    "buildOk": true,
+    "serverOk": true,
+    "screenshotOk": true,
+    "healthOk": true,
+    "port": 4121,
+    "projectId": "666ea1fd",
+    "elapsed": 30221,
+    "errors": [],
+    "pageErrors": [
+      "Failed to fetch dynamically imported module: http://localhost:4121/@id/__x00__virtual:vinext-app-browser-entry"
+    ],
+    "pageInfo": {
+      "title": "Tundra — Infrastructure Console",
+      "bodyText": "TUNDRA\nv2.8.1\n23 services\n2 warnings\n0 critical\nV\n\nMONITOR\n\n◉\nOverview\n◈\nServices\n▤\nMetrics\n\nOPERATE\n\n▶\nDeploys\n⚠\nIncidents\n▣\nRunbooks\n\nCONFIGURE\n\n♦\nAlerts\n◎\nTeams\n⚙\nSettings\nAll systems operational\nU",
+      "hasContent": true,
+      "elementCount": 455
+    }
+  },
+  {
+    "tag": "vinext-vai",
+    "stackId": "vinext",
+    "tier": "vai",
+    "deployOk": true,
+    "buildOk": true,
+    "serverOk": true,
+    "screenshotOk": true,
+    "healthOk": true,
+    "port": 4122,
+    "projectId": "b4e08882",
+    "elapsed": 30237,
+    "errors": [],
+    "pageErrors": [
+      "Cannot read properties of null (reading 'useEffect')"
+    ],
+    "pageInfo": {
+      "title": "Solstice — Subscription Commerce",
+      "bodyText": "S\nSolstice\nProducts\nPricing\nCustomers\nResources\nSign in\nStart free trial\nNow with AI-powered subscription analytics\nSubscription commerce,\nbeautifully managed\n\nEverything you need to launch, manage, a",
+      "hasContent": true,
+      "elementCount": 202
+    }
+  }
+]

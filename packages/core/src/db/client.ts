@@ -38,6 +38,7 @@ const CREATE_TABLES_SQL = `
     tool_call_id TEXT,
     token_count INTEGER,
     model_id TEXT,
+    feedback INTEGER,
     created_at INTEGER NOT NULL
   );
 
@@ -139,6 +140,12 @@ const MIGRATION_SQL = [
   `CREATE INDEX IF NOT EXISTS idx_session_events_session ON session_events(session_id)`,
   `CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(type)`,
   `CREATE INDEX IF NOT EXISTS idx_agent_sessions_status ON agent_sessions(status)`,
+  // VPT instrumentation — timing + quality metrics
+  `ALTER TABLE messages ADD COLUMN duration_ms INTEGER`,
+  `ALTER TABLE sources ADD COLUMN quality_score REAL`,
+  `ALTER TABLE sources ADD COLUMN last_validated INTEGER`,
+  // Feedback column for thumbs up/down on messages
+  `ALTER TABLE messages ADD COLUMN feedback INTEGER`,
 ];
 
 /**
