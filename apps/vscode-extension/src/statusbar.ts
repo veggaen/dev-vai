@@ -7,6 +7,7 @@
 
 import * as vscode from 'vscode';
 import { getActiveSession, onSessionChange, onEventPushed } from './session.js';
+import { getPlatformAuthState, onDidChangePlatformAuthState } from './platform-auth.js';
 
 /* ── State ─────────────────────────────────────────────────────── */
 
@@ -22,6 +23,7 @@ export function registerStatusBar(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     onSessionChange(() => updateStatusBar()),
     onEventPushed(() => updateStatusBar()),
+    onDidChangePlatformAuthState(() => updateStatusBar()),
   );
 
   updateStatusBar();
@@ -31,6 +33,14 @@ export function registerStatusBar(context: vscode.ExtensionContext): void {
 
 function updateStatusBar(): void {
   const session = getActiveSession();
+  const auth = getPlatformAuthState();
+  const platformLine = auth.user
+    ? `Platform: ${auth.user.email}`
+    : auth.status === 'signing-in'
+      ? 'Platform: connecting'
+      : auth.error
+        ? `Platform: ${auth.error}`
+        : 'Platform: signed out';
 
   if (session) {
     const count = session.eventCount;
@@ -41,6 +51,7 @@ function updateStatusBar(): void {
       `ID: ${session.id}`,
       `Events: ${count}`,
       `Buffered: ${session.eventBuffer.length}`,
+      platformLine,
       '',
       'Click to end session',
     ].join('\n');
@@ -49,7 +60,7 @@ function updateStatusBar(): void {
     statusBarItem.show();
   } else {
     statusBarItem.text = '$(circle-outline) Vai: No session';
-    statusBarItem.tooltip = 'Click to start a dev log session';
+    statusBarItem.tooltip = `${platformLine}\n\nClick to start a dev log session`;
     statusBarItem.command = 'vai.startSession';
     statusBarItem.backgroundColor = undefined;
     statusBarItem.show();

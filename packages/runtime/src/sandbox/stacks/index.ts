@@ -12,10 +12,11 @@ import { mernStack } from './mern.js';
 import { nextjsStack } from './nextjs-full.js';
 import { t3Stack } from './t3.js';
 import { vinextStack } from './vinext.js';
+import { gameStack } from './game.js';
 import { customConfigToStack } from './types.js';
 
 /** Built-in stacks */
-const BUILTIN_STACKS: StackDefinition[] = [pernStack, mernStack, nextjsStack, t3Stack, vinextStack];
+const BUILTIN_STACKS: StackDefinition[] = [pernStack, mernStack, nextjsStack, t3Stack, vinextStack, gameStack];
 
 /** Custom stacks registered at runtime */
 const customStacks = new Map<string, StackDefinition>();

@@ -7,7 +7,7 @@
  */
 
 /** Built-in stack IDs */
-export type BuiltinStackId = 'pern' | 'mern' | 'nextjs' | 't3' | 'vinext';
+export type BuiltinStackId = 'pern' | 'mern' | 'nextjs' | 't3' | 'vinext' | 'game';
 
 /** All stack IDs (built-in + custom) — custom stacks use `custom-{slug}` format */
 export type StackId = BuiltinStackId | `custom-${string}`;

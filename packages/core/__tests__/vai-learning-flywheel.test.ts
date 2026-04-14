@@ -1,8 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { VaiEngine } from '../src/models/vai-engine.js';
+
+function readSnapshot(persistPath: string): { learnedEntries: Array<{ pattern: string; source: string; language: string }> } {
+  return JSON.parse(fs.readFileSync(persistPath, 'utf-8')) as { learnedEntries: Array<{ pattern: string; source: string; language: string }> };
+}
 
 describe('VaiEngine Learning Flywheel', () => {
   let tmpDir: string;
@@ -14,6 +18,7 @@ describe('VaiEngine Learning Flywheel', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -138,15 +143,44 @@ describe('VaiEngine Learning Flywheel', () => {
     expect(engine.knowledge.entryCount).toBe(beforeCount);
   });
 
-  it('still learns when noLearn is false or omitted', async () => {
+  it('invokes the learning hook when noLearn is omitted or false', async () => {
+    const engine = new VaiEngine({ persistPath });
+    const afterResponseSpy = vi.spyOn(engine as never, 'afterResponse' as never);
+
+    await engine.chat({
+      messages: [{ role: 'user', content: 'Explain what Docker is and why developers use it.' }],
+    });
+
+    await engine.chat({
+      messages: [{ role: 'user', content: 'Explain what Docker is and why developers use it.' }],
+      noLearn: false,
+    });
+
+    expect(afterResponseSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('persists auto-learned entries via the snapshot instead of fuzzy matching', async () => {
     const engine = new VaiEngine({ persistPath });
 
-    // Teach then ask — this simulates the normal flywheel
-    engine.teach('custom-topic-abc', 'ABC is a framework for testing learning.', 'auto-learned', 'en');
+    engine.teach(
+      'custom-topic-abc',
+      'ABC is a framework for testing learning with stable persistence-based verification.',
+      'auto-learned',
+      'en',
+    );
     engine.flushPersist();
 
-    // Verify teach worked
-    const match = engine.knowledge.findBestMatch('custom-topic-abc');
-    expect(match).not.toBeNull();
+    expect(fs.existsSync(persistPath)).toBe(true);
+
+    const snapshot = readSnapshot(persistPath);
+    expect(snapshot.learnedEntries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pattern: 'custom-topic-abc',
+          source: 'auto-learned',
+          language: 'en',
+        }),
+      ]),
+    );
   });
 });

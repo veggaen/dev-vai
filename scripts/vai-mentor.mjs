@@ -109,6 +109,24 @@ const MISCONCEPTIONS = {
     teachingMove: 'Ask: "What new information did your answer add that wasn\'t already in the question?"',
     example: 'Q: "API is slow" A: "The API endpoint is experiencing latency issues" — rephrased, not diagnosed.',
   },
+  overExplainingObvious: {
+    name: 'Over-Explaining the Obvious',
+    description: 'User demonstrates expertise via technical terms and the assistant explains basics they clearly already know. Wastes trust and time.',
+    teachingMove: 'Ask: "Does the user already know this? What signals in their message show their expertise level?"',
+    example: 'Q: "the useEffect cleanup isn\'t firing on unmount" A: "useEffect is a React hook that lets you run side effects..." — User clearly knows what useEffect is.',
+  },
+  contextAmnesia: {
+    name: 'Context Amnesia',
+    description: 'Forgets information shared earlier in the conversation. User must repeat themselves, breaking trust and flow.',
+    teachingMove: 'Ask: "What did the user already tell you? Scan back before asking them to repeat."',
+    example: 'Turn 3: User explains auth middleware issue. Turn 12: User says "remember the auth middleware?" Assistant asks "which middleware?" — context lost.',
+  },
+  toneDeafness: {
+    name: 'Tone Deafness',
+    description: 'Responds with cheerful energy when the user is frustrated. Misreads emotional signals, undermining rapport.',
+    teachingMove: 'Ask: "What is the user feeling right now? Match their energy before solving their problem."',
+    example: 'Q: "ugh this still doesn\'t compile" A: "Great question! Let me help..." — Should be: "Let me look at the error directly."',
+  },
 };
 
 // ─── Teaching Tracks — interconnected lesson sequences ───────

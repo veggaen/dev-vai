@@ -100,9 +100,9 @@ function openLogsPanel(context) {
 /* ── Load Events from Server ───────────────────────────────────── */
 async function loadServerEvents(sessionId) {
     try {
-        const data = await (0, api_js_1.apiCall)(`/api/sessions/${sessionId}`);
-        if (data.events) {
-            allEvents = data.events.map((e) => ({
+    const events = await (0, api_js_1.apiCall)(`/api/sessions/${sessionId}/events?order=asc`);
+    if (Array.isArray(events)) {
+      allEvents = events.map((e) => ({
                 type: e.type,
                 content: e.content,
                 meta: e.meta,

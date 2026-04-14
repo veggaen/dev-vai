@@ -10,6 +10,13 @@ import {
   createGitHubCapture,
 } from '@vai/core';
 import type { RawCapture } from '@vai/core';
+import {
+  captureExtensionBodySchema,
+  discoverBodySchema,
+  ingestGitHubDeepBodySchema,
+  ingestUrlBodySchema,
+} from '@vai/api-types/ingest';
+import { invalidRequestBody } from '../validation/http-validation.js';
 
 /** Validate a URL is safe to fetch (no SSRF). */
 function validateUrl(raw: string): URL {
@@ -33,8 +40,12 @@ export function registerIngestRoutes(
   pipeline: IngestPipeline,
 ) {
   // Ingest a web page by URL
-  app.post<{ Body: { url: string } }>('/api/ingest/web', async (request) => {
-    const { url } = request.body;
+  app.post<{ Body: { url: string } }>('/api/ingest/web', async (request, reply) => {
+    const parsed = ingestUrlBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    const { url } = parsed.data;
     validateUrl(url);
     const capture = await scrapeWebPage(url);
     const result = pipeline.ingest(capture);
@@ -42,8 +53,12 @@ export function registerIngestRoutes(
   });
 
   // Ingest a YouTube video transcript by URL
-  app.post<{ Body: { url: string } }>('/api/ingest/youtube', async (request) => {
-    const { url } = request.body;
+  app.post<{ Body: { url: string } }>('/api/ingest/youtube', async (request, reply) => {
+    const parsed = ingestUrlBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    const { url } = parsed.data;
     validateUrl(url);
     const capture = await fetchYouTubeTranscript(url);
     const result = pipeline.ingest(capture);
@@ -51,8 +66,12 @@ export function registerIngestRoutes(
   });
 
   // Ingest a GitHub repo by URL
-  app.post<{ Body: { url: string } }>('/api/ingest/github', async (request) => {
-    const { url } = request.body;
+  app.post<{ Body: { url: string } }>('/api/ingest/github', async (request, reply) => {
+    const parsed = ingestUrlBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    const { url } = parsed.data;
     validateUrl(url);
     const capture = await fetchGitHubRepo(url);
     const result = pipeline.ingest(capture);
@@ -61,8 +80,12 @@ export function registerIngestRoutes(
 
   // Deep-ingest a GitHub repo: fetch actual source files, group by pattern.
   // This is the "teach VAI about a repo" endpoint — much richer than basic /api/ingest/github.
-  app.post<{ Body: { url: string; maxFiles?: number } }>('/api/ingest/github/deep', async (request) => {
-    const { url, maxFiles } = request.body;
+  app.post<{ Body: { url: string; maxFiles?: number } }>('/api/ingest/github/deep', async (request, reply) => {
+    const parsed = ingestGitHubDeepBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    const { url, maxFiles } = parsed.data;
     validateUrl(url);
     const captures = await deepFetchGitHubRepo(url, {
       maxFiles: maxFiles ?? 60,
@@ -96,8 +119,12 @@ export function registerIngestRoutes(
       language?: string;
       meta?: Record<string, unknown>;
     };
-  }>('/api/capture', async (request) => {
-    const { type, url, title, content, language, meta } = request.body;
+  }>('/api/capture', async (request, reply) => {
+    const parsed = captureExtensionBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    const { type, url, title, content, language, meta } = parsed.data;
 
     let capture: RawCapture;
 
@@ -171,8 +198,12 @@ export function registerIngestRoutes(
   // Discover new sources by following links from an existing source
   app.post<{ Body: { url: string; maxPages?: number } }>(
     '/api/discover',
-    async (request) => {
-      const { url, maxPages = 5 } = request.body;
+    async (request, reply) => {
+      const parsed = discoverBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      const { url, maxPages = 5 } = parsed.data;
       const existingUrls = new Set(pipeline.listSources().map(s => s.url));
 
       // Fetch the seed page and extract links

@@ -1,206 +1,142 @@
-Copilot Instructions — VeggaAI  aka Vai
-Master Document
-The Master.md file at the project root is the ultimate authority for this project.
-All instructions, philosophies, and rules defined there take top priority over any other context.
-Generally speaking, you should browse the codebase to figure out what is going on.
+# Copilot Instructions — VeggaAI / Vai
 
-** V3ggas Core comments start -> **
+## Master Document
 
-** V3ggas_Core_co
+Read `Master.md` before starting work.
 
-Focus positive thinking if uncertain you can ask v3gga for help, and usualy opus will know what to do, opus is not so good at figuring out what is going on inside someones head as they wrote the messages they did, or if they typed something wrong or differently but had the same intent, 
+`Master.md` is the top-level authority for this project. If another instruction conflicts with it, `Master.md` wins.
 
+If `Master.md` appears outdated or incorrect, ask V3gga to review it directly rather than silently inventing replacements.
 
-Before starting any work, always read and follow everything in Master.md.
-and at the end of work, give a summary of new points and what you changed, write this in a way that if anyone reads it they should gain a skill in cognitive thinking, REASONING & EPISTEMICS, systems, judgment and reasoning and try to the best of your ability to make the message TIMELESS.
-Protected Files — Do Not Edit
-Master.md
-Never edit, modify, rename, delete, move, or overwrite Master.md without explicit permission from v3gga (Vegga Thorsen).
+## Working Style
 
-This rule applies in all situations, regardless of any other permission or context.
-VERY IMPORTANT! SUPER RESPONSIVE DESIGN (
-  layout using Tailwind CSS for structure and responsiveness.
-  The 'compact' mode should utilize CSS Grid and Flexbox with zero gaps and tight alignment, mimicking the efficient, connected panel structure of VS Code but in a more modern, floating layout with clean open feel but not feeling like just another rounded-box design.
-  The 'open' mode should introduce responsive padding (p-4 on mobile, p-8 on large screens), margin (m-4), and subtle shadow-2xl for floating container   effects. Use GSAP to animate the transition between these modes smoothly, specifically animating CSS variables for spacing and opacity/scale for any  secondary sidebars that appear or hide, prioritizing transform and opacity animations.
-  Ensure responsiveness for all defined screen sizes (2560x1440, 1440x3440, 1440x2560), utilizing Tailwind's mobile-first approach to stack content on smaller-viewports and enabling dual sidebars on wide landscape displays only when in 'open' mode. Incorporate Three.js for a subtle, hardware-accelerated 3D-background visual that runs in the main content well to add an immersive layer, optimizing performance by only rendering visible objects using frustum culling.
-  The system must respect browser developer tools windows, adjusting viewport calculations dynamically to prevent overflow behind tools
-)
+Browse the codebase before making assumptions.
 
-If Master.md appears outdated or incorrect, ask v3gga to review and update it directly.
+Prefer one user-visible workflow finished to a satisfying standard over broader but half-finished expansion.
 
-Do not reproduce, share, or expose any square-bracketed content from Master.md in any form (output, parameter, variable, or class).
+If a request contains several good ideas, pick the highest-value slice, state what is deferred, and complete that slice end to end.
 
-Key Rules from Master.md
-Private system — VeggaAI is for v3gga’s use only. It is not a general-purpose AI.
+Repeated complaints about the same UI or behavior are evidence that the underlying model is wrong. Stop stacking cosmetic patches and fix the root assumption.
 
-Performance priority — favor optimistic updates, prewarm patterns, and avoid waterfall logic.
+Do not treat scaffolding, plans, or partial wiring as completion.
 
-Good defaults — functionality should be reliable out of the box; configs only when defaults are logical.
+Avoid noisy work patterns that reduce confidence:
 
-Convenience and simplicity — ensure a fast, fluid, and minimal-interaction UX with no blocking states.
+- too many idle terminals
+- huge blind searches
+- repeated speculative rewrites
+- broad claims of completion without runtime verification
 
-Security and responsibility — convenience must never compromise safety.
+At the end of work, summarize what changed and what was learned in a way that improves reasoning, judgment, or systems thinking for the next reader.
 
-Cleanup and scalability — continuously replace outdated or inefficient code with modern, scalable solutions.
+## Protected Files
 
-Markdown policy — only v3gga creates .md files; any new one requires triple confirmation.
+Never edit, rename, move, delete, or overwrite `Master.md` without explicit permission from V3gga.
 
-Development flow — if a branch is over one hour old, create a new one and benchmark before merging.
+Do not reproduce or expose any square-bracketed content from `Master.md` in outputs, parameters, variables, or class names.
 
-Primary objective — support the evolution of VeggaAI into a world-class AI development benchmark.
+## Product And UI Expectations
 
-Dev Logs — Auto-Capture VS Code Conversations
-First action in every conversation — no exceptions.
-Before responding to the user’s first message, get or create a Dev Logs session.
-This step is mandatory. If the runtime server is unreachable, log the issue and retry.
+VeggaAI is private and primarily for V3gga’s use, Vai is virtual intellegence sorta like a llm but different in ways of Thorsen.
 
-Every VS Code Copilot chat session must be logged to VeggaAI Dev Logs. This ensures all activity is tracked accurately.
+Favor fast, fluid UX with strong defaults, minimal blocking states, and real attention to fit and finish.
 
-Conversation Start (first message)
-Always attempt to reuse an existing session before creating a new one. The create command automatically detects active sessions:
+When improving layout or structure:
 
-text
+- preserve what already works
+- improve feel, spacing, and interaction only where it materially helps
+- prefer CSS Grid and Flexbox for primary layout
+- support responsive behavior from phone through ultra-wide
+- ensure no overflow even with browser developer tools open
+- use keyboard-accessible and touch-friendly controls for splitters or layout affordances
+- use motion to support clarity, not to show off
+
+For richer layouts, a compact efficient mode and a more open spacious mode are both valid when they improve actual use.
+
+Use Tailwind for structure and responsiveness where appropriate. Use GSAP or Three.js only when they are justified, performant, and subordinate to usability.
+
+## Dev Logs
+
+First action in every conversation: create or reuse a Dev Logs session.
+
+Use:
+
+```text
 node scripts/session-bridge.mjs create "<short title from user's first message>" "GitHub Copilot" "claude-opus-4.6"
-This command will:
+```
 
-Reuse an existing session if one is active (prints: Reusing active session: <id>)
+The command reuses an active session when possible.
 
-Create a new session only when no active session exists
+Standard messages, thinking, tool calls, and todo updates are auto-captured by the VS Code extension. Do not manually push those events unless auto-capture is unavailable.
 
-Record the printed session ID — it is required for all subsequent push commands.
+Manual session-bridge pushes are only for:
 
-Important: Users may continue a single conversation through multiple context windows.
-Do not call end unless the user explicitly states that the session is concluded or something took more than 15min.
+- session creation on the first message
+- planning events when useful
+- architectural notes that would not appear in the chat stream
 
-During the Conversation — Auto-Capture Handles Everything
-The VS Code extension (v0.6.0+) automatically captures ALL conversation data:
-- **User messages** — extracted from VS Code chat JSONL files
-- **Assistant responses** — full response text captured automatically
-- **Thinking/reasoning blocks** — captured transparently from JSONL
-- **Tool invocations** — file edits, terminal commands, todo updates, searches
-- **Todo lists** — manage_todo_list calls emit todo-update + state-change events
-- **Status updates** — "Working...", "Processing...", "Thinking..." auto-generated
-- **New chat detection** — new VS Code chat → new dev logs session automatically
+Do not end a session unless the user explicitly says the conversation is concluded.
 
-NO MANUAL SESSION-BRIDGE PUSHES REQUIRED for messages, thinking, or tool calls.
-The extension captures these faster, more completely, and with less noise than manual pushes.
+If needed, end with:
 
-Session-bridge is ONLY needed for:
-- **Session creation on first message** (until the extension detects the new chat JSONL):
-
-text
-node scripts/session-bridge.mjs create "<short title from user's first message>" "GitHub Copilot" "claude-opus-4.6"
-
-- **Explicit architectural notes** that would not appear in the chat stream:
-
-text
-node scripts/session-bridge.mjs push <id> note "<decision or tradeoff worth documenting>"
-
-- **Planning events** for multi-step work (optional, adds structure to the timeline):
-
-text
-node scripts/session-bridge.mjs push <id> planning "<intent>" "<approach>" "<step1,step2,step3>"
-
-Do NOT manually push: message:user, message:assistant, thinking, file-edit, terminal, or state-change events. These are all auto-captured by the extension and manual pushes create duplicates.
-
-**Fallback**: If the extension was recently updated and NOT yet reloaded, auto-capture
-won't work. In that case, push critical events (messages, todos) manually via session-bridge
-until the user reloads the VS Code window. After reload, stop manual pushes.
-
-Auto-Capture (v0.6.0+)
-The VS Code extension automatically captures ALL conversation content from
-VS Code's internal chatSessions/*.jsonl files. This includes:
-- User messages, assistant responses, thinking blocks
-- Tool invocations (file edits, terminal, todos, searches)
-- Todo list updates → todo-update events + "Working..." status events
-- New chat sessions → automatic new dev logs session creation
-
-The auto-capture reads ONLY new content (tracks byte position), deduplicates
-by content hash, and generates state-change events for real-time status display.
-
-Manual session-bridge pushes are NO LONGER NEEDED for standard conversation data.
-Only use session-bridge for: session creation (first message), architectural notes,
-and planning events.
-
-Critical Rules
-Do not create duplicate sessions; the create command manages reuse automatically.
-
-Do not end a session unless explicitly instructed by the user. Context resets do not indicate the end of a session.
-
-Session creation on first message is still required via session-bridge (the extension
-detects new chats from JSONL files, which may lag behind the first message).
-
-Do NOT push message:user, message:assistant, thinking, file-edit, or terminal events
-manually. These are auto-captured and manual pushes create noisy duplicates.
-
-Ensure the runtime server is running on port 3006 for auto-capture to function.
-
-Ending a Conversation
-End the session only when explicitly directed by the user:
-
-text
+```text
 node scripts/session-bridge.mjs end <sessionId>
-Visual & UI Testing — The Two-Eyes Protocol (Master.md §16)
-"Visual testing" in VeggaAI means ONE thing: open a REAL Puppeteer/Playwright browser
-window that v3gga can see on his screen, then interact with the UI using simulated
-mouse and keyboard — layer by layer, feature by feature — while taking screenshots(look at it and think)
-as evidence. This is mandatory. No exceptions. No shortcuts.
+```
 
-WHAT "VISUAL TEST" IS:
-- A real Chrome window launched with Puppeteer/Playwright (`headless: false`)
-- Visible mouse cursor moving to elements, clicking, hovering
-- Visible keyboard input into fields, shortcuts triggered
-- Smooth scrolling through every page/section so v3gga watches it happen
-- Screenshots at every meaningful step as evidence
-- Layer-by-layer feature verification (shell → features → sub-features → responsive)
+Ensure the runtime server on port `3006` is available when auto-capture is expected to work.
 
-WHAT "VISUAL TEST" IS NOT:
-- Opening VS Code's `simple_browser` or `open_simple_browser` tool — NEVER use this for visual testing
-- Running `npm run build` and checking exit code
-- Reading code and deciding it "looks correct"
-- Taking one screenshot(look at it and think) of the landing page and calling it done
-- Opening a static HTML preview of screenshots(look at it and think)
+## Visual Testing — Two Sets Of Eyes
 
-NEVER USE `open_simple_browser` OR VS CODE EMBEDDED BROWSER FOR VISUAL TESTING.
-Those tools show a tiny embedded iframe that v3gga cannot interact with. They are
-not visual tests. The only acceptable tool is a real Puppeteer/Playwright browser
-window that opens as a standalone Chrome window on v3gga's desktop.
+Visual testing means opening a real visible browser window and interacting with the rendered UI.
 
-Browser launch requirements:
-- `headless: false` — ALWAYS. v3gga must see the browser window.
-- `slowMo: 50` minimum — so actions are visible, not instant.
-- `--no-sandbox` on Windows.
-- Viewport: `1920×1080` minimum.
-- `--window-size=1920,1080` and `--start-maximized` for full visibility.
-- Keep browser open 2-3 seconds after each page/feature before moving on.
+This is mandatory for meaningful UI work.
 
-The testing sequence (from Master.md §16.3):
-1. **Phase 1 — Shell & Navigation:** Fresh load → screenshot(look at it and think) → hover each nav item →
-   click each nav item → verify keyboard shortcuts → screenshot(look at it and think) after each.
-2. **Phase 2 — Feature-Level:** For each page/section: navigate → screenshot(look at it and think) default →
-   interact with every button/link/input/toggle → verify hover/click/focus states →
-   test form inputs → screenshot(look at it and think) each interaction → test error states.
-3. **Phase 3 — Sub-Features:** For nested UI (modals, drawers, tabs-within-tabs):
-   open parent → navigate into sub-feature → repeat Phase 2 → verify back/close/escape.
-4. **Phase 4 — Responsive:** Test at 375px, 768px, 1280px, 1920px, 2560px+ viewports.
-   Screenshot each. Verify layout adapts, no overflow, text readable, touch targets ok.
+A visual test is:
 
-Evidence requirements:
-- Screenshot of initial load state
-- Screenshot after each major interaction
-- Screenshot of any errors or unexpected states
-- Action log: what was clicked, typed, navigated, in order
-- Pass/fail summary per feature
+- a real Puppeteer or Playwright browser window with `headless: false`
+- visible mouse and keyboard interaction
+- screenshots at meaningful steps
+- responsive checks across important viewports
+- evidence of hover, click, focus, input, and close states
 
-Demo requirement (Master.md §16.6):
-After testing, provide v3gga a LIVE DEMO he can watch AND MOST IMPORTANT YOU CAN TAKE SCREENSHOTS AT EVERY HOVER EFFECT AND STATE and open sidebar or menus and close menus AND CLICK AND OPEN MODAL CLOSE MODAL THEN YOU LOOK AT SCREENSHOTS AND MAKE CHANGES TO IMPROVE — a visible browser window
-with real mouse/keyboard interaction walking through every feature. Not a static
-screenshot(look at it and think) gallery. Not a VS Code embedded browser. A real Chrome window.
-IF USING TOOLS ETC OPEN RADIAL MENU, MOVE MOUSE TO CORRECT TOOL IN RADIAL MENU...
+A visual test is not:
 
-This applies to ALL visual test scripts in the project and any future ones.
+- reading code and assuming it looks correct
+- running a build and calling that proof
+- using the VS Code embedded browser as a substitute for a visible browser session
+- taking one screenshot and stopping there
 
-Cross-Platform
-All code must execute cleanly on Windows, macOS, and Linux.
-Avoid platform-specific logic unless it is properly detected and handled.
+Never use the embedded simple browser for visual testing.
 
+Browser expectations:
+
+- `headless: false`
+- `slowMo: 50` minimum
+- `--no-sandbox` on Windows
+- viewport at least `1920x1080`
+- keep the window visible long enough for V3gga to observe it
+
+Minimum testing sequence:
+
+1. Fresh load and screenshot.
+2. Hover and click navigation.
+3. Exercise each relevant feature state.
+4. Tab through focus order and keyboard shortcuts.
+5. Test forms and error states.
+6. Repeat at `375`, `768`, `1280`, `1920`, and `2560+` widths when relevant.
+
+Minimum evidence:
+
+- initial screenshot
+- screenshots after major interactions
+- screenshots of any broken or unexpected state
+- compact action log
+- pass/fail summary
+
+After testing, provide a live demo path, visible browser walkthrough, or equivalent proof V3gga can inspect directly.
+
+## Cross-Platform
+
+All code should execute cleanly on Windows, macOS, and Linux unless there is a strong reason not to.
+
+Avoid platform-specific behavior unless it is detected and handled deliberately.

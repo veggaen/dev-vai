@@ -4,7 +4,7 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --exclude \"./vai.db*\" --exclude \"./vai-knowledge.json*\" src/index.ts",
     "build": "tsc",
     "build:bundle": "esbuild src/index.ts --bundle --platform=node --target=node22 --outfile=dist/bundle.cjs --format=cjs --external:better-sqlite3",
     "typecheck": "tsc --noEmit",
@@ -14,9 +14,11 @@
   "dependencies": {
     "@fastify/cors": "^10.0.0",
     "@fastify/websocket": "^11.0.0",
+    "@vai/api-types": "workspace:*",
     "@vai/core": "workspace:*",
     "dotenv": "^16.4.0",
-    "fastify": "^5.2.0"
+    "fastify": "^5.2.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "esbuild": "^0.27.3",

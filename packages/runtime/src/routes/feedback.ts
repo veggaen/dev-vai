@@ -8,6 +8,8 @@
 import type { FastifyInstance } from 'fastify';
 import { type VaiDatabase, schema } from '@vai/core';
 import { eq } from 'drizzle-orm';
+import { feedbackBodySchema } from '@vai/api-types/feedback';
+import { invalidRequestBody } from '../validation/http-validation.js';
 
 export function registerFeedbackRoutes(
   app: FastifyInstance,
@@ -16,16 +18,11 @@ export function registerFeedbackRoutes(
   app.post<{
     Body: { messageId: string; helpful: boolean };
   }>('/api/feedback', async (request, reply) => {
-    const { messageId, helpful } = request.body;
-
-    if (!messageId || typeof messageId !== 'string') {
-      reply.code(400).send({ error: 'messageId is required' });
-      return;
+    const parsed = feedbackBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
     }
-    if (typeof helpful !== 'boolean') {
-      reply.code(400).send({ error: 'helpful must be a boolean' });
-      return;
-    }
+    const { messageId, helpful } = parsed.data;
 
     try {
       db.update(schema.messages)

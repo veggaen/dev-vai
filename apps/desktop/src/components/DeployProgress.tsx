@@ -8,7 +8,6 @@ import {
   Check,
   Loader2,
   X,
-  SkipForward,
   FolderPlus,
   Package,
   Hammer,
@@ -57,8 +56,6 @@ function StatusIcon({ status }: { status: DeployStepStatus['status'] }) {
       return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />;
     case 'failed':
       return <X className="h-3.5 w-3.5 text-red-400" />;
-    case 'skipped':
-      return <SkipForward className="h-3.5 w-3.5 text-zinc-600" />;
     default:
       return <div className="h-3.5 w-3.5 rounded-full border border-zinc-700 bg-zinc-800" />;
   }
@@ -71,17 +68,12 @@ function formatMs(ms: number): string {
 
 /* ── Component ── */
 
-/** Steps that are skipped because the tier doesn't include them (not failures) */
-const TIER_NA_MESSAGE = 'Not included in this tier';
-
 export function DeployProgress({ steps, stackName, tierName, startTime, onCancel, onRetry }: Props) {
-  // Filter out steps that are N/A for this tier — keeps the list clean
-  const visibleSteps = steps.filter(
-    (s) => !(s.status === 'skipped' && s.message === TIER_NA_MESSAGE),
-  );
+  const visibleSteps = steps.filter((step) => step.status !== 'skipped');
 
   const hasFailed = visibleSteps.some((s) => s.status === 'failed');
-  const allDone = visibleSteps.every((s) => s.status === 'done' || s.status === 'skipped');
+  const allDone = visibleSteps.length > 0 && visibleSteps.every((s) => s.status === 'done');
+  const isStarterFlow = visibleSteps.every((step) => ['scaffold', 'install', 'start', 'verify'].includes(step.id));
 
   const progress = useMemo(() => {
     if (visibleSteps.length === 0) return 0;
@@ -114,10 +106,10 @@ export function DeployProgress({ steps, stackName, tierName, startTime, onCancel
       {/* Header */}
       <div className="mb-4">
         <h3 className="text-sm font-semibold text-zinc-200">
-          {allDone ? '✅ Deployment Complete' : hasFailed ? '⚠️ Deploy Issue' : 'Deploying...'}
+          {allDone ? 'Preview ready' : hasFailed ? 'Deploy issue' : isStarterFlow ? 'Creating your app' : 'Deploying'}
         </h3>
         <p className="mt-0.5 text-[11px] text-zinc-500">
-          {stackName} — {tierName}
+          {stackName}
         </p>
       </div>
 
@@ -146,8 +138,6 @@ export function DeployProgress({ steps, stackName, tierName, startTime, onCancel
           const isActive = step.status === 'running';
           const isDone = step.status === 'done';
           const isFailed = step.status === 'failed';
-          const isSkipped = step.status === 'skipped';
-
           return (
             <div key={step.id}>
               <div
@@ -177,9 +167,7 @@ export function DeployProgress({ steps, stackName, tierName, startTime, onCancel
                   <div className="flex items-center gap-2">
                     <span
                       className={`text-xs font-medium ${
-                        isSkipped
-                          ? 'text-zinc-600'
-                          : isDone
+                        isDone
                             ? 'text-zinc-400'
                             : isActive
                               ? 'text-zinc-200'
@@ -220,14 +208,14 @@ export function DeployProgress({ steps, stackName, tierName, startTime, onCancel
       {allDone && (
         <div className="mt-3 rounded-lg border border-emerald-800/30 bg-emerald-500/5 p-3 text-center">
           <p className="text-xs font-medium text-emerald-400">
-            Ready — loading preview...
+            App is live. Loading preview.
           </p>
         </div>
       )}
       {hasFailed && (
         <div className="mt-3 rounded-lg border border-red-800/30 bg-red-500/5 p-3">
           <p className="mb-2 text-center text-xs font-medium text-red-400">
-            Deploy had issues — check logs above
+            Deployment hit a problem. Check the step details above.
           </p>
           <div className="flex items-center justify-center gap-2">
             {onRetry && (
@@ -251,7 +239,7 @@ export function DeployProgress({ steps, stackName, tierName, startTime, onCancel
         <div className="mt-3 flex justify-center">
           <button onClick={onCancel}
             className="rounded-lg border border-zinc-700 px-4 py-1.5 text-xs text-zinc-400 transition-colors hover:border-red-800/40 hover:bg-red-500/10 hover:text-red-400">
-            Cancel deploy
+            Cancel
           </button>
         </div>
       )}

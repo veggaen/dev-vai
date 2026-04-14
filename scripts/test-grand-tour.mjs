@@ -9,25 +9,22 @@
  *   7. Screenshots captured at each step
  */
 
-import puppeteer from 'puppeteer';
 import { mkdir } from 'fs/promises';
+import { launchVisualBrowser, maximizeBrowserWindow, wait } from './visual-browser.mjs';
 
 const SCREENSHOTS = 'scripts/screenshots/grand-tour';
 await mkdir(SCREENSHOTS, { recursive: true });
 
-const browser = await puppeteer.launch({
-  headless: false, slowMo: 50,
-  args: ['--no-sandbox', '--window-size=2560,1440'],
-});
-const page = await browser.newPage();
-await page.setViewport({ width: 2560, height: 1440 });
+const { browser, page } = await launchVisualBrowser();
+const viewport = await maximizeBrowserWindow(page);
+console.log(`Using real browser viewport ${viewport.width}x${viewport.height}`);
 
 const errors = [];
 page.on('pageerror', (err) => errors.push(err.message));
 
 console.log('⏳ Loading app...');
 await page.goto('http://localhost:5173', { waitUntil: 'networkidle0', timeout: 20000 });
-await new Promise((r) => setTimeout(r, 3000));
+await wait(3000);
 
 // Stop any auto-running demo first
 await page.evaluate(() => {
@@ -35,7 +32,7 @@ await page.evaluate(() => {
     window.__vai_demo.stop();
   }
 });
-await new Promise((r) => setTimeout(r, 1000));
+await wait(1000);
 
 // ── Test 1: Grand Tour button exists ──
 console.log('\n═══ Test 1: Grand Tour Button ═══');
@@ -52,7 +49,7 @@ await page.screenshot({ path: `${SCREENSHOTS}/00-before-tour.png` });
 // ── Test 2: Start Grand Tour ──
 console.log('\n═══ Test 2: Start Grand Tour ═══');
 await page.evaluate(() => window.__vai_demo?.grandTour?.());
-await new Promise((r) => setTimeout(r, 1500));
+await wait(1500);
 
 // Check if spotlight/annotation rendered
 const hasSpotlight = await page.evaluate(() => {
@@ -118,7 +115,7 @@ for (let step = 1; step <= 10; step++) {
     if (nextBtn) {
       await nextBtn.asElement()?.click();
       // Wait for step transition + actions to begin
-      await new Promise((r) => setTimeout(r, 2000));
+      await wait(2000);
     } else {
       console.log(`  ⚠️ Next button not found at step ${step}`);
       break;
@@ -140,7 +137,7 @@ const doneBtn = await page.evaluateHandle(() => {
 
 if (doneBtn && doneBtn.asElement()) {
   await doneBtn.asElement().click();
-  await new Promise((r) => setTimeout(r, 1000));
+  await wait(1000);
 
   const tourGone = await page.evaluate(() => {
     // Check if annotation panel is gone

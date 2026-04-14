@@ -1,7 +1,11 @@
+import { unlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { createDb } from '../src/db/client.js';
-import { conversations, messages } from '../src/db/schema.js';
+import { createDb, getRawDb, resetDbInstance } from '../src/db/client.js';
+import { conversations, evalRuns, messages } from '../src/db/schema.js';
 import type { VaiDatabase } from '../src/db/client.js';
 import { ulid } from 'ulid';
 
@@ -154,5 +158,46 @@ describe('Database', () => {
 
     const msgs = db.select().from(messages).where(eq(messages.conversationId, convId)).all();
     expect(msgs).toHaveLength(0);
+  });
+
+  it('migrates older eval_runs tables so newer casual, creative, and complex tracks can be stored', () => {
+    const dbPath = join(tmpdir(), `vai-eval-migration-${ulid()}.sqlite`);
+    const oldDb = new Database(dbPath);
+
+    oldDb.exec(`
+      CREATE TABLE eval_runs (
+        id TEXT PRIMARY KEY,
+        model_id TEXT NOT NULL,
+        track TEXT NOT NULL CHECK(track IN ('comprehension', 'navigation', 'bugfix', 'feature')),
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER,
+        config TEXT
+      );
+    `);
+    oldDb.close();
+
+    try {
+      const migratedDb = createDb(dbPath);
+      const rawDb = getRawDb();
+      const tableSql = rawDb
+        ?.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'eval_runs'")
+        .get() as { sql: string } | undefined;
+
+      expect(tableSql?.sql).toContain("'casual'");
+      expect(tableSql?.sql).toContain("'creative'");
+      expect(tableSql?.sql).toContain("'complex'");
+
+      migratedDb.insert(evalRuns).values({
+        id: ulid(),
+        modelId: 'test:mock',
+        track: 'casual',
+        startedAt: new Date(),
+        config: '{}',
+      }).run();
+    } finally {
+      getRawDb()?.close();
+      resetDbInstance();
+      unlinkSync(dbPath);
+    }
   });
 });

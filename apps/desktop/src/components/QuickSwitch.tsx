@@ -5,6 +5,7 @@ import { MessageSquare, Brain, Search, Settings, Clock, Zap } from 'lucide-react
 import { useChatStore } from '../stores/chatStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { useSessionStore } from '../stores/sessionStore.js';
+import { useAuthStore } from '../stores/authStore.js';
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 
@@ -20,9 +21,12 @@ function formatRelative(date: string): string {
 
 export function QuickSwitch() {
   const { showQuickSwitch, setShowQuickSwitch, setActivePanel, setSidebarState } = useLayoutStore();
-  const { conversations, selectConversation } = useChatStore();
+  const { conversations, selectConversation, startNewChat } = useChatStore();
   const sessions = useSessionStore((s) => s.sessions);
+  const isOwner = useAuthStore((state) => state.isOwner);
+  const ownerFeaturesHidden = useAuthStore((state) => state.ownerFeaturesHidden);
   const inputRef = useRef<HTMLInputElement>(null);
+  const showOwnerFeatures = isOwner && !ownerFeaturesHidden;
 
   // Focus input when opened
   useEffect(() => {
@@ -46,7 +50,7 @@ export function QuickSwitch() {
     setShowQuickSwitch(false);
   };
 
-  const handleSelectPanel = (panel: 'chats' | 'devlogs' | 'search' | 'settings') => {
+  const handleSelectPanel = (panel: 'chats' | 'projects' | 'devlogs' | 'search' | 'settings') => {
     setActivePanel(panel);
     setSidebarState('expanded');
     setShowQuickSwitch(false);
@@ -101,7 +105,7 @@ export function QuickSwitch() {
                 <Command.Group heading="Actions" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-zinc-600">
                   <QuickItem
                     onSelect={() => {
-                      useChatStore.setState({ activeConversationId: null, messages: [] });
+                      startNewChat();
                       setShowQuickSwitch(false);
                     }}
                     icon={<MessageSquare className="h-3.5 w-3.5" />}
@@ -111,6 +115,11 @@ export function QuickSwitch() {
                     onSelect={() => handleSelectPanel('search')}
                     icon={<Search className="h-3.5 w-3.5" />}
                     label="Search Conversations"
+                  />
+                  <QuickItem
+                    onSelect={() => handleSelectPanel('projects')}
+                    icon={<Clock className="h-3.5 w-3.5" />}
+                    label="Projects"
                   />
                   <QuickItem
                     onSelect={() => handleSelectPanel('settings')}
@@ -128,14 +137,18 @@ export function QuickSwitch() {
                         onSelect={() => handleSelectChat(conv.id)}
                         icon={<MessageSquare className="h-3.5 w-3.5" />}
                         label={conv.title}
-                        meta={formatRelative(conv.updatedAt)}
+                        meta={[
+                          conv.mode && conv.mode !== 'chat' ? conv.mode : null,
+                          conv.projectName,
+                          formatRelative(conv.updatedAt),
+                        ].filter(Boolean).join(' • ')}
                       />
                     ))}
                   </Command.Group>
                 )}
 
                 {/* Dev Log Sessions */}
-                {sessions.length > 0 && (
+                {showOwnerFeatures && sessions.length > 0 && (
                   <Command.Group heading="Dev Logs" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-zinc-600">
                     {sessions.slice(0, 5).map((session) => (
                       <QuickItem

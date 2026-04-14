@@ -11,6 +11,9 @@
  *   7. Test layout controls (focus mode, preview toggle, overlay toggle)
  *
  * Screenshots captured at every step for visual verification.
+ *
+ * Note: this validates the shared desktop/web shell served from the Tauri devUrl.
+ * It does not validate the native Tauri window chrome itself.
  */
 
 import puppeteer from 'puppeteer';
@@ -46,15 +49,89 @@ function check(label, condition) {
   }
 }
 
+async function getWindowSession(page) {
+  const session = await page.target().createCDPSession();
+  const { windowId } = await session.send('Browser.getWindowForTarget');
+  return { session, windowId };
+}
+
+async function getViewportMetrics(page) {
+  return page.evaluate(() => ({
+    width: window.innerWidth || document.documentElement.clientWidth || 1440,
+    height: window.innerHeight || document.documentElement.clientHeight || 900,
+    screenWidth: window.screen.availWidth || window.screen.width || 1440,
+    screenHeight: window.screen.availHeight || window.screen.height || 900,
+  }));
+}
+
+async function maximizeBrowserWindow(page) {
+  const { session, windowId } = await getWindowSession(page);
+  await session.send('Browser.setWindowBounds', {
+    windowId,
+    bounds: { windowState: 'maximized' },
+  });
+  await sleep(700);
+  return getViewportMetrics(page);
+}
+
+async function resizeBrowserWindow(page, width, height) {
+  const { session, windowId } = await getWindowSession(page);
+  await session.send('Browser.setWindowBounds', {
+    windowId,
+    bounds: {
+      windowState: 'normal',
+      width,
+      height,
+    },
+  });
+  await sleep(700);
+  return getViewportMetrics(page);
+}
+
+async function checkForHorizontalOverflow(page) {
+  return page.evaluate(() => {
+    const root = document.getElementById('layout-root');
+    const viewportWidth = window.innerWidth;
+    const documentWidth = document.documentElement.scrollWidth;
+    const bodyWidth = document.body.scrollWidth;
+    const rootWidth = root?.scrollWidth ?? 0;
+
+    return {
+      viewportWidth,
+      documentWidth,
+      bodyWidth,
+      rootWidth,
+      hasOverflow:
+        documentWidth > viewportWidth + 1 ||
+        bodyWidth > viewportWidth + 1 ||
+        rootWidth > viewportWidth + 1,
+    };
+  });
+}
+
 async function main() {
   await mkdir(SCREENSHOTS, { recursive: true });
 
-  const browser = await puppeteer.launch({
-    headless: false, slowMo: 50,
-    args: ['--no-sandbox', '--window-size=2560,1440'],
-  });
-  const page = await browser.newPage();
-  await page.setViewport({ width: 2560, height: 1440 });
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: false,
+      slowMo: 50,
+      defaultViewport: null,
+      channel: 'chrome',
+      args: ['--no-sandbox', '--start-maximized', '--force-device-scale-factor=1'],
+    });
+  } catch {
+    browser = await puppeteer.launch({
+      headless: false,
+      slowMo: 50,
+      defaultViewport: null,
+      args: ['--no-sandbox', '--start-maximized', '--force-device-scale-factor=1'],
+    });
+  }
+
+  const [page] = await browser.pages();
+  const viewport = await maximizeBrowserWindow(page);
 
   const errors = [];
   page.on('pageerror', (err) => errors.push(err.message));
@@ -63,6 +140,8 @@ async function main() {
   //  PHASE 0: Load & Clean State
   // ═══════════════════════════════════════════════════
   console.log('\n═══ Phase 0: Loading App ═══');
+  console.log(`  Validating shared shell at ${APP_URL}`);
+  console.log(`  Using real browser viewport ${viewport.width}x${viewport.height} on screen ${viewport.screenWidth}x${viewport.screenHeight}`);
   await page.goto(APP_URL, { waitUntil: 'networkidle0', timeout: 20000 });
   await sleep(3000);
 
@@ -458,6 +537,38 @@ async function main() {
   await sleep(600);
   await screenshot(page, 'rapid-switch-stable');
   check('Rapid panel switching is stable (no crash)', true);
+
+  // ═══════════════════════════════════════════════════
+  //  PHASE 7: Responsive Overflow Checks
+  // ═══════════════════════════════════════════════════
+  console.log('\n═══ Phase 7: Responsive Overflow Checks ═══');
+
+  await clickRail('Settings');
+  await sleep(400);
+
+  for (const viewport of [
+    { width: 1100, height: 820, label: 'desktop-min' },
+    { width: 900, height: 760, label: 'tablet' },
+    { width: 760, height: 760, label: 'phone-wide' },
+  ]) {
+    const metrics = await resizeBrowserWindow(page, viewport.width, viewport.height);
+
+    const overflow = await checkForHorizontalOverflow(page);
+    await screenshot(page, `responsive-${viewport.label}`);
+
+    check(
+      `No horizontal overflow at ${viewport.label} (${metrics.width}x${metrics.height})`,
+      !overflow.hasOverflow,
+    );
+
+    if (overflow.hasOverflow) {
+      failures.push(
+        `Overflow metrics ${viewport.label}: viewport=${overflow.viewportWidth}, document=${overflow.documentWidth}, body=${overflow.bodyWidth}, root=${overflow.rootWidth}`,
+      );
+    }
+  }
+
+  await maximizeBrowserWindow(page);
 
   // ═══════════════════════════════════════════════════
   //  SUMMARY

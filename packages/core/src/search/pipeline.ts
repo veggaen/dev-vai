@@ -21,25 +21,29 @@ import type {
   SearchResponse,
   AuditEntry,
   SearchPipelineConfig,
-  TrustTier,
   OnSearchLearn,
 } from './types.js';
 import { DEFAULT_SEARCH_CONFIG } from './types.js';
-import { validateSearchUrl, scoreDomain, scanContentSafety, contentFingerprint, assessUrl } from './safety.js';
+import { validateSearchUrl, scoreDomain, scanContentSafety, contentFingerprint } from './safety.js';
+import { classifySyncState, ThorsenAdaptiveController } from '../thorsen/types.js';
+import { normalizeInputForUnderstanding } from '../input-normalization.js';
 
 // ── Query Normalization (Step 1: CLARIFY) ──
 
 /** Common query intent markers */
 const INTENT_PATTERNS: ReadonlyArray<{ pattern: RegExp; intent: string }> = [
   { pattern: /^(what is|what are|what's|define)\b/i, intent: 'definition' },
+  { pattern: /^(hva\s+er)\b/i, intent: 'definition' },
   { pattern: /^(how to|how do|how can|how does)\b/i, intent: 'how-to' },
-  { pattern: /^(why|why does|why is|why are)\b/i, intent: 'explanation' },
+  { pattern: /^(hvordan|korleis)\b/i, intent: 'how-to' },
+  { pattern: /^(why|why does|why is|why are|explain|describe)\b/i, intent: 'explanation' },
+  { pattern: /^(forklar|beskriv|hvorfor)\b/i, intent: 'explanation' },
   { pattern: /^(compare|versus|vs\.?|difference between)\b/i, intent: 'comparison' },
   { pattern: /^(best|top|recommend|alternatives)\b/i, intent: 'recommendation' },
   { pattern: /^(when|what year|what date|timeline)\b/i, intent: 'temporal' },
   { pattern: /^(who|who is|who are|who was)\b/i, intent: 'person' },
   { pattern: /^(debug|fix|error|issue|problem|bug)\b/i, intent: 'troubleshoot' },
-  { pattern: /\b(latest|newest|recent|2024|2025)\b/i, intent: 'current' },
+  { pattern: /\b(current|latest|newest|recent|stable|release|lts|2024|2025)\b/i, intent: 'current' },
 ];
 
 /** Stop words to strip when extracting entities */
@@ -55,29 +59,171 @@ const ENTITY_STOP_WORDS = new Set([
   'same', 'so', 'than', 'too', 'very', 'just', 'about', 'and', 'but',
   'or', 'if', 'what', 'which', 'who', 'whom', 'this', 'that', 'these',
   'those', 'i', 'me', 'my', 'it', 'its', 'we', 'they', 'search', 'find',
-  'look', 'up', 'tell', 'give', 'show', 'get', 'know', 'please',
+  'look', 'up', 'tell', 'give', 'show', 'get', 'know', 'please', 'explain',
+  'describe', 'explained', 'simple', 'words', 'simply', 'include', 'sources',
+  'source', 'citation', 'citations', 'references', 'reference',
+  'hva', 'hvordan', 'hvorfor', 'forklar', 'beskriv', 'kan', 'du', 'meg',
+  'om', 'er', 'og', 'på', 'i', 'til', 'med', 'for', 'en', 'et', 'det', 'den',
 ]);
+
+const FOLLOW_UP_NOISE_TOKENS = new Set([
+  'simple', 'simply', 'word', 'words', 'include', 'source', 'sources',
+  'citation', 'citations', 'reference', 'references', 'official', 'doc', 'docs',
+  'documentation', 'page', 'pages', 'article', 'articles', 'guide', 'guides',
+  'explained', 'explain', 'describe', 'overview', 'overviews',
+  'forklar', 'beskriv', 'kort', 'enkelt', 'enkle',
+]);
+
+function hasComparisonMarkers(query: string): boolean {
+  return /\b(?:vs\.?|versus|over|instead of|compared? to|difference between)\b/i.test(query);
+}
+
+function dedupeTopicTokens(tokens: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const token of tokens) {
+    const key = token.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(token);
+  }
+
+  return deduped;
+}
+
+function stripTopicNoiseTerms(value: string): string {
+  const tokens = value
+    .split(/\s+/)
+    .map(sanitizeEntityToken)
+    .filter(Boolean);
+  if (tokens.length === 0) return '';
+
+  const filtered = dedupeTopicTokens(tokens.filter((token) => !FOLLOW_UP_NOISE_TOKENS.has(token.toLowerCase())));
+  if (filtered.length > 0) return filtered.join(' ').trim();
+  return dedupeTopicTokens(tokens).join(' ').trim();
+}
+
+function cleanQuerySubject(subject: string): string {
+  return stripTopicNoiseTerms(sanitizeTopicPhrase(subject
+    .replace(/^[\s"'`([{]+|[\s"'`\])}.?!,:;]+$/g, '')
+    .replace(/\b(?:and\s+why|and\s+how)\b.*$/i, '')
+    .replace(/\b(?:in\s+simple\s+words?|simply|for\s+beginners|med\s+enkle\s+ord|kort\s+fortalt)\b.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()));
+}
+
+function sanitizeEntityToken(token: string): string {
+  return token
+    .replace(/^[\s"'`([{<]+/g, '')
+    .replace(/[\s"'`\])}>!?,:;]+$/g, '')
+    .replace(/^\.+|\.+$/g, '')
+    .trim();
+}
+
+function sanitizeTopicPhrase(value: string): string {
+  return value
+    .split(/\s+/)
+    .map(sanitizeEntityToken)
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeCommonTypos(query: string): string {
+  return normalizeInputForUnderstanding(query);
+}
+
+function normalizeSearchQuery(query: string): string {
+  const trimmed = normalizeCommonTypos(query.trim());
+  const withoutLead = trimmed
+    .replace(/^(?:please\s+)?(?:use|do)\s+web\s+search(?:\s+(?:and|to))?\s+(?:(?:study|research|investigate|explore|look\s+into)\s+)?/i, '')
+    .replace(/^(?:please\s+)?(?:study|research|investigate|explore|look\s+into)\s+/i, '')
+    .replace(/^(?:please\s+)?(?:search(?:\s+the\s+web)?(?:\s+for)?|look\s+up|find|tell\s+me|give\s+me|show\s+me)\s+/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const withoutTrailingInstructions = withoutLead
+    .replace(/,?\s*include\s+(?:the\s+)?official\b.*$/i, '')
+    .replace(/,?\s*include\s+sources?\b.*$/i, '')
+    .replace(/,?\s*with\s+sources?\b.*$/i, '')
+    .replace(/,?\s*and\s+at\s+least\s+one\s+supporting\s+source\b.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const withoutBuildTail = withoutTrailingInstructions
+    .replace(/,?\s*(?:then|and\s+then)\s+(?:build|create|make|prototype|scaffold|turn)\b.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (/\b(?:current|latest|stable|version|release|lts)\b/i.test(withoutBuildTail)) {
+    const focusedClause = withoutBuildTail
+      .split(/,\s*(?=what\b|why\b|how\b|when\b)/i)[0]
+      ?.trim();
+    if (focusedClause && focusedClause.length > 0) {
+      return focusedClause;
+    }
+  }
+
+  return withoutBuildTail || trimmed;
+}
+
+function extractPrimarySubject(query: string, entities: readonly string[]): string {
+  const stripped = query
+    .replace(/^(?:what\s+(?:is|are|was|were)|what's|define|explain|describe|tell\s+me\s+about|who\s+(?:is|are|was|were)|how\s+(?:does|do)|why\s+(?:does|is|are|would|should)|hva\s+er|forklar|beskriv|fortell\s+meg\s+om|hvordan(?:\s+fungerer)?)\s+/i, '')
+    .trim();
+
+  if (/\b(?:current|latest|stable|version|release|lts)\b/i.test(stripped)) {
+    const focusedEntity = entities.find((entity) => {
+      const normalized = entity.toLowerCase();
+      return entity.length > 1 && !PACKAGE_QUERY_NOISE.has(normalized) && normalized !== 'pypi';
+    });
+    if (focusedEntity) return cleanQuerySubject(focusedEntity);
+  }
+
+  const beforeComparison = stripped.split(/\b(?:over|vs\.?|versus|instead of|compared? to)\b/i)[0] ?? stripped;
+  const cleaned = cleanQuerySubject(beforeComparison);
+  if (cleaned.length > 0) return cleaned;
+  return entities[0] ?? query.trim();
+}
+
+function extractComparisonSubject(query: string): string | null {
+  const match = query.match(/\b(?:over|vs\.?|versus|instead of|compared? to)\b\s+(.+?)(?:\?|$)/i);
+  if (!match) return null;
+  const cleaned = cleanQuerySubject(match[1] ?? '');
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+function shouldBiasPerplexityToProduct(query: string, primarySubject: string): boolean {
+  if (!/\bperplexity\b/i.test(primarySubject) && !/\bperplexity\b/i.test(query)) return false;
+  if (/\b(?:information\s+theory|probability|distribution|entropy|language\s+model|token\s+prediction|cross-entropy)\b/i.test(query)) {
+    return false;
+  }
+  return true;
+}
 
 export function buildSearchPlan(query: string): VaiSearchPlan {
   const trimmed = query.trim();
-  const lower = trimmed.toLowerCase();
+  const normalizedQuery = normalizeSearchQuery(trimmed);
+  const lower = normalizedQuery.toLowerCase();
 
   // Detect intent
   const matched = INTENT_PATTERNS.find(p => p.pattern.test(lower));
-  const intent = matched?.intent ?? 'general';
+  const intent = hasComparisonMarkers(lower) ? 'comparison' : (matched?.intent ?? 'general');
 
   // Extract entities (meaningful words)
-  const words = trimmed.split(/\s+/);
+  const words = normalizedQuery.split(/\s+/);
   const entities = words
+    .map(sanitizeEntityToken)
     .filter(w => !ENTITY_STOP_WORDS.has(w.toLowerCase()) && w.length > 1)
-    .map(w => w.replace(/[^a-zA-Z0-9_.#+-]/g, ''))
     .filter(w => w.length > 1);
 
   // Build constraints from query signals
   const constraints: SearchConstraints = {};
 
   // Generate fan-out queries (scoped sub-searches)
-  const fanOutQueries = generateFanOutQueries(trimmed, intent, entities);
+  const fanOutQueries = generateFanOutQueries(normalizedQuery, intent, entities);
 
   return {
     originalQuery: trimmed,
@@ -88,27 +234,431 @@ export function buildSearchPlan(query: string): VaiSearchPlan {
   };
 }
 
+
+const FOLLOW_UP_PRESETS: ReadonlyArray<{ pattern: RegExp; items: readonly string[] }> = [
+  {
+    pattern: /^programming$/i,
+    items: [
+      'Best programming language for beginners',
+      'How to learn programming step by step',
+      'Programming vs coding differences',
+    ],
+  },
+  {
+    pattern: /^meaning$/i,
+    items: [
+      'Difference between meaning, definition, and purpose',
+      'How meaning changes depending on context',
+      'Examples of words with multiple meanings',
+    ],
+  },
+  {
+    pattern: /^single$/i,
+    items: [
+      'What does single mean in music vs everyday language?',
+      'How is single used in Norwegian and English?',
+      'What are the most common meanings of single?',
+    ],
+  },
+  {
+    pattern: /^typescript$/i,
+    items: [
+      'TypeScript vs JavaScript differences',
+      'When to use interfaces vs type aliases',
+      'How to enable strict mode in TypeScript',
+    ],
+  },
+  {
+    pattern: /^python$/i,
+    items: [
+      'Python vs JavaScript for beginners',
+      'How to set up a Python virtual environment',
+      'What should I build first in Python?',
+    ],
+  },
+  {
+    pattern: /^docker$/i,
+    items: [
+      'Docker images vs containers differences',
+      'Docker Compose vs Kubernetes trade-offs',
+      'How to debug a container that exits immediately',
+    ],
+  },
+  {
+    pattern: /^database$/i,
+    items: [
+      'SQL vs NoSQL differences',
+      'How database indexing works',
+      'When to normalize vs denormalize data',
+    ],
+  },
+  {
+    pattern: /^queue$/i,
+    items: [
+      'Queue vs stack differences',
+      'How queues are used in async systems',
+      'What enqueue, dequeue, and peek mean',
+    ],
+  },
+  {
+    pattern: /^cache$/i,
+    items: [
+      'Cache invalidation strategies',
+      'Redis vs in-memory cache differences',
+      'When caching hurts instead of helps',
+    ],
+  },
+  {
+    pattern: /^latency$/i,
+    items: [
+      'Latency vs throughput differences',
+      'How to measure latency in an app',
+      'What usually causes high latency',
+    ],
+  },
+  {
+    pattern: /^recursion$/i,
+    items: [
+      'Recursion vs iteration differences',
+      'How base cases prevent infinite recursion',
+      'When recursion becomes inefficient',
+    ],
+  },
+  {
+    pattern: /^websocket$/i,
+    items: [
+      'WebSocket vs Server-Sent Events differences',
+      'How to keep WebSocket connections alive',
+      'When to choose WebSocket over HTTP polling',
+    ],
+  },
+  {
+    pattern: /\bvinext\b/i,
+    items: [
+      'Turn this starter into a premium landing page',
+      'Add auth and a dashboard shell to this app',
+      'When should I pick Vinext over Next.js or plain Vite?',
+    ],
+  },
+  {
+    pattern: /\bnext(?:\.?js)?\b/i,
+    items: [
+      'Add Prisma and Postgres to this app',
+      'Add GitHub sign-in next to Google auth',
+      'Polish the onboarding and dashboard flow',
+    ],
+  },
+  {
+    pattern: /\b(?:notes?\s+dashboard|note-taking|notes?\s+app|note\s+workspace|knowledge\s+capture)\b/i,
+    items: [
+      'Add search, tags, and filters to this notes dashboard',
+      'Persist notes in local storage and restore on reload',
+      'Add edit, delete, and pin toggles to each note',
+    ],
+  },
+  {
+    pattern: /\b(?:social\s+blog(?:ging)?|social\s+app|blog(?:ging)?\s+app|community\s+(?:feed|app)|creator\s+platform|social\s+hub)\b/i,
+    items: [
+      'Add comments and likes to the feed',
+      'Add author profiles and follow state to Social Hub',
+      'Add trending topics and saved drafts to the composer',
+    ],
+  },
+  {
+    pattern: /\b(?:twitter|x(?:\.com)?\s+clone|social\s+feed|timeline|for\s+you|who\s+to\s+follow|trending\s+now|orbit\s+social)\b/i,
+    items: [
+      'Add a composer modal and inline thread replies to this feed',
+      'Add profile pages, follow state, and engagement counters',
+      'Add trends and who-to-follow rails with mobile navigation',
+    ],
+  },
+  {
+    pattern: /\b(?:copy|recreate|replicate|reference|screenshot|inspired)\b.*\b(?:website|landing(?:\s*page)?|homepage|hero|marketing(?:\s+page)?)\b/i,
+    items: [
+      'Tighten spacing, typography, and visual rhythm to match the reference closer',
+      'Add responsive mobile navigation and a tighter tablet layout',
+      'Replace placeholder sections with brand-specific copy and imagery slots',
+    ],
+  },
+  {
+    pattern: /\b(?:internal\s+(?:ops|tool)|ops\s+(?:dashboard|workspace|tool)|operations\s+(?:dashboard|workspace)|back\s*office|backoffice|admin\s+dashboard|approval\s+queue|ops\s+control\s+center)\b/i,
+    items: [
+      'Add assignee filters and SLA badges to the approval queue',
+      'Turn the quick actions into working approval flows',
+      'Add audit history and escalation states to Ops Control Center',
+    ],
+  },
+  {
+    pattern: /\b(?:saas|subscription|billing\s+portal|workspace\s+(?:app|shell)|saas\s+control\s+center)\b/i,
+    items: [
+      'Add plan upgrades and seat management to this SaaS workspace',
+      'Add audit log filters and CSV export',
+      'Add invite flows and role-based access to the team panel',
+    ],
+  },
+  {
+    pattern: /\b(?:sell|shop|store|storefront|catalog|checkout|cart|product(?:s|\s+detail)?|gift\s+set)\b.*\b(?:candles?|massage\s*oil|scent(?:ed|ing)?|aroma|wellness|body\s*oil|ritual)\b|\b(?:candles?|massage\s*oil|scent(?:ed|ing)?|aroma|wellness|body\s*oil|ritual)\b.*\b(?:shop|store|storefront|catalog|checkout|cart|sell|product(?:s|\s+detail)?)\b/i,
+    items: [
+      'Add a scent quiz and personalized bundle recommendations',
+      'Turn the catalog into product detail pages with cart and checkout flow',
+      'Add reviews, trust badges, and shipping thresholds to the storefront',
+    ],
+  },
+  {
+    pattern: /\b(?:sell|selling|shop|store|storefront|catalog|checkout|cart|products?|ecommerce|commerce|webshop|marketplace)\b.*\b(?:brand|business|firma|anything|goods|items|retail|online\s+store|general\s+store)\b|\b(?:brand|business|firma|anything|goods|items|retail|online\s+store|general\s+store)\b.*\b(?:sell|selling|shop|store|storefront|catalog|checkout|cart|products?|ecommerce|commerce|webshop|marketplace)\b/i,
+    items: [
+      'Add category navigation, search, and filters to the storefront',
+      'Turn product cards into product detail pages with variants and cart flow',
+      'Add featured collections, trust signals, and order-summary checkout states',
+    ],
+  },
+  {
+    pattern: /\breact\b/i,
+    items: [
+      'Add routing with React Router',
+      'Set up state management with Zustand',
+      'Add a REST API backend to this',
+    ],
+  },
+  {
+    pattern: /\b(?:pern|mern|express|node|server|api|backend|postgres|prisma)\b/i,
+    items: [
+      'Add authentication to this API',
+      'Set up database migrations',
+      'Add input validation with Zod',
+    ],
+  },
+  {
+    pattern: /\b(?:tailwind|css|style|design|ui)\b/i,
+    items: [
+      'Add a dark mode toggle with Tailwind CSS',
+      'Make this responsive for mobile',
+      'Add animations with Framer Motion',
+    ],
+  },
+];
+
+function finalizeFollowUps(items: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const normalized = items
+    .map((item) => item.replace(/\s+/g, ' ').trim())
+    .filter((item) => item.length > 0)
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+  return normalized.slice(0, 3);
+}
+
+function deriveFollowUpSubject(topic: string): string {
+  const subject = stripTopicNoiseTerms(sanitizeTopicPhrase(topic
+    .replace(/^(?:difference\s+between|compare)\s+/i, '')
+    .replace(/\bvs\.?\b/gi, ' and ')
+    .replace(/^(?:set\s*up|setup|build|create|make|start|generate|install|launch|spin\s*up|scaffold|deploy|debug|fix|troubleshoot)\s+/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()));
+
+  return subject.length > 0 ? subject : topic;
+}
+
+export function normalizeFollowUpTopic(raw: string): string {
+  return stripTopicNoiseTerms(sanitizeTopicPhrase(normalizeCommonTypos(raw)
+    .replace(/^(?:please\s+)?(?:(?:what\s+(?:is|are)|how\s+(?:do|does|to)|why\s+(?:is|are|does)|can\s+you\s+explain|explain|describe|tell\s+me\s+about|show\s+me|give\s+me|search\s+(?:for)?|find|look\s+up|hva\s+er|forklar|beskriv|fortell\s+meg\s+om|hvordan(?:\s+fungerer)?)\s+)?/i, '')
+    .replace(/^(?:can|could|would)\s+you\s+/i, '')
+    .replace(/^(?:set\s*up|setup|build|create|make|start|generate|install|launch|spin\s*up|scaffold)\s+/i, '')
+    .replace(/\b(?:in\s+simple\s+words?|simply|for\s+beginners?|med\s+enkle\s+ord|kort\s+fortalt|kort\s+forklart)\b/gi, ' ')
+    .replace(/\b(?:include|with)\s+(?:sources?|citations?|references?)\b/gi, ' ')
+    .replace(/\b(?:for\s+me|please|pls|thanks?|thank\s+you|kan\s+du|kort)\b/gi, ' ')
+    .replace(/^a\s+|^an\s+|^the\s+/i, '')
+    .replace(/\s+and\s+how\s+.*$/i, '')
+    .replace(/\?.*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim()));
+}
+
+function normalizeSourceTitleForFollowUps(value: string): string {
+  return stripTopicNoiseTerms(sanitizeTopicPhrase(value
+    .replace(/\b(?:what\s+is|how\s+to|guide\s+to|guides\s+to|introduction\s+to|overview\s+of)\b/gi, ' ')
+    .replace(/[|:]/g, ' ')
+    .replace(/\b(?:docs?|documentation|help\s*center|release\s*notes?|changelog|official|home)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()));
+}
+
+function hostnameForBias(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function isPerplexityOfficialResult(raw: RawSearchResult): boolean {
+  const hostname = hostnameForBias(raw.url);
+  return hostname === 'perplexity.ai' || hostname.endsWith('.perplexity.ai');
+}
+
+function isPerplexityOfficialDocsResult(raw: RawSearchResult): boolean {
+  if (!isPerplexityOfficialResult(raw)) return false;
+  const haystack = `${raw.title} ${raw.snippet} ${raw.url}`.toLowerCase();
+  return /help[-\s]?center|discover|blog|api|enterprise/.test(haystack);
+}
+
+function isPerplexityUnofficialResult(raw: RawSearchResult): boolean {
+  if (!isPerplexityOfficialResult(raw)) return false;
+
+  const haystack = `${raw.title} ${raw.snippet} ${raw.url}`.toLowerCase();
+  return /\b(?:unofficial|wrapper|clone|open[-\s]?source|community|account generator|reverse engineered)\b/.test(haystack)
+    || /\b[a-z0-9._-]+\/[a-z0-9._-]+\b/i.test(raw.title);
+}
+
+function isPerplexityCloneOrWrapperResult(raw: RawSearchResult): boolean {
+  const hostname = hostnameForBias(raw.url);
+  if (hostname === 'github.com') return true;
+  if (hostname === 'sourceforge.net') return true;
+  if (hostname === 'glarity.app') return true;
+  if (hostname === 'toolify.ai') return true;
+  if (hostname === 'futurepedia.io') return true;
+  if (hostname === 'aitoolnet.com') return true;
+  if (hostname === 'theresanaiforthat.com') return true;
+  if (hostname === 'topai.tools') return true;
+
+  const haystack = `${raw.title} ${raw.snippet} ${raw.url}`.toLowerCase();
+  return /\b(?:clone|wrapper|tool review|alternatives?|open-source search engine|open-source perplexity|directory listing|perplexity[-\s]?inspired|inspired by perplexity|llm answer engine)\b/.test(haystack)
+    || (/\b[a-z0-9._-]+\/[a-z0-9._-]+\b/i.test(raw.title) && /\b(?:perplexity|answer engine|search engine)\b/i.test(haystack));
+}
+
+function isPerplexityWrapperLikeResult(raw: RawSearchResult): boolean {
+  return isPerplexityUnofficialResult(raw) || isPerplexityCloneOrWrapperResult(raw);
+}
+
+function isPerplexityProductResult(raw: RawSearchResult): boolean {
+  const haystack = `${raw.title} ${raw.snippet} ${raw.url}`.toLowerCase();
+  return /\bperplexity ai\b|perplexity_ai|perplexity\.ai|\bsonar\b|\bsearch engine\b|\bai company\b|\bllm\b/.test(haystack);
+}
+
+function isPerplexityMathResult(raw: RawSearchResult): boolean {
+  const haystack = `${raw.title} ${raw.snippet} ${raw.url}`.toLowerCase();
+  return /wiki\/perplexity(?:$|[?#])|\binformation theory\b|\bprobability distribution\b|\bcross-entropy\b|\bfair coin toss\b|\bfair die\b/.test(haystack);
+}
+
+function isLexicalTopicFollowUpCandidate(topic: string): boolean {
+  const words = topic.split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 3) return false;
+  if (!words.every((word) => /^[a-z0-9+#.-]{3,}$/i.test(word))) return false;
+  if (/\b(?:app|project|dashboard|site|website|workflow|stack|starter|template|scaffold|deploy|install|setup|debug|fix|api|sdk|cli|server|service|database)\b/i.test(topic)) {
+    return false;
+  }
+  return true;
+}
+
+export function generateTopicFollowUps(rawTopic: string, intent = 'general'): string[] {
+  const topic = normalizeFollowUpTopic(rawTopic);
+  if (topic.length < 2) return [];
+
+  const subject = deriveFollowUpSubject(topic);
+
+  if (intent === 'comparison') {
+    return finalizeFollowUps([
+      `Which trade-offs matter most between ${subject}?`,
+      `What does the performance picture look like for ${subject}?`,
+      `What breaks during a migration between ${subject}?`,
+    ]);
+  }
+
+  for (const preset of FOLLOW_UP_PRESETS) {
+    if (preset.pattern.test(topic)) {
+      return finalizeFollowUps(preset.items);
+    }
+  }
+
+  if (intent === 'general' && isLexicalTopicFollowUpCandidate(topic)) {
+    return finalizeFollowUps([
+      `How is ${subject} used in practice?`,
+      `What are the core ideas behind ${subject}?`,
+      `What should I learn next after ${subject}?`,
+    ]);
+  }
+
+  switch (intent) {
+    case 'definition':
+      return finalizeFollowUps([
+        `How is ${subject} used in a real project?`,
+        `What problem does ${subject} solve best?`,
+        `What should I learn right after ${subject}?`,
+      ]);
+    case 'explanation':
+      return finalizeFollowUps([
+        `What does ${subject} look like in a real workflow?`,
+        `When should I reach for ${subject} instead of another tool?`,
+        `Which part of ${subject} should I understand next?`,
+      ]);
+    case 'how-to':
+      return finalizeFollowUps([
+        `What usually breaks when setting up ${subject}?`,
+        `How should I structure ${subject} in a real project?`,
+        `What is the fastest production-ready path for ${subject}?`,
+      ]);
+    case 'troubleshoot':
+      return finalizeFollowUps([
+        `What is the fastest way to isolate ${subject} failures?`,
+        `Which logs or metrics matter most for ${subject}?`,
+        `What usually causes ${subject} to regress again?`,
+      ]);
+    case 'current':
+      return finalizeFollowUps([
+        `What changed recently in ${subject}?`,
+        `Which release notes matter most for ${subject}?`,
+        `What should I validate before upgrading ${subject}?`,
+      ]);
+    case 'recommendation':
+      return finalizeFollowUps([
+        `Which use case is ${subject} best for?`,
+        `What are the strongest alternatives to ${subject}?`,
+        `What trade-offs would rule out ${subject}?`,
+      ]);
+    default:
+      return finalizeFollowUps([
+        `Show me a practical example with ${subject}`,
+        `What should I build next with ${subject}?`,
+        `What is the cleanest project structure for ${subject}?`,
+      ]);
+  }
+}
 function generateFanOutQueries(query: string, intent: string, entities: readonly string[]): string[] {
   const queries: string[] = [query]; // always include original
 
   const entityStr = entities.slice(0, 4).join(' ');
+  const primarySubject = extractPrimarySubject(query, entities);
+  const comparisonSubject = extractComparisonSubject(query);
+  const biasPerplexityToProduct = shouldBiasPerplexityToProduct(query, primarySubject);
 
   switch (intent) {
     case 'definition':
-      queries.push(`${entityStr} explained simply`);
-      queries.push(`${entityStr} wikipedia`);
+      queries.push(`${primarySubject} explained simply`);
+      queries.push(biasPerplexityToProduct ? 'what is Perplexity AI' : `${primarySubject} official docs`);
+      if (biasPerplexityToProduct) queries.push('Perplexity AI search engine');
+      queries.push(`${primarySubject} wikipedia`);
       break;
     case 'how-to':
       queries.push(`${entityStr} tutorial step by step`);
       queries.push(`${entityStr} example code`);
       break;
     case 'explanation':
-      queries.push(`${entityStr} reason why explained`);
-      queries.push(`${entityStr} cause`);
+      queries.push(`${primarySubject} explained simply`);
+      queries.push(biasPerplexityToProduct ? 'what is Perplexity AI' : `what is ${primarySubject}`);
+      queries.push(biasPerplexityToProduct ? 'Perplexity AI search engine' : `${primarySubject} official site`);
       break;
     case 'comparison':
-      queries.push(`${entityStr} pros cons comparison`);
-      queries.push(`${entityStr} benchmarks performance`);
+      if (comparisonSubject) {
+        queries.push(`${primarySubject} vs ${comparisonSubject}`);
+        queries.push(`${primarySubject} compared to ${comparisonSubject}`);
+      }
+      queries.push(`${primarySubject} official docs`);
+      queries.push(`${primarySubject} pros cons comparison`);
       break;
     case 'recommendation':
       queries.push(`best ${entityStr} 2025`);
@@ -123,7 +673,7 @@ function generateFanOutQueries(query: string, intent: string, entities: readonly
       queries.push(`${entityStr} release notes changelog`);
       break;
     default:
-      queries.push(`${entityStr} overview`);
+      queries.push(`${primarySubject || entityStr} overview`);
       break;
   }
 
@@ -131,7 +681,7 @@ function generateFanOutQueries(query: string, intent: string, entities: readonly
   return queries.slice(0, 6);
 }
 
-// ── DuckDuckGo Search Provider (Step 3: FETCH) ──
+// ── Search Providers (Step 3: FETCH) ──
 
 interface RawSearchResult {
   title: string;
@@ -139,21 +689,156 @@ interface RawSearchResult {
   url: string;
 }
 
+const PACKAGE_QUERY_NOISE = new Set([
+  'current', 'stable', 'version', 'pypi', 'latest', 'release', 'lts', 'official',
+  'page', 'source', 'sources', 'supporting', 'tool', 'should', 'use', 'when', 'what',
+  'does', 'from', 'the',
+]);
+
+const REGISTRY_METADATA_HOSTS = new Set(['pypi.org', 'registry.npmjs.org', 'crates.io']);
+
+function normalizePackageToken(value: string): string {
+  return value.replace(/^[^a-z0-9]+|[^a-z0-9._-]+$/gi, '').trim();
+}
+
+function extractPyPIPackageName(query: string, packageHints: readonly string[] = []): string | null {
+  if (!/\bpypi\b/i.test(query)) return null;
+
+  const versionLookahead = query.match(/\b([a-z0-9][a-z0-9._-]*[a-z0-9])\b(?=\s+version\b)/i)?.[1];
+  if (versionLookahead) return normalizePackageToken(versionLookahead).toLowerCase();
+
+  const versionOf = query.match(/\bversion\s+(?:of|for)\s+([a-z0-9][a-z0-9._-]*[a-z0-9])\b/i)?.[1];
+  if (versionOf) return normalizePackageToken(versionOf).toLowerCase();
+
+  const hinted = packageHints
+    .map(normalizePackageToken)
+    .find((token) => token.length > 1 && !PACKAGE_QUERY_NOISE.has(token.toLowerCase()) && /[-_.]/.test(token));
+  if (hinted) return hinted.toLowerCase();
+
+  const fallback = query
+    .split(/\s+/)
+    .map(normalizePackageToken)
+    .find((token) => token.length > 1 && !PACKAGE_QUERY_NOISE.has(token.toLowerCase()) && /[-_.]/.test(token));
+  return fallback ? fallback.toLowerCase() : null;
+}
+
+/** Brave Search API — free tier 2000 req/month, returns real web results */
+async function fetchBrave(query: string, apiKey: string, timeoutMs: number): Promise<RawSearchResult[]> {
+  const results: RawSearchResult[] = [];
+  try {
+    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=8&safesearch=moderate`;
+    const res = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip',
+        'X-Subscription-Token': apiKey,
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return results;
+    const data = await res.json() as {
+      web?: { results?: Array<{ title?: string; description?: string; url?: string }> };
+    };
+    for (const r of (data.web?.results ?? []).slice(0, 8)) {
+      if (r.url && r.description && r.description.length > 15) {
+        results.push({ title: r.title ?? '', snippet: r.description, url: r.url });
+      }
+    }
+  } catch { /* continue */ }
+  return results;
+}
+
+async function fetchPyPI(packageName: string, timeoutMs: number): Promise<RawSearchResult[]> {
+  const results: RawSearchResult[] = [];
+  try {
+    const res = await fetch(`https://pypi.org/pypi/${encodeURIComponent(packageName)}/json`, {
+      headers: { 'User-Agent': 'VeggaAI/1.0' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return results;
+
+    const data = await res.json() as {
+      info?: {
+        version?: string;
+        summary?: string;
+        home_page?: string | null;
+        project_urls?: Record<string, string> | null;
+      };
+    };
+
+    const version = data.info?.version?.trim();
+    const summary = data.info?.summary?.trim() || `${packageName} package on PyPI.`;
+    const projectPage = `https://pypi.org/project/${encodeURIComponent(packageName)}/`;
+
+    results.push({
+      title: version ? `${packageName} ${version}` : packageName,
+      snippet: version
+        ? `${packageName} version ${version} is the current release listed on PyPI, the official Python package index. PyPI describes ${packageName} as: ${summary}`
+        : `${packageName} is listed on PyPI, the official Python package index. PyPI describes it as: ${summary}`,
+      url: projectPage,
+    });
+
+    const supportUrls = [
+      data.info?.home_page,
+      ...Object.values(data.info?.project_urls ?? {}),
+    ]
+      .filter((value): value is string => typeof value === 'string' && /^https?:\/\//i.test(value))
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .filter((value) => !/pypi\.org/i.test(value))
+      .slice(0, 2);
+
+    for (const supportUrl of supportUrls) {
+      results.push({
+        title: `${packageName} project link`,
+        snippet: summary,
+        url: supportUrl,
+      });
+    }
+  } catch { /* continue */ }
+
+  return results;
+}
+
+/** SearXNG — self-hosted, unlimited, zero cost when running locally */
+async function fetchSearXNG(query: string, baseUrl: string, timeoutMs: number): Promise<RawSearchResult[]> {
+  const results: RawSearchResult[] = [];
+  try {
+    const url = `${baseUrl.replace(/\/$/, '')}/search?q=${encodeURIComponent(query)}&format=json&categories=general`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'VeggaAI/1.0' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return results;
+    const data = await res.json() as {
+      results?: Array<{ title?: string; content?: string; url?: string }>;
+    };
+    for (const r of (data.results ?? []).slice(0, 8)) {
+      if (r.url && r.content && r.content.length > 15) {
+        results.push({ title: r.title ?? '', snippet: r.content, url: r.url });
+      }
+    }
+  } catch { /* continue */ }
+  return results;
+}
+
 async function fetchDuckDuckGo(query: string, timeoutMs: number): Promise<RawSearchResult[]> {
   const results: RawSearchResult[] = [];
+  const primarySubject = extractPrimarySubject(query, []);
 
-  // 1. Instant Answer API
+  // 1. DDG Instant Answer API — Wikipedia abstracts, direct answers, related topics
   try {
     const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
     const res = await fetch(ddgUrl, {
-      headers: { 'User-Agent': 'VeggaAI/0.1' },
+      headers: { 'User-Agent': 'VeggaAI/1.0' },
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (res.ok) {
       const data = await res.json() as {
         Abstract?: string; AbstractSource?: string; AbstractURL?: string;
         Answer?: string; AnswerType?: string;
-        RelatedTopics?: Array<{ Text?: string; FirstURL?: string }>;
+        RelatedTopics?: Array<{ Text?: string; FirstURL?: string; Topics?: Array<{ Text?: string; FirstURL?: string }> }>;
+        Results?: Array<{ Text?: string; FirstURL?: string }>;
+        Infobox?: { content?: Array<{ data_type?: string; value?: string; label?: string }> };
       };
 
       if (data.Abstract && data.Abstract.length > 20) {
@@ -170,44 +855,110 @@ async function fetchDuckDuckGo(query: string, timeoutMs: number): Promise<RawSea
           url: `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
         });
       }
+      // Direct results (more targeted than RelatedTopics)
+      if (data.Results) {
+        for (const r of data.Results.slice(0, 3)) {
+          if (r.Text && r.Text.length > 10 && r.FirstURL) {
+            results.push({ title: '', snippet: r.Text, url: r.FirstURL });
+          }
+        }
+      }
+      // Related topics (flatten nested topics)
       if (data.RelatedTopics) {
-        for (const topic of data.RelatedTopics.slice(0, 5)) {
+        for (const topic of data.RelatedTopics.slice(0, 8)) {
           if (topic.Text && topic.Text.length > 10 && topic.FirstURL) {
             results.push({ title: '', snippet: topic.Text, url: topic.FirstURL });
+          }
+          // Nested topic groups
+          if (topic.Topics) {
+            for (const sub of topic.Topics.slice(0, 3)) {
+              if (sub.Text && sub.Text.length > 10 && sub.FirstURL) {
+                results.push({ title: '', snippet: sub.Text, url: sub.FirstURL });
+              }
+            }
           }
         }
       }
     }
   } catch { /* continue to fallback */ }
 
-  // 2. HTML scrape fallback
-  if (results.length === 0) {
+  // 2. Wikipedia REST API — free, reliable, no key needed, high-quality summaries
+  if (results.length < 3) {
     try {
-      const htmlUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-      const res = await fetch(htmlUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      const term = primarySubject.split(/\s+/).slice(0, 5).join(' ');
+      const wikiUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(term)}`;
+      const wikiRes = await fetch(wikiUrl, {
+        headers: { 'User-Agent': 'VeggaAI/1.0 (local AI learning agent)' },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (wikiRes.ok) {
+        const wikiData = await wikiRes.json() as {
+          extract?: string; title?: string; content_urls?: { desktop?: { page?: string } };
+          description?: string; type?: string;
+        };
+        if (wikiData.extract && wikiData.extract.length > 50 && wikiData.type !== 'disambiguation') {
+          results.push({
+            title: wikiData.title ?? term,
+            snippet: wikiData.extract.slice(0, 600),
+            url: wikiData.content_urls?.desktop?.page ?? `https://en.wikipedia.org/wiki/${encodeURIComponent(term)}`,
+          });
+        }
+      }
+    } catch { /* no results */ }
+  }
+
+  // 2.5 GitHub repository search — good zero-key fallback for developer tools
+  if (results.length < 3 && primarySubject.length > 1) {
+    try {
+      const ghUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(primarySubject)}&per_page=5`;
+      const ghRes = await fetch(ghUrl, {
+        headers: {
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'VeggaAI/1.0',
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (ghRes.ok) {
+        const ghData = await ghRes.json() as {
+          items?: Array<{ full_name?: string; description?: string; html_url?: string; homepage?: string | null }>;
+        };
+        for (const repo of (ghData.items ?? []).slice(0, 3)) {
+          if (!repo.html_url || !repo.description || repo.description.length < 10) continue;
+          results.push({
+            title: repo.full_name ?? primarySubject,
+            snippet: repo.description,
+            url: repo.homepage && /^https?:\/\//i.test(repo.homepage) ? repo.homepage : repo.html_url,
+          });
+        }
+      }
+    } catch { /* continue */ }
+  }
+
+  // 3. DDG lite HTML scrape — last resort, more stable than full DDG HTML
+  if (results.length < 2) {
+    try {
+      const liteUrl = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
+      const res = await fetch(liteUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; VeggaAI/1.0)' },
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (res.ok) {
         const html = await res.text();
-        // Extract titles and snippets
-        const titleRegex = /<a class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi;
-        const snippetRegex = /<a class="result__snippet"[^>]*>(.*?)<\/a>/gi;
-
-        const titles: Array<{ url: string; title: string }> = [];
-        let m;
-        while ((m = titleRegex.exec(html)) !== null && titles.length < 8) {
-          titles.push({ url: m[1], title: m[2].replace(/<\/?[^>]+(>|$)/g, '').trim() });
-        }
-
+        // DDG lite has a simpler structure: <a class="result-link"> and <td class="result-snippet">
+        const linkRe = /<a[^>]+class="result-link"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi;
+        const snippetRe = /<td[^>]+class="result-snippet"[^>]*>([\s\S]*?)<\/td>/gi;
+        const links: Array<{ url: string; title: string }> = [];
         const snippets: string[] = [];
-        while ((m = snippetRegex.exec(html)) !== null && snippets.length < 8) {
-          snippets.push(m[1].replace(/<\/?[^>]+(>|$)/g, '').trim());
+        let m;
+        while ((m = linkRe.exec(html)) !== null && links.length < 6) {
+          links.push({ url: m[1], title: m[2].trim() });
         }
-
-        for (let i = 0; i < Math.min(titles.length, snippets.length); i++) {
-          if (snippets[i].length > 15) {
-            results.push({ title: titles[i].title, snippet: snippets[i], url: titles[i].url });
+        while ((m = snippetRe.exec(html)) !== null && snippets.length < 6) {
+          snippets.push(m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+        }
+        for (let i = 0; i < Math.min(links.length, snippets.length); i++) {
+          if (snippets[i].length > 20) {
+            results.push({ title: links[i].title, snippet: snippets[i], url: links[i].url });
           }
         }
       }
@@ -217,21 +968,60 @@ async function fetchDuckDuckGo(query: string, timeoutMs: number): Promise<RawSea
   return results;
 }
 
+async function fetchProviderChain(query: string, config: SearchPipelineConfig, packageHints: readonly string[] = []): Promise<RawSearchResult[]> {
+  const providers: Array<() => Promise<RawSearchResult[]>> = [];
+  const pypiPackage = extractPyPIPackageName(query, packageHints);
+
+  if (pypiPackage) {
+    providers.push(() => fetchPyPI(pypiPackage, config.fetchTimeoutMs));
+  }
+
+  if (config.searxngUrl) {
+    providers.push(() => fetchSearXNG(query, config.searxngUrl as string, config.fetchTimeoutMs));
+  }
+  if (config.braveApiKey) {
+    providers.push(() => fetchBrave(query, config.braveApiKey as string, config.fetchTimeoutMs));
+  }
+  providers.push(() => fetchDuckDuckGo(query, config.fetchTimeoutMs));
+
+  const merged: RawSearchResult[] = [];
+  const seen = new Set<string>();
+  const minUsefulResults = Math.max(3, config.resultsPerQuery);
+
+  for (const provider of providers) {
+    const batch = await provider().catch(() => [] as RawSearchResult[]);
+    for (const result of batch) {
+      const dedupeKey = `${result.url}::${result.title}`.toLowerCase();
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      merged.push(result);
+    }
+    if (merged.length >= minUsefulResults) break;
+  }
+
+  return merged;
+}
+
 // ── Ranking (Step 4: RANK) ──
 
 function rankSnippets(
   rawResults: Array<RawSearchResult & { queryIndex: number }>,
   minTrust: number,
+  query: string,
 ): SearchSnippet[] {
   const seen = new Set<string>();
-  const scored: SearchSnippet[] = [];
+  const scored: Array<SearchSnippet & { familyKey: string | null; wrapperLike: boolean; mathLike: boolean }> = [];
+  const primarySubject = extractPrimarySubject(query, []);
+  const biasPerplexityProduct = shouldBiasPerplexityToProduct(query, primarySubject);
+  const hasOfficialPerplexityResult = biasPerplexityProduct
+    && rawResults.some((raw) => isPerplexityOfficialResult(raw) && !isPerplexityUnofficialResult(raw));
 
   for (const raw of rawResults) {
     // URL safety check
     let domain: string;
     try {
       const url = validateSearchUrl(raw.url);
-      domain = url.hostname;
+      domain = url.hostname.replace(/^www\./, '').toLowerCase();
     } catch {
       continue; // skip unsafe URLs
     }
@@ -251,6 +1041,20 @@ function rankSnippets(
 
     // Relevance boost: earlier queries and earlier results rank higher
     const positionBoost = 1 / (1 + raw.queryIndex * 0.3);
+    let rank = trust.score * positionBoost;
+    const wrapperLike = biasPerplexityProduct && isPerplexityWrapperLikeResult(raw);
+    const mathLike = biasPerplexityProduct && isPerplexityMathResult(raw);
+    const officialDocsLike = biasPerplexityProduct && !wrapperLike && isPerplexityOfficialDocsResult(raw);
+    const officialLike = biasPerplexityProduct && !wrapperLike && isPerplexityOfficialResult(raw);
+    const familyKey = officialLike ? 'perplexity:official' : null;
+
+    if (biasPerplexityProduct) {
+      if (officialDocsLike) rank *= 3.1;
+      else if (officialLike) rank *= 2.45;
+      else if (isPerplexityProductResult(raw)) rank *= 1.45;
+      if (wrapperLike) rank *= hasOfficialPerplexityResult ? 0.04 : 0.16;
+      if (mathLike) rank *= hasOfficialPerplexityResult ? 0.08 : 0.18;
+    }
 
     scored.push({
       text: raw.snippet.slice(0, 500),
@@ -259,13 +1063,49 @@ function rankSnippets(
       title: raw.title,
       favicon: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`,
       trust,
-      rank: trust.score * positionBoost,
+      rank,
+      familyKey,
+      wrapperLike,
+      mathLike,
     });
   }
 
   // Sort by combined rank descending
   scored.sort((a, b) => b.rank - a.rank);
-  return scored;
+
+  if (!biasPerplexityProduct) {
+    return scored.map(({ familyKey: _familyKey, wrapperLike: _wrapperLike, mathLike: _mathLike, ...snippet }) => snippet);
+  }
+
+  const countedFamilies = new Set<string>();
+  let distinctHighSignalCount = 0;
+  for (const candidate of scored) {
+    if (candidate.wrapperLike || candidate.mathLike) continue;
+    const dedupeKey = candidate.familyKey ?? `${candidate.domain}::${candidate.title}`;
+    if (countedFamilies.has(dedupeKey)) continue;
+    countedFamilies.add(dedupeKey);
+    distinctHighSignalCount += 1;
+  }
+
+  const filtered: typeof scored = [];
+  const seenFamilies = new Set<string>();
+  let wrapperAllowance = distinctHighSignalCount >= 2 ? 0 : 1;
+
+  for (const candidate of scored) {
+    const dedupeKey = candidate.familyKey;
+    if (dedupeKey && seenFamilies.has(dedupeKey)) continue;
+
+    if ((candidate.wrapperLike || candidate.mathLike) && wrapperAllowance <= 0) continue;
+
+    if (dedupeKey) seenFamilies.add(dedupeKey);
+    if (candidate.wrapperLike || candidate.mathLike) {
+      wrapperAllowance -= 1;
+    }
+
+    filtered.push(candidate);
+  }
+
+  return filtered.map(({ familyKey: _familyKey, wrapperLike: _wrapperLike, mathLike: _mathLike, ...snippet }) => snippet);
 }
 
 // ── Cross-Check (Step 5: verify claims across sources) ──
@@ -333,13 +1173,206 @@ function computeConfidence(snippets: readonly SearchSnippet[]): number {
   return Math.min(Math.max(raw, 0), 1);
 }
 
+const NOISY_SENTENCE_PATTERN = /\b(?:notifications|fork\b|star\b|copy pip instructions|released:|go to file|open more actions menu|public\s+notifications|reading web response|quick start|inputs:|tools\s+searxng_web_search|mcp protocol|npm install|command\s*:|args\s*:|env\s*:|history\s+\d+\s+commits)\b|[│▼▲]/i;
+
+const COMPARISON_REASON_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
+  {
+    pattern: /\b(?:privacy|privacy-respecting|neither tracked nor profiled|not tracked|not profiled|without tracking)\b/i,
+    label: 'privacy without tracking or profiling',
+  },
+  {
+    pattern: /\b(?:metasearch|aggregates? results? from (?:multiple|various)|multiple search (?:services|providers|engines))\b/i,
+    label: 'aggregation across multiple search providers',
+  },
+  {
+    pattern: /\b(?:self-host|self host|self-hosted|self hosted|customizable|customisable)\b/i,
+    label: 'self-hosting and workflow control',
+  },
+  {
+    pattern: /\b(?:developer|tooling|integration|api|workflow)\b/i,
+    label: 'adaptability for developer tooling and custom search workflows',
+  },
+  {
+    pattern: /\b(?:web results|broader results|multiple sources|search services)\b/i,
+    label: 'broader web search instead of an instant-answer-only flow',
+  },
+];
+
+function sanitizeSnippetText(text: string): string {
+  return text
+    .replace(/&#\d+;?/g, ' ')
+    .replace(/&nbsp;|&quot;|&amp;|&lt;|&gt;/g, ' ')
+    .replace(/\[\s*edit\s*\]/gi, ' ')
+    .replace(/\b\d+\s+[A-Z][a-z]+\s+\[\s*edit\s*\]\s+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .trim();
+}
+
+function looksLikeNoisyUiSentence(sentence: string): boolean {
+  if (NOISY_SENTENCE_PATTERN.test(sentence)) return true;
+  const compact = sentence.replace(/\s+/g, '');
+  const punctuationCount = (compact.match(/[^a-zA-Z0-9]/g) ?? []).length;
+  return compact.length > 0 && (punctuationCount / compact.length) > 0.22;
+}
+
+function hasExplanatoryVerb(sentence: string): boolean {
+  return /\b(?:is|are|was|were|supports|queries|aggregates?|functions?|removes|stores|gives|uses|works|returns|provides|avoids|focuses)\b/i.test(sentence);
+}
+
+function splitIntoSentences(text: string): string[] {
+  return sanitizeSnippetText(text)
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim().replace(/^\d+\s+/, ''))
+    .filter((sentence) => sentence.length >= 40 && sentence.length <= 320)
+    .filter((sentence) => !looksLikeNoisyUiSentence(sentence));
+}
+
+function sentenceScore(sentence: string, query: string, plan: VaiSearchPlan, primarySubject: string, comparisonSubject: string | null): number {
+  const lower = sentence.toLowerCase();
+  let score = 0;
+  const biasPerplexityToProduct = shouldBiasPerplexityToProduct(query, primarySubject);
+
+  if (primarySubject.length > 0 && lower.includes(primarySubject.toLowerCase())) score += 4;
+  if (comparisonSubject && lower.includes(comparisonSubject.toLowerCase())) score += 3;
+  if (lower.includes(plan.intent)) score += 1;
+
+  for (const entity of plan.entities.slice(0, 6)) {
+    if (entity.length > 2 && lower.includes(entity.toLowerCase())) score += 1;
+  }
+
+  if (plan.intent === 'comparison') {
+    if (/\b(?:privacy|metasearch|aggregate|self-host|results|providers|instant|api)\b/i.test(sentence)) score += 3;
+  }
+
+  if (plan.intent === 'definition' && /\b(?:is|are|refers to|describes|explained)\b/i.test(sentence)) score += 2;
+  if (biasPerplexityToProduct) {
+    if (isPerplexityProductSentence(sentence)) score += 6;
+    if (isPerplexityMathSentence(sentence)) score -= 7;
+  }
+  if (/\b(?:github|pypi|npm|fork|star|released)\b/i.test(sentence)) score -= 3;
+  if (sentence.toLowerCase() === query.toLowerCase()) score -= 10;
+
+  return score;
+}
+
+function collectCitationMarks(indices: readonly number[]): string {
+  const unique = [...new Set(indices.filter((index) => index >= 0))].sort((a, b) => a - b);
+  return unique.map((index) => `[${index + 1}]`).join('');
+}
+
+function joinReasonLabels(labels: readonly string[]): string {
+  if (labels.length === 0) return '';
+  if (labels.length === 1) return labels[0];
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]}`;
+}
+
+function titleCaseSubject(subject: string): string {
+  if (subject.trim().length === 0) return subject;
+  return subject.charAt(0).toUpperCase() + subject.slice(1);
+}
+
+function isPerplexityProductSentence(sentence: string): boolean {
+  return /\b(?:perplexity ai|answer engine|search engine|user queries|synthesizes responses|citations?|web search|chatbot|sources?)\b/i.test(sentence);
+}
+
+function isPerplexityMathSentence(sentence: string): boolean {
+  return /\b(?:information theory|probability distribution|fair coin toss|fair die roll|cross-entropy|uncertainty for a discrete)\b/i.test(sentence);
+}
+
+function isPerplexityWrapperSentence(sentence: string): boolean {
+  return /\b(?:inspired by perplexity|perplexity[-\s]?inspired|open[-\s]?source perplexity|perplexity clone|wrapper)\b/i.test(sentence);
+}
+
+function buildEvidenceSummary(
+  query: string,
+  used: readonly SearchSnippet[],
+): {
+  plan: VaiSearchPlan;
+  primarySubject: string;
+  comparisonSubject: string | null;
+  summary: { text: string; sourceIndex: number } | null;
+  supporting: Array<{ text: string; sourceIndex: number }>;
+  reasons: Array<{ label: string; sourceIndex: number }>;
+} {
+  const plan = buildSearchPlan(query);
+  const normalizedQuery = normalizeSearchQuery(query);
+  const primarySubject = extractPrimarySubject(normalizedQuery, plan.entities);
+  const comparisonSubject = extractComparisonSubject(normalizedQuery);
+  const candidates: Array<{ text: string; sourceIndex: number; score: number }> = [];
+  const summaryCandidates: Array<{ text: string; sourceIndex: number; score: number }> = [];
+  const reasons: Array<{ label: string; sourceIndex: number }> = [];
+  const seenReasonLabels = new Set<string>();
+
+  for (let sourceIndex = 0; sourceIndex < used.length; sourceIndex += 1) {
+    const snippet = used[sourceIndex];
+    const sentences = splitIntoSentences(snippet.text);
+
+    for (const sentence of sentences) {
+      let score = sentenceScore(sentence, query, plan, primarySubject, comparisonSubject);
+      score += snippet.trust.tier === 'high' ? 3 : snippet.trust.tier === 'medium' ? 1 : -3;
+      score += Math.min(snippet.rank, 2.5);
+      if (shouldBiasPerplexityToProduct(query, primarySubject) && isPerplexityWrapperSentence(sentence)) {
+        score -= 9;
+      }
+      if (score > 0) {
+        candidates.push({ text: sentence, sourceIndex, score });
+
+        const lower = sentence.toLowerCase();
+        const subjectLower = primarySubject.toLowerCase();
+        const strongDefinitionLike = subjectLower.length > 0
+          && new RegExp(`^${subjectLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b.*\\b(?:is|are|refers to)\\b`, 'i').test(lower);
+        const definitionLike = subjectLower.length > 0
+          && lower.includes(subjectLower)
+          && /\b(?:is|are|refers to|functions by|supports|removes private data|stores little to no information)\b/i.test(sentence);
+        if (strongDefinitionLike) {
+          summaryCandidates.push({ text: sentence, sourceIndex, score: score + 8 });
+        }
+        if (definitionLike) {
+          summaryCandidates.push({ text: sentence, sourceIndex, score: score + 5 });
+        }
+      }
+
+      for (const reasonPattern of COMPARISON_REASON_PATTERNS) {
+        if (!seenReasonLabels.has(reasonPattern.label) && reasonPattern.pattern.test(sentence)) {
+          seenReasonLabels.add(reasonPattern.label);
+          reasons.push({ label: reasonPattern.label, sourceIndex });
+        }
+      }
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  summaryCandidates.sort((a, b) => b.score - a.score);
+  const summary = summaryCandidates[0] ?? candidates[0] ?? null;
+  const supporting: Array<{ text: string; sourceIndex: number }> = [];
+
+  const preferredSupport = plan.intent === 'comparison'
+    ? candidates.filter((candidate) => /\b(?:privacy|tracked|profiled|metasearch|aggregates?|self-host|search providers|instant-answer|instant answer|results)\b/i.test(candidate.text) && hasExplanatoryVerb(candidate.text))
+    : candidates;
+
+  for (const candidate of preferredSupport) {
+    if (supporting.length >= 2) break;
+    if (summary && candidate.text === summary.text) continue;
+    if (supporting.some((entry) => entry.text === candidate.text)) continue;
+    supporting.push({ text: candidate.text, sourceIndex: candidate.sourceIndex });
+  }
+
+  return {
+    plan,
+    primarySubject,
+    comparisonSubject,
+    summary: summary ? { text: summary.text, sourceIndex: summary.sourceIndex } : null,
+    supporting,
+    reasons: reasons.slice(0, 3),
+  };
+}
+
 function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): string {
   if (snippets.length === 0) {
     return `I searched for "${query}" but couldn't find useful results. Try rephrasing or being more specific.`;
   }
-
-  const lines: string[] = [];
-  lines.push(`**Search: "${query}"**\n`);
 
   // Group by trust tier for the summary
   const highTrust = snippets.filter(s => s.trust.tier === 'high');
@@ -350,14 +1383,62 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): st
   const ordered = [...highTrust, ...medTrust, ...otherTrust];
   const used = ordered.slice(0, 5);
 
-  for (let i = 0; i < used.length; i++) {
-    const s = used[i];
-    const citation = `[${i + 1}]`;
-    const text = s.text.length > 300 ? s.text.slice(0, 300) + '...' : s.text;
-    lines.push(`${citation} ${text}`);
+  const lines: string[] = [];
+  const { plan, primarySubject, comparisonSubject, summary, supporting, reasons } = buildEvidenceSummary(query, used);
+  const prefersSimpleFraming = /\b(?:explain|definition|what is|what are|in simple words?)\b/i.test(query)
+    || plan.intent === 'definition'
+    || plan.intent === 'explanation';
+  const asksWhatItDoes = /\bwhat\s+it\s+does\b/i.test(query) || plan.intent === 'definition' || plan.intent === 'explanation';
+  const asksWhenToUse = /\b(?:when\s+should\s+i\s+use|when\s+to\s+use|best\s+fit|should\s+use\s+it|when\s+should\s+you\s+use)\b/i.test(query);
+
+  if (summary) {
+    lines.push(`${summary.text} ${collectCitationMarks([summary.sourceIndex])}`.trim());
+  } else {
+    const fallbackSource = used[0];
+    const fallbackText = sanitizeSnippetText(fallbackSource.text);
+    const snippetText = fallbackText.length > 220 ? `${fallbackText.slice(0, 220)}...` : fallbackText;
+    lines.push(`${snippetText} ${collectCitationMarks([0])}`.trim());
   }
 
-  lines.push('\n**Sources:**');
+  if (prefersSimpleFraming && supporting.length > 0) {
+    const simpleLead = supporting[0];
+    lines.push('');
+    lines.push('In simple words');
+    lines.push(`${simpleLead.text} ${collectCitationMarks([simpleLead.sourceIndex])}`.trim());
+  }
+
+  if (plan.intent === 'comparison' && comparisonSubject) {
+    if (reasons.length > 0) {
+      const reasonSentence = `The strongest reasons to prefer ${titleCaseSubject(primarySubject)} over ${comparisonSubject} are ${joinReasonLabels(reasons.map((reason) => reason.label))}. ${collectCitationMarks(reasons.map((reason) => reason.sourceIndex))}`;
+      lines.push('');
+      lines.push(reasonSentence.trim());
+    }
+
+    if (supporting.length > 0) {
+      lines.push('');
+      lines.push('Key evidence:');
+      for (const entry of supporting) {
+        lines.push(`- ${entry.text} ${collectCitationMarks([entry.sourceIndex])}`.trim());
+      }
+    }
+  } else if (supporting.length > 0) {
+    lines.push('');
+    const remainingSupport = prefersSimpleFraming ? supporting.slice(1) : supporting;
+    const sectionHeading = asksWhatItDoes
+      ? 'What it does:'
+      : asksWhenToUse
+        ? 'Best fit:'
+        : 'Key points:';
+    if (remainingSupport.length > 0) {
+      lines.push(sectionHeading);
+      for (const entry of remainingSupport) {
+        lines.push(`- ${entry.text} ${collectCitationMarks([entry.sourceIndex])}`.trim());
+      }
+    }
+  }
+
+  lines.push('');
+  lines.push('Sources:');
   for (let i = 0; i < used.length; i++) {
     const s = used[i];
     const trustBadge = s.trust.tier === 'high' ? '🟢' : s.trust.tier === 'medium' ? '🟡' : '🔴';
@@ -450,6 +1531,12 @@ async function readTopPages(
     if (urlsSeen.has(s.url)) continue;
     // Skip DuckDuckGo internal URLs
     if (s.url.includes('duckduckgo.com')) continue;
+    try {
+      const hostname = new URL(s.url).hostname.replace(/^www\./, '');
+      if (REGISTRY_METADATA_HOSTS.has(hostname)) continue;
+    } catch {
+      continue;
+    }
     urlsSeen.add(s.url);
     toRead.push({ index: i, url: s.url });
   }
@@ -467,7 +1554,7 @@ async function readTopPages(
     if (!pageContent || pageContent.length < 100) continue;
     pagesRead++;
 
-    const { index, url } = toRead[j];
+    const { index } = toRead[j];
     const original = enriched[index];
     // Merge: use page content (richer) but keep original metadata
     enriched[index] = {
@@ -536,6 +1623,7 @@ class SearchCache {
 export class SearchPipeline {
   private readonly config: SearchPipelineConfig;
   private readonly cache: SearchCache;
+  private readonly controller = new ThorsenAdaptiveController();
   private onLearn: OnSearchLearn | null = null;
 
   constructor(config?: Partial<SearchPipelineConfig>) {
@@ -575,11 +1663,18 @@ export class SearchPipeline {
 
     // Step 2+3: FAN OUT + FETCH — parallel sub-queries
     const fanOutStart = Date.now();
-    const queries = plan.fanOutQueries.slice(0, this.config.maxFanOut);
+    const preSnapshot = this.controller.snapshot();
+    const adaptiveMaxFanOut = Math.max(1, Math.min(this.config.maxFanOut, preSnapshot.concurrency));
+    const adaptiveReadTopN = preSnapshot.state === 'linear'
+      ? 1
+      : preSnapshot.state === 'parallel'
+        ? Math.min(this.config.readTopN, 2)
+        : this.config.readTopN;
+    const queries = plan.fanOutQueries.slice(0, adaptiveMaxFanOut);
     const allRaw: Array<RawSearchResult & { queryIndex: number }> = [];
 
     const fetchPromises = queries.map((q, idx) =>
-      fetchDuckDuckGo(q, this.config.fetchTimeoutMs).then(results =>
+      fetchProviderChain(q, this.config, plan.entities).then(results =>
         results.slice(0, this.config.resultsPerQuery).map(r => ({ ...r, queryIndex: idx })),
       ).catch(() => [] as Array<RawSearchResult & { queryIndex: number }>),
     );
@@ -593,14 +1688,14 @@ export class SearchPipeline {
 
     // Step 4: RANK — score by trust × relevance, deduplicate
     const rankStart = Date.now();
-    const ranked = rankSnippets(allRaw, this.config.minTrustScore);
+    const ranked = rankSnippets(allRaw, this.config.minTrustScore, query);
     audit.push({ step: 'rank', detail: `${ranked.length} snippets after trust filter + dedup (from ${allRaw.length} raw)`, durationMs: Date.now() - rankStart });
 
     // Step 5: READ — fetch full page content for top-N results
     const readStart = Date.now();
     const { enriched, pagesRead } = await readTopPages(
       ranked.slice(0, this.config.maxSnippets),
-      this.config.readTopN,
+      adaptiveReadTopN,
       this.config.fetchTimeoutMs,
       this.config.maxPageChars,
     );
@@ -625,13 +1720,31 @@ export class SearchPipeline {
       }
     }
 
+    const durationMs = Date.now() - start;
+    this.controller.observe(durationMs);
+    const sync = this.controller.snapshot();
+    const syncState = classifySyncState(durationMs);
+    audit.push({
+      step: 'conclude',
+      detail: `ThorsenCurve=${syncState}, recommendedConcurrency=${sync.concurrency}, median=${sync.medianLatency}ms, p95=${sync.p95Latency}ms`,
+      durationMs: 0,
+    });
+
     const response: SearchResponse = {
       answer,
       sources: verified,
       plan,
       rawResultCount: allRaw.length,
       confidence: computeConfidence(verified),
-      durationMs: Date.now() - start,
+      durationMs,
+      sync: {
+        state: syncState,
+        latencyMs: durationMs,
+        recommendedConcurrency: sync.concurrency,
+        medianLatencyMs: sync.medianLatency,
+        p95LatencyMs: sync.p95Latency,
+        observations: sync.observations,
+      },
       audit,
     };
 
@@ -649,39 +1762,52 @@ export class SearchPipeline {
  * These help users dig deeper into the topic without reformulating.
  */
 export function generateFollowUps(query: string, response: SearchResponse): string[] {
+  const normalizedQuery = normalizeFollowUpTopic(query);
   const plan = response.plan;
-  const entities = plan.entities.slice(0, 3);
-  const entityStr = entities.join(' ');
+  const entities = plan.entities
+    .map((entity) => sanitizeTopicPhrase(entity))
+    .filter((entity) => entity.length > 0)
+    .filter((entity) => !ENTITY_STOP_WORDS.has(entity.toLowerCase()))
+    .slice(0, 3);
+  const primarySource = response.sources[0];
+  const sourceTitle = primarySource?.title?.trim() || '';
+  const normalizedSourceTitle = sourceTitle.length > 0
+    ? normalizeSourceTitleForFollowUps(sourceTitle)
+    : normalizeSourceTitleForFollowUps((primarySource?.domain || '').replace(/^www\./, ''));
+  const querySubject = cleanQuerySubject(extractPrimarySubject(normalizedQuery || query, entities));
+  const fallbackEntity = normalizedSourceTitle
+    || response.sources[0]?.domain
+    || sanitizeTopicPhrase(query)
+    || 'this topic';
+  const subjectParts = querySubject.length > 0
+    ? [querySubject]
+    : (entities.length > 0 ? entities : [fallbackEntity]);
+  const topicSeed = sanitizeTopicPhrase(subjectParts.join(' ').trim()) || fallbackEntity;
   const followUps: string[] = [];
 
-  switch (plan.intent) {
-    case 'definition':
-      followUps.push(`How does ${entityStr} work in practice?`);
-      followUps.push(`What are the alternatives to ${entityStr}?`);
-      followUps.push(`What are common ${entityStr} best practices?`);
-      break;
-    case 'how-to':
-      followUps.push(`What are common mistakes when ${entityStr.toLowerCase()}?`);
-      followUps.push(`What are the best tools for ${entityStr.toLowerCase()}?`);
-      followUps.push(`${entityStr} advanced techniques`);
-      break;
-    case 'comparison':
-      followUps.push(`Which is better for beginners, ${entityStr}?`);
-      followUps.push(`Performance benchmarks for ${entityStr}`);
-      followUps.push(`Migration guide between ${entityStr}`);
-      break;
-    case 'troubleshoot':
-      followUps.push(`Why does this ${entityStr.toLowerCase()} error happen?`);
-      followUps.push(`How to prevent ${entityStr.toLowerCase()} issues?`);
-      followUps.push(`${entityStr} debugging tools`);
-      break;
-    default:
-      followUps.push(`Tell me more about ${entityStr}`);
-      followUps.push(`${entityStr} examples and use cases`);
-      if (entities.length > 1) followUps.push(`How does ${entities[0]} relate to ${entities[1]}?`);
-      else followUps.push(`Latest developments in ${entityStr}`);
-      break;
+  if (query.trim() === '') return [];
+
+  if (/\bvinext\b/i.test(normalizedQuery)) {
+    return [
+      'Turn this starter into a premium landing page',
+      'Add auth and a dashboard shell to this app',
+      'When should I pick Vinext over Next.js or plain Vite?',
+    ];
   }
 
-  return followUps.slice(0, 3);
+  if (/\b(?:version|stable|latest|release|lts)\b/i.test(query) && normalizedSourceTitle.length > 0) {
+    followUps.push(`What changed recently in ${normalizedSourceTitle}?`);
+    followUps.push(`Migration notes for the current ${normalizedSourceTitle} release`);
+    followUps.push(`${normalizedSourceTitle} release notes and breaking changes`);
+    return finalizeFollowUps(followUps);
+  }
+
+  if (/\b(?:official|docs?|documentation|guide|page|pages)\b/i.test(query) && normalizedSourceTitle.length > 0) {
+    followUps.push(`Show me a practical example from ${normalizedSourceTitle}`);
+    followUps.push(`Common mistakes people make with ${normalizedSourceTitle}`);
+    followUps.push(`What should I read next about ${normalizedSourceTitle}?`);
+    return finalizeFollowUps(followUps);
+  }
+
+  return generateTopicFollowUps(topicSeed, plan.intent);
 }

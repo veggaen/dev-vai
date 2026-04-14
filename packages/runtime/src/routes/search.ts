@@ -10,6 +10,8 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { SearchPipeline } from '@vai/core';
+import { searchPlanBodySchema, searchQueryBodySchema } from '@vai/api-types/search';
+import { invalidRequestBody } from '../validation/http-validation.js';
 
 export function registerSearchRoutes(
   app: FastifyInstance,
@@ -26,17 +28,13 @@ export function registerSearchRoutes(
   app.post<{ Body: { query: string } }>(
     '/api/search',
     async (request, reply) => {
-      const { query } = request.body;
-      if (!query || typeof query !== 'string' || query.trim().length === 0) {
-        reply.code(400).send({ error: 'Query is required' });
-        return;
+      const parsed = searchQueryBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
       }
-      if (query.length > 1000) {
-        reply.code(400).send({ error: 'Query too long (max 1000 characters)' });
-        return;
-      }
+      const { query } = parsed.data;
 
-      const result = await searchPipeline.search(query.trim());
+      const result = await searchPipeline.search(query);
       return result;
     },
   );
@@ -53,13 +51,13 @@ export function registerSearchRoutes(
   app.post<{ Body: { query: string } }>(
     '/api/search/plan',
     async (request, reply) => {
-      const { query } = request.body;
-      if (!query || typeof query !== 'string' || query.trim().length === 0) {
-        reply.code(400).send({ error: 'Query is required' });
-        return;
+      const parsed = searchPlanBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
       }
+      const { query } = parsed.data;
 
-      const plan = searchPipeline.plan(query.trim());
+      const plan = searchPipeline.plan(query);
       return plan;
     },
   );

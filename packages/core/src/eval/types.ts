@@ -6,6 +6,9 @@
  *
  * Eval tracks:
  *   - comprehension: Can the model understand and answer about ingested content?
+ *   - casual: Can the model be practically helpful in everyday developer conversations?
+ *   - creative: Can the model produce useful developer-facing copy and structured creative output?
+ *   - complex: Can the model reason through realistic multi-constraint engineering tasks?
  *   - navigation: Can the model follow multi-step instructions?
  *   - bugfix: Can the model identify and fix code bugs?
  *   - feature: Can the model implement new features from specs?
@@ -15,7 +18,7 @@
 
 // ── Tracks ──
 
-export type EvalTrack = 'comprehension' | 'navigation' | 'bugfix' | 'feature' | 'thorsen' | 'gym';
+export type EvalTrack = 'comprehension' | 'casual' | 'creative' | 'complex' | 'navigation' | 'bugfix' | 'feature' | 'thorsen' | 'gym' | 'cognitive';
 
 // ── Tasks ──
 
@@ -40,11 +43,21 @@ export interface EvalTask {
 
 export interface EvalExpectation {
   /** Strategy for checking the response */
-  strategy: 'contains' | 'regex' | 'exact' | 'semantic' | 'custom';
+  strategy: 'contains' | 'regex' | 'exact' | 'semantic' | 'checklist' | 'custom';
   /** Pattern or text to check against */
-  value: string;
+  value?: string;
   /** For semantic: minimum similarity score (0-1) */
   threshold?: number;
+  /** Required terms that each score independently */
+  required?: string[];
+  /** Each group passes if any term in that group is present */
+  anyOf?: string[][];
+  /** Section headings or labels that should appear */
+  sections?: string[];
+  /** Terms that should not appear */
+  forbidden?: string[];
+  /** Minimum approximate word count */
+  minWords?: number;
   /** For custom: a function name in the custom scorer registry */
   scorer?: string;
 }

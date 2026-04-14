@@ -48,6 +48,23 @@ export interface TrustSignal {
 
 // ── Search Results ──
 
+export type SearchSyncState = 'linear' | 'parallel' | 'wormhole';
+
+export interface SearchSyncStatus {
+  /** Thorsen Curve state for this search run */
+  readonly state: SearchSyncState;
+  /** End-to-end latency for the search pipeline */
+  readonly latencyMs: number;
+  /** Current adaptive concurrency recommendation */
+  readonly recommendedConcurrency: number;
+  /** Median latency observed by the adaptive controller */
+  readonly medianLatencyMs: number;
+  /** P95 latency observed by the adaptive controller */
+  readonly p95LatencyMs: number;
+  /** Number of observations in the adaptive controller window */
+  readonly observations: number;
+}
+
 export interface SearchSnippet {
   /** Text content of the snippet */
   readonly text: string;
@@ -78,6 +95,8 @@ export interface SearchResponse {
   readonly confidence: number;
   /** Execution time in ms */
   readonly durationMs: number;
+  /** Thorsen Curve sync classification for this search */
+  readonly sync: SearchSyncStatus;
   /** Audit trail: full provenance log */
   readonly audit: readonly AuditEntry[];
 }
@@ -109,6 +128,10 @@ export interface SearchPipelineConfig {
   readonly cacheSize: number;
   /** Cache TTL in ms (default: 10 minutes) */
   readonly cacheTtlMs: number;
+  /** Brave Search API key (free tier: 2000 req/month — https://api.search.brave.com) */
+  readonly braveApiKey?: string;
+  /** SearXNG base URL for self-hosted search (e.g. http://localhost:8080) */
+  readonly searxngUrl?: string;
 }
 
 export const DEFAULT_SEARCH_CONFIG: SearchPipelineConfig = {

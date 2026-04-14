@@ -24,6 +24,37 @@ let pollInterval: ReturnType<typeof setInterval> | null = null;
 let pollTimeout: ReturnType<typeof setTimeout> | null = null;
 let polling = false;
 
+function isTauriApp(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+async function invokeNativeEngine(command: 'start_engine' | 'stop_engine'): Promise<void> {
+  if (!isTauriApp()) return;
+
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke(command);
+}
+
+async function startNativeEngine(): Promise<void> {
+  try {
+    await invokeNativeEngine('start_engine');
+  } catch (error) {
+    console.error('[VAI] Failed to start native engine', error);
+  }
+}
+
+async function restartNativeEngine(): Promise<void> {
+  if (!isTauriApp()) return;
+
+  try {
+    await invokeNativeEngine('stop_engine');
+  } catch {
+    // Ignore stop failures when no child is running yet.
+  }
+
+  await startNativeEngine();
+}
+
 function stopPolling() {
   polling = false;
   if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
@@ -39,6 +70,7 @@ export const useEngineStore = create<EngineState>((set, get) => ({
   retry: () => {
     stopPolling();
     set({ status: 'idle', error: null });
+    void restartNativeEngine();
     setTimeout(() => get().startPolling(), 50);
   },
 
@@ -49,6 +81,7 @@ export const useEngineStore = create<EngineState>((set, get) => ({
 
     console.log('[VAI] Starting engine poll...', { API_BASE });
     polling = true;
+    void startNativeEngine();
 
     // Only show boot screen if we've NEVER connected before.
     // If we've been connected before, use 'reconnecting' (no full-page flash).

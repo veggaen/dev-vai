@@ -11,6 +11,7 @@
  * POST   /api/sessions/:id/end      — finalize / close a session
  * POST   /api/sessions/import       — import a full session (JSON)
  * GET    /api/sessions/:id/export   — export session as JSON
+ * GET    /api/sessions/:id/intelligence — recompute score + lessons + analysis
  * GET    /api/sessions/context      — context summary for agents
  * GET    /api/sessions/search       — cross-session event search
  * POST   /api/sessions/:id/events/:eventId/pin  — pin/unpin event
@@ -22,7 +23,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { SessionService, type SessionEventType, type PinnedNoteCategory } from '@vai/core';
+import { SessionService, ConversationScorer, LearningExtractor, extractLessons, extractTurnPairs, getSessionAnalyzer, type SessionEventType, type PinnedNoteCategory } from '@vai/core';
 
 export function registerSessionRoutes(app: FastifyInstance, sessions: SessionService) {
   /* ── List sessions ── */
@@ -95,6 +96,32 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
     return { id, success: true };
   });
 
+  /* ── List all session scores ── */
+  app.get<{
+    Querystring: { grade?: string; limit?: string; offset?: string };
+  }>('/api/sessions/scores', async (request) => {
+    const { grade, limit, offset } = request.query;
+    const scores = sessions.listScores({
+      grade,
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+    });
+    return { scores, total: scores.length };
+  });
+
+  /* ── List all lessons across sessions ── */
+  app.get<{
+    Querystring: { category?: string; minConfidence?: string; limit?: string };
+  }>('/api/sessions/lessons', async (request) => {
+    const { category, minConfidence, limit } = request.query;
+    const lessons = sessions.listAllLessons({
+      category,
+      minConfidence: minConfidence ? Number(minConfidence) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
+    return { lessons, total: lessons.length };
+  });
+
   /* ── Resolve pinned note (static path before :id) ── */
   app.post<{
     Params: { noteId: string };
@@ -121,8 +148,8 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
     async (request) => {
       const session = sessions.getSession(request.params.id);
       if (!session) return { error: 'Session not found' };
-      const events = sessions.getEvents(request.params.id);
-      return { session, events, eventCount: events.length };
+      const eventCount = sessions.getEventCount(request.params.id);
+      return { session, eventCount };
     },
   );
 
@@ -168,6 +195,26 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
     },
   );
 
+  /* ── Purge duplicate events + recompute stats ── */
+  app.post<{ Params: { id: string } }>(
+    '/api/sessions/:id/purge-duplicates',
+    async (request) => {
+      const { id } = request.params;
+      const session = sessions.getSession(id);
+      if (!session) return { error: 'Session not found' };
+
+      const deleted = sessions.purgeDuplicates(id);
+      sessions.recomputeAllStats();
+      const updated = sessions.getSession(id);
+
+      return {
+        success: true,
+        eventsDeleted: deleted,
+        newStats: updated?.stats,
+      };
+    },
+  );
+
   /* ── Append events ── */
   app.post<{
     Params: { id: string };
@@ -202,13 +249,15 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
   /* ── Get events (filterable) ── */
   app.get<{
     Params: { id: string };
-    Querystring: { type?: SessionEventType; limit?: string; offset?: string; after?: string };
+    Querystring: { type?: SessionEventType; limit?: string; offset?: string; after?: string; before?: string; order?: 'asc' | 'desc' };
   }>('/api/sessions/:id/events', async (request) => {
     return sessions.getEvents(request.params.id, {
       type: request.query.type,
       limit: request.query.limit ? Number(request.query.limit) : undefined,
       offset: request.query.offset ? Number(request.query.offset) : undefined,
       after: request.query.after ? Number(request.query.after) : undefined,
+      before: request.query.before ? Number(request.query.before) : undefined,
+      order: request.query.order,
     });
   });
 
@@ -235,6 +284,103 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
     sessions.endSession(request.params.id, request.body.status ?? 'completed');
     return sessions.getSession(request.params.id);
   });
+
+  /* ── Get session score ── */
+  app.get<{ Params: { id: string } }>(
+    '/api/sessions/:id/score',
+    async (request, reply) => {
+      const session = sessions.getSession(request.params.id);
+      if (!session) return reply.status(404).send({ error: 'Session not found' });
+      const score = sessions.getScore(request.params.id);
+      return { score };
+    },
+  );
+
+  /* ── Get full session intelligence ── */
+  app.get<{ Params: { id: string } }>(
+    '/api/sessions/:id/intelligence',
+    async (request, reply) => {
+      const session = sessions.getSession(request.params.id);
+      if (!session) return reply.status(404).send({ error: 'Session not found' });
+
+      const events = sessions.getEvents(request.params.id, {});
+      const analyzer = getSessionAnalyzer();
+      const analysis = analyzer.analyze(session, events);
+
+      if (events.length === 0) {
+        return { score: null, report: null, analysis };
+      }
+
+      const scorer = new ConversationScorer();
+      const score = scorer.score(events, session.stats);
+      sessions.saveScore(request.params.id, score);
+
+      const turnPairs = extractTurnPairs(events);
+      const report = extractLessons(turnPairs, score, events);
+      sessions.deleteLessonsForSession(request.params.id);
+      sessions.saveLessons(report.lessons);
+
+      return { score, report, analysis };
+    },
+  );
+
+  /* ── Score a session (trigger scoring + persist) ── */
+  app.post<{ Params: { id: string } }>(
+    '/api/sessions/:id/score',
+    async (request, reply) => {
+      const session = sessions.getSession(request.params.id);
+      if (!session) return reply.status(404).send({ error: 'Session not found' });
+
+      const events = sessions.getEvents(request.params.id);
+      if (events.length === 0) return reply.status(400).send({ error: 'Session has no events' });
+
+      const scorer = new ConversationScorer();
+      const score = scorer.score(events, session.stats);
+      sessions.saveScore(request.params.id, score);
+
+      return { score };
+    },
+  );
+
+  /* ── Extract lessons from a scored session ── */
+  app.post<{ Params: { id: string } }>(
+    '/api/sessions/:id/lessons',
+    async (request, reply) => {
+      const session = sessions.getSession(request.params.id);
+      if (!session) return reply.status(404).send({ error: 'Session not found' });
+
+      // Score first if not already scored
+      let score = sessions.getScore(request.params.id);
+      if (!score) {
+        const events = sessions.getEvents(request.params.id);
+        if (events.length === 0) return reply.status(400).send({ error: 'Session has no events' });
+        const scorer = new ConversationScorer();
+        score = scorer.score(events, session.stats);
+        sessions.saveScore(request.params.id, score);
+      }
+
+      const events = sessions.getEvents(request.params.id);
+      const turnPairs = extractTurnPairs(events);
+      const report = extractLessons(turnPairs, score, events);
+
+      // Persist lessons (replace old ones for this session)
+      sessions.deleteLessonsForSession(request.params.id);
+      sessions.saveLessons(report.lessons);
+
+      return { report };
+    },
+  );
+
+  /* ── Get lessons for a session ── */
+  app.get<{ Params: { id: string } }>(
+    '/api/sessions/:id/lessons',
+    async (request, reply) => {
+      const session = sessions.getSession(request.params.id);
+      if (!session) return reply.status(404).send({ error: 'Session not found' });
+      const lessons = sessions.getLessons(request.params.id);
+      return { lessons, total: lessons.length };
+    },
+  );
 
   /* ── Export session as JSON ── */
   app.get<{ Params: { id: string } }>(
@@ -287,5 +433,31 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
         : request.query.resolved === 'true',
     });
     return { notes, total: notes.length };
+  });
+
+  /* ── Analyze session — extract intent, outcome, failure patterns ── */
+  app.get<{ Params: { id: string } }>(
+    '/api/sessions/:id/analyze',
+    async (request, reply) => {
+      const session = sessions.getSession(request.params.id);
+      if (!session) return reply.status(404).send({ error: 'Session not found' });
+      const events = sessions.getEvents(request.params.id, {});
+      const analyzer = getSessionAnalyzer();
+      return analyzer.analyze(session, events);
+    },
+  );
+
+  /* ── Aggregate insights across recent sessions ── */
+  app.get<{
+    Querystring: { limit?: string };
+  }>('/api/sessions/insights', async (request) => {
+    const limit = request.query.limit ? Number(request.query.limit) : 20;
+    const recentSessions = sessions.listSessions({ limit, status: undefined });
+    const analyzer = getSessionAnalyzer();
+    const analyses = recentSessions.map(s => {
+      const evts = sessions.getEvents(s.id, {});
+      return analyzer.analyze(s, evts);
+    });
+    return analyzer.aggregateInsights(analyses);
   });
 }

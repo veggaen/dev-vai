@@ -6,6 +6,8 @@ import {
   MessageSquare,
   FilePlus,
   FileEdit,
+  ShieldCheck,
+  RotateCcw,
   Terminal,
   ListChecks,
   AlertTriangle,
@@ -16,7 +18,7 @@ import {
   Search,
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore.js';
-import type { AgentSession } from '@vai/core';
+import type { AgentSession } from '@vai/core/browser';
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 
@@ -140,6 +142,12 @@ function SessionCard({
         )}
         {s.terminalCommands > 0 && (
           <MiniStat icon={Terminal} value={s.terminalCommands} color="text-green-400" />
+        )}
+        {(s.verificationsRun ?? 0) > 0 && (
+          <MiniStat icon={ShieldCheck} value={`${s.verificationsPassed ?? 0}/${s.verificationsRun ?? 0}`} color="text-emerald-300" />
+        )}
+        {(s.recoveriesTriggered ?? 0) > 0 && (
+          <MiniStat icon={RotateCcw} value={`${s.recoveriesSucceeded ?? 0}/${s.recoveriesTriggered ?? 0}`} color="text-amber-400" />
         )}
         {s.todosTotal > 0 && (
           <MiniStat icon={ListChecks} value={`${s.todosCompleted}/${s.todosTotal}`} color="text-indigo-400" />

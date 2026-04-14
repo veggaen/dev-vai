@@ -13,7 +13,7 @@
  *   5. Generate a structured improvement plan
  *   6. Optionally auto-generate templates for gaps
  *
- * @author V3gga Thorsen
+ * @author Thorsen
  */
 
 import type {

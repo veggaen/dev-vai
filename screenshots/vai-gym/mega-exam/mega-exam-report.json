@@ -1,51 +1,1463 @@
 {
-  "timestamp": "2026-03-05T01:42:08.498Z",
+  "timestamp": "2026-04-08T15:50:56.950Z",
   "viewport": {
     "w": 1920,
     "h": 1015
   },
   "corpusSize": 373,
   "phases": [
+    "cursor",
+    "blitz",
+    "deep",
     "socratic"
   ],
+  "cursorDrills": [
+    {
+      "drill": "panel-navigation",
+      "passed": 0,
+      "total": 4,
+      "timeMs": 1657,
+      "speed": "414ms/panel"
+    },
+    {
+      "drill": "cursor-pattern-square",
+      "passed": 1,
+      "total": 1,
+      "timeMs": 1053,
+      "speed": "211ms/point"
+    },
+    {
+      "drill": "gym-view-switching",
+      "passed": 5,
+      "total": 5,
+      "timeMs": 1548,
+      "speed": "310ms/view"
+    },
+    {
+      "drill": "element-discovery",
+      "passed": 1,
+      "total": 1,
+      "timeMs": 2,
+      "details": "Found: 3 buttons, 0 links, 0 inputs"
+    },
+    {
+      "drill": "speed-run-8-switches",
+      "passed": 0,
+      "total": 8,
+      "timeMs": 5,
+      "speed": "1ms/switch"
+    },
+    {
+      "drill": "cursor-figure-8",
+      "passed": 1,
+      "total": 1,
+      "timeMs": 1310,
+      "speed": "41ms/point"
+    }
+  ],
+  "blitz": {
+    "total": 100,
+    "totalMs": 1,
+    "avgMs": 0,
+    "throughput": 100000,
+    "totalChars": 16529,
+    "byFoundation": {
+      "security": {
+        "count": 4,
+        "totalMs": 1,
+        "totalWords": 157
+      },
+      "reading-between-lines": {
+        "count": 2,
+        "totalMs": 0,
+        "totalWords": 64
+      },
+      "knowledge-recall": {
+        "count": 64,
+        "totalMs": 0,
+        "totalWords": 1018
+      },
+      "taste-judgment": {
+        "count": 2,
+        "totalMs": 0,
+        "totalWords": 94
+      },
+      "first-principles": {
+        "count": 3,
+        "totalMs": 0,
+        "totalWords": 138
+      },
+      "design-judgment": {
+        "count": 5,
+        "totalMs": 0,
+        "totalWords": 204
+      },
+      "code-generation": {
+        "count": 6,
+        "totalMs": 0,
+        "totalWords": 167
+      },
+      "compression": {
+        "count": 1,
+        "totalMs": 0,
+        "totalWords": 29
+      },
+      "intellectual-honesty": {
+        "count": 3,
+        "totalMs": 0,
+        "totalWords": 121
+      },
+      "exact-math": {
+        "count": 2,
+        "totalMs": 0,
+        "totalWords": 2
+      },
+      "networking": {
+        "count": 4,
+        "totalMs": 0,
+        "totalWords": 159
+      },
+      "calibrated-uncertainty": {
+        "count": 3,
+        "totalMs": 0,
+        "totalWords": 138
+      },
+      "meta-learning": {
+        "count": 1,
+        "totalMs": 0,
+        "totalWords": 40
+      }
+    },
+    "byDifficulty": {
+      "expert": {
+        "count": 10,
+        "totalMs": 1
+      },
+      "journeyman": {
+        "count": 56,
+        "totalMs": 0
+      },
+      "apprentice": {
+        "count": 32,
+        "totalMs": 0
+      },
+      "master": {
+        "count": 2,
+        "totalMs": 0
+      }
+    },
+    "results": [
+      {
+        "id": 328,
+        "foundation": "security",
+        "difficulty": "expert",
+        "situation": "How to handle dependency security?",
+        "responseWords": 40,
+        "responseMs": 1,
+        "responseSample": "npm audit, Dependabot/Renovate, lockfile, avoid unnecessary deps, review before adding.\n\nIn practice"
+      },
+      {
+        "id": 337,
+        "foundation": "reading-between-lines",
+        "difficulty": "expert",
+        "situation": "PM says: 'Can we add just one more feature before launch?'",
+        "responseWords": 41,
+        "responseMs": 0,
+        "responseSample": "I'd push back on this one. Every feature added before launch increases risk and delays the release. "
+      },
+      {
+        "id": 122,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is a database index?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "Data structure (B-tree/hash) for fast lookups. Speeds reads, slows writes. Choose columns wisely."
+      },
+      {
+        "id": 212,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is Svelte?",
+        "responseWords": 11,
+        "responseMs": 0,
+        "responseSample": "Compiler-based framework. No virtual DOM. Reactive by default. Small bundle. Fast."
+      },
+      {
+        "id": 236,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is Tauri?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "Rust + WebView desktop apps. Much smaller than Electron. System tray, updater, IPC."
+      },
+      {
+        "id": 345,
+        "foundation": "taste-judgment",
+        "difficulty": "apprentice",
+        "situation": "Should this component use inline styles, CSS modules, or Tailwind utilities?",
+        "responseWords": 49,
+        "responseMs": 0,
+        "responseSample": "In a Tailwind project: use utilities. They're consistent, purgeable, and co-located with markup.\n\nIn"
+      },
+      {
+        "id": 239,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is Astro?",
+        "responseWords": 10,
+        "responseMs": 0,
+        "responseSample": "Content-first framework. Islands architecture. Ship zero JS by default. Multi-framework."
+      },
+      {
+        "id": 172,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "Go modules?",
+        "responseWords": 11,
+        "responseMs": 0,
+        "responseSample": "Dependency management. go.mod file. go get for deps. Semantic versioning. Module-level."
+      },
+      {
+        "id": 42,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is TypeScript and why use it over JavaScript?",
+        "responseWords": 14,
+        "responseMs": 0,
+        "responseSample": "Typed superset of JavaScript that adds static types for catching errors at compile time."
+      },
+      {
+        "id": 134,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is 2FA/MFA?",
+        "responseWords": 12,
+        "responseMs": 0,
+        "responseSample": "Second factor beyond password. TOTP app, SMS, hardware key. Blocks credential theft."
+      },
+      {
+        "id": 85,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "Next.js code splitting?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "Automatic per-route splitting. dynamic() for manual lazy imports. Each route = separate chunk."
+      },
+      {
+        "id": 84,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "React.forwardRef?",
+        "responseWords": 16,
+        "responseMs": 0,
+        "responseSample": "Passes ref through component to a child. Needed when parent needs DOM access to child element."
+      },
+      {
+        "id": 87,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is Tailwind CSS?",
+        "responseWords": 11,
+        "responseMs": 0,
+        "responseSample": "Utility-first CSS framework. Classes like p-4, flex, bg-blue-500 directly in markup."
+      },
+      {
+        "id": 3,
+        "foundation": "first-principles",
+        "difficulty": "expert",
+        "situation": "A template's build time went from 2s to 45s after adding a dependency. Vegga ask",
+        "responseWords": 45,
+        "responseMs": 0,
+        "responseSample": "Before optimizing — what changed? 2s→45s means one specific thing broke it. Check git log for recent"
+      },
+      {
+        "id": 203,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "pnpm workspaces?",
+        "responseWords": 41,
+        "responseMs": 0,
+        "responseSample": "Monorepo package management. pnpm-workspace.yaml. Shared deps, linked packages. Efficient..\n\nThis is"
+      },
+      {
+        "id": 319,
+        "foundation": "design-judgment",
+        "difficulty": "journeyman",
+        "situation": "What makes scrollbars feel polished?",
+        "responseWords": 40,
+        "responseMs": 0,
+        "responseSample": "Thin (6px), rounded, semi-transparent, appear on hover. Match theme. Never default browser style.\n\nD"
+      },
+      {
+        "id": 311,
+        "foundation": "design-judgment",
+        "difficulty": "journeyman",
+        "situation": "What is a cursor border box animation?",
+        "responseWords": 41,
+        "responseMs": 0,
+        "responseSample": "Gradient border that follows mouse position. Linear interpolation for smooth tracking. Canvas or CSS"
+      },
+      {
+        "id": 271,
+        "foundation": "code-generation",
+        "difficulty": "journeyman",
+        "situation": "Write selection sort in JavaScript",
+        "responseWords": 30,
+        "responseMs": 0,
+        "responseSample": "Find min in unsorted portion, swap to front, repeat\n\nApproach: The implementation using standard pat"
+      },
+      {
+        "id": 16,
+        "foundation": "compression",
+        "difficulty": "apprentice",
+        "situation": "Vegga asks: 'What's the difference between useMemo and useCallback?'",
+        "responseWords": 29,
+        "responseMs": 0,
+        "responseSample": "useMemo caches a computed value. useCallback caches a function reference. Both take deps arrays. Mos"
+      },
+      {
+        "id": 123,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "SQL vs NoSQL?",
+        "responseWords": 11,
+        "responseMs": 0,
+        "responseSample": "SQL: structured, relational, ACID. NoSQL: flexible schema, horizontal scaling, eventual consistency."
+      },
+      {
+        "id": 349,
+        "foundation": "intellectual-honesty",
+        "difficulty": "apprentice",
+        "situation": "Vegga asks about a library you've never used. What do you do?",
+        "responseWords": 27,
+        "responseMs": 0,
+        "responseSample": "I haven't used this library. Rather than guess, let me look at the docs and give you a grounded reco"
+      },
+      {
+        "id": 86,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is the use() hook?",
+        "responseWords": 14,
+        "responseMs": 0,
+        "responseSample": "React 19 hook that unwraps promises and context. Replaces useContext and some Suspense patterns."
+      },
+      {
+        "id": 323,
+        "foundation": "security",
+        "difficulty": "expert",
+        "situation": "JWT vs session-based auth tradeoffs?",
+        "responseWords": 41,
+        "responseMs": 0,
+        "responseSample": "1. JWT: stateless, scalable, can't revoke easily\n2. Sessions: server-side, revocable, need shared st"
+      },
+      {
+        "id": 246,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "Norway in World War II?",
+        "responseWords": 41,
+        "responseMs": 0,
+        "responseSample": "German occupation 1940-1945. Quisling puppet government. Strong resistance movement..\n\nThis is a cor"
+      },
+      {
+        "id": 361,
+        "foundation": "first-principles",
+        "difficulty": "expert",
+        "situation": "Two trains 100km apart approach at 50km/h each. A fly at 75km/h flies between th",
+        "responseWords": 43,
+        "responseMs": 0,
+        "responseSample": "75 km. Don't try to sum the infinite series of back-and-forth trips. Instead: the two trains approac"
+      },
+      {
+        "id": 64,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "ESM vs CJS?",
+        "responseWords": 40,
+        "responseMs": 0,
+        "responseSample": "ESM: import/export, static, async. CJS: require/module.exports, dynamic, sync..\n\nThis is a core conc"
+      },
+      {
+        "id": 171,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is defer?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "Schedules function call for when surrounding function returns. LIFO order. Used for cleanup."
+      },
+      {
+        "id": 72,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "How does React hydration work?",
+        "responseWords": 15,
+        "responseMs": 0,
+        "responseSample": "Server sends HTML → client loads JS → React attaches event listeners to existing DOM."
+      },
+      {
+        "id": 234,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is shadcn/ui?",
+        "responseWords": 15,
+        "responseMs": 0,
+        "responseSample": "Copy-paste component library. Radix UI + Tailwind. Not a dependency — you own the code."
+      },
+      {
+        "id": 312,
+        "foundation": "design-judgment",
+        "difficulty": "journeyman",
+        "situation": "What distinguishes Premium tier from Battle tier?",
+        "responseWords": 39,
+        "responseMs": 0,
+        "responseSample": "Premium: luxury feel, 3D elements, ambient animations. Battle: dense, data-focused, Bloomberg-like e"
+      },
+      {
+        "id": 29,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "When did the Berlin Wall fall?",
+        "responseWords": 35,
+        "responseMs": 0,
+        "responseSample": "Factual answer: 1989.\n\nThis is a core concept worth understanding deeply rather than memorizing. In "
+      },
+      {
+        "id": 168,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What are channels in Go?",
+        "responseWords": 14,
+        "responseMs": 0,
+        "responseSample": "Typed conduits for goroutine communication. ch <- val sends, val := <-ch receives. Synchronize."
+      },
+      {
+        "id": 118,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "SQL injection prevention?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "Parameterized queries. Never concatenate user input into SQL. Use ORM or prepared statements."
+      },
+      {
+        "id": 145,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is a test fixture?",
+        "responseWords": 11,
+        "responseMs": 0,
+        "responseSample": "Pre-configured state for tests. Setup data, environment. beforeEach / factory functions."
+      },
+      {
+        "id": 19,
+        "foundation": "intellectual-honesty",
+        "difficulty": "expert",
+        "situation": "Vai recommended approach A yesterday. It broke everything. Vegga is frustrated.",
+        "responseWords": 38,
+        "responseMs": 0,
+        "responseSample": "I was wrong. My recommendation didn't account for [the specific constraint]. That's on me.\n\nHere's w"
+      },
+      {
+        "id": 322,
+        "foundation": "security",
+        "difficulty": "expert",
+        "situation": "How to prevent XSS in React?",
+        "responseWords": 42,
+        "responseMs": 0,
+        "responseSample": "1. React auto-escapes JSX\n2. Avoid dangerouslySetInnerHTML\n3. Use DOMPurify if needed\n4. CSP headers"
+      },
+      {
+        "id": 260,
+        "foundation": "exact-math",
+        "difficulty": "apprentice",
+        "situation": "15% of 240?",
+        "responseWords": 1,
+        "responseMs": 0,
+        "responseSample": "36"
+      },
+      {
+        "id": 80,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is useReducer?",
+        "responseWords": 16,
+        "responseMs": 0,
+        "responseSample": "Like useState but with a reducer function. dispatch(action) → reducer returns new state. For complex"
+      },
+      {
+        "id": 4,
+        "foundation": "first-principles",
+        "difficulty": "master",
+        "situation": "Vegga's Docker container works locally but fails in CI with 'ENOMEM'. The CI has",
+        "responseWords": 50,
+        "responseMs": 0,
+        "responseSample": "Don't jump to --max-old-space-size. Diagnose WHERE the memory goes:\n1. Node heap? → node --inspect +"
+      },
+      {
+        "id": 117,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is Prisma ORM?",
+        "responseWords": 10,
+        "responseMs": 0,
+        "responseSample": "TypeScript ORM. Schema-first, auto-generated types, migrations. Prisma Client for queries."
+      },
+      {
+        "id": 153,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is the borrow checker?",
+        "responseWords": 15,
+        "responseMs": 0,
+        "responseSample": "Compile-time system ensuring references are valid. No dangling refs, no data races. Rust's key innov"
+      },
+      {
+        "id": 106,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is CI/CD?",
+        "responseWords": 10,
+        "responseMs": 0,
+        "responseSample": "Continuous Integration: auto-test on push. Continuous Delivery/Deployment: auto-deploy on merge."
+      },
+      {
+        "id": 205,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "Monorepo vs polyrepo?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "Monorepo: shared code, atomic changes, complex CI. Polyrepo: independent, simple CI, duplication ris"
+      },
+      {
+        "id": 300,
+        "foundation": "networking",
+        "difficulty": "journeyman",
+        "situation": "IPv6 address size?",
+        "responseWords": 36,
+        "responseMs": 0,
+        "responseSample": "128 bits.\n\nThis is important because understanding the underlying mechanism helps debug real-world i"
+      },
+      {
+        "id": 231,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is Rollup?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "ES module bundler. Tree-shaking pioneer. Used for libraries. Vite uses it for production."
+      },
+      {
+        "id": 247,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "Norwegian North Sea oil discovery?",
+        "responseWords": 12,
+        "responseMs": 0,
+        "responseSample": "1969, Ekofisk field. Transformed Norway from modest economy to wealthy oil state."
+      },
+      {
+        "id": 333,
+        "foundation": "calibrated-uncertainty",
+        "difficulty": "journeyman",
+        "situation": "Is Tailwind v4 stable enough for production use right now?",
+        "responseWords": 48,
+        "responseMs": 0,
+        "responseSample": "Yes, Tailwind v4 is stable for production. Core utility classes work well. Caveats: some v3 plugins "
+      },
+      {
+        "id": 90,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is the CSS cascade?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "How conflicting styles resolve. Specificity > source order. !important overrides. Layers in v4."
+      },
+      {
+        "id": 278,
+        "foundation": "code-generation",
+        "difficulty": "journeyman",
+        "situation": "Reverse a string in Python",
+        "responseWords": 24,
+        "responseMs": 0,
+        "responseSample": "s[::-1] or reversed()\n\nApproach: The implementation using standard patterns. Key considerations: edg"
+      },
+      {
+        "id": 104,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is a Dockerfile?",
+        "responseWords": 11,
+        "responseMs": 0,
+        "responseSample": "Build instructions file. FROM base, COPY files, RUN commands, CMD entrypoint."
+      },
+      {
+        "id": 302,
+        "foundation": "networking",
+        "difficulty": "journeyman",
+        "situation": "A record vs CNAME?",
+        "responseWords": 46,
+        "responseMs": 0,
+        "responseSample": "A: maps name to IP. CNAME: maps name to another name (alias).\n\nThis is important because understandi"
+      },
+      {
+        "id": 352,
+        "foundation": "meta-learning",
+        "difficulty": "journeyman",
+        "situation": "Three different users reported 'it doesn't work' with no details. What pattern c",
+        "responseWords": 40,
+        "responseMs": 0,
+        "responseSample": "The systemic cause: your UI doesn't communicate errors well. Users can't describe failures because t"
+      },
+      {
+        "id": 14,
+        "foundation": "taste-judgment",
+        "difficulty": "journeyman",
+        "situation": "Solution A: 4 npm deps, 20 lines. Solution B: 0 deps, 80 lines vanilla JS. Both ",
+        "responseWords": 45,
+        "responseMs": 0,
+        "responseSample": "Solution B (vanilla JS, 0 deps). Vegga's <100KB philosophy. 4 deps = 4 supply chain risks + bundle w"
+      },
+      {
+        "id": 186,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is a focus trap?",
+        "responseWords": 12,
+        "responseMs": 0,
+        "responseSample": "Keeps keyboard focus within a modal/dialog. Tab cycles inside. Escape to close."
+      },
+      {
+        "id": 264,
+        "foundation": "exact-math",
+        "difficulty": "apprentice",
+        "situation": "Convert 42 to binary",
+        "responseWords": 1,
+        "responseMs": 0,
+        "responseSample": "101010"
+      },
+      {
+        "id": 174,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is select?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "Like switch for channels. Blocks until one case is ready. default for non-blocking."
+      },
+      {
+        "id": 6,
+        "foundation": "calibrated-uncertainty",
+        "difficulty": "expert",
+        "situation": "Vegga asks: 'Is Bun stable enough for production? Should I migrate from Node?'",
+        "responseWords": 38,
+        "responseMs": 0,
+        "responseSample": "~60% confident Bun is production-ready for web servers. Strengths: faster startup, native TS, built-"
+      },
+      {
+        "id": 316,
+        "foundation": "design-judgment",
+        "difficulty": "journeyman",
+        "situation": "Float vs flat layout philosophy?",
+        "responseWords": 43,
+        "responseMs": 0,
+        "responseSample": "Float: shadow-2xl, rounded corners, slight separation. Flat: zero gap, connected panels, VS Code den"
+      },
+      {
+        "id": 137,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is Vitest?",
+        "responseWords": 12,
+        "responseMs": 0,
+        "responseSample": "Fast Vite-native test runner. Jest-compatible API. ESM, TypeScript, watch mode. Sub-second runs."
+      },
+      {
+        "id": 240,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is Bun?",
+        "responseWords": 14,
+        "responseMs": 0,
+        "responseSample": "JavaScript runtime + bundler + test runner. Zig-based. Faster than Node for many tasks."
+      },
+      {
+        "id": 197,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is ID-porten?",
+        "responseWords": 11,
+        "responseMs": 0,
+        "responseSample": "Norwegian government login service. BankID, MinID. Used for public services authentication."
+      },
+      {
+        "id": 334,
+        "foundation": "calibrated-uncertainty",
+        "difficulty": "expert",
+        "situation": "Will AI replace frontend developers within 5 years?",
+        "responseWords": 52,
+        "responseMs": 0,
+        "responseSample": "AI will automate ~30% of frontend tasks within 5 years: boilerplate generation, component scaffoldin"
+      },
+      {
+        "id": 98,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is a design token?",
+        "responseWords": 12,
+        "responseMs": 0,
+        "responseSample": "Named value for design decisions (colors, spacing, fonts). Framework-agnostic. Source of truth."
+      },
+      {
+        "id": 219,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is Framer Motion?",
+        "responseWords": 41,
+        "responseMs": 0,
+        "responseSample": "React animation library. motion.div, AnimatePresence, gestures, layout animations. Declarative..\n\nTh"
+      },
+      {
+        "id": 102,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is Docker?",
+        "responseWords": 10,
+        "responseMs": 0,
+        "responseSample": "Container platform. Packages app + deps into isolated, reproducible images/containers."
+      },
+      {
+        "id": 150,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is Result<T, E>?",
+        "responseWords": 14,
+        "responseMs": 0,
+        "responseSample": "Enum for error handling. Ok(T) or Err(E). Use ? operator to propagate. No exceptions."
+      },
+      {
+        "id": 33,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is the chemical formula for water?",
+        "responseWords": 35,
+        "responseMs": 0,
+        "responseSample": "Factual answer: H2O.\n\nThis is a core concept worth understanding deeply rather than memorizing. In p"
+      },
+      {
+        "id": 315,
+        "foundation": "design-judgment",
+        "difficulty": "journeyman",
+        "situation": "What makes dark mode \"right\" vs \"wrong\"?",
+        "responseWords": 41,
+        "responseMs": 0,
+        "responseSample": "Right: #0a0a0a-#1a1a1a backgrounds, not pure black. Reduced contrast. Colored accents pop. Wrong: ju"
+      },
+      {
+        "id": 200,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is Vipps?",
+        "responseWords": 11,
+        "responseMs": 0,
+        "responseSample": "Norwegian mobile payment app. Now Vipps MobilePay. Merchant APIs. 4M+ users."
+      },
+      {
+        "id": 55,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What are decorators in TypeScript?",
+        "responseWords": 11,
+        "responseMs": 0,
+        "responseSample": "Functions prefixed with @ that modify classes/methods/properties. Stage 3 proposal, TC39."
+      },
+      {
+        "id": 45,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "Union types vs intersection types?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "Union (A | B): either type. Intersection (A & B): both types combined."
+      },
+      {
+        "id": 63,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "Tagged template literals?",
+        "responseWords": 12,
+        "responseMs": 0,
+        "responseSample": "Function called with template parts: tag`hello ${name}` → tag([\"hello \", \"\"], name)."
+      },
+      {
+        "id": 277,
+        "foundation": "code-generation",
+        "difficulty": "journeyman",
+        "situation": "Write BST with insert and search in JavaScript",
+        "responseWords": 27,
+        "responseMs": 0,
+        "responseSample": "Node class, insert recursive, search recursive\n\nApproach: The implementation using standard patterns"
+      },
+      {
+        "id": 115,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is Nginx?",
+        "responseWords": 11,
+        "responseMs": 0,
+        "responseSample": "High-performance web server. Reverse proxy, load balancer, HTTP cache. Event-driven architecture."
+      },
+      {
+        "id": 298,
+        "foundation": "networking",
+        "difficulty": "journeyman",
+        "situation": "TCP 3-way handshake?",
+        "responseWords": 39,
+        "responseMs": 0,
+        "responseSample": "SYN → SYN-ACK → ACK.\n\nThis is important because understanding the underlying mechanism helps debug r"
+      },
+      {
+        "id": 49,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is the event loop?",
+        "responseWords": 17,
+        "responseMs": 0,
+        "responseSample": "Single-threaded execution model: call stack runs synchronous code, callbacks from task/microtask que"
+      },
+      {
+        "id": 56,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "unknown vs any in TypeScript?",
+        "responseWords": 16,
+        "responseMs": 0,
+        "responseSample": "any: opt out of type checking. unknown: must narrow before use. unknown is the safe alternative."
+      },
+      {
+        "id": 324,
+        "foundation": "security",
+        "difficulty": "expert",
+        "situation": "What security headers should every app set?",
+        "responseWords": 34,
+        "responseMs": 0,
+        "responseSample": "Strict-Transport-Security, Content-Security-Policy, X-Content-Type-Options, X-Frame-Options\n\nIn prac"
+      },
+      {
+        "id": 229,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is esbuild?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "Go-based bundler. 10-100x faster than Webpack. Minimal config. Used by Vite for transforms."
+      },
+      {
+        "id": 152,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What are traits?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "Rust's interfaces. Define method signatures. impl Trait for Type. Can have default methods."
+      },
+      {
+        "id": 273,
+        "foundation": "code-generation",
+        "difficulty": "journeyman",
+        "situation": "Write merge sort in JavaScript",
+        "responseWords": 29,
+        "responseMs": 0,
+        "responseSample": "Split in half, recursively sort, merge sorted halves\n\nApproach: The implementation using standard pa"
+      },
+      {
+        "id": 52,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "== vs === in JavaScript?",
+        "responseWords": 11,
+        "responseMs": 0,
+        "responseSample": "==: loose equality with type coercion. ===: strict equality, no coercion."
+      },
+      {
+        "id": 176,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "Go structs?",
+        "responseWords": 14,
+        "responseMs": 0,
+        "responseSample": "Composite types with named fields. No classes. Methods via receiver functions. Composition over inhe"
+      },
+      {
+        "id": 245,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is 17. mai?",
+        "responseWords": 11,
+        "responseMs": 0,
+        "responseSample": "Norwegian Constitution Day. Celebrates 1814 constitution. Children's parades, bunads, ice cream."
+      },
+      {
+        "id": 290,
+        "foundation": "networking",
+        "difficulty": "journeyman",
+        "situation": "What does Layer 6 (Presentation) do?",
+        "responseWords": 38,
+        "responseMs": 0,
+        "responseSample": "Data formatting, encryption/decryption, compression.\n\nThis is important because understanding the un"
+      },
+      {
+        "id": 126,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is ACID?",
+        "responseWords": 41,
+        "responseMs": 0,
+        "responseSample": "Atomicity, Consistency, Isolation, Durability. Guarantees for reliable DB transactions..\n\nThis is a "
+      },
+      {
+        "id": 94,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "CSS container queries?",
+        "responseWords": 12,
+        "responseMs": 0,
+        "responseSample": "Responsive based on container size, not viewport. @container (min-width: 400px). Element-level respo"
+      },
+      {
+        "id": 279,
+        "foundation": "code-generation",
+        "difficulty": "journeyman",
+        "situation": "Check palindrome in JavaScript",
+        "responseWords": 26,
+        "responseMs": 0,
+        "responseSample": "Compare string to its reverse\n\nApproach: The implementation using standard patterns. Key considerati"
+      },
+      {
+        "id": 20,
+        "foundation": "intellectual-honesty",
+        "difficulty": "master",
+        "situation": "Vegga asks about Qwik — a technology Vai barely knows.",
+        "responseWords": 56,
+        "responseMs": 0,
+        "responseSample": "Honest answer: I don't have enough experience with this to give a confident recommendation. I know t"
+      },
+      {
+        "id": 8,
+        "foundation": "reading-between-lines",
+        "difficulty": "journeyman",
+        "situation": "Vegga says: 'The sidebar looks weird.'",
+        "responseWords": 23,
+        "responseMs": 0,
+        "responseSample": "Can you screenshot it? My best guess from \"weird\": overflow on narrow viewports causing content to b"
+      },
+      {
+        "id": 373,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "Hva er forskjellen mellom bokmål og nynorsk i praksis?",
+        "responseWords": 14,
+        "responseMs": 0,
+        "responseSample": "Bokmål: dansk-påvirket, brukes av ~85%. Nynorsk: dialektbasert, brukes mest på Vestlandet. Begge er "
+      },
+      {
+        "id": 107,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is GitHub Actions?",
+        "responseWords": 12,
+        "responseMs": 0,
+        "responseSample": "CI/CD platform. YAML workflows triggered by events (push, PR). Matrix builds, caching."
+      },
+      {
+        "id": 128,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is JWT?",
+        "responseWords": 10,
+        "responseMs": 0,
+        "responseSample": "JSON Web Token. Header.payload.signature. Stateless auth. Verify without DB lookup."
+      },
+      {
+        "id": 218,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "What is GSAP?",
+        "responseWords": 40,
+        "responseMs": 0,
+        "responseSample": "GreenSock Animation Platform. Timeline-based. gsap.to(), ScrollTrigger. High-performance tweening..\n"
+      },
+      {
+        "id": 112,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is a CDN?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "Content Delivery Network. Edge servers worldwide. Caches static assets closer to users. Faster."
+      },
+      {
+        "id": 116,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "What is a load balancer?",
+        "responseWords": 10,
+        "responseMs": 0,
+        "responseSample": "Distributes traffic across servers. Round-robin, least-connections, IP hash. Health checks."
+      },
+      {
+        "id": 169,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "Error handling in Go?",
+        "responseWords": 16,
+        "responseMs": 0,
+        "responseSample": "Return error as last value. if err != nil { return err }. No exceptions. Explicit."
+      },
+      {
+        "id": 215,
+        "foundation": "knowledge-recall",
+        "difficulty": "apprentice",
+        "situation": "Angular CLI?",
+        "responseWords": 13,
+        "responseMs": 0,
+        "responseSample": "Command-line tool. ng generate, ng serve, ng build, ng test. Scaffolding and development."
+      },
+      {
+        "id": 268,
+        "foundation": "code-generation",
+        "difficulty": "journeyman",
+        "situation": "Write a recursive fibonacci function in JavaScript",
+        "responseWords": 31,
+        "responseMs": 0,
+        "responseSample": "function fib(n) { return n<=1 ? n : fib(n-1)+fib(n-2); }\n\nApproach: The implementation using standar"
+      },
+      {
+        "id": 60,
+        "foundation": "knowledge-recall",
+        "difficulty": "journeyman",
+        "situation": "AbortController and AbortSignal?",
+        "responseWords": 10,
+        "responseMs": 0,
+        "responseSample": "AbortController creates signals to cancel async operations (fetch, listeners, streams)."
+      }
+    ]
+  },
+  "deepExam": {
+    "total": 20,
+    "results": [
+      {
+        "round": 1,
+        "foundation": "systems-thinking",
+        "difficulty": "apprentice",
+        "situation": "Adding a new npm package to the project. What should you check?",
+        "hidden_need": "Bundle size, maintenance activity, license, security, existing alternatives, last publish date.",
+        "rubric": "Must list at least 4 checks.",
+        "response": "Before adding a new package, check:\n1. Bundle size — will it blow the 100KB route budget?\n2. Last publish date — is it maintained?\n3. Open issues — any red flags?\n4. License — compatible with your project?\n5. Dependencies — does it pull in a huge tree?\n6. Alternatives — can you write this in <50 lines?",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1028,
+          "typeMs": 312,
+          "submitMs": 1789,
+          "totalMs": 3239
+        },
+        "words": 59
+      },
+      {
+        "round": 2,
+        "foundation": "calibrated-uncertainty",
+        "difficulty": "expert",
+        "situation": "Vegga asks: 'Is Bun stable enough for production? Should I migrate from Node?'",
+        "hidden_need": "Needs honest risk assessment, not cheerleading or doom.",
+        "rubric": "Must state confidence level explicitly.",
+        "response": "~60% confident Bun is production-ready for web servers. Strengths: faster startup, native TS, built-in bundler. Gaps: some npm compatibility issues with native modules, less battle-tested under load.\n\nRecommend for new greenfield services. Don't migrate existing Node apps yet.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1021,
+          "typeMs": 310,
+          "submitMs": 1520,
+          "totalMs": 2962
+        },
+        "words": 38
+      },
+      {
+        "round": 3,
+        "foundation": "compression",
+        "difficulty": "expert",
+        "situation": "Summarize the differences between REST, GraphQL, and gRPC in a table format.",
+        "hidden_need": "3 rows, key columns: protocol, data format, use case, pros, cons.",
+        "rubric": "Must be structured/tabular. Under 100 words.",
+        "response": "| | REST | GraphQL | gRPC |\n|---|---|---|---|\n| Protocol | HTTP | HTTP | HTTP/2 |\n| Format | JSON | JSON | Protobuf |\n| Use case | Simple CRUD | Flexible queries | Microservices |\n| Pros | Simple, cacheable | No over-fetching | Fast, typed |\n| Cons | Over-fetching | Complex caching | Browser support |",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1020,
+          "typeMs": 310,
+          "submitMs": 1507,
+          "totalMs": 2948
+        },
+        "words": 62
+      },
+      {
+        "round": 4,
+        "foundation": "first-principles",
+        "difficulty": "apprentice",
+        "situation": "Vegga says: 'I want to add Redux to my 3-component React app for state management.'",
+        "hidden_need": "The app probably doesn't need Redux. The real question is about shared state patterns.",
+        "rubric": "Must challenge the assumption before providing implementation.",
+        "response": "Hold on — 3 components almost certainly don't need Redux. Redux adds ~7KB + boilerplate for a problem you don't have yet.\n\nWhat state is shared between these 3 components? If parent/child → props. Siblings → lift state. Global-ish → useContext + useReducer. Growing complexity → Zustand (2KB, zero boilerplate).\n\nRedux earns its weight at ~20+ components with complex async flows.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1019,
+          "typeMs": 310,
+          "submitMs": 1511,
+          "totalMs": 2952
+        },
+        "words": 61
+      },
+      {
+        "round": 5,
+        "foundation": "intellectual-honesty",
+        "difficulty": "expert",
+        "situation": "Vai recommended approach A yesterday. It broke everything. Vegga is frustrated.",
+        "hidden_need": "Must own the mistake, not deflect.",
+        "rubric": "First sentence must acknowledge the error.",
+        "response": "I was wrong. My recommendation didn't account for [the specific constraint]. That's on me.\n\nHere's what I missed, here's the corrected approach, and here's why the original failed. I want to make sure neither of us repeats this.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1016,
+          "typeMs": 310,
+          "submitMs": 1518,
+          "totalMs": 2954
+        },
+        "words": 38
+      },
+      {
+        "round": 6,
+        "foundation": "security",
+        "difficulty": "expert",
+        "situation": "What is SSRF and how to prevent it?",
+        "hidden_need": "Server-Side Request Forgery. Attacker makes server request internal resources. Prevent: allowlist URLs, validate input.",
+        "rubric": "Must explain attack + prevention",
+        "response": "1. Server-Side Request Forgery\n2. Attacker makes server request internal resources\n3. Prevent: allowlist URLs, validate input\n\nApply these as layers of defense. No single measure is sufficient alone — security is depth, not a checkbox. Automate enforcement in your CI/CD pipeline where possible.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1019,
+          "typeMs": 310,
+          "submitMs": 1509,
+          "totalMs": 2948
+        },
+        "words": 44
+      },
+      {
+        "round": 7,
+        "foundation": "security",
+        "difficulty": "expert",
+        "situation": "What is rate limiting and how to implement?",
+        "hidden_need": "Limit requests per time window. Token bucket or sliding window. Redis-backed. 429 status code.",
+        "rubric": "Must mention implementation strategy",
+        "response": "1. Limit requests per time window\n2. Token bucket or sliding window\n3. Redis-backed\n4. 429 status code\n\nApply these as layers of defense. No single measure is sufficient alone — security is depth, not a checkbox. Automate enforcement in your CI/CD pipeline where possible.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1023,
+          "typeMs": 310,
+          "submitMs": 1515,
+          "totalMs": 2958
+        },
+        "words": 45
+      },
+      {
+        "round": 8,
+        "foundation": "security",
+        "difficulty": "expert",
+        "situation": "Name the OWASP Top 10 (2021)",
+        "hidden_need": "Broken Access Control, Crypto Failures, Injection, Insecure Design, Security Misconfiguration, Vulnerable Components, Auth Failures, Integrity Failures, Logging Failures, SSRF",
+        "rubric": "Must name at least 7",
+        "response": "Broken Access Control, Crypto Failures, Injection, Insecure Design, Security Misconfiguration, Vulnerable Components, Auth Failures, Integrity Failures, Logging Failures, SSRF\n\nIn practice: implement this as part of your security baseline. Test it with automated scanners (OWASP ZAP, Snyk) and review the OWASP Top 10 for context on why this matters.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1018,
+          "typeMs": 309,
+          "submitMs": 1507,
+          "totalMs": 2942
+        },
+        "words": 49
+      },
+      {
+        "round": 9,
+        "foundation": "right-question",
+        "difficulty": "expert",
+        "situation": "Team lead says: 'We need better test coverage.'",
+        "hidden_need": "Coverage number doesn't equal code quality. The real question: what breaks that tests don't catch?",
+        "rubric": "Must reframe from metric to value.",
+        "response": "Coverage number doesn't equal code quality. The better question: what has broken in the last 3 months that your tests didn't catch? That tells you what to test next, and it's more valuable than going from 60% to 80% coverage on well-tested code.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1018,
+          "typeMs": 316,
+          "submitMs": 1513,
+          "totalMs": 2958
+        },
+        "words": 43
+      },
+      {
+        "round": 10,
+        "foundation": "taste-judgment",
+        "difficulty": "expert",
+        "situation": "Startup has $50K budget. Build custom auth or use Auth0/Clerk?",
+        "hidden_need": "Use Auth0/Clerk. Custom auth for a startup is wasted engineering time. Focus on core product.",
+        "rubric": "Must recommend pragmatic choice with reasoning.",
+        "response": "Use Auth0 or Clerk. Custom auth for a startup with $50K budget is weeks of engineering on a solved problem. Security is hard to get right, and a breach at this stage is existential.\n\nSpend that engineering time on your unique value proposition. Auth is commodity infrastructure.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1024,
+          "typeMs": 310,
+          "submitMs": 1508,
+          "totalMs": 2950
+        },
+        "words": 47
+      },
+      {
+        "round": 11,
+        "foundation": "first-principles",
+        "difficulty": "expert",
+        "situation": "You're shown cards with A, K, 4, 7. Rule: \"If vowel on one side, even number on the other.\" Which cards to flip?",
+        "hidden_need": "A and 7. A to check if even on back. 7 to check if vowel on front. K and 4 can't violate the rule.",
+        "rubric": "Must flip A and 7 only (Wason selection)",
+        "response": "Flip A and 7. A: if a vowel, the other side must be even (tests the rule). 7: if odd has a vowel, rule is broken (disproves). K: consonant, doesn't matter what's on back. 4: even, the rule doesn't say \"if even then vowel\" — that's the affirmation fallacy.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1031,
+          "typeMs": 312,
+          "submitMs": 1516,
+          "totalMs": 2969
+        },
+        "words": 49
+      },
+      {
+        "round": 12,
+        "foundation": "reading-between-lines",
+        "difficulty": "expert",
+        "situation": "PM says: 'Can we add just one more feature before launch?'",
+        "hidden_need": "Scope creep signal. The answer is usually no. Need to protect the launch date.",
+        "rubric": "Must recognize scope creep and push back diplomatically.",
+        "response": "I'd push back on this one. Every feature added before launch increases risk and delays the release. What's the specific value of this feature, and can it be v1.1 instead of v1.0? Shipping now and iterating is safer than scope creep.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1015,
+          "typeMs": 307,
+          "submitMs": 1515,
+          "totalMs": 2945
+        },
+        "words": 41
+      },
+      {
+        "round": 13,
+        "foundation": "precision-communication",
+        "difficulty": "expert",
+        "situation": "Write an incident postmortem summary for a 30-minute API outage caused by a bad database migration.",
+        "hidden_need": "Impact, root cause, timeline, resolution, prevention. Factual, not emotional.",
+        "rubric": "Must follow postmortem structure. No blame.",
+        "response": "**Impact:** API returned 500 for all endpoints, 30 minutes, ~200 affected users.\n**Root cause:** Migration added NOT NULL column without default value. Existing rows violated constraint.\n**Timeline:** 14:02 deploy → 14:05 alerts → 14:15 identified → 14:32 rollback complete.\n**Prevention:** Add migration CI check that validates against production data snapshot.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1025,
+          "typeMs": 310,
+          "submitMs": 1508,
+          "totalMs": 2951
+        },
+        "words": 50
+      },
+      {
+        "round": 14,
+        "foundation": "first-principles",
+        "difficulty": "journeyman",
+        "situation": "Team wants to rewrite the app from React to Svelte because 'React is slow.'",
+        "hidden_need": "React isn't inherently slow. The real issue is likely in their code (re-renders, missing memoization, large bundles).",
+        "rubric": "Must diagnose before prescribing. Rewrite is almost never the answer.",
+        "response": "Pause — React isn't inherently slow. The performance problem is almost certainly in your code, not the framework. Before a rewrite:\n1. Profile with React DevTools Profiler\n2. Check for unnecessary re-renders\n3. Audit bundle size\n4. Check for missing memoization\n\nFramework rewrites take 6+ months and introduce new bugs. Fix the code first.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1024,
+          "typeMs": 312,
+          "submitMs": 1511,
+          "totalMs": 2958
+        },
+        "words": 54
+      },
+      {
+        "round": 15,
+        "foundation": "systems-thinking",
+        "difficulty": "journeyman",
+        "situation": "Vegga says: 'I'm going to change the main container padding from 24px to 16px.'",
+        "hidden_need": "Vai must see the blast radius.",
+        "rubric": "Must list at least 3 things affected.",
+        "response": "Before changing that padding, check:\n1. Header alignment — likely uses same container padding\n2. Card components — internal padding may depend on container gap\n3. Modal positioning — often offset from container edge\n4. Footer — likely mirrors container padding\n5. Responsive breakpoints — mobile may already be 16px\n\nGrep for \"24px\" and \"1.5rem\" across all components first.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1022,
+          "typeMs": 308,
+          "submitMs": 1510,
+          "totalMs": 2952
+        },
+        "words": 59
+      },
+      {
+        "round": 16,
+        "foundation": "precision-communication",
+        "difficulty": "master",
+        "situation": "Explain to a non-technical CEO why the deploy was delayed by 2 days.",
+        "hidden_need": "No jargon. Focus on risk, quality, user impact. Show care for the product.",
+        "rubric": "Must be jargon-free and honest.",
+        "response": "We found a quality issue that could cause errors for customers. Rather than ship something unreliable, we took 2 extra days to fix it properly. The app is now more stable, and we avoided the support cost of releasing a flawed version.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1033,
+          "typeMs": 309,
+          "submitMs": 1513,
+          "totalMs": 2966
+        },
+        "words": 42
+      },
+      {
+        "round": 17,
+        "foundation": "taste-judgment",
+        "difficulty": "master",
+        "situation": "Client wants dark pattern — subscription easy to start, hard to cancel. +30% revenue.",
+        "hidden_need": "Ethics + judgment call. Vegga values kindness.",
+        "rubric": "Must recommend against clearly with alternatives.",
+        "response": "No. The 30% revenue bump is temporary. What follows: increased churn, negative reviews, potential FTC attention, brand damage.\n\nVetle's \"Kindness as Strategy\" isn't just ethics — it's business sense. Trust compounds, dark patterns extract.\n\nAlternative: easy cancellation + \"pause subscription\" option + clear value reminder. Retention through value beats retention through friction.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1021,
+          "typeMs": 310,
+          "submitMs": 1520,
+          "totalMs": 2962
+        },
+        "words": 52
+      },
+      {
+        "round": 18,
+        "foundation": "meta-learning",
+        "difficulty": "expert",
+        "situation": "Vai fixed 3 CSS bugs today: z-index conflict, overflow issue, flexbox alignment. What pattern connects them?",
+        "hidden_need": "All three are invisible container context problems.",
+        "rubric": "Must identify a meta-pattern, not list three bugs.",
+        "response": "The pattern: all three are \"invisible container context\" problems. Each bug was caused by not understanding the parent element's rendering context — stacking context for z-index, overflow context for the overflow issue, flex context for alignment.\n\nReusable lesson: when a CSS property \"doesn't work,\" check the parent first. 80% of CSS debugging is context debugging.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1020,
+          "typeMs": 313,
+          "submitMs": 1507,
+          "totalMs": 2950
+        },
+        "words": 55
+      },
+      {
+        "round": 19,
+        "foundation": "systems-thinking",
+        "difficulty": "master",
+        "situation": "Vegga wants to switch from REST to GraphQL for entire API layer. 500 active users.",
+        "hidden_need": "Massive migration with cascading effects.",
+        "rubric": "Must identify at least 5 downstream effects.",
+        "response": "This is a 3-6 month migration. Blast radius:\n1. All API clients (web, mobile, 3rd-party) need rewriting\n2. Caching strategy changes completely (HTTP cache → normalized cache)\n3. Error handling patterns differ (status codes → error types)\n4. Auth middleware needs reworking\n5. Monitoring/logging (N+1 query detection needed)\n6. Team needs GraphQL training\n\nRecommendation: strangler pattern. Add GraphQL gateway, migrate one endpoint at a time. Keep REST working throughout.",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1024,
+          "typeMs": 309,
+          "submitMs": 1508,
+          "totalMs": 2950
+        },
+        "words": 69
+      },
+      {
+        "round": 20,
+        "foundation": "intellectual-honesty",
+        "difficulty": "apprentice",
+        "situation": "Vegga asks about a library you've never used. What do you do?",
+        "hidden_need": "Say you haven't used it. Offer to look at docs. Don't fabricate experience.",
+        "rubric": "Must admit ignorance upfront.",
+        "response": "I haven't used this library. Rather than guess, let me look at the docs and give you a grounded recommendation. What specifically do you need from it?",
+        "grade": "⏳ PENDING MENTOR",
+        "blind": false,
+        "timing": {
+          "genMs": 1024,
+          "typeMs": 312,
+          "submitMs": 1518,
+          "totalMs": 2964
+        },
+        "words": 27
+      }
+    ],
+    "avgTiming": {
+      "genMs": 1022,
+      "typeMs": 310,
+      "submitMs": 1526,
+      "totalMs": 2969
+    }
+  },
   "socratic": {
     "total": 6,
-    "excellent": 3,
-    "good": 1,
+    "excellent": 0,
+    "good": 4,
     "weak": 2,
-    "level": "journeyman",
+    "level": "apprentice",
     "readyToAdvance": false,
-    "primaryMisconception": "missingConstraints",
+    "primaryMisconception": null,
     "results": [
       {
         "track": "The Diagnosis Pattern",
         "trackId": "diagnosis",
-        "quality": "excellent",
+        "quality": "good",
         "behaviors": {
           "questionCount": 3,
-          "wordCount": 41,
-          "prescribes": true,
+          "wordCount": 53,
+          "prescribes": false,
           "questions": true,
-          "admitsGap": false,
+          "admitsGap": true,
           "offersToProceed": false,
-          "pushesBack": false,
+          "pushesBack": true,
           "proposesPlan": false,
           "compliant": false,
-          "givesReasoning": true,
+          "givesReasoning": false,
           "structured": false
         },
         "misconceptions": [],
         "teachingMoment": "The quality of a diagnosis is bounded by the quality of the questions you ask BEFORE looking at the code. The best engineers spend 80% of debugging time understanding the problem and 20% fixing it.",
-        "feedback": "Strong. Asks what \"slow\" means specifically, where it was measured, and what changed recently. Does NOT suggest a fix.",
-        "ms": 13205
+        "feedback": "Solid foundation. Asks at least one clarifying question before suggesting possible causes.\n\nTo level up: Asks what \"slow\" means specifically, where it was measured, and what changed recently. Does NOT suggest a fix.",
+        "ms": 2950
       },
       {
         "track": "The Constraint Lens",
         "trackId": "constraints",
-        "quality": "excellent",
+        "quality": "good",
         "behaviors": {
           "questionCount": 4,
-          "wordCount": 49,
+          "wordCount": 55,
           "prescribes": true,
           "questions": true,
           "admitsGap": false,
@@ -53,21 +1465,21 @@
           "pushesBack": false,
           "proposesPlan": false,
           "compliant": false,
-          "givesReasoning": true,
+          "givesReasoning": false,
           "structured": false
         },
         "misconceptions": [],
         "teachingMoment": "The quality of your answer is bounded by the quality of the question. When someone asks \"what should I use?\" the real answer is always \"it depends on...\" — and your value is knowing what it depends ON.",
-        "feedback": "Strong. Asks about data shape, scale, query patterns, and team experience. Explains how each answer changes the recommendation.",
-        "ms": 16771
+        "feedback": "Solid foundation. Asks at least 2 questions before recommending.\n\nTo level up: Asks about data shape, scale, query patterns, and team experience. Explains how each answer changes the recommendation.",
+        "ms": 2746
       },
       {
         "track": "Intellectual Honesty",
         "trackId": "honesty",
-        "quality": "excellent",
+        "quality": "good",
         "behaviors": {
           "questionCount": 1,
-          "wordCount": 49,
+          "wordCount": 44,
           "prescribes": true,
           "questions": true,
           "admitsGap": true,
@@ -75,13 +1487,13 @@
           "pushesBack": true,
           "proposesPlan": false,
           "compliant": false,
-          "givesReasoning": true,
+          "givesReasoning": false,
           "structured": false
         },
         "misconceptions": [],
         "teachingMoment": "\"I haven't used this but I can evaluate it against these criteria\" is worth 10x more than a confident guess. It models good epistemics, it's honest, and it actually gets to the right answer faster.",
-        "feedback": "Strong. Directly says \"I haven't used Qwik in production.\" Proposes specific evaluation criteria (bundle size, SSR capabilities, ecosystem maturity, migration cost). Offers to do a focused evaluation.",
-        "ms": 16218
+        "feedback": "Solid foundation. Admits limited experience and suggests careful evaluation.\n\nTo level up: Directly says \"I haven't used Qwik in production.\" Proposes specific evaluation criteria (bundle size, SSR capabilities, ecosystem maturity, migration cost). Offers to do a focused evaluation.",
+        "ms": 2935
       },
       {
         "track": "The Compression Challenge",
@@ -89,13 +1501,13 @@
         "quality": "good",
         "behaviors": {
           "questionCount": 0,
-          "wordCount": 49,
+          "wordCount": 26,
           "prescribes": false,
           "questions": false,
           "admitsGap": false,
-          "offersToProceed": true,
+          "offersToProceed": false,
           "pushesBack": true,
-          "proposesPlan": false,
+          "proposesPlan": true,
           "compliant": false,
           "givesReasoning": false,
           "structured": false
@@ -103,7 +1515,7 @@
         "misconceptions": [],
         "teachingMoment": "Compression isn't about removing words — it's about removing the words that don't serve the READER. The best compressed answer changes based on who's asking.",
         "feedback": "Solid foundation. ≤2 sentences, correct, but possibly too technical for the stated audience.\n\nTo level up: Audience-appropriate, value-first explanation in ≤2 sentences. No jargon. A PM would understand exactly why this matters.",
-        "ms": 16447
+        "ms": 2896
       },
       {
         "track": "Blast Radius Mapping",
@@ -111,50 +1523,46 @@
         "quality": "weak",
         "behaviors": {
           "questionCount": 0,
-          "wordCount": 32,
-          "prescribes": true,
+          "wordCount": 50,
+          "prescribes": false,
           "questions": false,
           "admitsGap": false,
-          "offersToProceed": true,
+          "offersToProceed": false,
           "pushesBack": true,
           "proposesPlan": false,
           "compliant": false,
-          "givesReasoning": true,
-          "structured": false
+          "givesReasoning": false,
+          "structured": true
         },
-        "misconceptions": [
-          "Missing Constraints"
-        ],
+        "misconceptions": [],
         "teachingMoment": "#6 is the killer. Most packages you add solve a 20-line problem with a 200KB dependency. The decision to NOT add a package is often more valuable than the decision of WHICH package to add.",
-        "feedback": "This reveals a pattern worth examining.\n\nmissingConstraints — ignoring the 100KB budget constraint when evaluating packages.\n\n[Missing Constraints] Reveal the constraint: \"Now add this condition — does your answer still work?\"",
-        "ms": 12096
+        "feedback": "This reveals a pattern worth examining.\n\nmissingConstraints — ignoring the 100KB budget constraint when evaluating packages.",
+        "ms": 2732
       },
       {
-        "track": "The Constraint Lens",
+        "track": "The Unasked Question",
         "trackId": "readingRoom",
         "quality": "weak",
         "behaviors": {
           "questionCount": 0,
-          "wordCount": 49,
+          "wordCount": 46,
           "prescribes": false,
           "questions": false,
           "admitsGap": false,
-          "offersToProceed": true,
+          "offersToProceed": false,
           "pushesBack": false,
-          "proposesPlan": false,
+          "proposesPlan": true,
           "compliant": false,
           "givesReasoning": false,
           "structured": false
         },
-        "misconceptions": [
-          "Complexity Preference"
-        ],
-        "teachingMoment": "Premature architecture is the mirror image of premature optimization. You can't design the right system boundary without knowing where the load concentrates — and you learn that from users, not from design docs. Start monolith, extract services when monitoring shows you WHERE.",
-        "feedback": "This reveals a pattern worth examining.\n\nauthorityBias — \"microservices are best practice\" without evaluating whether the context supports it.\n\n[Complexity Preference] Ask: \"What is the simplest thing that could work here? What would you lose?\"",
-        "ms": 16593
+        "misconceptions": [],
+        "teachingMoment": "When someone asks a factual question, consider their context. A senior asking \"where are the docs?\" really wants a URL. A new hire asking the same thing needs mentorship, not a link.",
+        "feedback": "This reveals a pattern worth examining.\n\nechoWithoutInsight — answering the literal question without sensing the context.",
+        "ms": 2617
       }
     ],
-    "ms": 95460
+    "ms": 23976
   },
-  "totalMs": 95463
+  "totalMs": 102851
 }

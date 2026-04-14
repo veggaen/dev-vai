@@ -16,7 +16,7 @@
  *   - Content hash deduplication
  */
 
-import type { TrustSignal, TrustTier } from './types.js';
+import type { TrustSignal } from './types.js';
 
 // ── SSRF Protection (mirrors runtime/routes/ingest.ts but importable from core) ──
 
@@ -59,6 +59,8 @@ const HIGH_TRUST_DOMAINS: ReadonlySet<string> = new Set([
   'developer.mozilla.org', 'mdn.io',
   'docs.python.org', 'docs.oracle.com',
   'learn.microsoft.com', 'devdocs.io',
+  'tailwindcss.com', 'motion.dev', 'gsap.com', 'threejs.org',
+  'perplexity.ai',
   // Institutional
   'arxiv.org', 'scholar.google.com',
   'nature.com', 'science.org',

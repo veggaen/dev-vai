@@ -254,9 +254,10 @@ export const useCursorStore = create<CursorStore>((set, get) => ({
     const displayText = comboText || keys.join('+');
     set({ liteKbVisible: true, liteKbActiveKeys: keys, liteKbComboText: displayText });
     pushAction(get, set, 'move', `⌨ ${displayText}`);
-    // Auto-release after 600ms if not manually released
+    // Auto-release after 600ms if not manually released (skip if cursor is typing)
     setTimeout(() => {
       const s = get();
+      if (s.cursor.typing) return; // Don't auto-hide during typing sequences
       if (s.liteKbActiveKeys.length > 0 && s.liteKbActiveKeys[0] === keys[0]) {
         set({ liteKbVisible: false, liteKbActiveKeys: [], liteKbComboText: null });
       }
@@ -264,6 +265,7 @@ export const useCursorStore = create<CursorStore>((set, get) => ({
   },
 
   releaseKeys: () => {
+    if (get().cursor.typing) return; // Don't hide during typing sequences
     set({ liteKbVisible: false, liteKbActiveKeys: [], liteKbComboText: null });
   },
 

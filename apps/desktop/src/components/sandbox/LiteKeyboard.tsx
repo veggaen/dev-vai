@@ -153,22 +153,20 @@ export function LiteKeyboard({ activeKeys, comboText, visible }: LiteKeyboardPro
     <AnimatePresence>
       {visible && hasActiveKeys && (
         <motion.div
+          key="lite-kb-root"
           className="pointer-events-none fixed bottom-4 left-1/2 z-[64]"
           initial={{ opacity: 0, y: 20, x: '-50%' }}
           animate={{ opacity: 1, y: 0, x: '-50%' }}
           exit={{ opacity: 0, y: 20, x: '-50%' }}
           transition={{ duration: 0.15, ease: 'easeOut' }}
         >
-          {/* Combo text display */}
+          {/* Combo text display — no entrance animation on text changes */}
           {comboText && (
-            <motion.div
+            <div
               className="mb-2 mx-auto w-fit rounded-lg bg-violet-600/90 px-4 py-1.5 text-center text-sm font-bold text-white shadow-xl shadow-violet-500/30 backdrop-blur-md"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.1 }}
             >
               {comboText}
-            </motion.div>
+            </div>
           )}
 
           {/* Keyboard */}
@@ -238,8 +236,8 @@ function LiteKey({
         height: '24px',
         fontSize: keyDef.label.length > 3 ? '7px' : '9px',
       }}
-      animate={active ? { scale: [1, 0.82, 1] } : { scale: 1 }}
-      transition={{ duration: 0.12 }}
+      animate={active ? { scale: [1, 0.92, 1] } : { scale: 1 }}
+      transition={{ duration: 0.08 }}
     >
       {keyDef.label}
     </motion.div>

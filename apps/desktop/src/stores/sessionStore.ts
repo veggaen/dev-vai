@@ -2,15 +2,28 @@ import { create } from 'zustand';
 import { API_BASE } from '../lib/api.js';
 import type {
   AgentSession,
+  ConversationScore,
+  LearningReport,
+  SessionAnalysis,
   SessionEvent,
   SessionEventType,
   EventMeta,
   SearchResult,
+  SessionInsightsAggregate,
   PinnedNote,
   PinnedNoteCategory,
-} from '@vai/core';
+} from '@vai/core/browser';
 
 /* ── Types ─────────────────────────────────────────────────────── */
+
+interface SessionIntelligencePayload {
+  score: ConversationScore | null;
+  report: LearningReport | null;
+  analysis: SessionAnalysis | null;
+}
+
+const SESSION_EVENT_PAGE_SIZE = 200;
+const AUTO_INTELLIGENCE_EVENT_LIMIT = 2000;
 
 interface SessionState {
   /* Data */
@@ -18,7 +31,17 @@ interface SessionState {
   activeSessionId: string | null;
   activeSession: AgentSession | null;
   events: SessionEvent[];
+  eventTotal: number;
+  hasMoreEvents: boolean;
+  isLoadingMoreEvents: boolean;
+  isIntelligenceDeferred: boolean;
   isLoading: boolean;
+  activeScore: ConversationScore | null;
+  activeLearningReport: LearningReport | null;
+  activeAnalysis: SessionAnalysis | null;
+  sessionInsights: SessionInsightsAggregate | null;
+  isLoadingIntelligence: boolean;
+  lastIntelligenceRefreshAt: number;
 
   /* Live polling */
   isPolling: boolean;
@@ -67,6 +90,8 @@ interface SessionState {
   }>) => Promise<void>;
   updateTitle: (sessionId: string, title: string) => Promise<void>;
   refreshActiveSession: () => Promise<void>;
+  loadOlderEvents: () => Promise<void>;
+  refreshSessionIntelligence: (sessionId: string, includeGlobal?: boolean) => Promise<void>;
   startPolling: (intervalMs?: number) => void;
   stopPolling: () => void;
 
@@ -94,7 +119,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   activeSessionId: null,
   activeSession: null,
   events: [],
+  eventTotal: 0,
+  hasMoreEvents: false,
+  isLoadingMoreEvents: false,
+  isIntelligenceDeferred: false,
   isLoading: false,
+  activeScore: null,
+  activeLearningReport: null,
+  activeAnalysis: null,
+  sessionInsights: null,
+  isLoadingIntelligence: false,
+  lastIntelligenceRefreshAt: 0,
   isPolling: false,
   pollIntervalId: null,
   statusFilter: 'all',
@@ -129,26 +164,86 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   selectSession: async (id: string) => {
     try {
-      set({ isLoading: true, activeSessionId: id });
-      const res = await fetch(`${API_BASE}/api/sessions/${id}`);
-      if (!res.ok) throw new Error('Session not found');
-      const data = await res.json() as { session: AgentSession; events: SessionEvent[] };
+      set({
+        isLoading: true,
+        activeSessionId: id,
+        eventTotal: 0,
+        hasMoreEvents: false,
+        isLoadingMoreEvents: false,
+        isIntelligenceDeferred: false,
+        activeScore: null,
+        activeLearningReport: null,
+        activeAnalysis: null,
+        sessionInsights: null,
+        pinnedEvents: [],
+        pinnedNotes: [],
+      });
+
+      const [sessionRes, eventsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/sessions/${id}`),
+        fetch(`${API_BASE}/api/sessions/${id}/events?limit=${SESSION_EVENT_PAGE_SIZE}&order=desc`),
+      ]);
+
+      if (!sessionRes.ok || !eventsRes.ok) throw new Error('Session not found');
+
+      const data = await sessionRes.json() as { session: AgentSession; eventCount: number };
+      const newestFirstEvents = await eventsRes.json() as SessionEvent[];
+      const initialEvents = [...newestFirstEvents].reverse();
+      const eventTotal = data.eventCount ?? initialEvents.length;
+      const isIntelligenceDeferred = eventTotal > AUTO_INTELLIGENCE_EVENT_LIMIT;
+
       set({
         activeSession: data.session,
-        events: data.events,
+        events: initialEvents,
+        eventTotal,
+        hasMoreEvents: initialEvents.length < eventTotal,
+        isIntelligenceDeferred,
         isLoading: false,
       });
       // Fetch pinned data in background
       void get().fetchPinnedEvents(id);
       void get().fetchPinnedNotes(id);
+      if (!isIntelligenceDeferred) {
+        void get().refreshSessionIntelligence(id, false);
+      }
     } catch (err) {
       console.error('Failed to load session:', err);
-      set({ activeSessionId: null, activeSession: null, events: [], isLoading: false });
+      set({
+        activeSessionId: null,
+        activeSession: null,
+        events: [],
+        eventTotal: 0,
+        hasMoreEvents: false,
+        isLoadingMoreEvents: false,
+        isIntelligenceDeferred: false,
+        activeScore: null,
+        activeLearningReport: null,
+        activeAnalysis: null,
+        sessionInsights: null,
+        isLoading: false,
+        isLoadingIntelligence: false,
+      });
     }
   },
 
   clearSelection: () => {
-    set({ activeSessionId: null, activeSession: null, events: [] });
+    set({
+      activeSessionId: null,
+      activeSession: null,
+      events: [],
+      eventTotal: 0,
+      hasMoreEvents: false,
+      isLoadingMoreEvents: false,
+      isIntelligenceDeferred: false,
+      pinnedEvents: [],
+      pinnedNotes: [],
+      activeScore: null,
+      activeLearningReport: null,
+      activeAnalysis: null,
+      sessionInsights: null,
+      isLoadingIntelligence: false,
+      lastIntelligenceRefreshAt: 0,
+    });
   },
 
   deleteSession: async (id: string) => {
@@ -156,7 +251,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       await fetch(`${API_BASE}/api/sessions/${id}`, { method: 'DELETE' });
       const { activeSessionId } = get();
       if (activeSessionId === id) {
-        set({ activeSessionId: null, activeSession: null, events: [] });
+        set({
+          activeSessionId: null,
+          activeSession: null,
+          events: [],
+          eventTotal: 0,
+          hasMoreEvents: false,
+          isLoadingMoreEvents: false,
+          isIntelligenceDeferred: false,
+          pinnedEvents: [],
+          pinnedNotes: [],
+          activeScore: null,
+          activeLearningReport: null,
+          activeAnalysis: null,
+          sessionInsights: null,
+          isLoadingIntelligence: false,
+          lastIntelligenceRefreshAt: 0,
+        });
       }
       await get().fetchSessions();
     } catch (err) {
@@ -293,6 +404,65 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
+  refreshSessionIntelligence: async (sessionId, includeGlobal = true) => {
+    try {
+      set({ isLoadingIntelligence: true });
+
+      const intelligencePromise = (async () => {
+        const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/intelligence`, {
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) throw new Error('Failed to fetch session intelligence');
+        return await res.json() as SessionIntelligencePayload;
+      })();
+
+      const insightsPromise = includeGlobal
+        ? (async () => {
+            const res = await fetch(`${API_BASE}/api/sessions/insights?limit=20`, {
+              signal: AbortSignal.timeout(10_000),
+            });
+            if (!res.ok) throw new Error('Failed to fetch session insights');
+            return await res.json() as SessionInsightsAggregate;
+          })()
+        : Promise.resolve<SessionInsightsAggregate | null>(null);
+
+      const [intelligenceResult, insightsResult] = await Promise.allSettled([
+        intelligencePromise,
+        insightsPromise,
+      ]);
+
+      if (get().activeSessionId !== sessionId) return;
+
+      const nextState: Partial<SessionState> = {
+        isLoadingIntelligence: false,
+        lastIntelligenceRefreshAt: Date.now(),
+      };
+
+      if (intelligenceResult.status === 'fulfilled') {
+        nextState.activeScore = intelligenceResult.value.score;
+        nextState.activeLearningReport = intelligenceResult.value.report;
+        nextState.activeAnalysis = intelligenceResult.value.analysis;
+      } else {
+        console.error('Failed to fetch session intelligence:', intelligenceResult.reason);
+      }
+
+      if (includeGlobal) {
+        if (insightsResult.status === 'fulfilled') {
+          nextState.sessionInsights = insightsResult.value;
+        } else {
+          console.error('Failed to fetch session insights:', insightsResult.reason);
+        }
+      }
+
+      set(nextState);
+    } catch (err) {
+      console.error('Failed to refresh session intelligence:', err);
+      if (get().activeSessionId === sessionId) {
+        set({ isLoadingIntelligence: false });
+      }
+    }
+  },
+
   /* ── Refresh active session (incremental event fetch) ──── */
   refreshActiveSession: async () => {
     const { activeSessionId, events: currentEvents } = get();
@@ -316,10 +486,64 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       if (newEvents.length > 0) {
         set((state) => ({
           events: [...state.events, ...newEvents],
+          eventTotal: Math.max(state.eventTotal, state.events.length + newEvents.length),
         }));
+
+        const { activeSession, lastIntelligenceRefreshAt } = get();
+        if (
+          activeSession?.status === 'active' &&
+          Date.now() - lastIntelligenceRefreshAt > 15_000
+        ) {
+          void get().refreshSessionIntelligence(activeSessionId, false);
+        }
       }
     } catch {
       // Silent fail for polling — no UI changes
+    }
+  },
+
+  loadOlderEvents: async () => {
+    const { activeSessionId, events, hasMoreEvents, isLoadingMoreEvents } = get();
+    if (!activeSessionId || events.length === 0 || !hasMoreEvents || isLoadingMoreEvents) return;
+
+    try {
+      set({ isLoadingMoreEvents: true });
+      const oldestTimestamp = events[0]?.timestamp;
+      if (!oldestTimestamp) {
+        set({ isLoadingMoreEvents: false, hasMoreEvents: false });
+        return;
+      }
+
+      const res = await fetch(
+        `${API_BASE}/api/sessions/${activeSessionId}/events?before=${oldestTimestamp}&limit=${SESSION_EVENT_PAGE_SIZE}&order=desc`,
+        { signal: AbortSignal.timeout(10_000) },
+      );
+      if (!res.ok) throw new Error('Failed to load older events');
+
+      const olderNewestFirst = await res.json() as SessionEvent[];
+      const olderEvents = [...olderNewestFirst].reverse();
+
+      set((state) => ({
+        events: olderEvents.length > 0 ? [...olderEvents, ...state.events] : state.events,
+        hasMoreEvents: olderEvents.length === SESSION_EVENT_PAGE_SIZE && (state.events.length + olderEvents.length) < state.eventTotal,
+        isLoadingMoreEvents: false,
+      }));
+    } catch (err) {
+      console.error('Failed to load older events:', err);
+      set({ isLoadingMoreEvents: false });
+    }
+  },
+
+  refreshRecentInsights: async (limit = 20) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/sessions/insights?limit=${limit}`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error('Failed to fetch session insights');
+      const data = await res.json() as SessionInsightsAggregate;
+      set({ sessionInsights: data });
+    } catch (err) {
+      console.error('Failed to fetch session insights:', err);
     }
   },
 

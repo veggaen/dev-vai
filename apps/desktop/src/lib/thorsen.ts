@@ -188,3 +188,91 @@ export async function thorsenPipelineInfo(): Promise<ThorsenPipelineInfo> {
   if (!res.ok) throw new Error(`Thorsen pipeline info failed: ${res.status}`);
   return res.json();
 }
+
+/* ── Benchmark / Self-Improvement Types ──────────────────────── */
+
+export interface ThorsenHealthSummary {
+  grade: string;
+  templates: number;
+  avgScore: number;
+  wormholeRate: number;
+  successRate: number;
+  gaps: number;
+  suggestions: number;
+}
+
+export interface BenchmarkResult {
+  templateKey: string;
+  success: boolean;
+  thorsenScore: number;
+  pipelineLatencyMs: number;
+  syncState: string;
+  verified: boolean;
+  parseValid: boolean;
+  constraintsPassed: boolean;
+  strategy: string;
+  codeLines: number;
+  error?: string;
+}
+
+export interface CoverageGap {
+  key: string;
+  action: string;
+  domain: string;
+  logicType: string;
+  priority: 'high' | 'medium' | 'low';
+  reason: string;
+}
+
+export interface ImprovementSuggestion {
+  category: 'coverage' | 'quality' | 'performance' | 'verification';
+  severity: 'critical' | 'important' | 'nice-to-have';
+  title: string;
+  description: string;
+  effort: 'small' | 'medium' | 'large';
+}
+
+export interface SelfImprovementReport {
+  timestamp: string;
+  benchmarkDurationMs: number;
+  totalTemplates: number;
+  results: BenchmarkResult[];
+  stats: {
+    avgScore: number;
+    avgLatencyMs: number;
+    wormholeRate: number;
+    parallelRate: number;
+    linearRate: number;
+    verifiedRate: number;
+    successRate: number;
+    totalCodeLines: number;
+  };
+  gaps: CoverageGap[];
+  suggestions: ImprovementSuggestion[];
+  grade: string;
+  nextSteps: string[];
+}
+
+/* ── Benchmark / Health API calls ────────────────────────────── */
+
+/**
+ * Quick health check — grade + key metrics. Fast.
+ */
+export async function thorsenHealth(): Promise<ThorsenHealthSummary> {
+  const res = await fetch(`${API_BASE}/api/thorsen/health`);
+  if (!res.ok) throw new Error(`Thorsen health failed: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Full self-improvement cycle — benchmark all templates, find gaps,
+ * generate suggestions. Can take a few seconds.
+ */
+export async function thorsenSelfImprove(): Promise<SelfImprovementReport> {
+  const res = await fetch(`${API_BASE}/api/thorsen/self-improve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) throw new Error(`Thorsen self-improve failed: ${res.status}`);
+  return res.json();
+}

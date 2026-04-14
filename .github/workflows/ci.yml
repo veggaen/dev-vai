@@ -41,6 +41,138 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Benchmark deep memo headings and run live eval regressions
+        if: matrix.node-version == 22
+        shell: bash
+        env:
+          VAI_PORT: 3015
+          VAI_DB_PATH: Temporary_files/ci/vai-chat-benchmark.db
+        run: |
+          set -euo pipefail
+
+          mkdir -p Temporary_files/ci
+          LOG_FILE="Temporary_files/ci/vai-runtime.log"
+          BENCH_REPORT_FILE="Temporary_files/ci/vai-chat-benchmark-report.json"
+          CASUAL_EVAL_REPORT="Temporary_files/ci/vai-eval-casual.json"
+          CREATIVE_EVAL_REPORT="Temporary_files/ci/vai-eval-creative.json"
+          COMPLEX_EVAL_REPORT="Temporary_files/ci/vai-eval-complex.json"
+
+          cleanup() {
+            local status=$?
+            if [[ ${status} -ne 0 && -f "${LOG_FILE}" ]]; then
+              echo "::group::VAI runtime log"
+              cat "${LOG_FILE}"
+              echo "::endgroup::"
+            fi
+            if [[ -n "${RUNTIME_PID:-}" ]] && kill -0 "${RUNTIME_PID}" 2>/dev/null; then
+              kill "${RUNTIME_PID}" 2>/dev/null || true
+              wait "${RUNTIME_PID}" 2>/dev/null || true
+            fi
+            exit ${status}
+          }
+          trap cleanup EXIT
+
+          pnpm exec tsx packages/runtime/src/index.ts > "${LOG_FILE}" 2>&1 &
+          RUNTIME_PID=$!
+
+          node scripts/wait-for-runtime.mjs
+
+          pnpm vai:chat:bench -- \
+            --base-url "http://localhost:${VAI_PORT}" \
+            --grounded \
+            --strict \
+            --case predictive-prefetch-deep-memo \
+            --case answer-engine-deep-memo \
+            --case repo-native-architecture-deep-memo \
+            --report-file "${BENCH_REPORT_FILE}"
+
+          pnpm vai:eval -- \
+            --base-url "http://localhost:${VAI_PORT}" \
+            --track casual \
+            --task casual-grounded-plan-triage \
+            --report-file "${CASUAL_EVAL_REPORT}"
+
+          pnpm vai:eval -- \
+            --base-url "http://localhost:${VAI_PORT}" \
+            --track creative \
+            --task creative-grounded-comparison \
+            --report-file "${CREATIVE_EVAL_REPORT}"
+
+          pnpm vai:eval -- \
+            --base-url "http://localhost:${VAI_PORT}" \
+            --track complex \
+            --task complex-context-engine-tradeoffs \
+            --report-file "${COMPLEX_EVAL_REPORT}"
+
+      - name: Upload benchmark and live eval artifacts
+        if: matrix.node-version == 22 && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vai-benchmark-and-live-eval-reports
+          path: |
+            Temporary_files/ci/vai-chat-benchmark-report.json
+            Temporary_files/ci/vai-eval-casual.json
+            Temporary_files/ci/vai-eval-creative.json
+            Temporary_files/ci/vai-eval-complex.json
+            Temporary_files/ci/vai-runtime.log
+          if-no-files-found: error
+
+      - name: Browser builder smoke
+        if: matrix.node-version == 22
+        shell: bash
+        env:
+          VAI_PLATFORM_AUTH_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+
+          npx playwright install --with-deps chromium
+
+          RUNTIME_LOG="Temporary_files/ci/browser-runtime.log"
+          DESKTOP_LOG="Temporary_files/ci/browser-desktop.log"
+          mkdir -p Temporary_files/ci
+
+          cleanup() {
+            local status=$?
+            if [[ -n "${DESKTOP_PID:-}" ]] && kill -0 "${DESKTOP_PID}" 2>/dev/null; then
+              kill "${DESKTOP_PID}" 2>/dev/null || true
+              wait "${DESKTOP_PID}" 2>/dev/null || true
+            fi
+            if [[ -n "${RUNTIME_PID:-}" ]] && kill -0 "${RUNTIME_PID}" 2>/dev/null; then
+              kill "${RUNTIME_PID}" 2>/dev/null || true
+              wait "${RUNTIME_PID}" 2>/dev/null || true
+            fi
+            if [[ ${status} -ne 0 ]]; then
+              [[ -f "${RUNTIME_LOG}" ]] && cat "${RUNTIME_LOG}"
+              [[ -f "${DESKTOP_LOG}" ]] && cat "${DESKTOP_LOG}"
+            fi
+            exit ${status}
+          }
+          trap cleanup EXIT
+
+          pnpm --filter @vai/runtime dev > "${RUNTIME_LOG}" 2>&1 &
+          RUNTIME_PID=$!
+
+          for _ in {1..60}; do
+            if curl -fsS http://localhost:3006/health >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:3006/health >/dev/null
+
+          pnpm --filter @vai/desktop dev > "${DESKTOP_LOG}" 2>&1 &
+          DESKTOP_PID=$!
+
+          for _ in {1..60}; do
+            if curl -fsS http://localhost:5173 >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:5173 >/dev/null
+
+          node scripts/test-builder-dashboard-e2e.mjs
+
   build:
     name: Build (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest

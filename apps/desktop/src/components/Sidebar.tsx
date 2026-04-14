@@ -14,6 +14,7 @@ export function Sidebar() {
     fetchConversations,
     selectConversation,
     deleteConversation,
+    startNewChat,
   } = useChatStore();
 
   const { models, selectedModelId, setSelectedModelId, fetchModels } =
@@ -40,7 +41,7 @@ export function Sidebar() {
   }, []);
 
   const handleNewChat = () => {
-    useChatStore.setState({ activeConversationId: null, messages: [] });
+    startNewChat();
   };
 
   const handleSelectConversation = (id: string) => {

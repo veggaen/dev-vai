@@ -1,0 +1,56 @@
+version: '3.8'
+
+# SearXNG — self-hosted meta search engine
+# Queries Google + Bing + DuckDuckGo + Wikipedia simultaneously
+# Zero cost, no API keys, unlimited queries
+#
+# SETUP:
+#   docker compose -f docker/docker-compose.searxng.yml up -d
+#
+# Then set in .env:
+#   VAI_SEARXNG_URL=http://localhost:8080
+#
+# Health check:
+#   curl http://localhost:8080/search?q=test&format=json
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: vai-searxng
+    restart: unless-stopped
+    ports:
+      - '8080:8080'
+    volumes:
+      - ./searxng-config:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080
+      - SEARXNG_SECRET_KEY=vai-local-secret-change-me
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '1m'
+        max-file: '1'
+
+  # Optional: Redis cache to reduce redundant searches
+  redis:
+    image: redis:7-alpine
+    container_name: vai-searxng-redis
+    restart: unless-stopped
+    command: redis-server --save "" --appendonly no
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '1m'
+        max-file: '1'

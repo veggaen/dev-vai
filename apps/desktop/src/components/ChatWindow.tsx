@@ -20,9 +20,13 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useChatStore } from '../stores/chatStore.js';
+import { IDE_AGENT_COLORS, type ChatMessage, type SearchSourceUI } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
 import { toast } from 'sonner';
-import { useLayoutStore, MODE_PLACEHOLDERS, MODE_SYSTEM_PROMPTS } from '../stores/layoutStore.js';
+import { useLayoutStore, MODE_PLACEHOLDERS, type ChatMode } from '../stores/layoutStore.js';
+import { useSandboxStore } from '../stores/sandboxStore.js';
+import { useCollabStore } from '../stores/collabStore.js';
+import { useAuthStore } from '../stores/authStore.js';
 import { MessageBubble } from './MessageBubble.js';
 import { ModeSelector } from './ModeSelector.js';
 import { ScrollToBottom } from './ScrollToBottom.js';
@@ -32,21 +36,255 @@ import { useIntentStore, computeFallbackMap } from '../stores/intentStore.js';
 import {
   Code, Zap, Sparkles, BookOpen, Shield, MessageCircle,
   Paperclip, X, FileText, ArrowUp, Square,
-  Layout, Rocket, Globe, Eye, EyeOff, Brain,
+  Layout, Rocket, Globe, Eye, Brain, Bot, Wifi, Plus, ExternalLink, FolderOpenDot,
 } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { FocusModeToggle } from './LayoutModeToggle.js';
+import { BroadcastStrip } from './BroadcastStrip.js';
+import type { PerIdeConfig } from './BroadcastTargetPicker.js';
+import { resolveSendTimeWorkIntent } from '../lib/auto-sandbox-intent.js';
+import {
+  buildIdeMentionItems,
+  filterMentionItems,
+  mentionSlugSet,
+  stripLeadingIdeMentions,
+  type IdeMentionItem,
+} from '../lib/ideMentions.js';
+import { IdeMentionMenu } from './IdeMentionMenu.js';
+
+/** Fallback chat apps when the extension hasn't reported yet */
+const FALLBACK_CHAT_APPS: { id: string; label: string }[] = [
+  { id: 'chat', label: 'Chat' },
+  { id: 'claude', label: 'Claude Code' },
+  { id: 'augment', label: 'Augment' },
+];
+
+/** Fallback sessions when the extension hasn't reported yet */
+const FALLBACK_SESSIONS: { sessionId: string; title: string; lastModified: number; chatApp: string }[] = [
+  { sessionId: 'new-session', title: 'New Session', lastModified: Date.now(), chatApp: 'chat' },
+];
+
+/** Fallback model list when dynamic discovery hasn't reported yet */
+const FALLBACK_MODELS: { family: string; label: string }[] = [
+  { family: 'gpt-4o', label: 'GPT-4o' },
+  { family: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+  { family: 'o3-mini', label: 'o3-mini' },
+  { family: 'o4-mini', label: 'o4-mini' },
+  { family: 'claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
+  { family: 'claude-3.7-sonnet', label: 'Claude 3.7 Sonnet' },
+  { family: 'claude-sonnet-4', label: 'Claude Sonnet 4' },
+  { family: 'claude-opus-4', label: 'Claude Opus 4' },
+  { family: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+  { family: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+];
+
+type DeliveryRoute = 'vai' | 'group' | 'broadcast';
+type SendOptions = {
+  forceMode?: ChatMode;
+};
+
+function formatRelativeTime(value: string): string {
+  const diff = Date.now() - new Date(value).getTime();
+  if (diff < 60_000) return 'just now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+function summarizeResearchPrompt(value: string): string {
+  const cleaned = value.replace(/\s+/g, ' ').trim();
+  if (cleaned.length <= 72) return cleaned;
+  return `${cleaned.slice(0, 69).trimEnd()}...`;
+}
+
+function ResearchContextRailContent({
+  question,
+  sources,
+  onClose,
+  showCloseButton = false,
+}: {
+  question: string;
+  sources: readonly SearchSourceUI[];
+  onClose?: () => void;
+  showCloseButton?: boolean;
+}) {
+  const sourceDomains = Array.from(new Set(
+    sources.map((source) => source.domain.replace(/^www\./, '')),
+  )).slice(0, 3);
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-[1.75rem] border border-zinc-800/70 bg-zinc-950/80 shadow-[0_28px_120px_rgba(0,0,0,0.38)] backdrop-blur-xl">
+      <div className="border-b border-zinc-800/70 px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+              <span className="rounded-full border border-zinc-800/80 bg-zinc-900/70 px-2.5 py-1 font-medium text-zinc-200">
+                {sources.length} source{sources.length === 1 ? '' : 's'}
+              </span>
+              <span className="uppercase tracking-[0.2em] text-zinc-600">Research context</span>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-zinc-200">
+              Source trail for <span className="text-zinc-400">{question}</span>
+            </p>
+            {sourceDomains.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {sourceDomains.map((domain) => (
+                  <span
+                    key={domain}
+                    className="rounded-full border border-zinc-800/80 bg-zinc-900/60 px-2 py-1 text-[10px] font-medium text-zinc-400"
+                  >
+                    {domain}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {showCloseButton && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              data-research-sidebar-close="button"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-800/80 bg-zinc-900/60 text-zinc-500 transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
+              aria-label="Close sources sidebar"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 space-y-2.5 overflow-y-auto px-4 py-4">
+        {sources.slice(0, 10).map((source, index) => (
+          <a
+            key={`${source.url}-${index}`}
+            href={source.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-research-source-item={index + 1}
+            className="group/context block rounded-[1.35rem] border border-zinc-800/70 bg-zinc-950/35 px-3.5 py-3.5 transition-colors hover:border-zinc-700 hover:bg-zinc-900/50"
+          >
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex flex-shrink-0 items-center gap-2">
+                <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full border border-zinc-800/80 bg-zinc-900/70 px-1.5 text-[10px] font-semibold text-zinc-300">
+                  {index + 1}
+                </span>
+                <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-800/80 bg-zinc-900/80">
+                  {source.favicon ? (
+                    <img
+                      src={source.favicon}
+                      alt=""
+                      className="h-4 w-4 rounded-sm"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  ) : (
+                    <span className="text-[10px] font-semibold uppercase text-zinc-500">
+                      {source.domain.slice(0, 1)}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  <span className="truncate text-zinc-400">{source.domain.replace(/^www\./, '')}</span>
+                  <span className="rounded-full border border-zinc-800/70 px-1.5 py-0.5 text-[9px] text-zinc-600">
+                    {source.trustTier}
+                  </span>
+                  <span className="rounded-full border border-zinc-800/70 px-1.5 py-0.5 text-[9px] text-zinc-600">
+                    {Math.round(source.trustScore * 100)}
+                  </span>
+                </div>
+                <p className="mt-1.5 line-clamp-2 text-[13px] font-medium leading-5 text-zinc-100 transition-colors group-hover/context:text-white">
+                  {source.title}
+                </p>
+                {source.snippet && (
+                  <p className="mt-1.5 line-clamp-3 text-[11px] leading-5 text-zinc-500 transition-colors group-hover/context:text-zinc-400">
+                    {source.snippet}
+                  </p>
+                )}
+              </div>
+
+              <ExternalLink className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-zinc-700 transition-colors group-hover/context:text-zinc-300" />
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ResearchContextRail({
+  question,
+  sources,
+  isOpen,
+  onClose,
+}: {
+  question: string;
+  sources: readonly SearchSourceUI[];
+  isOpen: boolean;
+  onClose: () => void;
+}) {
+  if (sources.length === 0 || !isOpen) return null;
+
+  return (
+    <>
+      <AnimatePresence>
+        <motion.button
+          type="button"
+          aria-label="Close sources sidebar"
+          onClick={onClose}
+          className="fixed inset-0 z-30 bg-black/45 xl:hidden"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        />
+      </AnimatePresence>
+
+      <AnimatePresence>
+        <motion.aside
+          data-research-sidebar="panel"
+          data-state="open"
+          className="fixed inset-x-4 bottom-24 top-20 z-40 xl:hidden"
+          initial={{ opacity: 0, x: 28 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: 28 }}
+          transition={{ duration: 0.22, ease: 'easeOut' }}
+        >
+          <ResearchContextRailContent
+            question={question}
+            sources={sources}
+            onClose={onClose}
+            showCloseButton
+          />
+        </motion.aside>
+      </AnimatePresence>
+
+      <motion.aside
+        data-research-sidebar="panel"
+        data-state="open"
+        className="hidden xl:block xl:sticky xl:top-6"
+        initial={{ opacity: 0, x: 20 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: 20 }}
+        transition={{ duration: 0.22, ease: 'easeOut' }}
+      >
+        <ResearchContextRailContent question={question} sources={sources} />
+      </motion.aside>
+    </>
+  );
+}
 
 /* ── Preset suggestions for empty state ── */
 const PRESETS = [
-  { label: 'Scaffold a Next.js app', icon: Code, category: 'Build' },
-  { label: 'Create a REST API', icon: Zap, category: 'Build' },
-  { label: 'Build a landing page', icon: Layout, category: 'Build' },
-  { label: 'Deploy from a template', icon: Rocket, category: 'Deploy' },
-  { label: 'Explain React 19 features', icon: BookOpen, category: 'Learn' },
-  { label: 'Compare Prisma vs Drizzle', icon: MessageCircle, category: 'Explore' },
+  { label: 'Scaffold a Next.js app', description: 'Full-stack React with SSR', icon: Code, category: 'Build' },
+  { label: 'Create a REST API', description: 'Express or Fastify backend', icon: Zap, category: 'Build' },
+  { label: 'Build a landing page', description: 'Modern responsive design', icon: Layout, category: 'Build' },
+  { label: 'Deploy from a template', description: 'Docker, Vercel, Railway', icon: Rocket, category: 'Deploy' },
+  { label: 'Explain React 19 features', description: 'Hooks, server components', icon: BookOpen, category: 'Learn' },
+  { label: 'Compare Prisma vs Drizzle', description: 'ORM trade-offs & perf', icon: MessageCircle, category: 'Explore' },
 ];
 
-/* ── Quick suggestion chips (inline above input when empty) ── */
 const QUICK_CHIPS = [
   { label: 'Build something', icon: Sparkles },
   { label: 'Explain a concept', icon: BookOpen },
@@ -93,31 +331,155 @@ const LARGE_PASTE_THRESHOLD = 500;
 const MIN_INPUT_HEIGHT = 56;
 const MAX_INPUT_HEIGHT = 200;
 
+function ChatStudioLogo() {
+  return (
+    <div
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[#ff6b35] to-[#ff4d00] shadow-[0_8px_24px_rgba(255,107,53,0.25)]"
+      aria-hidden
+    >
+      <div className="flex flex-col gap-[3px]">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="h-[2px] w-5 rounded-full bg-white/90" style={{ opacity: 0.35 + i * 0.22 }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ChatWindow() {
   const {
     messages,
     activeConversationId,
     isStreaming,
     sendMessage,
+    sendBroadcast,
+    broadcastMode,
+    broadcastTargetClientIds,
+    setBroadcastMode,
+    setBroadcastTargetClientIds,
     stopStreaming,
     createConversation,
+    updateConversationMode,
     learningEnabled,
     setLearningEnabled,
+    trainingWorkspace,
+    setTrainingWorkspace,
   } = useChatStore();
-  const { selectedModelId } = useSettingsStore();
-  const { mode, showBuilderPanel, toggleBuilderPanel } = useLayoutStore();
+  const { selectedModelId, selectedFrontendId, frontends, ideTargets } = useSettingsStore();
+  const {
+    mode,
+    showBuilderPanel,
+    toggleBuilderPanel,
+    expandBuilder,
+    setActivePanel,
+    buildStatus,
+    setBuildStatus,
+    setMode,
+  } = useLayoutStore();
+  const studioBuilderChrome = showBuilderPanel && (mode === 'builder' || mode === 'agent');
+  const isOwner = useAuthStore((state) => state.isOwner);
+  const ownerFeaturesHidden = useAuthStore((state) => state.ownerFeaturesHidden);
+  const authUser = useAuthStore((state) => state.user);
+  const persistentProjectId = useSandboxStore((state) => state.persistentProjectId);
+  const buildActivity = useSandboxStore((state) => state.buildActivity);
+  const sandboxStatus = useSandboxStore((state) => state.status);
+  const sandboxFiles = useSandboxStore((state) => state.files);
+  const sandboxProjectName = useSandboxStore((state) => state.projectName);
+  const sandboxProjectId = useSandboxStore((state) => state.projectId);
+  const sandboxDevPort = useSandboxStore((state) => state.devPort);
+  const deployPhase = useSandboxStore((state) => state.deployPhase);
+  const deploySteps = useSandboxStore((state) => state.deploySteps);
+  const fetchPeers = useCollabStore((state) => state.fetchPeers);
+  const peers = useCollabStore((state) => state.peers);
+  const createAudit = useCollabStore((state) => state.createAudit);
+  const fetchAudits = useCollabStore((state) => state.fetchAudits);
+  const audits = useCollabStore((state) => state.audits);
+  const globalClients = useCollabStore((state) => state.globalClients);
+  const fetchGlobalClients = useCollabStore((state) => state.fetchGlobalClients);
 
   const [input, setInput] = useState('');
   const [pastedImage, setPastedImage] = useState<PastedImage | null>(null);
   const [imageDescription, setImageDescription] = useState('');
   const [imageQuestion, setImageQuestion] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([]);
+  const [deliveryRoute, setDeliveryRoute] = useState<DeliveryRoute>('vai');
+  const [broadcastModel, setBroadcastModel] = useState('gpt-4o');
+  const [broadcastChatApp, setBroadcastChatApp] = useState('chat');
+  const [broadcastSession, setBroadcastSession] = useState('new-session');
+  const [perIdeConfigs, setPerIdeConfigs] = useState<PerIdeConfig[]>([]);
+  const [showIdePopup, setShowIdePopup] = useState(false);
+  const [isResearchRailOpen, setIsResearchRailOpen] = useState(false);
+  /** `@` mention: start index in `input`, or null when not in a mention token */
+  const [mentionAt, setMentionAt] = useState<number | null>(null);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionSelected, setMentionSelected] = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const idePopupRef = useRef<HTMLDivElement>(null);
+  const ideButtonRef = useRef<HTMLButtonElement>(null);
+  const mentionQueryPrevRef = useRef('');
+  /** Hash of the last sandbox file list sent as context — avoids resending unchanged data. */
+  const lastSandboxContextHashRef = useRef<string | null>(null);
 
   const hasMessages = activeConversationId && messages.length > 0;
+  const userTurnCount = useMemo(
+    () => messages.filter((message) => message.role === 'user').length,
+    [messages],
+  );
+  const latestResearchContext = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (message.role !== 'assistant' || !message.sources || message.sources.length === 0) continue;
+
+      let question = 'this answer';
+      for (let j = i - 1; j >= 0; j -= 1) {
+        if (messages[j]?.role === 'user') {
+          question = summarizeResearchPrompt(messages[j].content);
+          break;
+        }
+      }
+
+      return {
+        assistantIndex: i,
+        question,
+        sources: message.sources,
+      };
+    }
+
+    return null;
+  }, [messages]);
+  const hasResearchRailContext = Boolean(latestResearchContext);
+  const researchThreadMode = Boolean(latestResearchContext && userTurnCount > 1);
+  const useResearchRailWideLayout = Boolean(hasResearchRailContext && isResearchRailOpen);
+  const compactResearchChrome = researchThreadMode || useResearchRailWideLayout;
+
+  useEffect(() => {
+    if (!latestResearchContext) {
+      setIsResearchRailOpen(false);
+      return;
+    }
+
+    if (userTurnCount > 1) {
+      setIsResearchRailOpen(true);
+    }
+  }, [latestResearchContext?.assistantIndex, userTurnCount]);
+
+  /* ── Sync broadcast mode from store (per-chat, restored by selectConversation) ── */
+  useEffect(() => {
+    setDeliveryRoute(broadcastMode ? 'broadcast' : 'vai');
+  }, [broadcastMode]);
+
+  /* ── Fetch global clients for broadcast target count + available models ── */
+  useEffect(() => { void fetchGlobalClients(); }, [fetchGlobalClients]);
+  useEffect(() => {
+    if (!broadcastMode) return;
+    // Re-fetch clients when broadcast mode is enabled (to get fresh model lists)
+    void fetchGlobalClients();
+    const id = setInterval(() => void fetchGlobalClients(), 15_000);
+    return () => clearInterval(id);
+  }, [broadcastMode, fetchGlobalClients]);
 
   /* ── Smart auto-scroll ── */
   const { scrollRef, showScrollButton, scrollToBottom } = useAutoScroll({
@@ -127,16 +489,250 @@ export function ChatWindow() {
 
   /* ── Adaptive intent tracking ── */
   const intentStore = useIntentStore();
-  const { recordUserAction, recordDeployTriggered, setBuildMode, resetConversation } = intentStore;
+  const { recordUserAction, recordDeployTriggered, setBuildMode, setHasActiveProject, resetConversation, processUserMessage } = intentStore;
 
   const isBuildMode = mode === 'agent' || mode === 'builder';
+  const selectedFrontend = useMemo(
+    () => frontends.find((frontend) => frontend.id === selectedFrontendId) ?? null,
+    [frontends, selectedFrontendId],
+  );
+  const hasActiveProject = Boolean(sandboxProjectId);
+
   useEffect(() => { setBuildMode(isBuildMode); }, [isBuildMode, setBuildMode]);
+
+  /* ── Auto-open preview when the last assistant message has file blocks ── */
+  useEffect(() => {
+    if (isStreaming || showBuilderPanel) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    // Detect titled code blocks (Base44-style: auto-reveal preview on code generation)
+    if (/```\w*\s+(?:title|path|file|filename)=/.test(last.content)) {
+      toggleBuilderPanel();
+    }
+  // Only trigger on new assistant message arrival (messages.length change)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length]);
+  useEffect(() => {
+    setHasActiveProject(!!sandboxProjectId);
+    // Reset context hash so the next message always sends the full file tree for this project.
+    lastSandboxContextHashRef.current = null;
+  }, [sandboxProjectId, setHasActiveProject]);
   useEffect(() => { resetConversation(); }, [activeConversationId, resetConversation]);
+  useEffect(() => {
+    if (!persistentProjectId) return;
+    void fetchPeers(persistentProjectId);
+    void fetchAudits(persistentProjectId);
+  }, [persistentProjectId, fetchAudits, fetchPeers]);
+  useEffect(() => {
+    if (!isBuildMode) return;
+
+    messages.forEach((message, index) => {
+      if (message.role === 'user' && !intentStore.intents.has(index)) {
+        processUserMessage(index, message.content);
+      }
+    });
+  }, [isBuildMode, messages, processUserMessage, intentStore.intents]);
 
   const fallbackDeployMap = useMemo(
     () => computeFallbackMap(messages, intentStore),
-    [messages, intentStore.intents, intentStore.adaptiveBoost],
+    [messages, intentStore, intentStore.intents, intentStore.adaptiveBoost, isBuildMode],
   );
+  const roundtablePeers = useMemo(
+    () => peers.filter((peer) => peer.status !== 'idle'),
+    [peers],
+  );
+  const _recentAudits = useMemo(
+    () => audits.slice(0, 2).map((audit) => ({
+      ...audit,
+      submittedCount: audit.results.filter((result) => result.status === 'submitted').length,
+      claimedCount: audit.results.filter((result) => result.status === 'claimed' && !result.claimIsStale).length,
+      pendingCount: audit.results.filter((result) => result.status === 'pending' || (result.status === 'claimed' && result.claimIsStale)).length,
+    })),
+    [audits],
+  );
+  const showGroupChatStrip = deliveryRoute === 'group' || roundtablePeers.length > 0;
+
+  /** Models reported by connected IDEs — deduplicated by family, falls back to hardcoded list */
+  const ideModels = useMemo(() => {
+    const seen = new Set<string>();
+    const models: { family: string; label: string }[] = [];
+    for (const client of globalClients) {
+      if (!client.availableModels) continue;
+      try {
+        const parsed = JSON.parse(client.availableModels) as Array<{ id: string; family: string; name: string; vendor: string }>;
+        for (const m of parsed) {
+          if (!seen.has(m.family)) {
+            seen.add(m.family);
+            models.push({ family: m.family, label: m.name || m.family });
+          }
+        }
+      } catch { /* ignore parse errors */ }
+    }
+    return models.length > 0 ? models : FALLBACK_MODELS.map((m) => ({ family: m.family, label: m.label }));
+  }, [globalClients]);
+
+  /** Chat apps and sessions reported by connected IDEs */
+  const { ideChatApps, ideChatSessions } = useMemo(() => {
+    const apps = new Map<string, { id: string; label: string }>();
+    const sessions: Array<{ sessionId: string; title: string; lastModified: number; chatApp: string }> = [];
+    for (const client of globalClients) {
+      if (!client.availableChatInfo) continue;
+      try {
+        const info = JSON.parse(client.availableChatInfo) as {
+          chatApps?: Array<{ id: string; label: string }>;
+          sessions?: Array<{ sessionId: string; title: string; lastModified: number; chatApp: string }>;
+        };
+        if (info.chatApps) {
+          for (const app of info.chatApps) {
+            if (!apps.has(app.id)) apps.set(app.id, app);
+          }
+        }
+        if (info.sessions) {
+          for (const s of info.sessions) {
+            if (!sessions.some((x) => x.sessionId === s.sessionId)) sessions.push(s);
+          }
+        }
+      } catch { /* ignore parse errors */ }
+    }
+    const resolvedApps = apps.size > 0 ? Array.from(apps.values()) : FALLBACK_CHAT_APPS;
+    const resolvedSessions = sessions.length > 0 ? sessions : FALLBACK_SESSIONS;
+    return { ideChatApps: resolvedApps, ideChatSessions: resolvedSessions };
+  }, [globalClients]);
+  const filteredBroadcastSessions = useMemo(() => {
+    const list = broadcastChatApp
+      ? ideChatSessions.filter((session) => session.chatApp === broadcastChatApp)
+      : ideChatSessions;
+    return [...list].sort((a, b) => b.lastModified - a.lastModified);
+  }, [broadcastChatApp, ideChatSessions]);
+
+  useEffect(() => {
+    const nextModel = ideModels[0]?.family;
+    if (!nextModel) return;
+    if (!ideModels.some((model) => model.family === broadcastModel)) {
+      setBroadcastModel(nextModel);
+    }
+  }, [broadcastModel, ideModels]);
+
+  useEffect(() => {
+    const nextChatApp = ideChatApps[0]?.id ?? '';
+    if (!nextChatApp) {
+      if (broadcastChatApp) setBroadcastChatApp('');
+      return;
+    }
+    if (!ideChatApps.some((app) => app.id === broadcastChatApp)) {
+      setBroadcastChatApp(nextChatApp);
+    }
+  }, [broadcastChatApp, ideChatApps]);
+
+  useEffect(() => {
+    if (!broadcastSession) return;
+    if (!filteredBroadcastSessions.some((session) => session.sessionId === broadcastSession)) {
+      setBroadcastSession('');
+    }
+  }, [broadcastSession, filteredBroadcastSessions]);
+
+  const onlineIdeCount = useMemo(() => {
+    const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
+    return globalClients.filter((c) => {
+      const lastActivity = Math.max(
+        c.lastPolledAt ? new Date(c.lastPolledAt).getTime() : 0,
+        c.lastSeenAt ? new Date(c.lastSeenAt).getTime() : 0,
+      );
+      return lastActivity > thirtyMinAgo;
+    }).length;
+  }, [globalClients]);
+
+  const ideMentionCatalog = useMemo(() => buildIdeMentionItems(globalClients), [globalClients]);
+  const ideMentionSlugSetResolved = useMemo(() => mentionSlugSet(ideMentionCatalog), [ideMentionCatalog]);
+  const filteredIdeMentions = useMemo(() => {
+    if (mentionAt === null) return [];
+    return filterMentionItems(ideMentionCatalog, mentionQuery);
+  }, [mentionAt, ideMentionCatalog, mentionQuery]);
+
+  useEffect(() => {
+    if (filteredIdeMentions.length === 0) return;
+    setMentionSelected((i) => Math.min(i, Math.max(0, filteredIdeMentions.length - 1)));
+  }, [filteredIdeMentions.length]);
+
+  /** IDE status map for the quick-connect popup */
+  const ideClientStatus = useMemo(() => {
+    const THRESHOLD = 30 * 60_000;
+    const now = Date.now();
+    const statusMap = new Map<string, { online: boolean; clientIds: string[]; lastActivity: string }>();
+    for (const target of ideTargets) {
+      if (target.id === 'desktop') continue;
+      const matching = globalClients.filter((c) => c.launchTarget === target.id || c.clientType === target.id);
+      const onlineClients = matching.filter((c) => {
+        const t = Math.max(c.lastPolledAt ? new Date(c.lastPolledAt).getTime() : 0, c.lastSeenAt ? new Date(c.lastSeenAt).getTime() : 0);
+        return now - t < THRESHOLD;
+      });
+      const latest = matching.reduce((max, c) => {
+        const t = Math.max(c.lastPolledAt ? new Date(c.lastPolledAt).getTime() : 0, c.lastSeenAt ? new Date(c.lastSeenAt).getTime() : 0);
+        return t > max ? t : max;
+      }, 0);
+      statusMap.set(target.id, {
+        online: onlineClients.length > 0,
+        clientIds: matching.map((c) => c.id),
+        lastActivity: latest > 0 ? formatRelativeTime(new Date(latest).toISOString()) : 'Never',
+      });
+    }
+    return statusMap;
+  }, [ideTargets, globalClients]);
+
+  /** Close IDE popup on click outside */
+  useEffect(() => {
+    if (!showIdePopup) return;
+    const handler = (e: MouseEvent) => {
+      if (idePopupRef.current?.contains(e.target as Node)) return;
+      if (ideButtonRef.current?.contains(e.target as Node)) return;
+      setShowIdePopup(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showIdePopup]);
+
+  const showOwnerFeatures = isOwner && !ownerFeaturesHidden;
+  const showOwnerTrainingStrip = showOwnerFeatures || trainingWorkspace;
+
+  /* ── Inject submitted audit results as group chat messages ── */
+  const injectedResultIds = useRef(new Set<string>());
+  useEffect(() => {
+    if (!audits.length || !peers.length) return;
+    for (const audit of audits) {
+      for (const result of audit.results) {
+        if (result.status !== 'submitted' || !result.verdict) continue;
+        if (injectedResultIds.current.has(result.id)) continue;
+        injectedResultIds.current.add(result.id);
+        const peer = peers.find((p) => p.peerKey === result.peerKey);
+        if (!peer) continue;
+        useChatStore.getState().injectAgentMessage(
+          result.verdict,
+          {
+            type: 'ide-agent',
+            name: peer.displayName,
+            ide: peer.launchTarget,
+            model: peer.model,
+            peerKey: result.peerKey,
+            color: IDE_AGENT_COLORS[peer.launchTarget as keyof typeof IDE_AGENT_COLORS],
+          },
+        );
+      }
+    }
+  }, [audits, peers]);
+
+  /** Quick-connect to a specific IDE from the popup */
+  const quickConnectIde = useCallback((targetLabel: string, clientIds: string[]) => {
+    if (!activeConversationId) {
+      const modelId = selectedModelId ?? 'vai:v0';
+      void useChatStore.getState().createConversation(modelId, 'chat', {
+        sandboxProjectId: sandboxProjectId ?? null,
+      });
+    }
+    setBroadcastMode(true, clientIds);
+    setDeliveryRoute('broadcast');
+    setShowIdePopup(false);
+    toast.success(`Connected to ${targetLabel} — type your message`);
+  }, [activeConversationId, sandboxProjectId, selectedModelId, setBroadcastMode]);
 
   /* ── Auto-grow textarea ── */
   const adjustTextareaHeight = useCallback(() => {
@@ -145,6 +741,54 @@ export function ChatWindow() {
     ta.style.height = 'auto';
     ta.style.height = `${Math.min(ta.scrollHeight, MAX_INPUT_HEIGHT)}px`;
   }, []);
+
+  const syncMentionFromTextarea = useCallback((value: string, cursorPos: number) => {
+    const before = value.slice(0, cursorPos);
+    const at = before.lastIndexOf('@');
+    if (at === -1) {
+      setMentionAt(null);
+      mentionQueryPrevRef.current = '';
+      return;
+    }
+    const fragment = before.slice(at + 1);
+    if (fragment.includes(' ') || fragment.includes('\n')) {
+      setMentionAt(null);
+      mentionQueryPrevRef.current = '';
+      return;
+    }
+    if (fragment !== mentionQueryPrevRef.current) {
+      setMentionSelected(0);
+      mentionQueryPrevRef.current = fragment;
+    }
+    setMentionAt(at);
+    setMentionQuery(fragment);
+  }, []);
+
+  const applyIdeMention = useCallback((item: IdeMentionItem) => {
+    const ta = textareaRef.current;
+    if (!ta || mentionAt === null) return;
+    const pos = ta.selectionStart ?? input.length;
+    const before = input.slice(0, mentionAt);
+    const after = input.slice(pos);
+    const insertion = `@${item.slug} `;
+    const next = before + insertion + after;
+    setInput(next);
+    setMentionAt(null);
+    mentionQueryPrevRef.current = '';
+    const newPos = before.length + insertion.length;
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(newPos, newPos);
+      adjustTextareaHeight();
+    });
+    if (item.clientId === '__all__') {
+      setBroadcastMode(true, []);
+    } else {
+      setBroadcastMode(true, [item.clientId]);
+    }
+    setDeliveryRoute('broadcast');
+    toast.success(item.clientId === '__all__' ? 'Broadcasting to all connected IDEs' : `Routing to ${item.label}`);
+  }, [mentionAt, input, setBroadcastMode, adjustTextareaHeight]);
 
   useEffect(() => { adjustTextareaHeight(); }, [input, adjustTextareaHeight]);
 
@@ -226,53 +870,175 @@ export function ChatWindow() {
     setImageQuestion('');
   }, []);
 
-  const handleSend = async (overrideText?: string) => {
+  const handleSend = async (overrideText?: string, options?: SendOptions) => {
+    const isOverrideSend = typeof overrideText === 'string';
     const text = (overrideText ?? input).trim();
     if (isStreaming || !text) return;
-    if (pastedImage && !imageDescription.trim()) {
+    if (!isOverrideSend && pastedImage && !imageDescription.trim()) {
       descriptionRef.current?.focus();
       return;
     }
 
+    const forcedMode = options?.forceMode;
+    const effectiveMode = forcedMode ?? mode;
+
+    const sendTimeWorkIntent = resolveSendTimeWorkIntent({
+      userPrompt: text,
+      mode: effectiveMode,
+      hasActiveProject,
+    });
+    const nextConversationMode = forcedMode
+      ?? (effectiveMode === 'chat' && sendTimeWorkIntent.shouldPrimeBuilder
+        ? 'builder'
+        : effectiveMode);
+
     let convId = activeConversationId;
     if (!convId) {
-      if (!selectedModelId) {
-        toast.error('No AI model selected — open Settings to choose one');
-        return;
-      }
-      convId = await createConversation(selectedModelId);
+      const modelId = selectedModelId ?? 'vai:v0';
+      convId = await createConversation(modelId, nextConversationMode, {
+        sandboxProjectId: sandboxProjectId ?? null,
+      });
+    } else if (nextConversationMode !== mode) {
+      await updateConversationMode(convId, nextConversationMode);
     }
     if (!convId) return;
 
+    if (nextConversationMode !== mode) {
+      setMode(nextConversationMode);
+    }
+
     let fullContent = text;
-    if (attachedFiles.length > 0) {
+    if (!isOverrideSend && attachedFiles.length > 0) {
       const fileSections = attachedFiles.map(
         (f) => `\n\n---\n📎 **${f.name}** (${f.language}, ${(f.sizeBytes / 1024).toFixed(1)}KB)\n\`\`\`${f.language}\n${f.content}\n\`\`\``
       );
       fullContent = text + fileSections.join('');
     }
 
-    const systemPrompt = MODE_SYSTEM_PROMPTS[mode] || undefined;
+    /* ── Broadcast route: send to connected IDEs via broadcast API ── */
+    if (deliveryRoute === 'broadcast') {
+      const stripped = stripLeadingIdeMentions(fullContent, ideMentionSlugSetResolved);
+      const broadcastBody = stripped.trim() ? stripped : fullContent.trim();
+      if (!broadcastBody) {
+        toast.error('Enter a message after the IDE mention');
+        return;
+      }
+      await sendBroadcast(
+        broadcastBody,
+        broadcastTargetClientIds.length > 0 ? broadcastTargetClientIds : undefined,
+        broadcastModel,
+        broadcastChatApp || undefined,
+        broadcastSession || undefined,
+      );
+      setInput('');
+      setAttachedFiles([]);
+      requestAnimationFrame(() => {
+        if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      });
+      return;
+    }
 
-    if (pastedImage) {
+    if (deliveryRoute === 'group') {
+      if (!persistentProjectId) {
+        toast.error('Open a project first to use group chat');
+        return;
+      }
+      if (roundtablePeers.length === 0) {
+        toast.error('No IDEs connected — add agents from Settings');
+        return;
+      }
+
+      const audit = await createAudit(
+        persistentProjectId,
+        fullContent,
+        roundtablePeers.map((peer) => peer.peerKey),
+      );
+
+      if (!audit) {
+        toast.error('Unable to broadcast to group');
+        return;
+      }
+
+      toast.success(`Sent to ${roundtablePeers.length} IDE${roundtablePeers.length === 1 ? '' : 's'}`);
+    }
+
+    if (nextConversationMode === 'builder' || sendTimeWorkIntent.shouldPrimeBuilder) {
+      expandBuilder();
+      setBuildStatus({
+        step: 'generating',
+        message: forcedMode === 'builder'
+          ? 'Turning grounded brief into runnable output...'
+          : sendTimeWorkIntent.buildStatusMessage,
+      });
+    }
+
+    const systemPrompt = selectedFrontend
+      ? `The user currently prefers the ${selectedFrontend.framework} shell (${selectedFrontend.id}). When proposing app architecture, scaffold targets, or sandbox templates, bias toward that shell while keeping the shared runtime and alternate shell compatibility in mind.`
+      : undefined;
+
+    // Inject sandbox context when a project is active so Vai knows what's running.
+    // Hash the file list to avoid re-sending the same blob on every message.
+    const sandboxContextPrompt = (() => {
+      if (!sandboxProjectId || (sandboxStatus !== 'running' && sandboxStatus !== 'writing' && sandboxStatus !== 'idle')) return undefined;
+
+      const fileListKey = sandboxFiles.slice(0, 40).join('|');
+      const contextHash = `${sandboxProjectId}:${sandboxDevPort ?? 'none'}:${fileListKey}`;
+      const fileTreeUnchanged = lastSandboxContextHashRef.current === contextHash;
+      lastSandboxContextHashRef.current = contextHash;
+
+      const lines: string[] = [
+        `ACTIVE SANDBOX PROJECT: "${sandboxProjectName || sandboxProjectId}"`,
+      ];
+      if (sandboxDevPort) {
+        lines.push(`Dev server is RUNNING at http://localhost:${sandboxDevPort}`);
+      } else {
+        lines.push('Dev server is NOT running yet.');
+      }
+      // Only include the full file tree when it has changed since the last message.
+      if (!fileTreeUnchanged && sandboxFiles.length > 0) {
+        const fileList = sandboxFiles.slice(0, 40).join('\n  ');
+        lines.push(`Current file tree (${sandboxFiles.length} files):\n  ${fileList}${sandboxFiles.length > 40 ? `\n  ... and ${sandboxFiles.length - 40} more` : ''}`);
+      } else if (fileTreeUnchanged && sandboxFiles.length > 0) {
+        lines.push(`File tree unchanged (${sandboxFiles.length} files — omitted to save context).`);
+      }
+      lines.push('');
+      lines.push('EDITING RULES: Since a project is active, prefer targeted edits over full re-scaffolds.');
+      lines.push('Output only the files that need to change, using title="path/to/file" on each code block.');
+      lines.push('Never re-emit files that are unchanged.');
+      return lines.join('\n');
+    })();
+
+    const routePrompt = deliveryRoute === 'group'
+      ? 'This prompt was also sent to connected IDE agents in a group chat. Keep your answer useful on its own, but expect parallel IDE agent responses.'
+      : undefined;
+    const composedSystemPrompt = [
+      systemPrompt,
+      sandboxContextPrompt,
+      sendTimeWorkIntent.requestSystemPrompt,
+      routePrompt,
+    ].filter(Boolean).join('\n\n') || undefined;
+
+    if (!isOverrideSend && pastedImage) {
       sendMessage(fullContent, {
         data: pastedImage.data, mimeType: pastedImage.mimeType,
         description: imageDescription.trim(), question: imageQuestion.trim() || undefined,
         width: pastedImage.width, height: pastedImage.height, sizeBytes: pastedImage.sizeBytes,
-      }, systemPrompt);
+      }, composedSystemPrompt);
       clearImage();
     } else {
-      sendMessage(fullContent, undefined, systemPrompt);
+      sendMessage(fullContent, undefined, composedSystemPrompt);
     }
 
-    setInput('');
-    setAttachedFiles([]);
-    // Reset textarea height
-    requestAnimationFrame(() => {
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
-    });
+    if (!isOverrideSend) {
+      setInput('');
+      setAttachedFiles([]);
+      // Reset textarea height
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+      });
+    }
   };
 
   const handlePresetClick = (label: string) => { handleSend(label); };
@@ -280,24 +1046,89 @@ export function ChatWindow() {
     setInput(label + ': ');
     textareaRef.current?.focus();
   };
+
+  /** Switch to Builder mode + focus input — Base44-style "just start building" */
+  const startBuilding = async (description?: string) => {
+    setMode('builder');
+    if (!showBuilderPanel) toggleBuilderPanel();
+    let convId = activeConversationId;
+    if (!convId) {
+      const modelId = selectedModelId ?? 'vai:v0';
+      convId = await createConversation(modelId, 'builder', {
+        sandboxProjectId: sandboxProjectId ?? null,
+      });
+    } else {
+      await updateConversationMode(convId, 'builder');
+    }
+    if (description) {
+      await handleSend(description);
+    } else {
+      setTimeout(() => {
+        setInput('');
+        textareaRef.current?.focus();
+      }, 50);
+    }
+  };
   const charCount = input.length;
   const canSend = input.trim().length > 0 && !isStreaming && (!pastedImage || imageDescription.trim().length > 0);
 
   const showTypingIndicator = isStreaming && messages.length > 0 && messages[messages.length - 1]?.content === '';
+  const activeDeployStep = useMemo(
+    () => deploySteps.find((step) => step.status === 'running')
+      ?? deploySteps.find((step) => step.status === 'failed')
+      ?? null,
+    [deploySteps],
+  );
+  const transientActivity = useMemo(() => {
+    const items: Array<{ key: string; tone: 'violet' | 'blue' | 'emerald' | 'amber' | 'orange'; label: string; detail: string }> = [];
+
+    if (isStreaming) {
+      const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content?.toLowerCase() ?? '';
+      const isSearchLikely = /\b(?:what|who|when|where|why|how|latest|current|news|price|weather|search|find|look up|research)\b/.test(lastUserMsg);
+      items.push({
+        key: 'thinking',
+        tone: mode === 'builder' ? 'orange' : isSearchLikely ? 'blue' : 'violet',
+        label: mode === 'builder' ? 'thinking...' : isSearchLikely ? 'Searching the web...' : 'Thinking...',
+        detail: mode === 'builder'
+          ? 'generating code and writing to preview'
+          : isSearchLikely
+            ? 'fetching sources and composing cited answer'
+            : 'composing response',
+      });
+    }
+
+    if (deployPhase === 'deploying' && activeDeployStep) {
+      items.push({
+        key: 'deploy',
+        tone: 'blue',
+        label: activeDeployStep.label,
+        detail: activeDeployStep.message || 'working through the live preview pipeline',
+      });
+    } else if (buildStatus.step !== 'idle' && buildStatus.step !== 'ready') {
+      const isSoftMiss = buildStatus.step === 'failed' && /(?:no files|no preview|text only|unchanged|ended early)/i.test(buildStatus.message || '');
+      items.push({
+        key: 'build-status',
+        tone: buildStatus.step === 'failed' ? 'amber' : 'blue',
+        label: buildStatus.step === 'failed'
+          ? (isSoftMiss ? 'No preview update yet' : 'Build path hit an issue')
+          : `Working: ${buildStatus.step}`,
+        detail: buildStatus.message || 'processing the current request',
+      });
+    }
+
+    return items.slice(0, 3);
+  }, [activeDeployStep, buildStatus.message, buildStatus.step, deployPhase, isStreaming, mode]);
+  const showProjectContextStrip = Boolean(sandboxProjectId);
+  const shellModeLabel = `${mode.charAt(0).toUpperCase()}${mode.slice(1)}`;
+  const headerTitle = sandboxProjectName || (hasMessages ? 'Current workspace' : 'Vai');
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col h-full overflow-hidden relative">
-      {/* Preview toggle — top-right, only shown when preview is hidden */}
-      {!showBuilderPanel && (
-        <button
-          onClick={toggleBuilderPanel}
-          className="absolute top-2 right-2 z-10 flex h-7 items-center gap-1 rounded-md border border-zinc-800/60 bg-zinc-900/80 px-2 text-[10px] text-zinc-500 backdrop-blur-sm transition-all hover:border-zinc-700 hover:text-zinc-300"
-          title="Show preview (Ctrl+B)"
-        >
-          <Eye className="h-3 w-3" />
-          <span>Preview</span>
-        </button>
-      )}
+    <div
+      data-studio-builder-chrome={studioBuilderChrome ? 'true' : undefined}
+      className={`relative flex h-full min-w-0 flex-1 flex-col overflow-hidden ${
+        studioBuilderChrome ? 'bg-[#fafafa]' : 'bg-[#0a0a0a]'
+      }`}
+    >
       <input
         ref={fileInputRef}
         type="file"
@@ -306,6 +1137,84 @@ export function ChatWindow() {
         onChange={handleFileUpload}
         className="hidden"
       />
+
+      <div className={studioBuilderChrome ? 'border-b border-zinc-200 bg-white' : 'border-b border-white/[0.04]'}>
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-5 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            {studioBuilderChrome && <ChatStudioLogo />}
+            <div className="min-w-0">
+              <h2 className={`truncate text-[14px] font-medium ${studioBuilderChrome ? 'text-zinc-900' : 'text-zinc-200'}`}>
+                {headerTitle}
+              </h2>
+              {studioBuilderChrome && (
+                <p className="truncate text-[11px] text-zinc-500">
+                  {(authUser?.name || authUser?.email?.split('@')[0] || 'Your')}&apos;s workspace
+                </p>
+              )}
+            </div>
+            <span
+              className={`hidden rounded-full border px-2 py-0.5 text-[10px] font-medium sm:inline-flex ${
+                studioBuilderChrome
+                  ? 'border-zinc-200 bg-zinc-50 text-zinc-600'
+                  : 'border-white/8 bg-white/[0.04] text-zinc-500'
+              }`}
+            >
+              {shellModeLabel}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {!showBuilderPanel && (
+              <button
+                onClick={toggleBuilderPanel}
+                className={`flex h-8 items-center gap-1.5 rounded-full border px-3 text-[11px] font-medium transition-colors ${
+                  studioBuilderChrome
+                    ? 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50'
+                    : 'border-white/8 bg-white/[0.04] text-zinc-400 hover:border-white/12 hover:bg-white/[0.07] hover:text-zinc-200'
+                }`}
+                title="Show preview (Ctrl+B)"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                <span>Preview</span>
+              </button>
+            )}
+            <FocusModeToggle />
+          </div>
+        </div>
+      </div>
+
+      {showProjectContextStrip && (
+        <div className="mx-auto w-full max-w-5xl px-5 pt-2">
+          <div
+            className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2 ${
+              studioBuilderChrome
+                ? 'border-zinc-200 bg-white shadow-sm'
+                : 'border-white/[0.04] bg-white/[0.02]'
+            }`}
+          >
+            <FolderOpenDot className={`h-3.5 w-3.5 flex-shrink-0 ${studioBuilderChrome ? 'text-zinc-400' : 'text-zinc-500'}`} />
+            <span className={`truncate text-[12px] font-medium ${studioBuilderChrome ? 'text-zinc-800' : 'text-zinc-300'}`}>
+              {sandboxProjectName || sandboxProjectId}
+            </span>
+            {persistentProjectId && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                  studioBuilderChrome
+                    ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200/80'
+                    : 'bg-emerald-500/10 text-emerald-400'
+                }`}
+              >
+                synced
+              </span>
+            )}
+            {sandboxDevPort && (
+              <span className={`ml-auto text-[11px] ${studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-600'}`}>
+                :{sandboxDevPort}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Messages area ── */}
       <div
@@ -316,114 +1225,373 @@ export function ChatWindow() {
         {/* Scroll-to-bottom FAB */}
         <ScrollToBottom visible={showScrollButton} onClick={scrollToBottom} />
 
+        {showGroupChatStrip && (
+          <div className="mx-auto max-w-3xl px-4 pt-3">
+            <div className="rounded-2xl border border-zinc-800/70 bg-zinc-900/50 p-2.5 backdrop-blur-sm">
+              {/* Participant avatars row — Discord-style */}
+              <div className="flex items-center gap-2">
+                {/* Vai — always present */}
+                <div className="flex items-center gap-1.5 rounded-full bg-zinc-800/60 px-2.5 py-1 ring-1 ring-zinc-700/40">
+                  <div className="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-blue-600">
+                    <span className="text-[9px] font-bold text-white">V</span>
+                  </div>
+                  <span className="text-[11px] font-medium text-zinc-300">Vai</span>
+                </div>
+
+                {/* Connected IDE agents */}
+                {roundtablePeers.map((peer) => {
+                  const agentColor = IDE_AGENT_COLORS[peer.launchTarget] || '#6B7280';
+                  return (
+                    <div
+                      key={peer.peerKey}
+                      className="flex items-center gap-1.5 rounded-full bg-zinc-800/60 px-2.5 py-1 ring-1 ring-zinc-700/40 transition-colors hover:ring-zinc-600"
+                      title={`${peer.ide} · ${peer.model}`}
+                    >
+                      <div
+                        className="flex h-5 w-5 items-center justify-center rounded-full"
+                        style={{ backgroundColor: `${agentColor}30` }}
+                      >
+                        <span className="text-[9px] font-bold" style={{ color: agentColor }}>
+                          {peer.displayName.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-medium text-zinc-300">{peer.displayName}</span>
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" title="connected" />
+                    </div>
+                  );
+                })}
+
+                {/* Add more agents button */}
+                <button
+                  onClick={() => setActivePanel('settings')}
+                  className="flex h-7 items-center gap-1 rounded-full border border-dashed border-zinc-700 px-2.5 text-[11px] text-zinc-500 transition-colors hover:border-zinc-600 hover:text-zinc-300"
+                  title="Manage group chat participants"
+                >
+                  <Bot className="h-3 w-3" />
+                  {roundtablePeers.length === 0 ? 'Add IDEs' : '+'}
+                </button>
+
+                {/* Spacer */}
+                <div className="flex-1" />
+
+                {/* Group chat toggle */}
+                {roundtablePeers.length > 0 && (
+                  <button
+                    onClick={() => setDeliveryRoute(deliveryRoute === 'group' ? 'vai' : 'group')}
+                    className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium transition-all ${
+                      deliveryRoute === 'group'
+                        ? 'bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/30'
+                        : 'bg-zinc-800/40 text-zinc-500 ring-1 ring-zinc-700/40 hover:text-zinc-300'
+                    }`}
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" />
+                    {deliveryRoute === 'group' ? 'Group chat on' : 'Group chat'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showOwnerTrainingStrip && (
+          <div className="mx-auto max-w-3xl px-4 pt-3">
+            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-3 backdrop-blur-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
+                    <Brain className="h-4 w-4 text-emerald-300" />
+                    Owner training workspace
+                    {trainingWorkspace && (
+                      <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-emerald-200">
+                        isolated
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-xs text-zinc-500">
+                    {trainingWorkspace
+                      ? 'User chats do not train Vai. This workspace is the only place where owner-curated conversations can be marked as teachable.'
+                      : 'Learning is locked off for normal chats. Start or enter an owner training workspace when you want to curate training manually.'}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
+                  {showOwnerFeatures && !trainingWorkspace && (
+                    <button
+                      onClick={() => setTrainingWorkspace(true)}
+                      className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                    >
+                      Enter training workspace
+                    </button>
+                  )}
+                  {trainingWorkspace && (
+                    <button
+                      onClick={() => setTrainingWorkspace(false)}
+                      className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[11px] text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-zinc-800"
+                    >
+                      Exit training workspace
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {trainingWorkspace && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-zinc-300">
+                  <button
+                    onClick={() => setLearningEnabled(!learningEnabled)}
+                    className={`rounded-lg border px-2.5 py-1.5 transition-colors ${
+                      learningEnabled
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20'
+                        : 'border-zinc-700 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800'
+                    }`}
+                  >
+                    {learningEnabled ? 'Training armed' : 'Training blocked'}
+                  </button>
+                  <span className="text-zinc-500">
+                    Only when armed will this owner conversation be allowed to feed Vai.
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {!hasMessages ? (
           /* ═══════════ WELCOME STATE ═══════════ */
           <motion.div
-            initial={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -12 }}
-            transition={{ duration: 0.3 }}
-            className="flex h-full flex-col items-center justify-center px-6"
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
+            className="flex min-h-full flex-col items-center justify-center px-5 py-12"
           >
-            {/* Branding */}
-            <div className="mb-8 text-center">
-              <div className="relative mx-auto mb-4 h-14 w-14">
-                <div className="absolute inset-0 rounded-full bg-gradient-to-br from-violet-500/20 to-blue-500/20 blur-xl" />
-                <div className="relative flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-violet-600/15 to-blue-600/15 ring-1 ring-violet-500/20">
-                  <Sparkles className="h-6 w-6 text-violet-400" />
-                </div>
-              </div>
-              <h1 className="mb-2 text-2xl font-semibold tracking-tight text-zinc-100">
-                What shall we think through?
-              </h1>
-              <p className="text-sm text-zinc-500">
-                Ask anything, build something, or pick a starter below
-              </p>
+            <div className="mx-auto w-full max-w-2xl text-center">
+              <motion.h1
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.05, duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
+                className="text-[2.5rem] font-semibold leading-[1.15] tracking-[-0.035em] text-zinc-100 sm:text-[3rem]"
+              >
+                What shall we build?
+              </motion.h1>
+              <motion.p
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1, duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
+                className="mx-auto mt-4 max-w-lg text-[15px] leading-7 text-zinc-500"
+              >
+                Describe an app, page, or workflow. Vai builds it live — code, preview, and iteration in one place.
+              </motion.p>
             </div>
 
-            {/* Preset cards */}
-            <div className="w-full max-w-lg space-y-1.5">
-              {PRESETS.map((p) => {
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15, duration: 0.4 }}
+              className="mx-auto mt-8 flex w-full max-w-xl flex-wrap justify-center gap-2"
+            >
+              {[
+                'A team dashboard with charts',
+                'A polished landing page',
+                'A Kanban board with filters',
+                'A client portal with auth',
+              ].map((desc, i) => (
+                <motion.button
+                  key={desc}
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.2 + i * 0.04, duration: 0.3 }}
+                  onClick={() => startBuilding(desc)}
+                  className="group/build flex items-center gap-1.5 rounded-full border border-white/8 bg-white/[0.03] px-3.5 py-2 text-[13px] text-zinc-400 transition-all duration-200 hover:border-white/14 hover:bg-white/[0.06] hover:text-zinc-200"
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.97 }}
+                >
+                  <Sparkles className="h-3 w-3 opacity-50 transition-opacity group-hover/build:opacity-100" />
+                  {desc}
+                </motion.button>
+              ))}
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3, duration: 0.4 }}
+              className="mx-auto mt-10 grid w-full max-w-2xl gap-2 sm:grid-cols-2"
+            >
+              {PRESETS.slice(0, 6).map((p, i) => {
                 const Icon = p.icon;
                 return (
-                  <button
+                  <motion.button
                     key={p.label}
-                    onClick={() => handlePresetClick(p.label)}
-                    className="group/preset flex w-full items-center gap-3 rounded-xl border border-zinc-800/60 bg-zinc-900/30 px-4 py-3 text-left text-sm text-zinc-400 transition-all duration-200 hover:border-zinc-600 hover:bg-zinc-800/50 hover:text-zinc-200 hover:shadow-lg hover:shadow-violet-500/5"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.34 + i * 0.03, duration: 0.3 }}
+                    onClick={() => p.category === 'Build' ? startBuilding(p.label) : handlePresetClick(p.label)}
+                    className="group/preset flex items-start gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5 text-left transition-all duration-200 hover:border-white/10 hover:bg-white/[0.04]"
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.985 }}
                   >
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-800/80 transition-colors group-hover/preset:bg-violet-500/10">
-                      <Icon className="h-4 w-4 text-zinc-500 transition-colors group-hover/preset:text-violet-400" />
+                    <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-white/[0.05] text-zinc-400 transition-colors group-hover/preset:text-zinc-200">
+                      <Icon className="h-4 w-4" />
                     </div>
-                    <span className="flex-1">{p.label}</span>
-                    <span className="rounded-md bg-zinc-800/50 px-1.5 py-0.5 text-[10px] text-zinc-600 group-hover/preset:text-zinc-500">
-                      {p.category}
-                    </span>
-                    <ArrowUp className="h-3.5 w-3.5 -rotate-45 text-zinc-700 transition-all group-hover/preset:translate-x-0.5 group-hover/preset:text-zinc-500" />
-                  </button>
+                    <div className="min-w-0">
+                      <span className="block text-[13px] font-medium text-zinc-300 group-hover/preset:text-zinc-100">{p.label}</span>
+                      <span className="mt-0.5 block text-[11px] leading-5 text-zinc-600 group-hover/preset:text-zinc-500">{p.description}</span>
+                    </div>
+                  </motion.button>
                 );
               })}
-            </div>
+            </motion.div>
           </motion.div>
         ) : (
           /* ═══════════ MESSAGE THREAD ═══════════ */
           /* justify-end makes sparse messages sit at the bottom, above input */
-          <div className="mx-auto flex min-h-full max-w-3xl flex-col justify-end px-4 py-4 pb-2">
-            <AnimatePresence initial={false}>
-              {messages.map((msg, idx) => {
-                const fb = fallbackDeployMap.get(idx);
-                return (
-                  <motion.div
-                    key={msg.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.2, ease: 'easeOut' }}
-                    layout
-                  >
-                    <MessageBubble
-                      role={msg.role}
-                      content={msg.content}
-                      imageId={msg.imageId}
-                      imagePreview={msg.imagePreview}
-                      fallbackDeploy={fb?.intent ?? null}
-                      recoveryPattern={fb?.recovery ?? 'none'}
-                      allIntents={fb?.allIntents}
-                      onIntentAction={(accepted) => {
-                        recordUserAction(idx, accepted);
-                        if (accepted) recordDeployTriggered();
-                      }}
-                      isLatest={idx === messages.length - 1}
-                      isStreaming={isStreaming && idx === messages.length - 1}
-                      sources={msg.sources}
-                      followUps={msg.followUps}
-                      confidence={msg.confidence}
-                      feedback={msg.feedback}
-                      onFeedback={(helpful) => useChatStore.getState().setFeedback(msg.id, helpful)}
-                      onFollowUp={(question) => sendMessage(question)}
-                    />
-                  </motion.div>
-                );
-              })}
-            </AnimatePresence>
+          <div className={`mx-auto flex min-h-full w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100vw-2rem))]' : 'max-w-[min(56rem,calc(100vw-2rem))]'} flex-col px-4 py-6 pb-4 md:px-5`}>
+            {hasResearchRailContext && latestResearchContext && (
+              <div className="mb-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsResearchRailOpen((open) => !open)}
+                  data-research-sidebar-toggle="button"
+                  data-state={isResearchRailOpen ? 'open' : 'closed'}
+                  aria-expanded={isResearchRailOpen}
+                  className="inline-flex items-center gap-2 rounded-full border border-zinc-800/80 bg-zinc-950/75 px-3 py-2 text-[11px] font-medium text-zinc-300 shadow-[0_10px_40px_rgba(0,0,0,0.22)] backdrop-blur-md transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-white"
+                >
+                  <BookOpen className="h-3.5 w-3.5" />
+                  <span>{isResearchRailOpen ? 'Hide sources' : 'Open sources'}</span>
+                  <span className="rounded-full border border-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                    {latestResearchContext.sources.length}
+                  </span>
+                </button>
+              </div>
+            )}
 
-            {/* Typing indicator */}
-            <AnimatePresence>
-              {showTypingIndicator && <TypingIndicator />}
-            </AnimatePresence>
+            <div className={useResearchRailWideLayout ? 'grid min-h-full grid-cols-1 gap-8 xl:grid-cols-[minmax(0,52rem)_22rem] xl:items-start' : ''}>
+              <div className={`flex min-h-full flex-col ${compactResearchChrome ? 'justify-start' : 'justify-end'}`}>
+                <AnimatePresence initial={false}>
+                  {messages.map((msg, idx) => {
+                    const fb = fallbackDeployMap.get(idx);
+                    const sourceRailHandlesSources = latestResearchContext?.assistantIndex === idx;
+                    return (
+                      <motion.div
+                        key={msg.id}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.2, ease: 'easeOut' }}
+                        layout="position"
+                      >
+                        <MessageBubble
+                          role={msg.role}
+                          content={msg.content}
+                          imageId={msg.imageId}
+                          imagePreview={msg.imagePreview}
+                          studioChrome={studioBuilderChrome}
+                          fallbackDeploy={fb?.intent ?? null}
+                          recoveryPattern={fb?.recovery ?? 'none'}
+                          allIntents={fb?.allIntents}
+                          onIntentAction={(accepted) => {
+                            recordUserAction(idx, accepted);
+                            if (accepted) recordDeployTriggered();
+                          }}
+                          isLatest={idx === messages.length - 1}
+                          isStreaming={isStreaming && idx === messages.length - 1}
+                          sources={msg.sources}
+                          followUps={msg.followUps}
+                          confidence={msg.confidence}
+                          groundedBuildBrief={msg.groundedBuildBrief}
+                          feedback={msg.feedback}
+                          onFeedback={(helpful) => useChatStore.getState().setFeedback(msg.id, helpful)}
+                          onFollowUp={(question) => { void handleSend(question); }}
+                          onGroundedExecute={(prompt) => { void handleSend(prompt, { forceMode: 'builder' }); }}
+                          sender={msg.sender}
+                          isAutoRepair={msg.isAutoRepair}
+                          repairAttempt={msg.repairAttempt}
+                          compactResearchChrome={compactResearchChrome}
+                          isLatestResearchMessage={sourceRailHandlesSources}
+                          sourceRailHandlesSources={sourceRailHandlesSources}
+                          sourceRailOpen={sourceRailHandlesSources && isResearchRailOpen}
+                          onOpenSources={sourceRailHandlesSources ? () => setIsResearchRailOpen(true) : undefined}
+                        />
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
 
-            {/* Spacer to ensure last message isn't flush with divider */}
-            <div className="h-2 flex-shrink-0" />
+                <AnimatePresence>
+                  {showTypingIndicator && <TypingIndicator />}
+                </AnimatePresence>
+
+                <div className="h-2 flex-shrink-0" />
+              </div>
+
+              {hasResearchRailContext && latestResearchContext && (
+                <ResearchContextRail
+                  question={latestResearchContext.question}
+                  sources={latestResearchContext.sources}
+                  isOpen={isResearchRailOpen}
+                  onClose={() => setIsResearchRailOpen(false)}
+                />
+              )}
+            </div>
           </div>
         )}
       </div>
 
-      {/* ── Subtle divider between messages & input ── */}
-      <div className="relative flex-shrink-0">
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-zinc-800 to-transparent" />
-      </div>
-
       {/* ── Input area — centered, auto-growing ── */}
-      <div className="flex-shrink-0 bg-zinc-950/80 backdrop-blur-md">
-        <div className="mx-auto max-w-3xl px-4 pb-3 pt-3">
+      <div className="flex-shrink-0">
+        <div className={`mx-auto w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100vw-2rem))]' : 'max-w-[min(56rem,calc(100vw-2rem))]'} px-4 pb-4 pt-2 md:px-5`}>
+
+          {studioBuilderChrome && buildActivity.length > 0 && (
+            <div className="mb-2 max-h-40 overflow-y-auto rounded-xl border border-zinc-200 bg-white px-3 py-2.5 shadow-sm">
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-400">Activity</div>
+              <div className="space-y-1.5">
+                {buildActivity.slice(-40).map((a) => (
+                  <div key={a.id} className="flex min-w-0 items-start gap-2 text-[11px] leading-snug">
+                    <FileText className="mt-0.5 h-3 w-3 shrink-0 text-zinc-400" />
+                    <span className="min-w-0">
+                      <span className="font-medium text-zinc-600">Wrote</span>{' '}
+                      <code className="break-all rounded-md bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] text-zinc-800">
+                        {a.detail}
+                      </code>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {transientActivity.length > 0 && (
+            <AnimatePresence initial={false}>
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                className={`mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] ${
+                  studioBuilderChrome ? 'text-zinc-600' : 'text-zinc-500'
+                }`}
+              >
+                {transientActivity.map((item) => {
+                  const toneClass = item.tone === 'blue'
+                    ? 'text-blue-300'
+                    : item.tone === 'amber'
+                      ? 'text-amber-300'
+                      : item.tone === 'orange'
+                        ? 'text-orange-500'
+                        : 'text-violet-300';
+                  const dotClass = item.tone === 'orange'
+                    ? 'bg-orange-500'
+                    : toneClass.replace('text-', 'bg-');
+                  const detailMuted = studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-600';
+
+                  return (
+                    <div key={item.key} className="flex min-w-0 items-center gap-2">
+                      <span className={`inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full ${dotClass}`} />
+                      <span className={`truncate font-medium ${toneClass}`}>{item.label}</span>
+                      <span className={`hidden max-w-[42rem] truncate lg:inline ${detailMuted}`}>{item.detail}</span>
+                    </div>
+                  );
+                })}
+              </motion.div>
+            </AnimatePresence>
+          )}
 
           {/* Quick chips — shown only when input is empty and no messages */}
           {!hasMessages && !input && (
@@ -431,19 +1599,24 @@ export function ChatWindow() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="mb-2 flex flex-wrap justify-center gap-1.5"
+              className="mb-3 flex flex-wrap justify-center gap-1.5"
             >
-              {QUICK_CHIPS.map((chip) => {
+              {QUICK_CHIPS.map((chip, i) => {
                 const Icon = chip.icon;
                 return (
-                  <button
+                  <motion.button
                     key={chip.label}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: i * 0.03, duration: 0.2 }}
                     onClick={() => handleChipClick(chip.label)}
-                    className="flex items-center gap-1.5 rounded-full border border-zinc-800/60 bg-zinc-900/40 px-3 py-1.5 text-[11px] text-zinc-500 transition-all hover:border-zinc-600 hover:bg-zinc-800/60 hover:text-zinc-300"
+                    className="flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.02] px-3 py-1.5 text-[11px] text-zinc-500 transition-all duration-200 hover:border-white/10 hover:bg-white/[0.05] hover:text-zinc-300"
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.97 }}
                   >
                     <Icon className="h-3 w-3" />
                     {chip.label}
-                  </button>
+                  </motion.button>
                 );
               })}
             </motion.div>
@@ -505,25 +1678,131 @@ export function ChatWindow() {
               ))}
             </div>
           )}
-
           {/* The input box */}
-          <div className="relative flex flex-col rounded-2xl border border-zinc-700/50 bg-zinc-900/70 shadow-lg shadow-black/10 transition-all focus-within:border-violet-500/30 focus-within:ring-1 focus-within:ring-violet-500/15 focus-within:shadow-violet-500/5">
+          <motion.div
+            className={`relative flex flex-col overflow-hidden rounded-2xl border transition-all ${
+              deliveryRoute === 'broadcast'
+                ? studioBuilderChrome
+                  ? 'border-blue-200 bg-white shadow-sm'
+                  : 'border-blue-400/20 bg-zinc-900/80'
+                : studioBuilderChrome
+                  ? 'border-zinc-200 bg-white shadow-sm'
+                  : 'border-white/8 bg-zinc-900/70'
+            }`}
+            animate={canSend ? { borderColor: deliveryRoute === 'broadcast' ? 'rgba(96,165,250,0.3)' : studioBuilderChrome ? 'rgba(228,228,231,1)' : 'rgba(255,255,255,0.12)' } : {}}
+            transition={{ duration: 0.2 }}
+          >
+            <AnimatePresence initial={false}>
+              {deliveryRoute === 'broadcast' && (
+                <BroadcastStrip
+                  onlineCount={onlineIdeCount}
+                  clients={globalClients}
+                  models={ideModels}
+                  selectedModel={broadcastModel}
+                  onModelChange={setBroadcastModel}
+                  targetIds={broadcastTargetClientIds}
+                  onTargetChange={(ids) => setBroadcastTargetClientIds(ids.filter((id) => id !== '__all__'))}
+                  perIdeConfigs={perIdeConfigs}
+                  onPerIdeConfigChange={setPerIdeConfigs}
+                  chatApps={ideChatApps}
+                  selectedChatApp={broadcastChatApp}
+                  onChatAppChange={(appId) => { setBroadcastChatApp(appId); setBroadcastSession(''); }}
+                  chatSessions={ideChatSessions}
+                  selectedSession={broadcastSession}
+                  onSessionChange={setBroadcastSession}
+                  onDisconnect={() => { setDeliveryRoute('vai'); setBroadcastMode(false); }}
+                  onConnectIde={() => setActivePanel('settings')}
+                />
+              )}
+            </AnimatePresence>
+
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                const pos = e.target.selectionStart ?? v.length;
+                setInput(v);
+                syncMentionFromTextarea(v, pos);
+              }}
+              onSelect={(e) => {
+                const ta = e.currentTarget;
+                syncMentionFromTextarea(ta.value, ta.selectionStart ?? ta.value.length);
+              }}
               onPaste={handlePaste}
               onKeyDown={(e) => {
+                if (mentionAt !== null) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (filteredIdeMentions.length > 0) {
+                      setMentionSelected((i) => (i + 1) % filteredIdeMentions.length);
+                    }
+                    return;
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (filteredIdeMentions.length > 0) {
+                      setMentionSelected((i) => (i - 1 + filteredIdeMentions.length) % filteredIdeMentions.length);
+                    }
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setMentionAt(null);
+                    mentionQueryPrevRef.current = '';
+                    return;
+                  }
+                  if ((e.key === 'Enter' || e.key === 'Tab') && filteredIdeMentions.length > 0) {
+                    e.preventDefault();
+                    applyIdeMention(filteredIdeMentions[mentionSelected]);
+                    return;
+                  }
+                  if ((e.key === 'Enter' || e.key === 'Tab') && filteredIdeMentions.length === 0) {
+                    e.preventDefault();
+                    setMentionAt(null);
+                    mentionQueryPrevRef.current = '';
+                    return;
+                  }
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   handleSend();
                 }
               }}
-              placeholder={pastedImage ? 'Describe what you need help with...' : MODE_PLACEHOLDERS[mode]}
+              placeholder={
+                pastedImage
+                  ? 'Describe what you need help with...'
+                  : deliveryRoute === 'broadcast'
+                    ? `Message ${onlineIdeCount} connected IDE${onlineIdeCount === 1 ? '' : 's'}...${onlineIdeCount > 0 ? ' · @ route' : ''}`
+                    : onlineIdeCount > 0
+                      ? `${MODE_PLACEHOLDERS[mode]} · @ IDE`
+                      : MODE_PLACEHOLDERS[mode]
+              }
               rows={1}
-              className="resize-none overflow-y-auto bg-transparent px-4 pt-3 pb-1 text-sm leading-relaxed text-zinc-100 placeholder-zinc-600 focus:outline-none"
+              className={`resize-none overflow-y-auto bg-transparent px-4 pb-1 text-sm leading-relaxed focus:outline-none ${
+                studioBuilderChrome ? 'text-zinc-900 placeholder-zinc-400' : 'text-zinc-100 placeholder-zinc-600'
+              } ${deliveryRoute === 'broadcast' ? 'pt-2.5' : 'pt-3'}`}
               style={{ minHeight: `${MIN_INPUT_HEIGHT}px`, maxHeight: `${MAX_INPUT_HEIGHT}px` }}
             />
+            {mentionAt !== null && textareaRef.current && (
+              <IdeMentionMenu
+                items={filteredIdeMentions}
+                selectedIndex={mentionSelected}
+                onSelect={applyIdeMention}
+                onClose={() => {
+                  setMentionAt(null);
+                  mentionQueryPrevRef.current = '';
+                }}
+                anchorRect={textareaRef.current.getBoundingClientRect()}
+                emptyHint={
+                  filteredIdeMentions.length > 0
+                    ? undefined
+                    : ideMentionCatalog.length === 0
+                      ? 'No IDE connected — use + IDE in the toolbar'
+                      : 'No matching IDE — try all, vscode, cursor…'
+                }
+              />
+            )}
 
             {/* Bottom toolbar */}
             <div className="flex items-center justify-between px-3 pb-2.5">
@@ -536,50 +1815,204 @@ export function ChatWindow() {
                   <Paperclip className="h-4 w-4" />
                 </button>
                 <ModeSelector />
-                <div className="mx-0.5 h-4 w-px bg-zinc-800" />
-                <FocusModeToggle />
-                <button
-                  onClick={() => setLearningEnabled(!learningEnabled)}
-                  className={`flex h-7 items-center gap-1 rounded-lg px-1.5 text-xs transition-colors ${
-                    learningEnabled
-                      ? 'text-emerald-400 hover:bg-emerald-900/30'
-                      : 'text-zinc-600 hover:bg-zinc-800/80 hover:text-zinc-400'
-                  }`}
-                  title={learningEnabled ? 'Learning ON — Vai learns from this chat' : 'Learning OFF — Vai won\'t learn from this chat'}
-                >
-                  <Brain className="h-3.5 w-3.5" />
-                  {!learningEnabled && <span className="text-[10px] font-medium uppercase tracking-wider">off</span>}
-                </button>
+                {roundtablePeers.length > 0 && (
+                  <button
+                    onClick={() => setDeliveryRoute(deliveryRoute === 'group' ? 'vai' : 'group')}
+                    className={`flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium transition-all ${
+                      deliveryRoute === 'group'
+                        ? 'bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/30'
+                        : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                    }`}
+                    title={deliveryRoute === 'group' ? `Group chat • ${roundtablePeers.length} IDE${roundtablePeers.length === 1 ? '' : 's'}` : 'Click to broadcast to connected IDEs'}
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" />
+                    <span>{roundtablePeers.length}</span>
+                  </button>
+                )}
+                {onlineIdeCount > 0 && (
+                  <button
+                    onClick={() => {
+                      const next = deliveryRoute === 'broadcast' ? 'vai' : 'broadcast';
+                      setDeliveryRoute(next);
+                      setBroadcastMode(next === 'broadcast');
+                    }}
+                    className={`flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium transition-all ${
+                      deliveryRoute === 'broadcast'
+                        ? 'bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/30'
+                        : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                    }`}
+                    title={deliveryRoute === 'broadcast' ? `Broadcasting to ${onlineIdeCount} IDE${onlineIdeCount === 1 ? '' : 's'}` : 'Click to broadcast to connected IDEs'}
+                  >
+                    {deliveryRoute === 'broadcast' ? (
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-50" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-400" />
+                      </span>
+                    ) : (
+                      <Wifi className="h-3.5 w-3.5" />
+                    )}
+                    <span>{onlineIdeCount}</span>
+                  </button>
+                )}
+                {/* IDE quick-connect dropdown */}
+                {ideTargets.length > 0 && (
+                  <div className="relative">
+                    <button
+                      ref={ideButtonRef}
+                      onClick={() => setShowIdePopup(!showIdePopup)}
+                      className={`flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition-all ${
+                        showIdePopup
+                          ? 'bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/30'
+                          : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                      }`}
+                      title="Connect to IDE"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">IDE</span>
+                    </button>
+                    {showIdePopup && createPortal(
+                      <div
+                        ref={idePopupRef}
+                        className="fixed z-[200] w-64 rounded-xl border border-zinc-700/60 bg-zinc-900 shadow-2xl shadow-black/40"
+                        style={{
+                          bottom: (ideButtonRef.current ? window.innerHeight - ideButtonRef.current.getBoundingClientRect().top + 6 : 60),
+                          left: ideButtonRef.current?.getBoundingClientRect().left ?? 0,
+                        }}
+                      >
+                        <div className="border-b border-zinc-800/60 px-3 py-2">
+                          <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-400">Connect IDE</div>
+                        </div>
+                        <div className="max-h-60 overflow-y-auto p-1.5 combobox-scroll">
+                          {ideTargets.filter((t) => t.id !== 'desktop').map((target) => {
+                            const status = ideClientStatus.get(target.id);
+                            const isOnline = status?.online ?? false;
+                            const hasClients = (status?.clientIds?.length ?? 0) > 0;
+                            const isConnected = deliveryRoute === 'broadcast' && status?.clientIds?.some((cid: string) => broadcastTargetClientIds.includes(cid));
+                            return (
+                              <button
+                                key={target.id}
+                                onClick={() => {
+                                  if (isConnected) {
+                                    setBroadcastMode(false);
+                                    setDeliveryRoute('vai');
+                                    setShowIdePopup(false);
+                                    toast.success(`Disconnected from ${target.label}`);
+                                  } else if (hasClients) {
+                                    quickConnectIde(target.label, status!.clientIds);
+                                  } else {
+                                    setActivePanel('settings');
+                                    setShowIdePopup(false);
+                                    toast('Install the VeggaAI extension in ' + target.label);
+                                  }
+                                }}
+                                className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
+                                  isConnected
+                                    ? 'bg-emerald-500/10 text-emerald-200 hover:bg-red-500/10 hover:text-red-200'
+                                    : 'text-zinc-300 hover:bg-zinc-800'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <span className={`h-2 w-2 shrink-0 rounded-full ${
+                                    isOnline ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]'
+                                      : hasClients ? 'bg-amber-500'
+                                      : 'bg-zinc-600'
+                                  }`} />
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-medium">{target.label}</div>
+                                    <div className="text-[10px] text-zinc-500">
+                                      {isConnected ? 'Connected' : isOnline ? `Active · ${status?.lastActivity}` : hasClients ? status?.lastActivity : 'Not setup'}
+                                    </div>
+                                  </div>
+                                </div>
+                                <span className={`shrink-0 text-[10px] font-medium ${
+                                  isConnected ? '' : isOnline ? 'text-blue-400' : hasClients ? 'text-amber-400' : 'text-zinc-600'
+                                }`}>
+                                  {isConnected ? 'Disconnect' : hasClients ? 'Connect' : 'Setup'}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>,
+                      document.body,
+                    )}
+                  </div>
+                )}
+                {trainingWorkspace && (
+                  <>
+                    <div className="mx-0.5 h-4 w-px bg-zinc-800" />
+                    <button
+                      onClick={() => setLearningEnabled(!learningEnabled)}
+                      className={`flex h-7 items-center gap-1 rounded-lg px-1.5 text-xs transition-colors ${
+                        learningEnabled
+                          ? 'text-emerald-400 hover:bg-emerald-900/30'
+                          : 'text-zinc-600 hover:bg-zinc-800/80 hover:text-zinc-400'
+                      }`}
+                      title={learningEnabled ? 'Owner training armed — this chat may teach Vai' : 'Owner training blocked — this chat will not teach Vai'}
+                    >
+                      <Brain className="h-3.5 w-3.5" />
+                      <span className="text-[10px] font-medium uppercase tracking-wider">{learningEnabled ? 'train' : 'safe'}</span>
+                    </button>
+                  </>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
                 {charCount > 0 && (
-                  <span className="text-[10px] tabular-nums text-zinc-600">{charCount}</span>
-                )}
-                {isStreaming ? (
-                  <button
-                    onClick={stopStreaming}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-700 text-zinc-300 transition-all hover:bg-red-600/80 hover:text-white"
-                    title="Stop generating"
+                  <motion.span
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="text-[10px] tabular-nums text-zinc-600"
                   >
-                    <Square className="h-3.5 w-3.5 fill-current" />
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handleSend()}
-                    disabled={!canSend}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-600 text-white transition-all hover:bg-violet-500 hover:shadow-lg hover:shadow-violet-500/25 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:shadow-none"
-                    title="Send message (Enter)"
-                  >
-                    <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
-                  </button>
+                    {charCount}
+                  </motion.span>
                 )}
+                <AnimatePresence mode="wait">
+                  {isStreaming ? (
+                    <motion.button
+                      key="stop"
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.8, opacity: 0 }}
+                      onClick={stopStreaming}
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-700 text-zinc-300 transition-colors hover:bg-red-600/80 hover:text-white"
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      title="Stop generating"
+                    >
+                      <motion.div
+                        animate={{ rotate: [0, 90, 180, 270, 360] }}
+                        transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
+                      >
+                        <Square className="h-3.5 w-3.5 fill-current" />
+                      </motion.div>
+                    </motion.button>
+                  ) : (
+                    <motion.button
+                      key="send"
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.8, opacity: 0 }}
+                      onClick={() => handleSend()}
+                      disabled={!canSend}
+                      className={`flex h-8 w-8 items-center justify-center rounded-full text-white transition-all duration-200 ${
+                        canSend
+                          ? 'bg-zinc-100 text-zinc-900 hover:bg-white'
+                          : 'bg-zinc-800 text-zinc-600'
+                      }`}
+                      whileHover={canSend ? { scale: 1.05 } : {}}
+                      whileTap={canSend ? { scale: 0.92 } : {}}
+                      title="Send message (Enter)"
+                    >
+                      <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+                    </motion.button>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
-          </div>
+          </motion.div>
 
-          {/* Disclaimer */}
-          <p className="mt-1.5 text-center text-[10px] text-zinc-700">
+          <p className="mt-2 text-center text-[10px] text-zinc-700/60">
             Vai can make mistakes. Verify important information.
           </p>
         </div>

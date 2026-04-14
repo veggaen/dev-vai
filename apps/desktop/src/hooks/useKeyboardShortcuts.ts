@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useLayoutStore, type ChatMode } from '../stores/layoutStore.js';
+import { useChatStore } from '../stores/chatStore.js';
 
 const MODE_KEYS: Record<string, ChatMode> = {
   '1': 'chat',
@@ -14,12 +15,13 @@ const MODE_KEYS: Record<string, ChatMode> = {
  *   Ctrl+1-5        — Switch mode (chat / agent / builder / plan / debate)
  *   Ctrl+0          — Focus mode (chat only — hide sidebar + builder)
  *   Ctrl+K          — Quick Switch (fuzzy search conversations)
+ *   Ctrl+,          — Settings sidebar (same tier as Ctrl+K / palette-style power user flow)
  *   Ctrl+S          — Cycle sidebar: expanded → rail → hidden
  *   Ctrl+Shift+L    — Toggle Dev Logs panel
  *   Ctrl+Shift+F    — Toggle Search panel
  *   Ctrl+Shift+K    — Toggle Knowledge Base panel
  *   Ctrl+Shift+M    — Toggle layout mode (compact ↔ open)
- *   Ctrl+J          — Toggle debug console
+ *   Ctrl+J          — Toggle debug console (paired with Ctrl+K: pick chat vs inspect logs)
  *   Ctrl+E          — Toggle file explorer
  *   Ctrl+B          — Toggle builder panel
  */
@@ -29,6 +31,8 @@ export function useKeyboardShortcuts() {
     toggleBuilderPanel, toggleFocusMode, cycleSidebar,
     setShowQuickSwitch, setActivePanel, toggleLayoutMode,
   } = useLayoutStore();
+  const activeConversationId = useChatStore((state) => state.activeConversationId);
+  const updateConversationMode = useChatStore((state) => state.updateConversationMode);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -46,6 +50,13 @@ export function useKeyboardShortcuts() {
       if (ctrl && key.toLowerCase() === 'k') {
         e.preventDefault();
         setShowQuickSwitch(true);
+        return;
+      }
+
+      // Ctrl+, — Settings (VS Code–style preferences shortcut)
+      if (ctrl && key === ',') {
+        e.preventDefault();
+        setActivePanel('settings');
         return;
       }
 
@@ -86,7 +97,13 @@ export function useKeyboardShortcuts() {
 
       if (ctrl && MODE_KEYS[key]) {
         e.preventDefault();
-        setMode(MODE_KEYS[key]);
+        const nextMode = MODE_KEYS[key];
+        setMode(nextMode);
+        if (activeConversationId) {
+          void updateConversationMode(activeConversationId, nextMode).catch((error) => {
+            console.error('Failed to sync conversation mode from keyboard shortcut', error);
+          });
+        }
         return;
       }
 
@@ -118,5 +135,17 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setMode, toggleDebugConsole, toggleFileExplorer, toggleBuilderPanel, toggleFocusMode, cycleSidebar, setShowQuickSwitch, setActivePanel, toggleLayoutMode]);
+  }, [
+    activeConversationId,
+    cycleSidebar,
+    setActivePanel,
+    setMode,
+    setShowQuickSwitch,
+    toggleBuilderPanel,
+    toggleDebugConsole,
+    toggleFileExplorer,
+    toggleFocusMode,
+    toggleLayoutMode,
+    updateConversationMode,
+  ]);
 }

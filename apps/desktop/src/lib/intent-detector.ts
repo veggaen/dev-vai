@@ -77,6 +77,17 @@ export const STACKS: StackDef[] = [
     description: 'Expense tracker',
     semanticHints: ['expense', 'expenses', 'budget', 'money', 'finance', 'spending'],
   },
+  {
+    id: 'game',
+    aliases: ['game', 'game engine', 'canvas game', 'top-down', 'top down'],
+    label: 'Game Engine',
+    description: 'Top-down action game',
+    semanticHints: [
+      'game', 'shooter', 'action game', 'rpg', 'hotline miami', 'combat',
+      'enemies', 'weapons', 'top-down', 'arcade', 'pixel', 'neon',
+      'quest', 'achievement', 'lore', 'boss fight', 'level editor',
+    ],
+  },
 ];
 
 /* ──────────────────────────────────── Tiers ── */
@@ -119,6 +130,69 @@ const REQUEST_FRAMES = /\b(can\s+you|could\s+you|please|i\s+want|i\s+need|i'd\s+
 
 /** Stack-adjacent terms (user mentions stack-related concepts) */
 const STACK_ADJACENT = /\b(app|application|project|template|stack|website|web\s*app|site|service|api)\b/i;
+
+/* ──────────────────────────── Edit Intent ── */
+
+/**
+ * Edit intent — user wants to modify an existing project.
+ * Detected when a sandbox project is already active.
+ */
+export interface EditIntent {
+  /** Categorized edit type */
+  type: 'fix' | 'add' | 'change' | 'remove' | 'refactor' | 'style' | 'generic';
+  /** 0–1 confidence that this is a targeted project-edit request */
+  confidence: number;
+  /** Short description of what the user wants to change */
+  summary: string;
+}
+
+const EDIT_STRONG = /\b(fix|change|update|upgrade|improve|modify|edit|rename|refactor|replace|rewrite|patch|correct|adjust|move|delete|remove)\b/i;
+const EDIT_ADD = /\b(add|include|insert|append|implement|support|enable|integrate)\b/i;
+const EDIT_STYLE = /\b(style|design|color|font|layout|size|margin|padding|spacing|theme|dark\s*mode|light\s*mode|responsive)\b/i;
+const EDIT_BUG = /\b(bug|broken|error|crash|failing|doesn'?t\s+work|not\s+working|issue|problem|broke|wrong)\b/i;
+
+/**
+ * Detect if the user wants to edit an existing project.
+ * Should be called when a sandbox project is already active.
+ *
+ * Returns null if the message looks like a brand-new project request
+ * rather than an edit to the current one.
+ */
+export function detectEditIntent(
+  userMessage: string,
+  context: DetectionContext & { hasActiveProject?: boolean } = {},
+): EditIntent | null {
+  if (!context.hasActiveProject && !context.isBuildMode) return null;
+
+  const lower = userMessage.toLowerCase();
+  let score = 0;
+  let type: EditIntent['type'] = 'generic';
+
+  if (EDIT_STRONG.test(lower)) score += 0.45;
+  if (EDIT_ADD.test(lower)) { score += 0.35; type = 'add'; }
+  if (EDIT_STYLE.test(lower)) { score += 0.30; type = 'style'; }
+  if (EDIT_BUG.test(lower)) { score += 0.40; type = 'fix'; }
+
+  if (EDIT_STRONG.test(lower) && EDIT_BUG.test(lower)) type = 'fix';
+  if (EDIT_ADD.test(lower) && !EDIT_BUG.test(lower)) type = 'add';
+  if (/\b(refactor|clean\s*up|extract|split|consolidate)\b/i.test(lower)) { type = 'refactor'; score += 0.30; }
+  if (/\b(upgrade|improve)\b/i.test(lower)) { type = 'change'; score += 0.30; }
+  if (/\b(change|update|modify)\b/i.test(lower) && EDIT_STYLE.test(lower)) type = 'style';
+  if (/\b(remove|delete|hide|disable)\b/i.test(lower)) { type = 'remove'; score += 0.35; }
+
+  // Penalize if this looks more like a brand-new project request
+  if (STRONG_VERBS.test(lower) && STACK_ADJACENT.test(lower) && !EDIT_BUG.test(lower)) {
+    score -= 0.25;
+  }
+
+  if (context.isBuildMode) score += 0.10;
+  if (context.hasActiveProject) score += 0.15;
+
+  if (score < 0.35) return null;
+
+  const summary = userMessage.replace(/\s+/g, ' ').trim().slice(0, 80);
+  return { type, confidence: Math.min(score, 1), summary };
+}
 
 /* ──────────────────────────── Core Detection ── */
 
@@ -338,8 +412,8 @@ export function detectAllIntents(
         stackId: stack.id,
         tier: 'basic',
         displayName: `${stack.label} Basic`,
-        confidence: 0.35,
-        signals: [{ type: 'context', value: 'generic-build', weight: 0.35 }],
+        confidence: 0.2,
+        signals: [{ type: 'context', value: 'generic-build', weight: 0.2 }],
       });
     }
   }

@@ -1,9 +1,13 @@
-import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback, memo, type ReactNode } from 'react';
 import {
   MessageSquare,
   Brain,
   Compass,
   BookOpen,
+  Flag,
+  ShieldCheck,
+  RotateCcw,
+  Archive,
   FilePlus,
   FileEdit,
   FileSearch2,
@@ -39,12 +43,17 @@ import {
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore.js';
 import type {
+  LearningReport,
   SessionEvent,
   SessionEventType,
   MessageMeta,
   ThinkingMeta,
   PlanningMeta,
   ContextGatherMeta,
+  CheckpointMeta,
+  VerificationMeta,
+  RecoveryMeta,
+  ArtifactMeta,
   FileCreateMeta,
   FileEditMeta,
   FileReadMeta,
@@ -55,7 +64,7 @@ import type {
   ErrorMeta,
   ToolCallMeta,
   TodoItem,
-} from '@vai/core';
+} from '@vai/core/browser';
 
 /* ── Icon mapping ─────────────────────────────────────────────── */
 
@@ -64,6 +73,10 @@ const ICON_MAP: Record<SessionEventType, LucideIcon> = {
   thinking: Brain,
   planning: Compass,
   'context-gather': BookOpen,
+  checkpoint: Flag,
+  verification: ShieldCheck,
+  recovery: RotateCcw,
+  artifact: Archive,
   'file-create': FilePlus,
   'file-edit': FileEdit,
   'file-read': FileSearch2,
@@ -83,6 +96,10 @@ const COLOR_MAP: Record<SessionEventType, string> = {
   thinking: 'text-purple-400',
   planning: 'text-violet-400',
   'context-gather': 'text-teal-400',
+  checkpoint: 'text-yellow-400',
+  verification: 'text-emerald-400',
+  recovery: 'text-amber-400',
+  artifact: 'text-pink-400',
   'file-create': 'text-emerald-400',
   'file-edit': 'text-amber-400',
   'file-read': 'text-zinc-400',
@@ -102,6 +119,10 @@ const BG_MAP: Record<SessionEventType, string> = {
   thinking: 'bg-purple-500/10 border-purple-500/20',
   planning: 'bg-violet-500/10 border-violet-500/20',
   'context-gather': 'bg-teal-500/10 border-teal-500/20',
+  checkpoint: 'bg-yellow-500/10 border-yellow-500/20',
+  verification: 'bg-emerald-500/10 border-emerald-500/20',
+  recovery: 'bg-amber-500/10 border-amber-500/20',
+  artifact: 'bg-pink-500/10 border-pink-500/20',
   'file-create': 'bg-emerald-500/10 border-emerald-500/20',
   'file-edit': 'bg-amber-500/10 border-amber-500/20',
   'file-read': 'bg-zinc-500/10 border-zinc-500/20',
@@ -121,6 +142,10 @@ const LABEL_MAP: Record<SessionEventType, string> = {
   thinking: 'Thinking',
   planning: 'Planning',
   'context-gather': 'Context Gathering',
+  checkpoint: 'Checkpoint',
+  verification: 'Proof',
+  recovery: 'Recovery',
+  artifact: 'Artifact',
   'file-create': 'Created File',
   'file-edit': 'Edited File',
   'file-read': 'Read File',
@@ -242,6 +267,57 @@ function eventsToMarkdown(events: SessionEvent[], sessionTitle: string): string 
         if (steps?.length) {
           lines.push('');
           steps.forEach((s, i) => lines.push(`${i + 1}. ${s}`));
+        }
+        lines.push('');
+        break;
+      }
+      case 'checkpoint': {
+        const cp = meta as Record<string, unknown>;
+        lines.push(`### 🚩 Checkpoint — ${time}`);
+        lines.push(`**${cp.checkpoint ?? 'checkpoint'}** · ${cp.status ?? 'unknown'}`);
+        if (cp.detail) lines.push(String(cp.detail));
+        if (cp.port) lines.push(`Port: ${cp.port}`);
+        const files = cp.files as string[] | undefined;
+        if (files?.length) lines.push(`Files: ${files.slice(0, 8).join(', ')}${files.length > 8 ? ', ...' : ''}`);
+        lines.push('');
+        break;
+      }
+      case 'verification': {
+        const vm = meta as Record<string, unknown>;
+        lines.push(`### ✅ Verification — ${time}`);
+        lines.push(`**${vm.target ?? 'preview'}** · ${vm.status ?? 'unknown'}`);
+        if (vm.port) lines.push(`Port: ${vm.port}`);
+        const evidence = vm.evidence as string[] | undefined;
+        if (evidence?.length) {
+          lines.push('```');
+          lines.push(evidence.join('\n'));
+          lines.push('```');
+        }
+        lines.push('');
+        break;
+      }
+      case 'recovery': {
+        const rm = meta as Record<string, unknown>;
+        lines.push(`### 🔁 Recovery — ${time}`);
+        lines.push(`**${rm.strategy ?? 'recovery'}** · ${rm.status ?? 'unknown'}`);
+        if (rm.attempt !== undefined && rm.maxAttempts !== undefined) {
+          lines.push(`Attempt: ${rm.attempt}/${rm.maxAttempts}`);
+        }
+        if (rm.reason) lines.push(`Reason: ${rm.reason}`);
+        const files = rm.files as string[] | undefined;
+        if (files?.length) lines.push(`Files: ${files.slice(0, 8).join(', ')}${files.length > 8 ? ', ...' : ''}`);
+        lines.push('');
+        break;
+      }
+      case 'artifact': {
+        const am = meta as Record<string, unknown>;
+        lines.push(`### 📦 Artifact — ${time}`);
+        lines.push(`**${am.artifactType ?? 'artifact'}**${am.label ? ` · ${am.label}` : ''}`);
+        if (am.itemCount !== undefined) lines.push(`Count: ${am.itemCount}`);
+        if (am.value) {
+          lines.push('```');
+          lines.push(String(am.value).slice(0, 1000));
+          lines.push('```');
         }
         lines.push('');
         break;
@@ -513,6 +589,163 @@ function ContextGatherCard({ event }: { event: SessionEvent }) {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+function CheckpointCard({ event }: { event: SessionEvent }) {
+  const meta = event.meta as CheckpointMeta;
+  const files = meta.files ?? [];
+
+  const statusStyles: Record<CheckpointMeta['status'], string> = {
+    started: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30',
+    completed: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+    failed: 'bg-red-500/15 text-red-300 border-red-500/30',
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-200">
+        <span className="font-medium">{meta.checkpoint}</span>
+        <span className={`rounded border px-1.5 py-0.5 text-xs ${statusStyles[meta.status]}`}>
+          {meta.status}
+        </span>
+        {meta.port && <span className="text-xs text-zinc-500">port {meta.port}</span>}
+      </div>
+      {meta.detail && <div className="text-xs text-zinc-400 whitespace-pre-wrap">{meta.detail}</div>}
+      {(meta.sandboxProjectId || meta.conversationId) && (
+        <div className="flex flex-wrap gap-2 text-xs text-zinc-500">
+          {meta.sandboxProjectId && <span>sandbox {meta.sandboxProjectId}</span>}
+          {meta.conversationId && <span>conversation {meta.conversationId}</span>}
+        </div>
+      )}
+      {files.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {files.slice(0, 6).map((file) => (
+            <span key={file} className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400">
+              {shortPath(file)}
+            </span>
+          ))}
+          {files.length > 6 && (
+            <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-500">+{files.length - 6} more</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VerificationCard({ event }: { event: SessionEvent }) {
+  const [expanded, setExpanded] = useState(false);
+  const meta = event.meta as VerificationMeta;
+  const evidence = meta.evidence ?? [];
+
+  const statusStyles: Record<VerificationMeta['status'], string> = {
+    started: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30',
+    passed: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+    failed: 'bg-red-500/15 text-red-300 border-red-500/30',
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-200">
+        <span className="font-medium">{meta.target}</span>
+        <span className={`rounded border px-1.5 py-0.5 text-xs ${statusStyles[meta.status]}`}>
+          {meta.status}
+        </span>
+        {meta.port && <span className="text-xs text-zinc-500">port {meta.port}</span>}
+        {meta.timeoutMs && <span className="text-xs text-zinc-600">timeout {formatDuration(meta.timeoutMs)}</span>}
+        {evidence.length > 0 && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="ml-auto text-xs text-zinc-500 hover:text-zinc-300"
+          >
+            {expanded ? 'Hide evidence' : `Evidence (${evidence.length})`}
+          </button>
+        )}
+      </div>
+      <div className="text-xs text-zinc-400 whitespace-pre-wrap">{event.content}</div>
+      {expanded && evidence.length > 0 && (
+        <pre className="max-h-40 overflow-auto rounded-md bg-zinc-950 border border-zinc-800 p-3 font-mono text-xs text-zinc-400">
+          {evidence.join('\n')}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function RecoveryCard({ event }: { event: SessionEvent }) {
+  const meta = event.meta as RecoveryMeta;
+  const files = meta.files ?? [];
+
+  const statusStyles: Record<RecoveryMeta['status'], string> = {
+    triggered: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30',
+    succeeded: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+    failed: 'bg-red-500/15 text-red-300 border-red-500/30',
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-200">
+        <span className="font-medium">{meta.strategy}</span>
+        <span className={`rounded border px-1.5 py-0.5 text-xs ${statusStyles[meta.status]}`}>
+          {meta.status}
+        </span>
+        {meta.attempt !== undefined && meta.maxAttempts !== undefined && (
+          <span className="text-xs text-zinc-500">attempt {meta.attempt}/{meta.maxAttempts}</span>
+        )}
+        {meta.port && <span className="text-xs text-zinc-500">port {meta.port}</span>}
+      </div>
+      {meta.reason && <div className="text-xs text-zinc-400 whitespace-pre-wrap">{meta.reason}</div>}
+      {files.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {files.slice(0, 6).map((file) => (
+            <span key={file} className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400">
+              {shortPath(file)}
+            </span>
+          ))}
+          {files.length > 6 && (
+            <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-500">+{files.length - 6} more</span>
+          )}
+        </div>
+      )}
+      <div className="text-xs text-zinc-500 whitespace-pre-wrap">{event.content}</div>
+    </div>
+  );
+}
+
+function ArtifactCard({ event }: { event: SessionEvent }) {
+  const [expanded, setExpanded] = useState(false);
+  const meta = event.meta as ArtifactMeta;
+  const value = meta.value ?? '';
+  const preview = value.length > 240 ? value.slice(0, 240) + '...' : value;
+  const hasValue = value.length > 0;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-200">
+        <span className="font-medium">{meta.artifactType}</span>
+        {meta.label && <span className="text-xs text-zinc-500">{meta.label}</span>}
+        {meta.itemCount !== undefined && <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400">{meta.itemCount}</span>}
+        {hasValue && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="ml-auto text-xs text-zinc-500 hover:text-zinc-300"
+          >
+            {expanded ? 'Hide value' : 'Show value'}
+          </button>
+        )}
+      </div>
+      <div className="text-xs text-zinc-400 whitespace-pre-wrap">{event.content}</div>
+      {hasValue && (
+        expanded ? (
+          <pre className="max-h-40 overflow-auto rounded-md bg-zinc-950 border border-zinc-800 p-3 font-mono text-xs text-zinc-400">
+            {value}
+          </pre>
+        ) : (
+          <div className="rounded bg-zinc-950/70 px-2 py-1 text-xs text-zinc-500 font-mono whitespace-pre-wrap">{preview}</div>
+        )
       )}
     </div>
   );
@@ -878,6 +1111,36 @@ function getCollapsedSummary(event: SessionEvent): string | null {
   const meta = event.meta as unknown as Record<string, unknown>;
 
   switch (type) {
+    case 'checkpoint': {
+      const checkpoint = meta?.checkpoint as string | undefined;
+      const status = meta?.status as string | undefined;
+      return checkpoint ? `${checkpoint}${status ? ` — ${status}` : ''}` : status ?? null;
+    }
+    case 'verification': {
+      const target = meta?.target as string | undefined;
+      const status = meta?.status as string | undefined;
+      const port = meta?.port as number | undefined;
+      const suffix = port ? ` port ${port}` : '';
+      if (target || status) return `${target ?? 'verification'}${status ? ` — ${status}` : ''}${suffix}`;
+      return null;
+    }
+    case 'recovery': {
+      const strategy = meta?.strategy as string | undefined;
+      const status = meta?.status as string | undefined;
+      const attempt = meta?.attempt as number | undefined;
+      const maxAttempts = meta?.maxAttempts as number | undefined;
+      const attemptText = attempt !== undefined && maxAttempts !== undefined ? ` ${attempt}/${maxAttempts}` : '';
+      if (strategy || status) return `${strategy ?? 'recovery'}${status ? ` — ${status}` : ''}${attemptText}`;
+      return null;
+    }
+    case 'artifact': {
+      const artifactType = meta?.artifactType as string | undefined;
+      const label = meta?.label as string | undefined;
+      const itemCount = meta?.itemCount as number | undefined;
+      const countText = itemCount !== undefined ? ` — ${itemCount}` : '';
+      if (artifactType || label) return `${artifactType ?? 'artifact'}${label ? ` — ${label}` : ''}${countText}`;
+      return null;
+    }
     case 'search': {
       const query = (meta?.query ?? event.content ?? '').toString();
       const searchType = meta?.searchType as string | undefined;
@@ -967,6 +1230,10 @@ const EventRow = memo(function EventRow({ event, isLast, compact, isPinned, onTo
       case 'thinking': return <ThinkingCard event={event} />;
       case 'planning': return <PlanningCard event={event} />;
       case 'context-gather': return <ContextGatherCard event={event} />;
+      case 'checkpoint': return <CheckpointCard event={event} />;
+      case 'verification': return <VerificationCard event={event} />;
+      case 'recovery': return <RecoveryCard event={event} />;
+      case 'artifact': return <ArtifactCard event={event} />;
       case 'message': return <MessageCard event={event} />;
       case 'file-create': return <FileCreateCard event={event} />;
       case 'file-edit': return <FileEditCard event={event} />;
@@ -1170,6 +1437,18 @@ function SessionHeader() {
               <StatBadge icon={FilePlus} label="Created" value={counts['file-create'] ?? 0} color="emerald" />
               <StatBadge icon={FileEdit} label="Edited" value={counts['file-edit'] ?? 0} color="amber" />
               <StatBadge icon={Terminal} label="Commands" value={counts['terminal'] ?? 0} color="green" />
+              {(counts['verification'] ?? 0) > 0 && (
+                <StatBadge icon={ShieldCheck} label="Proofs" value={counts['verification'] ?? 0} color="emerald" />
+              )}
+              {(counts['recovery'] ?? 0) > 0 && (
+                <StatBadge icon={RotateCcw} label="Recoveries" value={counts['recovery'] ?? 0} color="amber" />
+              )}
+              {(counts['checkpoint'] ?? 0) > 0 && (
+                <StatBadge icon={Flag} label="Checkpoints" value={counts['checkpoint'] ?? 0} color="yellow" />
+              )}
+              {(counts['artifact'] ?? 0) > 0 && (
+                <StatBadge icon={Archive} label="Artifacts" value={counts['artifact'] ?? 0} color="pink" />
+              )}
               {(counts['search'] ?? 0) > 0 && (
                 <StatBadge icon={Search} label="Searches" value={counts['search'] ?? 0} color="cyan" />
               )}
@@ -1208,6 +1487,412 @@ function StatBadge({ icon: Icon, label, value, color }: {
       <Icon className={`h-3 w-3 text-${color}-400`} />
       <span className={`text-${color}-400`}>{value}</span>
       <span className="text-zinc-500">{label}</span>
+    </div>
+  );
+}
+
+function titleCaseToken(token: string): string {
+  return token
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function gradeTone(grade: string | undefined): string {
+  if (!grade) return 'bg-zinc-800 text-zinc-300 border-zinc-700';
+  if (grade.startsWith('A')) return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+  if (grade.startsWith('B')) return 'bg-blue-500/15 text-blue-300 border-blue-500/30';
+  if (grade.startsWith('C')) return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+  return 'bg-red-500/15 text-red-300 border-red-500/30';
+}
+
+function metricTone(value: number): string {
+  if (value >= 80) return 'bg-emerald-400';
+  if (value >= 65) return 'bg-blue-400';
+  if (value >= 50) return 'bg-amber-400';
+  return 'bg-red-400';
+}
+
+function outcomeTone(outcome: string | undefined): string {
+  switch (outcome) {
+    case 'success':
+      return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+    case 'partial':
+      return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+    case 'failure':
+      return 'bg-red-500/15 text-red-300 border-red-500/30';
+    case 'abandoned':
+      return 'bg-zinc-700/40 text-zinc-300 border-zinc-600';
+    default:
+      return 'bg-zinc-800 text-zinc-300 border-zinc-700';
+  }
+}
+
+function lessonTone(category: LearningReport['lessons'][number]['category']): string {
+  switch (category) {
+    case 'success-pattern':
+      return 'bg-emerald-500/12 text-emerald-300 border-emerald-500/20';
+    case 'anti-pattern':
+      return 'bg-red-500/12 text-red-300 border-red-500/20';
+    case 'reasoning-chain':
+      return 'bg-violet-500/12 text-violet-300 border-violet-500/20';
+    default:
+      return 'bg-blue-500/12 text-blue-300 border-blue-500/20';
+  }
+}
+
+function PanelShell({
+  icon: Icon,
+  title,
+  subtitle,
+  children,
+}: {
+  icon: LucideIcon;
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+      <div className="mb-3 flex items-start gap-2">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-1.5 text-zinc-400">
+          <Icon className="h-3.5 w-3.5" />
+        </div>
+        <div>
+          <div className="text-sm font-medium text-zinc-100">{title}</div>
+          {subtitle && <div className="text-xs text-zinc-500">{subtitle}</div>}
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ScoreRow({ label, value }: { label: string; value: number }) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[11px] text-zinc-400">
+        <span>{label}</span>
+        <span className="text-zinc-300">{Math.round(value)}</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-zinc-800">
+        <div
+          className={`h-full rounded-full transition-[width] ${metricTone(value)}`}
+          style={{ width: `${Math.max(6, Math.min(100, value))}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SessionIntelligencePanel() {
+  const {
+    activeSession,
+    activeScore,
+    activeLearningReport,
+    activeAnalysis,
+    sessionInsights,
+    isLoadingIntelligence,
+    eventTotal,
+    isIntelligenceDeferred,
+    refreshSessionIntelligence,
+    refreshRecentInsights,
+  } = useSessionStore();
+
+  if (!activeSession) return null;
+
+  const stats = activeSession.stats;
+  const verificationsRun = stats.verificationsRun ?? 0;
+  const verificationsPassed = stats.verificationsPassed ?? 0;
+  const checkpointsRecorded = stats.checkpointsRecorded ?? 0;
+  const artifactsCaptured = stats.artifactsCaptured ?? 0;
+  const recoveriesTriggered = stats.recoveriesTriggered ?? 0;
+  const recoveriesSucceeded = stats.recoveriesSucceeded ?? 0;
+  const passRate = verificationsRun > 0
+    ? Math.round((verificationsPassed / verificationsRun) * 100)
+    : null;
+  const topLessons = [...(activeLearningReport?.lessons ?? [])]
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 4);
+  const strongFoundations = activeLearningReport?.cognitiveProfile.strongFoundations.slice(0, 3) ?? [];
+  const improvementPriority = activeLearningReport?.cognitiveProfile.improvementPriority.slice(0, 3) ?? [];
+  const totalRecentSessions = sessionInsights
+    ? (sessionInsights.outcomeBreakdown.success ?? 0)
+      + (sessionInsights.outcomeBreakdown.partial ?? 0)
+      + (sessionInsights.outcomeBreakdown.failure ?? 0)
+      + (sessionInsights.outcomeBreakdown.abandoned ?? 0)
+      + (sessionInsights.outcomeBreakdown.unknown ?? 0)
+    : 0;
+  const successRate = sessionInsights && totalRecentSessions > 0
+    ? Math.round(((sessionInsights.outcomeBreakdown.success ?? 0) / totalRecentSessions) * 100)
+    : null;
+
+  return (
+    <div className="border-b border-zinc-800 bg-zinc-950/40 px-4 py-3">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs text-zinc-400">
+          <Brain className="h-3.5 w-3.5 text-blue-400" />
+          <span className="font-medium text-zinc-300">Session Intelligence</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {isIntelligenceDeferred && !isLoadingIntelligence && (
+            <button
+              onClick={() => void refreshSessionIntelligence(activeSession.id, false)}
+              className="rounded border border-blue-500/20 bg-blue-500/10 px-2 py-1 text-[11px] text-blue-300 hover:bg-blue-500/15"
+            >
+              Analyze large session
+            </button>
+          )}
+          {!sessionInsights && !isLoadingIntelligence && (
+            <button
+              onClick={() => void refreshRecentInsights(20)}
+              className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300 hover:border-zinc-600 hover:text-zinc-100"
+            >
+              Load recent trends
+            </button>
+          )}
+          {isLoadingIntelligence && (
+            <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+              <div className="h-3 w-3 animate-spin rounded-full border border-zinc-700 border-t-blue-500" />
+              Refreshing derived signals
+            </div>
+          )}
+        </div>
+      </div>
+
+      {isIntelligenceDeferred && !activeScore && !activeAnalysis && !activeLearningReport && (
+        <div className="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-xs text-amber-200">
+          This session has {eventTotal.toLocaleString()} events. Derived analysis is deferred by default so the timeline opens fast instead of stalling on a full replay.
+        </div>
+      )}
+
+      <div className="grid gap-3 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="grid gap-3 md:grid-cols-2">
+          <PanelShell icon={ShieldCheck} title="Quality" subtitle="Score, proof discipline, and standout moments">
+            {activeScore ? (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-3xl font-semibold text-zinc-100">{Math.round(activeScore.overall)}</div>
+                    <div className="mt-1 text-xs text-zinc-500">Overall conversation quality</div>
+                  </div>
+                  <div className={`rounded-full border px-3 py-1 text-sm font-medium ${gradeTone(activeScore.overallGrade)}`}>
+                    {activeScore.overallGrade}
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  <ScoreRow label="Efficiency" value={activeScore.efficiency.value} />
+                  <ScoreRow label="Teaching" value={activeScore.teachingQuality.value} />
+                  <ScoreRow label="Cognitive Alignment" value={activeScore.cognitiveAlignment.value} />
+                  <ScoreRow label="Anti-Pattern Safety" value={activeScore.antiPatterns.score} />
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                  {passRate !== null && (
+                    <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-emerald-300">
+                      Proof pass rate {passRate}%
+                    </span>
+                  )}
+                  {checkpointsRecorded > 0 && (
+                    <span className="rounded-full border border-yellow-500/20 bg-yellow-500/10 px-2 py-1 text-yellow-300">
+                      {checkpointsRecorded} checkpoints
+                    </span>
+                  )}
+                  {artifactsCaptured > 0 && (
+                    <span className="rounded-full border border-pink-500/20 bg-pink-500/10 px-2 py-1 text-pink-300">
+                      {artifactsCaptured} artifacts
+                    </span>
+                  )}
+                  {recoveriesTriggered > 0 && (
+                    <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-amber-300">
+                      {recoveriesSucceeded}/{recoveriesTriggered} recoveries
+                    </span>
+                  )}
+                </div>
+
+                {activeScore.highlights.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/70 p-2.5 text-xs text-zinc-400">
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.12em] text-zinc-600">Highlight</div>
+                    <div className="text-zinc-200">{activeScore.highlights[0]?.reason}</div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-sm text-zinc-500">Derived score appears once the session has enough activity to analyze.</div>
+            )}
+          </PanelShell>
+
+          <PanelShell icon={Activity} title="Health" subtitle="Outcome, failure pattern, and next improvement">
+            {activeAnalysis ? (
+              <>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className={`rounded-full border px-2 py-1 ${outcomeTone(activeAnalysis.outcome)}`}>
+                    {titleCaseToken(activeAnalysis.outcome)}
+                  </span>
+                  <span className={`rounded-full border px-2 py-1 ${activeAnalysis.failurePattern === 'none' ? 'border-zinc-700 bg-zinc-800 text-zinc-300' : 'border-red-500/20 bg-red-500/10 text-red-300'}`}>
+                    {activeAnalysis.failurePattern === 'none' ? 'No dominant failure' : titleCaseToken(activeAnalysis.failurePattern)}
+                  </span>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-zinc-400">
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-2">
+                    <div className="text-[11px] text-zinc-600">Messages</div>
+                    <div className="mt-1 text-zinc-200">{activeAnalysis.metrics.totalMessages}</div>
+                  </div>
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-2">
+                    <div className="text-[11px] text-zinc-600">Concrete Ratio</div>
+                    <div className="mt-1 text-zinc-200">{Math.round(activeAnalysis.metrics.concreteResponseRatio * 100)}%</div>
+                  </div>
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-2">
+                    <div className="text-[11px] text-zinc-600">Avg Response</div>
+                    <div className="mt-1 text-zinc-200">{Math.round(activeAnalysis.metrics.avgResponseWordCount)} words</div>
+                  </div>
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-2">
+                    <div className="text-[11px] text-zinc-600">Intent</div>
+                    <div className="mt-1 text-zinc-200">{titleCaseToken(activeAnalysis.intent)}</div>
+                  </div>
+                </div>
+
+                <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/70 p-2.5 text-xs">
+                  <div className="mb-1 text-[11px] uppercase tracking-[0.12em] text-zinc-600">Next Improvement</div>
+                  <div className="text-zinc-300">{activeAnalysis.suggestedImprovement}</div>
+                </div>
+
+                {(activeAnalysis.whatWorked.length > 0 || activeAnalysis.whatFailed.length > 0) && (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <div className="mb-1 text-[11px] uppercase tracking-[0.12em] text-zinc-600">Working</div>
+                      <div className="space-y-1 text-xs text-zinc-300">
+                        {activeAnalysis.whatWorked.slice(0, 2).map((item) => (
+                          <div key={item} className="rounded-md border border-emerald-500/10 bg-emerald-500/5 px-2 py-1.5">
+                            {item}
+                          </div>
+                        ))}
+                        {activeAnalysis.whatWorked.length === 0 && <div className="text-zinc-600">No clear success factor yet.</div>}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="mb-1 text-[11px] uppercase tracking-[0.12em] text-zinc-600">Watch</div>
+                      <div className="space-y-1 text-xs text-zinc-300">
+                        {activeAnalysis.whatFailed.slice(0, 2).map((item) => (
+                          <div key={item} className="rounded-md border border-red-500/10 bg-red-500/5 px-2 py-1.5">
+                            {item}
+                          </div>
+                        ))}
+                        {activeAnalysis.whatFailed.length === 0 && <div className="text-zinc-600">No recurring failure identified.</div>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-sm text-zinc-500">Outcome analysis appears after the session has at least a small conversation trail.</div>
+            )}
+          </PanelShell>
+        </div>
+
+        <div className="grid gap-3">
+          <PanelShell icon={BookOpen} title="Lessons" subtitle="Reusable patterns extracted from this session">
+            {topLessons.length > 0 ? (
+              <div className="space-y-2">
+                {topLessons.map((lesson) => (
+                  <div key={lesson.id} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-2.5">
+                    <div className="mb-1 flex items-center gap-2 text-[11px]">
+                      <span className={`rounded-full border px-2 py-0.5 ${lessonTone(lesson.category)}`}>
+                        {titleCaseToken(lesson.category)}
+                      </span>
+                      <span className="text-zinc-600">{Math.round(lesson.confidence * 100)}% confidence</span>
+                    </div>
+                    <div className="text-sm text-zinc-200">{lesson.summary}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-zinc-500">No durable lesson extracted yet.</div>
+            )}
+
+            {(strongFoundations.length > 0 || improvementPriority.length > 0) && (
+              <div className="mt-3 space-y-2 text-xs">
+                {strongFoundations.length > 0 && (
+                  <div>
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.12em] text-zinc-600">Strong Foundations</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {strongFoundations.map((foundation) => (
+                        <span key={foundation.foundationId} className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-emerald-300">
+                          {titleCaseToken(foundation.foundationId)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {improvementPriority.length > 0 && (
+                  <div>
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.12em] text-zinc-600">Next Focus</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {improvementPriority.map((foundation) => (
+                        <span key={foundation} className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-amber-300">
+                          {titleCaseToken(foundation)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </PanelShell>
+
+          <PanelShell icon={Compass} title="Recent Trends" subtitle="What nearby sessions are teaching the system">
+            {sessionInsights ? (
+              <>
+                <div className="grid grid-cols-2 gap-2 text-xs text-zinc-400">
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-2">
+                    <div className="text-[11px] text-zinc-600">Recent Success Rate</div>
+                    <div className="mt-1 text-zinc-200">{successRate ?? 0}%</div>
+                  </div>
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-2">
+                    <div className="text-[11px] text-zinc-600">Avg Concrete Ratio</div>
+                    <div className="mt-1 text-zinc-200">{Math.round(sessionInsights.avgConcreteRatio * 100)}%</div>
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-2 text-xs">
+                  <div>
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.12em] text-zinc-600">Top Failures</div>
+                    <div className="space-y-1">
+                      {sessionInsights.topFailures.slice(0, 2).map((failure) => (
+                        <div key={failure.pattern} className="rounded-md border border-red-500/10 bg-red-500/5 px-2 py-1.5 text-zinc-300">
+                          {titleCaseToken(failure.pattern)} · {failure.pct}%
+                        </div>
+                      ))}
+                      {sessionInsights.topFailures.length === 0 && <div className="text-zinc-600">No repeated failure signature across recent sessions.</div>}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.12em] text-zinc-600">Top Success Factors</div>
+                    <div className="space-y-1">
+                      {sessionInsights.topSuccessFactors.slice(0, 2).map((factor) => (
+                        <div key={factor.factor} className="rounded-md border border-emerald-500/10 bg-emerald-500/5 px-2 py-1.5 text-zinc-300">
+                          {factor.factor} · {factor.pct}%
+                        </div>
+                      ))}
+                      {sessionInsights.topSuccessFactors.length === 0 && <div className="text-zinc-600">Success factors need a larger recent sample.</div>}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/70 p-2.5 text-xs text-zinc-300">
+                  {sessionInsights.recommendation}
+                </div>
+              </>
+            ) : (
+              <div className="text-sm text-zinc-500">Recent trend aggregation appears once multiple sessions have been analyzed.</div>
+            )}
+          </PanelShell>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1462,6 +2147,9 @@ export function SessionViewer() {
   const {
     activeSession,
     events,
+    eventTotal,
+    hasMoreEvents,
+    isLoadingMoreEvents,
     eventTypeFilter,
     filterPreset,
     isLoading,
@@ -1471,6 +2159,7 @@ export function SessionViewer() {
     searchQuery,
     compactMode,
     toggleCompactMode,
+    loadOlderEvents,
     pinnedEvents,
     pinEvent,
     unpinEvent,
@@ -1514,6 +2203,15 @@ export function SessionViewer() {
   const filteredEvents = useMemo(() => {
     // First: filter out noise (git fsmonitor cookies, zero-error diagnostics)
     let filtered = events.filter(e => !isNoiseEvent(e));
+
+    // Dedup safety net: remove events with identical type + content (keep first occurrence)
+    const seen = new Set<string>();
+    filtered = filtered.filter(e => {
+      const key = `${e.type}:${e.content.slice(0, 300)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 
     // Apply preset filters
     if (filterPreset === 'conversation') {
@@ -1600,6 +2298,7 @@ export function SessionViewer() {
       <EventFilter />
       <SearchBar />
       <PinnedPanel />
+      <SessionIntelligencePanel />
 
       {/* Toolbar */}
       <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-1.5">
@@ -1629,6 +2328,22 @@ export function SessionViewer() {
           {copied ? <Check className="h-3 w-3" /> : <ClipboardCopy className="h-3 w-3" />}
           {copied ? 'Copied!' : `Copy ${hasActiveFilter ? 'filtered' : 'all'}`}
         </button>
+
+        {hasMoreEvents && (
+          <button
+            onClick={() => void loadOlderEvents()}
+            disabled={isLoadingMoreEvents}
+            className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 disabled:cursor-wait disabled:opacity-50"
+            title="Load older events"
+          >
+            <ArrowLeft className="h-3 w-3" />
+            {isLoadingMoreEvents ? 'Loading older…' : 'Load older'}
+          </button>
+        )}
+
+        <span className="text-xs text-zinc-600">
+          {filteredEvents.length.toLocaleString()} loaded / {eventTotal.toLocaleString()} total
+        </span>
 
         <span className="ml-auto text-xs text-zinc-600">
           {filteredEvents.length} event{filteredEvents.length !== 1 ? 's' : ''}

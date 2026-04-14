@@ -16,12 +16,15 @@ import { create } from 'zustand';
 import {
   detectDeployIntent,
   detectAllIntents,
+  detectEditIntent,
   hasDeployTokens,
   getRecoveryPattern,
   type DeployIntent,
+  type EditIntent,
   type DetectionContext,
   type RecoveryPattern,
 } from '../lib/intent-detector.js';
+import { hasFileBlocks } from '../lib/file-extractor.js';
 
 /* ──────────────── Persistence Schema ── */
 
@@ -140,6 +143,8 @@ export interface MessageIntent {
   userContent: string;
   intent: DeployIntent | null;
   allIntents: DeployIntent[];
+  /** Edit intent — set when a project is active and the user asks to modify it */
+  editIntent: EditIntent | null;
   recovery: RecoveryPattern;
   /** Whether the LLM's response had deploy tokens (set after assistant replies) */
   llmHandled: boolean;
@@ -181,6 +186,8 @@ interface IntentState {
   adaptiveBoost: number;
   /** Whether user is in build-oriented mode */
   isBuildMode: boolean;
+  /** Whether a sandbox project is currently active */
+  hasActiveProject: boolean;
   /** Rolling audit log of every intent decision */
   decisionLog: IntentDecisionLog[];
 
@@ -194,6 +201,8 @@ interface IntentState {
   recordDeployTriggered: () => void;
   /** Set build mode flag */
   setBuildMode: (isBuild: boolean) => void;
+  /** Update whether a sandbox project is active (called by ChatWindow) */
+  setHasActiveProject: (active: boolean) => void;
   /** Get detection context for the intent detector */
   getDetectionContext: () => DetectionContext;
   /** Force a window re-evaluation */
@@ -214,6 +223,7 @@ export const useIntentStore = create<IntentState>((set, get) => ({
   messagesSinceEval: 0,
   adaptiveBoost: 0,
   isBuildMode: false,
+  hasActiveProject: false,
   decisionLog: loadDecisionLogs(),
 
   processUserMessage: (index: number, content: string) => {
@@ -223,16 +233,20 @@ export const useIntentStore = create<IntentState>((set, get) => ({
     const recent = [content, ...state.recentUserMessages].slice(0, 10);
 
     // Build detection context
-    const ctx: DetectionContext = {
+    const ctx: DetectionContext & { hasActiveProject: boolean } = {
       recentUserMessages: recent.slice(1), // exclude current message
       deployFrequency: state.getDeployFrequency(),
       isBuildMode: state.isBuildMode,
+      hasActiveProject: state.hasActiveProject,
     };
 
-    // Run detection
+    // Run deploy intent detection
     const intent = detectDeployIntent(content, ctx);
     const allIntents = intent ? [intent] : detectAllIntents(content, ctx);
     const confidence = intent?.confidence ?? (allIntents[0]?.confidence ?? 0);
+
+    // Run edit intent detection (only meaningful when a project is active)
+    const editIntentResult = detectEditIntent(content, ctx);
 
     // Apply adaptive boost
     const adjustedConfidence = Math.min(confidence + state.adaptiveBoost, 1);
@@ -252,6 +266,7 @@ export const useIntentStore = create<IntentState>((set, get) => ({
         ...i,
         confidence: Math.min(i.confidence + state.adaptiveBoost, 1),
       })),
+      editIntent: editIntentResult,
       recovery,
       llmHandled: false,
       userActed: null,
@@ -373,6 +388,8 @@ export const useIntentStore = create<IntentState>((set, get) => ({
 
   setBuildMode: (isBuild: boolean) => set({ isBuildMode: isBuild }),
 
+  setHasActiveProject: (active: boolean) => set({ hasActiveProject: active }),
+
   getDetectionContext: () => {
     const state = get();
     return {
@@ -476,12 +493,16 @@ export function computeFallbackMap(
 ): Map<number, { intent: DeployIntent; recovery: RecoveryPattern; allIntents: DeployIntent[] }> {
   const map = new Map<number, { intent: DeployIntent; recovery: RecoveryPattern; allIntents: DeployIntent[] }>();
 
+  if (!store.isBuildMode) {
+    return map;
+  }
+
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (msg.role !== 'assistant') continue;
 
-    // Already has LLM deploy tokens — skip
-    if (hasDeployTokens(msg.content)) continue;
+    // Already has actionable output — skip fallback deploy prompts.
+    if (hasDeployTokens(msg.content) || hasFileBlocks(msg.content)) continue;
 
     // Find preceding user message
     let userMsg: typeof msg | null = null;
@@ -496,11 +517,8 @@ export function computeFallbackMap(
     if (!userMsg || userIdx < 0) continue;
 
     // Check if we already processed this user message
-    let msgIntent = store.intents.get(userIdx);
-    if (!msgIntent) {
-      // Process it now
-      msgIntent = store.processUserMessage(userIdx, userMsg.content);
-    }
+    const msgIntent = store.intents.get(userIdx);
+    if (!msgIntent) continue;
 
     if (msgIntent.intent && msgIntent.recovery !== 'none') {
       map.set(i, {

@@ -78,15 +78,46 @@ describe('extractFilesFromMarkdown', () => {
     expect(extractFilesFromMarkdown(md)).toEqual([]);
   });
 
-  it('handles code blocks without language identifier', () => {
-    // Edge case: ``` title="file.txt" with no lang
-    // Our regex requires (\w*) which allows empty, but the \s+ after means
-    // there must be a space. `` ` title="..."` should still work if lang is empty.
+  it('extracts code blocks without a language identifier', () => {
     const md = '``` title="README.md"\n# Hello\n```';
     const files = extractFilesFromMarkdown(md);
-    // This actually won't match because (\w*) captures empty then \s+ expects space
-    // but there IS a space before title... let's verify
-    expect(files.length).toBeLessThanOrEqual(1);
+
+    expect(files).toEqual([
+      { path: 'README.md', content: '# Hello', language: 'text' },
+    ]);
+  });
+
+  it('supports alternate path attributes and normalizes common path variants', () => {
+    const md = [
+      '```tsx path="./src/App.tsx"',
+      'export function App() { return <div />; }',
+      '```',
+      '',
+      '```css filename="\\src\\index.css"',
+      'body { margin: 0; }',
+      '```',
+      '',
+      '```json file="/package.json"',
+      '{ "name": "my-app" }',
+      '```',
+    ].join('\n');
+
+    const files = extractFilesFromMarkdown(md);
+
+    expect(files.map((f) => f.path)).toEqual([
+      'src/App.tsx',
+      'src/index.css',
+      'package.json',
+    ]);
+  });
+
+  it('extracts file blocks when title appears after other fence attributes', () => {
+    const md = '```tsx theme="night" title="src/App.tsx"\nexport const App = () => null;\n```';
+    const files = extractFilesFromMarkdown(md);
+
+    expect(files).toHaveLength(1);
+    expect(files[0].path).toBe('src/App.tsx');
+    expect(files[0].language).toBe('tsx');
   });
 
   it('ignores code blocks that only have language (no title)', () => {
@@ -98,6 +129,10 @@ describe('extractFilesFromMarkdown', () => {
 describe('hasFileBlocks', () => {
   it('returns true when file blocks exist', () => {
     expect(hasFileBlocks('```tsx title="src/App.tsx"\ncode\n```')).toBe(true);
+  });
+
+  it('returns true for alternate path attributes', () => {
+    expect(hasFileBlocks('``` path="README.md"\n# Hello\n```')).toBe(true);
   });
 
   it('returns false for plain code blocks', () => {
@@ -125,6 +160,13 @@ describe('hasPackageJson', () => {
     expect(hasPackageJson(files)).toBe(true);
   });
 
+  it('returns true for normalized root package.json paths', () => {
+    const files = [
+      { path: './package.json', content: '{}', language: 'json' },
+    ];
+    expect(hasPackageJson(files)).toBe(true);
+  });
+
   it('returns false when no package.json', () => {
     const files = [
       { path: 'src/index.ts', content: '', language: 'ts' },
@@ -139,6 +181,13 @@ describe('extractProjectName', () => {
       { path: 'package.json', content: '{"name": "my-cool-app", "version": "1.0.0"}', language: 'json' },
     ];
     expect(extractProjectName(files)).toBe('my-cool-app');
+  });
+
+  it('extracts name from normalized package.json paths', () => {
+    const files = [
+      { path: '/package.json', content: '{"name": "normalized-app"}', language: 'json' },
+    ];
+    expect(extractProjectName(files)).toBe('normalized-app');
   });
 
   it('returns null when no package.json', () => {

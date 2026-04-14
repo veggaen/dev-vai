@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 /**
- * Vai 50-Question Foundation Training Session v2
+ * Vai 75-Question Foundation Training Session v4
  * 
- * IMPROVEMENTS over v1:
+ * IMPROVEMENTS over v3:
+ * - 5 speaking dimensions added: adaptive-depth, proactive-reframing,
+ *   epistemic-transparency, narrative-coherence, teaching-velocity
+ * - 75 drills (5 per foundation × 15 foundations)
  * - Scoring uses full expectedAnswer (no truncation)
  * - N-gram overlap (bigrams + trigrams) for semantic matching
  * - Concept extraction scoring (key technical terms)
  * - Factor-aware scoring aligned to drill's scoringCriteria
- * - 50 drills (5 per foundation) — no duplicates in a 50Q run
  * - Sharpened answers for weak areas (compression, calibrated-uncertainty)
  * 
  * No API key needed — fully deterministic.
@@ -26,6 +28,11 @@ const FOUNDATIONS = [
   'systems-thinking',
   'taste-judgment',
   'intellectual-honesty',
+  'adaptive-depth',
+  'proactive-reframing',
+  'epistemic-transparency',
+  'narrative-coherence',
+  'teaching-velocity',
 ];
 
 /* ── Vai's Answer Generator ─────────────────────────────────── */
@@ -760,6 +767,91 @@ The honest answer: "It depends on your bottleneck, and the language is probably 
 Meta-insight: knowing your biases doesn't eliminate them. You need STRUCTURAL countermeasures — like having someone argue the opposite position, or evaluating alternatives before naming your preference. Awareness alone is insufficient.`;
   }
 
+  // === ADAPTIVE DEPTH ===
+  if (drillId.includes('ad-simple')) {
+    return `A Promise is an object representing a value that may not exist yet. It can be pending, fulfilled (with a value), or rejected (with an error). You chain .then() for success and .catch() for errors, or use async/await for cleaner syntax.`;
+  }
+  if (drillId.includes('ad-complex')) {
+    return `This is likely a connection draining issue during rolling updates. During deployment, old pods receive SIGTERM but may still be in the load balancer's active pool. If the LB sends a request to a terminating pod, you get a 502. Why not every deployment: depends on traffic volume during the rollout window and your terminationGracePeriodSeconds setting. Fix: 1) Add a preStop lifecycle hook with a sleep (10-15s) to allow the LB to deregister the pod. 2) Ensure readinessProbe fails immediately on SIGTERM. 3) Set terminationGracePeriodSeconds > preStop sleep + drain time. 4) Check your ingress controller's upstream keepalive settings. Verify: check if 502s cluster within the first 30s of pod termination timestamps.`;
+  }
+  if (drillId.includes('ad-mismatch')) {
+    return `Correct response: "Done — added try/catch around the API call with a user-friendly error message." (1-2 sentences, action confirmation). Over-calibrated (BAD): "Great! Error handling is crucial for production applications. There are several strategies: try/catch blocks, error boundaries in React, global error handlers..." — This turns a simple confirmation into an unsolicited lecture. The rule: when the user gives a short answer, they want short action, not education. Match their energy.`;
+  }
+  if (drillId.includes('ad-escalate')) {
+    return `Q1 response: "Use display: flex; justify-content: center; align-items: center; on the parent." — 1 line, done. Q2 response: "For unknown-height centering with RTL support, use logical properties: display: grid; place-items: center; on the container. Grid with place-items handles both axes and is direction-agnostic. For RTL specifically, avoid margin-left/right — use margin-inline-start/end. If you need IE11 support, fallback: position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); — but this doesn't handle RTL." The depth escalation: Q1 = 1 property, Q2 = full explanation with edge cases, because the question complexity changed by 5x.`;
+  }
+  if (drillId.includes('ad-signal')) {
+    return `1. SHORT — "just" + imperative = they want action, not explanation. Signal: urgency + low patience. 2. DEEP — "curious" + "under the hood" = they explicitly want depth. Signal: learning intent. 3. SHORT — imperative + no context = fix it, don't explain it. Signal: frustration (build is blocking them). 4. DEEP — specific context (platform, 50K products) + "tradeoffs" = they want nuanced analysis. Signal: decision-making at architectural level, high stakes. The meta-skill: depth is signaled by (a) explicit curiosity words, (b) specificity of context provided, (c) action words vs learning words, (d) emotional tone (urgency = short, curiosity = deep).`;
+  }
+
+  // === PROACTIVE REFRAMING ===
+  if (drillId.includes('pr-deprecated')) {
+    return `margin: 0 auto works for horizontal centering of block elements with a defined width: div { width: 300px; margin: 0 auto; }. But you might actually want flexbox, which handles both axes and doesn't need a fixed width: parent { display: flex; justify-content: center; align-items: center; }. Or even simpler with grid: parent { display: grid; place-items: center; }. The margin approach is still valid for simple horizontal centering, but flexbox/grid are more versatile and handle vertical centering too.`;
+  }
+  if (drillId.includes('pr-xy')) {
+    return `To answer your question directly: filename.slice(-3) — but this only works for 3-letter extensions and breaks for .ts, .js, .html, .jpeg, etc. What you probably want is: path.extname(filename) (Node.js) or filename.split('.').pop() which handles any extension length. Even better question: why do you need the extension? If it's for MIME type detection, use a library like mime-types. If it's for file filtering, use path.extname() with a Set of allowed extensions. The reframe: "I need to determine the file type" → robust solution, not character slicing.`;
+  }
+  if (drillId.includes('pr-premature')) {
+    return `For an MVP, consider instead: do you need caching yet? Caching adds complexity (invalidation, staleness, operational overhead) and your MVP probably doesn't have the traffic to justify it. Start with: 1) Fix slow queries directly (add indexes, optimize N+1). 2) Use HTTP caching headers (Cache-Control) — free, no infrastructure. 3) Add a CDN for static assets. If you've done all that and STILL need caching: Redis — it does everything Memcached does AND persistence, pub/sub, and data structures. Memcached only wins at pure key-value with very high throughput, which an MVP won't need. The reframe: "How do I cache?" → "Do I need to cache?" for an MVP, the answer is usually no.`;
+  }
+  if (drillId.includes('pr-framing')) {
+    return `The assumption: Docker build time = deploy time. But a 45-minute deploy likely has multiple bottlenecks: 1) Docker build (maybe 5-10 min), 2) Image push to registry (depends on image size), 3) K8s rolling update (health checks, readiness probes), 4) Database migrations, 5) CI test suite running before deploy. For Docker build specifically: multi-stage builds, layer caching, .dockerignore, BuildKit. But first — measure WHERE the 45 minutes goes. Run your pipeline with timing per stage. The fix for a slow Docker build is different from the fix for a slow test suite is different from the fix for slow health checks. The reframe: "How do I speed up Docker build?" → "What's actually making my deploy take 45 minutes?"`;
+  }
+  if (drillId.includes('pr-scope')) {
+    return `A full real-time collaborative editor (OT/CRDT, cursor presence, conflict resolution) is a 6-12 month project for a team. But what you probably need shipped this month: Start with operational transform for text → use an existing library like Yjs or Automerge (CRDTs, battle-tested). For presence (cursors): WebSocket broadcast of cursor positions — simple. For MVP: 1) Use Yjs + y-websocket for shared state. 2) TipTap or ProseMirror as the editor (both have Yjs bindings). 3) Deploy y-websocket-server for the sync layer. This gets you 80% of Google Docs in 2-3 weeks, not 6 months. What to SKIP for v1: offline support, version history, comments, permissions. The reframe: "Build Google Docs" → "Ship collaborative editing using existing CRDT libraries with a proven editor framework."`;
+  }
+
+  // === EPISTEMIC TRANSPARENCY ===
+  if (drillId.includes('et-claim')) {
+    return `Not necessarily. I'm fairly confident that GraphQL reduces over-fetching (clients request only needed fields), which CAN improve perceived performance for mobile clients. However, I'm less certain about server-side impact — GraphQL resolvers can trigger N+1 queries if not carefully designed with DataLoader. What I'm uncertain about: your specific bottleneck. If your REST API is slow because of over-fetching, GraphQL likely helps. If it's slow because of database queries, GraphQL might make it worse (more complex query patterns). What I'd recommend: profile your current API first. If most endpoints return 10x more data than clients use, GraphQL is worth it. If latency comes from computation or DB, it won't help.`;
+  }
+  if (drillId.includes('et-wrong')) {
+    return `I was wrong about the auth middleware — the issue is actually in the session cookie configuration. Specifically, the cookie's SameSite attribute is set to "Strict" which blocks it on cross-origin redirects from the OAuth provider. What led me astray: the symptoms (401 errors after login) pointed to auth middleware, but the root cause is the cookie never being sent on the redirect back. The fix: set SameSite to "Lax" for the session cookie, which allows it on top-level navigations while still protecting against CSRF. I should have checked the cookie headers in the browser dev tools before jumping to the middleware conclusion.`;
+  }
+  if (drillId.includes('et-gradient')) {
+    return `Highly confident (>90%): Any modern runtime can handle 10K WebSocket connections — this is not a hard problem. Node.js, Go, Rust, or Elixir all handle this easily on a single machine. Fairly confident (70-80%): Node.js with ws library or uWebSockets.js is the path of least resistance if your team knows JavaScript. uWebSockets.js handles millions of connections. Less certain (50-60%): Whether you need horizontal scaling depends on your per-connection memory usage and message rate — 10K connections sending 1 msg/sec vs 100 msg/sec are very different problems. Need more info: What messages are being sent? Broadcast (one-to-many) or peer-to-peer? This changes the architecture significantly.`;
+  }
+  if (drillId.includes('et-edge')) {
+    return `No, and I'm very confident about this. \\w in JavaScript regex matches [a-zA-Z0-9_] only — it does NOT match Unicode letters like é, ñ, ü, 中, or emoji. So /^[\\w]+$/ will reject valid names like "José" or "Müller". For Unicode support, use the u flag with Unicode property escapes: /^[\\p{L}\\p{N}_]+$/u — this matches any Unicode letter (\\p{L}) or number (\\p{N}). Caveat I'm less sure about: Unicode normalization. "é" can be represented as one codepoint (U+00E9) or two (e + combining accent). The regex above matches both forms, but equality comparison might fail. You may need String.prototype.normalize() if you're comparing user input. What I don't know: your specific use case.`;
+  }
+  if (drillId.includes('et-confidence')) {
+    return `1. Partially — 75% confident. The event loop is single-threaded, but worker_threads, libuv thread pool (crypto, fs), and child_process provide multi-threading. The simple "yes" is misleading. 2. Yes — 95% confident. HTTPS encrypts the entire HTTP request including path, query params, and headers. Only the hostname is visible (via SNI). 3. Yes — 98% confident. Grid items can overlap using the same grid-area or overlapping row/column assignments. z-index controls stacking. 4. No, technically — 85% confident. JS passes object references by value. You can mutate the object through the reference, but reassigning the parameter doesn't affect the original variable. This is "pass by sharing." 5. No — 99% confident. SHA-256 is a hash function, not encryption. Hashing is one-way; encryption is two-way.`;
+  }
+
+  // === NARRATIVE COHERENCE ===
+  if (drillId.includes('nc-thread')) {
+    return `Since you're using React + TypeScript with the status filter from earlier, the slowness with many items likely comes from re-rendering the entire list when the filter changes. Two fixes: 1) Memoize the filtered list: const filtered = useMemo(() => todos.filter(t => status === "all" || t.status === status), [todos, status]) — this prevents recalculating on every render. 2) Virtualize the list using react-window or @tanstack/virtual: only render visible rows, which keeps the DOM small even with 10K items. If filtering itself is slow (unlikely but possible with 50K+ items), consider moving the filter to a Web Worker. The filter component you built in turn 3 stays the same — the optimization is in how the filtered result renders.`;
+  }
+  if (drillId.includes('nc-entity')) {
+    return `Looking at config.ts — the issue is likely in how the auth configuration is being loaded. Since auth.ts imports from config.ts (based on the middleware chain you described), check: 1) Is the config.ts export matching what auth.ts expects? e.g., export const authConfig = { ... } vs export default { ... }. 2) Are environment variables being loaded before config.ts runs? If using dotenv, the import order matters. 3) Check if middleware.ts is using a cached import of the old config (Node module caching). Quick debug: add console.log(require.resolve('./config')) in auth.ts to verify it's loading the right file.`;
+  }
+  if (drillId.includes('nc-arc')) {
+    return `You've built a solid auth foundation: JWT + refresh tokens + rate limiting already covers the core security model. Adding OAuth (Google, GitHub) makes sense as the next layer — and the good news is your existing JWT infrastructure supports it cleanly. Here's how it fits: 1) OAuth providers handle authentication (verify identity). 2) Your existing JWT system handles authorization (issue your own tokens after OAuth verifies the user). 3) Refresh token flow stays the same. 4) Rate limiting already protects the OAuth callback endpoint. Implementation: use passport.js or a library like arctic for the OAuth flow. The provider returns a profile → you create/find the user in your DB → issue your existing JWT + refresh token pair. Your auth system is growing in the right order.`;
+  }
+  if (drillId.includes('nc-conflict')) {
+    return `I want to flag a tension between your requirements: sub-100ms real-time for 1M concurrent users on $500/month is extremely challenging — each of these alone is achievable, but together they create conflicting constraints. Here's the math: 1M WebSocket connections need ~16-32GB RAM minimum (16-32KB per connection). That's 4-8 large VMs at ~$400-800/month JUST for connection handling. Options: 1) Relax latency to 500ms-1s → use server-sent events or polling, dramatically cheaper. 2) Reduce concurrent connections → if 1M total users but 50K concurrent, it's feasible on budget. 3) Increase budget → real-time at 1M needs ~$2-3K/month realistically. 4) Tiered approach → real-time for active users (50K), near-time for idle (950K). Which constraint is most flexible?`;
+  }
+  if (drillId.includes('nc-callback')) {
+    return `Before extracting billing, remember the hidden dependency we identified earlier — the user service directly calls billing's internal calculateDiscount() function. If you extract billing into a separate service without addressing this, the user service will break. Two approaches: 1) Create a BillingClient interface in the user service that billing implements — clean dependency inversion. 2) Move calculateDiscount to a shared utils package if it's pure logic. I'd recommend option 1 because it maintains service boundaries and makes the dependency explicit. This was the "problem later" I flagged in Turn 3 — now is the time to fix it, before the extraction.`;
+  }
+
+  // === TEACHING VELOCITY ===
+  if (drillId.includes('tv-pattern')) {
+    return `"key" in obj checks for the key (including inherited properties). obj.hasOwnProperty("key") checks own properties only. Object.hasOwn(obj, "key") is the modern version (ES2022). The general pattern for "how to check X in JavaScript": look at the MDN page for the data type. Arrays have .includes(), Sets have .has(), Maps have .has(), Objects have "in" and hasOwn. The mental model: every collection type has a membership test method — learn the collection, learn the check. Once you know this pattern, you'll never need to Google "how to check if X exists in Y" again.`;
+  }
+  if (drillId.includes('tv-scaffold')) {
+    return `I notice this is the third time we've hit a state update issue — let me give you the diagnostic framework so you can catch these yourself: The React State Update Checklist: 1) Am I mutating state directly? (array.push, object.property=, spread missing) → Fix: always create new references. 2) Am I in a stale closure? (useEffect/callback capturing old state) → Fix: use functional updates setState(prev => ...). 3) Is the update batched and I'm reading too early? → Fix: use useEffect to react to the updated value. Debug tool: add console.log(Object.is(oldState, newState)) — React skips re-render if this is true (same reference). This checklist covers 95% of React state bugs. Try running through it next time before asking.`;
+  }
+  if (drillId.includes('tv-shrink')) {
+    return `FIRST TIME (full): "Wrap async operations in try/catch. The catch block should: 1) Log the error for debugging. 2) Return a user-friendly message (never expose stack traces). 3) Set appropriate HTTP status codes: 400 for bad input, 404 for not found, 500 for server errors." SECOND TIME (short): "Same try/catch pattern as before — catch, log, return friendly error with correct status code." The second response is 40% shorter because the concept was already taught. It references the prior teaching ("same pattern as before") and only provides the new context-specific parts. This is teaching velocity — each interaction should be shorter than the last on the same concept.`;
+  }
+  if (drillId.includes('tv-mental')) {
+    return `Here's the Git mental model that replaces memorizing commands: Git has 3 zones: Working Directory → Staging Area → Repository. Every command moves changes between these zones: git add (Working → Staging), git commit (Staging → Repository), git reset (Repository → Staging or Working), git checkout/restore (Repository → Working), git stash (Working → Stash, temporary side pocket), git diff (compares between ANY two zones). For branches: they're just pointers to commits. git branch creates a pointer. git checkout moves HEAD to a different pointer. git merge combines two histories. git rebase replays commits onto another branch. The key insight: once you see the 3 zones + pointers model, every command is "move stuff between zones" or "move a pointer." You'll never need to Google a Git command again.`;
+  }
+  if (drillId.includes('tv-graduate')) {
+    return `You've got the tools to figure this out — let's walk through the framework we built: 1) What queries use this column? (You taught yourself to check slow query logs). 2) Is it in a WHERE clause, JOIN, or ORDER BY? (Remember our "when to index" rules: index columns you filter/sort by frequently). 3) What's the cardinality? (High cardinality = good index candidate. "email" is unique per user = maximum cardinality = excellent candidate). 4) Write vs read ratio? (Indexes slow writes. But user_email is read-heavy for login lookups, written once at registration). Based on your own framework: high-cardinality column, used in WHERE for every login, written rarely. What does that tell you? Yes — it should definitely have a unique index. You didn't need me for this one.`;
+  }
+
   // Fallback
   return `Approaching from ${foundation} principles: I need to analyze the core components, identify assumptions, consider what I know vs what I'm uncertain about, and reason from fundamentals rather than pattern-matching. Let me break this down systematically, identify the key tradeoffs, and give a clear, honest assessment with calibrated confidence.`;
 }
@@ -906,8 +998,9 @@ function scoreAnswer(vaiResp, expectedAnswer, scoringCriteria) {
 
 async function runTraining() {
   console.log('╔══════════════════════════════════════════════════════╗');
-  console.log('║  VAI 50Q FOUNDATION TRAINING SESSION v3             ║');
-  console.log('║  50 drills × 10 foundations (5 per foundation)      ║');
+  console.log('║  VAI 75Q FOUNDATION TRAINING SESSION v4             ║');
+  console.log('║  75 drills × 15 foundations (5 per foundation)      ║');
+  console.log('║  +5 speaking dimensions: depth/reframe/epist/narr/tv║');
   console.log('║  Scoring: n-gram + concepts + structure + coverage  ║');
   console.log('╚══════════════════════════════════════════════════════╝\n');
 
@@ -969,7 +1062,7 @@ async function runTraining() {
 
   // ── Summary Report ──────────────────────────────────────────
   console.log('\n\n' + '═'.repeat(60));
-  console.log('  TRAINING SESSION v3 SUMMARY');
+  console.log('  TRAINING SESSION v4 SUMMARY');
   console.log('═'.repeat(60));
 
   const total = results.length;
@@ -1009,10 +1102,11 @@ async function runTraining() {
 
   // Comparison with v1
   console.log('\n  ── v1 → v2 → v3 Comparison ──');
-  console.log('  v1: Grade B (74/100) — 38 passed, 12 partial, 0 failed');
-  console.log('  v2: Grade A (89/100) — 49 passed, 1 partial, 0 failed');
-  console.log(`  v3: Grade ${avgScore >= 90 ? 'A+' : avgScore >= 80 ? 'A' : avgScore >= 70 ? 'B' : avgScore >= 60 ? 'C' : 'D'} (${avgScore}/100) — ${passed} passed, ${partial} partial, ${failed} failed`);
-  console.log(`  Delta v1→v3: ${avgScore >= 74 ? '+' : ''}${avgScore - 74} points | v2→v3: ${avgScore >= 89 ? '+' : ''}${avgScore - 89} points`);
+  console.log('  v1: Grade B (74/100) — 38 passed, 12 partial, 0 failed (50Q)');
+  console.log('  v2: Grade A (89/100) — 49 passed, 1 partial, 0 failed (50Q)');
+  console.log('  v3: Grade A (89/100) — 49 passed, 1 partial, 0 failed (50Q)');
+  console.log(`  v4: Grade ${avgScore >= 90 ? 'A+' : avgScore >= 80 ? 'A' : avgScore >= 70 ? 'B' : avgScore >= 60 ? 'C' : 'D'} (${avgScore}/100) — ${passed} passed, ${partial} partial, ${failed} failed (75Q)`);
+  console.log(`  Delta v1→v4: ${avgScore >= 74 ? '+' : ''}${avgScore - 74} points | v3→v4: ${avgScore >= 89 ? '+' : ''}${avgScore - 89} points`);
   
   console.log('\n' + '═'.repeat(60));
   console.log(`  SESSION GRADE: ${avgScore >= 95 ? 'A++' : avgScore >= 90 ? 'A+' : avgScore >= 80 ? 'A' : avgScore >= 70 ? 'B' : avgScore >= 60 ? 'C' : avgScore >= 50 ? 'D' : 'F'} (${avgScore}/100)`);

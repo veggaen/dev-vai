@@ -15,7 +15,7 @@
 /* ── Intent Packet ────────────────────────────────────────────── */
 
 /** Actions the synthesizer can perform */
-export type ThorsenAction = 'create' | 'optimize' | 'debug' | 'explain' | 'transpile' | 'test';
+export type ThorsenAction = 'create' | 'optimize' | 'debug' | 'explain' | 'transpile' | 'test' | 'converse';
 
 /** Target domains for synthesis */
 export type ThorsenDomain =
@@ -27,6 +27,7 @@ export type ThorsenDomain =
   | 'pipeline'
   | 'vai-drill'
   | 'test'
+  | 'cognitive-test'
   | 'custom';
 
 /** Logic paradigm hint */
@@ -126,6 +127,30 @@ export function classifySyncState(latencyMs: number): ThorsenSyncState {
   if (latencyMs < THORSEN_CURVE.WORMHOLE_THRESHOLD) return 'wormhole';
   if (latencyMs <= THORSEN_CURVE.LINEAR_THRESHOLD) return 'parallel';
   return 'linear';
+}
+
+/* ── Conversation Curve ───────────────────────────────────────── */
+
+/** Per-turn quality point (from ConversationScorer CurvePoint) */
+export interface ConversationCurvePoint {
+  readonly turnIndex: number;
+  readonly turnScore: number;
+  readonly cumulativeScore: number;
+  readonly slope: number;
+}
+
+/**
+ * Conversation-level quality trajectory mapped onto the Thorsen Curve.
+ *
+ * A "wormhole conversation" has: turnsBeforeDecay === null, avgSlope > 0,
+ * and points.length >= 20 — meaning quality never drops and grows over time.
+ */
+export interface ConversationCurve {
+  readonly points: readonly ConversationCurvePoint[];
+  readonly state: ThorsenSyncState;
+  readonly avgSlope: number;
+  readonly contextRetentionScore: number;
+  readonly turnsBeforeDecay: number | null;
 }
 
 /* ── Adaptive Throughput Controller ───────────────────────────── */

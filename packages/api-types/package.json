@@ -1,0 +1,28 @@
+{
+  "name": "@vai/api-types",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./chat-ws": "./src/chat-ws.ts",
+    "./conversations": "./src/conversations.ts",
+    "./broadcast": "./src/broadcast.ts",
+    "./sandbox": "./src/sandbox.ts",
+    "./feedback": "./src/feedback.ts",
+    "./search": "./src/search.ts",
+    "./ingest": "./src/ingest.ts",
+    "./responses": "./src/responses.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

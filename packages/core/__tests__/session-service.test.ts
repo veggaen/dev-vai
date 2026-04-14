@@ -133,6 +133,28 @@ describe('SessionService', () => {
     expect(msgs.length).toBe(2);
   });
 
+  it('pages events newest-first with before cursors', () => {
+    const session = svc.createSession({ title: 'Paged Events', agentName: 'test', modelId: 'm1' });
+    const base = 1_700_000_000_000;
+
+    svc.addEvents([
+      { sessionId: session.id, type: 'message', timestamp: base + 1_000, content: 'first', meta: {} },
+      { sessionId: session.id, type: 'message', timestamp: base + 2_000, content: 'second', meta: {} },
+      { sessionId: session.id, type: 'message', timestamp: base + 3_000, content: 'third', meta: {} },
+      { sessionId: session.id, type: 'message', timestamp: base + 4_000, content: 'fourth', meta: {} },
+    ]);
+
+    const newestPage = svc.getEvents(session.id, { limit: 2, order: 'desc' });
+    expect(newestPage.map((event) => event.content)).toEqual(['fourth', 'third']);
+
+    const olderPage = svc.getEvents(session.id, {
+      limit: 2,
+      order: 'desc',
+      before: newestPage[newestPage.length - 1].timestamp,
+    });
+    expect(olderPage.map((event) => event.content)).toEqual(['second', 'first']);
+  });
+
   // ── Pinned Events ──
 
   it('pins and unpins events', () => {

@@ -61,6 +61,18 @@ export interface SearchSource {
   readonly trustScore: number;
 }
 
+export interface GroundedBuildBrief {
+  readonly intent: 'build' | 'edit';
+  readonly focusLabel: string;
+  readonly summary: string;
+  readonly recommendation: string;
+  readonly nextStep: string;
+  readonly reasons: readonly string[];
+  readonly sourceDomains: readonly string[];
+  readonly sourceCount: number;
+  readonly confidence: number;
+}
+
 export interface ChatChunk {
   readonly type: 'text_delta' | 'reasoning_delta' | 'tool_call_delta' | 'sources' | 'done';
   readonly textDelta?: string;
@@ -72,6 +84,8 @@ export interface ChatChunk {
   readonly followUps?: readonly string[];
   /** Confidence score (0-1) for the search results */
   readonly confidence?: number;
+  /** Structured evidence-to-build handoff for build-oriented grounded replies */
+  readonly groundedBrief?: GroundedBuildBrief;
   readonly usage?: TokenUsage;
   readonly durationMs?: number;
   /** Which specific model handled this request */

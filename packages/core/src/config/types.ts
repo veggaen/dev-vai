@@ -1,3 +1,5 @@
+import type { ConversationMode } from '../chat/modes.js';
+
 /**
  * VeggaAI Configuration Types
  *
@@ -99,6 +101,69 @@ export interface FallbackChain {
   readonly models: string[];
 }
 
+// ── Platform Auth ──
+
+export interface PlatformAuthProviderConfig {
+  readonly enabled: boolean;
+}
+
+export interface GoogleOAuthConfig extends PlatformAuthProviderConfig {
+  readonly clientId?: string;
+  readonly clientSecret?: string;
+  readonly scopes: readonly string[];
+}
+
+export interface PlatformAuthConfig {
+  /** Whether platform user auth is enabled at all */
+  readonly enabled: boolean;
+  /** Public runtime URL used for OAuth callback construction */
+  readonly publicUrl: string;
+  /** Preferred app URL used for post-login redirects */
+  readonly appUrl?: string;
+  /** Cookie name for platform sessions */
+  readonly sessionCookieName: string;
+  /** Session lifetime in hours */
+  readonly sessionTtlHours: number;
+  /** Secret used for session token hashing and auth state integrity */
+  readonly sessionSecret: string;
+  /** Enabled platform auth providers */
+  readonly providers: {
+    readonly google: GoogleOAuthConfig;
+  };
+}
+
+export interface ChatPromptRewriteRulesConfig {
+  /** Disambiguate repository context from frontend Context/provider concepts */
+  readonly disambiguateRepoContext: boolean;
+  /** Ground predictive prefetch asks in repository signals and fallback retrieval */
+  readonly groundPredictivePrefetch: boolean;
+  /** Ground abstract answer-engine asks in retrieval/indexing architecture */
+  readonly groundAnswerEngine: boolean;
+  /** Ask for concrete architecture sections instead of vague slogans */
+  readonly hardenArchitectureSketches: boolean;
+}
+
+export type ChatPromptRewriteProfile = 'light' | 'standard' | 'strict';
+
+export type ChatPromptRewriteResponseDepth = 'standard' | 'deep-design-memo';
+
+export interface ChatPromptRewriteConfig {
+  /** Enable conservative prompt hardening for ambiguous repo-native asks */
+  readonly enabled: boolean;
+  /** Current implementation strategy — kept explicit for future expansion */
+  readonly strategy: 'system-message';
+  /** Named hardening profile so operators can tune how forcefully ambiguity is corrected */
+  readonly profile: ChatPromptRewriteProfile;
+  /** Requested response depth for repo-native architecture answers */
+  readonly responseDepth: ChatPromptRewriteResponseDepth;
+  /** Conversation modes where hardening may run */
+  readonly applyToModes: readonly ConversationMode[];
+  /** Skip rewriting very large messages to avoid over-processing long prompts */
+  readonly maxUserMessageChars: number;
+  /** Fine-grained rule toggles */
+  readonly rules: ChatPromptRewriteRulesConfig;
+}
+
 // ── Main Config ──
 
 export interface VaiConfig {
@@ -132,12 +197,19 @@ export interface VaiConfig {
   readonly sandboxDocker: boolean;
 
   // ── Auth ──
+  /** Platform owner email — gates owner-only features (e.g. allowLearn). Env: VAI_OWNER_EMAIL */
+  readonly ownerEmail: string;
   /** API keys that grant access (empty = open / local-only) */
   readonly apiKeys: readonly string[];
   /** Whether API-key auth is enforced (auto-enabled when apiKeys is non-empty) */
   readonly authEnabled: boolean;
   /** Per-key rate limit (requests per minute), 0 = unlimited */
   readonly rateLimitPerMinute: number;
+  /** Platform user auth and OAuth settings */
+  readonly platformAuth: PlatformAuthConfig;
+
+  /** Conservative prompt hardening for ambiguous repo-native questions */
+  readonly chatPromptRewrite: ChatPromptRewriteConfig;
 
   // ── Features ──
   /** Enable tool calling in chat (requires capable model) */

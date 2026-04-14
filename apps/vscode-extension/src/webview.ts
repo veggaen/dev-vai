@@ -81,9 +81,9 @@ export function openLogsPanel(context: vscode.ExtensionContext): void {
 
 async function loadServerEvents(sessionId: string): Promise<void> {
   try {
-    const data = await apiCall(`/api/sessions/${sessionId}`);
-    if (data.events) {
-      allEvents = data.events.map((e: any) => ({
+    const events = await apiCall(`/api/sessions/${sessionId}/events?order=asc`);
+    if (Array.isArray(events)) {
+      allEvents = events.map((e: any) => ({
         type: e.type,
         content: e.content,
         meta: e.meta,

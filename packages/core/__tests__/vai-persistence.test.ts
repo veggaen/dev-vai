@@ -37,6 +37,22 @@ describe('VaiEngine Persistence', () => {
     expect(snapshot.learnedEntries.every(e => !e.source.startsWith('bootstrap'))).toBe(true);
   });
 
+  it('filters polluted learned entries out of persistence snapshots', () => {
+    const engine = new VaiEngine({ persistPath });
+    engine.teach('clean topic', 'This is a clean learned response.', 'user-taught', 'en');
+    engine.teach(
+      'epic agent merge',
+      'SearchCtrl+K Toggle Sidebar Cancel Request was interrupted by the user. 20 (Beta) Upgrade to SuperGrok.',
+      'auto-learned',
+      'en',
+    );
+    engine.flushPersist();
+
+    const snapshot: VaiSnapshot = JSON.parse(fs.readFileSync(persistPath, 'utf-8'));
+    expect(snapshot.learnedEntries.some((entry) => entry.pattern === 'clean topic')).toBe(true);
+    expect(snapshot.learnedEntries.some((entry) => /supergrok/i.test(entry.response))).toBe(false);
+  });
+
   it('loads persisted entries on construction', () => {
     // Step 1: Teach and persist
     const engine1 = new VaiEngine({ persistPath });
@@ -48,6 +64,58 @@ describe('VaiEngine Persistence', () => {
     const match = engine2.knowledge.findBestMatch('my custom topic');
     expect(match).not.toBeNull();
     expect(match!.response).toBe('This is a custom response.');
+  });
+
+  it('skips polluted persisted entries during load', () => {
+    const snapshot: VaiSnapshot = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      learnedEntries: [
+        {
+          pattern: 'clean topic',
+          response: 'This is a clean learned response.',
+          frequency: 1,
+          source: 'user-taught',
+          language: 'en',
+        },
+        {
+          pattern: 'epic agent merge',
+          response: 'SearchCtrl+K Toggle Sidebar Cancel Request was interrupted by the user. 20 (Beta) Upgrade to SuperGrok.',
+          frequency: 1,
+          source: 'auto-learned',
+          language: 'en',
+        },
+      ],
+      strategyStats: {},
+      missedTopics: {},
+    };
+    fs.writeFileSync(persistPath, JSON.stringify(snapshot), 'utf-8');
+
+    const engine = new VaiEngine({ persistPath });
+    expect(engine.knowledge.findBestMatch('clean topic')?.response).toBe('This is a clean learned response.');
+    expect(engine.knowledge.findBestMatch('epic agent merge')).toBeNull();
+  });
+
+  it('skips persisted AI app-shell chrome entries during load', () => {
+    const snapshot: VaiSnapshot = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      learnedEntries: [
+        {
+          pattern: 'perplexity',
+          response: 'Search Computer New Thread History Discover Spaces Finance More Recent make a good prompt for me Account & Settings Upgrade to access the top AI models Ask anything Model Computer.',
+          frequency: 2,
+          source: 'https://www.perplexity.ai/',
+          language: 'en',
+        },
+      ],
+      strategyStats: {},
+      missedTopics: {},
+    };
+    fs.writeFileSync(persistPath, JSON.stringify(snapshot), 'utf-8');
+
+    const engine = new VaiEngine({ persistPath });
+    expect(engine.knowledge.findBestMatch('what is perplexity')).toBeNull();
   });
 
   it('preserves bootstrap entries alongside persisted ones', () => {

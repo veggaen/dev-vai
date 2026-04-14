@@ -32,7 +32,13 @@ const taskRegistry = new Map<EvalTrack, EvalTask[]>();
 /** Register eval tasks for a track */
 export function registerEvalTasks(track: EvalTrack, tasks: EvalTask[]): void {
   const existing = taskRegistry.get(track) ?? [];
-  taskRegistry.set(track, [...existing, ...tasks]);
+  const byId = new Map(existing.map((task) => [task.id, task]));
+
+  for (const task of tasks) {
+    byId.set(task.id, task);
+  }
+
+  taskRegistry.set(track, Array.from(byId.values()));
 }
 
 /** Get all tasks for a track */
@@ -47,15 +53,33 @@ export function getEvalTracks(): EvalTrack[] {
 
 // ── Scorer ──
 
+function formatChecklistDetail(
+  matched: string[],
+  missing: string[],
+  violations: string[],
+  passedCount: number,
+  totalCount: number,
+): string {
+  const parts = [`Checklist ${passedCount}/${totalCount}`];
+  if (matched.length > 0) parts.push(`matched: ${matched.join(', ')}`);
+  if (missing.length > 0) parts.push(`missing: ${missing.join(', ')}`);
+  if (violations.length > 0) parts.push(`violations: ${violations.join(', ')}`);
+  return parts.join('; ');
+}
+
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
 function scoreResponse(response: string, task: EvalTask): { passed: boolean; score: number; detail: string } {
   const { strategy, value, threshold } = task.expected;
   const normalized = response.toLowerCase().trim();
 
   switch (strategy) {
     case 'contains': {
-      const terms = value.toLowerCase().split('|').map((t) => t.trim());
+      const terms = (value ?? '').toLowerCase().split('|').map((t) => t.trim()).filter(Boolean);
       const matched = terms.filter((t) => normalized.includes(t));
-      const score = matched.length / terms.length;
+      const score = terms.length > 0 ? matched.length / terms.length : 0;
       return {
         passed: score >= (threshold ?? 0.5),
         score,
@@ -64,7 +88,7 @@ function scoreResponse(response: string, task: EvalTask): { passed: boolean; sco
     }
 
     case 'regex': {
-      const regex = new RegExp(value, 'i');
+      const regex = new RegExp(value ?? '', 'i');
       const match = regex.test(response);
       return {
         passed: match,
@@ -74,7 +98,7 @@ function scoreResponse(response: string, task: EvalTask): { passed: boolean; sco
     }
 
     case 'exact': {
-      const match = normalized === value.toLowerCase().trim();
+      const match = normalized === (value ?? '').toLowerCase().trim();
       return {
         passed: match,
         score: match ? 1.0 : 0.0,
@@ -85,13 +109,85 @@ function scoreResponse(response: string, task: EvalTask): { passed: boolean; sco
     case 'semantic': {
       // Placeholder — will use embeddings once available
       // For now, fall back to fuzzy contains
-      const terms = value.toLowerCase().split(/\s+/).filter((t) => t.length > 3);
+      const terms = (value ?? '').toLowerCase().split(/\s+/).filter((t) => t.length > 3);
       const matched = terms.filter((t) => normalized.includes(t));
       const score = terms.length > 0 ? matched.length / terms.length : 0;
       return {
         passed: score >= (threshold ?? 0.6),
         score,
         detail: `Semantic fallback: ${matched.length}/${terms.length} key terms found`,
+      };
+    }
+
+    case 'checklist': {
+      const matched: string[] = [];
+      const missing: string[] = [];
+      const violations: string[] = [];
+      let passedCount = 0;
+      let totalCount = 0;
+
+      for (const section of task.expected.sections ?? []) {
+        totalCount += 1;
+        const ok = normalized.includes(section.toLowerCase());
+        if (ok) {
+          passedCount += 1;
+          matched.push(`section:${section}`);
+        } else {
+          missing.push(`section:${section}`);
+        }
+      }
+
+      for (const term of task.expected.required ?? []) {
+        totalCount += 1;
+        const ok = normalized.includes(term.toLowerCase());
+        if (ok) {
+          passedCount += 1;
+          matched.push(`term:${term}`);
+        } else {
+          missing.push(`term:${term}`);
+        }
+      }
+
+      for (const group of task.expected.anyOf ?? []) {
+        const label = group.join('/');
+        totalCount += 1;
+        const ok = group.some((term) => normalized.includes(term.toLowerCase()));
+        if (ok) {
+          passedCount += 1;
+          matched.push(`any:${label}`);
+        } else {
+          missing.push(`any:${label}`);
+        }
+      }
+
+      if (typeof task.expected.minWords === 'number') {
+        totalCount += 1;
+        const wordCount = countWords(response);
+        const ok = wordCount >= task.expected.minWords;
+        if (ok) {
+          passedCount += 1;
+          matched.push(`minWords:${task.expected.minWords}`);
+        } else {
+          missing.push(`minWords:${task.expected.minWords} (got ${wordCount})`);
+        }
+      }
+
+      for (const term of task.expected.forbidden ?? []) {
+        totalCount += 1;
+        const ok = !normalized.includes(term.toLowerCase());
+        if (ok) {
+          passedCount += 1;
+          matched.push(`avoid:${term}`);
+        } else {
+          violations.push(`term:${term}`);
+        }
+      }
+
+      const score = totalCount > 0 ? passedCount / totalCount : 0;
+      return {
+        passed: score >= (threshold ?? 0.7),
+        score,
+        detail: formatChecklistDetail(matched, missing, violations, passedCount, totalCount),
       };
     }
 

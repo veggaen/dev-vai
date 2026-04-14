@@ -1,15 +1,15 @@
-import puppeteer from 'puppeteer';
+import { launchVisualBrowser, maximizeBrowserWindow, wait } from './visual-browser.mjs';
 
-const b = await puppeteer.launch({ headless: false, slowMo: 50, args: ['--no-sandbox', '--window-size=2560,1440'] });
-const p = await b.newPage();
-await p.setViewport({ width: 2560, height: 1440 });
+const { browser: b, page: p } = await launchVisualBrowser();
+const viewport = await maximizeBrowserWindow(p);
+console.log(`Viewport ${viewport.width}x${viewport.height} on screen ${viewport.screenWidth}x${viewport.screenHeight}`);
 
 const logs = [];
 p.on('console', msg => logs.push({ type: msg.type(), text: msg.text() }));
 p.on('pageerror', err => logs.push({ type: 'pageerror', text: err.message }));
 
 await p.goto('http://localhost:5173', { waitUntil: 'networkidle0', timeout: 15000 });
-await new Promise(r => setTimeout(r, 3000));
+await wait(3000);
 
 // Deep diagnostic on all groups, panels, separators and builder content
 const debug = await p.evaluate(() => {
@@ -103,7 +103,7 @@ if (sep) {
   await p.mouse.down();
   await p.mouse.move(box.x + box.width / 2 + 100, box.y + box.height / 2, { steps: 10 });
   await p.mouse.up();
-  await new Promise(r => setTimeout(r, 500));
+  await wait(500);
 
   const afterW = await p.evaluate(() => document.getElementById('chat')?.offsetWidth);
   console.log(`Chat panel: ${beforeW}px → ${afterW}px (delta: ${afterW - beforeW}px)`);

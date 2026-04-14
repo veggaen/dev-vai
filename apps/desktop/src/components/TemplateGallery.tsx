@@ -45,8 +45,28 @@ interface StackInfo {
 
 interface Props {
   onDeploy: (stackId: string, tier: string, stackName?: string, tierName?: string) => void;
+  onTemplate?: (templateId: string, name: string) => void;
   isDeploying: boolean;
 }
+
+const QUICK_STARTS = [
+  {
+    id: 'react-vite',
+    label: 'React + Vite',
+    description: 'SPA, tool, game, prototype',
+    icon: '⚡',
+    color: 'from-cyan-500/10 to-cyan-500/3 border-cyan-800/30 hover:border-cyan-600/40',
+    iconColor: 'text-cyan-400',
+  },
+  {
+    id: 'nextjs',
+    label: 'Next.js 15',
+    description: 'Full-stack app with API routes',
+    icon: '▲',
+    color: 'from-violet-500/10 to-violet-500/3 border-violet-800/30 hover:border-violet-600/40',
+    iconColor: 'text-violet-400',
+  },
+] as const;
 
 /* ── New tier display names & metadata ── */
 
@@ -123,7 +143,7 @@ const STACK_COLORS: Record<string, string> = {
 
 /* ── Main Component ── */
 
-export function TemplateGallery({ onDeploy, isDeploying }: Props) {
+export function TemplateGallery({ onDeploy, onTemplate, isDeploying }: Props) {
   const [stacks, setStacks] = useState<StackInfo[]>([]);
   const [selectedStack, setSelectedStack] = useState<StackInfo | null>(null);
   const [selectedTier, setSelectedTier] = useState<string>('basic');
@@ -426,11 +446,40 @@ export function TemplateGallery({ onDeploy, isDeploying }: Props) {
         <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/10 ring-1 ring-violet-500/20">
           <Rocket className="h-5 w-5 text-violet-400" />
         </div>
-        <h3 className="text-sm font-semibold text-zinc-200">Deploy a Stack</h3>
+        <h3 className="text-sm font-semibold text-zinc-200">Start Building</h3>
         <p className="mt-1 text-[11px] text-zinc-500">
-          Pick a preset or build your own component stack
+          Quick scaffold or pick a full stack to deploy
         </p>
       </div>
+
+      {/* ── Quick Start — instant scaffolds ── */}
+      {onTemplate && (
+        <div className="mb-4">
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-600">Quick Start</p>
+          <div className="grid grid-cols-2 gap-2">
+            {QUICK_STARTS.map((qs) => (
+              <button
+                key={qs.id}
+                onClick={() => onTemplate(qs.id, 'Vai App')}
+                disabled={isDeploying}
+                className={`group/qs rounded-lg border bg-gradient-to-b p-3 text-left transition-all hover:shadow-md hover:shadow-black/20 ${qs.color} disabled:opacity-50`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`text-base font-bold ${qs.iconColor}`}>{qs.icon}</span>
+                  <span className="text-xs font-semibold text-zinc-200">{qs.label}</span>
+                </div>
+                <p className="text-[10px] leading-tight text-zinc-500">{qs.description}</p>
+                <div className="mt-1.5 flex items-center gap-1 text-[9px] text-zinc-600">
+                  <Zap className="h-2.5 w-2.5" />
+                  Instant scaffold
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-600">Full Stacks</p>
 
       {/* Stack cards */}
       <div className="grid grid-cols-2 gap-2">

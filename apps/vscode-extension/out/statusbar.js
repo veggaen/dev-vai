@@ -42,6 +42,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.registerStatusBar = registerStatusBar;
 const vscode = __importStar(require("vscode"));
 const session_js_1 = require("./session.js");
+const platform_auth_js_1 = require("./platform-auth.js");
 /* ── State ─────────────────────────────────────────────────────── */
 let statusBarItem;
 /* ── Initialize ────────────────────────────────────────────────── */
@@ -49,12 +50,20 @@ function registerStatusBar(context) {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     context.subscriptions.push(statusBarItem);
     // Update on session changes
-    context.subscriptions.push((0, session_js_1.onSessionChange)(() => updateStatusBar()), (0, session_js_1.onEventPushed)(() => updateStatusBar()));
+    context.subscriptions.push((0, session_js_1.onSessionChange)(() => updateStatusBar()), (0, session_js_1.onEventPushed)(() => updateStatusBar()), (0, platform_auth_js_1.onDidChangePlatformAuthState)(() => updateStatusBar()));
     updateStatusBar();
 }
 /* ── Update ────────────────────────────────────────────────────── */
 function updateStatusBar() {
     const session = (0, session_js_1.getActiveSession)();
+    const auth = (0, platform_auth_js_1.getPlatformAuthState)();
+    const platformLine = auth.user
+        ? `Platform: ${auth.user.email}`
+        : auth.status === 'signing-in'
+            ? 'Platform: connecting'
+            : auth.error
+                ? `Platform: ${auth.error}`
+                : 'Platform: signed out';
     if (session) {
         const count = session.eventCount;
         const title = session.title.length > 25 ? session.title.slice(0, 25) + '…' : session.title;
@@ -64,6 +73,7 @@ function updateStatusBar() {
             `ID: ${session.id}`,
             `Events: ${count}`,
             `Buffered: ${session.eventBuffer.length}`,
+            platformLine,
             '',
             'Click to end session',
         ].join('\n');
@@ -73,7 +83,7 @@ function updateStatusBar() {
     }
     else {
         statusBarItem.text = '$(circle-outline) Vai: No session';
-        statusBarItem.tooltip = 'Click to start a dev log session';
+        statusBarItem.tooltip = `${platformLine}\n\nClick to start a dev log session`;
         statusBarItem.command = 'vai.startSession';
         statusBarItem.backgroundColor = undefined;
         statusBarItem.show();

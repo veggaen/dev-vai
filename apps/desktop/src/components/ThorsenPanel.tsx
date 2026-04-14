@@ -13,12 +13,15 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Orbit, Zap, Copy, Check, ChevronDown, Play,
-  FileCode2, CircleDot, GitBranch,
+  FileCode2, CircleDot, GitBranch, Activity,
+  AlertTriangle, TrendingUp, Gauge, BarChart3,
 } from 'lucide-react';
 import {
   thorsenSynthesize,
   thorsenPulse,
   thorsenTemplates,
+  thorsenHealth,
+  thorsenSelfImprove,
   type ThorsenIntent,
   type ThorsenResponse,
   type ThorsenSyncState,
@@ -30,6 +33,8 @@ import {
   type ThorsenTemplate,
   type PipelineTrace,
   type PipelineStage,
+  type ThorsenHealthSummary,
+  type SelfImprovementReport,
 } from '../lib/thorsen.js';
 
 /* ── Constants ────────────────────────────────────────────────── */
@@ -118,9 +123,17 @@ export function ThorsenPanel() {
   // History
   const [history, setHistory] = useState<Array<{ intent: ThorsenIntent; response: ThorsenResponse; timestamp: number }>>([]);
 
-  // Load templates on mount
+  // Benchmark Dashboard
+  const [health, setHealth] = useState<ThorsenHealthSummary | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [report, setReport] = useState<SelfImprovementReport | null>(null);
+  const [benchRunning, setBenchRunning] = useState(false);
+
+  // Load templates + health on mount
   useEffect(() => {
     thorsenTemplates().then(r => setTemplates(r.templates)).catch(() => {});
+    setHealthLoading(true);
+    thorsenHealth().then(h => setHealth(h)).catch(() => {}).finally(() => setHealthLoading(false));
   }, []);
 
   // Pulse monitor — measure sync every 2s
@@ -175,6 +188,26 @@ export function ThorsenPanel() {
     setDomain(t.domain as ThorsenDomain);
     setLogicType(t.logicType as ThorsenLogicType);
     setShowTemplates(false);
+  }, []);
+
+  const handleRunBenchmark = useCallback(async () => {
+    setBenchRunning(true);
+    try {
+      const r = await thorsenSelfImprove();
+      setReport(r);
+      setHealth({
+        grade: r.grade,
+        templates: r.totalTemplates,
+        avgScore: Math.round(r.stats.avgScore * 100) / 100,
+        wormholeRate: Math.round(r.stats.wormholeRate * 100),
+        successRate: Math.round(r.stats.successRate * 100),
+        gaps: r.gaps.length,
+        suggestions: r.suggestions.length,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Benchmark failed');
+    }
+    setBenchRunning(false);
   }, []);
 
   return (
@@ -440,6 +473,15 @@ export function ThorsenPanel() {
             </div>
           )}
 
+          {/* ─── Benchmark Dashboard ─────────────────────────── */}
+          <BenchmarkDashboard
+            health={health}
+            healthLoading={healthLoading}
+            report={report}
+            benchRunning={benchRunning}
+            onRunBenchmark={handleRunBenchmark}
+          />
+
           {/* Thorsen Curve visualization */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
             <div className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
@@ -673,6 +715,289 @@ function PipelineTraceView({ trace }: { trace: PipelineTrace }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+
+/* ── Benchmark Dashboard ─────────────────────────────────────── */
+
+const GRADE_COLORS: Record<string, string> = {
+  A: '#10b981',
+  B: '#34d399',
+  C: '#f59e0b',
+  D: '#f97316',
+  F: '#ef4444',
+};
+
+const SEVERITY_STYLES: Record<string, { border: string; text: string; bg: string }> = {
+  critical: { border: 'border-red-500/40', text: 'text-red-400', bg: 'bg-red-500/10' },
+  important: { border: 'border-amber-500/40', text: 'text-amber-400', bg: 'bg-amber-500/10' },
+  'nice-to-have': { border: 'border-zinc-700', text: 'text-zinc-400', bg: 'bg-zinc-800/30' },
+};
+
+function BenchmarkDashboard({
+  health,
+  healthLoading,
+  report,
+  benchRunning,
+  onRunBenchmark,
+}: {
+  health: ThorsenHealthSummary | null;
+  healthLoading: boolean;
+  report: SelfImprovementReport | null;
+  benchRunning: boolean;
+  onRunBenchmark: () => void;
+}) {
+  const [showDetails, setShowDetails] = useState(false);
+
+  return (
+    <div className="space-y-3">
+      {/* Health summary card */}
+      <div className="group/bench relative overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 backdrop-blur-sm transition-all duration-300 hover:border-emerald-500/20">
+        <div className="pointer-events-none absolute -inset-px rounded-xl bg-gradient-to-br from-emerald-500/0 via-teal-500/0 to-cyan-500/0 opacity-0 transition-opacity duration-500 group-hover/bench:from-emerald-500/5 group-hover/bench:via-teal-500/3 group-hover/bench:to-cyan-500/5 group-hover/bench:opacity-100" />
+        <div className="relative">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[13px] font-bold uppercase tracking-wide text-emerald-400">
+              <div className="h-1 w-1 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]" />
+              <Activity className="h-3.5 w-3.5" />
+              Benchmark Dashboard
+            </div>
+            <button
+              onClick={onRunBenchmark}
+              disabled={benchRunning}
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:bg-emerald-500 hover:shadow-lg hover:shadow-emerald-500/25 disabled:opacity-50"
+            >
+              {benchRunning ? (
+                <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>
+                  <Gauge className="h-3 w-3" />
+                </motion.div>
+              ) : (
+                <BarChart3 className="h-3 w-3" />
+              )}
+              {benchRunning ? 'Running...' : 'Run Full Benchmark'}
+            </button>
+          </div>
+
+          {healthLoading && !health && (
+            <div className="flex items-center gap-2 py-4 text-xs text-zinc-500">
+              <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>
+                <Gauge className="h-3.5 w-3.5" />
+              </motion.div>
+              Loading health metrics...
+            </div>
+          )}
+
+          {health && (
+            <div className="grid grid-cols-4 gap-3 sm:grid-cols-7">
+              {/* Grade */}
+              <div className="col-span-1 flex flex-col items-center justify-center rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                <motion.div
+                  className="text-3xl font-black"
+                  style={{ color: GRADE_COLORS[health.grade] ?? '#71717a' }}
+                  animate={{ scale: [1, 1.05, 1] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                >
+                  {health.grade}
+                </motion.div>
+                <div className="text-[9px] uppercase tracking-widest text-zinc-600">Grade</div>
+              </div>
+
+              <MetricCard label="Templates" value={health.templates} icon={<FileCode2 className="h-3 w-3" />} />
+              <MetricCard label="Avg Score" value={`${(health.avgScore * 100).toFixed(0)}%`} icon={<TrendingUp className="h-3 w-3" />} color={health.avgScore >= 0.95 ? '#10b981' : health.avgScore >= 0.8 ? '#f59e0b' : '#ef4444'} />
+              <MetricCard label="Wormhole" value={`${health.wormholeRate}%`} icon={<Zap className="h-3 w-3" />} color={health.wormholeRate >= 90 ? '#10b981' : health.wormholeRate >= 50 ? '#f59e0b' : '#ef4444'} />
+              <MetricCard label="Success" value={`${health.successRate}%`} icon={<Check className="h-3 w-3" />} color={health.successRate >= 95 ? '#10b981' : health.successRate >= 80 ? '#f59e0b' : '#ef4444'} />
+              <MetricCard label="Gaps" value={health.gaps} icon={<AlertTriangle className="h-3 w-3" />} color={health.gaps === 0 ? '#10b981' : health.gaps <= 5 ? '#f59e0b' : '#ef4444'} />
+              <MetricCard label="Actions" value={health.suggestions} icon={<Activity className="h-3 w-3" />} color={health.suggestions === 0 ? '#10b981' : '#f59e0b'} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Full report details */}
+      {report && (
+        <>
+          <button
+            onClick={() => setShowDetails(!showDetails)}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-800 py-1.5 text-[11px] text-zinc-500 transition-all hover:border-zinc-700 hover:text-zinc-300"
+          >
+            {showDetails ? 'Hide' : 'Show'} Full Report
+            <ChevronDown className={`h-3 w-3 transition-transform ${showDetails ? 'rotate-180' : ''}`} />
+          </button>
+
+          <AnimatePresence>
+            {showDetails && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="space-y-3 overflow-hidden"
+              >
+                {/* Run info */}
+                <div className="flex items-center gap-4 rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-2 text-[10px] text-zinc-500">
+                  <span>Ran: {new Date(report.timestamp).toLocaleTimeString()}</span>
+                  <span>Duration: {report.benchmarkDurationMs.toFixed(0)}ms</span>
+                  <span>Lines: {report.stats.totalCodeLines.toLocaleString()}</span>
+                  <span>Avg latency: {report.stats.avgLatencyMs.toFixed(1)}ms</span>
+                </div>
+
+                {/* Sync state distribution */}
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+                  <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-zinc-600">Sync State Distribution</div>
+                  <div className="flex gap-1">
+                    {report.stats.wormholeRate > 0 && (
+                      <motion.div initial={{ width: 0 }} animate={{ width: `${report.stats.wormholeRate * 100}%` }} className="h-5 rounded-l bg-emerald-500/60" title={`Wormhole: ${(report.stats.wormholeRate * 100).toFixed(0)}%`} />
+                    )}
+                    {report.stats.parallelRate > 0 && (
+                      <motion.div initial={{ width: 0 }} animate={{ width: `${report.stats.parallelRate * 100}%` }} className="h-5 bg-amber-500/60" title={`Parallel: ${(report.stats.parallelRate * 100).toFixed(0)}%`} />
+                    )}
+                    {report.stats.linearRate > 0 && (
+                      <motion.div initial={{ width: 0 }} animate={{ width: `${report.stats.linearRate * 100}%` }} className="h-5 rounded-r bg-red-500/60" title={`Linear: ${(report.stats.linearRate * 100).toFixed(0)}%`} />
+                    )}
+                  </div>
+                  <div className="mt-1 flex justify-between text-[9px] text-zinc-600">
+                    <span className="text-emerald-400/70">Wormhole {(report.stats.wormholeRate * 100).toFixed(0)}%</span>
+                    <span className="text-amber-400/70">Parallel {(report.stats.parallelRate * 100).toFixed(0)}%</span>
+                    <span className="text-red-400/70">Linear {(report.stats.linearRate * 100).toFixed(0)}%</span>
+                  </div>
+                </div>
+
+                {/* Suggestions */}
+                {report.suggestions.length > 0 && (
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
+                      Improvement Suggestions ({report.suggestions.length})
+                    </div>
+                    <div className="space-y-2">
+                      {report.suggestions.map((s, i) => {
+                        const style = SEVERITY_STYLES[s.severity] ?? SEVERITY_STYLES['nice-to-have'];
+                        return (
+                          <motion.div
+                            key={i}
+                            initial={{ opacity: 0, x: -6 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: i * 0.04 }}
+                            className={`rounded-lg border ${style.border} ${style.bg} px-3 py-2`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${style.text} ${style.bg}`}>{s.severity}</span>
+                              <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-500">{s.category}</span>
+                              <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-500">{s.effort}</span>
+                            </div>
+                            <div className={`mt-1 text-xs font-medium ${style.text}`}>{s.title}</div>
+                            <div className="mt-0.5 text-[10px] text-zinc-500">{s.description}</div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Next Steps */}
+                {report.nextSteps.length > 0 && (
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-zinc-600">Next Steps</div>
+                    <div className="space-y-1">
+                      {report.nextSteps.map((step, i) => (
+                        <div key={i} className="flex items-start gap-2 text-[11px] text-zinc-400">
+                          <span className="mt-0.5 text-violet-400">{i + 1}.</span>
+                          <span>{step}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Template results table (collapsed by default) */}
+                <TemplateResultsTable results={report.results} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  icon,
+  color,
+}: {
+  label: string;
+  value: string | number;
+  icon: React.ReactNode;
+  color?: string;
+}) {
+  return (
+    <div className="flex flex-col items-center rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5">
+      <div className="text-zinc-500">{icon}</div>
+      <div className="mt-1 text-sm font-bold" style={{ color: color ?? '#e4e4e7' }}>{value}</div>
+      <div className="text-[9px] uppercase tracking-widest text-zinc-600">{label}</div>
+    </div>
+  );
+}
+
+function TemplateResultsTable({ results }: { results: SelfImprovementReport['results'] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (results.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between text-[10px] font-semibold uppercase tracking-widest text-zinc-600 hover:text-zinc-400"
+      >
+        Template Results ({results.length})
+        <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="mt-2 max-h-[40vh] overflow-auto"
+          >
+            <table className="w-full text-[10px]">
+              <thead>
+                <tr className="border-b border-zinc-800 text-left text-zinc-600">
+                  <th className="pb-1 pr-2">Template</th>
+                  <th className="pb-1 pr-2">Score</th>
+                  <th className="pb-1 pr-2">Latency</th>
+                  <th className="pb-1 pr-2">Sync</th>
+                  <th className="pb-1 pr-2">Lines</th>
+                  <th className="pb-1">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r, i) => (
+                  <tr key={i} className="border-b border-zinc-800/30 hover:bg-zinc-800/20">
+                    <td className="py-1 pr-2 font-mono text-zinc-400">{r.templateKey}</td>
+                    <td className="py-1 pr-2 font-bold" style={{ color: r.thorsenScore >= 0.95 ? '#10b981' : r.thorsenScore >= 0.8 ? '#f59e0b' : '#ef4444' }}>
+                      {(r.thorsenScore * 100).toFixed(0)}%
+                    </td>
+                    <td className="py-1 pr-2 text-zinc-500">{r.pipelineLatencyMs.toFixed(1)}ms</td>
+                    <td className="py-1 pr-2">
+                      <span style={{ color: SYNC_COLORS[r.syncState as ThorsenSyncState] ?? '#71717a' }}>{r.syncState}</span>
+                    </td>
+                    <td className="py-1 pr-2 text-zinc-500">{r.codeLines}</td>
+                    <td className="py-1">
+                      {r.success ? (
+                        <span className="text-emerald-400">{r.verified ? '✓ verified' : '✓ ok'}</span>
+                      ) : (
+                        <span className="text-red-400" title={r.error}>✗ {r.error?.substring(0, 30)}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

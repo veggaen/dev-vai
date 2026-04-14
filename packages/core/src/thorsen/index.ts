@@ -14,6 +14,8 @@ export type {
   ThorsenSyncState,
   ThorsenSyncStatus,
   ThorsenResponse,
+  ConversationCurvePoint,
+  ConversationCurve,
 } from './types.js';
 
 export { THORSEN_CURVE, classifySyncState, ThorsenAdaptiveController } from './types.js';

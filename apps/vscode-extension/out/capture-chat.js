@@ -6,6 +6,7 @@
  * 1. Proxies user messages to Copilot's language model
  * 2. Auto-logs both sides of the conversation
  * 3. Creates sessions on first message
+ * 4. /broadcast command — renders desktop broadcasts inline in chat
  *
  * This is the INTERACTIVE capture layer — for when users actively use @vai.
  * The passive capture (files, terminals, editors) runs independently.
@@ -44,12 +45,76 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.enqueueBroadcast = enqueueBroadcast;
+exports.hasPendingBroadcasts = hasPendingBroadcasts;
 exports.handleChatRequest = handleChatRequest;
 exports.registerChatParticipant = registerChatParticipant;
+exports.triggerBroadcastInChat = triggerBroadcastInChat;
 const vscode = __importStar(require("vscode"));
 const session_js_1 = require("./session.js");
+const api_js_1 = require("./api.js");
+const pendingBroadcasts = [];
+function enqueueBroadcast(item) {
+    pendingBroadcasts.push(item);
+}
+function hasPendingBroadcasts() {
+    return pendingBroadcasts.length > 0;
+}
 /* ── Chat Handler ──────────────────────────────────────────────── */
 async function handleChatRequest(request, _context, stream, token) {
+    // ── /broadcast command — render pending desktop messages + auto-respond via LLM ──
+    if (request.command === 'broadcast') {
+        if (pendingBroadcasts.length === 0) {
+            stream.markdown('No pending messages from VeggaAI Desktop.\n');
+            return {};
+        }
+        const items = pendingBroadcasts.splice(0); // drain queue
+        for (const item of items) {
+            const time = item.receivedAt.toLocaleTimeString();
+            stream.markdown(`**📩 VeggaAI Desktop** *(${time})*\n\n`);
+            stream.markdown(`> ${item.content.replace(/\n/g, '\n> ')}\n\n`);
+            // Process through Copilot LLM and send response back to desktop
+            try {
+                const models = await vscode.lm.selectChatModels({ vendor: 'copilot', family: 'gpt-4o' });
+                const model = models[0];
+                if (model && !token.isCancellationRequested) {
+                    const chatMessages = [vscode.LanguageModelChatMessage.User(item.content)];
+                    const chatResponse = await model.sendRequest(chatMessages, {}, token);
+                    let responseText = '';
+                    for await (const fragment of chatResponse.text) {
+                        if (token.isCancellationRequested)
+                            break;
+                        stream.markdown(fragment);
+                        responseText += fragment;
+                    }
+                    // Send the LLM response back as the real reply (overwrites auto-ack)
+                    if (responseText.trim()) {
+                        try {
+                            await (0, api_js_1.apiCall)(`/api/broadcasts/deliveries/${item.deliveryId}/respond`, 'POST', {
+                                responseContent: responseText.trim(),
+                                meta: { model: 'copilot-gpt-4o' },
+                            });
+                        }
+                        catch {
+                            // Silent — auto-ack is already in place as fallback
+                        }
+                    }
+                }
+                else {
+                    stream.markdown('*No Copilot model available for auto-response.*\n');
+                }
+            }
+            catch (err) {
+                const errMsg = err instanceof Error ? err.message : String(err);
+                if (!errMsg.includes('off_topic')) {
+                    stream.markdown(`\n\n*Auto-response error: ${errMsg}*\n`);
+                }
+            }
+            stream.markdown(`\n\n---\n\n`);
+        }
+        (0, session_js_1.pushEvent)('broadcast', `Processed ${items.length} broadcast(s) via Copilot`, { count: items.length });
+        return {};
+    }
     const autoStart = vscode.workspace.getConfiguration('vai').get('autoStartSession', true);
     // Auto-create session on first @vai message
     if (!(0, session_js_1.getActiveSession)() && autoStart) {
@@ -104,5 +169,15 @@ function registerChatParticipant(context) {
     const participant = vscode.chat.createChatParticipant('vai.devlogs', handleChatRequest);
     participant.iconPath = new vscode.ThemeIcon('radio-tower');
     context.subscriptions.push(participant);
+}
+/**
+ * Open the chat panel and auto-send @vai /broadcast.
+ * This causes the broadcast messages to render inline in the Copilot chat.
+ */
+function triggerBroadcastInChat() {
+    void vscode.commands.executeCommand('workbench.action.chat.open', {
+        query: '@vai /broadcast',
+        isPartialQuery: false,
+    });
 }
 //# sourceMappingURL=capture-chat.js.map

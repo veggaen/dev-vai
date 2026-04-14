@@ -189,8 +189,8 @@ export interface PipelineOptions extends SynthesizerOptions {
  * Pipeline Stages
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
-const VALID_ACTIONS = new Set<ThorsenAction>(['create', 'optimize', 'debug', 'explain', 'transpile', 'test']);
-const VALID_DOMAINS = new Set<ThorsenDomain>(['calculator', 'component', 'api-route', 'utility', 'dataset', 'pipeline', 'vai-drill', 'test', 'custom']);
+const VALID_ACTIONS = new Set<ThorsenAction>(['create', 'optimize', 'debug', 'explain', 'transpile', 'test', 'converse']);
+const VALID_DOMAINS = new Set<ThorsenDomain>(['calculator', 'component', 'api-route', 'utility', 'dataset', 'pipeline', 'vai-drill', 'test', 'cognitive-test', 'custom']);
 const VALID_LOGIC = new Set<ThorsenLogicType>(['functional', 'stateful', 'reactive', 'declarative']);
 const VALID_TARGETS = new Set<ThorsenTargetEnv>(['node', 'browser', 'wsl2', 'docker', 'edge']);
 const VALID_LANGUAGES = new Set<ThorsenLanguage>(['typescript', 'python', 'rust', 'go', 'auto']);
@@ -468,6 +468,33 @@ function stageScore(
   // Score factors — each contributes to the final thorsenScore
   const factors: Record<string, number> = {};
 
+  // ── Converse branch — conversation quality over code quality ──
+  if (normalized.intent.action === 'converse') {
+    factors.sourceReliability = routing.strategy === 'llm' ? 0.90 : 0.80;
+    factors.verified = verified.parseValid ? 0.05 : 0;
+    factors.speed = syncState === 'wormhole' ? 0.10
+      : syncState === 'parallel' ? 0.05
+      : -0.05;
+    // Converse intents value thoroughness; penalize overly short responses
+    const responseLength = verified.artifact.code.length;
+    factors.responsivenessDepth = responseLength > 200 ? 0.10
+      : responseLength > 50 ? 0.05
+      : -0.05;
+
+    const baseScore = verified.artifact.thorsenScore;
+    const adjustment = Object.values(factors).reduce((sum, v) => sum + v, 0) - factors.sourceReliability;
+    const adjustedScore = Math.max(0, Math.min(1, baseScore + adjustment));
+
+    return {
+      artifact: { ...verified.artifact, thorsenScore: adjustedScore },
+      syncState,
+      pipelineLatencyMs: Math.round(pipelineLatencyMs * 100) / 100,
+      adjustedScore,
+      scoreFactors: factors,
+    };
+  }
+
+  // ── Default branch — code artifact scoring ────────────────────
   // Base score from generation method
   factors.sourceReliability = routing.strategy === 'template' ? 1.0
     : routing.strategy === 'llm' ? 0.85

@@ -48,6 +48,7 @@ interface TrackedFile {
   bytesRead: number;
   lastModified: number;
   vscodeSessionId?: string; // VS Code's internal chat session ID
+  cachedTitle?: string; // Cached session title (from customTitle or first user message)
 }
 
 /* ── State ─────────────────────────────────────────────────────── */
@@ -79,7 +80,7 @@ interface PendingResponse {
   timer: ReturnType<typeof setTimeout> | null;
 }
 const pendingResponses = new Map<number, PendingResponse>();
-const RESPONSE_SETTLE_MS = 4000; // Wait 4s after last fragment before pushing
+const RESPONSE_SETTLE_MS = 2000; // Wait 2s after last fragment — reduced from 4s to catch rapid exchanges
 
 // ── Event queue for pre-session events ──
 // Events that arrive before any session is active (e.g. during the 2s startup delay)
@@ -903,6 +904,28 @@ function handleUserMessage(text: string): void {
     autoCapture: true,
   });
 
+  // Detect frustration signals — emit a note so session analyzer can score outcome
+  const FRUSTRATION_RE = /\b(?:no(?:pe)?|wrong|broken|doesn'?t work|still (?:broken|failing)|that'?s not right|not what I (?:meant|asked)|again|try again|same (?:issue|error|problem)|you'?re repeating|i(?:'ve)? (?:already|just) (?:told|said))\b/i;
+  const SUCCESS_RE = /\b(?:thanks?|thank you|perfect|great|awesome|works?(?:ing)?|that(?:'s| is) (?:it|right|correct)|exactly|fixed|it (?:works?|runs?))\b/i;
+
+  if (FRUSTRATION_RE.test(text)) {
+    pushEvent('note', `[frustration] ${text.substring(0, 120)}`, {
+      eventType: 'note',
+      author: 'user-signal-detector',
+      signalType: 'frustration',
+      autoCapture: true,
+      source: 'chat-history-watcher',
+    });
+  } else if (SUCCESS_RE.test(text)) {
+    pushEvent('note', `[success] ${text.substring(0, 120)}`, {
+      eventType: 'note',
+      author: 'user-signal-detector',
+      signalType: 'success',
+      autoCapture: true,
+      source: 'chat-history-watcher',
+    });
+  }
+
   console.log(`[vai:chat-history] Captured user message (${text.length} chars)`);
 }
 
@@ -1279,6 +1302,129 @@ function simpleHash(str: string): string {
     hash |= 0;
   }
   return hash.toString(36);
+}
+
+/* ── Export: Available Chat Sessions ────────────────────────────── */
+
+export interface ChatSessionInfo {
+  sessionId: string;
+  title: string;
+  lastModified: number;
+  chatApp: string; // 'chat' = default VS Code chat, '@vai' = our participant, etc.
+}
+
+/**
+ * Returns a list of known VS Code chat sessions from tracked JSONL files.
+ * The desktop uses this to populate the session picker dropdown.
+ */
+export function getAvailableChatSessions(): ChatSessionInfo[] {
+  if (!chatSessionsDir) return [];
+
+  const sessions: ChatSessionInfo[] = [];
+
+  for (const [filename, tracked] of trackedFiles) {
+    // Parse header once and cache results
+    if (!tracked.vscodeSessionId) {
+      try {
+        const header = readJsonlHeader(tracked.filePath);
+        if (header?.kind === 0 && header.v?.sessionId) {
+          tracked.vscodeSessionId = String(header.v.sessionId);
+          if (header.v.customTitle) {
+            tracked.cachedTitle = String(header.v.customTitle);
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    if (!tracked.vscodeSessionId) continue;
+
+    // Derive title: use cached, or try first user message
+    if (!tracked.cachedTitle) {
+      try {
+        tracked.cachedTitle = deriveSessionTitle(tracked.filePath);
+      } catch { /* ignore */ }
+    }
+
+    sessions.push({
+      sessionId: tracked.vscodeSessionId,
+      title: tracked.cachedTitle || 'Untitled',
+      lastModified: tracked.lastModified,
+      chatApp: 'chat',
+    });
+  }
+
+  sessions.sort((a, b) => b.lastModified - a.lastModified);
+  return sessions;
+}
+
+/** Read the first JSON line (header) from a JSONL file, handling very large headers. */
+function readJsonlHeader(filePath: string): { kind: number; v: Record<string, unknown> } | null {
+  const fileSize = fs.statSync(filePath).size;
+  if (fileSize === 0) return null;
+
+  // Read in chunks until we find the first newline
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const CHUNK = 64 * 1024; // 64KB chunks
+    const MAX_READ = 8 * 1024 * 1024; // Stop after 8MB (some headers embed screenshots)
+    let accumulated = '';
+    let offset = 0;
+
+    while (offset < Math.min(fileSize, MAX_READ)) {
+      const toRead = Math.min(CHUNK, fileSize - offset);
+      const buf = Buffer.alloc(toRead);
+      fs.readSync(fd, buf, 0, toRead, offset);
+      accumulated += buf.toString('utf8');
+      offset += toRead;
+
+      const nlIdx = accumulated.indexOf('\n');
+      if (nlIdx >= 0) {
+        return JSON.parse(accumulated.slice(0, nlIdx));
+      }
+    }
+
+    // No newline found — try parsing entire accumulated text
+    if (accumulated.length > 0) {
+      return JSON.parse(accumulated);
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return null;
+}
+
+/** Extract a title from the first user message in a JSONL chat session file. */
+function deriveSessionTitle(filePath: string): string | undefined {
+  const fileSize = fs.statSync(filePath).size;
+  if (fileSize === 0) return undefined;
+
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    // Read up to 2MB to find user messages in the first few lines
+    const toRead = Math.min(2 * 1024 * 1024, fileSize);
+    const buf = Buffer.alloc(toRead);
+    fs.readSync(fd, buf, 0, toRead, 0);
+    const text = buf.toString('utf8');
+
+    const lines = text.split('\n');
+    // Skip header (line 0), check next lines for user messages
+    for (let i = 1; i < Math.min(lines.length, 30); i++) {
+      const line = lines[i];
+      if (!line || line.length < 10) continue;
+      try {
+        const obj = JSON.parse(line);
+        // kind=3 is a chat request with user message
+        if (obj.kind === 3 && obj.v?.request?.message) {
+          const msg = obj.v.request.message as string;
+          // Truncate to a reasonable title length
+          const clean = msg.replace(/\s+/g, ' ').trim();
+          return clean.length > 80 ? clean.slice(0, 77) + '...' : clean;
+        }
+      } catch { /* line may be too large or invalid, skip */ }
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return undefined;
 }
 
 /* ── Dispose ───────────────────────────────────────────────────── */

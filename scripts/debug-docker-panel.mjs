@@ -1,20 +1,17 @@
 /**
  * Quick debug script — check what the Docker panel renders.
  */
-import puppeteer from 'puppeteer';
-import { writeFile, mkdir } from 'fs/promises';
+import { mkdir } from 'fs/promises';
+import { launchVisualBrowser, maximizeBrowserWindow, wait } from './visual-browser.mjs';
 
 const DIR = './screenshots/docker-panel';
 await mkdir(DIR, { recursive: true });
 
-const browser = await puppeteer.launch({
-  headless: false, slowMo: 50,
-  defaultViewport: { width: 2560, height: 1440 },
-});
-
-const page = await browser.newPage();
+const { browser, page } = await launchVisualBrowser();
+const viewport = await maximizeBrowserWindow(page);
+console.log(`Using real browser viewport ${viewport.width}x${viewport.height}`);
 await page.goto('http://localhost:5173', { waitUntil: 'networkidle2', timeout: 30_000 });
-await new Promise((r) => setTimeout(r, 2000));
+await wait(2000);
 
 // Click Docker button using title attribute
 const btns = await page.$$('button');
@@ -37,7 +34,7 @@ if (!clicked) {
   }
 }
 
-await new Promise((r) => setTimeout(r, 2000));
+await wait(2000);
 await page.screenshot({ path: `${DIR}/debug-docker.png`, fullPage: true });
 
 // Dump text from the area to the right of the rail
