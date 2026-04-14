@@ -68,7 +68,7 @@ function formatMs(ms: number): string {
 
 /* ── Component ── */
 
-export function DeployProgress({ steps, stackName, tierName, startTime, onCancel, onRetry }: Props) {
+export function DeployProgress({ steps, stackName, tierName: _tierName, startTime, onCancel, onRetry }: Props) {
   const visibleSteps = steps.filter((step) => step.status !== 'skipped');
 
   const hasFailed = visibleSteps.some((s) => s.status === 'failed');

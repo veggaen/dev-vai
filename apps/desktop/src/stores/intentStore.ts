@@ -470,7 +470,7 @@ export const useIntentStore = create<IntentState>((set, get) => ({
 
 // ── DevTools global ──────────────────────────────────────────────────
 if (typeof window !== 'undefined') {
-  (window as any).__vaiIntentDebug = {
+  (window as unknown as Record<string, unknown>).__vaiIntentDebug = {
     get logs() { return useIntentStore.getState().decisionLog; },
     get stats() { return useIntentStore.getState().stats; },
     get boost() { return useIntentStore.getState().adaptiveBoost; },

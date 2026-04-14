@@ -20,7 +20,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { evidenceTierFromProof, type FailureClass, type ProofFlags } from '@vai/core/browser';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSandboxStore } from '../stores/sandboxStore.js';
-import { useLayoutStore, type ChatMode } from '../stores/layoutStore.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 import { API_BASE } from '../lib/api.js';
 import { getActiveCapture, type SessionCapture } from '../lib/sessionCapture.js';
 import {
@@ -1272,7 +1272,7 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
 
     const lastUserMsg = [...messages].reverse().find((message) => message.role === 'user');
     const userPrompt = lastUserMsg?.content ?? '';
-    const normalizedPrompt = userPrompt.toLowerCase();
+    const _normalizedPrompt = userPrompt.toLowerCase();
     const templateActions = extractTemplateActions(lastMsg.content);
     const deployActions = extractDeployActions(lastMsg.content);
     const files = extractFilesFromMarkdown(lastMsg.content);

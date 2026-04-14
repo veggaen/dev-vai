@@ -14,7 +14,7 @@ type AuthenticatedViewer = PlatformViewer & {
   user: NonNullable<PlatformViewer['user']>;
 };
 
-async function requireViewer(
+async function _requireViewer(
   auth: PlatformAuthService,
   request: any,
   reply: any,
@@ -175,7 +175,7 @@ export function registerBroadcastRoutes(
   });
 
   // ── List recent broadcasts (desktop fetches this) ──
-  app.get<{ Querystring: { projectId?: string; limit?: string } }>('/api/broadcasts', async (request, reply) => {
+  app.get<{ Querystring: { projectId?: string; limit?: string } }>('/api/broadcasts', async (request, _reply) => {
     const platformViewer = await auth.getViewer(request);
     const userId = platformViewer.authenticated && platformViewer.user
       ? platformViewer.user.id
@@ -192,7 +192,7 @@ export function registerBroadcastRoutes(
   // ── List all companion clients for the authenticated user ──
   // Desktop uses this to show IDE online/offline status in settings
   // Falls back to listing all clients when not authenticated (local dev)
-  app.get('/api/companion-clients', async (request, reply) => {
+  app.get('/api/companion-clients', async (request, _reply) => {
     const viewer = await auth.getViewer(request);
     if (viewer.authenticated && viewer.user) {
       return projects.listUserCompanionClients(viewer.user.id);
@@ -264,7 +264,7 @@ export function registerBroadcastRoutes(
   });
 
   // ── Delete companion client by ID (local dev only) ──
-  app.delete<{ Params: { id: string } }>('/api/companion-clients/:id', async (request, reply) => {
+  app.delete<{ Params: { id: string } }>('/api/companion-clients/:id', async (request, _reply) => {
     projects.deleteCompanionClient(request.params.id);
     return { ok: true };
   });

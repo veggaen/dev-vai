@@ -178,7 +178,7 @@ export function registerIngestRoutes(
 
   // Re-process all existing sources with improved text cleaning
   // This re-cleans, re-chunks, re-summarizes, and re-trains on all existing content
-  app.post('/api/reprocess', async (_request, reply) => {
+  app.post('/api/reprocess', async (_request, _reply) => {
     const result = pipeline.reprocessAll((done, total, title) => {
       if (done % 50 === 0 || done === total) {
         console.log(`[VAI] Reprocessing: ${done}/${total} — "${title}"`);

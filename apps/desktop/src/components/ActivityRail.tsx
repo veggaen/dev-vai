@@ -1,4 +1,4 @@
-import { MessageSquare, Brain, Search, Settings, Zap, BookOpen, Maximize2, Minimize2, Container, Activity, Dumbbell, Orbit, FolderKanban, Shield, UserRound } from 'lucide-react';
+import { MessageSquare, Brain, Search, Settings, BookOpen, Maximize2, Minimize2, Container, Activity, Dumbbell, Orbit, FolderKanban, Shield, UserRound } from 'lucide-react';
 import { useLayoutStore, type SidebarPanel, ROLE_NAV_ITEMS } from '../stores/layoutStore.js';
 import { useEngineStore } from '../stores/engineStore.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -30,7 +30,7 @@ const BASE_RAIL_ITEMS: RailItem[] = [
 
 export function ActivityRail() {
   const { sidebarState, activePanel, setActivePanel, setShowQuickSwitch,
-    showBuilderPanel, focusMode, layoutMode, toggleLayoutMode,
+    layoutMode, toggleLayoutMode,
   } = useLayoutStore();
   const { status: engineStatus } = useEngineStore();
   const { conversations } = useChatStore();

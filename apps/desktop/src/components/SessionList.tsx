@@ -13,7 +13,6 @@ import {
   AlertTriangle,
   StopCircle,
   Archive,
-  Trash2,
   RefreshCw,
   Search,
 } from 'lucide-react';
@@ -208,7 +207,6 @@ function MiniStat({ icon: Icon, value, color }: {
 
 function SessionsSummary({ sessions }: { sessions: AgentSession[] }) {
   const stats = useMemo(() => {
-    const now = Date.now();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayMs = today.getTime();

@@ -379,7 +379,7 @@ export async function runVisualQA(
 
   // ═══ Step 9: Verify status pills ═══
   c.log('info', '📋 Step 9: Checking status pills');
-  const statusArea = document.querySelector('[class*="status"], [data-testid="status-pills"]');
+  const _statusArea = document.querySelector('[class*="status"], [data-testid="status-pills"]');
   const pills = document.querySelectorAll('[class*="pill"], [class*="badge"], [class*="status-item"]');
 
   // Check no "Preview code mode is ready" text

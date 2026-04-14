@@ -1,7 +1,7 @@
 import { useSandboxStore } from '../stores/sandboxStore.js';
 import { API_BASE } from '../lib/api.js';
 import {
-  Globe, RefreshCw, Smartphone, Tablet, Monitor, Copy, ExternalLink,
+  RefreshCw, Smartphone, Tablet, Monitor, Copy, ExternalLink,
   Code2, Eye, EyeOff, Trash2, Download, CheckCircle, XCircle, Loader2,
   Camera, Terminal, FolderTree, Play, Square, Maximize2, Minimize2,
   ArrowLeft, ArrowRight, Save, RotateCcw, MessageSquare, File, PanelsTopLeft,

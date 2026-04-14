@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { UserRound, LogOut, LogIn, RefreshCw } from 'lucide-react';
+import { LogOut, LogIn, RefreshCw } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
 import { toast } from 'sonner';

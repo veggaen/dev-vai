@@ -23,7 +23,17 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { SessionService, ConversationScorer, LearningExtractor, extractLessons, extractTurnPairs, getSessionAnalyzer, type SessionEventType, type PinnedNoteCategory } from '@vai/core';
+import { SessionService, ConversationScorer, extractLessons, extractTurnPairs, getSessionAnalyzer, type SessionEventType, type PinnedNoteCategory } from '@vai/core';
+import {
+  createSessionBodySchema,
+  endSessionBodySchema,
+  importSessionBodySchema,
+  patchSessionBodySchema,
+  sessionEventPinBodySchema,
+  sessionEventsBodySchema,
+  sessionNoteBodySchema,
+} from '@vai/api-types/sessions';
+import { invalidRequestBody } from '../validation/http-validation.js';
 
 export function registerSessionRoutes(app: FastifyInstance, sessions: SessionService) {
   /* ── List sessions ── */
@@ -48,8 +58,12 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       modelId: string;
       tags?: string[];
     };
-  }>('/api/sessions', async (request) => {
-    return sessions.createSession(request.body);
+  }>('/api/sessions', async (request, reply) => {
+    const parsed = createSessionBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    return sessions.createSession(parsed.data);
   });
 
   /* ── Context summary (for agents bootstrapping context) ── */
@@ -91,8 +105,12 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       session: Record<string, unknown>;
       events: Array<Record<string, unknown>>;
     };
-  }>('/api/sessions/import', async (request) => {
-    const id = sessions.importSession(request.body as never);
+  }>('/api/sessions/import', async (request, reply) => {
+    const parsed = importSessionBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    const id = sessions.importSession(parsed.data as never);
     return { id, success: true };
   });
 
@@ -161,8 +179,12 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       description?: string;
       tags?: string[];
     };
-  }>('/api/sessions/:id', async (request) => {
-    sessions.updateSession(request.params.id, request.body);
+  }>('/api/sessions/:id', async (request, reply) => {
+    const parsed = patchSessionBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    sessions.updateSession(request.params.id, parsed.data);
     return sessions.getSession(request.params.id);
   });
 
@@ -227,13 +249,17 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
         meta: Record<string, unknown>;
       }>;
     };
-  }>('/api/sessions/:id/events', async (request) => {
+  }>('/api/sessions/:id/events', async (request, reply) => {
+    const parsed = sessionEventsBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
     const { id } = request.params;
     const session = sessions.getSession(id);
     if (!session) return { error: 'Session not found' };
 
     const added = sessions.addEvents(
-      request.body.events.map((e) => ({
+      parsed.data.events.map((e) => ({
         sessionId: id,
         type: e.type,
         timestamp: e.timestamp ?? Date.now(),
@@ -265,9 +291,13 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
   app.post<{
     Params: { id: string; eventId: string };
     Body: { pinned?: boolean };
-  }>('/api/sessions/:id/events/:eventId/pin', async (request) => {
+  }>('/api/sessions/:id/events/:eventId/pin', async (request, reply) => {
+    const parsed = sessionEventPinBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
     const { eventId } = request.params;
-    const pinned = request.body.pinned !== false;
+    const pinned = parsed.data.pinned !== false;
     if (pinned) {
       sessions.pinEvent(eventId);
     } else {
@@ -280,8 +310,12 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
   app.post<{
     Params: { id: string };
     Body: { status?: 'completed' | 'failed' };
-  }>('/api/sessions/:id/end', async (request) => {
-    sessions.endSession(request.params.id, request.body.status ?? 'completed');
+  }>('/api/sessions/:id/end', async (request, reply) => {
+    const parsed = endSessionBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    sessions.endSession(request.params.id, parsed.data.status ?? 'completed');
     return sessions.getSession(request.params.id);
   });
 
@@ -408,12 +442,16 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
       category?: PinnedNoteCategory;
       eventId?: string;
     };
-  }>('/api/sessions/:id/notes', async (request) => {
+  }>('/api/sessions/:id/notes', async (request, reply) => {
+    const parsed = sessionNoteBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
     return sessions.addPinnedNote({
       sessionId: request.params.id,
-      eventId: request.body.eventId,
-      content: request.body.content,
-      category: request.body.category,
+      eventId: parsed.data.eventId,
+      content: parsed.data.content,
+      category: parsed.data.category,
     });
   });
 

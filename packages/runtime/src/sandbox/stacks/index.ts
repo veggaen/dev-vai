@@ -3,7 +3,7 @@
  * Supports both built-in stacks and user-defined custom stacks.
  */
 
-import type { StackDefinition, StackTemplate, StackId, TierId, CustomStackConfig } from './types.js';
+import type { StackDefinition, StackTemplate, CustomStackConfig } from './types.js';
 export type { StackDefinition, StackTemplate, StackId, TierId, CustomStackConfig } from './types.js';
 export { TIER_META, DEPLOY_STEPS, customConfigToStack } from './types.js';
 

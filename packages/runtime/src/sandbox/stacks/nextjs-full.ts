@@ -10,12 +10,9 @@ import { mergeFiles } from './types.js';
 import {
   getNextjsEnvVars,
   buildSetupScript,
-  generateSetupWizardComponent,
-  generateSetupApiRoutes,
   generateNextjsDemoSequence,
   generateAuthContext,
   generateUserMenu,
-  generateAuthApiRoutes,
   generateMessagePanel,
   generateProfileCard,
   generateSocialFeed,

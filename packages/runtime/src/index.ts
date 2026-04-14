@@ -43,7 +43,8 @@ function killPortHolder(port: number): boolean {
       }
       for (const pid of pids) {
         console.log(`[VAI] Killing stale process on port ${port} (PID ${pid})`);
-        try { execFileSync('taskkill', ['/F', '/T', '/PID', pid], { stdio: 'pipe' }); } catch {}
+        // eslint-disable-next-line no-empty
+        try { execFileSync('taskkill', ['/F', '/T', '/PID', pid], { stdio: 'pipe' }); } catch { /* process may have already exited */ }
       }
       return pids.size > 0;
     } else {
@@ -54,7 +55,8 @@ function killPortHolder(port: number): boolean {
       for (const pid of output.trim().split('\n').filter(Boolean)) {
         if (pid !== String(process.pid)) {
           console.log(`[VAI] Killing stale process on port ${port} (PID ${pid})`);
-          try { execSync(`kill -9 ${pid}`, { stdio: 'pipe' }); } catch {}
+          // eslint-disable-next-line no-empty
+          try { execSync(`kill -9 ${pid}`, { stdio: 'pipe' }); } catch { /* process may have already exited */ }
         }
       }
       return true;

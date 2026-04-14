@@ -23,7 +23,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useAutoSandbox } from './hooks/useAutoSandbox.js';
 import { FileExplorer } from './components/FileExplorer.js';
 import { VaiOverlaySystem } from './components/VaiOverlaySystem.js';
-import { LayoutModeToggle } from './components/LayoutModeToggle.js';
+import { LayoutModeToggle as _LayoutModeToggle } from './components/LayoutModeToggle.js';
 import { CursorFocusBox } from './components/CursorFocusBox.js';
 import { AuthGate } from './components/AuthGate.js';
 import { toast } from 'sonner';

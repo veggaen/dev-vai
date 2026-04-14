@@ -10,13 +10,10 @@ import { mergeFiles } from './types.js';
 import {
   getT3EnvVars,
   buildSetupScript,
-  generateSetupWizardComponent,
-  generateSetupApiRoutes,
   generateT3DemoSequence,
   generateAuthContext,
   generateAuthPage,
   generateUserMenu,
-  generateAuthApiRoutes,
   generateMessagePanel,
   generateProfileCard,
   generateSocialFeed,

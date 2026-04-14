@@ -5,7 +5,7 @@ import { useEngineStore } from '../stores/engineStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { BuildStatusBadge } from './BuildStatusBadge.js';
 import { SidebarSearch } from './SidebarSearch.js';
-import { Search, Brain, PanelLeftClose, ChevronLeft } from 'lucide-react';
+import { Search, Brain, ChevronLeft } from 'lucide-react';
 
 export function Sidebar() {
   const {

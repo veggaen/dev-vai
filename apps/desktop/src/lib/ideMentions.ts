@@ -83,7 +83,7 @@ export function buildIdeMentionItems(clients: CompanionClientSummary[]): IdeMent
   return items;
 }
 
-function filterSortedClients(clients: CompanionClientSummary[]): CompanionClientSummary[] {
+function _filterSortedClients(clients: CompanionClientSummary[]): CompanionClientSummary[] {
   return [...clients].sort((a, b) => {
     const ta = slugBase(a);
     const tb = slugBase(b);

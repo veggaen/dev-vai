@@ -3,8 +3,8 @@ import { motion } from 'framer-motion';
 import {
   Plus, Trash2, Clock, MessageSquare, ChevronLeft,
   BookOpen, Globe, Search as SearchIcon, ExternalLink,
-  Bot, GitBranch, CheckCircle2, Laptop2, UserRound, Trophy, FolderKanban, FolderOpenDot, Shield,
-  Send, Wifi, WifiOff,
+  Bot, GitBranch, CheckCircle2, FolderKanban, FolderOpenDot, Shield,
+  Wifi, WifiOff,
 } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
@@ -14,6 +14,7 @@ import { useVinextStore, type VinextState } from '../stores/vinextStore.js';
 import { useSandboxStore } from '../stores/sandboxStore.js';
 import { useCollabStore } from '../stores/collabStore.js';
 import { useAuthStore } from '../stores/authStore.js';
+import type { ProjectHandoffIntentResponse } from '@vai/api-types/project-responses';
 import { SidebarSearch } from './SidebarSearch.js';
 import { SessionList } from './SessionList.js';
 import { BuildStatusBadge } from './BuildStatusBadge.js';
@@ -33,20 +34,20 @@ function formatRelative(date: string): string {
   return new Date(date).toLocaleDateString();
 }
 
-function formatActivity(lastSeenAt: string | null, lastPolledAt: string | null): string {
+function _formatActivity(lastSeenAt: string | null, lastPolledAt: string | null): string {
   if (lastPolledAt) return `polled ${formatRelative(lastPolledAt)}`;
   if (lastSeenAt) return `seen ${formatRelative(lastSeenAt)}`;
   return 'never seen';
 }
 
-function auditStatusTone(status: 'pending' | 'claimed' | 'submitted', claimIsStale: boolean): string {
+function _auditStatusTone(status: 'pending' | 'claimed' | 'submitted', claimIsStale: boolean): string {
   if (status === 'submitted') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   if (status === 'claimed' && claimIsStale) return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
   if (status === 'claimed') return 'border-blue-500/30 bg-blue-500/10 text-blue-300';
   return 'border-zinc-700 bg-zinc-900 text-zinc-500';
 }
 
-function auditStatusLabel(status: 'pending' | 'claimed' | 'submitted', claimIsStale: boolean): string {
+function _auditStatusLabel(status: 'pending' | 'claimed' | 'submitted', claimIsStale: boolean): string {
   if (status === 'claimed' && claimIsStale) return 'claim stale';
   return status;
 }
@@ -679,8 +680,8 @@ function SettingsPanel() {
   const motionBudget = useVinextStore((state: VinextState) => state.motionBudget);
   const trustLevel = useVinextStore((state: VinextState) => state.trustLevel);
   const [auditPrompt, setAuditPrompt] = useState('Audit this project for correctness, regressions, and architecture risks.');
-  const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
-  const [launchingTargetId, setLaunchingTargetId] = useState<string | null>(null);
+  const [_expandedResults, _setExpandedResults] = useState<Set<string>>(new Set());
+  const [_launchingTargetId, setLaunchingTargetId] = useState<string | null>(null);
 
 
   useEffect(() => {
@@ -730,7 +731,7 @@ function SettingsPanel() {
     return statusMap;
   }, [ideTargets, globalClients]);
 
-  const compatibleClientsByPeerKey = useMemo(() => {
+  const _compatibleClientsByPeerKey = useMemo(() => {
     return new Map(peers.map((peer) => [
       peer.peerKey,
       companionClients
@@ -743,7 +744,7 @@ function SettingsPanel() {
     ]));
   }, [companionClients, peers]);
 
-  const visibleAudits = useMemo(() => {
+  const _visibleAudits = useMemo(() => {
     return audits.slice(0, 3).map((audit) => {
       const submittedCount = audit.results.filter((result) => result.status === 'submitted').length;
       const claimedCount = audit.results.filter((result) => result.status === 'claimed' && !result.claimIsStale).length;
@@ -772,7 +773,7 @@ function SettingsPanel() {
     });
   }, [audits]);
 
-  const invitePreset = async (targetId: string, preset: { peerKey: string; displayName: string; model: string }) => {
+  const _invitePreset = async (targetId: string, preset: { peerKey: string; displayName: string; model: string }) => {
     if (!persistentProjectId) {
       toast.error('Open a project before inviting IDE peers');
       return;
@@ -813,7 +814,7 @@ function SettingsPanel() {
     }
   };
 
-  const handlePreferredClientChange = async (peerKey: string, preferredClientId: string) => {
+  const _handlePreferredClientChange = async (peerKey: string, preferredClientId: string) => {
     if (!persistentProjectId) return;
 
     const nextPeers = peers.map((peer) => ({
@@ -852,11 +853,9 @@ function SettingsPanel() {
       }),
     });
 
-    const payload = await response.json().catch(() => null) as {
+    const payload = await response.json().catch(() => null) as (ProjectHandoffIntentResponse & {
       error?: string;
-      launchUrl?: string | null;
-      token?: string;
-    } | null;
+    }) | null;
 
     if (!response.ok || !payload?.token) {
       throw new Error(payload?.error ?? 'Unable to create project handoff');
@@ -865,7 +864,7 @@ function SettingsPanel() {
     return payload;
   };
 
-  const handleLaunchTarget = async (targetId: string, targetLabel: string) => {
+  const _handleLaunchTarget = async (targetId: string, targetLabel: string) => {
     setLaunchingTargetId(targetId);
     try {
       const handoff = await createHandoffIntent(targetId);
@@ -882,7 +881,7 @@ function SettingsPanel() {
     }
   };
 
-  const handleCopyHandoffLink = async (targetId: string, targetLabel: string) => {
+  const _handleCopyHandoffLink = async (targetId: string, targetLabel: string) => {
     setLaunchingTargetId(targetId);
     try {
       const handoff = await createHandoffIntent(targetId);
@@ -902,7 +901,7 @@ function SettingsPanel() {
     }
   };
 
-  const handleAttachCurrentSandbox = async () => {
+  const _handleAttachCurrentSandbox = async () => {
     if (!projectId) {
       toast.error('Create or open a sandbox project first');
       return;

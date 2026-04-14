@@ -20,7 +20,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useChatStore } from '../stores/chatStore.js';
-import { IDE_AGENT_COLORS, type ChatMessage, type SearchSourceUI } from '../stores/chatStore.js';
+import { IDE_AGENT_COLORS, type SearchSourceUI } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
 import { toast } from 'sonner';
 import { useLayoutStore, MODE_PLACEHOLDERS, type ChatMode } from '../stores/layoutStore.js';
@@ -510,8 +510,7 @@ export function ChatWindow() {
       toggleBuilderPanel();
     }
   // Only trigger on new assistant message arrival (messages.length change)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length]);
+  }, [messages.length]); // eslint-disable-line -- intentional dep subset
   useEffect(() => {
     setHasActiveProject(!!sandboxProjectId);
     // Reset context hash so the next message always sends the full file tree for this project.
@@ -1051,10 +1050,10 @@ export function ChatWindow() {
   const startBuilding = async (description?: string) => {
     setMode('builder');
     if (!showBuilderPanel) toggleBuilderPanel();
-    let convId = activeConversationId;
+    const convId = activeConversationId;
     if (!convId) {
       const modelId = selectedModelId ?? 'vai:v0';
-      convId = await createConversation(modelId, 'builder', {
+      await createConversation(modelId, 'builder', {
         sandboxProjectId: sandboxProjectId ?? null,
       });
     } else {
