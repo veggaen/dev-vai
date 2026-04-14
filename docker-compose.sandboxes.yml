@@ -1,0 +1,55 @@
+# ═══════════════════════════════════════════════════════════════
+# VeggaAI — Docker Compose (Multi-Sandbox Orchestrator)
+#
+# This compose file manages sandboxed project environments.
+# Each sandbox runs in its own container with isolated:
+#   - File system (project files)
+#   - Port range (4100-4199)
+#   - Node.js runtime
+#
+# Usage (managed by SandboxManager):
+#   docker compose -f docker-compose.sandboxes.yml up sandbox-1
+#   docker compose -f docker-compose.sandboxes.yml scale sandbox=3
+#
+# The runtime API creates/removes sandbox services dynamically
+# via the Docker API (docker.sock mount).
+# ═══════════════════════════════════════════════════════════════
+
+# This is a template — the runtime generates per-sandbox configs.
+# See: packages/runtime/src/sandbox/container-manager.ts
+
+services:
+  # Each sandbox is a lightweight Node container
+  # serving a deployed template project
+  sandbox-template:
+    image: node:22-alpine
+    working_dir: /project
+    # These are dynamically set by the sandbox manager:
+    # volumes:
+    #   - ./sandboxes/{projectId}:/project
+    # ports:
+    #   - "{assignedPort}:3000"
+    environment:
+      - NODE_ENV=development
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    networks:
+      - vai-net
+
+networks:
+  vai-net:
+    external: true
+    name: dev-vai_vai-net

@@ -22,6 +22,7 @@ export interface AgentSession {
   modelId: string;             // e.g. "claude-opus-4.6", "gpt-5.1"
   startedAt: number;           // epoch ms
   endedAt?: number;            // epoch ms
+  lastActivityAt?: number;     // epoch ms — latest event timestamp
   status: 'active' | 'completed' | 'failed';
 
   /** Aggregate stats computed from events */
@@ -45,6 +46,12 @@ export interface SessionStats {
   todosCompleted: number;
   todosTotal: number;
   errorsEncountered: number;
+  verificationsRun?: number;
+  verificationsPassed?: number;
+  recoveriesTriggered?: number;
+  recoveriesSucceeded?: number;
+  checkpointsRecorded?: number;
+  artifactsCaptured?: number;
 }
 
 /* ── Session Events (individual actions / log entries) ─────────── */
@@ -54,6 +61,10 @@ export type SessionEventType =
   | 'thinking'       // Agent reasoning / thinking block
   | 'planning'       // Agent planning / intent analysis
   | 'context-gather' // Reading codebase for context
+  | 'checkpoint'     // Builder lifecycle checkpoint
+  | 'verification'   // Proof / validation result
+  | 'recovery'       // Recovery or rollback attempt
+  | 'artifact'       // Durable artifact produced by the workflow
   | 'file-create'    // File created
   | 'file-edit'      // File modified (with diff info)
   | 'file-read'      // File read for context
@@ -88,6 +99,10 @@ export type EventMeta =
   | ThinkingMeta
   | PlanningMeta
   | ContextGatherMeta
+  | CheckpointMeta
+  | VerificationMeta
+  | RecoveryMeta
+  | ArtifactMeta
   | FileCreateMeta
   | FileEditMeta
   | FileReadMeta
@@ -128,6 +143,45 @@ export interface ContextGatherMeta {
   filesRead: string[];         // Files examined
   queriesRun: string[];        // Search queries executed
   findings: string;            // What was discovered
+}
+
+export interface CheckpointMeta {
+  eventType: 'checkpoint';
+  checkpoint: string;
+  status: 'started' | 'completed' | 'failed';
+  detail?: string;
+  sandboxProjectId?: string;
+  conversationId?: string;
+  files?: string[];
+  port?: number;
+}
+
+export interface VerificationMeta {
+  eventType: 'verification';
+  target: 'dev-server' | 'preview-runtime' | 'template-preview' | 'deploy-preview' | 'sandbox-link';
+  status: 'started' | 'passed' | 'failed';
+  port?: number;
+  timeoutMs?: number;
+  evidence?: string[];
+}
+
+export interface RecoveryMeta {
+  eventType: 'recovery';
+  strategy: string;
+  status: 'triggered' | 'succeeded' | 'failed';
+  attempt?: number;
+  maxAttempts?: number;
+  reason?: string;
+  port?: number;
+  files?: string[];
+}
+
+export interface ArtifactMeta {
+  eventType: 'artifact';
+  artifactType: string;
+  label?: string;
+  value?: string;
+  itemCount?: number;
 }
 
 export interface FileCreateMeta {
@@ -217,6 +271,55 @@ export interface NoteMeta {
   author?: string;
 }
 
+/* ── Pinned Notes (cross-session decision/blocker tracking) ──── */
+
+export type PinnedNoteCategory =
+  | 'decision'
+  | 'blocker'
+  | 'breakthrough'
+  | 'todo'
+  | 'context'
+  | 'custom';
+
+export interface PinnedNote {
+  id: string;
+  sessionId: string;
+  eventId?: string;           // optional reference to a specific event
+  content: string;
+  category: PinnedNoteCategory;
+  createdAt: number;          // epoch ms
+  resolved: boolean;
+}
+
+/* ── Context Summary (for agents bootstrapping context) ──────── */
+
+export interface ContextSummary {
+  recentSessions: Array<{
+    id: string;
+    title: string;
+    status: string;
+    startedAt: number;
+    endedAt?: number;
+    stats: SessionStats;
+    keyDecisions: string[];
+    filesTouched: string[];
+    errors: string[];
+  }>;
+  unresolvedNotes: PinnedNote[];
+  totalSessions: number;
+  totalEvents: number;
+  cognitiveContext?: string;
+}
+
+/* ── Search Result ──────────────────────────────────────────── */
+
+export interface SearchResult {
+  event: SessionEvent;
+  sessionTitle: string;
+  sessionId: string;
+  matchScore: number;         // 0-1 relevance
+}
+
 /* ── Helper to create events ──────────────────────────────────── */
 
 let _eventCounter = 0;
@@ -229,6 +332,10 @@ export function createSessionId(): string {
   return `ses_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export function createPinnedNoteId(): string {
+  return `pin_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /* ── Icon & color mapping for event types ─────────────────────── */
 
 export const EVENT_TYPE_CONFIG: Record<
@@ -239,6 +346,10 @@ export const EVENT_TYPE_CONFIG: Record<
   thinking:         { icon: 'Brain',         color: 'purple',  label: 'Thinking'  },
   planning:         { icon: 'Compass',       color: 'violet',  label: 'Planning'  },
   'context-gather': { icon: 'BookOpen',      color: 'teal',    label: 'Context'   },
+  checkpoint:       { icon: 'Flag',          color: 'yellow',  label: 'Checkpoint' },
+  verification:     { icon: 'ShieldCheck',   color: 'emerald', label: 'Proof'     },
+  recovery:         { icon: 'RotateCcw',     color: 'amber',   label: 'Recovery'  },
+  artifact:         { icon: 'Archive',       color: 'pink',    label: 'Artifact'  },
   'file-create':    { icon: 'FilePlus',      color: 'emerald', label: 'Created'   },
   'file-edit':      { icon: 'FileEdit',      color: 'amber',   label: 'Edited'    },
   'file-read':      { icon: 'FileSearch',    color: 'zinc',    label: 'Read'      },

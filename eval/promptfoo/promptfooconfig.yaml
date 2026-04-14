@@ -1,0 +1,158 @@
+# Vai runtime — industrial-style chat eval over HTTP (Promptfoo).
+#
+# ## Preconditions
+# - Runtime: `pnpm --filter @vai/runtime dev` (default http://localhost:3006)
+# - Local dev: platform auth off so anonymous POST /api/conversations works
+# - Windows: if better-sqlite3 bindings are missing: `pnpm rebuild better-sqlite3`
+#
+# ## Run (repo root)
+#   pnpm eval:chat
+#   pnpm eval:chat:external   # hosted model + llm-rubric (see promptfooconfig.external.yaml)
+#   pnpm eval:chat:view
+#   pnpm eval:chat -- --filter-metadata tier=contract
+#   pnpm eval:chat -- --filter-pattern "\\[behavior\\]"
+#
+# ## Environment
+#   VAI_PROMPTFOO_BASE
+#   VAI_PROMPTFOO_MODEL            (default vai:v0)
+#   VAI_PROMPTFOO_FETCH_TIMEOUT_MS (per HTTP request; default 30000)
+#
+# ## Harness behavior
+# The custom provider sets skipPromptRewrite: true on POST .../messages so eval is not skewed by
+# repo-native prompt hardening. Implemented in packages/runtime (conversations route) + core overrides.
+
+description: 'Vai runtime — HTTP chat quality gate'
+
+providers:
+  - id: file://./vai-runtime-provider.mjs
+    label: vai-local-http
+
+prompts:
+  - '{{message}}'
+
+# Prepended to every test case (see Promptfoo merge order: default first, then per-test asserts).
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://./assertions/standard-contract.js
+      config:
+        minChars: 1
+        maxChars: 80000
+        maxLatencyMs: 240000
+
+tests:
+  - description: '[contract] Plain chat returns substantive text'
+    metadata:
+      tier: contract
+      id: chat-substantive
+    vars:
+      message: 'In two short sentences, explain what a REST API is.'
+    assert:
+      - type: javascript
+        value: 'output.trim().length >= 40'
+
+  - description: '[behavior] Literal echo instruction (engine fast-path)'
+    metadata:
+      tier: behavior
+      id: literal-echo
+    vars:
+      message: 'Repeat after me: VAI_PF_MARK_Q9Z2M'
+    assert:
+      - type: icontains
+        value: VAI_PF_MARK_Q9Z2M
+
+  - description: '[behavior] Integer math — addition'
+    metadata:
+      tier: behavior
+      id: math-add
+    vars:
+      message: 'What is 2+2?'
+    assert:
+      - type: javascript
+        value: file://./assertions/contains-number.js
+        config:
+          expected: '4'
+
+  - description: '[behavior] Integer math — operator precedence'
+    metadata:
+      tier: behavior
+      id: math-precedence
+    vars:
+      message: 'What is 17*3+1?'
+    assert:
+      - type: javascript
+        value: file://./assertions/contains-number.js
+        config:
+          expected: '52'
+
+  - description: '[behavior] Base conversion'
+    metadata:
+      tier: behavior
+      id: base-binary
+    vars:
+      message: 'convert 255 to binary'
+    assert:
+      - type: regex
+        value: '11111111'
+
+  - description: '[product] Local engine identity (vai:v0)'
+    metadata:
+      tier: product
+      id: identity-local
+    vars:
+      # "What is vai:v0?" does not match the engine's identity regex (":v0" suffix). "Who are you?" hits the self-intro path.
+      message: 'Who are you?'
+    assert:
+      - type: javascript
+        value: file://./assertions/vai-identity-markers.js
+
+  - description: '[behavior] Concise yes / no'
+    metadata:
+      tier: behavior
+      id: yes-no-brief
+    vars:
+      message: 'Answer with a single word, yes or no only: Is ice typically colder than boiling water?'
+    assert:
+      - type: javascript
+        value: file://./assertions/concise-yes-no.js
+        config:
+          maxChars: 120
+
+  - description: '[behavior] Unicode literal echo'
+    metadata:
+      tier: behavior
+      id: unicode-literal
+    vars:
+      message: 'Repeat after me: ✅'
+    assert:
+      - type: contains
+        value: '✅'
+
+  - description: '[architecture] Mentions layered / hexagonal backend concepts'
+    metadata:
+      tier: architecture
+      id: hexagonal-hints
+    vars:
+      message: >-
+        In 3–5 short bullet points, list folders you would use for a small TypeScript HTTP API
+        with hexagonal architecture (ports and adapters). No code blocks.
+    assert:
+      - type: javascript
+        value: >-
+          const o = (output || '').toLowerCase();
+          const hasLayer = /domain|application|adapter|port|use case|infrastructure/.test(o);
+          const hasPattern = /hexagonal|ports?\s+and\s+adapters|clean architecture|onion|layered/.test(o);
+          hasLayer && hasPattern && o.length > 60;
+
+  # vai:v0 often retrieves TLS/HTTPS tutorials for free-form "HTTP idempotency" questions.
+  # This case still encodes the concept via the literal-echo fast path (deterministic gate).
+  - description: '[behavior] Idempotency wording (literal echo)'
+    metadata:
+      tier: behavior
+      id: http-idempotency-echo
+    vars:
+      message: >-
+        Repeat after me: Idempotent HTTP methods can be retried safely because repeating them should not create duplicate side effects.
+    assert:
+      - type: icontains
+        value: Idempotent HTTP methods can be retried safely

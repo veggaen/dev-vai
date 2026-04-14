@@ -28,10 +28,12 @@ export interface DeployEvent {
 
 export type DeployEmitter = (event: DeployEvent) => void;
 
-/** Check if Docker is available on this system */
+/** Check if Docker CLI is installed AND daemon is running */
 function isDockerAvailable(): boolean {
   try {
     execSync('docker --version', { stdio: 'pipe', timeout: 5000 });
+    // Also verify daemon is responsive — `docker version` requires a running daemon
+    execSync('docker version', { stdio: 'pipe', timeout: 10000 });
     return true;
   } catch {
     return false;
@@ -58,6 +60,26 @@ async function waitForHealth(port: number, timeout = 30000): Promise<boolean> {
   return false;
 }
 
+/** Wait for any URL to return a successful response */
+async function waitForUrl(url: string, timeout = 30000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2000);
+      const res = await fetch(url, {
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (res.ok) return true;
+    } catch {
+      // Server not ready yet
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return false;
+}
+
 /**
  * Deploy a stack template with full pipeline and progress events.
  * Steps: scaffold → install → build → docker → test → start → verify
@@ -68,12 +90,58 @@ export async function deployStack(
   tier: string,
   name: string | undefined,
   emit: DeployEmitter,
+  ownerUserId?: string | null,
 ): Promise<{ projectId: string; port: number } | null> {
   const startTime = Date.now();
   const elapsed = () => Date.now() - startTime;
 
   /* ── Step 1: Scaffold ── */
   emit({ step: 'scaffold', status: 'running', message: 'Finding template...' });
+
+  // Next.js basic → use real create-next-app CLI for an honest clean starter
+  if (stackId === 'nextjs' && tier === 'basic') {
+    emit({ step: 'scaffold', status: 'running', message: 'Creating a fresh Next.js App Router baseline...' });
+    let cliProject;
+    try {
+      cliProject = await sandbox.createFromCLI('nextjs', name || 'my-nextjs-app', ownerUserId ?? null);
+    } catch (err) {
+      emit({ step: 'scaffold', status: 'failed', message: `Starter scaffold failed: ${(err as Error).message}` });
+      return null;
+    }
+    emit({
+      step: 'scaffold',
+      status: 'done',
+      message: `Next.js app created (${Object.keys(cliProject.files).length} files)`,
+      projectId: cliProject.id,
+      elapsed: elapsed(),
+    });
+
+    // Skip install — create-next-app already installed deps
+    emit({ step: 'install', status: 'done', message: 'Dependencies already prepared by create-next-app', elapsed: elapsed() });
+
+    // Start dev server
+    emit({ step: 'start', status: 'running', message: 'Launching Next.js dev server...' });
+    const devResult = await sandbox.startDev(cliProject.id);
+    if (!devResult.port) {
+      emit({ step: 'start', status: 'failed', message: 'Dev server did not start' });
+      return null;
+    }
+    emit({ step: 'start', status: 'done', message: `Running on port ${devResult.port}`, port: devResult.port, elapsed: elapsed() });
+
+    // Verify
+    emit({ step: 'verify', status: 'running', message: 'Opening live preview...' });
+    const verifyOk = await waitForUrl(`http://localhost:${devResult.port}`, 30_000);
+    emit({
+      step: 'verify',
+      status: verifyOk ? 'done' : 'failed',
+      message: verifyOk ? 'Preview is ready' : 'Preview did not respond in time',
+      projectId: cliProject.id,
+      port: devResult.port,
+      elapsed: elapsed(),
+    });
+
+    return { projectId: cliProject.id, port: devResult.port };
+  }
 
   const template = getStackTemplate(stackId, tier);
   if (!template) {
@@ -86,7 +154,10 @@ export async function deployStack(
   }
 
   emit({ step: 'scaffold', status: 'running', message: `Writing ${template.files.length} files...` });
-  const project = await sandbox.create(name || template.name.toLowerCase().replace(/\s+/g, '-'));
+  const project = await sandbox.create(
+    name || template.name.toLowerCase().replace(/\s+/g, '-'),
+    ownerUserId ?? null,
+  );
   await sandbox.writeFiles(
     project.id,
     template.files.map((f) => ({ path: f.path, content: f.content })),
@@ -153,7 +224,7 @@ export async function deployStack(
         execSync(`docker build -t ${tag} .`, {
           cwd: project.rootDir,
           stdio: 'pipe',
-          timeout: 180_000,
+          timeout: 300_000,
           ...EXEC_SHELL,
         });
         // Clean up verification image
@@ -232,7 +303,8 @@ export async function deployStack(
   /* ── Step 6: Start dev server ── */
   emit({ step: 'start', status: 'running', message: 'Starting dev server...' });
   try {
-    const { port } = await sandbox.startDev(project.id);
+    const { port: initialPort } = await sandbox.startDev(project.id);
+    let port = sandbox.get(project.id)?.devPort ?? initialPort;
     emit({
       step: 'start',
       status: 'done',
@@ -245,7 +317,20 @@ export async function deployStack(
     emit({ step: 'verify', status: 'running', message: 'Waiting for server to be ready...' });
 
     // Wait for the sandbox status to become 'running' or health endpoint
-    const healthy = await waitForHealth(port, 30_000);
+    let healthy = await waitForHealth(port, 15_000);
+    const latestPort = sandbox.get(project.id)?.devPort ?? port;
+    if (!healthy && latestPort !== port) {
+      port = latestPort;
+      emit({
+        step: 'verify',
+        status: 'running',
+        message: `Detected active server on port ${port}...`,
+        port,
+        elapsed: elapsed(),
+      });
+      healthy = await waitForHealth(port, 15_000);
+    }
+
     if (healthy) {
       emit({
         step: 'verify',

@@ -11,15 +11,15 @@
 
 ```
         ┌─────────┐
-        │  E2E    │  ← Playwright (5-15 tests)
-        │ (slow)  │     Critical user flows only
+        │  E2E    │  ← Playwright ( tests)
+        │ (slow)  │     Critical user + ui flows only
        ─┴─────────┴─
       ┌──────────────┐
-      │ Integration  │  ← Vitest (20-50 tests)
+      │ Integration  │  ← Vitest ( tests)
       │  (medium)    │     API routes, DB queries, component + hook combos
      ─┴──────────────┴─
     ┌──────────────────┐
-    │   Unit Tests     │  ← Vitest (100-500 tests)
+    │   Unit Tests     │  ← Vitest ( tests)
     │   (fast)         │     Pure functions, hooks, components, validators
     └──────────────────┘
 ```
@@ -678,3 +678,63 @@ jobs:
 - [ ] WebSocket chat route test (streaming via WS)
 - [ ] Playwright E2E: open app → type message → see response
 - [ ] Playwright E2E: scaffold template → see preview
+
+---
+
+## 12. AI-assisted E2E & evaluation ecosystem (2026)
+
+Vai already uses **deterministic Playwright/Puppeteer drivers** under `scripts/` and aggregates them with **`pnpm e2e:audit`** → `reports/e2e-audit-latest.{json,md}`. The tools below are **optional add-ons**: natural-language or agentic layers on top of similar foundations, or **separate** tracks for **LLM quality** (not UI correctness).
+
+### AI-flavored E2E / browser automation
+
+| Tool | Role | Fit for Vai | License / caveat |
+|------|------|-------------|------------------|
+| [**Shortest**](https://github.com/antiwork/shortest) | Natural-language tests on **Playwright**; AI plans/steps | Strong fit: same stack as `test-*.mjs`; could stub flows in English then export/trace | Open source; typically needs an **LLM API key** (e.g. Anthropic) |
+| [**QA Wolf**](https://www.qawolf.com/) | Agentic **Playwright/Appium** codegen from prompts, maintenance workflows | Useful for **new** suites; overlaps with hand-written scripts — pick one “source of truth” | **Commercial** product (may offer trial/free tier); not a single OSS repo for the full platform |
+| [**Aethr**](https://github.com/autifyhq/aethr) (Autify) | NL scenario runner + **Playwright MCP** | Aligns with **Cursor**; step lists can live in Markdown | Check repo license and maturity before adoption |
+| [**CodeceptJS**](https://codecept.io/) + AI helpers | BDD-style tests; **AI-assisted** healing / codegen | Possible if you want a second runner beside raw Playwright; migration cost | Open source core; AI features depend on provider keys |
+| **Testsigma** | Low-code English tests, self-healing | Evaluate only if you want a separate IDE; duplicates much of Playwright | “Open source” offerings have varied scope — confirm what is actually self-hostable |
+
+**Practical stance for this repo:** keep **deterministic** `scripts/*.mjs` + `e2e:audit` as CI ground truth; use **Shortest** or **Markdown+MCP** (Aethr-style) as an **authoring accelerator**, not a replacement for checked-in Playwright when you need reproducible failures.
+
+### API reliability / fuzzing (runtime & HTTP)
+
+| Tool | Role | Fit for Vai |
+|------|------|-------------|
+| [**EvoMaster**](https://www.evomaster.org/) | **Evolutionary fuzzing** for REST/GraphQL/RPC; finds crashes, weird states | Run against **documented** Fastify/OpenAPI surfaces (`packages/runtime`) if you add or export an OpenAPI spec |
+| [**Schemathesis**](https://schemathesis.readthedocs.io/) | Property-based tests from **OpenAPI** | Same requirement: needs a schema for generated routes |
+| **Hand-rolled `fetch` in Vitest** | Contract tests for a few critical routes | Already aligned with current monorepo; lowest ceremony |
+
+### LLM / RAG quality (not E2E UI)
+
+| Tool | Role | Fit for Vai |
+|------|------|-------------|
+| [**Promptfoo**](https://www.promptfoo.dev/) | CLI/config-driven **evals**: accuracy, safety, regressions on prompts | Good for **chat modes**, tool-calling, and rewrite pipelines |
+| [**DeepEval**](https://github.com/confident-ai/deepeval) | Python-oriented **LLM evals** (hallucination, RAG metrics) | Use if you centralize evals in Python or bridge from CI |
+| **Botium** | **Conversational** / chatbot regression | Optional if you expose third-party bot adapters |
+
+These complement UI tests: **failing Promptfoo** means “wrong answer,” not “button missing.”
+
+### Benchmarks (agents & coding assistants)
+
+| Benchmark | What it measures | Relevance |
+|-----------|------------------|-----------|
+| [**SWE-bench**](https://www.swebench.com/) (Verified) | Patch real GitHub issues | Gold standard for **coding agents**; heavy setup |
+| [**GAIA**](https://huggingface.co/datasets/gaia-benchmark/GAIA) | Multi-step reasoning + tool use | General **agent** capability, not repo-specific |
+| [**Terminal-Bench**](https://terminal-bench.com/) | Terminal / shell tasks | Already in Vai’s orbit for **agent harness** work |
+| **CUB** (Computer Use Benchmark) | **GUI / browser** operation | Closer to **Cursor Browser MCP** + vision models; optional north star for “AI drives UI” |
+
+### Visual regression
+
+| Tool | Notes |
+|------|------|
+| [**Percy**](https://percy.io/), **Chromatic**, **Applitools** | Hosted visual diffs; free tiers vary |
+| **Playwright `toHaveScreenshot`** | Fully local, no vendor; good first step |
+
+### Summary
+
+1. **UI truth:** deterministic Playwright (as now) + `pnpm e2e:audit`.  
+2. **Faster authoring:** evaluate **Shortest** or MCP+Markdown runners; still commit stable specs.  
+3. **API hardening:** **EvoMaster** / Schemathesis when OpenAPI (or similar) exists for the runtime.  
+4. **Model behavior:** **Promptfoo** / DeepEval **separate** from browser E2E.  
+5. **Agents:** Terminal-Bench / SWE-bench for **capabilities**, not daily UI smoke.

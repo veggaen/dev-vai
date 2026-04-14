@@ -10,30 +10,69 @@ import {
   createGitHubCapture,
 } from '@vai/core';
 import type { RawCapture } from '@vai/core';
+import {
+  captureExtensionBodySchema,
+  discoverBodySchema,
+  ingestGitHubDeepBodySchema,
+  ingestUrlBodySchema,
+} from '@vai/api-types/ingest';
+import { invalidRequestBody } from '../validation/http-validation.js';
+
+/** Validate a URL is safe to fetch (no SSRF). */
+function validateUrl(raw: string): URL {
+  const url = new URL(raw);
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error(`Only HTTP/HTTPS URLs allowed, got ${url.protocol}`);
+  }
+  const host = url.hostname.toLowerCase();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1'
+      || host === '0.0.0.0' || host.endsWith('.local')
+      || host.startsWith('10.') || host.startsWith('192.168.')
+      || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+      || host === '169.254.169.254') {
+    throw new Error(`Private/internal URLs are not allowed: ${host}`);
+  }
+  return url;
+}
 
 export function registerIngestRoutes(
   app: FastifyInstance,
   pipeline: IngestPipeline,
 ) {
   // Ingest a web page by URL
-  app.post<{ Body: { url: string } }>('/api/ingest/web', async (request) => {
-    const { url } = request.body;
+  app.post<{ Body: { url: string } }>('/api/ingest/web', async (request, reply) => {
+    const parsed = ingestUrlBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    const { url } = parsed.data;
+    validateUrl(url);
     const capture = await scrapeWebPage(url);
     const result = pipeline.ingest(capture);
     return result;
   });
 
   // Ingest a YouTube video transcript by URL
-  app.post<{ Body: { url: string } }>('/api/ingest/youtube', async (request) => {
-    const { url } = request.body;
+  app.post<{ Body: { url: string } }>('/api/ingest/youtube', async (request, reply) => {
+    const parsed = ingestUrlBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    const { url } = parsed.data;
+    validateUrl(url);
     const capture = await fetchYouTubeTranscript(url);
     const result = pipeline.ingest(capture);
     return result;
   });
 
   // Ingest a GitHub repo by URL
-  app.post<{ Body: { url: string } }>('/api/ingest/github', async (request) => {
-    const { url } = request.body;
+  app.post<{ Body: { url: string } }>('/api/ingest/github', async (request, reply) => {
+    const parsed = ingestUrlBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    const { url } = parsed.data;
+    validateUrl(url);
     const capture = await fetchGitHubRepo(url);
     const result = pipeline.ingest(capture);
     return result;
@@ -41,8 +80,13 @@ export function registerIngestRoutes(
 
   // Deep-ingest a GitHub repo: fetch actual source files, group by pattern.
   // This is the "teach VAI about a repo" endpoint — much richer than basic /api/ingest/github.
-  app.post<{ Body: { url: string; maxFiles?: number } }>('/api/ingest/github/deep', async (request) => {
-    const { url, maxFiles } = request.body;
+  app.post<{ Body: { url: string; maxFiles?: number } }>('/api/ingest/github/deep', async (request, reply) => {
+    const parsed = ingestGitHubDeepBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    const { url, maxFiles } = parsed.data;
+    validateUrl(url);
     const captures = await deepFetchGitHubRepo(url, {
       maxFiles: maxFiles ?? 60,
       onProgress: (msg) => console.log(`[DeepIngest] ${msg}`),
@@ -75,8 +119,12 @@ export function registerIngestRoutes(
       language?: string;
       meta?: Record<string, unknown>;
     };
-  }>('/api/capture', async (request) => {
-    const { type, url, title, content, language, meta } = request.body;
+  }>('/api/capture', async (request, reply) => {
+    const parsed = captureExtensionBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+    const { type, url, title, content, language, meta } = parsed.data;
 
     let capture: RawCapture;
 
@@ -130,7 +178,7 @@ export function registerIngestRoutes(
 
   // Re-process all existing sources with improved text cleaning
   // This re-cleans, re-chunks, re-summarizes, and re-trains on all existing content
-  app.post('/api/reprocess', async (_request, reply) => {
+  app.post('/api/reprocess', async (_request, _reply) => {
     const result = pipeline.reprocessAll((done, total, title) => {
       if (done % 50 === 0 || done === total) {
         console.log(`[VAI] Reprocessing: ${done}/${total} — "${title}"`);
@@ -150,8 +198,12 @@ export function registerIngestRoutes(
   // Discover new sources by following links from an existing source
   app.post<{ Body: { url: string; maxPages?: number } }>(
     '/api/discover',
-    async (request) => {
-      const { url, maxPages = 5 } = request.body;
+    async (request, reply) => {
+      const parsed = discoverBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      const { url, maxPages = 5 } = parsed.data;
       const existingUrls = new Set(pipeline.listSources().map(s => s.url));
 
       // Fetch the seed page and extract links

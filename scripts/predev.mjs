@@ -24,23 +24,33 @@ const isWindows = process.platform === 'win32';
 const REQUIRED_PORTS = [
   Number(process.env.VAI_PORT ?? 3006),  // Runtime server
   5173,                                    // Vite dev server
+  5174,                                    // Vite fallback (clean this too)
 ];
 
 /** Sandbox ports — kill if occupied but don't fail if still busy */
-const SANDBOX_PORTS = Array.from({ length: 11 }, (_, i) => 4100 + i); // 4100-4110
+const SANDBOX_PORTS = Array.from({ length: 31 }, (_, i) => 4100 + i); // 4100-4130
 
+/**
+ * Check if a port is in use on BOTH IPv4 and IPv6.
+ * Previous version only checked IPv4 (0.0.0.0), which missed processes
+ * bound to [::1] (IPv6 localhost) — e.g. Vite often binds IPv6 only.
+ */
 function isPortInUse(port) {
-  return new Promise((resolve) => {
-    const server = net.createServer();
-    server.once('error', (err) => {
-      if (err.code === 'EADDRINUSE') resolve(true);
-      else resolve(false);
+  const checkHost = (host) =>
+    new Promise((resolve) => {
+      const server = net.createServer();
+      server.once('error', (err) => {
+        resolve(err.code === 'EADDRINUSE');
+      });
+      server.once('listening', () => {
+        server.close(() => resolve(false));
+      });
+      server.listen(port, host);
     });
-    server.once('listening', () => {
-      server.close(() => resolve(false));
-    });
-    server.listen(port);
-  });
+
+  return Promise.all([checkHost('0.0.0.0'), checkHost('::1')]).then(
+    ([v4, v6]) => v4 || v6,
+  );
 }
 
 /** Sleep helper */

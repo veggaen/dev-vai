@@ -3,7 +3,7 @@
  * Supports both built-in stacks and user-defined custom stacks.
  */
 
-import type { StackDefinition, StackTemplate, StackId, TierId, CustomStackConfig } from './types.js';
+import type { StackDefinition, StackTemplate, CustomStackConfig } from './types.js';
 export type { StackDefinition, StackTemplate, StackId, TierId, CustomStackConfig } from './types.js';
 export { TIER_META, DEPLOY_STEPS, customConfigToStack } from './types.js';
 
@@ -11,10 +11,12 @@ import { pernStack } from './pern.js';
 import { mernStack } from './mern.js';
 import { nextjsStack } from './nextjs-full.js';
 import { t3Stack } from './t3.js';
+import { vinextStack } from './vinext.js';
+import { gameStack } from './game.js';
 import { customConfigToStack } from './types.js';
 
 /** Built-in stacks */
-const BUILTIN_STACKS: StackDefinition[] = [pernStack, mernStack, nextjsStack, t3Stack];
+const BUILTIN_STACKS: StackDefinition[] = [pernStack, mernStack, nextjsStack, t3Stack, vinextStack, gameStack];
 
 /** Custom stacks registered at runtime */
 const customStacks = new Map<string, StackDefinition>();

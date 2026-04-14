@@ -1,7 +1,10 @@
+import type { ConversationMode } from './modes.js';
+
 export interface ConversationRecord {
   id: string;
   title: string;
   modelId: string;
+  mode: ConversationMode;
   createdAt: Date;
   updatedAt: Date;
 }
