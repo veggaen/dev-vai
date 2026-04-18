@@ -243,6 +243,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): VaiConfig {
     authEnabled: envBool(env, 'VAI_AUTH_ENABLED', !!(env.VAI_API_KEYS?.trim())),
     rateLimitPerMinute: envInt(env, 'VAI_RATE_LIMIT_PER_MINUTE', 60),
     platformAuth,
+    allowedOrigins: env.VAI_ALLOWED_ORIGINS?.trim()
+      ? env.VAI_ALLOWED_ORIGINS.trim().split(',').map((o) => o.trim()).filter(Boolean)
+      : undefined,
     chatPromptRewrite,
 
     // Features
@@ -250,6 +253,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): VaiConfig {
     maxToolIterations: envInt(env, 'VAI_MAX_TOOL_ITERATIONS', 10),
     enableUsageTracking: envBool(env, 'VAI_ENABLE_USAGE_TRACKING', true),
     enableEval: envBool(env, 'VAI_ENABLE_EVAL', false),
+
+    // Quality Gate
+    qualityGate: {
+      enabled: envBool(env, 'VAI_QUALITY_GATE', false),
+      confidenceThreshold: parseFloat(env.VAI_QUALITY_GATE_THRESHOLD || '0.5'),
+      provider: (env.VAI_QUALITY_GATE_PROVIDER?.trim() as ProviderId | undefined) || undefined,
+      model: env.VAI_QUALITY_GATE_MODEL?.trim() || undefined,
+      timeoutMs: envInt(env, 'VAI_QUALITY_GATE_TIMEOUT', 5000),
+      skipStrategies: (env.VAI_QUALITY_GATE_SKIP || 'empty,gibberish,keyboard-noise,math,binary,conversational,scaffold,url-request').split(',').map(s => s.trim()),
+    },
   };
 }
 
@@ -283,6 +296,14 @@ export function printConfigDiagnostic(config: VaiConfig): void {
   lines.push(`  platform auth: ${config.platformAuth.enabled ? `ON (${Object.entries(config.platformAuth.providers).filter(([, provider]) => provider.enabled).map(([id]) => id).join(', ') || 'configured providers pending'})` : 'OFF'}`);
   if (config.maxMonthlySpend > 0) {
     lines.push(`  monthly spend cap: $${config.maxMonthlySpend}`);
+  }
+
+  // Quality Gate
+  const qg = config.qualityGate;
+  if (qg.enabled) {
+    lines.push(`  quality gate: ON (threshold: ${qg.confidenceThreshold}, timeout: ${qg.timeoutMs}ms${qg.provider ? `, provider: ${qg.provider}` : ', auto-detect'})`);
+  } else {
+    lines.push('  quality gate: OFF');
   }
 
   console.log(lines.join('\n'));

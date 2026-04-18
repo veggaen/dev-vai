@@ -20,7 +20,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useChatStore } from '../stores/chatStore.js';
-import { IDE_AGENT_COLORS, type SearchSourceUI } from '../stores/chatStore.js';
+import { IDE_AGENT_COLORS } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
 import { toast } from 'sonner';
 import { useLayoutStore, MODE_PLACEHOLDERS, type ChatMode } from '../stores/layoutStore.js';
@@ -33,15 +33,18 @@ import { ScrollToBottom } from './ScrollToBottom.js';
 import { TypingIndicator } from './TypingIndicator.js';
 import { useAutoScroll } from '../hooks/useAutoScroll.js';
 import { useIntentStore, computeFallbackMap } from '../stores/intentStore.js';
+import { apiFetch } from '../lib/api.js';
 import {
-  Code, Zap, Sparkles, BookOpen, Shield, MessageCircle,
+  BookOpen, MessageCircle, Sparkles, Shield, Globe,
   Paperclip, X, FileText, ArrowUp, Square,
-  Layout, Rocket, Globe, Eye, Brain, Bot, Wifi, Plus, ExternalLink, FolderOpenDot,
+  Eye, Brain, Bot, Wifi, Plus, Moon, Sun, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { FocusModeToggle } from './LayoutModeToggle.js';
 import { BroadcastStrip } from './BroadcastStrip.js';
 import type { PerIdeConfig } from './BroadcastTargetPicker.js';
+import { ResearchContextRail } from './chat/ResearchContextRail.js';
+import { ChatEmptyState } from './chat/ChatEmptyState.js';
 import { resolveSendTimeWorkIntent } from '../lib/auto-sandbox-intent.js';
 import {
   buildIdeMentionItems,
@@ -51,6 +54,7 @@ import {
   type IdeMentionItem,
 } from '../lib/ideMentions.js';
 import { IdeMentionMenu } from './IdeMentionMenu.js';
+import { pickSandboxContextPaths } from '../lib/sandbox-context.js';
 
 /** Fallback chat apps when the extension hasn't reported yet */
 const FALLBACK_CHAT_APPS: { id: string; label: string }[] = [
@@ -97,201 +101,6 @@ function summarizeResearchPrompt(value: string): string {
   return `${cleaned.slice(0, 69).trimEnd()}...`;
 }
 
-function ResearchContextRailContent({
-  question,
-  sources,
-  onClose,
-  showCloseButton = false,
-}: {
-  question: string;
-  sources: readonly SearchSourceUI[];
-  onClose?: () => void;
-  showCloseButton?: boolean;
-}) {
-  const sourceDomains = Array.from(new Set(
-    sources.map((source) => source.domain.replace(/^www\./, '')),
-  )).slice(0, 3);
-
-  return (
-    <div className="flex h-full flex-col overflow-hidden rounded-[1.75rem] border border-zinc-800/70 bg-zinc-950/80 shadow-[0_28px_120px_rgba(0,0,0,0.38)] backdrop-blur-xl">
-      <div className="border-b border-zinc-800/70 px-4 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
-              <span className="rounded-full border border-zinc-800/80 bg-zinc-900/70 px-2.5 py-1 font-medium text-zinc-200">
-                {sources.length} source{sources.length === 1 ? '' : 's'}
-              </span>
-              <span className="uppercase tracking-[0.2em] text-zinc-600">Research context</span>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-zinc-200">
-              Source trail for <span className="text-zinc-400">{question}</span>
-            </p>
-            {sourceDomains.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {sourceDomains.map((domain) => (
-                  <span
-                    key={domain}
-                    className="rounded-full border border-zinc-800/80 bg-zinc-900/60 px-2 py-1 text-[10px] font-medium text-zinc-400"
-                  >
-                    {domain}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {showCloseButton && onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              data-research-sidebar-close="button"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-800/80 bg-zinc-900/60 text-zinc-500 transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
-              aria-label="Close sources sidebar"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="flex-1 space-y-2.5 overflow-y-auto px-4 py-4">
-        {sources.slice(0, 10).map((source, index) => (
-          <a
-            key={`${source.url}-${index}`}
-            href={source.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            data-research-source-item={index + 1}
-            className="group/context block rounded-[1.35rem] border border-zinc-800/70 bg-zinc-950/35 px-3.5 py-3.5 transition-colors hover:border-zinc-700 hover:bg-zinc-900/50"
-          >
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex flex-shrink-0 items-center gap-2">
-                <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full border border-zinc-800/80 bg-zinc-900/70 px-1.5 text-[10px] font-semibold text-zinc-300">
-                  {index + 1}
-                </span>
-                <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-zinc-800/80 bg-zinc-900/80">
-                  {source.favicon ? (
-                    <img
-                      src={source.favicon}
-                      alt=""
-                      className="h-4 w-4 rounded-sm"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                    />
-                  ) : (
-                    <span className="text-[10px] font-semibold uppercase text-zinc-500">
-                      {source.domain.slice(0, 1)}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                  <span className="truncate text-zinc-400">{source.domain.replace(/^www\./, '')}</span>
-                  <span className="rounded-full border border-zinc-800/70 px-1.5 py-0.5 text-[9px] text-zinc-600">
-                    {source.trustTier}
-                  </span>
-                  <span className="rounded-full border border-zinc-800/70 px-1.5 py-0.5 text-[9px] text-zinc-600">
-                    {Math.round(source.trustScore * 100)}
-                  </span>
-                </div>
-                <p className="mt-1.5 line-clamp-2 text-[13px] font-medium leading-5 text-zinc-100 transition-colors group-hover/context:text-white">
-                  {source.title}
-                </p>
-                {source.snippet && (
-                  <p className="mt-1.5 line-clamp-3 text-[11px] leading-5 text-zinc-500 transition-colors group-hover/context:text-zinc-400">
-                    {source.snippet}
-                  </p>
-                )}
-              </div>
-
-              <ExternalLink className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-zinc-700 transition-colors group-hover/context:text-zinc-300" />
-            </div>
-          </a>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ResearchContextRail({
-  question,
-  sources,
-  isOpen,
-  onClose,
-}: {
-  question: string;
-  sources: readonly SearchSourceUI[];
-  isOpen: boolean;
-  onClose: () => void;
-}) {
-  if (sources.length === 0 || !isOpen) return null;
-
-  return (
-    <>
-      <AnimatePresence>
-        <motion.button
-          type="button"
-          aria-label="Close sources sidebar"
-          onClick={onClose}
-          className="fixed inset-0 z-30 bg-black/45 xl:hidden"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-        />
-      </AnimatePresence>
-
-      <AnimatePresence>
-        <motion.aside
-          data-research-sidebar="panel"
-          data-state="open"
-          className="fixed inset-x-4 bottom-24 top-20 z-40 xl:hidden"
-          initial={{ opacity: 0, x: 28 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 28 }}
-          transition={{ duration: 0.22, ease: 'easeOut' }}
-        >
-          <ResearchContextRailContent
-            question={question}
-            sources={sources}
-            onClose={onClose}
-            showCloseButton
-          />
-        </motion.aside>
-      </AnimatePresence>
-
-      <motion.aside
-        data-research-sidebar="panel"
-        data-state="open"
-        className="hidden xl:block xl:sticky xl:top-6"
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: 20 }}
-        transition={{ duration: 0.22, ease: 'easeOut' }}
-      >
-        <ResearchContextRailContent question={question} sources={sources} />
-      </motion.aside>
-    </>
-  );
-}
-
-/* ── Preset suggestions for empty state ── */
-const PRESETS = [
-  { label: 'Scaffold a Next.js app', description: 'Full-stack React with SSR', icon: Code, category: 'Build' },
-  { label: 'Create a REST API', description: 'Express or Fastify backend', icon: Zap, category: 'Build' },
-  { label: 'Build a landing page', description: 'Modern responsive design', icon: Layout, category: 'Build' },
-  { label: 'Deploy from a template', description: 'Docker, Vercel, Railway', icon: Rocket, category: 'Deploy' },
-  { label: 'Explain React 19 features', description: 'Hooks, server components', icon: BookOpen, category: 'Learn' },
-  { label: 'Compare Prisma vs Drizzle', description: 'ORM trade-offs & perf', icon: MessageCircle, category: 'Explore' },
-];
-
-const QUICK_CHIPS = [
-  { label: 'Build something', icon: Sparkles },
-  { label: 'Explain a concept', icon: BookOpen },
-  { label: 'Debug my code', icon: Shield },
-  { label: 'Browse the web', icon: Globe },
-];
-
 /* ── File extension detection ── */
 const CODE_PATTERNS: { test: RegExp; ext: string }[] = [
   { test: /^import\s+.*from\s+['"]|^export\s+(default\s+)?/m, ext: 'tsx' },
@@ -308,6 +117,11 @@ function detectFileExtension(text: string): string {
     if (p.test.test(text)) return p.ext;
   }
   return 'md';
+}
+
+function truncateSnapshotContent(content: string, limit = 1600): string {
+  if (content.length <= limit) return content;
+  return `${content.slice(0, limit).trimEnd()}\n/* truncated for prompt context */`;
 }
 
 interface PastedImage {
@@ -330,21 +144,6 @@ interface FileAttachment {
 const LARGE_PASTE_THRESHOLD = 500;
 const MIN_INPUT_HEIGHT = 56;
 const MAX_INPUT_HEIGHT = 200;
-
-function ChatStudioLogo() {
-  return (
-    <div
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[#ff6b35] to-[#ff4d00] shadow-[0_8px_24px_rgba(255,107,53,0.25)]"
-      aria-hidden
-    >
-      <div className="flex flex-col gap-[3px]">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="h-[2px] w-5 rounded-full bg-white/90" style={{ opacity: 0.35 + i * 0.22 }} />
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export function ChatWindow() {
   const {
@@ -375,8 +174,10 @@ export function ChatWindow() {
     buildStatus,
     setBuildStatus,
     setMode,
+    themePreference,
+    toggleThemePreference,
   } = useLayoutStore();
-  const studioBuilderChrome = showBuilderPanel && (mode === 'builder' || mode === 'agent');
+  const studioBuilderChrome = themePreference === 'light';
   const isOwner = useAuthStore((state) => state.isOwner);
   const ownerFeaturesHidden = useAuthStore((state) => state.ownerFeaturesHidden);
   const authUser = useAuthStore((state) => state.user);
@@ -409,6 +210,7 @@ export function ChatWindow() {
   const [perIdeConfigs, setPerIdeConfigs] = useState<PerIdeConfig[]>([]);
   const [showIdePopup, setShowIdePopup] = useState(false);
   const [isResearchRailOpen, setIsResearchRailOpen] = useState(false);
+  const [activityCollapsed, setActivityCollapsed] = useState(false);
   /** `@` mention: start index in `input`, or null when not in a mention token */
   const [mentionAt, setMentionAt] = useState<number | null>(null);
   const [mentionQuery, setMentionQuery] = useState('');
@@ -977,7 +779,7 @@ export function ChatWindow() {
 
     // Inject sandbox context when a project is active so Vai knows what's running.
     // Hash the file list to avoid re-sending the same blob on every message.
-    const sandboxContextPrompt = (() => {
+    const sandboxContextPrompt = await (async () => {
       if (!sandboxProjectId || (sandboxStatus !== 'running' && sandboxStatus !== 'writing' && sandboxStatus !== 'idle')) return undefined;
 
       const fileListKey = sandboxFiles.slice(0, 40).join('|');
@@ -1000,6 +802,34 @@ export function ChatWindow() {
       } else if (fileTreeUnchanged && sandboxFiles.length > 0) {
         lines.push(`File tree unchanged (${sandboxFiles.length} files — omitted to save context).`);
       }
+
+      const snapshotPaths = pickSandboxContextPaths(sandboxFiles, text);
+      const snapshots = (await Promise.all(snapshotPaths.map(async (path) => {
+        try {
+          const res = await apiFetch(`/api/sandbox/${sandboxProjectId}/file?path=${encodeURIComponent(path)}`);
+          if (!res.ok) return null;
+          const data = await res.json() as { path: string; content: string };
+          return {
+            path: data.path,
+            content: truncateSnapshotContent(data.content),
+            language: detectFileExtension(data.content),
+          };
+        } catch {
+          return null;
+        }
+      }))).filter((snapshot): snapshot is { path: string; content: string; language: string } => Boolean(snapshot));
+
+      if (snapshots.length > 0) {
+        lines.push('');
+        lines.push('CURRENT FILE SNAPSHOTS:');
+        for (const snapshot of snapshots) {
+          lines.push(`FILE: ${snapshot.path}`);
+          lines.push(`\`\`\`${snapshot.language}`);
+          lines.push(snapshot.content);
+          lines.push('```');
+        }
+      }
+
       lines.push('');
       lines.push('EDITING RULES: Since a project is active, prefer targeted edits over full re-scaffolds.');
       lines.push('Output only the files that need to change, using title="path/to/file" on each code block.');
@@ -1042,8 +872,11 @@ export function ChatWindow() {
 
   const handlePresetClick = (label: string) => { handleSend(label); };
   const handleChipClick = (label: string) => {
-    setInput(label + ': ');
-    textareaRef.current?.focus();
+    setInput(label);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      adjustTextareaHeight();
+    });
   };
 
   /** Switch to Builder mode + focus input — Base44-style "just start building" */
@@ -1119,7 +952,138 @@ export function ChatWindow() {
   }, [activeDeployStep, buildStatus.message, buildStatus.step, deployPhase, isStreaming, mode]);
   const showProjectContextStrip = Boolean(sandboxProjectId);
   const shellModeLabel = `${mode.charAt(0).toUpperCase()}${mode.slice(1)}`;
-  const headerTitle = sandboxProjectName || (hasMessages ? 'Current workspace' : 'Vai');
+  const headerTitle = hasMessages ? 'Workspace' : 'Vai';
+  const composerAssistText = pastedImage
+    ? 'Describe the screenshot and ask the exact question you want answered.'
+    : deliveryRoute === 'broadcast'
+      ? 'Send one prompt to connected IDEs and compare the answers in this thread.'
+      : showProjectContextStrip
+        ? 'Ask for edits, debugging, or polish using the attached project context.'
+        : hasMessages
+          ? 'Use a sharper follow-up to keep the thread moving.'
+          : 'Start with the outcome you want, then add files or screenshots if needed.';
+  const composerStateChips = useMemo(() => {
+    const chips: Array<{ key: string; label: string; tone: 'emerald' | 'blue' | 'violet' | 'amber' }> = [
+      {
+        key: 'mode',
+        label: `${shellModeLabel} mode`,
+        tone: mode === 'builder' || mode === 'agent' ? 'amber' : 'violet',
+      },
+    ];
+
+    if (deliveryRoute === 'broadcast') {
+      const targetCount = broadcastTargetClientIds.length > 0 ? broadcastTargetClientIds.length : onlineIdeCount;
+      chips.push({
+        key: 'route',
+        label: `Broadcast ${Math.max(targetCount, 1)} IDE${targetCount === 1 ? '' : 's'}`,
+        tone: 'blue',
+      });
+    } else if (deliveryRoute === 'group') {
+      chips.push({
+        key: 'route',
+        label: `Group chat ${roundtablePeers.length}`,
+        tone: 'violet',
+      });
+    }
+
+    if (showProjectContextStrip) {
+      chips.push({
+        key: 'project',
+        label: persistentProjectId ? 'Synced project' : 'Project attached',
+        tone: 'blue',
+      });
+    }
+
+    if (attachedFiles.length > 0) {
+      chips.push({
+        key: 'files',
+        label: `${attachedFiles.length} file${attachedFiles.length === 1 ? '' : 's'}`,
+        tone: 'amber',
+      });
+    }
+
+    if (pastedImage) {
+      chips.push({ key: 'image', label: 'Image attached', tone: 'amber' });
+    }
+
+    return chips.slice(0, 3);
+  }, [
+    attachedFiles.length,
+    broadcastTargetClientIds.length,
+    deliveryRoute,
+    mode,
+    onlineIdeCount,
+    pastedImage,
+    persistentProjectId,
+    roundtablePeers.length,
+    shellModeLabel,
+    showProjectContextStrip,
+  ]);
+  const composerHintChips = useMemo(() => {
+    const hints = [
+      { key: 'enter', label: 'Enter sends' },
+      { key: 'newline', label: 'Shift+Enter newline' },
+    ];
+
+    if (onlineIdeCount > 0) {
+      hints.push({ key: 'route', label: '@ routes to IDE' });
+    }
+
+    if (!pastedImage) {
+      hints.push({ key: 'paste', label: 'Paste big code to attach' });
+    }
+
+    return hints.slice(0, 2);
+  }, [onlineIdeCount, pastedImage]);
+  const activitySummary = useMemo(() => {
+    if (transientActivity.length > 0) {
+      return transientActivity[0]?.label ?? 'Working';
+    }
+    if (buildActivity.length > 0) {
+      return `${buildActivity.length} update${buildActivity.length === 1 ? '' : 's'}`;
+    }
+    return 'Idle';
+  }, [buildActivity.length, transientActivity]);
+  const contextualComposerActions = useMemo(() => {
+    if (!hasMessages) return [];
+
+    if (deliveryRoute === 'broadcast') {
+      return [
+        { label: 'Ask for fixes', prompt: 'Review the current issue and propose the best fix with tradeoffs.', icon: Shield },
+        { label: 'Different approach', prompt: 'Give me a materially different approach to this problem.', icon: Sparkles },
+        { label: 'Implementation plan', prompt: 'Turn this into a concrete implementation plan with steps.', icon: BookOpen },
+        { label: 'Challenge it', prompt: 'Challenge the current direction and call out the weak assumptions.', icon: Globe },
+      ];
+    }
+
+    if (mode === 'builder' || mode === 'agent' || showProjectContextStrip) {
+      return [
+        { label: 'Tighten the layout', prompt: 'Tighten the layout, spacing, and hierarchy without changing the core functionality.', icon: Sparkles },
+        { label: 'Make it mobile-ready', prompt: 'Improve the mobile layout and touch behavior without breaking desktop.', icon: Globe },
+        { label: 'Explain the structure', prompt: 'Explain what you built, where the important files live, and how the pieces connect.', icon: BookOpen },
+      ];
+    }
+
+    if (hasResearchRailContext) {
+      return [
+        { label: 'Short summary', prompt: 'Summarize that in 3 crisp bullets.', icon: BookOpen },
+        { label: 'Why it matters', prompt: 'Why does this matter in practice?', icon: Shield },
+        { label: 'Turn into a plan', prompt: 'Turn that into an actionable plan.', icon: Sparkles },
+        { label: 'Best source first', prompt: 'Which source matters most here, and why?', icon: Globe },
+      ];
+    }
+
+    return [
+      { label: 'Make it shorter', prompt: 'Make that shorter and sharper.', icon: Sparkles },
+      { label: 'Give examples', prompt: 'Give me two concrete examples.', icon: BookOpen },
+      { label: 'Challenge assumptions', prompt: 'Challenge that answer and point out weak assumptions.', icon: Shield },
+      { label: 'Turn into steps', prompt: 'Turn that into clear step-by-step actions.', icon: Globe },
+    ];
+  }, [deliveryRoute, hasMessages, hasResearchRailContext, mode, showProjectContextStrip]);
+
+  useEffect(() => {
+    setActivityCollapsed(false);
+  }, [activeConversationId]);
 
   return (
     <div
@@ -1137,10 +1101,9 @@ export function ChatWindow() {
         className="hidden"
       />
 
-      <div className={studioBuilderChrome ? 'border-b border-zinc-200 bg-white' : 'border-b border-white/[0.04]'}>
+      <div className={studioBuilderChrome ? 'border-b border-zinc-200 bg-white' : 'border-b border-zinc-900 bg-zinc-950/92'}>
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
-            {studioBuilderChrome && <ChatStudioLogo />}
             <div className="min-w-0">
               <h2 className={`truncate text-[14px] font-medium ${studioBuilderChrome ? 'text-zinc-900' : 'text-zinc-200'}`}>
                 {headerTitle}
@@ -1152,10 +1115,10 @@ export function ChatWindow() {
               )}
             </div>
             <span
-              className={`hidden rounded-full border px-2 py-0.5 text-[10px] font-medium sm:inline-flex ${
+              className={`hidden rounded-md border px-2 py-0.5 text-[10px] font-medium sm:inline-flex ${
                 studioBuilderChrome
                   ? 'border-zinc-200 bg-zinc-50 text-zinc-600'
-                  : 'border-white/8 bg-white/[0.04] text-zinc-500'
+                  : 'border-zinc-800/70 bg-zinc-950 text-zinc-500'
               }`}
             >
               {shellModeLabel}
@@ -1163,13 +1126,26 @@ export function ChatWindow() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleThemePreference}
+              className={`flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[11px] font-medium transition-colors ${
+                studioBuilderChrome
+                  ? 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50'
+                  : 'border-zinc-800/70 bg-zinc-950 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-100'
+              }`}
+              title={studioBuilderChrome ? 'Switch to dark theme' : 'Switch to light theme'}
+            >
+              {studioBuilderChrome ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
+              <span>{studioBuilderChrome ? 'Dark' : 'Light'}</span>
+            </button>
             {!showBuilderPanel && (
               <button
                 onClick={toggleBuilderPanel}
-                className={`flex h-8 items-center gap-1.5 rounded-full border px-3 text-[11px] font-medium transition-colors ${
+                className={`flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[11px] font-medium transition-colors ${
                   studioBuilderChrome
                     ? 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50'
-                    : 'border-white/8 bg-white/[0.04] text-zinc-400 hover:border-white/12 hover:bg-white/[0.07] hover:text-zinc-200'
+                    : 'border-zinc-800/70 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200'
                 }`}
                 title="Show preview (Ctrl+B)"
               >
@@ -1181,39 +1157,6 @@ export function ChatWindow() {
           </div>
         </div>
       </div>
-
-      {showProjectContextStrip && (
-        <div className="mx-auto w-full max-w-5xl px-5 pt-2">
-          <div
-            className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2 ${
-              studioBuilderChrome
-                ? 'border-zinc-200 bg-white shadow-sm'
-                : 'border-white/[0.04] bg-white/[0.02]'
-            }`}
-          >
-            <FolderOpenDot className={`h-3.5 w-3.5 flex-shrink-0 ${studioBuilderChrome ? 'text-zinc-400' : 'text-zinc-500'}`} />
-            <span className={`truncate text-[12px] font-medium ${studioBuilderChrome ? 'text-zinc-800' : 'text-zinc-300'}`}>
-              {sandboxProjectName || sandboxProjectId}
-            </span>
-            {persistentProjectId && (
-              <span
-                className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                  studioBuilderChrome
-                    ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200/80'
-                    : 'bg-emerald-500/10 text-emerald-400'
-                }`}
-              >
-                synced
-              </span>
-            )}
-            {sandboxDevPort && (
-              <span className={`ml-auto text-[11px] ${studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-600'}`}>
-                :{sandboxDevPort}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* ── Messages area ── */}
       <div
@@ -1355,95 +1298,16 @@ export function ChatWindow() {
 
         {!hasMessages ? (
           /* ═══════════ WELCOME STATE ═══════════ */
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
-            className="flex min-h-full flex-col items-center justify-center px-5 py-12"
-          >
-            <div className="mx-auto w-full max-w-2xl text-center">
-              <motion.h1
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.05, duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
-                className="text-[2.5rem] font-semibold leading-[1.15] tracking-[-0.035em] text-zinc-100 sm:text-[3rem]"
-              >
-                What shall we build?
-              </motion.h1>
-              <motion.p
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1, duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
-                className="mx-auto mt-4 max-w-lg text-[15px] leading-7 text-zinc-500"
-              >
-                Describe an app, page, or workflow. Vai builds it live — code, preview, and iteration in one place.
-              </motion.p>
-            </div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15, duration: 0.4 }}
-              className="mx-auto mt-8 flex w-full max-w-xl flex-wrap justify-center gap-2"
-            >
-              {[
-                'A team dashboard with charts',
-                'A polished landing page',
-                'A Kanban board with filters',
-                'A client portal with auth',
-              ].map((desc, i) => (
-                <motion.button
-                  key={desc}
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.2 + i * 0.04, duration: 0.3 }}
-                  onClick={() => startBuilding(desc)}
-                  className="group/build flex items-center gap-1.5 rounded-full border border-white/8 bg-white/[0.03] px-3.5 py-2 text-[13px] text-zinc-400 transition-all duration-200 hover:border-white/14 hover:bg-white/[0.06] hover:text-zinc-200"
-                  whileHover={{ y: -1 }}
-                  whileTap={{ scale: 0.97 }}
-                >
-                  <Sparkles className="h-3 w-3 opacity-50 transition-opacity group-hover/build:opacity-100" />
-                  {desc}
-                </motion.button>
-              ))}
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3, duration: 0.4 }}
-              className="mx-auto mt-10 grid w-full max-w-2xl gap-2 sm:grid-cols-2"
-            >
-              {PRESETS.slice(0, 6).map((p, i) => {
-                const Icon = p.icon;
-                return (
-                  <motion.button
-                    key={p.label}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.34 + i * 0.03, duration: 0.3 }}
-                    onClick={() => p.category === 'Build' ? startBuilding(p.label) : handlePresetClick(p.label)}
-                    className="group/preset flex items-start gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5 text-left transition-all duration-200 hover:border-white/10 hover:bg-white/[0.04]"
-                    whileHover={{ y: -1 }}
-                    whileTap={{ scale: 0.985 }}
-                  >
-                    <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-white/[0.05] text-zinc-400 transition-colors group-hover/preset:text-zinc-200">
-                      <Icon className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <span className="block text-[13px] font-medium text-zinc-300 group-hover/preset:text-zinc-100">{p.label}</span>
-                      <span className="mt-0.5 block text-[11px] leading-5 text-zinc-600 group-hover/preset:text-zinc-500">{p.description}</span>
-                    </div>
-                  </motion.button>
-                );
-              })}
-            </motion.div>
-          </motion.div>
+          <ChatEmptyState
+            onStartBuilding={startBuilding}
+            onPresetClick={handlePresetClick}
+            onAskMemoryQuestion={(prompt, options) => { void handleSend(prompt, options); }}
+            onOpenSettings={() => setActivePanel('settings')}
+          />
         ) : (
           /* ═══════════ MESSAGE THREAD ═══════════ */
           /* justify-end makes sparse messages sit at the bottom, above input */
-          <div className={`mx-auto flex min-h-full w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100vw-2rem))]' : 'max-w-[min(56rem,calc(100vw-2rem))]'} flex-col px-4 py-6 pb-4 md:px-5`}>
+          <div className={`mx-auto flex min-h-full w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100vw-2rem))]' : 'max-w-[min(56rem,calc(100vw-2rem))]'} flex-col px-4 py-5 md:px-5`}>
             {hasResearchRailContext && latestResearchContext && (
               <div className="mb-4 flex justify-end">
                 <button
@@ -1452,11 +1316,11 @@ export function ChatWindow() {
                   data-research-sidebar-toggle="button"
                   data-state={isResearchRailOpen ? 'open' : 'closed'}
                   aria-expanded={isResearchRailOpen}
-                  className="inline-flex items-center gap-2 rounded-full border border-zinc-800/80 bg-zinc-950/75 px-3 py-2 text-[11px] font-medium text-zinc-300 shadow-[0_10px_40px_rgba(0,0,0,0.22)] backdrop-blur-md transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-white"
+                  className="inline-flex items-center gap-2 rounded-xl border border-zinc-800/80 bg-zinc-950/75 px-3 py-2 text-[11px] font-medium text-zinc-300 shadow-[0_10px_40px_rgba(0,0,0,0.22)] backdrop-blur-md transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-white"
                 >
                   <BookOpen className="h-3.5 w-3.5" />
                   <span>{isResearchRailOpen ? 'Hide sources' : 'Open sources'}</span>
-                  <span className="rounded-full border border-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                  <span className="rounded-md border border-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-500">
                     {latestResearchContext.sources.length}
                   </span>
                 </button>
@@ -1464,55 +1328,47 @@ export function ChatWindow() {
             )}
 
             <div className={useResearchRailWideLayout ? 'grid min-h-full grid-cols-1 gap-8 xl:grid-cols-[minmax(0,52rem)_22rem] xl:items-start' : ''}>
-              <div className={`flex min-h-full flex-col ${compactResearchChrome ? 'justify-start' : 'justify-end'}`}>
-                <AnimatePresence initial={false}>
-                  {messages.map((msg, idx) => {
-                    const fb = fallbackDeployMap.get(idx);
-                    const sourceRailHandlesSources = latestResearchContext?.assistantIndex === idx;
-                    return (
-                      <motion.div
-                        key={msg.id}
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.2, ease: 'easeOut' }}
-                        layout="position"
-                      >
-                        <MessageBubble
-                          role={msg.role}
-                          content={msg.content}
-                          imageId={msg.imageId}
-                          imagePreview={msg.imagePreview}
-                          studioChrome={studioBuilderChrome}
-                          fallbackDeploy={fb?.intent ?? null}
-                          recoveryPattern={fb?.recovery ?? 'none'}
-                          allIntents={fb?.allIntents}
-                          onIntentAction={(accepted) => {
-                            recordUserAction(idx, accepted);
-                            if (accepted) recordDeployTriggered();
-                          }}
-                          isLatest={idx === messages.length - 1}
-                          isStreaming={isStreaming && idx === messages.length - 1}
-                          sources={msg.sources}
-                          followUps={msg.followUps}
-                          confidence={msg.confidence}
-                          groundedBuildBrief={msg.groundedBuildBrief}
-                          feedback={msg.feedback}
-                          onFeedback={(helpful) => useChatStore.getState().setFeedback(msg.id, helpful)}
-                          onFollowUp={(question) => { void handleSend(question); }}
-                          onGroundedExecute={(prompt) => { void handleSend(prompt, { forceMode: 'builder' }); }}
-                          sender={msg.sender}
-                          isAutoRepair={msg.isAutoRepair}
-                          repairAttempt={msg.repairAttempt}
-                          compactResearchChrome={compactResearchChrome}
-                          isLatestResearchMessage={sourceRailHandlesSources}
-                          sourceRailHandlesSources={sourceRailHandlesSources}
-                          sourceRailOpen={sourceRailHandlesSources && isResearchRailOpen}
-                          onOpenSources={sourceRailHandlesSources ? () => setIsResearchRailOpen(true) : undefined}
-                        />
-                      </motion.div>
-                    );
-                  })}
-                </AnimatePresence>
+              <div className="flex min-h-full flex-col justify-start">
+                {messages.map((msg, idx) => {
+                  const fb = fallbackDeployMap.get(idx);
+                  const sourceRailHandlesSources = latestResearchContext?.assistantIndex === idx;
+                  return (
+                    <div key={msg.id}>
+                      <MessageBubble
+                        role={msg.role}
+                        content={msg.content}
+                        imageId={msg.imageId}
+                        imagePreview={msg.imagePreview}
+                        studioChrome={studioBuilderChrome}
+                        fallbackDeploy={fb?.intent ?? null}
+                        recoveryPattern={fb?.recovery ?? 'none'}
+                        allIntents={fb?.allIntents}
+                        onIntentAction={(accepted) => {
+                          recordUserAction(idx, accepted);
+                          if (accepted) recordDeployTriggered();
+                        }}
+                        isLatest={idx === messages.length - 1}
+                        isStreaming={isStreaming && idx === messages.length - 1}
+                        sources={msg.sources}
+                        followUps={msg.followUps}
+                        confidence={msg.confidence}
+                        groundedBuildBrief={msg.groundedBuildBrief}
+                        feedback={msg.feedback}
+                        onFeedback={(helpful) => useChatStore.getState().setFeedback(msg.id, helpful)}
+                        onFollowUp={(question) => { void handleSend(question); }}
+                        onGroundedExecute={(prompt) => { void handleSend(prompt, { forceMode: 'builder' }); }}
+                        sender={msg.sender}
+                        isAutoRepair={msg.isAutoRepair}
+                        repairAttempt={msg.repairAttempt}
+                        compactResearchChrome={compactResearchChrome}
+                        isLatestResearchMessage={sourceRailHandlesSources}
+                        sourceRailHandlesSources={sourceRailHandlesSources}
+                        sourceRailOpen={sourceRailHandlesSources && isResearchRailOpen}
+                        onOpenSources={sourceRailHandlesSources ? () => setIsResearchRailOpen(true) : undefined}
+                      />
+                    </div>
+                  );
+                })}
 
                 <AnimatePresence>
                   {showTypingIndicator && <TypingIndicator />}
@@ -1537,89 +1393,6 @@ export function ChatWindow() {
       {/* ── Input area — centered, auto-growing ── */}
       <div className="flex-shrink-0">
         <div className={`mx-auto w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100vw-2rem))]' : 'max-w-[min(56rem,calc(100vw-2rem))]'} px-4 pb-4 pt-2 md:px-5`}>
-
-          {studioBuilderChrome && buildActivity.length > 0 && (
-            <div className="mb-2 max-h-40 overflow-y-auto rounded-xl border border-zinc-200 bg-white px-3 py-2.5 shadow-sm">
-              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-400">Activity</div>
-              <div className="space-y-1.5">
-                {buildActivity.slice(-40).map((a) => (
-                  <div key={a.id} className="flex min-w-0 items-start gap-2 text-[11px] leading-snug">
-                    <FileText className="mt-0.5 h-3 w-3 shrink-0 text-zinc-400" />
-                    <span className="min-w-0">
-                      <span className="font-medium text-zinc-600">Wrote</span>{' '}
-                      <code className="break-all rounded-md bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] text-zinc-800">
-                        {a.detail}
-                      </code>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {transientActivity.length > 0 && (
-            <AnimatePresence initial={false}>
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                className={`mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] ${
-                  studioBuilderChrome ? 'text-zinc-600' : 'text-zinc-500'
-                }`}
-              >
-                {transientActivity.map((item) => {
-                  const toneClass = item.tone === 'blue'
-                    ? 'text-blue-300'
-                    : item.tone === 'amber'
-                      ? 'text-amber-300'
-                      : item.tone === 'orange'
-                        ? 'text-orange-500'
-                        : 'text-violet-300';
-                  const dotClass = item.tone === 'orange'
-                    ? 'bg-orange-500'
-                    : toneClass.replace('text-', 'bg-');
-                  const detailMuted = studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-600';
-
-                  return (
-                    <div key={item.key} className="flex min-w-0 items-center gap-2">
-                      <span className={`inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full ${dotClass}`} />
-                      <span className={`truncate font-medium ${toneClass}`}>{item.label}</span>
-                      <span className={`hidden max-w-[42rem] truncate lg:inline ${detailMuted}`}>{item.detail}</span>
-                    </div>
-                  );
-                })}
-              </motion.div>
-            </AnimatePresence>
-          )}
-
-          {/* Quick chips — shown only when input is empty and no messages */}
-          {!hasMessages && !input && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="mb-3 flex flex-wrap justify-center gap-1.5"
-            >
-              {QUICK_CHIPS.map((chip, i) => {
-                const Icon = chip.icon;
-                return (
-                  <motion.button
-                    key={chip.label}
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: i * 0.03, duration: 0.2 }}
-                    onClick={() => handleChipClick(chip.label)}
-                    className="flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.02] px-3 py-1.5 text-[11px] text-zinc-500 transition-all duration-200 hover:border-white/10 hover:bg-white/[0.05] hover:text-zinc-300"
-                    whileHover={{ y: -1 }}
-                    whileTap={{ scale: 0.97 }}
-                  >
-                    <Icon className="h-3 w-3" />
-                    {chip.label}
-                  </motion.button>
-                );
-              })}
-            </motion.div>
-          )}
 
           {/* Image preview row */}
           {pastedImage && (
@@ -1679,16 +1452,16 @@ export function ChatWindow() {
           )}
           {/* The input box */}
           <motion.div
-            className={`relative flex flex-col overflow-hidden rounded-2xl border transition-all ${
+            className={`relative flex flex-col overflow-visible rounded-[1rem] border transition-all ${
               deliveryRoute === 'broadcast'
                 ? studioBuilderChrome
                   ? 'border-blue-200 bg-white shadow-sm'
-                  : 'border-blue-400/20 bg-zinc-900/80'
+                  : 'border-blue-500/15 bg-zinc-950/82'
                 : studioBuilderChrome
                   ? 'border-zinc-200 bg-white shadow-sm'
-                  : 'border-white/8 bg-zinc-900/70'
+                  : 'border-zinc-800/60 bg-zinc-950/82'
             }`}
-            animate={canSend ? { borderColor: deliveryRoute === 'broadcast' ? 'rgba(96,165,250,0.3)' : studioBuilderChrome ? 'rgba(228,228,231,1)' : 'rgba(255,255,255,0.12)' } : {}}
+            animate={canSend ? { borderColor: deliveryRoute === 'broadcast' ? 'rgba(96,165,250,0.24)' : studioBuilderChrome ? 'rgba(228,228,231,1)' : 'rgba(63,63,70,0.75)' } : {}}
             transition={{ duration: 0.2 }}
           >
             <AnimatePresence initial={false}>
@@ -1714,6 +1487,137 @@ export function ChatWindow() {
                 />
               )}
             </AnimatePresence>
+
+            <div className={`flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2 ${
+              studioBuilderChrome ? 'border-zinc-200/80 bg-zinc-50/80' : 'border-zinc-800/75 bg-zinc-950/72'
+            }`}>
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                {composerStateChips.map((chip) => {
+                  const toneClass = chip.tone === 'blue'
+                    ? studioBuilderChrome
+                      ? 'border-sky-200 bg-sky-50 text-sky-700'
+                      : 'border-sky-500/20 bg-sky-500/10 text-sky-200'
+                    : chip.tone === 'amber'
+                      ? studioBuilderChrome
+                        ? 'border-amber-200 bg-amber-50 text-amber-700'
+                        : 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+                      : chip.tone === 'emerald'
+                        ? studioBuilderChrome
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                          : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                        : studioBuilderChrome
+                          ? 'border-violet-200 bg-violet-50 text-violet-700'
+                          : 'border-violet-500/20 bg-violet-500/10 text-violet-200';
+
+                  return (
+                    <span
+                      key={chip.key}
+                      className={`rounded-md border px-2.5 py-1 text-[10px] font-medium tracking-[0.02em] ${toneClass}`}
+                    >
+                      {chip.label}
+                    </span>
+                  );
+                })}
+                <span className={`hidden min-w-0 flex-1 truncate text-[11px] lg:inline ${studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-500'}`}>
+                  {composerAssistText}
+                </span>
+              </div>
+
+              <div className="hidden items-center gap-3 md:flex">
+                {composerHintChips.map((hint) => (
+                  <span
+                    key={hint.key}
+                    className={`text-[10px] ${studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-500'}`}
+                  >
+                    {hint.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {(buildActivity.length > 0 || transientActivity.length > 0) && (
+              <div className={`border-b px-3.5 py-2.5 ${
+                studioBuilderChrome ? 'border-zinc-200/80 bg-white/70' : 'border-zinc-800/75 bg-zinc-950/58'
+              }`}>
+                <button
+                  type="button"
+                  onClick={() => setActivityCollapsed((value) => !value)}
+                  className={`flex w-full items-center justify-between gap-3 text-left ${
+                    studioBuilderChrome ? 'text-zinc-700' : 'text-zinc-300'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${
+                      studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-600'
+                    }`}>
+                      Activity {activityCollapsed ? `• ${activitySummary}` : ''}
+                    </div>
+                    {activityCollapsed && (
+                      <div className={`mt-1 truncate text-[11px] ${
+                        studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-400'
+                      }`}>
+                        {buildStatus.message || 'Recent project writes and startup progress'}
+                      </div>
+                    )}
+                  </div>
+                  {activityCollapsed ? <ChevronRight className="h-3.5 w-3.5 shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0" />}
+                </button>
+
+                {!activityCollapsed && buildActivity.length > 0 && (
+                  <div className="space-y-1.5">
+                    {buildActivity.slice(-5).map((a) => (
+                      <div key={a.id} className="flex min-w-0 items-start gap-2 text-[11px] leading-snug">
+                        <FileText className={`mt-0.5 h-3 w-3 shrink-0 ${studioBuilderChrome ? 'text-zinc-400' : 'text-zinc-500'}`} />
+                        <span className="min-w-0">
+                          <span className={studioBuilderChrome ? 'font-medium text-zinc-700' : 'font-medium text-zinc-300'}>Wrote</span>{' '}
+                          <code className={`break-all rounded-md px-1.5 py-0.5 font-mono text-[10px] ${
+                            studioBuilderChrome ? 'bg-zinc-100 text-zinc-800' : 'bg-zinc-900 text-zinc-200'
+                          }`}>
+                            {a.detail}
+                          </code>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {!activityCollapsed && transientActivity.length > 0 && (
+                  <AnimatePresence initial={false}>
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      className={`${buildActivity.length > 0 ? 'mt-2.5' : 'mt-2'} flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] ${
+                        studioBuilderChrome ? 'text-zinc-600' : 'text-zinc-400'
+                      }`}
+                    >
+                      {transientActivity.map((item) => {
+                        const toneClass = item.tone === 'blue'
+                          ? studioBuilderChrome ? 'text-blue-700' : 'text-blue-300'
+                          : item.tone === 'amber'
+                            ? studioBuilderChrome ? 'text-amber-700' : 'text-amber-300'
+                            : item.tone === 'orange'
+                              ? 'text-orange-500'
+                              : studioBuilderChrome ? 'text-violet-700' : 'text-violet-300';
+                        const dotClass = item.tone === 'orange'
+                          ? 'bg-orange-500'
+                          : toneClass.replace('text-', 'bg-');
+                        const detailMuted = studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-400';
+
+                        return (
+                          <div key={item.key} className="flex min-w-0 items-center gap-2">
+                            <span className={`inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full ${dotClass}`} />
+                            <span className={`truncate font-medium ${toneClass}`}>{item.label}</span>
+                            <span className={`hidden max-w-[42rem] truncate lg:inline ${detailMuted}`}>{item.detail}</span>
+                          </div>
+                        );
+                      })}
+                    </motion.div>
+                  </AnimatePresence>
+                )}
+
+              </div>
+            )}
 
             <textarea
               ref={textareaRef}
@@ -1780,7 +1684,7 @@ export function ChatWindow() {
               rows={1}
               className={`resize-none overflow-y-auto bg-transparent px-4 pb-1 text-sm leading-relaxed focus:outline-none ${
                 studioBuilderChrome ? 'text-zinc-900 placeholder-zinc-400' : 'text-zinc-100 placeholder-zinc-600'
-              } ${deliveryRoute === 'broadcast' ? 'pt-2.5' : 'pt-3'}`}
+              } pt-3`}
               style={{ minHeight: `${MIN_INPUT_HEIGHT}px`, maxHeight: `${MAX_INPUT_HEIGHT}px` }}
             />
             {mentionAt !== null && textareaRef.current && (

@@ -128,6 +128,49 @@ describe('ChatService', () => {
     expect(systemText).toMatch(/numbered bullets/i);
   });
 
+  it('injects a temporary plan-mode override for procedural debug prompts in chat mode', async () => {
+    const convId = chatService.createConversation('mock:test', 'Chat', 'chat');
+
+    for await (const _chunk of chatService.sendMessage(
+      convId,
+      'My Docker container keeps crashing, how do I debug it?',
+    )) {
+      // consume
+    }
+
+    const systemText =
+      adapter.lastStreamRequest?.messages
+        .filter((message) => message.role === 'system')
+        .map((message) => message.content)
+        .join('\n\n') ?? '';
+
+    expect(systemText).toMatch(/Temporary mode override for this answer: Plan mode/i);
+    expect(systemText).toMatch(/ordered plan or diagnosis/i);
+    expect(systemText).toMatch(/likely cause, first checks, how to confirm/i);
+  });
+
+  it('injects corrective-turn quality guidance when the user refines a previous answer', async () => {
+    const convId = chatService.createConversation('mock:test', 'Chat', 'chat');
+
+    for await (const _chunk of chatService.sendMessage(convId, 'Should I use hosted auth or local auth?')) {
+      // consume
+    }
+
+    for await (const _chunk of chatService.sendMessage(convId, 'No, I mean for a local-first app, which should I change first?')) {
+      // consume
+    }
+
+    const systemText =
+      adapter.lastStreamRequest?.messages
+        .filter((message) => message.role === 'system')
+        .map((message) => message.content)
+        .join('\n\n') ?? '';
+
+    expect(systemText).toMatch(/Turn quality contract for this answer/i);
+    expect(systemText).toMatch(/correcting or refining the previous answer/i);
+    expect(systemText).toMatch(/recommendation in the first sentence/i);
+  });
+
   it('injects domain skill context for non-scaffold requests', async () => {
     const convId = chatService.createConversation('mock:test');
 

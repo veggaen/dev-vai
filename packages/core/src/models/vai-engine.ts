@@ -1,5 +1,5 @@
 /**
- * VeggaAI Engine — VAI's own model, built from scratch.
+ * VeggaAI Engine ��� VAI's own model, built from scratch.
  *
  * This is NOT a wrapper around someone else's model. This IS the model.
  *
@@ -25,6 +25,8 @@ import type {
 } from './adapter.js';
 import { buildGroundedBuildBrief } from './grounded-build-brief.js';
 import { isExplicitWebSearchRequest } from './explicit-web-search.js';
+import { composeBuilderApp } from './builder/compose-builder-app.js';
+import { resolveBuilderIntent } from './builder/resolve-builder-intent.js';
 import { KnowledgeStore, VaiTokenizer, type KnowledgeEntry } from './knowledge-store.js';
 import { KnowledgeIntelligence } from './knowledge-intelligence.js';
 import { SkillRouter, type SkillMatch, type DomainId } from './skill-router.js';
@@ -50,12 +52,12 @@ export type { KnowledgeEntry };
 
 // ---- Vai Self-Awareness ----
 
-/** Metadata generated alongside every response — Vai's awareness of its own answer quality. */
+/** Metadata generated alongside every response ��� Vai's awareness of its own answer quality. */
 export interface ResponseMeta {
   /** Which strategy produced this response (e.g., 'conversational', 'web-search', 'fallback') */
-  readonly strategy: string;
+  strategy: string; // mutable: patched by quality gate
   /** 0–1 confidence score based on strategy tier + response quality signals */
-  readonly confidence: number;
+  confidence: number; // mutable: patched by quality gate
   /** Primary topic detected from the user's question */
   readonly topicDetected: string;
   /** How deep Vai's knowledge is on this topic */
@@ -72,7 +74,7 @@ export interface ResponseMeta {
   readonly matchedPattern?: string;
 }
 
-/** Full self-diagnostic report — what Vai knows about its own capabilities. */
+/** Full self-diagnostic report ��� what Vai knows about its own capabilities. */
 export interface VaiDiagnosis {
   /** High-level stats */
   readonly overview: {
@@ -104,7 +106,7 @@ export interface VaiDiagnosis {
 export interface VaiSnapshot {
   version: 1;
   savedAt: string;
-  /** Only non-bootstrap entries — bootstrap is rebuilt every startup */
+  /** Only non-bootstrap entries ��� bootstrap is rebuilt every startup */
   learnedEntries: KnowledgeEntry[];
   /** Cumulative strategy usage counts */
   strategyStats: Record<string, number>;
@@ -120,6 +122,8 @@ export interface VaiEngineOptions {
    * Saves are debounced — at most once per 2 seconds.
    */
   persistPath?: string;
+  /** Full VaiConfig — used for quality gate, provider resolution, etc. */
+  config?: import('../config/types.js').VaiConfig;
 }
 
 // ---- VAI Engine (the model adapter) ----
@@ -137,19 +141,20 @@ export class VaiEngine implements ModelAdapter {
   readonly skillRouter: SkillRouter;
   private intelligenceDirty = false;
 
-  private systemPrompt = 'You are VeggaAI (VAI), a local-first AI assistant that learns from your data. You are still in early training — be honest about what you know and what you are still learning.';
+  private systemPrompt = 'You are VeggaAI (VAI), a local-first AI assistant that learns from your data. You are still in early training ��� be honest about what you know and what you are still learning.';
 
-  // ─── PERSISTENCE ───
+  // ��������� PERSISTENCE ���������
   private readonly persistPath: string | null;
+  private readonly _config: import('../config/types.js').VaiConfig | null;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private persistDirty = false;
-  /** Number of bootstrap entries — everything after this index is user-learned */
+  /** Number of bootstrap entries ��� everything after this index is user-learned */
   private bootstrapEntryCount = 0;
 
-  // Track topics we couldn't answer — so we can tell the user what to teach us
+  // Track topics we couldn't answer ��� so we can tell the user what to teach us
   private missedTopics: Map<string, number> = new Map();
 
-  // ─── SELF-AWARENESS TRACKING ───
+  // ��������� SELF-AWARENESS TRACKING ���������
   // Ring buffer of recent response metadata for diagnostics
   private responseHistory: ResponseMeta[] = [];
   private strategyStats: Map<string, number> = new Map();
@@ -161,7 +166,7 @@ export class VaiEngine implements ModelAdapter {
   private _hasActiveSandboxContext = false;
   private static readonly HISTORY_SIZE = 100;
 
-  // ── Synthesis scoring constants ──────────────────────────────────
+  // ������ Synthesis scoring constants ������������������������������������������������������������������������������������������������������
   /** Number of TF-IDF documents to retrieve for synthesis */
   private static readonly SYNTHESIS_RETRIEVE_COUNT = 8;
   /** Minimum TF-IDF score to consider a retrieval result */
@@ -173,14 +178,14 @@ export class VaiEngine implements ModelAdapter {
   /** Relative score threshold to include secondary sources (fraction of best score) */
   private static readonly SYNTHESIS_GOOD_MATCH_RATIO = 0.75;
 
-  // ── Per-request memoization cache ────────────────────────────────
+  // ������ Per-request memoization cache ������������������������������������������������������������������������������������������������
   // Eliminates redundant findBestMatch / retrieveRelevant / findBestTaughtMatch
   // calls across the 30-strategy chain. Cleared at the start of each generateResponse().
   private _matchCache = new Map<string, KnowledgeEntry | null>();
   private _taughtMatchCache = new Map<string, KnowledgeEntry | null>();
   private _retrieveCache = new Map<string, Array<{ text: string; source: string; score: number }>>();
 
-  /** Cached findBestMatch — reuses result for identical input within one request */
+  /** Cached findBestMatch ��� reuses result for identical input within one request */
   private cachedFindBestMatch(input: string): KnowledgeEntry | null {
     if (this._matchCache.has(input)) return this._matchCache.get(input)!;
     const result = this.knowledge.findBestMatch(input);
@@ -188,7 +193,7 @@ export class VaiEngine implements ModelAdapter {
     return result;
   }
 
-  /** Cached findBestTaughtMatch — reuses result for identical input within one request */
+  /** Cached findBestTaughtMatch ��� reuses result for identical input within one request */
   private cachedFindBestTaughtMatch(input: string): KnowledgeEntry | null {
     if (this._taughtMatchCache.has(input)) return this._taughtMatchCache.get(input)!;
     const result = this.knowledge.findBestTaughtMatch(input);
@@ -196,7 +201,7 @@ export class VaiEngine implements ModelAdapter {
     return result;
   }
 
-  /** Cached retrieveRelevant — reuses result for identical query+topK within one request */
+  /** Cached retrieveRelevant ��� reuses result for identical query+topK within one request */
   private cachedRetrieveRelevant(query: string, topK = 5): Array<{ text: string; source: string; score: number }> {
     const key = `${query}|${topK}`;
     if (this._retrieveCache.has(key)) return this._retrieveCache.get(key)!;
@@ -205,7 +210,7 @@ export class VaiEngine implements ModelAdapter {
     return result;
   }
 
-  /** Clear all per-request caches — called at start of each generateResponse() */
+  /** Clear all per-request caches ��� called at start of each generateResponse() */
   private clearRequestCache(): void {
     this._matchCache.clear();
     this._taughtMatchCache.clear();
@@ -214,6 +219,7 @@ export class VaiEngine implements ModelAdapter {
 
   constructor(options?: VaiEngineOptions) {
     this.persistPath = options?.persistPath ?? null;
+    this._config = options?.config ?? null;
 
     // Seed with foundational knowledge
     this.knowledge.addEntry(
@@ -225,7 +231,7 @@ export class VaiEngine implements ModelAdapter {
       'bootstrap', 'no',
     );
     this.knowledge.addEntry(
-      'what are you', 'I am VeggaAI (VAI), a local-first AI built from scratch. I learn from sources you give me — web pages, transcripts, code, and conversations. I understand English and Norwegian.',
+      'what are you', 'I am VeggaAI (VAI), a local-first AI built from scratch. I learn from sources you give me ��� web pages, transcripts, code, and conversations. I understand English and Norwegian.',
       'bootstrap', 'en',
     );
     this.knowledge.addEntry(
@@ -233,39 +239,39 @@ export class VaiEngine implements ModelAdapter {
       'bootstrap', 'no',
     );
     this.knowledge.addEntry(
-      'what can you do', 'Right now I can: learn from text you feed me, answer based on what I have learned, generate code in 20+ languages, do math, discuss topics Socratically, and search the web when you say "google it". I am v0 — pattern matching and n-grams. I also know about testing tools, dev patterns, and code utilities. As you feed me more data, I get better.',
+      'what can you do', 'Right now I can: learn from text you feed me, answer based on what I have learned, generate code in 20+ languages, do math, discuss topics Socratically, and search the web when you say "google it". I am v0 ��� pattern matching and n-grams. I also know about testing tools, dev patterns, and code utilities. As you feed me more data, I get better.',
       'bootstrap', 'en',
     );
 
-    // ─── TESTING TOOLS KNOWLEDGE ───
+    // ��������� TESTING TOOLS KNOWLEDGE ���������
     this.bootstrapTestingKnowledge();
-    // ─── CODE PATTERNS KNOWLEDGE ───
+    // ��������� CODE PATTERNS KNOWLEDGE ���������
     this.bootstrapCodePatterns();
-    // ─── CURRENT EVENTS KNOWLEDGE ───
+    // ��������� CURRENT EVENTS KNOWLEDGE ���������
     this.bootstrapCurrentEvents();
-    // ─── BEST PRACTICES KNOWLEDGE ───
+    // ��������� BEST PRACTICES KNOWLEDGE ���������
     this.bootstrapBestPractices();
-    // ─── ADVANCED DOMAINS ───
+    // ��������� ADVANCED DOMAINS ���������
     this.bootstrapAdvancedDomains();
-    // ─── COGNITIVE FOUNDATIONS ───
+    // ��������� COGNITIVE FOUNDATIONS ���������
     this.bootstrapCognitiveFoundations();
 
-    // ─── KNOWLEDGE EXPANSION (benchmark-driven gap fills) ───
+    // ��������� KNOWLEDGE EXPANSION (benchmark-driven gap fills) ���������
     this.bootstrapKnowledgeExpansion();
 
-    // ─── KNOWLEDGE EXPANSION R14b (24 remaining benchmark failures) ───
+    // ��������� KNOWLEDGE EXPANSION R14b (24 remaining benchmark failures) ���������
     this.bootstrapKnowledgeExpansionR14b();
 
-    // ─── KNOWLEDGE CONNECTIONS (cross-domain bridge facts) ───
+    // ��������� KNOWLEDGE CONNECTIONS (cross-domain bridge facts) ���������
     this.bootstrapKnowledgeConnections();
 
-    // ─── SKILL ROUTER (Domain-aware dynamic skill selection) ───
+    // ��������� SKILL ROUTER (Domain-aware dynamic skill selection) ���������
     this.skillRouter = new SkillRouter();
 
-    // ─── KNOWLEDGE INTELLIGENCE ───
+    // ��������� KNOWLEDGE INTELLIGENCE ���������
     this.intelligence = new KnowledgeIntelligence(this.knowledge);
 
-    // ─── SEARCH PIPELINE (Perplexity-style) ───
+    // ��������� SEARCH PIPELINE (Perplexity-style) ���������
     this.searchPipeline = new SearchPipeline({
       braveApiKey: process.env.BRAVE_SEARCH_API_KEY || undefined,
       searxngUrl: process.env.VAI_SEARXNG_URL || undefined,
@@ -303,7 +309,7 @@ export class VaiEngine implements ModelAdapter {
 
     // API testing
     this.knowledge.addEntry('supertest', 'supertest is the standard library for testing HTTP endpoints in Express, Hapi, and Fastify servers. Use with Vitest for API integration tests.', src, 'en');
-    this.knowledge.addEntry('msw', 'MSW (Mock Service Worker) intercepts HTTP requests at the network level for API mocking. Critical for reliable tests. Key gotcha: handler not matching, URL mismatch, wrong environment, and wrong lifecycle hooks cause most failures. Don\'t treat MSW failures as random flake — they\'re usually deterministic misconfig.', src, 'en');
+    this.knowledge.addEntry('msw', 'MSW (Mock Service Worker) intercepts HTTP requests at the network level for API mocking. Critical for reliable tests. Key gotcha: handler not matching, URL mismatch, wrong environment, and wrong lifecycle hooks cause most failures. Don\'t treat MSW failures as random flake ��� they\'re usually deterministic misconfig.', src, 'en');
 
     // Rust testing
     this.knowledge.addEntry('cargo nextest', 'cargo-nextest is the fastest Rust test runner in 2026, with better filtering and parallel execution than built-in cargo test.', src, 'en');
@@ -1293,7 +1299,7 @@ export class VaiEngine implements ModelAdapter {
   }
 
   retrieveRelevant(query: string, topK = 5): Array<{ text: string; source: string; score: number }> {
-    return this.knowledge.retrieveRelevant(query, topK);
+    return this.knowledge.retrieveRelevant(query, topK, true);
   }
 
   /**
@@ -1533,6 +1539,46 @@ export class VaiEngine implements ModelAdapter {
     // Patch timing into the last tracked meta
     if (this._lastMeta) this._lastMeta.durationMs = durationMs;
 
+    // ── Quality Gate: learn from external LLM feedback on low-confidence responses ──
+    // The LLM is a teacher, not a replacement. Vai learns the diff and regenerates
+    // its OWN improved response. The LLM's code is never shipped directly.
+    if (this._lastMeta && this._config?.qualityGate?.enabled) {
+      const gate = this._config.qualityGate;
+      const confidence = this._lastMeta.confidence;
+      const strategy = this._lastMeta.strategy;
+      const shouldValidate = confidence < gate.confidenceThreshold
+        && !gate.skipStrategies.includes(strategy);
+
+      if (shouldValidate) {
+        try {
+          const lessons = await this.runQualityGate(
+            lastMessage.content,
+            response,
+            strategy,
+            confidence,
+            gate,
+          );
+          if (lessons) {
+            // Learn from LLM feedback — persist lessons so Vai improves over time
+            for (const lesson of lessons.learnings) {
+              this.teach(lesson.topic, lesson.insight, 'quality-gate', 'en');
+            }
+            // Regenerate Vai's OWN response using what it just learned
+            if (lessons.shouldRegenerate) {
+              const improved = await this.generateResponse(lastMessage.content, request.messages);
+              if (improved.length > 20) {
+                response = this.applyBrevityConstraint(lastMessage.content, improved);
+                this._lastMeta.strategy = `${strategy}→self-improved`;
+                this._lastMeta.confidence = Math.min(confidence + 0.15, 0.85);
+              }
+            }
+          }
+        } catch {
+          // Quality gate failure is non-fatal — use original response
+        }
+      }
+    }
+
     // Learning flywheel — extract and persist knowledge from this exchange
     // Skip when noLearn is set (protective parenting — Vegga controls what Vai learns)
     if (this._lastMeta && !request.noLearn) this.afterResponse(lastMessage.content, response, this._lastMeta);
@@ -1625,8 +1671,321 @@ export class VaiEngine implements ModelAdapter {
     };
   }
 
+  // ── Quality Gate: external LLM as teacher — Vai learns, never copies ──
+
+  private async runQualityGate(
+    userInput: string,
+    vaiResponse: string,
+    strategy: string,
+    confidence: number,
+    gate: NonNullable<import('../config/types.js').VaiConfig['qualityGate']>,
+  ): Promise<{
+    score: number;
+    shouldRegenerate: boolean;
+    learnings: Array<{ topic: string; insight: string }>;
+    versionWarnings: string[];
+  } | null> {
+    const provider = this.resolveQualityGateProvider(gate);
+    if (!provider) return null;
+
+    // Ask the LLM to be a teacher — diagnose problems, don't give answers
+    const evaluationPrompt = [
+      'You are a code quality teacher evaluating an AI assistant\'s response.',
+      'Your job is to diagnose weaknesses and teach — NOT to provide a replacement response.',
+      '',
+      'Reply in EXACTLY this JSON format (no markdown fences, no wrapping):',
+      '{',
+      '  "score": <1-10>,',
+      '  "weaknesses": ["<specific weakness 1>", "<specific weakness 2>"],',
+      '  "missing_concepts": ["<concept the AI should know>"],',
+      '  "version_issues": ["<any outdated library/framework versions mentioned>"],',
+      '  "pattern_fixes": ["<pattern: wrong approach → better approach>"],',
+      '  "should_regenerate": <true if score <= 4>',
+      '}',
+      '',
+      `User question: ${userInput.slice(0, 500)}`,
+      '',
+      `AI response: ${vaiResponse.slice(0, 2000)}`,
+      '',
+      'Evaluate for:',
+      '- Accuracy: Are facts and code patterns correct?',
+      '- Completeness: Are key points covered?',
+      '- Version currency: Are library/framework versions current (as of 2026)?',
+      '- Code quality: Are patterns modern and idiomatic?',
+      '- Hallucination: Does it invent things that don\'t exist?',
+      '',
+      'IMPORTANT: For version_issues, only flag versions you are CERTAIN are outdated.',
+      'If unsure about a version, do not flag it. False positives are worse than misses.',
+    ].join('\n');
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), gate.timeoutMs);
+
+    try {
+      const result = await this.callQualityGateProvider(provider, evaluationPrompt, controller.signal);
+      if (!result) return null;
+
+      // Parse JSON from the LLM response — tolerant of wrapping
+      const jsonMatch = result.match(/\{[\s\S]*"score"\s*:\s*(\d+)[\s\S]*\}/);
+      if (!jsonMatch) return null;
+
+      const parsed = JSON.parse(jsonMatch[0]) as {
+        score: number;
+        weaknesses?: string[];
+        missing_concepts?: string[];
+        version_issues?: string[];
+        pattern_fixes?: string[];
+        should_regenerate?: boolean;
+      };
+
+      const score = Math.max(1, Math.min(10, parsed.score));
+      const learnings: Array<{ topic: string; insight: string }> = [];
+
+      // Convert LLM feedback into learnable knowledge entries
+      if (parsed.missing_concepts) {
+        for (const concept of parsed.missing_concepts.slice(0, 3)) {
+          if (concept && concept.length > 5 && concept.length < 300) {
+            learnings.push({
+              topic: this.extractTopicFromConcept(concept),
+              insight: concept,
+            });
+          }
+        }
+      }
+
+      if (parsed.pattern_fixes) {
+        for (const fix of parsed.pattern_fixes.slice(0, 3)) {
+          if (fix && fix.length > 10 && fix.length < 500) {
+            learnings.push({
+              topic: this.extractTopicFromConcept(fix),
+              insight: fix,
+            });
+          }
+        }
+      }
+
+      // Validate version warnings against Vai's own knowledge before accepting
+      const validatedVersionWarnings = this.validateVersionCurrency(
+        parsed.version_issues ?? [],
+      );
+
+      // Learn valid version updates
+      for (const warning of validatedVersionWarnings) {
+        learnings.push({
+          topic: warning.split(':')[0]?.trim() || 'version-update',
+          insight: warning,
+        });
+      }
+
+      return {
+        score: score / 10,
+        shouldRegenerate: score <= 4 || (parsed.should_regenerate ?? false),
+        learnings,
+        versionWarnings: validatedVersionWarnings,
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Validate version warnings from the LLM against Vai's own knowledge.
+   * LLMs are trained on old data — if Vai knows a newer version exists,
+   * the LLM's suggestion to "upgrade to X" might itself be outdated.
+   */
+  private validateVersionCurrency(versionIssues: string[]): string[] {
+    const validated: string[] = [];
+
+    // Vai's known current versions (maintained in bootstrap knowledge + learned)
+    // These serve as a floor — if the LLM suggests something older, ignore it
+    const knownCurrentVersions: Record<string, number> = {
+      'next': 16, 'nextjs': 16, 'react': 19, 'vue': 3, 'angular': 19,
+      'svelte': 5, 'node': 22, 'typescript': 5, 'tailwind': 4,
+      'vite': 6, 'bun': 1, 'deno': 2, 'nuxt': 4, 'astro': 5,
+    };
+
+    for (const issue of versionIssues) {
+      if (!issue || issue.length < 5) continue;
+
+      // Check if the LLM is suggesting an older version than what Vai knows
+      const versionMatch = issue.match(/(\w+)\s*(?:v?(\d+))/i);
+      if (versionMatch) {
+        const lib = versionMatch[1].toLowerCase();
+        const suggestedMajor = parseInt(versionMatch[2], 10);
+        const knownMajor = knownCurrentVersions[lib];
+
+        if (knownMajor && suggestedMajor < knownMajor) {
+          // LLM is behind — skip this "warning", it's stale
+          continue;
+        }
+      }
+
+      validated.push(issue);
+    }
+
+    return validated;
+  }
+
+  /** Extract a topic key from a concept description for knowledge storage */
+  private extractTopicFromConcept(concept: string): string {
+    // Take first 4 meaningful words as topic
+    const words = concept.split(/\s+/)
+      .filter(w => w.length > 2)
+      .slice(0, 4)
+      .join(' ')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s.-]/g, '')
+      .trim();
+    return words || 'quality-gate-learning';
+  }
+
+  private resolveQualityGateProvider(
+    gate: NonNullable<import('../config/types.js').VaiConfig['qualityGate']>,
+  ): { id: string; apiKey: string; baseUrl: string; model: string } | null {
+    if (!this._config) return null;
+    const providers = this._config.providers;
+
+    // Explicit provider in config
+    if (gate.provider && gate.provider !== 'vai') {
+      const p = providers[gate.provider];
+      if (p.enabled && p.apiKey) {
+        return {
+          id: p.id,
+          apiKey: p.apiKey,
+          baseUrl: p.baseUrl || this.defaultBaseUrl(p.id),
+          model: gate.model || p.defaultModel || this.defaultModel(p.id),
+        };
+      }
+    }
+
+    // Auto-detect: try anthropic → openai → google
+    for (const id of ['anthropic', 'openai', 'google'] as const) {
+      const p = providers[id];
+      if (p.enabled && p.apiKey) {
+        return {
+          id: p.id,
+          apiKey: p.apiKey,
+          baseUrl: p.baseUrl || this.defaultBaseUrl(p.id),
+          model: gate.model || p.defaultModel || this.defaultModel(p.id),
+        };
+      }
+    }
+
+    return null;
+  }
+
+  private defaultBaseUrl(id: string): string {
+    switch (id) {
+      case 'anthropic': return 'https://api.anthropic.com';
+      case 'openai': return 'https://api.openai.com';
+      case 'google': return 'https://generativelanguage.googleapis.com';
+      default: return '';
+    }
+  }
+
+  private defaultModel(id: string): string {
+    switch (id) {
+      case 'anthropic': return 'claude-sonnet-4-20250514';
+      case 'openai': return 'gpt-4o';
+      case 'google': return 'gemini-2.5-flash';
+      default: return '';
+    }
+  }
+
+  private async callQualityGateProvider(
+    provider: { id: string; apiKey: string; baseUrl: string; model: string },
+    prompt: string,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    try {
+      switch (provider.id) {
+        case 'anthropic':
+          return await this.callAnthropicQualityGate(provider, prompt, signal);
+        case 'openai':
+          return await this.callOpenAIQualityGate(provider, prompt, signal);
+        case 'google':
+          return await this.callGoogleQualityGate(provider, prompt, signal);
+        default:
+          return null;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  private async callAnthropicQualityGate(
+    provider: { apiKey: string; baseUrl: string; model: string },
+    prompt: string,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    const res = await fetch(`${provider.baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': provider.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+      signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { content?: Array<{ text?: string }> };
+    return data.content?.[0]?.text ?? null;
+  }
+
+  private async callOpenAIQualityGate(
+    provider: { apiKey: string; baseUrl: string; model: string },
+    prompt: string,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    const res = await fetch(`${provider.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${provider.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+      signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    return data.choices?.[0]?.message?.content ?? null;
+  }
+
+  private async callGoogleQualityGate(
+    provider: { apiKey: string; baseUrl: string; model: string },
+    prompt: string,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    const url = `${provider.baseUrl}/v1beta/models/${provider.model}:generateContent?key=${provider.apiKey}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 1024 },
+      }),
+      signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    return data.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+  }
+
   private async generateResponse(input: string, history: readonly Message[]): Promise<string> {
     input = this.normalizeUserInputForUnderstanding(input);
+    const correctiveFollowUpRewrite = this.rewriteCorrectiveFollowUpInput(input, history);
+    if (correctiveFollowUpRewrite) {
+      input = correctiveFollowUpRewrite;
+    }
     let lower = input.toLowerCase().trim();
 
     // Clear per-request caches — each generateResponse() starts fresh
@@ -1634,6 +1993,13 @@ export class VaiEngine implements ModelAdapter {
 
     // Resolve active conversation mode from system messages — used throughout the strategy chain
     this._activeMode = (() => {
+      for (const m of history) {
+        if (m.role !== 'system') continue;
+        const temporaryModeMatch = /\bTemporary mode override for this answer:\s*(Builder|Agent|Plan|Debate|Chat)\s+mode\b/i.exec(m.content);
+        if (temporaryModeMatch) {
+          return temporaryModeMatch[1].toLowerCase() as typeof this._activeMode;
+        }
+      }
       for (const m of history) {
         if (m.role !== 'system') continue;
         const explicitModeMatch = /\bYou\s+are\s+in\s+(Builder|Agent|Plan|Debate|Chat)\s+mode\b/i.exec(m.content);
@@ -1704,6 +2070,20 @@ export class VaiEngine implements ModelAdapter {
     const mathResult = this.tryMath(lower);
     if (mathResult !== null) return this.tracked('math', mathResult, input);
 
+    // Strategy 0.01: Real-time utility questions — time, date, day — caught before anything
+    const utilityResult = this.tryUtilityQuestion(lower, input, history);
+    if (utilityResult !== null) return this.tracked('utility', utilityResult, input);
+
+    // Strategy 0.015: URL-based requests — "take a look at URL", "rebuild URL", "check out URL"
+    // For GitHub URLs: fetches repo info via API and generates/presents the project.
+    // For non-GitHub URLs: catches build intent or returns null for search pipeline.
+    const urlRequestResult = await this.tryUrlBasedRequest(lower, input);
+    if (urlRequestResult !== null) return this.tracked('url-request', urlRequestResult, input);
+
+    // Strategy 0.02: Multi-question decomposition — "what is X and also Y and also Z"
+    const multiResult = this.tryMultiQuestionDecomposition(lower, input, history);
+    if (multiResult !== null) return this.tracked('multi-question', multiResult, input);
+
     // Strategy 0.05: Dynamic Skill Routing — detect domain and apply domain-specific skills
     // This fires BEFORE scaffold detection so creative requests ("make me a game like Hotline Miami")
     // get routed to domain-specific handlers instead of generic deploy buttons.
@@ -1730,6 +2110,10 @@ export class VaiEngine implements ModelAdapter {
     const repoNativeResult = this.tryRepoNativeArchitecture(input, lower, history);
     if (repoNativeResult) return this.tracked('repo-native-architecture', repoNativeResult, input);
 
+    // Strategy 0.055: Official docs lookup — return real docs pages before build/product routing hijacks the prompt
+    const officialDocsAnswer = this.tryOfficialDocsAnswer(input, lower);
+    if (officialDocsAnswer) return this.tracked('official-docs', officialDocsAnswer, input);
+
     // Strategy 0.06: Product architecture direction — complex build prompts get architecture guidance
     const productArchResult = this.tryProductArchitectureDirection(input, lower, history);
     if (productArchResult) return this.tracked('product-architecture', productArchResult, input);
@@ -1745,6 +2129,14 @@ export class VaiEngine implements ModelAdapter {
     // Strategy 0.09: Entitlement / product policy — billing, permissions, revision flows
     const entitlementResult = this.tryEntitlementPolicy(lower);
     if (entitlementResult) return this.tracked('entitlement-policy', entitlementResult, input);
+
+    // Strategy 0.095: Generic web/app build redirect — fires in chat mode ONLY, before
+    // TF-IDF retrieval can match "landing" against YouTube videos about lunar landings.
+    // vai:v0 cannot AI-generate arbitrary websites; route users to templates instead.
+    if (activeMode === 'chat' && !this._hasActiveSandboxContext) {
+      const chatBuildRedirect = this.tryGenericChatBuildRedirect(lower);
+      if (chatBuildRedirect) return this.tracked('chat-build-redirect', chatBuildRedirect, input);
+    }
 
     // Strategy 0.1: Scaffold / deploy intent — ONLY triggers on explicit scaffold/deploy requests.
     // Creative requests like "make me a game" bypass this entirely.
@@ -1783,7 +2175,7 @@ export class VaiEngine implements ModelAdapter {
     const builderStackFollowUp = this.tryBuilderStackFollowUp(lower, history);
     if (builderStackFollowUp) return this.tracked('builder-stack-follow-up', builderStackFollowUp, input);
 
-    const activeSandboxUiEdit = this.tryActiveSandboxLandingPageEdit(input, lower);
+    const activeSandboxUiEdit = this.tryActiveSandboxLandingPageEdit(input, lower, history);
     if (activeSandboxUiEdit) return this.tracked('builder-active-sandbox-edit', activeSandboxUiEdit, input);
 
     // Strategy 0.3: Binary/hex decode — detect binary or hex sequences
@@ -1854,6 +2246,11 @@ export class VaiEngine implements ModelAdapter {
     const codeExample = this.tryCodeExample(lower);
     if (codeExample) return this.tracked('code-example', codeExample, input);
 
+    // Strategy 1.395: Practical setup guidance — intercept common "how do I add auth / set up Prisma"
+    // prompts before broad project generators rewrite them into build-intake questions.
+    const practicalSetup = this.tryPracticalSetupKnowledge(lower);
+    if (practicalSetup) return this.tracked(practicalSetup.strategy, practicalSetup.text, input);
+
     // Strategy 1: Conversational awareness — handle common patterns
     const conversational = this.handleConversational(lower, history);
     if (conversational) return this.tracked('conversational', conversational, input);
@@ -1896,6 +2293,9 @@ export class VaiEngine implements ModelAdapter {
         });
       }
     }
+
+    const currentInfoGuardrail = this.tryCurrentInfoGuardrail(input, lower);
+    if (currentInfoGuardrail) return this.tracked('current-info-guardrail', currentInfoGuardrail, input);
 
     // Strategy 1.4: Creative code projects — full working programs
     const creativeCode = this.tryCreativeCodeProject(lower, history);
@@ -1997,8 +2397,18 @@ export class VaiEngine implements ModelAdapter {
     if (testGen) return this.tracked('test-gen', testGen, input);
 
     // Strategy 2: Check knowledge store for a direct match
+    // Guard: bootstrap self-description entries should only match when the user is asking about Vai/VeggaAI itself
     const match = this.cachedFindBestMatch(input);
-    if (match) return this.tracked('direct-match', match.response, input);
+    if (match) {
+      const isBootstrapSelfEntry = (match.source === 'bootstrap' || match.source.startsWith('bootstrap'))
+        && /\bVeggaAI\b|I am v0|I learn from sources/i.test(match.response);
+      const isAskingAboutVai = /\b(?:veggaai|vai|vegga)\b/i.test(input)
+        || /^(?:what|who)\s+(?:are|r)\s+(?:you|u)\b/i.test(lower)
+        || /\b(?:what\s+(?:can|do)\s+you|your\s+(?:capabilities|features|name))\b/i.test(lower);
+      if (!isBootstrapSelfEntry || isAskingAboutVai) {
+        return this.tracked('direct-match', match.response, input);
+      }
+    }
 
     // Strategy 2.5: Concept lookup — extracted definitions from learned content
     const conceptResult = this.tryConceptLookup(lower);
@@ -2120,6 +2530,237 @@ export class VaiEngine implements ModelAdapter {
 
   private normalizeResearchIntentInput(input: string): string {
     return this.normalizeUserInputForUnderstanding(input);
+  }
+
+  private rewriteCorrectiveFollowUpInput(input: string, history: readonly Message[]): string | null {
+    if (history.length < 2) return null;
+
+    const hasPriorAssistant = history.some((message) => message.role === 'assistant');
+    if (!hasPriorAssistant) return null;
+
+    const trimmed = input.trim();
+    const redirectRewrite = this.rewriteReferentialRedirectInput(trimmed, history);
+    if (redirectRewrite) return redirectRewrite;
+
+    const clarified = this.extractCorrectiveClarification(trimmed);
+    if (!clarified) return null;
+
+    const contextualTopic = this.inferRecentFollowUpTopic(history);
+
+    if (this.isTerseCorrectiveClarification(clarified)) {
+      const cleanedClarification = clarified.replace(/[.?!]+$/g, '').trim();
+      if (contextualTopic && !new RegExp(`\\b${this.escapeRegex(contextualTopic)}\\b`, 'i').test(cleanedClarification)) {
+        return `what about ${contextualTopic} ${cleanedClarification}?`;
+      }
+      return `what about ${cleanedClarification}?`;
+    }
+
+    if (contextualTopic && /^[a-z][\w.+/#\- ]{0,48}$/i.test(clarified) && !new RegExp(`\\b${this.escapeRegex(contextualTopic)}\\b`, 'i').test(clarified)) {
+      return `${contextualTopic} ${clarified}`;
+    }
+
+    return clarified;
+  }
+
+  private rewriteReferentialRedirectInput(input: string, history: readonly Message[]): string | null {
+    const explicitRedirect = this.extractExplicitRedirectQuestion(input);
+    if (explicitRedirect) {
+      return this.contextualizeRedirectQuestion(explicitRedirect, this.inferRecentFollowUpTopic(history));
+    }
+
+    const requestedPart = this.extractRequestedQuestionPart(input);
+    if (!requestedPart) return null;
+
+    const priorUserMessages = history.filter((message) => message.role === 'user');
+    const previousUser = priorUserMessages.length >= 2 ? priorUserMessages[priorUserMessages.length - 2]?.content ?? '' : '';
+    if (!previousUser) return null;
+
+    const segments = this.extractMultiPartQuestionSegments(previousUser);
+    if (segments.length < 2) return null;
+
+    const selectedSegment = requestedPart === 'last'
+      ? segments[segments.length - 1]
+      : segments[requestedPart - 1];
+    if (!selectedSegment) return null;
+
+    return this.contextualizeRedirectQuestion(selectedSegment, this.inferRecentFollowUpTopic(history));
+  }
+
+  private extractExplicitRedirectQuestion(input: string): string | null {
+    const patterns = [
+      /^(?:that(?:'s|\s+is)\s+not\s+my\s+(?:real|actual)\s+question[,.!\s]*)?(?:my|the)\s+(?:real|actual)\s+question\s+(?:is|was)\s+(.+)$/i,
+      /^(?:that(?:'s|\s+is)\s+not\s+what\s+i(?:'m|\s+am)\s+asking[,.!\s]*)?(?:what\s+i(?:'m|\s+am)\s+asking\s+about|i(?:'m|\s+am)\s+asking\s+about)\s+(.+)$/i,
+      /^(?:ignore\s+(?:the\s+rest|everything\s+else|all\s+that)[,;:]?\s*)?(?:just\s+)?answer\s+(.+)$/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = pattern.exec(input);
+      if (!match) continue;
+
+      const clarified = (match[1] ?? '')
+        .replace(/^[:\-–—,]\s*/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!clarified) continue;
+      if (/^(?:the\s+)?(?:first|second|third|last)\s+(?:part|question)\b/i.test(clarified)) {
+        return null;
+      }
+      return clarified;
+    }
+
+    return null;
+  }
+
+  private extractRequestedQuestionPart(input: string): 1 | 2 | 3 | 'last' | null {
+    const lower = input.toLowerCase();
+    if (!/\b(?:first|second|third|last|1st|2nd|3rd)\s+(?:part|question)\b/i.test(lower)) return null;
+    if (!/\b(?:answer|cover|focus\s+on|take|do|give\s+me|just|only|ignore\s+the\s+rest|what\s+about)\b/i.test(lower)) return null;
+
+    if (/\b(?:1st|first)\s+(?:part|question)\b/i.test(lower)) return 1;
+    if (/\b(?:2nd|second)\s+(?:part|question)\b/i.test(lower)) return 2;
+    if (/\b(?:3rd|third)\s+(?:part|question)\b/i.test(lower)) return 3;
+    if (/\blast\s+(?:part|question)\b/i.test(lower)) return 'last';
+
+    return null;
+  }
+
+  private extractMultiPartQuestionSegments(input: string): string[] {
+    const normalized = input
+      .replace(/\s+/g, ' ')
+      .replace(/[\r\n]+/g, ' ')
+      .trim();
+    if (!normalized) return [];
+
+    const questionChunks = normalized
+      .split(/\?+/)
+      .map((chunk) => chunk.trim())
+      .filter((chunk) => chunk.length > 0);
+    const chunks = questionChunks.length > 0 ? questionChunks : [normalized];
+    const segments: string[] = [];
+
+    for (const chunk of chunks) {
+      const splitParts = chunk.split(/(?:\s*,\s*|\s+and\s+|\s+but\s+|\s+also\s+)(?=(?:how|what|which|when|where|why|who|whom|whose|can|could|should|would|do|does|did|is|are|am|will)\b)/i);
+      for (const part of splitParts) {
+        const cleaned = part
+          .replace(/^(?:and|but|also|plus)\s+/i, '')
+          .replace(/^[-:;,.]+\s*/, '')
+          .trim();
+        if (cleaned.length < 8) continue;
+
+        const wordCount = cleaned.split(/\s+/).filter(Boolean).length;
+        if (wordCount < 3) continue;
+
+        const asQuestion = /[?]$/.test(cleaned) || /^(?:how|what|which|when|where|why|who|whom|whose|can|could|should|would|do|does|did|is|are|am|will)\b/i.test(cleaned)
+          ? cleaned.replace(/[.?!]+$/g, '').trim() + '?'
+          : cleaned;
+
+        if (!segments.some((existing) => existing.toLowerCase() === asQuestion.toLowerCase())) {
+          segments.push(asQuestion);
+        }
+      }
+    }
+
+    return segments;
+  }
+
+  private contextualizeRedirectQuestion(question: string, topic: string | null): string {
+    const trimmed = question.trim();
+    if (!topic) return trimmed;
+    if (new RegExp(`\\b${this.escapeRegex(topic)}\\b`, 'i').test(trimmed)) return trimmed;
+
+    const bare = trimmed.replace(/[.?!]+$/g, '').trim();
+    const wordCount = bare.split(/\s+/).filter(Boolean).length;
+    if (/^(?:how|what|which|when|where|why|who|whom|whose|can|could|should|would|do|does|did|is|are|am|will)\b/i.test(bare) && wordCount <= 12) {
+      return `${bare} in ${topic}?`;
+    }
+    if (wordCount <= 8) {
+      return `${topic} ${bare}`;
+    }
+
+    return trimmed;
+  }
+
+  private extractCorrectiveClarification(input: string): string | null {
+    const patterns = [
+      /^(?:no[,.!]?\s+)?(?:i\s+mean|what\s+i\s+mean(?:t)?(?:\s+is)?|to\s+be\s+clear|more\s+specifically|more\s+accurately|rather|instead|i'?m\s+asking\s+about)\s+(.+)$/i,
+      /^(?:no[,.!]?\s+)?not\s+[^,.;:!?]+[,;:]\s*(.+)$/i,
+      /^(?:no[,.!]?\s+)?not\s+.+?\s+but\s+(.+)$/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = pattern.exec(input);
+      if (!match) continue;
+
+      const clarified = (match[1] ?? '')
+        .replace(/^[:\-–—,]\s*/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (clarified) return clarified;
+    }
+
+    return null;
+  }
+
+  private inferRecentFollowUpTopic(history: readonly Message[]): string | null {
+    const recentAssistant = [...history].reverse().find((message) => message.role === 'assistant' && message.content.trim().length > 0);
+    const assistantText = recentAssistant?.content ?? '';
+
+    const headingMatch = /\*\*([^*]{2,60})\*\*/.exec(assistantText);
+    if (headingMatch) {
+      const heading = headingMatch[1]
+        .replace(/[:.]+$/g, '')
+        .trim();
+      if (heading.length > 0 && !this.isGenericFollowUpHeading(heading)) return heading;
+    }
+
+    const topicMatchers: Array<{ pattern: RegExp; label: string }> = [
+      { pattern: /\bnext\.?js\b|\bapp router\b|\bpages router\b/i, label: 'Next.js' },
+      { pattern: /\breact\b/i, label: 'React' },
+      { pattern: /\bdocker\b/i, label: 'Docker' },
+      { pattern: /\bkubernetes\b/i, label: 'Kubernetes' },
+      { pattern: /\btypescript\b/i, label: 'TypeScript' },
+      { pattern: /\bnode\.?js\b|\bnode\b/i, label: 'Node.js' },
+      { pattern: /\btailwind\b/i, label: 'Tailwind CSS' },
+      { pattern: /\bgsap\b/i, label: 'GSAP' },
+      { pattern: /\bthree\.?js\b/i, label: 'Three.js' },
+      { pattern: /\bbun\b/i, label: 'Bun' },
+      { pattern: /\bdeno\b/i, label: 'Deno' },
+    ];
+
+    for (const matcher of topicMatchers) {
+      if (matcher.pattern.test(assistantText)) return matcher.label;
+    }
+
+    const previousUsers = [...history].reverse().filter((message) => message.role === 'user' && message.content.trim().length > 0);
+    for (const message of previousUsers) {
+      for (const matcher of topicMatchers) {
+        if (matcher.pattern.test(message.content)) return matcher.label;
+      }
+    }
+
+    return null;
+  }
+
+  private isGenericFollowUpHeading(heading: string): boolean {
+    return /^(?:recommendation|decision|why|next\s+step|short\s+version|build\s+direction|what\s+stays|what\s+changes)$/i.test(heading.trim());
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private isTerseCorrectiveClarification(input: string): boolean {
+    const trimmed = input.trim();
+    if (trimmed.length === 0 || /[?]/.test(trimmed)) return false;
+    if (/^(?:what|which|why|how|when|who|where|can|could|should|would|do|does|did|is|are|am|will|build|make|create|write|show|explain|compare|give|tell)\b/i.test(trimmed)) {
+      return false;
+    }
+
+    const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+    if (wordCount <= 5) return true;
+
+    return /^(?:the|this|that|it|my|our|their|performance|security|testing|routing|deployment|local-first|offline|pricing|ui|ux|design|auth|database|state|docs?|types?|api|backend|frontend)\b/i.test(trimmed)
+      && wordCount <= 7;
   }
 
   private normalizeUserInputForUnderstanding(input: string): string {
@@ -2798,7 +3439,13 @@ export class VaiEngine implements ModelAdapter {
     const spec = this.detectBenchmarkResponseSpec(history);
     if (!spec) return null;
 
-    const selection = this.selectMCQAnswer(input, input.toLowerCase().trim(), { forceChoice: true });
+    // Use the raw (un-normalized) input from the last user message when available,
+    // because normalizeUserInputForUnderstanding collapses newlines to spaces
+    // which breaks MCQ option parsing that relies on (?:^|\n) anchors.
+    const rawUserMsg = [...history].reverse().find(m => m.role === 'user');
+    const rawInput = rawUserMsg?.content ?? input;
+
+    const selection = this.selectMCQAnswer(rawInput, rawInput.toLowerCase().trim(), { forceChoice: true });
     if (!selection) return null;
 
     if (spec.kind === 'answer-prefix') {
@@ -3020,7 +3667,10 @@ export class VaiEngine implements ModelAdapter {
     if (/(?:my|your)\s+(?:first|last|previous|earlier)\s+message/i.test(lower)) return null;
     if (/(?:how\s+are\s+you|what'?s\s+your\s+name|who\s+made\s+you|help\s+me|do\s+you\s+like)/i.test(lower)) return null;
     // Skip action requests — "can you show/explain/build/give me..." are NOT yes/no questions
-    if (/^can\s+you\s+(?:show|explain|tell|give|help|make|build|create|write|generate|provide|list|describe|teach|demonstrate|walk)/i.test(lower)) return null;
+    if (/^can\s+you\s+(?:show|explain|tell|give|help|make|build|create|write|generate|provide|list|describe|teach|demonstrate|walk|review|check|audit|analyze|debug|fix|refactor|optimize|improve|look\s+at|take\s+a\s+look)/i.test(lower)) return null;
+    // Skip any build/create request with a web target — these should go to build handlers
+    // Only match imperative requests (sentence-initial or after "can you"/"please"), NOT descriptive uses like "I can build quickly"
+    if (/(?:^|\.\s*)(?:(?:can\s+you|please)\s+)?(?:build|create|make|design|generate|develop)\b/i.test(lower) && /\b(?:website|web\s*site|app|application|page|site|portfolio|gallery|dashboard|landing|store|shop)\b/i.test(lower) && !/\bi\s+(?:can|could|want\s+to|like\s+to)\s+build\b/i.test(lower)) return null;
     if (
       this._activeMode === 'builder'
       && /\b(?:build|create|make|start|set\s*up|setup|install|scaffold|deploy|spin\s*up|bootstrap|launch|upgrade|improve|update|refine|polish|add)\b/i.test(lower)
@@ -3277,6 +3927,15 @@ export class VaiEngine implements ModelAdapter {
     const generalStorefrontFollowUp = this.tryGeneralStorefrontFollowUp(original, history);
     if (generalStorefrontFollowUp) return generalStorefrontFollowUp;
 
+    const referentialRedirectFollowUp = this.tryReferentialRedirectFollowUp(original, history);
+    if (referentialRedirectFollowUp) return referentialRedirectFollowUp;
+
+    const referentialCompressionFollowUp = this.tryReferentialCompressionFollowUp(original, history);
+    if (referentialCompressionFollowUp) return referentialCompressionFollowUp;
+
+    const referentialChangeFollowUp = this.tryReferentialChangeFollowUp(original, history);
+    if (referentialChangeFollowUp) return referentialChangeFollowUp;
+
     const recentAssistant = [...history].reverse().find(m => m.role === 'assistant');
     const assistantText = recentAssistant?.content ?? '';
     if (
@@ -3300,9 +3959,10 @@ export class VaiEngine implements ModelAdapter {
 
     // Only fire for short/vague follow-up messages that lack self-contained context
     const isAgreementPhrase = /^(?:ok|okay|sure|yes|yeah|yep|alright|great|cool|perfect)[\s!.]*$|^(?:sounds\s+good|let'?s?\s+go(?:\s+with\s+that)?|let'?s?\s+do\s+(?:it|that)|go\s+(?:ahead|with\s+that)|use\s+that|that\s+one|sounds\s+like\s+a\s+plan)[\s!.]*$|^ok[,\s]+(?:let'?s?|lets?)\s+(?:go(?:\s+with\s+(?:that|it))?|do\s+(?:it|that))[\s!.]*$/i.test(lower);
+    const isDoItPhrase = /^(?:do\s+it|just\s+do\s+it|go\s+for\s+it|make\s+it|build\s+it|create\s+it|do\s+it\s+(?:please|pls|now)|(?:yes|yeah|yep|sure|ok|okay)[,\s]+(?:do|build|make|create)\s+(?:it|that))(?:\s+(?:please|pls|now))?[\s!.]*$/i.test(lower);
     const isDefaultBuildChoice = /^(?:pick|choose)\s+one\s+and\s+build\s+(?:it|that)[\s!.]*$|^(?:pick|choose)\s+for\s+me[\s!.]*$|^surprise\s+me[\s!.]*$/i.test(lower);
     const isFollowUpQuestion = /^(?:what|which|how)\s+(?:stack|one|framework|option|approach|language|tool|library|about\s+(?:that|this))\b|^(?:how\s+do\s+(?:i|we)|what\s+(?:next|should|do\s+(?:i|we)))|^(?:can\s+you\s+(?:help|show|explain|continue))|^(?:tell\s+me\s+more|more\s+(?:about\s+that|info|details?))\b/i.test(lower);
-    const isVagueFollowUp = isAgreementPhrase || isDefaultBuildChoice || isFollowUpQuestion;
+    const isVagueFollowUp = isAgreementPhrase || isDoItPhrase || isDefaultBuildChoice || isFollowUpQuestion;
     if (!isVagueFollowUp) return null;
 
     // Extract topic from recent assistant messages
@@ -3312,10 +3972,25 @@ export class VaiEngine implements ModelAdapter {
     const priorUserMsgs = [...history].filter(m => m.role === 'user').slice(-3);
     const priorContext = priorUserMsgs.map(m => m.content).join(' ').toLowerCase();
 
-    // Detect: agreement/confirmation ("ok", "lets go with that", "sure")
-    const isAgreement = isAgreementPhrase;
+    // Detect: agreement/confirmation ("ok", "lets go with that", "sure", "do it please")
+    const isAgreement = isAgreementPhrase || isDoItPhrase;
 
     if (isAgreement) {
+      // If previous assistant message was a build redirect, re-extract user's original intent
+      // and generate the website/app they asked for
+      const wasBuildRedirect = /build request|fastest path to a running app|Type the stack name|open Builder mode/i.test(assistantText);
+      if (wasBuildRedirect) {
+        // Find what the user originally asked for
+        const priorUser = [...history].reverse().filter(m => m.role === 'user').find((m, i) => i > 0);
+        const originalRequest = priorUser?.content ?? '';
+        const origLower = originalRequest.toLowerCase();
+        // If the original request was about a website/app, generate it directly
+        if (/\b(?:website|web\s*site|portfolio|gallery|landing\s*page|photographer|photography|blog|personal|business)\b/i.test(origLower)) {
+          const projectDesc = originalRequest.replace(/^(?:can\s+you\s+|help\s+(?:me\s+)?)?(?:make|build|create|design|generate|develop)\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?/i, '').trim();
+          return this.generateWebsite(projectDesc);
+        }
+      }
+
       if (/\*\*Build direction\*\*/i.test(assistantText) && /Pick one fast lane/i.test(assistantText)) {
         return this.generateDefaultOpsChatPreview('internal ops tool with approval queue, activity rail, and quick actions');
       }
@@ -3372,6 +4047,310 @@ export class VaiEngine implements ModelAdapter {
     }
 
     return null;
+  }
+
+  private tryReferentialRedirectFollowUp(original: string, history: readonly Message[]): string | null {
+    const normalized = original.replace(/\s+/g, ' ').trim();
+    if (!/\b(?:that(?:'s|\s+is)\s+not\s+my\s+(?:real|actual)\s+question|that(?:'s|\s+is)\s+not\s+what\s+i(?:'m|\s+am)\s+asking|wrong\s+question|not\s+the\s+question)\b/i.test(normalized)) {
+      return null;
+    }
+
+    if (this.extractExplicitRedirectQuestion(normalized)) return null;
+    if (this.extractRequestedQuestionPart(normalized)) return null;
+
+    const priorUserMessages = history.filter((message) => message.role === 'user');
+    const previousUser = priorUserMessages.length >= 2 ? priorUserMessages[priorUserMessages.length - 2]?.content ?? '' : '';
+    const segments = previousUser ? this.extractMultiPartQuestionSegments(previousUser) : [];
+
+    if (segments.length >= 2) {
+      const options = segments
+        .slice(0, 3)
+        .map((segment, index) => `${index + 1}. ${segment}`)
+        .join('\n');
+      return `Then point me at the exact slice you want.\n\nI can answer:\n${options}\n\nSay "answer the second part" or restate the real question in one line.`;
+    }
+
+    return 'Then point me at the exact question you want answered. Say "my real question is ..." or restate it in one line.';
+  }
+
+  private tryReferentialCompressionFollowUp(original: string, history: readonly Message[]): string | null {
+    const recentAssistant = [...history].reverse().find((message) => message.role === 'assistant' && message.content.trim().length > 0);
+    if (!recentAssistant) return null;
+
+    const normalized = original.replace(/\s+/g, ' ').trim();
+    const intent = this.classifyReferentialCompressionRequest(normalized);
+    if (!intent) return null;
+
+    const summary = this.extractReferentialCompressionSummary(recentAssistant.content);
+    if (!summary) return null;
+
+    if (intent === 'decision') {
+      return `**Decision**\n${summary.decision}`;
+    }
+    if (intent === 'next-step') {
+      return `**Next step**\n${summary.nextStep}`;
+    }
+    if (intent === 'bullet-version') {
+      return ['**Short version**', ...summary.bullets.map((bullet) => `- ${bullet}`)].join('\n');
+    }
+
+    return `**Short version**\n${summary.shortVersion}`;
+  }
+
+  private classifyReferentialCompressionRequest(input: string): 'decision' | 'next-step' | 'short-version' | 'bullet-version' | null {
+    const normalized = input
+      .replace(/^(?:based\s+on|from|using|given)\s+(?:that|this|your|the)\s+(?:answer|response|comparison|explanation|analysis),?\s*/i, '')
+      .trim();
+
+    if (/^(?:just|only)?\s*(?:give\s+me\s+)?(?:the\s+)?decision(?:\s+only)?[.?!]*$/i.test(normalized)) {
+      return 'decision';
+    }
+    if (/^(?:just|only)?\s*(?:give\s+me\s+)?(?:the\s+)?next\s+step(?:\s+only)?[.?!]*$/i.test(normalized)
+      || /^(?:what(?:'s|\s+is)\s+the\s+next\s+step)[.?!]*$/i.test(normalized)) {
+      return 'next-step';
+    }
+    if (/^(?:bullet\s+version|bullet\s+points?|bullets\s+only)[.?!]*$/i.test(normalized)) {
+      return 'bullet-version';
+    }
+    if (/^(?:short(?:est)?\s+version|brief\s+version|quick\s+version|one[- ]liner|one\s+sentence|tl;?dr|summary)[.?!]*$/i.test(normalized)) {
+      return 'short-version';
+    }
+
+    return null;
+  }
+
+  private extractReferentialCompressionSummary(content: string): {
+    decision: string;
+    nextStep: string;
+    shortVersion: string;
+    bullets: string[];
+  } | null {
+    const body = content
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/\[[^\]]+\]\([^\)]+\)/g, ' ')
+      .replace(/\*\*/g, '')
+      .replace(/\r/g, '')
+      .trim();
+    if (!body) return null;
+
+    const lines = body
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .filter((line) => !/^sources:?$/i.test(line));
+    const sentences = body
+      .replace(/\n+/g, ' ')
+      .split(/(?<=[.!?])\s+/)
+      .map((sentence) => sentence.trim())
+      .filter((sentence) => sentence.length > 25);
+
+    const decision = sentences.find((sentence) => /\b(?:recommend|go\s+with|pick|choose|best\s+fit|bias|prefer|stronger\s+choice|right\s+move)\b/i.test(sentence))
+      ?? lines.find((line) => /\b(?:recommend|go\s+with|pick|choose|best\s+fit|bias|prefer)\b/i.test(line))
+      ?? sentences[0]
+      ?? lines[0];
+
+    const nextStepHeadingIndex = lines.findIndex((line) => /^next\s+step$/i.test(line));
+    const nextStep = (nextStepHeadingIndex >= 0 ? lines[nextStepHeadingIndex + 1] : null)
+      ?? lines.find((line) => /\b(?:first\s+slice|start\s+with|to\s+get\s+started|run\s+the|build\s+the|add\s+the|open\s+the)\b/i.test(line) && !/^next\s+step$/i.test(line))
+      ?? sentences.find((sentence) => /\b(?:next\s+step|start\s+with|to\s+get\s+started|first)\b/i.test(sentence))
+      ?? sentences[0]
+      ?? lines[0];
+
+    const bulletCandidates = lines
+      .map((line) => line.replace(/^[-*]\s*/, '').replace(/^\d+\.\s*/, '').trim())
+      .filter((line) => line.length > 18)
+      .filter((line) => !/^sources:?$/i.test(line));
+
+    const shortVersion = sentences.slice(0, 2).join(' ').trim() || decision;
+    const bullets = bulletCandidates.slice(0, 3);
+
+    return {
+      decision: decision.replace(/^[*-]\s*/, '').trim(),
+      nextStep: nextStep.replace(/^[*-]\s*/, '').trim(),
+      shortVersion,
+      bullets: bullets.length > 0 ? bullets : [decision.replace(/^[*-]\s*/, '').trim()],
+    };
+  }
+
+  private tryReferentialChangeFollowUp(original: string, history: readonly Message[]): string | null {
+    const recentAssistant = [...history].reverse().find((message) => message.role === 'assistant' && message.content.trim().length > 0);
+    if (!recentAssistant) return null;
+
+    const normalized = original.replace(/\s+/g, ' ').trim();
+    const changeRequest = this.classifyReferentialChangeRequest(normalized);
+    if (!changeRequest) return null;
+
+    const topic = this.inferRecentFollowUpTopic(history)
+      ?? this.resolveReferentialHistoryTopic(history)
+      ?? 'the current approach';
+
+    return this.buildReferentialChangeFollowUp(topic, changeRequest);
+  }
+
+  private classifyReferentialChangeRequest(input: string):
+    | { kind: 'platform-shift'; target: 'web' | 'desktop' }
+    | { kind: 'local-first' }
+    | { kind: 'privacy-priority'; target: 'privacy' | 'speed' }
+    | { kind: 'collaboration-scope'; target: 'single-user' | 'multi-user' }
+    | null {
+    const lower = input.toLowerCase();
+    const hasContextualLeadIn = VaiEngine.REFERENTIAL_FOLLOW_UP_PATTERN.test(input)
+      || /\b(?:what\s+changes\s+if|how\s+would\s+that\s+change\s+if|what\s+changes\s+for|how\s+does\s+that\s+change\s+for)\b/i.test(input)
+      || /\b(?:rather|instead|not)\b/i.test(lower);
+
+    if (!hasContextualLeadIn) return null;
+
+    if (/\bweb\b.*\b(?:instead\s+of|not)\b.*\bdesktop\b|\bweb\b.*\bdesktop\b/i.test(lower)) {
+      return { kind: 'platform-shift', target: 'web' };
+    }
+    if (/\bdesktop\b.*\b(?:instead\s+of|not)\b.*\bweb\b|\bdesktop\b.*\bweb\b/i.test(lower)) {
+      return { kind: 'platform-shift', target: 'desktop' };
+    }
+    if (/\blocal-?first\b|\boffline-?first\b|\bneeds?\s+to\s+be\s+local-?first\b|\bneeds?\s+to\s+work\s+offline\b/i.test(lower)) {
+      return { kind: 'local-first' };
+    }
+    if (/\bprivacy\b.*\b(?:more\s+than|over|instead\s+of|not)\b.*\b(?:speed|latency|performance)\b/i.test(lower)) {
+      return { kind: 'privacy-priority', target: 'privacy' };
+    }
+    if (/\b(?:speed|latency|performance)\b.*\b(?:more\s+than|over|instead\s+of|not)\b.*\bprivacy\b/i.test(lower)) {
+      return { kind: 'privacy-priority', target: 'speed' };
+    }
+    if (/\bmulti-?user\b.*\b(?:instead\s+of|not)\b.*\bsingle-?user\b|\bmulti-?user\b.*\bsingle-?user\b|\bteam\b.*\binstead\s+of\b.*\bsingle\b/i.test(lower)) {
+      return { kind: 'collaboration-scope', target: 'multi-user' };
+    }
+    if (/\bsingle-?user\b.*\b(?:instead\s+of|not)\b.*\bmulti-?user\b|\bsingle-?user\b.*\bmulti-?user\b/i.test(lower)) {
+      return { kind: 'collaboration-scope', target: 'single-user' };
+    }
+
+    return null;
+  }
+
+  private resolveReferentialHistoryTopic(history: readonly Message[]): string | null {
+    const userMessages = [...history].reverse().filter((message) => message.role === 'user');
+    for (const message of userMessages) {
+      const normalized = this.normalizeFollowUpTopic(message.content);
+      if (this.isStableFollowUpTopic(normalized)) return normalized;
+      const detected = this.detectTopic(message.content);
+      if (this.isStableFollowUpTopic(detected)) return detected;
+    }
+
+    return null;
+  }
+
+  private buildReferentialChangeFollowUp(
+    topic: string,
+    changeRequest:
+      | { kind: 'platform-shift'; target: 'web' | 'desktop' }
+      | { kind: 'local-first' }
+      | { kind: 'privacy-priority'; target: 'privacy' | 'speed' }
+      | { kind: 'collaboration-scope'; target: 'single-user' | 'multi-user' },
+  ): string {
+    const topicLabel = topic.length > 60 ? 'the current approach' : topic;
+
+    if (changeRequest.kind === 'platform-shift' && changeRequest.target === 'web') {
+      return [
+        `**What stays**`,
+        `- The core product loop for ${topicLabel} stays the same.` ,
+        '- Shared chat/service logic still benefits both web and desktop.',
+        '',
+        `**What changes**`,
+        '- Distribution shifts toward zero-install access, links, and fast onboarding in the browser.',
+        '- Browser session handling, reconnect behavior, and responsive layout become first-class instead of window chrome or native shell behavior.',
+        '- Native file access, hotkeys, tray behavior, and offline guarantees stop being free and need explicit browser-safe fallbacks.',
+        '',
+        `**Decision**`,
+        '- Bias web first when reach, shareability, and low-friction access matter more than native OS integration.',
+      ].join('\n');
+    }
+
+    if (changeRequest.kind === 'platform-shift' && changeRequest.target === 'desktop') {
+      return [
+        `**What stays**`,
+        `- The core product loop for ${topicLabel} still matters more than the shell.` ,
+        '- Shared model/service quality work still carries over.',
+        '',
+        `**What changes**`,
+        '- Native windowing, keyboard shortcuts, file system access, and local persistence become part of the default UX instead of optional extras.',
+        '- Packaging, updates, crash recovery, and machine-local state matter more than share links or browser session handoff.',
+        '- You can lean harder on local databases and offline workflows without fighting browser limits.',
+        '',
+        `**Decision**`,
+        '- Bias desktop first when power-user flow, native integration, and durable local state matter more than instant distribution.',
+      ].join('\n');
+    }
+
+    if (changeRequest.kind === 'local-first') {
+      return [
+        `**What stays**`,
+        `- ${topicLabel} still needs the same user-facing product loop.` ,
+        '- Good chat quality and fast defaults still matter.',
+        '',
+        `**What changes**`,
+        '- Local storage becomes the source of truth first, with sync added after instead of starting remote-first.',
+        '- You need explicit sync, conflict resolution, reconnect behavior, and offline-safe queuing early.',
+        '- Auth shifts from mandatory central accounts toward device trust, optional identity linking, and careful data export/import flows.',
+        '',
+        `**Decision**`,
+        '- Choose local-first when offline reliability, privacy, and low-latency interaction are product-defining, not just nice-to-have.',
+      ].join('\n');
+    }
+
+    if (changeRequest.kind === 'privacy-priority' && changeRequest.target === 'privacy') {
+      return [
+        `**What stays**`,
+        `- ${topicLabel} still has to feel fast and useful to the user.` ,
+        '',
+        `**What changes**`,
+        '- Prefer on-device processing, shorter retention, and opt-in telemetry instead of broad logging by default.',
+        '- Retrieval, indexing, and conversation history should stay local where possible, even if that costs some warmup speed or convenience.',
+        '- Share less by default, sync less eagerly, and make export or cloud backup an explicit user choice.',
+        '',
+        `**Decision**`,
+        '- If trust is core to the product, take the privacy-first hit early and win back speed through focused optimization later.',
+      ].join('\n');
+    }
+
+    if (changeRequest.kind === 'privacy-priority' && changeRequest.target === 'speed') {
+      return [
+        `**What stays**`,
+        `- ${topicLabel} still needs clear trust boundaries.` ,
+        '',
+        `**What changes**`,
+        '- You can precompute more, warm caches more aggressively, and sync sooner instead of waiting for explicit user action.',
+        '- Centralized indexing, telemetry, and shared state can be used more heavily as long as the consent boundary stays explicit.',
+        '- The UX can optimize for instant response first, then layer privacy controls around that baseline.',
+        '',
+        `**Decision**`,
+        '- Bias speed first when responsiveness is the main product promise and the data boundary is already acceptable to the user.',
+      ].join('\n');
+    }
+
+    if (changeRequest.kind === 'collaboration-scope' && changeRequest.target === 'multi-user') {
+      return [
+        `**What stays**`,
+        `- The product loop for ${topicLabel} still needs to feel simple from the user side.` ,
+        '',
+        `**What changes**`,
+        '- Auth, identity, permissions, and workspace boundaries become core architecture instead of later add-ons.',
+        '- You need conflict handling, shared state sync, presence, and audit visibility where single-user flow could stay implicit.',
+        '- Support, billing, and onboarding now need role-aware behavior instead of one local owner model.',
+        '',
+        `**Decision**`,
+        '- Go multi-user only if collaboration is part of the first product promise, because it changes the system shape immediately.',
+      ].join('\n');
+    }
+
+    return [
+      `**What stays**`,
+      `- ${topicLabel} can stay product-first and simpler to ship.` ,
+      '',
+      `**What changes**`,
+      '- You can delay auth, permissions, presence, and shared-state conflict work.',
+      '- Local state, defaults, and onboarding can optimize for one owner instead of a shared workspace.',
+      '',
+      `**Decision**`,
+      '- Stay single-user if speed of execution and product clarity matter more than collaboration in the first release.',
+    ].join('\n');
   }
 
   private tryArtisanStorefrontFollowUp(original: string, history: readonly Message[]): string | null {
@@ -3768,9 +4747,13 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
   // ─── ERROR DIAGNOSIS ──────────────────────────────────────────────────────
 
   private tryErrorDiagnosis(input: string, lower: string): string | null {
+    // Skip if the input contains a URL — URLs are NOT error messages
+    if (/https?:\/\/\S+/i.test(input)) return null;
+
     // Detect error/exception patterns
     const hasError = /\berror\b|\bexception\b|\bfailed\b|\bcrash(?:es|ing|ed)?\b|\bthrows?\b|\bstack\s*trace\b/i.test(input);
-    const hasCode = /at\s+\w+[\w.]*\s*\(|\s+at\s+\w|TypeError|ReferenceError|SyntaxError|RangeError|Cannot\s+read\s+prop|is not a function|Cannot find module|ENOENT|EADDRINUSE|ECONNREFUSED|ERR_MODULE_NOT_FOUND|404|500|undefined is not|null is not|failed to compile|module not found/i.test(input);
+    // Note: `\s+at\s+\w` must be preceded by a newline or line-start to avoid matching "look at https://"
+    const hasCode = /at\s+\w+[\w.]*\s*\(|(?:^|\n)\s+at\s+\w|TypeError|ReferenceError|SyntaxError|RangeError|Cannot\s+read\s+prop|is not a function|Cannot find module|ENOENT|EADDRINUSE|ECONNREFUSED|ERR_MODULE_NOT_FOUND|404|500|undefined is not|null is not|failed to compile|module not found/i.test(input);
     const isAsk = /why|what|how|fix|solve|help|understand|debug|when\s+i|whenever|after\s+i|keeps?\s+(?:crashing|failing|breaking)|won't\s+(?:work|start|load|run)|doesn't\s+(?:work|start|load|run)|not\s+working|not\s+(?:loading|starting|running)|keeps\s+happening/i.test(input);
 
     if (!hasError && !hasCode) return null;
@@ -3801,7 +4784,8 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
 
     // --- TypeError: cannot read property ---
     if (/Cannot read prop|is not a function|undefined is not|null is not|TypeError/i.test(input)) {
-      const prop = input.match(/(?:property|properties)\s+['"]?(\w+)['"]?/i)?.[1]
+      const prop = input.match(/reading\s+['"`](\w+)['"`]/i)?.[1]
+        ?? input.match(/(?:property|properties)\s+(?!of\b)['"`]?(\w+)['"`]?/i)?.[1]
         ?? input.match(/\.(\w+)\s+of\s+(?:undefined|null)/i)?.[1];
       return `**TypeError${prop ? `: accessing \`${prop}\`` : ''}** — you're accessing a property on \`undefined\` or \`null\`.\n\n**Most common causes:**\n1. Async data not yet loaded — wrap in \`if (!data) return null\` or use optional chaining: \`data?.${prop ?? 'field'}\`\n2. API returned unexpected shape — \`console.log\` the response before accessing it\n3. Wrong variable name or scope — check spelling\n4. Array method on non-array — confirm the value is actually an array with \`Array.isArray(x)\`\n\n**Quick fix:** Add \`console.log('value:', yourVariable)\` just before the crash line to see what it actually is.`;
     }
@@ -4013,20 +4997,32 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
    * "make me a javascript calculator", "build a todo list in python", etc.
    */
   private tryCreativeCodeProject(input: string, history: readonly Message[] = []): string | null {
+    if (
+      /^(?:how\s+do\s+i|how\s+to)\b/i.test(input)
+      && /\b(?:add|implement|set\s*up|setup|configure|integrate)\b/i.test(input)
+      && /\b(?:auth(?:entication)?|nextauth|auth\.?js|clerk|prisma|postgres(?:ql)?|database|orm)\b/i.test(input)
+    ) {
+      return null;
+    }
+
     // Match many natural ways to ask for a project:
     // "make/build/create/write/code/generate/give/design/scaffold/set up [me] [a/an] <project> [in/using/with <lang>]"
     // "I want/need [a/an] <project>"
     // "help me build/create [a/an] <project>"
     // "can you make/build [me] [a/an] <project>"
+    const needDrivenProject = /\bi\s+need\s+(?:a\s+|an\s+|the\s+|my\s+)?(?:simple\s+|good\s+|great\s+|professional\s+|polished\s+)?(?:app|application|project|site|website|portfolio|gallery|dashboard|landing\s*page|homepage)\b/i.test(input)
+      && /\b(?:can\s+you|could\s+you|help\s+me|make|build|create|design|develop)\b/i.test(input);
     const projectMatch = input.match(
       /(?:(?:can\s+you\s+|help\s+(?:me\s+)?)?(?:make|build|create|write|code|generate|give|design|scaffold|set\s*up|develop|start|upgrade|improve|polish|refine|add|turn)|i\s+(?:want|need))\s+(?:me\s+)?(?:a\s+|an\s+|the\s+|my\s+|current\s+)?(?:simple\s+|basic\s+|quick\s+|full[\s-]*stack\s+)?(.+?)(?:\s+(?:in|using|with)\s+(\w[\w#+]*))?\s*$/i
     );
     const isBareCommerceProject = !projectMatch
       && /\b(?:sell|selling|shop|store|storefront|catalog|checkout|products?|ecommerce|commerce)\b/i.test(input)
       && /\b(?:brand|business|firma|anything|goods|items|retail|marketplace|webshop|online\s+store|general\s+store|commerce\s+store|ecommerce\s+store|store|shop|storefront)\b/i.test(input);
-    if (!projectMatch && !isBareCommerceProject) return null;
+    if (!projectMatch && !isBareCommerceProject && !needDrivenProject) return null;
 
-    const projectDesc = isBareCommerceProject
+    const projectDesc = needDrivenProject && !projectMatch
+      ? input.trim().toLowerCase()
+      : isBareCommerceProject
       ? input.trim().toLowerCase()
       : (projectMatch?.[1]?.trim().toLowerCase() || '');
     const cleanedProjectDesc = projectDesc
@@ -4036,6 +5032,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     const langHint = projectMatch?.[2]?.trim().toLowerCase() || '';
     const isChatMode = this._activeMode === 'chat';
     const isBuilderMode = this._activeMode === 'builder';
+    const isVagueGenericBuild = /^(?:good|great|professional|polished|nice|cool|modern|clean|simple|basic|strong|solid|premium)?\s*(?:app|application|project|site|website|dashboard|tool|workspace|platform)$/i.test(cleanedProjectDesc);
 
     if (
       isChatMode
@@ -4043,6 +5040,10 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       && /\b(household|roommates?)\b/i.test(cleanedProjectDesc)
     ) {
       return this.generateSharedShoppingChatPreview(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && isVagueGenericBuild) {
+      return this.generateBuilderGenericAppClarifier();
     }
 
     if (isBuilderMode) {
@@ -4166,7 +5167,24 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       return this.generateBuilderNodeExpressApp(cleanedProjectDesc);
     }
 
-    const fullDesc = `${cleanedProjectDesc} ${langHint}`.trim();
+    const fullDesc = `${input} ${cleanedProjectDesc} ${langHint}`.trim();
+    const builderIntent = isBuilderMode
+      ? resolveBuilderIntent({
+        input,
+        cleanedProjectDesc,
+        fullDesc,
+      })
+      : null;
+
+    if (builderIntent) {
+      const composed = composeBuilderApp(builderIntent, {
+        portfolio: (desc) => this.generateBuilderPhotographyPortfolioApp(desc),
+        referenceSocial: (desc) => this.generateBuilderReferenceSocialApp(desc),
+        socialBlog: (desc) => this.generateBuilderSocialBlogApp(desc),
+        storefront: (desc) => this.generateBuilderStorefrontApp(desc),
+      });
+      if (composed) return composed;
+    }
 
     if (
       isBuilderMode
@@ -4249,6 +5267,23 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       && /\b(?:app|dashboard|workspace|board|manager|preview|tool)\b/i.test(fullDesc)
     ) {
       return this.generateBuilderNotesDashboardApp(cleanedProjectDesc);
+    }
+
+    if (
+      isBuilderMode
+      && /\b(?:photographer|photography|photo\s+gallery|lightbox|masonry|editorial|portrait|wedding)\b/i.test(fullDesc)
+      && /\b(?:portfolio|gallery|site|website|app|page)\b/i.test(fullDesc)
+    ) {
+      return this.generateBuilderPhotographyPortfolioApp(cleanedProjectDesc);
+    }
+
+    if (
+      isBuilderMode
+      && /\b(?:sell|selling|shop|store|storefront|catalog|checkout|products?|ecommerce|commerce)\b/i.test(fullDesc)
+      && /\b(?:app|application|site|store|shop|website|platform|brand|business|marketplace|webshop|catalog)\b/i.test(fullDesc)
+      && !/\b(shared\s+shopping|shopping\s+app|shopping\s*list|grocery|household|roommates?)\b/i.test(fullDesc)
+    ) {
+      return this.generateBuilderStorefrontApp(cleanedProjectDesc);
     }
 
     if (
@@ -4386,6 +5421,14 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       return this.generateCProgram(projectDesc);
     }
 
+    // --- Utility function / snippet generation ---
+    // Catches "write a debounce function in typescript", "create a throttle utility", etc.
+    // Exclude language-specific project requests (C++ class, Rust struct, etc.)
+    if (/(?:function|utility|helper|hook|module|snippet|method|handler|wrapper|decorator|middleware|guard|interceptor|pipe|filter|validator|formatter|parser|serializer|converter|adapter|factory|singleton|observer|iterator|generator)\b/i.test(projectDesc)
+      && !/\bc\+\+\b|\bcpp\b|\bc#\b|\.net\b|\brust\b|\bjava\b(?!script)/i.test(projectDesc)) {
+      return this.generateUtilitySnippet(projectDesc, langHint);
+    }
+
     const isProjectAdvicePrompt = /(?:my\s+app|works locally|deploy turns into|harder to explain|without killing the ambition|what would you change first|how would a strong product person|real fix is)/i.test(projectDesc);
 
     if (isProjectAdvicePrompt) {
@@ -4462,10 +5505,305 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     return null;
   }
 
-  private tryActiveSandboxLandingPageEdit(input: string, lower: string): string | null {
+  /**
+   * Chat-mode guard for generic web/app build requests.
+   * vai:v0 is a knowledge retrieval system — it cannot AI-generate arbitrary websites.
+   * Without this guard, "build a landing page" falls through to TF-IDF and matches
+   * unrelated content (e.g. "landing" → YouTube videos about lunar landings).
+   * This fires in chat mode only; builder mode has dedicated code generators.
+   */
+  private tryGenericChatBuildRedirect(lower: string): string | null {
+    // Must have a build verb
+    if (!/\b(?:build|create|make|design|generate|write me|code me|give me|develop)\b/i.test(lower)) return null;
+
+    // Skip planning/discussion — user is asking for advice about building, not requesting a build
+    if (/\b(?:before\s+we\s+build|plan\s+for|how\s+(?:would|should|do)\s+(?:i|we|you)\s+(?:build|create|make)|give\s+me\s+a\s+(?:plan|outline|roadmap|overview)|first.slice\s+plan)\b/i.test(lower)) return null;
+    // Skip descriptive uses like "I can build quickly" where build is not imperative
+    if (/\bi\s+(?:can|could|want\s+to|like\s+to|need\s+to)\s+build\b/i.test(lower)) return null;
+    // Skip docs / URL lookups that happen to say "page"
+    if (/\b(?:official|docs?|documentation|url|link)\b/i.test(lower)) return null;
+
+    // Must target a web artifact (not a specific algorithm/tool type)
+    const hasWebTarget = /\b(?:website|web\s*site|web\s*design|webdesign|landing\s*page|landing\s+page|landing|portfolio|photographer(?:'?s)?\s+(?:site|web|website|page)|photography\s+(?:site|website|page)|personal\s+(?:site|page|website)|business\s+(?:site|page|website)|company\s+(?:site|page|website)|startup\s+(?:site|page|landing)|agency\s+(?:site|page|website)|blog\s+(?:site|website)|marketing\s+(?:site|page|website)|web\s+app|web\s+application|gallery\s+(?:site|website|page)|art\s+(?:gallery|portfolio|website|site))\b/i.test(lower);
+    // Also catch bare "app|page|site|website" after a clear build verb (without specific stack)
+    const hasGenericTarget = !hasWebTarget && /\b(?:app|page|site|website)\b/i.test(lower);
+    if (!hasWebTarget && !hasGenericTarget) return null;
+
+    const hasProductHint = /\b(?:dashboard|landing|portfolio|gallery|store|shop|blog|chat|todo|crm|marketplace|editor|video|music|social|admin|notes?|saas|api|mvp|oauth|auth|login|photographer|photography|spa|single\s*page)\b/i.test(lower);
+    if (hasGenericTarget && !hasWebTarget && !hasProductHint) {
+      return [
+        "Happy to help build it — what kind of app do you want to make?",
+        '',
+        '**Pick a shape and I can take the next step immediately:**',
+        '- **SaaS workspace** — auth, billing, dashboard, settings',
+        '- **Internal tool** — tables, filters, forms, admin flows',
+        '- **Landing page** — hero, sections, CTA, marketing copy',
+        '- **Portfolio / personal site** — projects, about, contact',
+        '- **Store / commerce app** — catalog, product pages, checkout',
+        '',
+        'If you want the fastest path, reply with one sentence like: "build a photography portfolio", "build a team dashboard", or "build a Next.js app".',
+      ].join('\n');
+    }
+
+    // Skip if a specific tech stack is mentioned — scaffold intent handles those
+    if (/\b(?:pern|mern|next\.?\s*js|nextjs|t3|vinext|react|vue|angular|svelte|express|fastify|python|django|rails|laravel|vite|node\.?js)\b/i.test(lower)) return null;
+
+    // Skip specific code types that creative-code handles well
+    if (/\b(?:calculator|todo\s*list|task\s*(?:list|manager)|counter|fizzbuzz|fizz\s*buzz|linked\s*list|http\s+server|rest\s+api|cli|game\b|chatbot|weather\s+app|notes?\s+app)\b/i.test(lower)) return null;
+
+    // Skip reference/screenshot-driven build requests — handled by creative-code reference flow
+    if (/\b(?:screenshot|reference|clone|recreate|replicate|copy|inspired)\b/i.test(lower)) return null;
+
+    // Skip docs/search/info requests — "give me the official docs page" is NOT a build request
+    if (/\b(?:official|docs|documentation|web\s+search|search|look\s+up|version|release|current|latest)\b/i.test(lower)) return null;
+
+    // Skip URL-containing requests — user wants to reference or discuss a URL, not build a "page"
+    if (/https?:\/\/\S+/i.test(lower)) return null;
+
+    const isArtGalleryExperience = /\b(?:art\s+gallery|artist\s+(?:portfolio|site|website)|museum\s+(?:site|website)|exhibition(?:\s+site|\s+page)?|curatorial\s+site|gallery\s+(?:site|website|page))\b/i.test(lower)
+      && !/\b(?:photo|photograph|photography|portrait|wedding)\b/i.test(lower);
+    const isPhotographyPortfolio = /\b(?:photographer|photography|photo\s+gallery|editorial|wedding|portrait)\b/i.test(lower);
+    const wantsSinglePage = /\b(?:single\s*page|one\s*page|one-page|spa)\b/i.test(lower);
+
+    if (isArtGalleryExperience) {
+      const recommendedStack = wantsSinglePage ? 'Vinext' : 'Next.js';
+      const deployTag = wantsSinglePage
+        ? '{{deploy:vinext:basic:Art Gallery SPA}}'
+        : '{{deploy:nextjs:basic:Art Gallery Site}}';
+
+      return [
+        "That's a build request — and this one should read like a gallery experience, not a photographer portfolio.",
+        '',
+        '**Best first cut for an art gallery site:**',
+        `- **Stack:** ${recommendedStack} ${wantsSinglePage ? 'for a striking single-page exhibition flow with smooth transitions between collections' : 'if you want dedicated exhibition pages, artist pages, and stronger SEO'}`,
+        '- **Hero:** current exhibition or featured artist with dates, location, and primary visit CTA',
+        '- **Core sections:** current exhibitions, featured artists, upcoming events, gallery story, visit info, inquiry/contact',
+        '- **Visual direction:** quiet typography, strong whitespace, large artwork surfaces, minimal chrome so the work stays primary',
+        '',
+        '**If I were shipping v1 today:**',
+        '- Start with one flagship exhibition, 6 to 10 strong works, and clear visit/contact details.',
+        '- Make artist pages and event programming the second step after the main exhibition flow feels premium.',
+        '',
+        '**Deploy now:**',
+        deployTag,
+        '',
+        'If you want, say: "make it contemporary and minimal", "make it more museum-like", or "deploy the first version".',
+      ].join('\n');
+    }
+
+    if (isPhotographyPortfolio) {
+      const recommendedStack = wantsSinglePage ? 'Vinext' : 'Next.js';
+      const deployTag = wantsSinglePage
+        ? '{{deploy:vinext:basic:Photographer Portfolio SPA}}'
+        : '{{deploy:nextjs:basic:Photographer Portfolio Site}}';
+
+      return [
+        "That's a build request — and this one should start from the product shape, not a generic stack menu.",
+        '',
+        '**Best first cut for a pro photographer:**',
+        `- **Stack:** ${recommendedStack} ${wantsSinglePage ? 'for a fast single-page portfolio with smooth motion and light transitions' : 'if SEO, shareable project pages, and content expansion matter'}`,
+        '- **Hero:** full-bleed image, strong nameplate, short positioning line, primary booking CTA',
+        '- **Core sections:** featured shoots, services/packages, testimonial strip, about section, contact/booking form',
+        '- **Visual direction:** dark editorial palette, oversized photography, restrained typography, subtle motion only where it helps',
+        '',
+        '**If I were shipping v1 today:**',
+        '- Start with 5 to 8 standout images, one clear niche, and one obvious CTA: book, inquire, or view gallery.',
+        '- Keep it single-scroll and mobile-first so the work lands fast.',
+        '- Add lightbox and category filtering after the first preview is already strong.',
+        '',
+        '**Deploy now:**',
+        deployTag,
+        '',
+        'If you want, say: "make it luxury wedding photography", "make it minimalist black-and-white", or "deploy the first version".',
+      ].join('\n');
+    }
+
+    return [
+      "That's a build request — here's the fastest path to a running app:",
+      '',
+      '**Type the stack name to start:**',
+      '- `build PERN app` — PostgreSQL + Express + React (boards, CRMs, task managers)',
+      '- `build MERN app` — MongoDB + Express + React (bookmarks, feeds, content apps)',
+      '- `build Next.js app` — React with SSR (landing pages, blogs, marketing sites)',
+      '- `build T3 app` — tRPC + Prisma + Next.js (type-safe full stack)',
+      '- `build Vinext app` — React 19 + Vite + Tailwind v4 (fast SPA, portfolios)',
+      '',
+      '**Or open Builder mode** — pick a template from the gallery on the right panel.',
+    ].join('\n');
+  }
+
+  private getActiveSandboxSnapshotPaths(history: readonly Message[]): string[] {
+    const paths = new Set<string>();
+    for (const message of history) {
+      if (message.role !== 'system') continue;
+      const matches = message.content.matchAll(/^FILE:\s+(.+)$/gm);
+      for (const match of matches) {
+        const path = match[1]?.trim();
+        if (path) paths.add(path);
+      }
+    }
+    return [...paths];
+  }
+
+  private getActiveSandboxSystemText(history: readonly Message[]): string {
+    return history
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content)
+      .join('\n');
+  }
+
+  private resolveLandingAccent(lower: string): { accent: string; accentSoft: string; accentGlow: string } {
+    if (/\bred\b|\bcrimson\b|\bscarlet\b/i.test(lower)) {
+      return { accent: '#ef4444', accentSoft: 'rgba(239,68,68,0.18)', accentGlow: 'rgba(239,68,68,0.32)' };
+    }
+    if (/\borange\b|\bamber\b|\bgold\b/i.test(lower)) {
+      return { accent: '#f59e0b', accentSoft: 'rgba(245,158,11,0.18)', accentGlow: 'rgba(245,158,11,0.3)' };
+    }
+    if (/\bgreen\b|\bemerald\b/i.test(lower)) {
+      return { accent: '#22c55e', accentSoft: 'rgba(34,197,94,0.18)', accentGlow: 'rgba(34,197,94,0.28)' };
+    }
+    if (/\bteal\b|\bcyan\b|\bblue\b/i.test(lower)) {
+      return { accent: '#22d3ee', accentSoft: 'rgba(34,211,238,0.18)', accentGlow: 'rgba(34,211,238,0.28)' };
+    }
+    if (/\bpink\b|\bfuchsia\b|\bmagenta\b/i.test(lower)) {
+      return { accent: '#ec4899', accentSoft: 'rgba(236,72,153,0.18)', accentGlow: 'rgba(236,72,153,0.28)' };
+    }
+    return { accent: '#8b5cf6', accentSoft: 'rgba(139,92,246,0.18)', accentGlow: 'rgba(139,92,246,0.28)' };
+  }
+
+  private generateActiveSandboxLandingPageEdit(targetPath: string, brand: string, heroLead: string, accent: { accent: string; accentSoft: string; accentGlow: string }): string {
+    const componentName = /(?:^|\/)(?:src\/)?app\/page\./i.test(targetPath) ? 'HomePage' : 'App';
+
+    return [
+      `Polishing the active landing page in place for ${brand}.`,
+      '',
+      `\`\`\`tsx title="${targetPath}"`,
+      "import { useState } from 'react';",
+      '',
+      "const features = [",
+      "  { title: 'Clear product story', desc: 'Sharper hierarchy, calmer spacing, and a tighter headline keep the first scroll focused.' },",
+      "  { title: 'Stronger proof', desc: 'Metrics and customer signals support the pitch without turning the hero into noise.' },",
+      "  { title: 'Better conversion flow', desc: 'The call-to-action row now feels intentional on desktop and easier to tap on mobile.' },",
+      '];',
+      '',
+      "const proof = [",
+      "  { value: '42%', label: 'faster onboarding' },",
+      "  { value: '18 min', label: 'time to first workflow' },",
+      "  { value: '4.9/5', label: 'pilot team rating' },",
+      '];',
+      '',
+      `export default function ${componentName}() {`,
+      "  const [theme, setTheme] = useState<'dark' | 'light'>('dark');",
+      "  const [activeFeature, setActiveFeature] = useState(features[0].title);",
+      "  const isDark = theme === 'dark';",
+      `  const accent = '${accent.accent}';`,
+      `  const accentSoft = '${accent.accentSoft}';`,
+      `  const accentGlow = '${accent.accentGlow}';`,
+      "  const scrollToId = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });",
+      '  return (',
+      "    <main",
+      "      style={{",
+      "        minHeight: '100vh',",
+      "        background: isDark",
+      "          ? `radial-gradient(circle at top, ${accentSoft}, rgba(5,8,22,0) 34%), linear-gradient(180deg, #050816 0%, #020617 100%)`",
+      "          : `radial-gradient(circle at top, ${accentSoft}, rgba(255,255,255,0) 34%), linear-gradient(180deg, #f7f7fb 0%, #eef2ff 100%)`,",
+      "        color: isDark ? '#f8fafc' : '#0f172a',",
+      "        fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',",
+      "        transition: 'background 220ms ease, color 220ms ease',",
+      "      }}",
+      "    >",
+      "      <section style={{ width: 'min(1120px, calc(100% - 32px))', margin: '0 auto', padding: '28px 0 72px' }}>",
+      "        <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, padding: '16px 18px', border: isDark ? '1px solid rgba(63,63,70,0.86)' : '1px solid rgba(226,232,240,0.95)', borderRadius: 18, background: isDark ? 'rgba(9,11,18,0.76)' : 'rgba(255,255,255,0.88)', backdropFilter: 'blur(14px)', boxShadow: isDark ? '0 20px 50px rgba(0,0,0,0.22)' : '0 18px 44px rgba(15,23,42,0.08)' }}>",
+      `          <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.03em' }}>${brand}</span>`,
+      "          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, color: isDark ? '#94a3b8' : '#475569', fontSize: 14 }}>",
+      "            {[['Platform', 'platform'], ['Workflow', 'workflow'], ['Launch', 'launch-cta']].map(([label, id]) => (",
+      "              <button key={label} type=\"button\" onClick={() => scrollToId(id)} style={{ padding: '8px 12px', borderRadius: 12, background: isDark ? 'rgba(15,23,42,0.82)' : 'rgba(248,250,252,0.95)', border: isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.9)', color: 'inherit', cursor: 'pointer' }}>{label}</button>",
+      '            ))}',
+      '          </div>',
+      "          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>",
+      "            <button",
+      "              type=\"button\"",
+      "              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}",
+      "              title={isDark ? 'Light mode' : 'Dark mode'}",
+      "              onClick={() => setTheme(isDark ? 'light' : 'dark')}",
+      "              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 42, height: 42, borderRadius: 12, border: isDark ? '1px solid rgba(63,63,70,0.86)' : '1px solid rgba(226,232,240,0.95)', background: isDark ? 'rgba(15,23,42,0.88)' : 'rgba(255,255,255,0.98)', color: isDark ? '#f8fafc' : '#0f172a', cursor: 'pointer' }}",
+      "            >",
+      "              {isDark ? (",
+      "                <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth=\"1.8\" strokeLinecap=\"round\" strokeLinejoin=\"round\">",
+      "                  <circle cx=\"12\" cy=\"12\" r=\"4\" />",
+      "                  <path d=\"M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77\" />",
+      "                </svg>",
+      "              ) : (",
+      "                <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth=\"1.8\" strokeLinecap=\"round\" strokeLinejoin=\"round\">",
+      "                  <path d=\"M21 12.79A9 9 0 1 1 11.21 3c0 0 0 0 0 0A7 7 0 0 0 21 12.79Z\" />",
+      "                </svg>",
+      "              )}",
+      "            </button>",
+      "            <button type=\"button\" onClick={() => scrollToId('launch-cta')} style={{ border: 'none', borderRadius: 12, padding: '12px 18px', background: accent, color: '#020617', fontWeight: 700, boxShadow: `0 14px 34px ${accentGlow}`, cursor: 'pointer' }}>Book a demo</button>",
+      "          </div>",
+      '        </nav>',
+      '',
+      "        <div id=\"platform\" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.15fr) minmax(320px, 0.85fr)', gap: 24, alignItems: 'stretch', marginTop: 28 }}>",
+      "          <section style={{ padding: '56px 48px', borderRadius: 28, background: isDark ? `radial-gradient(circle at top right, ${accentSoft}, transparent 34%), linear-gradient(145deg, rgba(8,11,20,0.96) 0%, rgba(15,23,42,0.96) 100%)` : `radial-gradient(circle at top right, ${accentSoft}, rgba(255,255,255,0) 34%), linear-gradient(145deg, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.98) 100%)`, border: isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.95)', boxShadow: isDark ? '0 28px 90px rgba(0,0,0,0.28)' : '0 20px 56px rgba(15,23,42,0.08)' }}>",
+      `            <div style={{ display: 'inline-flex', padding: '8px 14px', borderRadius: 12, background: accentSoft, color: accent, fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Polished product landing page</div>`,
+      `            <h1 style={{ margin: '22px 0 16px', fontSize: 'clamp(3rem, 7vw, 5.6rem)', lineHeight: 0.95, letterSpacing: '-0.06em', maxWidth: 10.5 + 'ch' }}>Move from first impression to <span style={{ color: accent }}>confident action</span> faster.</h1>`,
+      `            <p style={{ margin: 0, maxWidth: 620, color: isDark ? '#cbd5e1' : '#475569', fontSize: 18, lineHeight: 1.8 }}>${heroLead}</p>`,
+      "            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 28 }}>",
+      "              <button type=\"button\" onClick={() => scrollToId('launch-cta')} style={{ border: 'none', borderRadius: 14, padding: '16px 24px', background: accent, color: '#020617', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 18px 40px ${accentGlow}` }}>Start free</button>",
+      "              <button type=\"button\" onClick={() => { setActiveFeature(features[0].title); scrollToId('workflow'); }} style={{ borderRadius: 14, padding: '16px 24px', background: isDark ? 'rgba(15,23,42,0.84)' : 'rgba(255,255,255,0.94)', color: isDark ? '#f8fafc' : '#0f172a', border: isDark ? '1px solid rgba(148,163,184,0.18)' : '1px solid rgba(226,232,240,0.95)', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>See the workflow</button>",
+      '            </div>',
+      "            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14, marginTop: 26 }}>",
+      '              {proof.map((item) => (',
+      "                <article key={item.label} style={{ borderRadius: 16, padding: '18px 16px', background: isDark ? 'rgba(8,11,20,0.9)' : 'rgba(255,255,255,0.94)', border: isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.95)' }}>",
+      "                  <strong style={{ display: 'block', fontSize: 24, letterSpacing: '-0.04em' }}>{item.value}</strong>",
+      "                  <span style={{ color: isDark ? '#94a3b8' : '#64748b', fontSize: 14 }}>{item.label}</span>",
+      '                </article>',
+      '              ))}',
+      '            </div>',
+      '          </section>',
+      '',
+      "          <aside style={{ display: 'grid', gap: 18 }}>",
+      "            <section style={{ padding: 24, borderRadius: 22, background: isDark ? '#0f172a' : '#ffffff', color: isDark ? '#e2e8f0' : '#0f172a', border: isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.95)', boxShadow: isDark ? '0 24px 60px rgba(0,0,0,0.22)' : '0 18px 48px rgba(15,23,42,0.08)' }}>",
+      "              <p style={{ margin: '0 0 10px', color: accent, fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Why it reads better</p>",
+      "              <h2 style={{ margin: '0 0 10px', fontSize: 24, letterSpacing: '-0.04em' }}>Spacing, type, and proof now work together.</h2>",
+      "              <p style={{ margin: 0, color: isDark ? '#cbd5e1' : '#475569', lineHeight: 1.8 }}>The hero breathes more, the headline lands earlier, and the support copy has a cleaner rhythm instead of fighting the CTA.</p>",
+      '            </section>',
+      "            <section id=\"workflow\" style={{ padding: 24, borderRadius: 22, background: isDark ? 'rgba(8,11,20,0.9)' : 'rgba(255,255,255,0.96)', border: isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.95)' }}>",
+      "              <p style={{ margin: '0 0 14px', color: accent, fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>What changed</p>",
+      "              <div style={{ display: 'grid', gap: 12 }}>",
+      '                {features.map((feature) => (',
+      "                  <article key={feature.title} onMouseEnter={() => setActiveFeature(feature.title)} style={{ padding: '16px 18px', borderRadius: 16, background: isDark ? 'rgba(15,23,42,0.9)' : '#f8fafc', border: activeFeature === feature.title ? `1px solid ${accent}` : (isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.95)'), boxShadow: activeFeature === feature.title ? `0 12px 28px ${accentGlow}` : 'none', transition: 'border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease', transform: activeFeature === feature.title ? 'translateY(-1px)' : 'translateY(0)' }}>",
+      "                    <strong style={{ display: 'block', marginBottom: 6, fontSize: 16 }}>{feature.title}</strong>",
+      "                    <span style={{ color: isDark ? '#94a3b8' : '#64748b', lineHeight: 1.7 }}>{feature.desc}</span>",
+      '                  </article>',
+      '                ))}',
+      '              </div>',
+      '            </section>',
+      '          </aside>',
+      '        </div>',
+      '',
+      "        <section id=\"launch-cta\" style={{ marginTop: 24, display: 'grid', gap: 14, gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', padding: '22px 24px', borderRadius: 20, background: isDark ? 'rgba(9,11,18,0.82)' : 'rgba(255,255,255,0.94)', border: isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.95)' }}>",
+      "          <div>",
+      "            <p style={{ margin: '0 0 6px', color: accent, fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Launch CTA</p>",
+      "            <h2 style={{ margin: 0, fontSize: 28, letterSpacing: '-0.04em' }}>Start the pilot without losing the page's visual hierarchy.</h2>",
+      "          </div>",
+      "          <button type=\"button\" style={{ border: 'none', borderRadius: 14, padding: '14px 20px', background: accent, color: '#020617', fontWeight: 700, cursor: 'pointer', boxShadow: `0 16px 34px ${accentGlow}` }}>Request access</button>",
+      "        </section>",
+      '      </section>',
+      '    </main>',
+      '  );',
+      '}',
+      '```',
+    ].join('\n');
+  }
+
+  private tryActiveSandboxLandingPageEdit(input: string, lower: string, history: readonly Message[]): string | null {
     if (this._activeMode !== 'builder' || !this._hasActiveSandboxContext) return null;
 
     const wantsVisualEdit = /\b(?:edit|update|change|improve|polish|refine|make|turn|switch|rename|add)\b/i.test(lower);
+    const strongColorEdit = /\b(?:text|headline|button|cta|accent|color|palette|theme|background)\b/i.test(lower)
+      && /\b(?:red|orange|amber|yellow|green|emerald|teal|blue|cyan|violet|purple|pink|white|black)\b/i.test(lower);
+    const snapshotPaths = this.getActiveSandboxSnapshotPaths(history);
     const landingSignals = [
       /\blanding\s+page\b/i,
       /\bhero\b/i,
@@ -4473,90 +5811,75 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       /\blogos?\s+strip\b/i,
       /\bfeature\s+cards?\b/i,
       /\bdark\b/i,
+      /\btypography\b/i,
+      /\bspacing\b/i,
+      /\btext\b/i,
+      /\bcolor\b/i,
+      /\bpalette\b/i,
+      /\btheme\b/i,
     ].filter((pattern) => pattern.test(lower)).length;
 
-    if (!wantsVisualEdit || landingSignals < 2) return null;
+    if (!wantsVisualEdit || (landingSignals < 2 && !(strongColorEdit && snapshotPaths.length > 0))) return null;
+    const targetPath = snapshotPaths.find((path) =>
+      /(?:^|\/)(?:src\/)?app\/page\.(?:tsx|jsx|ts|js)$/i.test(path)
+      || /(?:^|\/)src\/App\.(?:tsx|jsx|ts|js)$/i.test(path),
+    );
+    if (!targetPath) {
+      return 'I can polish the active landing page, but I need the main page file in context first. Send `src/App.tsx` or `app/page.tsx`, or ask again after the builder syncs file snapshots.';
+    }
 
     const brandMatch = /rename\s+the\s+brand\s+to\s+([a-z0-9][a-z0-9\s-]{1,40})/i.exec(input)
       ?? /brand\s+to\s+([a-z0-9][a-z0-9\s-]{1,40})/i.exec(input);
-    const brand = (brandMatch?.[1] ?? 'NightShift AI').trim();
+    const brand = (brandMatch?.[1] ?? 'Northshift').trim();
     const heroLead = /\boperations\s+teams?\b/i.test(lower)
       ? 'AI agents for operations teams that need faster incident response, cleaner handoffs, and less busywork.'
-      : 'An AI operations workspace that keeps teams aligned from signal to action.';
+      : 'A more confident product story with calmer spacing, stronger hierarchy, and a CTA row that feels ready to click.';
+    const accent = this.resolveLandingAccent(lower);
 
-    return [
-      `Updating the active landing page in place for ${brand}.`,
-      '',
-      '```tsx title="src/App.tsx"',
-      "const features = [",
-      "  { title: 'Agent orchestration', desc: 'Coordinate multiple AI workers across triage, escalation, and follow-through without losing context.' },",
-      "  { title: 'Ops-grade visibility', desc: 'See live status, owners, and blockers across every workflow so the next move is obvious.' },",
-      "  { title: 'Proof-backed changes', desc: 'Ship updates with verification, audit trails, and runtime confidence instead of guesswork.' },",
-      '];',
-      '',
-      "const logos = ['Northstar', 'Helix', 'Axiom', 'Pulse', 'Orbit'];",
-      '',
-      'export default function App() {',
-      '  return (',
-      "    <div style={{ minHeight: '100vh', fontFamily: 'Inter, sans-serif', background: 'radial-gradient(circle at top, #18233f 0%, #070b14 58%, #03050a 100%)', color: '#f8fafc' }}>",
-      "      <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '22px 40px', borderBottom: '1px solid rgba(148,163,184,0.14)' }}>",
-      `        <span style={{ fontWeight: 800, fontSize: 20, letterSpacing: '-0.02em' }}>${brand}</span>`,
-      "        <div style={{ display: 'flex', gap: 24, fontSize: 14, color: '#94a3b8' }}>",
-      "          {['Platform', 'Solutions', 'Customers', 'Docs'].map((item) => <a key={item} href=\"#\" style={{ color: 'inherit', textDecoration: 'none' }}>{item}</a>)}",
-      '        </div>',
-      "        <button style={{ border: 'none', borderRadius: 999, padding: '12px 18px', background: 'linear-gradient(135deg, #7c3aed, #22c55e)', color: '#fff', fontWeight: 700, boxShadow: '0 12px 40px rgba(124,58,237,0.32)', cursor: 'pointer' }}>Book a demo</button>",
-      '      </nav>',
-      '',
-      "      <section style={{ padding: '88px 32px 40px', textAlign: 'center' }}>",
-      "        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderRadius: 999, border: '1px solid rgba(34,197,94,0.22)', background: 'rgba(34,197,94,0.10)', color: '#86efac', fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Live orchestration for modern operations</div>",
-      "        <h1 style={{ margin: '24px auto 18px', maxWidth: 920, fontSize: 'clamp(44px, 7vw, 86px)', lineHeight: 1.02, letterSpacing: '-0.05em' }}>Run every operational handoff with AI agents that stay aligned.</h1>",
-      `        <p style={{ margin: '0 auto', maxWidth: 760, fontSize: 20, lineHeight: 1.7, color: '#cbd5e1' }}>${heroLead}</p>`,
-      "        <div style={{ display: 'flex', justifyContent: 'center', gap: 14, flexWrap: 'wrap', marginTop: 34 }}>",
-      "          <button style={{ border: 'none', borderRadius: 14, padding: '16px 28px', background: 'linear-gradient(135deg, #7c3aed, #8b5cf6)', color: '#fff', fontSize: 16, fontWeight: 700, boxShadow: '0 18px 60px rgba(124,58,237,0.32)', cursor: 'pointer' }}>Start the control loop</button>",
-      "          <button style={{ borderRadius: 14, padding: '16px 28px', background: 'rgba(15,23,42,0.6)', color: '#e2e8f0', border: '1px solid rgba(148,163,184,0.2)', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>See the workflow</button>",
-      '        </div>',
-      '      </section>',
-      '',
-      "      <section style={{ maxWidth: 1120, margin: '0 auto', padding: '0 32px 36px' }}>",
-      "        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 18 }}>",
-      '          {features.map((feature) => (',
-      "            <article key={feature.title} style={{ borderRadius: 24, padding: 24, border: '1px solid rgba(148,163,184,0.14)', background: 'rgba(15,23,42,0.72)', boxShadow: '0 20px 50px rgba(2,6,23,0.24)' }}>",
-      "              <div style={{ width: 44, height: 44, borderRadius: 14, background: 'linear-gradient(135deg, rgba(124,58,237,0.24), rgba(34,197,94,0.20))', marginBottom: 18 }} />",
-      "              <h2 style={{ margin: '0 0 10px', fontSize: 20 }}>{feature.title}</h2>",
-      "              <p style={{ margin: 0, color: '#94a3b8', lineHeight: 1.7 }}>{feature.desc}</p>",
-      '            </article>',
-      '          ))}',
-      '        </div>',
-      '      </section>',
-      '',
-      "      <section style={{ maxWidth: 1120, margin: '0 auto', padding: '0 32px 80px' }}>",
-      "        <div style={{ borderRadius: 28, border: '1px solid rgba(148,163,184,0.12)', background: 'rgba(8,15,29,0.88)', padding: '24px 28px' }}>",
-      "          <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#64748b', marginBottom: 18 }}>Trusted by operations teams at</div>",
-      "          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 14 }}>",
-      '            {logos.map((logo) => (',
-      "              <div key={logo} style={{ borderRadius: 16, border: '1px solid rgba(148,163,184,0.10)', padding: '16px 18px', textAlign: 'center', color: '#e2e8f0', background: 'rgba(15,23,42,0.54)', fontWeight: 700 }}>{logo}</div>",
-      '            ))}',
-      '          </div>',
-      '        </div>',
-      '      </section>',
-      '    </div>',
-      '  );',
-      '}',
-      '```',
-    ].join('\n');
+    return this.generateActiveSandboxLandingPageEdit(targetPath, brand, heroLead, accent);
   }
 
   private tryActiveSandboxProjectIteration(input: string, lower: string, history: readonly Message[]): string | null {
     if (this._activeMode !== 'builder' || !this._hasActiveSandboxContext) return null;
 
+    const isIterationRequest = /^(?:now\s+)?(?:can\s+you\s+)?(?:please\s+)?(?:add|change|modify|update|make|convert|switch|remove|delete|include|insert|replace|refactor|fix|style|use|rename|polish|improve|refine|tighten)\b/i.test(input)
+      || /\b(?:color scheme|palette|accent|spacing|hero text|headline|cta|copy|traffic sources|chart|dashboard|date range|time range|filter row|filters?|auth(?:entication)?|login|sign[\s-]?in|session|middleware)\b/i.test(lower);
+    if (!isIterationRequest) return null;
+
+    const looksLikeFreshBuildRequest = /^(?:now\s+)?(?:can\s+you\s+)?(?:please\s+)?(?:build|create|make|design|generate|develop|scaffold|start)\b/i.test(input)
+      && /\b(?:website|web\s*site|app|application|project|portfolio|gallery|landing\s*page|homepage|site|store|shop|dashboard|blog|workspace|platform)\b/i.test(lower)
+      && !/\b(?:current|existing|active|this|same)\b/i.test(lower)
+      && !/\b(?:edit|change|modify|update|improve|polish|refine|fix|replace|remove|switch|turn|keep|reuse|iterate)\b/i.test(lower);
+    if (looksLikeFreshBuildRequest) return null;
+
+    const snapshotPaths = this.getActiveSandboxSnapshotPaths(history);
+    const systemText = this.getActiveSandboxSystemText(history);
+    const wantsAuthUpgrade = /\b(?:auth(?:entication)?|login|sign[\s-]?in|session|middleware|protected route|user account)\b/i.test(lower);
+    const looksLikeNextApp = snapshotPaths.some((path) => /(?:^|\/)(?:src\/)?app\/(?:layout|page)\.(?:tsx|jsx|ts|js)$/i.test(path))
+      || /"next"\s*:|next\.config/i.test(systemText);
+
+    if (wantsAuthUpgrade) {
+      if (looksLikeNextApp) {
+        return 'I can wire auth into the current Next.js app, but I need one choice before I patch files: use Auth.js with GitHub sign-in, Clerk, or a local email/password flow? If you want the fastest default, reply `use Auth.js with GitHub`.';
+      }
+      return 'I can add auth to the active app, but I need one short choice before I patch files: hosted auth (Clerk or Supabase) or app-owned auth (Auth.js or local session)?';
+    }
+
+    if (
+      /\bphoto-portfolio\b/i.test(systemText)
+      && /\b(?:text|copy|headline|lede|button|cta|gallery|image|images|photo|photos|nature|landscape|portrait|norwegian|booking|contact|creative|relevant)\b/i.test(lower)
+    ) {
+      return this.generateActiveSandboxPhotographyPortfolioEdit(input);
+    }
+
     const lastAssistant = [...history]
       .reverse()
       .find((message) => message.role === 'assistant' && /```[\s\S]+title="[^"]+"/.test(message.content));
-    if (!lastAssistant) return null;
-
-    const isIterationRequest = /^(?:now\s+)?(?:can\s+you\s+)?(?:please\s+)?(?:add|change|modify|update|make|convert|switch|remove|delete|include|insert|replace|refactor|fix|style|use|rename|polish|improve|refine|tighten)\b/i.test(input)
-      || /\b(?:color scheme|palette|accent|spacing|hero text|headline|cta|copy|traffic sources|chart|dashboard|date range|time range|filter row|filters?)\b/i.test(lower);
-    if (!isIterationRequest) return null;
+    if (!lastAssistant) {
+      return snapshotPaths.length > 0
+        ? `I can edit the active app from here, but I need the exact file you want patched called out. I already have snapshots for ${snapshotPaths.slice(0, 4).join(', ')}. Reply with the file path to change, or ask for a landing-page polish pass.`
+        : 'I can edit the active app, but I need the current page or component file in context first. Send `src/App.tsx` or `app/page.tsx` and I will patch it directly.';
+    }
 
     const hasReactDashboardHistory = /Analytics Dashboard/.test(lastAssistant.content)
       && /Revenue Over Time/.test(lastAssistant.content)
@@ -4565,6 +5888,21 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
 
     if (hasReactDashboardHistory) {
       return this.generateBuilderDashboardIteration(lower, lastAssistant.content);
+    }
+
+    const hasPhotographyPortfolioHistory = /Photography portfolio|Norwegian nature photographer|Family \+ portrait photographer/i.test(lastAssistant.content)
+      && /```tsx title="src\/App\.tsx"/.test(lastAssistant.content)
+      && /Book a session|View selected work|View full gallery|Book a portrait session|Browse family galleries|Explore selected work/i.test(lastAssistant.content);
+
+    const looksLikePhotographyPortfolio = hasPhotographyPortfolioHistory
+      || /\bphoto-portfolio\b/i.test(systemText)
+      || /\b(?:photography portfolio|norwegian nature photographer|book a session|view full gallery)\b/i.test(`${systemText}\n${lastAssistant.content}`);
+
+    if (
+      looksLikePhotographyPortfolio
+      && /\b(?:text|copy|headline|lede|button|cta|gallery|image|images|photo|photos|nature|landscape|portrait|norwegian|booking|contact|creative|relevant)\b/i.test(lower)
+    ) {
+      return this.generateActiveSandboxPhotographyPortfolioEdit(input);
     }
 
     return null;
@@ -4580,6 +5918,21 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
 
   private generateBuilderNextjsClarifier(): string {
     return 'Do you want a fresh Next.js starter, or do you want a custom Next.js app built directly? If you want the starter, reply with "fresh Next.js starter". Otherwise describe the app and I will build it without falling back to a template.';
+  }
+
+  private generateBuilderGenericAppClarifier(): string {
+    return [
+      'I can build something much stronger than a toy starter, but `good app` is still too open to guess honestly.',
+      '',
+      'Reply with one line in this format:',
+      '`audience + main action + vibe`',
+      '',
+      'Examples:',
+      '- `solo founders + track launches + premium dark workspace`',
+      '- `photographers + book clients + elegant editorial site`',
+      '- `roommates + coordinate groceries + fast mobile-first app`',
+      '- `small team + manage approvals + clean internal dashboard`',
+    ].join('\n');
   }
 
   private generateProjectAdviceDirection(projectDesc: string): string {
@@ -4979,15 +6332,622 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     );
   }
 
+  private buildPhotographyPortfolioSpec(desc: string): {
+    eyebrow: string;
+    heroTitle: string;
+    heroLead: string;
+    primaryCta: string;
+    secondaryCta: string;
+    noteLabel: string;
+    contactHeading: string;
+    contactLead: string;
+    contactMeta: string[];
+    metaItems: string[];
+    shots: Array<{ id: number; title: string; category: string; tone: string; location: string; image: string }>;
+  } {
+    const isFamilyPortraitSite = /\b(?:family|portrait|portraits|children|newborn|maternity|couple)\b/i.test(desc);
+    const isNorwegianNatureSite = !isFamilyPortraitSite
+      && /\b(?:norway|norwegian|fjord|scandinavia|scandinavian|nature|landscape|forest|mountain|coast|coastal|wild)\b/i.test(desc);
+
+    if (isFamilyPortraitSite) {
+      return {
+        eyebrow: 'Family + portrait photographer',
+        heroTitle: 'Warm portraits, easy direction, and family stories that still feel like your own.',
+        heroLead: 'Portrait sessions built around calm pacing, natural light, and images that feel honest instead of over-posed.',
+        primaryCta: 'Book a portrait session',
+        secondaryCta: 'Browse family stories',
+        noteLabel: 'Session preview',
+        contactHeading: 'Plan a portrait session',
+        contactLead: 'Ideal for families, maternity, couples, and natural portraits with a relaxed editorial finish.',
+        contactMeta: ['Weekend availability', 'Outdoor or home sessions', 'Gallery delivery included'],
+        metaItems: ['Family sessions', 'Portrait direction', 'Relaxed pacing', 'Mobile-first browsing'],
+        shots: [
+          { id: 1, title: 'Sunday Orchard', category: 'Family', tone: 'Bright movement, quiet direction, and easy connection in open air.', location: 'Evening field session', image: 'https://images.unsplash.com/photo-1516589178581-6cd7833ae3b2?auto=format&fit=crop&w=1200&q=80' },
+          { id: 2, title: 'Window Portrait', category: 'Portrait', tone: 'Soft indoor light with clean framing and a calm editorial feel.', location: 'North window studio', image: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=1200&q=80' },
+          { id: 3, title: 'Three Generations', category: 'Family', tone: 'Layered family storytelling without stiff posing or heavy staging.', location: 'Garden gathering', image: 'https://images.unsplash.com/photo-1511895426328-dc8714191300?auto=format&fit=crop&w=1200&q=80' },
+          { id: 4, title: 'Golden Hour Walk', category: 'Lifestyle', tone: 'Sunset motion, soft colour, and playful moments that stay natural.', location: 'Coastal path', image: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=1200&q=80' },
+          { id: 5, title: 'At Home Newborn', category: 'Newborn', tone: 'Quiet documentary detail with warm texture and no rushed energy.', location: 'At-home session', image: 'https://images.unsplash.com/photo-1517686469429-8bdb88b9f907?auto=format&fit=crop&w=1200&q=80' },
+          { id: 6, title: 'Studio Keepsake', category: 'Portrait', tone: 'Timeless composition for prints, cards, and long-lasting album covers.', location: 'Simple studio setup', image: 'https://images.unsplash.com/photo-1504593811423-6dd665756598?auto=format&fit=crop&w=1200&q=80' },
+        ],
+      };
+    }
+
+    if (isNorwegianNatureSite) {
+      return {
+        eyebrow: 'Norwegian nature photographer',
+        heroTitle: 'Weather-shaped landscapes and grounded portrait work from the edge of the north.',
+        heroLead: 'For brands, lodges, tourism projects, and people who want Norwegian light, texture, and atmosphere instead of generic adventure clichés.',
+        primaryCta: 'Check booking availability',
+        secondaryCta: 'Explore selected work',
+        noteLabel: 'Selected frame',
+        contactHeading: 'Book landscapes, portraits, or editorial travel work',
+        contactLead: 'Available for destination shoots, tourism campaigns, portrait commissions, and visual storytelling rooted in real Nordic landscapes.',
+        contactMeta: ['Landscape + portrait coverage', 'Editorial licensing available', 'Travel-ready across Norway'],
+        metaItems: ['Norwegian light', 'Weather-led frames', 'Portrait direction', 'Editorial delivery'],
+        shots: [
+          { id: 1, title: 'Afterlight', category: 'Fjord light', tone: 'Warm dusk moving across water, rock, and quiet cloud texture.', location: 'Western Norway', image: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=80' },
+          { id: 2, title: 'Night Window', category: 'Editorial', tone: 'Blue-hour glass, reflected weather, and a strong sense of place.', location: 'Oslo twilight', image: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80' },
+          { id: 3, title: 'Rooftop Study', category: 'Portrait', tone: 'Quiet posture, cold air, and directional light without over-styling.', location: 'City portrait session', image: 'https://images.unsplash.com/photo-1503023345310-bd7c1de61c7d?auto=format&fit=crop&w=1200&q=80' },
+          { id: 4, title: 'Moss Trail', category: 'Nature', tone: 'Deep green texture, mist, and a slower observational rhythm.', location: 'Forest path', image: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1200&q=80' },
+          { id: 5, title: 'Ridgeline', category: 'Landscape', tone: 'Open mountain distance with restrained colour and crisp atmosphere.', location: 'Highland weather', image: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80' },
+          { id: 6, title: 'Cold Shore', category: 'Coast', tone: 'Minimal tide lines, heavy sky, and natural tonal contrast.', location: 'Northern coastline', image: 'https://images.unsplash.com/photo-1470770841072-f978cf4d019e?auto=format&fit=crop&w=1200&q=80' },
+        ],
+      };
+    }
+
+    return {
+      eyebrow: 'Photography portfolio',
+      heroTitle: 'Images that feel composed, tactile, and ready to be remembered.',
+      heroLead: 'Editorial photography for people, spaces, and campaigns that need mood, clarity, and a strong sense of place.',
+      primaryCta: 'Book a session',
+      secondaryCta: 'View selected work',
+      noteLabel: 'Selected frame',
+      contactHeading: 'Start a photography brief',
+      contactLead: 'Available for editorial, portrait, and campaign work with a polished, modern visual direction.',
+      contactMeta: ['Editorial + campaign shoots', 'Fast shortlist + planning', 'Licensing-ready delivery'],
+      metaItems: ['Editorial direction', 'Portrait rhythm', 'Campaign polish', 'Modern booking flow'],
+      shots: [
+        { id: 1, title: 'Afterlight', category: 'Editorial', tone: 'Warm dusk over the city with a clean, modern colour story.', location: 'Late evening feature', image: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?auto=format&fit=crop&w=1200&q=80' },
+        { id: 2, title: 'Night Window', category: 'Editorial', tone: 'Texture, glass, and reflected neon for a sharper brand mood.', location: 'Urban study', image: 'https://images.unsplash.com/photo-1499364615650-ec38552f4f34?auto=format&fit=crop&w=1200&q=80' },
+        { id: 3, title: 'Rooftop Study', category: 'Portrait', tone: 'Soft directional light and calm posture without visual noise.', location: 'City rooftop', image: 'https://images.unsplash.com/photo-1521119989659-a83eee488004?auto=format&fit=crop&w=1200&q=80' },
+        { id: 4, title: 'Morning Run', category: 'Lifestyle', tone: 'Motion, distance, and enough atmosphere to keep the frame alive.', location: 'Early movement', image: 'https://images.unsplash.com/photo-1517832606299-7ae9b720a186?auto=format&fit=crop&w=1200&q=80' },
+        { id: 5, title: 'Borrowed Blue', category: 'Campaign', tone: 'Clean composition with a cool palette and restrained styling.', location: 'Product feature', image: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=1200&q=80' },
+        { id: 6, title: 'Paper Studio', category: 'Still life', tone: 'Minimal shapes, tactile surfaces, and deliberate spacing.', location: 'Studio set', image: 'https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=1200&q=80' },
+      ],
+    };
+  }
+
+  private buildPhotographyPortfolioAppTsx(desc: string): string {
+    const spec = this.buildPhotographyPortfolioSpec(desc);
+
+    return [
+      "import { useMemo, useState } from 'react';",
+      '',
+      'type Shot = {',
+      '  id: number;',
+      '  title: string;',
+      '  category: string;',
+      '  tone: string;',
+      '  location: string;',
+      '  image: string;',
+      '};',
+      '',
+      `const shots = ${JSON.stringify(spec.shots, null, 2)} satisfies Shot[];`,
+      `const metaItems = ${JSON.stringify(spec.metaItems)};`,
+      '',
+      'export default function App() {',
+      '  const [activeId, setActiveId] = useState(shots[0].id);',
+      '  const activeShot = useMemo(() => shots.find((shot) => shot.id === activeId) ?? shots[0], [activeId]);',
+      "  const scrollToId = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });",
+      '',
+      '  return (',
+      '    <main className="portfolio-shell">',
+      '      <section className="hero-card">',
+      '        <div className="hero-copy">',
+      `          <p className="eyebrow">${spec.eyebrow}</p>`,
+      `          <h1>${spec.heroTitle}</h1>`,
+      `          <p className="lede">${spec.heroLead}</p>`,
+      '          <div className="hero-actions">',
+      `            <button type="button" className="primary" onClick={() => scrollToId('contact')}>${spec.primaryCta}</button>`,
+      `            <button type="button" className="secondary" onClick={() => scrollToId('gallery')}>${spec.secondaryCta}</button>`,
+      '          </div>',
+      '        </div>',
+      '        <aside className="hero-note">',
+      `          <span>${spec.noteLabel}</span>`,
+      '          <strong>{activeShot.title}</strong>',
+      '          <p>{activeShot.tone}</p>',
+      '          <small>{activeShot.location}</small>',
+      '        </aside>',
+      '      </section>',
+      '',
+      '      <section className="meta-strip">',
+      '        {metaItems.map((item) => (',
+      '          <span key={item}>{item}</span>',
+      '        ))}',
+      '      </section>',
+      '',
+      '      <section id="gallery" className="gallery-grid">',
+      '        {shots.map((shot, index) => (',
+      '          <button',
+      '            key={shot.id}',
+      '            type="button"',
+      '            className={`gallery-card ${activeId === shot.id ? "is-active" : ""}`}',
+      '            onClick={() => setActiveId(shot.id)}',
+      '            style={{ animationDelay: `${index * 65}ms` }}',
+      '          >',
+      '            <div className="image-fill">',
+      '              <img src={shot.image} alt={shot.title} loading={index < 2 ? "eager" : "lazy"} />',
+      '            </div>',
+      '            <div className="card-copy">',
+      '              <span>{shot.category}</span>',
+      '              <strong>{shot.title}</strong>',
+      '              <p>{shot.tone}</p>',
+      '              <small>{shot.location}</small>',
+      '            </div>',
+      '          </button>',
+      '        ))}',
+      '      </section>',
+      '',
+      '      <section className="lightbox-shell">',
+      '        <div className="lightbox-frame">',
+      '          <div className="lightbox-image">',
+      '            <img src={activeShot.image} alt={activeShot.title} />',
+      '          </div>',
+      '          <div className="lightbox-copy">',
+      '            <p className="eyebrow">Selected frame</p>',
+      '            <h2>{activeShot.title}</h2>',
+      '            <p>{activeShot.tone}</p>',
+      '            <div className="lightbox-row">',
+      '              <span>{activeShot.category}</span>',
+      '              <span>{activeShot.location}</span>',
+      '              <span>Licensing-ready delivery</span>',
+      '            </div>',
+      '          </div>',
+      '        </div>',
+      '      </section>',
+      '',
+      '      <section id="contact" className="contact-shell">',
+      `        <p className="eyebrow">${spec.eyebrow}</p>`,
+      `        <h2>${spec.contactHeading}</h2>`,
+      `        <p className="contact-lede">${spec.contactLead}</p>`,
+      '        <div className="contact-points">',
+      ...spec.contactMeta.map((item) => `        <span>${item}</span>`),
+      '        </div>',
+      '        <a className="inline-link" href="mailto:hello@example.com?subject=Photography%20session">Send an enquiry</a>',
+      '      </section>',
+      '    </main>',
+      '  );',
+      '}',
+    ].join('\n');
+  }
+
+  private buildPhotographyPortfolioStyles(): string {
+    return [
+      "@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');",
+      '',
+      ':root { color: #f5f7fb; background: #090b12; font-family: "Manrope", ui-sans-serif, system-ui, sans-serif; }',
+      '* { box-sizing: border-box; }',
+      'html { scroll-behavior: smooth; }',
+      'body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, rgba(72, 98, 150, 0.22), transparent 24%), radial-gradient(circle at 85% 12%, rgba(164, 110, 62, 0.16), transparent 18%), #090b12; }',
+      'button, a { font: inherit; }',
+      'img { display: block; max-width: 100%; }',
+      '.portfolio-shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 72px; }',
+      '.hero-card, .gallery-card, .lightbox-frame, .contact-shell { border: 1px solid rgba(148,163,184,0.16); background: rgba(10, 13, 21, 0.78); box-shadow: 0 24px 80px rgba(0,0,0,0.32); backdrop-filter: blur(18px); }',
+      '.hero-card { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr); gap: 22px; padding: 30px; border-radius: 34px; }',
+      '.hero-copy h1, .lightbox-copy h2, .contact-shell h2 { font-family: "Cormorant Garamond", Georgia, serif; }',
+      '.eyebrow { margin: 0 0 12px; color: #d6c29a; font-size: 12px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; }',
+      'h1, h2, p { margin: 0; }',
+      'h1 { font-size: clamp(3.3rem, 8vw, 5.8rem); line-height: 0.88; letter-spacing: -0.06em; max-width: 10ch; }',
+      '.lede { margin-top: 18px; max-width: 58ch; color: #cdd5e3; font-size: 18px; line-height: 1.82; }',
+      '.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }',
+      '.primary, .secondary, .inline-link { display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 14px 20px; cursor: pointer; text-decoration: none; transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease; }',
+      '.primary { border: none; background: linear-gradient(135deg, #c9a45c, #f1d7a7); color: #171717; box-shadow: 0 18px 40px rgba(201,164,92,0.24); font-weight: 800; }',
+      '.secondary { border: 1px solid rgba(148,163,184,0.24); background: rgba(15,23,42,0.7); color: #e2e8f0; }',
+      '.inline-link { width: fit-content; margin-top: 24px; border: 1px solid rgba(201,164,92,0.28); background: rgba(201,164,92,0.12); color: #f5e7c7; font-weight: 700; }',
+      '.primary:hover, .secondary:hover, .inline-link:hover, .gallery-card:hover { transform: translateY(-2px); }',
+      '.hero-note { padding: 24px; border-radius: 28px; background: linear-gradient(180deg, rgba(17, 24, 39, 0.92), rgba(9,11,18,0.94)); border: 1px solid rgba(148,163,184,0.14); display: grid; gap: 12px; align-content: end; }',
+      '.hero-note span, .hero-note small { color: #98a4b8; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }',
+      '.hero-note strong { font-size: 32px; letter-spacing: -0.04em; }',
+      '.hero-note p { color: #d7deea; line-height: 1.7; }',
+      '.meta-strip { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 24px; }',
+      '.meta-strip span, .lightbox-row span, .contact-points span { padding: 10px 14px; border-radius: 999px; background: rgba(15,23,42,0.72); border: 1px solid rgba(148,163,184,0.14); color: #d8dfeb; font-size: 14px; }',
+      '.gallery-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }',
+      '.gallery-card { padding: 0; border-radius: 28px; overflow: hidden; color: inherit; text-align: left; animation: rise 420ms ease both; }',
+      '.gallery-card.is-active { border-color: rgba(214,194,154,0.7); box-shadow: 0 24px 84px rgba(201,164,92,0.18); }',
+      '.image-fill { aspect-ratio: 4 / 3; overflow: hidden; }',
+      '.image-fill img, .lightbox-image img { width: 100%; height: 100%; object-fit: cover; }',
+      '.card-copy { padding: 18px; display: grid; gap: 8px; }',
+      '.card-copy span { color: #c9a45c; font-size: 12px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }',
+      '.card-copy strong { font-size: 26px; letter-spacing: -0.04em; }',
+      '.card-copy p, .card-copy small, .lightbox-copy p, .contact-lede { color: #cdd5e3; line-height: 1.75; }',
+      '.card-copy small { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; }',
+      '.lightbox-shell { margin-top: 26px; }',
+      '.lightbox-frame { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr); overflow: hidden; border-radius: 30px; }',
+      '.lightbox-image { min-height: 560px; }',
+      '.lightbox-copy { padding: 30px; display: grid; align-content: end; gap: 14px; }',
+      '.lightbox-copy h2 { font-size: 40px; letter-spacing: -0.05em; }',
+      '.lightbox-row { display: flex; flex-wrap: wrap; gap: 10px; }',
+      '.contact-shell { margin-top: 26px; border-radius: 30px; padding: 28px; }',
+      '.contact-shell h2 { font-size: 42px; letter-spacing: -0.05em; max-width: 14ch; }',
+      '.contact-lede { margin-top: 14px; max-width: 60ch; }',
+      '.contact-points { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }',
+      '@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }',
+      '@media (max-width: 980px) { .hero-card, .lightbox-frame { grid-template-columns: 1fr; } .gallery-grid { grid-template-columns: 1fr; } .lightbox-image { min-height: 420px; } }',
+      '@media (max-width: 720px) { .portfolio-shell { width: min(100%, calc(100% - 20px)); padding-top: 18px; } .hero-card, .contact-shell { padding: 20px; } h1 { font-size: clamp(3rem, 16vw, 4.5rem); } .lightbox-copy { padding: 22px; } }',
+    ].join('\n');
+  }
+
+  private generateActiveSandboxPhotographyPortfolioEdit(desc: string): string {
+    return [
+      '```tsx title="src/App.tsx"',
+      this.buildPhotographyPortfolioAppTsx(desc),
+      '```',
+      '',
+      '```css title="src/styles.css"',
+      this.buildPhotographyPortfolioStyles(),
+      '```',
+    ].join('\n');
+  }
+
+  private generateBuilderPhotographyPortfolioApp(desc: string): string {
+    return [
+      '```json title="package.json"',
+      JSON.stringify({
+        name: 'photo-portfolio',
+        private: true,
+        version: '0.0.0',
+        type: 'module',
+        scripts: {
+          dev: 'vite',
+          build: 'tsc -b && vite build',
+          preview: 'vite preview',
+        },
+        dependencies: {
+          react: '^18.3.1',
+          'react-dom': '^18.3.1',
+        },
+        devDependencies: {
+          '@types/react': '^18.3.1',
+          '@types/react-dom': '^18.3.1',
+          '@vitejs/plugin-react': '^4.3.1',
+          typescript: '^5.5.3',
+          vite: '^5.4.10',
+        },
+      }, null, 2),
+      '```',
+      '',
+      '```html title="index.html"',
+      '<!doctype html>',
+      '<html lang="en">',
+      '  <head>',
+      '    <meta charset="UTF-8" />',
+      '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+      '    <title>Photography Portfolio</title>',
+      '    <script type="module" src="/src/main.tsx"></script>',
+      '  </head>',
+      '  <body>',
+      '    <div id="root"></div>',
+      '  </body>',
+      '</html>',
+      '```',
+      '',
+      '```tsx title="src/main.tsx"',
+      "import { StrictMode } from 'react';",
+      "import { createRoot } from 'react-dom/client';",
+      "import App from './App.tsx';",
+      "import './styles.css';",
+      '',
+      "createRoot(document.getElementById('root')!).render(",
+      '  <StrictMode>',
+      '    <App />',
+      '  </StrictMode>,',
+      ');',
+      '```',
+      '',
+      '```tsx title="src/App.tsx"',
+      this.buildPhotographyPortfolioAppTsx(desc),
+      '```',
+      '',
+      '```css title="src/styles.css"',
+      this.buildPhotographyPortfolioStyles(),
+      '```',
+      '',
+      '```json title="tsconfig.json"',
+      JSON.stringify({
+        compilerOptions: {
+          target: 'ES2020',
+          lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+          module: 'ESNext',
+          moduleResolution: 'bundler',
+          jsx: 'react-jsx',
+          strict: true,
+          skipLibCheck: true,
+        },
+        include: ['src'],
+      }, null, 2),
+      '```',
+    ].join('\n');
+  }
+
+  private generateBuilderStorefrontApp(desc: string): string {
+    return [
+      '```json title="package.json"',
+      JSON.stringify({
+        name: 'custom-storefront',
+        private: true,
+        version: '0.0.0',
+        type: 'module',
+        scripts: {
+          dev: 'vite',
+          build: 'tsc -b && vite build',
+          preview: 'vite preview',
+        },
+        dependencies: {
+          react: '^18.3.1',
+          'react-dom': '^18.3.1',
+        },
+        devDependencies: {
+          '@types/react': '^18.3.1',
+          '@types/react-dom': '^18.3.1',
+          '@vitejs/plugin-react': '^4.3.1',
+          typescript: '^5.5.3',
+          vite: '^5.4.10',
+        },
+      }, null, 2),
+      '```',
+      '',
+      '```html title="index.html"',
+      '<!doctype html>',
+      '<html lang="en">',
+      '  <head>',
+      '    <meta charset="UTF-8" />',
+      '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+      '    <title>Custom Storefront</title>',
+      '    <script type="module" src="/src/main.tsx"></script>',
+      '  </head>',
+      '  <body>',
+      '    <div id="root"></div>',
+      '  </body>',
+      '</html>',
+      '```',
+      '',
+      '```tsx title="src/main.tsx"',
+      "import { StrictMode } from 'react';",
+      "import { createRoot } from 'react-dom/client';",
+      "import App from './App.tsx';",
+      "import './styles.css';",
+      '',
+      "createRoot(document.getElementById('root')!).render(",
+      '  <StrictMode>',
+      '    <App />',
+      '  </StrictMode>,',
+      ');',
+      '```',
+      '',
+      '```tsx title="src/App.tsx"',
+      "import { useMemo, useState } from 'react';",
+      '',
+      'type Product = {',
+      '  id: string;',
+      '  name: string;',
+      '  category: string;',
+      '  price: number;',
+      '  note: string;',
+      '  accent: string;',
+      '};',
+      '',
+      `const promptLabel = ${JSON.stringify(desc)};`,
+      '',
+      'const products = [',
+      "  { id: 'linen-01', name: 'Linen Carryall', category: 'Bags', price: 84, note: 'Soft structure, everyday size, and a premium neutral finish.', accent: 'linear-gradient(135deg, #f59e0b, #fb7185)' },",
+      "  { id: 'ceramic-02', name: 'Stone Mug Set', category: 'Home', price: 46, note: 'Stackable ceramics designed for gifting and repeat purchase.', accent: 'linear-gradient(135deg, #38bdf8, #818cf8)' },",
+      "  { id: 'serum-03', name: 'Night Serum', category: 'Wellness', price: 62, note: 'A hero product card with premium margins, trust copy, and refill logic.', accent: 'linear-gradient(135deg, #22c55e, #14b8a6)' },",
+      "  { id: 'journal-04', name: 'Grid Journal', category: 'Desk', price: 28, note: 'A lower-ticket add-on that rounds out the cart and checkout mix.', accent: 'linear-gradient(135deg, #a78bfa, #ec4899)' },",
+      "  { id: 'lamp-05', name: 'Halo Lamp', category: 'Lighting', price: 138, note: 'A larger anchor product to prove the layout can support mixed pricing.', accent: 'linear-gradient(135deg, #f97316, #facc15)' },",
+      "  { id: 'throw-06', name: 'Woven Throw', category: 'Living', price: 96, note: 'Warm texture photography and straightforward shipping cues.', accent: 'linear-gradient(135deg, #60a5fa, #22d3ee)' },",
+      '] satisfies Product[];',
+      '',
+      'const promises = [',
+      "  'Category browsing that reads like a real store',",
+      "  'Product detail, price, and shipping cues in one surface',",
+      "  'A cart summary that updates immediately without backend wiring yet',",
+      '];',
+      '',
+      'export default function App() {',
+      "  const [selectedId, setSelectedId] = useState(products[0]?.id ?? '');",
+      "  const [cartIds, setCartIds] = useState<string[]>(products[1] ? [products[1].id] : []);",
+      '  const selected = useMemo(() => products.find((product) => product.id === selectedId) ?? products[0], [selectedId]);',
+      '  const cartProducts = useMemo(() => cartIds.map((id) => products.find((product) => product.id === id)).filter(Boolean) as Product[], [cartIds]);',
+      '  const subtotal = cartProducts.reduce((sum, product) => sum + product.price, 0);',
+      '',
+      '  if (!selected) return null;',
+      '',
+      '  const addSelectedToCart = () => {',
+      '    setCartIds((current) => [...current, selected.id]);',
+      '  };',
+      '',
+      '  return (',
+      '    <main className="store-shell">',
+      '      <section className="hero-card">',
+      '        <div>',
+      '          <p className="eyebrow">{promptLabel}</p>',
+      '          <h1>Custom storefront, not a borrowed demo shell.</h1>',
+      '          <p className="lede">This first pass focuses on the real commerce loop: discover products, inspect the detail view, add to cart, and reach a believable checkout summary without the app feeling like a generic starter.</p>',
+      '          <div className="hero-points">',
+      '            {promises.map((item) => (',
+      '              <span key={item}>{item}</span>',
+      '            ))}',
+      '          </div>',
+      '        </div>',
+      '        <aside className="hero-note">',
+      '          <span>Builder target</span>',
+      '          <strong>{cartProducts.length} item{cartProducts.length === 1 ? "" : "s"} in cart</strong>',
+      '          <p>Use this as the first storefront shape before adding real inventory, search, variants, or payments.</p>',
+      '          <div className="metric-row">',
+      '            <div><small>Categories</small><strong>6</strong></div>',
+      '            <div><small>Subtotal</small><strong>${subtotal.toFixed(0)}</strong></div>',
+      '            <div><small>Checkout</small><strong>Mocked</strong></div>',
+      '          </div>',
+      '        </aside>',
+      '      </section>',
+      '',
+      '      <section className="commerce-grid">',
+      '        <article className="catalog-panel">',
+      '          <div className="section-head">',
+      '            <div>',
+      '              <p className="section-kicker">Catalog</p>',
+      '              <h2>Featured assortment</h2>',
+      '            </div>',
+      '            <span>6 seeded products</span>',
+      '          </div>',
+      '          <div className="product-grid">',
+      '            {products.map((product) => (',
+      '              <button',
+      '                key={product.id}',
+      '                type="button"',
+      '                className={`product-card ${selected.id === product.id ? "is-active" : ""}`}',
+      '                onClick={() => setSelectedId(product.id)}',
+      '              >',
+      '                <div className="product-art" style={{ background: product.accent }} />',
+      '                <div className="product-copy">',
+      '                  <span>{product.category}</span>',
+      '                  <strong>{product.name}</strong>',
+      '                  <p>{product.note}</p>',
+      '                  <em>${product.price}</em>',
+      '                </div>',
+      '              </button>',
+      '            ))}',
+      '          </div>',
+      '        </article>',
+      '',
+      '        <article className="detail-panel">',
+      '          <p className="section-kicker">Product detail</p>',
+      '          <h2>{selected.name}</h2>',
+      '          <p className="detail-price">${selected.price}</p>',
+      '          <p className="detail-copy">{selected.note}</p>',
+      '          <div className="detail-stack">',
+      '            <div><small>Shipping</small><strong>Free over $80</strong></div>',
+      '            <div><small>Availability</small><strong>Ready to ship</strong></div>',
+      '            <div><small>Upsell lane</small><strong>Related add-ons next</strong></div>',
+      '          </div>',
+      '          <div className="detail-actions">',
+      '            <button type="button" className="primary" onClick={addSelectedToCart}>Add to cart</button>',
+      '            <button type="button" className="secondary">View sizing + care</button>',
+      '          </div>',
+      '        </article>',
+      '',
+      '        <aside className="cart-panel">',
+      '          <p className="section-kicker">Cart summary</p>',
+      '          <h2>Checkout-ready rail</h2>',
+      '          <ul className="cart-list">',
+      '            {cartProducts.map((product, index) => (',
+      '              <li key={`${product.id}-${index}`}>',
+      '                <div>',
+      '                  <strong>{product.name}</strong>',
+      '                  <span>{product.category}</span>',
+      '                </div>',
+      '                <em>${product.price}</em>',
+      '              </li>',
+      '            ))}',
+      '          </ul>',
+      '          <div className="cart-total">',
+      '            <span>Estimated subtotal</span>',
+      '            <strong>${subtotal.toFixed(0)}</strong>',
+      '          </div>',
+      '          <button type="button" className="primary cart-cta">Mock checkout</button>',
+      '        </aside>',
+      '      </section>',
+      '    </main>',
+      '  );',
+      '}',
+      '```',
+      '',
+      '```css title="src/styles.css"',
+      ":root { color: #f8fafc; background: #09090b; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }",
+      '* { box-sizing: border-box; }',
+      'body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, rgba(251,191,36,0.12), transparent 18%), radial-gradient(circle at 82% 12%, rgba(59,130,246,0.14), transparent 20%), #09090b; }',
+      'button { font: inherit; }',
+      '.store-shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 72px; }',
+      '.hero-card { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr); gap: 22px; padding: 28px; border-radius: 32px; background: rgba(9, 11, 18, 0.82); border: 1px solid rgba(148,163,184,0.14); box-shadow: 0 24px 80px rgba(0,0,0,0.34); backdrop-filter: blur(18px); }',
+      '.eyebrow, .section-kicker, .hero-note span, .section-head span, .product-copy span, .detail-stack small { margin: 0; color: #fbbf24; font-size: 12px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }',
+      'h1, h2, p, ul { margin: 0; padding: 0; }',
+      'h1 { font-size: clamp(3rem, 7vw, 5.1rem); line-height: 0.94; letter-spacing: -0.06em; max-width: 11ch; }',
+      '.lede { margin-top: 18px; max-width: 58ch; color: #d4d4d8; font-size: 18px; line-height: 1.75; }',
+      '.hero-points { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }',
+      '.hero-points span, .detail-stack div { padding: 12px 14px; border-radius: 18px; background: rgba(15,23,42,0.78); border: 1px solid rgba(148,163,184,0.14); }',
+      '.hero-note { padding: 22px; border-radius: 26px; background: linear-gradient(180deg, rgba(24,24,27,0.92), rgba(9,11,18,0.94)); border: 1px solid rgba(148,163,184,0.14); display: grid; gap: 12px; align-content: end; }',
+      '.hero-note strong { font-size: 30px; letter-spacing: -0.05em; }',
+      '.hero-note p { color: #d4d4d8; line-height: 1.7; }',
+      '.metric-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }',
+      '.metric-row div { padding: 12px; border-radius: 18px; background: rgba(15,23,42,0.74); border: 1px solid rgba(148,163,184,0.12); }',
+      '.metric-row small { display: block; color: #94a3b8; font-size: 11px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.08em; }',
+      '.metric-row strong { font-size: 18px; }',
+      '.commerce-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.9fr) minmax(280px, 0.8fr); gap: 18px; margin-top: 22px; }',
+      '.catalog-panel, .detail-panel, .cart-panel { padding: 22px; border-radius: 28px; background: rgba(9,11,18,0.82); border: 1px solid rgba(148,163,184,0.14); box-shadow: 0 22px 70px rgba(0,0,0,0.28); }',
+      '.section-head { display: flex; justify-content: space-between; gap: 16px; align-items: end; margin-bottom: 18px; }',
+      '.section-head h2, .detail-panel h2, .cart-panel h2 { font-size: 28px; letter-spacing: -0.05em; }',
+      '.product-grid { display: grid; gap: 14px; }',
+      '.product-card { width: 100%; padding: 0; border: 1px solid rgba(148,163,184,0.14); border-radius: 24px; overflow: hidden; background: rgba(24,24,27,0.82); color: inherit; text-align: left; cursor: pointer; transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease; }',
+      '.product-card.is-active { border-color: rgba(251,191,36,0.72); box-shadow: 0 18px 50px rgba(251,191,36,0.16); }',
+      '.product-card:hover, .primary:hover, .secondary:hover { transform: translateY(-2px); }',
+      '.product-art { min-height: 150px; }',
+      '.product-copy { padding: 18px; display: grid; gap: 8px; }',
+      '.product-copy strong { font-size: 24px; letter-spacing: -0.04em; }',
+      '.product-copy p, .detail-copy, .cart-list span { color: #d4d4d8; line-height: 1.7; }',
+      '.product-copy em, .detail-price, .cart-list em, .cart-total strong { font-style: normal; color: #f8fafc; font-size: 20px; font-weight: 700; }',
+      '.detail-price { margin-top: 14px; }',
+      '.detail-copy { margin-top: 10px; }',
+      '.detail-stack { display: grid; gap: 10px; margin-top: 18px; }',
+      '.detail-stack strong { display: block; margin-top: 6px; font-size: 16px; }',
+      '.detail-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }',
+      '.primary, .secondary { border-radius: 999px; padding: 14px 18px; cursor: pointer; transition: transform 0.18s ease, box-shadow 0.18s ease; }',
+      '.primary { border: none; background: linear-gradient(135deg, #f59e0b, #fb7185); color: #18181b; box-shadow: 0 18px 40px rgba(251,191,36,0.2); font-weight: 800; }',
+      '.secondary { border: 1px solid rgba(148,163,184,0.2); background: rgba(15,23,42,0.78); color: #e4e4e7; }',
+      '.cart-list { list-style: none; display: grid; gap: 12px; margin-top: 18px; }',
+      '.cart-list li { display: flex; justify-content: space-between; gap: 16px; padding: 14px 0; border-top: 1px solid rgba(148,163,184,0.12); }',
+      '.cart-list li:first-child { border-top: none; padding-top: 0; }',
+      '.cart-list strong { display: block; margin-bottom: 6px; font-size: 16px; }',
+      '.cart-total { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(148,163,184,0.12); }',
+      '.cart-total span { color: #a1a1aa; }',
+      '.cart-cta { width: 100%; margin-top: 16px; justify-content: center; }',
+      '@media (max-width: 1040px) { .hero-card, .commerce-grid { grid-template-columns: 1fr; } .metric-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }',
+      '@media (max-width: 720px) { .store-shell { width: min(100%, calc(100% - 20px)); padding-top: 18px; } .hero-card, .catalog-panel, .detail-panel, .cart-panel { padding: 18px; } .metric-row { grid-template-columns: 1fr; } }',
+      '```',
+      '',
+      '```json title="tsconfig.json"',
+      JSON.stringify({
+        compilerOptions: {
+          target: 'ES2020',
+          useDefineForClassFields: true,
+          lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+          module: 'ESNext',
+          skipLibCheck: true,
+          moduleResolution: 'Bundler',
+          allowImportingTsExtensions: true,
+          resolveJsonModule: true,
+          isolatedModules: true,
+          noEmit: true,
+          jsx: 'react-jsx',
+          strict: true,
+        },
+        include: ['src'],
+      }, null, 2),
+      '```',
+    ].join('\n');
+  }
+
   private generateBuilderFrontendApp(desc: string): string {
-    const isShoppingApp = /shopping|grocery|store|cart/i.test(desc);
-    const appName = isShoppingApp ? 'shared-shopping-app' : 'builder-app';
-    const heading = isShoppingApp ? 'Shared Shopping List' : 'Builder App';
+    const isShoppingApp = /\b(shared\s+shopping|shopping\s+list|grocery|household|roommates?)\b/i.test(desc);
+    const isWebsiteSurface = /website|site|homepage|landing|portfolio/i.test(desc);
+    const appName = isShoppingApp ? 'shared-shopping-app' : isWebsiteSurface ? 'website-draft' : 'product-draft';
+    const heading = isShoppingApp ? 'Shared Shopping List' : isWebsiteSurface ? 'Website Draft' : 'Product Draft';
     const heroCopy = isShoppingApp
       ? 'A polished household shopping surface with live-looking activity and clear priorities.'
-      : 'A polished frontend scaffold generated directly in Builder mode.';
-    const primarySection = isShoppingApp ? 'Household' : 'Workspace';
-    const secondarySection = isShoppingApp ? 'Activity Chat' : 'Recent Activity';
+      : isWebsiteSurface
+        ? 'A TypeScript-first starter shaped around the request, ready for real copy, sections, proof, and conversion flows.'
+        : 'A polished frontend starter shaped directly from the prompt, ready for real features instead of placeholder scaffolding.';
+    const primarySection = isShoppingApp ? 'Household' : isWebsiteSurface ? 'Sections' : 'Workspace';
+    const secondarySection = isShoppingApp ? 'Activity Chat' : isWebsiteSurface ? 'Launch Steps' : 'Recent Activity';
     const cardLabel = isShoppingApp ? 'Need soon' : 'In focus';
 
     return "```json title=\"package.json\"\n" +
@@ -4998,7 +6958,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
         type: 'module',
         scripts: {
           dev: 'vite',
-          build: 'vite build',
+          build: 'tsc -b && vite build',
           preview: 'vite preview'
         },
         dependencies: {
@@ -5006,7 +6966,10 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
           'react-dom': '^18.3.1'
         },
         devDependencies: {
+          '@types/react': '^18.3.1',
+          '@types/react-dom': '^18.3.1',
           '@vitejs/plugin-react': '^4.3.1',
+          typescript: '^5.5.3',
           vite: '^5.4.10'
         }
       }, null, 2) +
@@ -5018,40 +6981,41 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       "    <meta charset=\"UTF-8\" />\n" +
       "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n" +
       `    <title>${heading}</title>\n` +
-      "    <script type=\"module\" src=\"/src/main.jsx\"></script>\n" +
+      "    <script type=\"module\" src=\"/src/main.tsx\"></script>\n" +
       "  </head>\n" +
       "  <body>\n" +
       "    <div id=\"root\"></div>\n" +
       "  </body>\n" +
       "</html>\n" +
       "```\n\n" +
-      "```jsx title=\"src/main.jsx\"\n" +
-      "import React from 'react';\n" +
-      "import ReactDOM from 'react-dom/client';\n" +
-      "import App from './App.jsx';\n" +
+      "```tsx title=\"src/main.tsx\"\n" +
+      "import { StrictMode } from 'react';\n" +
+      "import { createRoot } from 'react-dom/client';\n" +
+      "import App from './App.tsx';\n" +
       "import './styles.css';\n\n" +
-      "ReactDOM.createRoot(document.getElementById('root')).render(\n" +
-      "  <React.StrictMode>\n" +
+      "createRoot(document.getElementById('root')!).render(\n" +
+      "  <StrictMode>\n" +
       "    <App />\n" +
-      "  </React.StrictMode>,\n" +
+      "  </StrictMode>,\n" +
       ");\n" +
       "```\n\n" +
-      "```jsx title=\"src/App.jsx\"\n" +
-        "import React from 'react';\n\n" +
+      "```tsx title=\"src/App.tsx\"\n" +
+      "type Member = { name: string; role: string; accent: 'peach' | 'mint' | 'sky' };\n" +
+      "type Item = { label: string; meta: string; amount: string };\n\n" +
       "const household = [\n" +
-      "  { name: 'Maya', role: 'Meal prep', accent: 'peach' },\n" +
-      "  { name: 'Jon', role: 'Restock', accent: 'mint' },\n" +
-      "  { name: 'Ari', role: 'Budget', accent: 'sky' },\n" +
-      "];\n\n" +
+      `  { name: '${isWebsiteSurface ? 'Hero' : 'Maya'}', role: '${isWebsiteSurface ? 'First impression' : 'Meal prep'}', accent: 'peach' },\n` +
+      `  { name: '${isWebsiteSurface ? 'Services' : 'Jon'}', role: '${isWebsiteSurface ? 'Offer clarity' : 'Restock'}', accent: 'mint' },\n` +
+      `  { name: '${isWebsiteSurface ? 'Contact' : 'Ari'}', role: '${isWebsiteSurface ? 'Conversion path' : 'Budget'}', accent: 'sky' },\n` +
+      "] satisfies Member[];\n\n" +
       "const items = [\n" +
-      `  { label: '${isShoppingApp ? 'Avocados' : 'Hero copy'}', meta: '${cardLabel}', amount: '${isShoppingApp ? '4' : 'Ready'}' },\n` +
-      `  { label: '${isShoppingApp ? 'Sparkling water' : 'Feature card'}', meta: 'Weekly', amount: '${isShoppingApp ? '12' : 'Live'}' },\n` +
-      `  { label: '${isShoppingApp ? 'Chili crisp' : 'Launch note'}', meta: 'Refill', amount: '${isShoppingApp ? '1' : 'Now'}' },\n` +
-      "];\n\n" +
+      `  { label: '${isShoppingApp ? 'Avocados' : isWebsiteSurface ? 'Hero section' : 'Core surface'}', meta: '${cardLabel}', amount: '${isShoppingApp ? '4' : 'Ready'}' },\n` +
+      `  { label: '${isShoppingApp ? 'Sparkling water' : isWebsiteSurface ? 'Offer strip' : 'Feature card'}', meta: 'Weekly', amount: '${isShoppingApp ? '12' : isWebsiteSurface ? 'Next' : 'Live'}' },\n` +
+      `  { label: '${isShoppingApp ? 'Chili crisp' : isWebsiteSurface ? 'Booking CTA' : 'Launch note'}', meta: 'Refill', amount: '${isShoppingApp ? '1' : 'Now'}' },\n` +
+      "] satisfies Item[];\n\n" +
       "const activity = [\n" +
-      `  '${isShoppingApp ? 'Maya moved avocados to Need soon.' : 'Builder generated the first pass.'}',\n` +
-      `  '${isShoppingApp ? 'Jon marked sparkling water as weekly stock.' : 'The workspace is ready for iteration.'}',\n` +
-      `  '${isShoppingApp ? 'Ari flagged chili crisp for budget review.' : 'Use this as a from-scratch baseline.'}',\n` +
+      `  '${isShoppingApp ? 'Maya moved avocados to Need soon.' : isWebsiteSurface ? 'Replace the draft copy with the real studio story.' : 'Use this as the first working pass.'}',\n` +
+      `  '${isShoppingApp ? 'Jon marked sparkling water as weekly stock.' : isWebsiteSurface ? 'Swap the placeholder sections for services, proof, and booking.' : 'The workspace is ready for iteration.'}',\n` +
+      `  '${isShoppingApp ? 'Ari flagged chili crisp for budget review.' : isWebsiteSurface ? 'Add real imagery and contact details before polishing.' : 'Turn the starter into the actual product flow.'}',\n` +
       "];\n\n" +
       "export default function App() {\n" +
       "  return (\n" +
@@ -5126,233 +7090,59 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       ".card em { color: #7dd3fc; font-style: normal; }\n" +
       ".activity { padding: 0; margin: 0; }\n" +
       "@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .shell { padding: 24px 14px 40px; } }\n" +
+      "```\n\n" +
+      "```json title=\"tsconfig.json\"\n" +
+      "{\n" +
+      "  \"compilerOptions\": {\n" +
+      "    \"target\": \"ES2020\",\n" +
+      "    \"lib\": [\"ES2020\", \"DOM\", \"DOM.Iterable\"],\n" +
+      "    \"module\": \"ESNext\",\n" +
+      "    \"moduleResolution\": \"bundler\",\n" +
+      "    \"jsx\": \"react-jsx\",\n" +
+      "    \"strict\": true,\n" +
+      "    \"skipLibCheck\": true\n" +
+      "  },\n" +
+      "  \"include\": [\"src\"]\n" +
+      "}\n" +
       "```";
   }
 
   private generateBuilderNotesDashboardApp(desc: string): string {
-    return "```json title=\"package.json\"\n" +
-      JSON.stringify({
-        name: 'notes-dashboard',
-        private: true,
-        version: '0.0.0',
-        type: 'module',
-        scripts: {
-          dev: 'vite',
-          build: 'vite build',
-          preview: 'vite preview'
-        },
-        dependencies: {
-          react: '^18.3.1',
-          'react-dom': '^18.3.1'
-        },
-        devDependencies: {
-          '@vitejs/plugin-react': '^4.3.1',
-          vite: '^5.4.10'
-        }
-      }, null, 2) +
-      "\n```\n\n" +
-      "```html title=\"index.html\"\n" +
-      "<!doctype html>\n" +
-      "<html lang=\"en\">\n" +
-      "  <head>\n" +
-      "    <meta charset=\"UTF-8\" />\n" +
-      "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n" +
-      "    <title>Notes Dashboard</title>\n" +
-      "    <script type=\"module\" src=\"/src/main.jsx\"></script>\n" +
-      "  </head>\n" +
-      "  <body>\n" +
-      "    <div id=\"root\"></div>\n" +
-      "  </body>\n" +
-      "</html>\n" +
-      "```\n\n" +
-      "```jsx title=\"src/main.jsx\"\n" +
-      "import React from 'react';\n" +
-      "import ReactDOM from 'react-dom/client';\n" +
-      "import App from './App.jsx';\n" +
-      "import './styles.css';\n\n" +
-      "ReactDOM.createRoot(document.getElementById('root')).render(\n" +
-      "  <React.StrictMode>\n" +
-      "    <App />\n" +
-      "  </React.StrictMode>,\n" +
-      ");\n" +
-      "```\n\n" +
-      "```jsx title=\"src/App.jsx\"\n" +
-      "import React, { useMemo, useState } from 'react';\n\n" +
-      "const seededNotes = [\n" +
-      "  { id: 1, title: 'Launch checklist', excerpt: 'Confirm onboarding copy, preview health, and sharing states before the next review.', category: 'Ops', pinned: true, updated: '2m ago' },\n" +
-      "  { id: 2, title: 'Research highlights', excerpt: 'Capture the strongest ideas from product references before they get buried in chat history.', category: 'Research', pinned: true, updated: '12m ago' },\n" +
-      "  { id: 3, title: 'Design cues', excerpt: 'Keep the shell open, modern, and dense enough to feel productive without losing clarity.', category: 'Design', pinned: false, updated: '28m ago' },\n" +
-      "  { id: 4, title: 'Follow-up prompts', excerpt: 'Queue the next three high-signal asks so iteration does not stall between improvements.', category: 'Planning', pinned: false, updated: '51m ago' },\n" +
-      "];\n\n" +
-      "const timeline = [\n" +
-      "  'Pinned notes are surfacing the most urgent work for the next pass.',\n" +
-      "  'Research highlights were refreshed after the latest builder validation run.',\n" +
-      "  'A fresh planning note is ready to be captured and reviewed.',\n" +
-      "];\n\n" +
-      "export default function App() {\n" +
-      "  const [notes, setNotes] = useState(seededNotes);\n" +
-      "  const [title, setTitle] = useState('');\n" +
-      "  const [body, setBody] = useState('');\n\n" +
-      "  const stats = useMemo(() => ({\n" +
-      "    total: notes.length,\n" +
-      "    pinned: notes.filter((note) => note.pinned).length,\n" +
-      "    categories: new Set(notes.map((note) => note.category)).size,\n" +
-      "  }), [notes]);\n\n" +
-      "  const pinnedNotes = notes.filter((note) => note.pinned);\n\n" +
-      "  function saveNote(event) {\n" +
-      "    event.preventDefault();\n" +
-      "    const nextTitle = title.trim();\n" +
-      "    const nextBody = body.trim();\n" +
-      "    if (!nextTitle || !nextBody) return;\n\n" +
-      "    setNotes((current) => [{\n" +
-      "      id: Date.now(),\n" +
-      "      title: nextTitle,\n" +
-      "      excerpt: nextBody,\n" +
-      "      category: 'Fresh note',\n" +
-      "      pinned: false,\n" +
-      "      updated: 'Just now',\n" +
-      "    }, ...current]);\n" +
-      "    setTitle('');\n" +
-      "    setBody('');\n" +
-      "  }\n\n" +
-      "  return (\n" +
-      "    <main className=\"shell\">\n" +
-      "      <section className=\"hero\">\n" +
-      `        <p className="eyebrow">${desc}</p>\n` +
-      "        <div className=\"hero-copy\">\n" +
-      "          <div>\n" +
-      "            <h1>Notes Dashboard</h1>\n" +
-      "            <p className=\"lede\">A compact workspace for capture, pinned context, and recent notes that stay visible while you iterate.</p>\n" +
-      "          </div>\n" +
-      "          <div className=\"stats\">\n" +
-      "            <div className=\"stat\"><span>Total notes</span><strong>{stats.total}</strong></div>\n" +
-      "            <div className=\"stat\"><span>Pinned</span><strong>{stats.pinned}</strong></div>\n" +
-      "            <div className=\"stat\"><span>Categories</span><strong>{stats.categories}</strong></div>\n" +
-      "          </div>\n" +
-      "        </div>\n" +
-      "      </section>\n\n" +
-      "      <section className=\"layout\">\n" +
-      "        <article className=\"panel composer\">\n" +
-      "          <div className=\"panel-head\">\n" +
-      "            <span className=\"kicker\">Quick Capture</span>\n" +
-      "            <h2>Save a note</h2>\n" +
-      "          </div>\n" +
-      "          <form onSubmit={saveNote}>\n" +
-      "            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder=\"Note title\" />\n" +
-      "            <textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder=\"Capture the next decision, reminder, or insight.\" rows={7} />\n" +
-      "            <button type=\"submit\">Save note</button>\n" +
-      "          </form>\n" +
-      "          <div className=\"timeline\">\n" +
-      "            {timeline.map((entry) => (\n" +
-      "              <div key={entry} className=\"timeline-item\">{entry}</div>\n" +
-      "            ))}\n" +
-      "          </div>\n" +
-      "        </article>\n\n" +
-      "        <article className=\"panel\">\n" +
-      "          <div className=\"panel-head\">\n" +
-      "            <span className=\"kicker\">Pinned</span>\n" +
-      "            <h2>Priority notes</h2>\n" +
-      "          </div>\n" +
-      "          <div className=\"pinned-grid\">\n" +
-      "            {pinnedNotes.map((note) => (\n" +
-      "              <article key={note.id} className=\"note-card note-card-pinned\">\n" +
-      "                <div className=\"note-meta\"><span>{note.category}</span><span>{note.updated}</span></div>\n" +
-      "                <h3>{note.title}</h3>\n" +
-      "                <p>{note.excerpt}</p>\n" +
-      "              </article>\n" +
-      "            ))}\n" +
-      "          </div>\n" +
-      "        </article>\n\n" +
-      "        <article className=\"panel\">\n" +
-      "          <div className=\"panel-head\">\n" +
-      "            <span className=\"kicker\">Recent</span>\n" +
-      "            <h2>Latest notes</h2>\n" +
-      "          </div>\n" +
-      "          <div className=\"notes-list\">\n" +
-      "            {notes.map((note) => (\n" +
-      "              <article key={note.id} className=\"note-card\">\n" +
-      "                <div className=\"note-meta\"><span>{note.category}</span><span>{note.updated}</span></div>\n" +
-      "                <h3>{note.title}</h3>\n" +
-      "                <p>{note.excerpt}</p>\n" +
-      "              </article>\n" +
-      "            ))}\n" +
-      "          </div>\n" +
-      "        </article>\n" +
-      "      </section>\n" +
-      "    </main>\n" +
-      "  );\n" +
-      "}\n" +
-      "```\n\n" +
-      "```css title=\"src/styles.css\"\n" +
-      ":root {\n" +
-      "  color: #f7f8fc;\n" +
-      "  background: #08111c;\n" +
-      "  font-family: Inter, ui-sans-serif, system-ui, sans-serif;\n" +
-      "}\n\n" +
-      "* { box-sizing: border-box; }\n" +
-      "body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #18345a 0%, #09111b 58%, #04070d 100%); }\n" +
-      "button, input, textarea { font: inherit; }\n" +
-      "button { border: 0; border-radius: 999px; padding: 12px 18px; background: linear-gradient(135deg, #7c3aed, #2563eb); color: white; cursor: pointer; font-weight: 600; }\n" +
-      "input, textarea { width: 100%; border: 1px solid rgba(148, 163, 184, 0.18); background: rgba(15, 23, 42, 0.74); color: #f7f8fc; border-radius: 18px; padding: 14px 16px; }\n" +
-      "textarea { resize: vertical; min-height: 160px; }\n" +
-      ".shell { max-width: 1320px; margin: 0 auto; padding: 44px 18px 64px; }\n" +
-      ".hero { margin-bottom: 20px; padding: 28px; border-radius: 28px; border: 1px solid rgba(148, 163, 184, 0.15); background: rgba(7, 15, 30, 0.78); backdrop-filter: blur(18px); }\n" +
-      ".eyebrow, .kicker { margin: 0 0 10px; color: #7dd3fc; text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.75rem; }\n" +
-      ".hero-copy { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 18px; align-items: start; }\n" +
-      "h1 { margin: 0; font-size: clamp(2.6rem, 6vw, 5rem); line-height: 0.94; }\n" +
-      ".lede { max-width: 62ch; color: #bfd1e7; line-height: 1.65; }\n" +
-      ".stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }\n" +
-      ".stat { padding: 16px; border-radius: 20px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(148, 163, 184, 0.12); }\n" +
-      ".stat span { display: block; font-size: 0.78rem; color: #9fb6d2; text-transform: uppercase; letter-spacing: 0.1em; }\n" +
-      ".stat strong { display: block; margin-top: 8px; font-size: 1.6rem; }\n" +
-      ".layout { display: grid; grid-template-columns: 1.05fr 0.95fr 1fr; gap: 18px; align-items: start; }\n" +
-      ".panel { padding: 22px; border-radius: 26px; background: rgba(8, 15, 28, 0.76); border: 1px solid rgba(148, 163, 184, 0.14); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24); }\n" +
-      ".panel-head h2 { margin: 0 0 14px; font-size: 1.2rem; }\n" +
-      ".composer form, .timeline, .pinned-grid, .notes-list { display: grid; gap: 14px; }\n" +
-      ".timeline-item, .note-card { border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.12); background: rgba(255, 255, 255, 0.03); padding: 16px; }\n" +
-      ".note-card-pinned { background: linear-gradient(180deg, rgba(124, 58, 237, 0.18), rgba(37, 99, 235, 0.08)); }\n" +
-      ".note-meta { display: flex; justify-content: space-between; gap: 12px; color: #9fb6d2; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; }\n" +
-      ".note-card h3 { margin: 12px 0 8px; font-size: 1.05rem; }\n" +
-      ".note-card p, .timeline-item { margin: 0; color: #c5d2e4; line-height: 1.6; }\n" +
-      "@media (max-width: 1120px) { .hero-copy, .layout { grid-template-columns: 1fr; } .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }\n" +
-      "@media (max-width: 640px) { .shell { padding: 24px 12px 40px; } .hero, .panel { border-radius: 22px; } .stats { grid-template-columns: 1fr; } }\n" +
-      "```";
-  }
-
-  private generateBuilderAdminWorkspaceApp(desc: string): string {
-    return `\`\`\`json title="package.json"
-${JSON.stringify({
-      name: 'ops-control-center',
+    const pkg = JSON.stringify({
+      name: 'notes-dashboard',
       private: true,
       version: '0.0.0',
       type: 'module',
       scripts: {
         dev: 'vite',
-        build: 'vite build',
-        preview: 'vite preview'
+        build: 'tsc -b && vite build',
+        preview: 'vite preview',
       },
       dependencies: {
         react: '^18.3.1',
-        'react-dom': '^18.3.1'
+        'react-dom': '^18.3.1',
       },
       devDependencies: {
         '@vitejs/plugin-react': '^4.3.1',
-        vite: '^5.4.10'
-      }
-    }, null, 2)}
+        vite: '^5.4.10',
+      },
+    }, null, 2);
+
+    return `\`\`\`json title="package.json"
+${pkg}
 \`\`\`
 
 \`\`\`html title="index.html"
 <!doctype html>
-<html lang="en">
+<html lang='en'>
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ops Control Center</title>
-    <script type="module" src="/src/main.jsx"></script>
+    <meta charset='UTF-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+    <title>Notes Dashboard</title>
+    <script type='module' src='/src/main.tsx'></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id='root'></div>
   </body>
 </html>
 \`\`\`
@@ -5373,17 +7163,606 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 \`\`\`jsx title="src/App.jsx"
 import React, { useMemo, useState } from 'react';
 
+const promptLabel = ${JSON.stringify(desc)};
+
+const notebookTabs = ['All notes', 'Studio', 'Research', 'Launch'];
+
+const seededNotes = [
+  { id: 1, title: 'Launch checklist', excerpt: 'Confirm onboarding copy, preview health, and sharing states before the next review.', notebook: 'Launch', status: 'Pinned', pinned: true, updated: '2m ago' },
+  { id: 2, title: 'Research highlights', excerpt: 'Capture the strongest ideas from product references before they get buried in chat history.', notebook: 'Research', status: 'Review', pinned: true, updated: '12m ago' },
+  { id: 3, title: 'Design cues', excerpt: 'Keep the shell open, dense enough to feel useful, and quiet enough to read for an hour.', notebook: 'Studio', status: 'Draft', pinned: false, updated: '28m ago' },
+  { id: 4, title: 'Follow-up prompts', excerpt: 'Queue the next three high-signal asks so iteration does not stall between passes.', notebook: 'Studio', status: 'Ready', pinned: false, updated: '51m ago' },
+];
+
+const briefing = [
+  'Pinned notes should stay visible while new drafts land below them.',
+  'Research notes need a calmer reading surface than the builder shell.',
+  'Fresh capture should feel one click away, not buried in a dashboard tile.',
+];
+
+export default function App() {
+  const [notes, setNotes] = useState(seededNotes);
+  const [activeNotebook, setActiveNotebook] = useState('All notes');
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+
+  const visibleNotes = useMemo(() => (
+    activeNotebook === 'All notes'
+      ? notes
+      : notes.filter((note) => note.notebook === activeNotebook)
+  ), [notes, activeNotebook]);
+
+  const stats = useMemo(() => ({
+    total: notes.length,
+    pinned: notes.filter((note) => note.pinned).length,
+    notebooks: new Set(notes.map((note) => note.notebook)).size,
+  }), [notes]);
+
+  const pinnedNotes = notes.filter((note) => note.pinned);
+
+  function saveNote(event) {
+    event.preventDefault();
+    const nextTitle = title.trim();
+    const nextBody = body.trim();
+    if (!nextTitle || !nextBody) return;
+
+    setNotes((current) => [{
+      id: Date.now(),
+      title: nextTitle,
+      excerpt: nextBody,
+      notebook: activeNotebook === 'All notes' ? 'Studio' : activeNotebook,
+      status: 'New',
+      pinned: false,
+      updated: 'Just now',
+    }, ...current]);
+    setTitle('');
+    setBody('');
+  }
+
+  return (
+    <main className='desk'>
+      <header className='masthead'>
+        <div>
+          <p className='eyebrow'>{promptLabel}</p>
+          <h1>Notes Dashboard</h1>
+          <p className='lede'>A warmer editorial workspace for drafting, pinning, and scanning live note context without the usual glassy dashboard chrome.</p>
+        </div>
+        <div className='summary-strip'>
+          <div>
+            <span>Total notes</span>
+            <strong>{stats.total}</strong>
+          </div>
+          <div>
+            <span>Pinned</span>
+            <strong>{stats.pinned}</strong>
+          </div>
+          <div>
+            <span>Notebooks</span>
+            <strong>{stats.notebooks}</strong>
+          </div>
+        </div>
+      </header>
+
+      <section className='workspace'>
+        <aside className='shelf'>
+          <div className='section-heading'>Notebook shelf</div>
+          <div className='tab-stack'>
+            {notebookTabs.map((tab) => (
+              <button
+                key={tab}
+                type='button'
+                className={tab === activeNotebook ? 'tab is-active' : 'tab'}
+                onClick={() => setActiveNotebook(tab)}
+              >
+                <span>{tab}</span>
+                <small>{tab === 'All notes' ? notes.length : notes.filter((note) => note.notebook === tab).length}</small>
+              </button>
+            ))}
+          </div>
+
+          <div className='briefing'>
+            <div className='section-heading'>Desk brief</div>
+            {briefing.map((item) => (
+              <p key={item}>{item}</p>
+            ))}
+          </div>
+        </aside>
+
+        <section className='canvas'>
+          <article className='editor-sheet'>
+            <div className='section-heading'>Quick capture</div>
+            <h2>Draft the next note</h2>
+            <form onSubmit={saveNote} className='editor-form'>
+              <input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder='Note title'
+              />
+              <textarea
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                placeholder='Capture the next decision, reminder, or reference while it is still sharp.'
+                rows={8}
+              />
+              <button type='submit'>Save note</button>
+            </form>
+          </article>
+
+          <section className='note-column'>
+            <div className='note-column-head'>
+              <div>
+                <div className='section-heading'>Current view</div>
+                <h2>{activeNotebook}</h2>
+              </div>
+              <span>{visibleNotes.length} visible</span>
+            </div>
+
+            <div className='note-wall'>
+              {visibleNotes.map((note) => (
+                <article key={note.id} className={note.pinned ? 'note-card pinned' : 'note-card'}>
+                  <div className='note-topline'>
+                    <span>{note.notebook}</span>
+                    <span>{note.updated}</span>
+                  </div>
+                  <h3>{note.title}</h3>
+                  <p>{note.excerpt}</p>
+                  <footer>
+                    <span>{note.status}</span>
+                  </footer>
+                </article>
+              ))}
+            </div>
+          </section>
+        </section>
+
+        <aside className='agenda'>
+          <div className='section-heading'>Pinned context</div>
+          <div className='pin-stack'>
+            {pinnedNotes.map((note) => (
+              <article key={note.id} className='pin-card'>
+                <span>{note.notebook}</span>
+                <strong>{note.title}</strong>
+                <p>{note.excerpt}</p>
+              </article>
+            ))}
+          </div>
+        </aside>
+      </section>
+    </main>
+  );
+}
+\`\`\`
+
+\`\`\`css title="src/styles.css"
+:root {
+  color: #2f241d;
+  background: #f4e9d9;
+  font-family: 'Segoe UI Variable Text', 'Trebuchet MS', sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 10% 12%, rgba(255, 189, 123, 0.34), transparent 24%),
+    radial-gradient(circle at 86% 16%, rgba(204, 117, 74, 0.18), transparent 22%),
+    linear-gradient(180deg, #f8efe3 0%, #eadcc6 44%, #deccb5 100%);
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image:
+    linear-gradient(rgba(92, 63, 41, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(92, 63, 41, 0.03) 1px, transparent 1px);
+  background-size: 100% 26px, 26px 100%;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 1px solid rgba(86, 59, 38, 0.18);
+  border-radius: 999px;
+  padding: 0.95rem 1.2rem;
+  background: linear-gradient(135deg, #2d211a, #443127);
+  color: #fbf4eb;
+  cursor: pointer;
+  box-shadow: 0 18px 38px rgba(73, 43, 26, 0.18);
+  transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+  box-shadow: 0 22px 42px rgba(73, 43, 26, 0.22);
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid rgba(86, 59, 38, 0.14);
+  border-radius: 22px;
+  background: rgba(255, 251, 245, 0.92);
+  color: #2c211c;
+  padding: 1rem 1.1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+input:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid rgba(164, 97, 56, 0.48);
+  outline-offset: 2px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 12rem;
+}
+
+.desk {
+  position: relative;
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 2.4rem 1.75rem 3rem;
+}
+
+.masthead {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(19rem, 0.78fr);
+  gap: 1.4rem;
+  align-items: stretch;
+  padding-bottom: 2rem;
+}
+
+.eyebrow,
+.section-heading {
+  margin: 0 0 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-size: 0.72rem;
+  color: #9d6037;
+}
+
+h1,
+h2,
+h3,
+strong {
+  font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  font-weight: 700;
+}
+
+h1 {
+  margin: 0;
+  max-width: 10ch;
+  font-size: clamp(3.4rem, 7vw, 6.4rem);
+  line-height: 0.9;
+  letter-spacing: -0.05em;
+  color: #241913;
+}
+
+.lede {
+  max-width: 58ch;
+  margin: 1rem 0 0;
+  color: #5e4c3d;
+  line-height: 1.75;
+  font-size: 1.04rem;
+}
+
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+  align-self: end;
+  background: none;
+}
+
+.summary-strip > div {
+  padding: 1.2rem 1.15rem;
+  border-radius: 26px;
+  border: 1px solid rgba(95, 62, 39, 0.12);
+  background: linear-gradient(180deg, rgba(255, 252, 247, 0.94), rgba(249, 238, 223, 0.92));
+  box-shadow: 0 22px 44px rgba(101, 67, 39, 0.12);
+}
+
+.summary-strip span,
+.tab small,
+.note-topline,
+.note-card footer,
+.pin-card span {
+  font-size: 0.73rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #8a715d;
+}
+
+.summary-strip strong {
+  display: block;
+  margin-top: 0.45rem;
+  font-size: 1.75rem;
+  color: #241913;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(15rem, 18rem) minmax(0, 1fr) minmax(16rem, 19rem);
+  gap: 1.35rem;
+  align-items: start;
+}
+
+.shelf,
+.agenda,
+.editor-sheet,
+.note-column {
+  border-radius: 30px;
+  border: 1px solid rgba(95, 62, 39, 0.12);
+  background: linear-gradient(180deg, rgba(255, 249, 241, 0.9), rgba(248, 239, 226, 0.88));
+  box-shadow: 0 24px 50px rgba(107, 73, 46, 0.12);
+}
+
+.shelf,
+.agenda {
+  position: sticky;
+  top: 1.25rem;
+  padding: 1.2rem;
+  backdrop-filter: blur(12px);
+}
+
+.tab-stack,
+.briefing,
+.pin-stack,
+.editor-form,
+.note-wall {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.tab {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.05rem;
+  border: 1px solid rgba(95, 62, 39, 0.1);
+  border-radius: 22px;
+  background: rgba(255, 253, 249, 0.72);
+  color: #2c221d;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.tab.is-active {
+  border-color: rgba(73, 43, 26, 0.2);
+  background: linear-gradient(135deg, #2d211a, #4a3528);
+  color: #fbf3ea;
+  box-shadow: 0 16px 34px rgba(73, 43, 26, 0.22);
+}
+
+.tab.is-active small {
+  color: rgba(251, 243, 234, 0.68);
+}
+
+.briefing {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(95, 62, 39, 0.08);
+}
+
+.briefing p,
+.note-card p,
+.pin-card p {
+  margin: 0;
+  line-height: 1.72;
+  color: #5a4a3d;
+}
+
+.canvas {
+  display: grid;
+  grid-template-columns: minmax(21rem, 27rem) minmax(0, 1fr);
+  gap: 1.35rem;
+  align-items: start;
+}
+
+.editor-sheet,
+.note-column {
+  padding: 1.35rem;
+}
+
+.editor-sheet {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(250, 240, 227, 0.58)),
+    repeating-linear-gradient(180deg, transparent 0, transparent 2.95rem, rgba(122, 99, 76, 0.08) 2.95rem, rgba(122, 99, 76, 0.08) 3.03rem);
+}
+
+.editor-sheet::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255, 209, 167, 0.16), transparent 42%);
+  pointer-events: none;
+}
+
+.editor-sheet h2,
+.note-column h2 {
+  margin: 0 0 1rem;
+  font-size: 1.85rem;
+  color: #241913;
+}
+
+.note-column-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  align-items: end;
+}
+
+.note-column-head span {
+  color: #9d6037;
+  font-size: 0.88rem;
+}
+
+.note-wall {
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+}
+
+.note-card,
+.pin-card {
+  padding: 1.05rem;
+  border: 1px solid rgba(95, 62, 39, 0.1);
+  border-radius: 24px;
+  background: rgba(255, 254, 250, 0.94);
+  box-shadow: 0 14px 30px rgba(110, 74, 46, 0.1);
+}
+
+.note-card {
+  min-height: 15rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.note-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 34px rgba(110, 74, 46, 0.14);
+}
+
+.note-card.pinned,
+.pin-card {
+  background: linear-gradient(180deg, rgba(255, 244, 220, 0.96), rgba(255, 250, 240, 0.94));
+}
+
+.note-topline,
+.note-card footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.note-card h3,
+.pin-card strong {
+  margin: 0.9rem 0 0.6rem;
+  font-size: 1.18rem;
+  color: #241913;
+}
+
+.pin-stack {
+  gap: 1rem;
+}
+
+@media (max-width: 1220px) {
+  .masthead,
+  .workspace,
+  .canvas {
+    grid-template-columns: 1fr;
+  }
+
+  .shelf,
+  .agenda {
+    position: static;
+  }
+}
+
+@media (max-width: 720px) {
+  .desk {
+    padding: 1rem 0.9rem 1.5rem;
+  }
+
+  .summary-strip,
+  .note-wall {
+    grid-template-columns: 1fr;
+  }
+
+  .editor-sheet,
+  .note-column,
+  .shelf,
+  .agenda {
+    border-radius: 24px;
+  }
+}
+\`\`\``;
+  }
+
+  private generateBuilderAdminWorkspaceApp(desc: string): string {
+    const pkg = JSON.stringify({
+      name: 'ops-control-center',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: {
+        dev: 'vite',
+        build: 'vite build',
+        preview: 'vite preview',
+      },
+      dependencies: {
+        react: '^18.3.1',
+        'react-dom': '^18.3.1',
+      },
+      devDependencies: {
+        '@vitejs/plugin-react': '^4.3.1',
+        vite: '^5.4.10',
+      },
+    }, null, 2);
+
+    return `\`\`\`json title="package.json"
+${pkg}
+\`\`\`
+
+\`\`\`html title="index.html"
+<!doctype html>
+<html lang='en'>
+  <head>
+    <meta charset='UTF-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+    <title>Ops Control Center</title>
+    <script type='module' src='/src/main.jsx'></script>
+  </head>
+  <body>
+    <div id='root'></div>
+  </body>
+</html>
+\`\`\`
+
+\`\`\`jsx title="src/main.jsx"
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+import './styles.css';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
+\`\`\`
+
+\`\`\`jsx title="src/App.jsx"
+import React, { useMemo, useState } from 'react';
+
+const promptLabel = ${JSON.stringify(desc)};
+
 const seededQueue = [
-  { id: 1, title: 'Vendor payout override', lane: 'Finance', owner: 'Maya', priority: 'Urgent' },
-  { id: 2, title: 'Access escalation review', lane: 'Support', owner: 'Jon', priority: 'High' },
-  { id: 3, title: 'Regional launch checklist', lane: 'Operations', owner: 'Ari', priority: 'Normal' },
+  { id: 1, title: 'Vendor payout override', lane: 'Finance', owner: 'Maya', priority: 'Urgent', sla: '12m' },
+  { id: 2, title: 'Access escalation review', lane: 'Support', owner: 'Jon', priority: 'High', sla: '28m' },
+  { id: 3, title: 'Regional launch checklist', lane: 'Operations', owner: 'Ari', priority: 'Normal', sla: '45m' },
 ];
 
 const shortcutWorkflows = ['Billing incident', 'Access review', 'Launch freeze'];
 const seededActivity = [
   'Maya flagged the vendor payout override for immediate review.',
   'Jon reopened the access escalation queue after a policy mismatch.',
-  'Ari tightened the regional launch checklist before handoff.',
+  'Ari tightened the regional launch checklist before shift handoff.',
 ];
 
 export default function App() {
@@ -5416,68 +7795,87 @@ export default function App() {
   }
 
   return (
-    <main className="shell">
-      <section className="hero">
-        <p className="eyebrow">${desc}</p>
-        <div className="hero-copy">
-          <div>
-            <h1>Ops Control Center</h1>
-            <p className="lede">A compact internal workspace for approvals, launch operations, and fast-response handoffs without the generic scaffold feel.</p>
-          </div>
-          <div className="stats">
-            <div className="stat"><span>Pending</span><strong>{stats.pending}</strong></div>
-            <div className="stat"><span>Urgent</span><strong>{stats.urgent}</strong></div>
-            <div className="stat"><span>Approved today</span><strong>{stats.approved}</strong></div>
-          </div>
+    <main className='ops-shell'>
+      <header className='ops-header'>
+        <div>
+          <p className='eyebrow'>{promptLabel}</p>
+          <h1>Ops Control Center</h1>
+          <p className='lede'>A denser operations room with a queue table, command dock, and event ledger instead of another stack of nested cards.</p>
         </div>
-      </section>
+        <div className='status-ribbon'>
+          <div><span>Pending</span><strong>{stats.pending}</strong></div>
+          <div><span>Urgent</span><strong>{stats.urgent}</strong></div>
+          <div><span>Approved today</span><strong>{stats.approved}</strong></div>
+        </div>
+      </header>
 
-      <section className="layout">
-        <article className="panel">
-          <div className="panel-head">
-            <span className="kicker">Queue</span>
-            <h2>Approval Queue</h2>
+      <section className='ops-grid'>
+        <section className='queue-panel'>
+          <div className='section-head'>
+            <div>
+              <span className='label'>Approval Queue</span>
+              <h2>Approval Queue</h2>
+            </div>
+            <span className='queue-badge'>{queue.length} waiting</span>
           </div>
-          <div className="queue-list">
+
+          <div className='queue-table'>
+            <div className='queue-row queue-head'>
+              <span>Lane</span>
+              <span>Item</span>
+              <span>Owner</span>
+              <span>SLA</span>
+              <span>Action</span>
+            </div>
             {queue.map((item) => (
-              <article key={item.id} className="queue-card">
-                <div className="queue-meta"><span>{item.lane}</span><span>{item.priority}</span></div>
-                <h3>{item.title}</h3>
-                <p>{item.owner} is holding this item for the next decision.</p>
-                <button onClick={() => approveItem(item.id)}>Approve item</button>
-              </article>
+              <div key={item.id} className='queue-row'>
+                <span className={item.priority === 'Urgent' ? 'priority urgent' : 'priority'}>{item.lane}</span>
+                <div>
+                  <strong>{item.title}</strong>
+                  <small>{item.priority} priority</small>
+                </div>
+                <span>{item.owner}</span>
+                <span>{item.sla}</span>
+                <button type='button' onClick={() => approveItem(item.id)}>Approve item</button>
+              </div>
             ))}
           </div>
-        </article>
+        </section>
 
-        <article className="panel">
-          <div className="panel-head">
-            <span className="kicker">Shortcuts</span>
-            <h2>Quick Actions</h2>
+        <aside className='command-dock'>
+          <div className='section-head'>
+            <div>
+              <span className='label'>Runbook</span>
+              <h2>Quick Actions</h2>
+            </div>
           </div>
-          <div className="shortcut-list">
+          <div className='workflow-list'>
             {shortcutWorkflows.map((workflow) => (
-              <button key={workflow} className="shortcut" onClick={() => triggerWorkflow(workflow)}>{workflow}</button>
+              <button key={workflow} type='button' className='workflow' onClick={() => triggerWorkflow(workflow)}>
+                {workflow}
+              </button>
             ))}
           </div>
-          <div className="runbook">
-            <span className="runbook-label">Runbook Focus</span>
-            <strong>Shift handoff</strong>
-            <p>Keep approvals, policy exceptions, and launch blockers visible in one surface so no handoff drops context.</p>
+          <div className='handoff'>
+            <span className='label'>Shift handoff</span>
+            <strong>Keep blockers visible</strong>
+            <p>Policy exceptions, billing incidents, and launch freezes should stay in the same field of view as the queue they affect.</p>
           </div>
-        </article>
+        </aside>
 
-        <article className="panel">
-          <div className="panel-head">
-            <span className="kicker">Now</span>
-            <h2>Live Activity</h2>
+        <section className='activity-panel'>
+          <div className='section-head'>
+            <div>
+              <span className='label'>Event log</span>
+              <h2>Live Activity</h2>
+            </div>
           </div>
-          <div className="activity-list">
+          <ol className='activity-list'>
             {activity.map((entry) => (
-              <div key={entry} className="activity-item">{entry}</div>
+              <li key={entry}>{entry}</li>
             ))}
-          </div>
-        </article>
+          </ol>
+        </section>
       </section>
     </main>
   );
@@ -5486,44 +7884,277 @@ export default function App() {
 
 \`\`\`css title="src/styles.css"
 :root {
-  color: #eef4ff;
-  background: #06101c;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: #edf5ff;
+  background: #071018;
+  font-family: 'Cascadia Mono', 'Consolas', 'Courier New', ui-monospace, monospace;
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #183861 0%, #07111b 56%, #04070d 100%); }
-button { font: inherit; }
-.shell { max-width: 1320px; margin: 0 auto; padding: 44px 18px 64px; }
-.hero { margin-bottom: 20px; padding: 28px; border-radius: 28px; border: 1px solid rgba(148, 163, 184, 0.15); background: rgba(7, 15, 30, 0.78); backdrop-filter: blur(18px); }
-.eyebrow, .kicker { margin: 0 0 10px; color: #7dd3fc; text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.75rem; }
-.hero-copy { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 18px; align-items: start; }
-h1 { margin: 0; font-size: clamp(2.6rem, 6vw, 4.8rem); line-height: 0.94; }
-.lede { max-width: 62ch; color: #bfd1e7; line-height: 1.65; }
-.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.stat { padding: 16px; border-radius: 20px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(148, 163, 184, 0.12); }
-.stat span { display: block; font-size: 0.78rem; color: #9fb6d2; text-transform: uppercase; letter-spacing: 0.1em; }
-.stat strong { display: block; margin-top: 8px; font-size: 1.6rem; }
-.layout { display: grid; grid-template-columns: 1.1fr 0.9fr 1fr; gap: 18px; align-items: start; }
-.panel { padding: 22px; border-radius: 26px; background: rgba(8, 15, 28, 0.76); border: 1px solid rgba(148, 163, 184, 0.14); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24); }
-.panel-head h2 { margin: 0 0 14px; font-size: 1.2rem; }
-.queue-list, .shortcut-list, .activity-list { display: grid; gap: 14px; }
-.queue-card, .runbook, .activity-item { border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.12); background: rgba(255, 255, 255, 0.03); padding: 16px; }
-.queue-meta { display: flex; justify-content: space-between; gap: 12px; color: #9fb6d2; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; }
-.queue-card h3 { margin: 12px 0 8px; font-size: 1.05rem; }
-.queue-card p, .runbook p, .activity-item { margin: 0; color: #c5d2e4; line-height: 1.6; }
-.queue-card button, .shortcut { border: 0; border-radius: 999px; padding: 11px 16px; background: linear-gradient(135deg, #7c3aed, #2563eb); color: white; cursor: pointer; font-weight: 600; }
-.shortcut-list { margin-bottom: 14px; }
-.runbook-label { display: inline-block; margin-bottom: 8px; color: #fbbf24; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.12em; }
-.runbook strong { display: block; margin-bottom: 8px; font-size: 1rem; }
-@media (max-width: 1120px) { .hero-copy, .layout { grid-template-columns: 1fr; } .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .shell { padding: 24px 12px 40px; } .hero, .panel { border-radius: 22px; } .stats { grid-template-columns: 1fr; } }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 18% 10%, rgba(68, 145, 255, 0.18), transparent 24%),
+    radial-gradient(circle at 88% 14%, rgba(14, 201, 182, 0.13), transparent 20%),
+    linear-gradient(180deg, #071018 0%, #08131d 52%, #050a10 100%);
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.22;
+  background-image:
+    linear-gradient(rgba(130, 178, 235, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(130, 178, 235, 0.06) 1px, transparent 1px);
+  background-size: 72px 72px, 72px 72px;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+.ops-shell {
+  position: relative;
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 1.75rem;
+}
+
+.ops-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(20rem, 0.82fr);
+  gap: 1.2rem;
+  align-items: stretch;
+  margin-bottom: 1.2rem;
+}
+
+.eyebrow,
+.label,
+.queue-badge,
+.priority,
+.queue-head,
+.queue-row small {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.72rem;
+}
+
+.eyebrow,
+.label,
+.queue-head {
+  color: #8dbaf0;
+}
+
+h1,
+h2,
+strong {
+  margin: 0;
+  font-family: 'Bahnschrift', 'Segoe UI Variable Display', sans-serif;
+  font-weight: 700;
+}
+
+h1 {
+  max-width: 10ch;
+  font-size: clamp(3rem, 6vw, 5.6rem);
+  line-height: 0.9;
+  letter-spacing: -0.05em;
+}
+
+.lede {
+  max-width: 58ch;
+  margin-top: 1rem;
+  color: #a8bfd8;
+  line-height: 1.78;
+  font-size: 1rem;
+}
+
+.status-ribbon {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+  align-self: end;
+}
+
+.status-ribbon > div {
+  padding: 1.15rem;
+  border-radius: 24px;
+  border: 1px solid rgba(134, 184, 244, 0.14);
+  background: linear-gradient(180deg, rgba(10, 18, 27, 0.94), rgba(9, 16, 24, 0.82));
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.28);
+}
+
+.status-ribbon span {
+  color: #86a4c7;
+}
+
+.status-ribbon strong {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 1.8rem;
+}
+
+.ops-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.42fr) minmax(19rem, 0.78fr);
+  gap: 1.15rem;
+}
+
+.queue-panel,
+.command-dock,
+.activity-panel {
+  border: 1px solid rgba(134, 184, 244, 0.13);
+  border-radius: 28px;
+  background: linear-gradient(180deg, rgba(8, 14, 21, 0.92), rgba(7, 12, 18, 0.88));
+  padding: 1.15rem;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.3);
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+.section-head h2 {
+  margin-top: 0.3rem;
+  font-size: 1.55rem;
+}
+
+.queue-badge {
+  color: #ffcf5d;
+}
+
+.queue-table,
+.workflow-list,
+.activity-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.queue-row {
+  display: grid;
+  grid-template-columns: 0.95fr 1.8fr 0.7fr 0.5fr 0.95fr;
+  gap: 0.9rem;
+  align-items: center;
+  padding: 1rem 1.05rem;
+  border: 1px solid rgba(134, 184, 244, 0.08);
+  border-radius: 22px;
+  background: rgba(10, 18, 27, 0.82);
+}
+
+.queue-head {
+  background: rgba(15, 24, 35, 0.92);
+}
+
+.queue-row strong {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.priority {
+  color: #7fd1ff;
+}
+
+.priority.urgent {
+  color: #ff8b5c;
+}
+
+.queue-row button,
+.workflow {
+  border: 1px solid rgba(134, 184, 244, 0.16);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(74, 120, 215, 0.18), rgba(20, 199, 195, 0.12));
+  color: #edf5ff;
+  padding: 0.85rem 0.95rem;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.queue-row button:hover,
+.workflow:hover {
+  transform: translateY(-1px);
+  border-color: rgba(134, 184, 244, 0.3);
+  background: linear-gradient(135deg, rgba(74, 120, 215, 0.28), rgba(20, 199, 195, 0.18));
+}
+
+.command-dock {
+  display: grid;
+  gap: 1rem;
+  align-self: start;
+}
+
+.workflow {
+  text-align: left;
+}
+
+.handoff {
+  padding: 1rem;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 207, 93, 0.24);
+  background: linear-gradient(180deg, rgba(255, 207, 93, 0.08), rgba(255, 207, 93, 0.03));
+}
+
+.handoff p,
+.activity-list li {
+  margin: 0.65rem 0 0;
+  color: #acc0d8;
+  line-height: 1.7;
+}
+
+.activity-panel {
+  grid-column: 1 / -1;
+}
+
+.activity-list {
+  list-style: none;
+  padding: 0;
+  counter-reset: activity;
+}
+
+.activity-list li {
+  position: relative;
+  padding: 1rem 1rem 1rem 4rem;
+  border: 1px solid rgba(134, 184, 244, 0.08);
+  border-radius: 20px;
+  background: rgba(9, 17, 26, 0.78);
+}
+
+.activity-list li::before {
+  counter-increment: activity;
+  content: counter(activity, decimal-leading-zero);
+  position: absolute;
+  left: 1rem;
+  top: 1rem;
+  color: #7fa8d9;
+}
+
+@media (max-width: 1080px) {
+  .ops-header,
+  .ops-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .ops-shell {
+    padding: 1rem;
+  }
+
+  .status-ribbon,
+  .queue-row {
+    grid-template-columns: 1fr;
+  }
+}
 \`\`\``;
   }
 
   private generateBuilderSaaSWorkspaceApp(desc: string): string {
-    return `\`\`\`json title="package.json"
-${JSON.stringify({
+    const pkg = JSON.stringify({
       name: 'saas-control-center',
       private: true,
       version: '0.0.0',
@@ -5531,30 +8162,33 @@ ${JSON.stringify({
       scripts: {
         dev: 'vite',
         build: 'vite build',
-        preview: 'vite preview'
+        preview: 'vite preview',
       },
       dependencies: {
         react: '^18.3.1',
-        'react-dom': '^18.3.1'
+        'react-dom': '^18.3.1',
       },
       devDependencies: {
         '@vitejs/plugin-react': '^4.3.1',
-        vite: '^5.4.10'
-      }
-    }, null, 2)}
+        vite: '^5.4.10',
+      },
+    }, null, 2);
+
+    return `\`\`\`json title="package.json"
+${pkg}
 \`\`\`
 
 \`\`\`html title="index.html"
 <!doctype html>
-<html lang="en">
+<html lang='en'>
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset='UTF-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
     <title>SaaS Control Center</title>
-    <script type="module" src="/src/main.jsx"></script>
+    <script type='module' src='/src/main.jsx'></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id='root'></div>
   </body>
 </html>
 \`\`\`
@@ -5574,6 +8208,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 
 \`\`\`jsx title="src/App.jsx"
 import React, { useState } from 'react';
+
+const promptLabel = ${JSON.stringify(desc)};
 
 const billingCards = [
   { label: 'MRR', value: '$48.2k', note: '+9% vs last month' },
@@ -5598,6 +8234,8 @@ const initialMessages = [
   { id: 2, author: 'Jon', text: 'Auth changes are staged and ready after the audit review.' },
 ];
 
+const navItems = ['Overview', 'Billing', 'Access', 'Exports'];
+
 export default function App() {
   const [messages, setMessages] = useState(initialMessages);
   const [draft, setDraft] = useState('');
@@ -5611,426 +8249,871 @@ export default function App() {
   }
 
   return (
-    <main className="shell">
-      <section className="hero">
-        <p className="eyebrow">${desc}</p>
-        <div className="hero-copy">
-          <div>
-            <h1>SaaS Control Center</h1>
-            <p className="lede">A premium workspace shell with billing, access controls, audit visibility, and an embedded team chat instead of a generic placeholder app.</p>
-          </div>
-          <div className="stats">
-            {billingCards.map((card) => (
-              <div key={card.label} className="stat">
-                <span>{card.label}</span>
-                <strong>{card.value}</strong>
-                <em>{card.note}</em>
-              </div>
-            ))}
-          </div>
+    <div className='saas-shell'>
+      <aside className='saas-nav'>
+        <div>
+          <p className='eyebrow'>{promptLabel}</p>
+          <h1>SaaS Control Center</h1>
         </div>
-      </section>
+        <nav>
+          {navItems.map((item, index) => (
+            <button key={item} type='button' className={index === 0 ? 'nav-item active' : 'nav-item'}>{item}</button>
+          ))}
+        </nav>
+        <div className='nav-note'>
+          <span>Workspace status</span>
+          <strong>Growth plan</strong>
+          <p>Audit, billing, and team visibility are kept in one bright workspace instead of four anonymous dark tiles.</p>
+        </div>
+      </aside>
 
-      <section className="layout">
-        <article className="panel">
-          <div className="panel-head">
-            <span className="kicker">Billing</span>
-            <h2>Revenue and plan health</h2>
+      <main className='workspace'>
+        <header className='workspace-header'>
+          <div>
+            <p className='section-label'>Operator view</p>
+            <h2>Revenue, seats, and controls in one surface</h2>
           </div>
-          <div className="billing-list">
-            {billingCards.map((card) => (
-              <div key={card.label} className="billing-card">
-                <strong>{card.label}</strong>
-                <span>{card.value}</span>
-                <p>{card.note}</p>
+          <button type='button' className='invite-button'>Invite member</button>
+        </header>
+
+        <section className='metric-band'>
+          {billingCards.map((card) => (
+            <article key={card.label} className='metric-card'>
+              <span>{card.label}</span>
+              <strong>{card.value}</strong>
+              <p>{card.note}</p>
+            </article>
+          ))}
+        </section>
+
+        <section className='content-grid'>
+          <article className='surface billing-surface'>
+            <div className='surface-head'>
+              <div>
+                <span className='section-label'>Billing</span>
+                <h3>Revenue and plan health</h3>
               </div>
-            ))}
-          </div>
-        </article>
+            </div>
+            <div className='billing-bars'>
+              {billingCards.map((card, index) => (
+                <div key={card.label} className='bar-row'>
+                  <div>
+                    <strong>{card.label}</strong>
+                    <p>{card.note}</p>
+                  </div>
+                  <div className='bar-track'>
+                    <div className='bar-fill' style={{ width: (72 - index * 18) + '%' }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </article>
 
-        <article className="panel">
-          <div className="panel-head">
-            <span className="kicker">Access</span>
-            <h2>Auth and team settings</h2>
-          </div>
-          <div className="member-list">
-            {members.map((member) => (
-              <div key={member.name} className="member-card">
-                <strong>{member.name}</strong>
-                <span>{member.role}</span>
-                <p>{member.status}</p>
+          <article className='surface team-surface'>
+            <div className='surface-head'>
+              <div>
+                <span className='section-label'>Access</span>
+                <h3>Team controls</h3>
               </div>
-            ))}
-          </div>
-        </article>
+            </div>
+            <div className='member-list'>
+              {members.map((member) => (
+                <div key={member.name} className='member-row'>
+                  <div>
+                    <strong>{member.name}</strong>
+                    <p>{member.role}</p>
+                  </div>
+                  <span>{member.status}</span>
+                </div>
+              ))}
+            </div>
+          </article>
 
-        <article className="panel">
-          <div className="panel-head">
-            <span className="kicker">Audit</span>
-            <h2>Audit Log</h2>
-          </div>
-          <div className="audit-list">
-            {auditLog.map((entry) => (
-              <div key={entry} className="audit-item">{entry}</div>
-            ))}
-          </div>
-        </article>
-
-        <article className="panel chat-panel">
-          <div className="panel-head">
-            <span className="kicker">Workspace</span>
-            <h2>Workspace Chat</h2>
-          </div>
-          <div className="chat-list">
-            {messages.map((message) => (
-              <div key={message.id} className="chat-item">
-                <strong>{message.author}</strong>
-                <p>{message.text}</p>
+          <article className='surface audit-surface'>
+            <div className='surface-head'>
+              <div>
+                <span className='section-label'>Audit</span>
+                <h3>Audit Log</h3>
               </div>
-            ))}
-          </div>
-          <form onSubmit={sendMessage} className="chat-form">
-            <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Share a billing, auth, or support update" />
-            <button type="submit">Send update</button>
-          </form>
-        </article>
-      </section>
-    </main>
+            </div>
+            <div className='audit-list'>
+              {auditLog.map((entry) => (
+                <div key={entry} className='audit-item'>{entry}</div>
+              ))}
+            </div>
+          </article>
+
+          <article className='surface chat-surface'>
+            <div className='surface-head'>
+              <div>
+                <span className='section-label'>Workspace</span>
+                <h3>Workspace Chat</h3>
+              </div>
+            </div>
+            <div className='chat-list'>
+              {messages.map((message) => (
+                <div key={message.id} className='chat-item'>
+                  <strong>{message.author}</strong>
+                  <p>{message.text}</p>
+                </div>
+              ))}
+            </div>
+            <form onSubmit={sendMessage} className='chat-form'>
+              <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder='Share a billing, auth, or support update' />
+              <button type='submit'>Send update</button>
+            </form>
+          </article>
+        </section>
+      </main>
+    </div>
   );
 }
 \`\`\`
 
 \`\`\`css title="src/styles.css"
 :root {
-  color: #eef4ff;
-  background: #06101c;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: #12223b;
+  background: #eef3fa;
+  font-family: 'Segoe UI Variable Text', 'Aptos', sans-serif;
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #19395f 0%, #07101b 55%, #04070d 100%); }
-button, input { font: inherit; }
-.shell { max-width: 1340px; margin: 0 auto; padding: 44px 18px 64px; }
-.hero { margin-bottom: 20px; padding: 28px; border-radius: 28px; border: 1px solid rgba(148, 163, 184, 0.15); background: rgba(7, 15, 30, 0.78); backdrop-filter: blur(18px); }
-.eyebrow, .kicker { margin: 0 0 10px; color: #7dd3fc; text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.75rem; }
-.hero-copy { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 18px; align-items: start; }
-h1 { margin: 0; font-size: clamp(2.6rem, 6vw, 4.8rem); line-height: 0.94; }
-.lede { max-width: 62ch; color: #bfd1e7; line-height: 1.65; }
-.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.stat { padding: 16px; border-radius: 20px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(148, 163, 184, 0.12); }
-.stat span, .billing-card strong { display: block; font-size: 0.78rem; color: #9fb6d2; text-transform: uppercase; letter-spacing: 0.1em; }
-.stat strong { display: block; margin-top: 8px; font-size: 1.6rem; }
-.stat em { display: block; margin-top: 8px; color: #c5d2e4; font-style: normal; font-size: 0.92rem; }
-.layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
-.panel { padding: 22px; border-radius: 26px; background: rgba(8, 15, 28, 0.76); border: 1px solid rgba(148, 163, 184, 0.14); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24); }
-.panel-head h2 { margin: 0 0 14px; font-size: 1.2rem; }
-.billing-list, .member-list, .audit-list, .chat-list { display: grid; gap: 14px; }
-.billing-card, .member-card, .audit-item, .chat-item { border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.12); background: rgba(255, 255, 255, 0.03); padding: 16px; }
-.billing-card span, .member-card span { display: block; margin: 8px 0 6px; font-size: 1.2rem; font-weight: 700; }
-.billing-card p, .member-card p, .audit-item, .chat-item p { margin: 0; color: #c5d2e4; line-height: 1.6; }
-.member-card strong, .chat-item strong { display: block; margin-bottom: 6px; }
-.chat-panel { display: grid; gap: 14px; }
-.chat-form { display: grid; grid-template-columns: 1fr auto; gap: 12px; }
-input { width: 100%; border: 1px solid rgba(148, 163, 184, 0.18); background: rgba(15, 23, 42, 0.74); color: #f7f8fc; border-radius: 18px; padding: 14px 16px; }
-button { border: 0; border-radius: 999px; padding: 12px 18px; background: linear-gradient(135deg, #7c3aed, #2563eb); color: white; cursor: pointer; font-weight: 600; }
-@media (max-width: 1120px) { .hero-copy, .layout { grid-template-columns: 1fr; } .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .shell { padding: 24px 12px 40px; } .hero, .panel { border-radius: 22px; } .stats, .chat-form { grid-template-columns: 1fr; } }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 18% 10%, rgba(83, 123, 255, 0.14), transparent 24%),
+    radial-gradient(circle at 88% 12%, rgba(33, 196, 184, 0.12), transparent 18%),
+    linear-gradient(180deg, #f7f9fd 0%, #edf2f8 50%, #e7eef6 100%);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.saas-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 19rem minmax(0, 1fr);
+}
+
+.saas-nav {
+  padding: 1.65rem;
+  border-right: 1px solid rgba(18, 34, 59, 0.08);
+  background:
+    radial-gradient(circle at top, rgba(84, 120, 255, 0.22), transparent 28%),
+    linear-gradient(180deg, #122240 0%, #0f1b31 100%);
+  color: #f1f6ff;
+}
+
+.eyebrow,
+.section-label,
+.metric-card span,
+.nav-note span {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.17em;
+  font-size: 0.72rem;
+  color: #9cb6dc;
+}
+
+.saas-nav h1 {
+  margin: 0.45rem 0 0;
+  font-family: 'Segoe UI Variable Display', 'Aptos Display', sans-serif;
+  font-size: clamp(2.4rem, 4vw, 3.9rem);
+  line-height: 0.94;
+  letter-spacing: -0.05em;
+}
+
+.saas-nav nav {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1.7rem 0;
+}
+
+.nav-item {
+  border: 1px solid rgba(174, 197, 240, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e6eefb;
+  text-align: left;
+  padding: 0.95rem 1rem;
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.nav-item:hover {
+  transform: translateX(2px);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.nav-item.active {
+  border-color: rgba(107, 146, 255, 0.38);
+  background: linear-gradient(135deg, rgba(94, 126, 255, 0.22), rgba(27, 203, 193, 0.12));
+}
+
+.nav-note {
+  padding: 1.1rem;
+  border: 1px solid rgba(174, 197, 240, 0.12);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.nav-note strong,
+.workspace-header h2,
+.surface h3,
+.metric-card strong,
+.member-row strong,
+.chat-item strong {
+  display: block;
+  margin-top: 0.45rem;
+}
+
+.nav-note strong,
+.workspace-header h2,
+.surface h3,
+.metric-card strong {
+  font-family: 'Segoe UI Variable Display', 'Aptos Display', sans-serif;
+}
+
+.nav-note p,
+.metric-card p,
+.bar-row p,
+.member-row p,
+.audit-item,
+.chat-item p {
+  margin: 0.48rem 0 0;
+  color: #5d6e86;
+  line-height: 1.65;
+}
+
+.nav-note p {
+  color: #bbcae6;
+}
+
+.workspace {
+  padding: 1.65rem;
+}
+
+.workspace-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  padding: 1.4rem;
+  border-radius: 30px;
+  background: linear-gradient(135deg, #1a3e7e, #2456aa 52%, #1aa8b8 100%);
+  color: #f6fbff;
+  box-shadow: 0 28px 48px rgba(34, 68, 128, 0.18);
+}
+
+.workspace-header .section-label {
+  color: rgba(237, 247, 255, 0.72);
+}
+
+.workspace-header h2 {
+  margin: 0.45rem 0 0;
+  font-size: clamp(2rem, 3vw, 3rem);
+  line-height: 1;
+}
+
+.invite-button,
+.chat-form button {
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #0f1b31, #183152);
+  color: #f7fbff;
+  padding: 0.9rem 1.1rem;
+  box-shadow: 0 16px 30px rgba(10, 21, 39, 0.16);
+}
+
+.metric-band,
+.content-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.metric-band {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-card,
+.surface {
+  padding: 1.1rem;
+  border-radius: 28px;
+  border: 1px solid rgba(18, 34, 59, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 22px 40px rgba(39, 70, 120, 0.08);
+}
+
+.metric-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 4px;
+  background: linear-gradient(90deg, #315eff, #28c7be);
+}
+
+.metric-card strong {
+  font-size: 1.8rem;
+  color: #12223b;
+}
+
+.content-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.surface-head {
+  margin-bottom: 1rem;
+}
+
+.surface h3 {
+  margin: 0.35rem 0 0;
+  font-size: 1.35rem;
+  color: #12223b;
+}
+
+.billing-bars,
+.member-list,
+.audit-list,
+.chat-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.bar-row,
+.member-row,
+.audit-item,
+.chat-item {
+  padding: 1rem;
+  border: 1px solid rgba(18, 34, 59, 0.08);
+  border-radius: 22px;
+  background: linear-gradient(180deg, #ffffff, #f7fafe);
+}
+
+.bar-track {
+  margin-top: 0.75rem;
+  height: 0.62rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(18, 34, 59, 0.08);
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #315eff, #28c7be);
+}
+
+.member-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.member-row span {
+  align-self: center;
+  color: #315eff;
+}
+
+.chat-item {
+  background: linear-gradient(180deg, rgba(239, 245, 255, 0.98), rgba(255, 255, 255, 0.98));
+}
+
+.chat-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.75rem;
+  margin-top: 0.95rem;
+}
+
+input {
+  width: 100%;
+  border: 1px solid rgba(18, 34, 59, 0.12);
+  border-radius: 18px;
+  background: #ffffff;
+  color: #172132;
+  padding: 0.9rem 1rem;
+}
+
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid rgba(49, 94, 255, 0.38);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1100px) {
+  .saas-shell,
+  .metric-band,
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .saas-nav {
+    border-right: 0;
+    border-bottom: 1px solid rgba(18, 34, 59, 0.08);
+  }
+}
+
+@media (max-width: 720px) {
+  .workspace,
+  .saas-nav {
+    padding: 1rem;
+  }
+
+  .workspace-header,
+  .chat-form,
+  .member-row {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+}
 \`\`\``;
   }
 
-  private generateBuilderSharedShoppingApp(_desc: string): string {
-    return "```json title=\"package.json\"\n" +
-      JSON.stringify({
-        name: 'shared-shopping-app',
-        private: true,
-        version: '0.0.0',
-        type: 'module',
-        scripts: {
-          dev: 'vite',
-          build: 'vite build',
-          preview: 'vite preview'
-        },
-        dependencies: {
-          react: '^18.3.1',
-          'react-dom': '^18.3.1',
-          'framer-motion': '^11.11.17'
-        },
-        devDependencies: {
-          '@vitejs/plugin-react': '^4.3.1',
-          '@tailwindcss/vite': '^4.2.2',
-          tailwindcss: '^4.2.2',
-          vite: '^5.4.10'
-        }
-      }, null, 2) +
-      "\n```\n\n" +
-      "```html title=\"index.html\"\n" +
-      "<!doctype html>\n" +
-      "<html lang=\"en\">\n" +
-      "  <head>\n" +
-      "    <meta charset=\"UTF-8\" />\n" +
-      "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n" +
-      "    <title>Shared Shopping List</title>\n" +
-      "    <script type=\"module\" src=\"/src/main.jsx\"></script>\n" +
-      "  </head>\n" +
-      "  <body>\n" +
-      "    <div id=\"root\"></div>\n" +
-      "  </body>\n" +
-      "</html>\n" +
-      "```\n\n" +
-      "```js title=\"vite.config.js\"\n" +
-      "import { defineConfig } from 'vite';\n" +
-      "import react from '@vitejs/plugin-react';\n" +
-      "import tailwindcss from '@tailwindcss/vite';\n\n" +
-      "export default defineConfig({\n" +
-      "  plugins: [react(), tailwindcss()],\n" +
-      "});\n" +
-      "```\n\n" +
-      "```jsx title=\"src/main.jsx\"\n" +
-      "import React from 'react';\n" +
-      "import ReactDOM from 'react-dom/client';\n" +
-      "import App from './App.jsx';\n" +
-      "import './styles.css';\n\n" +
-      "ReactDOM.createRoot(document.getElementById('root')).render(\n" +
-      "  <React.StrictMode>\n" +
-      "    <App />\n" +
-      "  </React.StrictMode>,\n" +
-      ");\n" +
-      "```\n\n" +
-      "```jsx title=\"src/App.jsx\"\n" +
-      "import { useMemo, useState } from 'react';\n" +
-      "import { motion } from 'framer-motion';\n\n" +
-      "const members = [\n" +
-      "  { name: 'Maya', role: 'Meal prep', badge: 'On store run' },\n" +
-      "  { name: 'Jon', role: 'Restock', badge: 'At home' },\n" +
-      "  { name: 'Ari', role: 'Budget', badge: 'Reviewing totals' },\n" +
-      "];\n\n" +
-      "const starterItems = [\n" +
-      "  { id: 1, name: 'Avocados', aisle: 'Produce', owner: 'Maya', priority: 'Need soon', quantity: '4' },\n" +
-      "  { id: 2, name: 'Sparkling water', aisle: 'Drinks', owner: 'Jon', priority: 'Weekly', quantity: '12' },\n" +
-      "  { id: 3, name: 'Chili crisp', aisle: 'Pantry', owner: 'Ari', priority: 'Refill', quantity: '1' },\n" +
-      "  { id: 4, name: 'Baby spinach', aisle: 'Produce', owner: 'Maya', priority: 'Tonight', quantity: '2 bags' },\n" +
-      "];\n\n" +
-      "const activityFeed = [\n" +
-      "  'Maya moved avocados to Need soon before the evening run.',\n" +
-      "  'Jon said sparkling water is still on the weekly stock list.',\n" +
-      "  'Ari wants chili crisp kept under the pantry budget this week.',\n" +
-      "];\n\n" +
-      "export default function App() {\n" +
-      "  const [items, setItems] = useState(starterItems);\n" +
-      "  const [draft, setDraft] = useState('');\n\n" +
-      "  const groupedItems = useMemo(() => items.reduce((acc, item) => {\n" +
-      "    acc[item.aisle] ??= [];\n" +
-      "    acc[item.aisle].push(item);\n" +
-      "    return acc;\n" +
-      "  }, {}), [items]);\n\n" +
-      "  function addItem(event) {\n" +
-      "    event.preventDefault();\n" +
-      "    const nextName = draft.trim();\n" +
-      "    if (!nextName) return;\n" +
-      "    setItems((current) => [{\n" +
-      "      id: current.length + 1,\n" +
-      "      name: nextName,\n" +
-      "      aisle: 'Produce',\n" +
-      "      owner: 'You',\n" +
-      "      priority: 'Need soon',\n" +
-      "      quantity: '1',\n" +
-      "    }, ...current]);\n" +
-      "    setDraft('');\n" +
-      "  }\n\n" +
-      "  return (\n" +
-      "    <main className=\"min-h-screen bg-slate-950 text-slate-100\">\n" +
-      "      <div className=\"mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-6 md:px-8\">\n" +
-      "        <motion.section\n" +
-      "          initial={{ opacity: 0, y: 18 }}\n" +
-      "          animate={{ opacity: 1, y: 0 }}\n" +
-      "          transition={{ duration: 0.35 }}\n" +
-      "          className=\"rounded-3xl border border-white/10 bg-white/5 p-5 shadow-2xl shadow-black/30 backdrop-blur\"\n" +
-      "        >\n" +
-      "          <div className=\"flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between\">\n" +
-      "            <div className=\"max-w-2xl\">\n" +
-      "              <p className=\"mb-2 text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300\">Household sync</p>\n" +
-      "              <h1 className=\"text-4xl font-semibold tracking-tight sm:text-5xl\">Shared Shopping List</h1>\n" +
-      "              <p className=\"mt-3 max-w-xl text-sm leading-6 text-slate-300 sm:text-base\">Useful at home, fast in the store, and social enough that everyone knows who added what and what still matters tonight.</p>\n" +
-      "            </div>\n" +
-      "            <form onSubmit={addItem} className=\"grid gap-3 rounded-2xl border border-white/10 bg-slate-950/70 p-3 sm:grid-cols-[1fr_auto]\">\n" +
-      "              <input\n" +
-      "                value={draft}\n" +
-      "                onChange={(event) => setDraft(event.target.value)}\n" +
-      "                placeholder=\"Quick-add milk, limes, detergent...\"\n" +
-      "                className=\"min-w-[16rem] rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none ring-0 placeholder:text-slate-500\"\n" +
-      "              />\n" +
-      "              <button className=\"rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300\">Quick-add item</button>\n" +
-      "            </form>\n" +
-      "          </div>\n" +
-      "        </motion.section>\n\n" +
-      "        <div className=\"grid gap-4 lg:grid-cols-[1.05fr_1.35fr_1fr]\">\n" +
-      "          <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.06 }} className=\"rounded-3xl border border-white/10 bg-slate-900/80 p-5\">\n" +
-      "            <div className=\"mb-4 flex items-center justify-between\">\n" +
-      "              <h2 className=\"text-lg font-semibold\">Household</h2>\n" +
-      "              <span className=\"rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300\">3 active</span>\n" +
-      "            </div>\n" +
-      "            <div className=\"space-y-3\">\n" +
-      "              {members.map((member) => (\n" +
-      "                <div key={member.name} className=\"rounded-2xl border border-white/10 bg-white/5 p-4\">\n" +
-      "                  <div className=\"flex items-center justify-between gap-3\">\n" +
-      "                    <div>\n" +
-      "                      <div className=\"font-medium text-slate-100\">{member.name}</div>\n" +
-      "                      <div className=\"text-sm text-slate-400\">{member.role}</div>\n" +
-      "                    </div>\n" +
-      "                    <span className=\"rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300\">{member.badge}</span>\n" +
-      "                  </div>\n" +
-      "                </div>\n" +
-      "              ))}\n" +
-      "            </div>\n" +
-      "          </motion.article>\n\n" +
-      "          <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }} className=\"rounded-3xl border border-white/10 bg-slate-900/80 p-5\">\n" +
-      "            <div className=\"mb-4 flex items-center justify-between\">\n" +
-      "              <h2 className=\"text-lg font-semibold\">Shared Shopping List</h2>\n" +
-      "              <span className=\"rounded-full bg-cyan-400/15 px-3 py-1 text-xs font-medium text-cyan-300\">{items.length} live items</span>\n" +
-      "            </div>\n" +
-      "            <div className=\"space-y-4\">\n" +
-      "              {Object.entries(groupedItems).map(([aisle, aisleItems]) => (\n" +
-      "                <section key={aisle} className=\"rounded-2xl border border-white/10 bg-white/5 p-4\">\n" +
-      "                  <div className=\"mb-3 flex items-center justify-between\">\n" +
-      "                    <h3 className=\"text-sm font-semibold uppercase tracking-[0.18em] text-slate-400\">{aisle}</h3>\n" +
-      "                    <span className=\"text-xs text-slate-500\">Aisle grouping</span>\n" +
-      "                  </div>\n" +
-      "                  <div className=\"space-y-3\">\n" +
-      "                    {aisleItems.map((item) => (\n" +
-      "                      <div key={item.id} className=\"flex items-center justify-between gap-4 rounded-2xl bg-slate-950/70 px-3 py-3\">\n" +
-      "                        <div>\n" +
-      "                          <div className=\"font-medium text-slate-100\">{item.name}</div>\n" +
-      "                          <div className=\"text-xs text-slate-400\">Added by {item.owner} · {item.priority}</div>\n" +
-      "                        </div>\n" +
-      "                        <span className=\"rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-200\">{item.quantity}</span>\n" +
-      "                      </div>\n" +
-      "                    ))}\n" +
-      "                  </div>\n" +
-      "                </section>\n" +
-      "              ))}\n" +
-      "            </div>\n" +
-      "          </motion.article>\n\n" +
-      "          <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} className=\"rounded-3xl border border-white/10 bg-slate-900/80 p-5\">\n" +
-      "            <div className=\"mb-4 flex items-center justify-between\">\n" +
-      "              <h2 className=\"text-lg font-semibold\">Activity Chat</h2>\n" +
-      "              <span className=\"rounded-full bg-amber-400/15 px-3 py-1 text-xs font-medium text-amber-300\">Live household context</span>\n" +
-      "            </div>\n" +
-      "            <div className=\"space-y-3\">\n" +
-      "              {activityFeed.map((entry) => (\n" +
-      "                <div key={entry} className=\"rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300\">{entry}</div>\n" +
-      "              ))}\n" +
-      "            </div>\n" +
-      "          </motion.article>\n" +
-      "        </div>\n" +
-      "      </div>\n" +
-      "    </main>\n" +
-      "  );\n" +
-      "}\n" +
-      "```\n\n" +
-      "```css title=\"src/styles.css\"\n" +
-      "@import \"tailwindcss\";\n\n" +
-      ":root {\n" +
-      "  color-scheme: dark;\n" +
-      "  font-family: Inter, ui-sans-serif, system-ui, sans-serif;\n" +
-      "}\n\n" +
-      "body {\n" +
-      "  margin: 0;\n" +
-      "  min-height: 100vh;\n" +
-      "  background: radial-gradient(circle at top, #123354 0%, #020617 55%, #02030a 100%);\n" +
-      "}\n" +
-      "```";
+  private generateBuilderSharedShoppingApp(desc: string): string {
+    const pkg = JSON.stringify({
+      name: 'shared-shopping-app',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: {
+        dev: 'vite',
+        build: 'vite build',
+        preview: 'vite preview',
+      },
+      dependencies: {
+        react: '^18.3.1',
+        'react-dom': '^18.3.1',
+        'framer-motion': '^11.11.17',
+      },
+      devDependencies: {
+        '@types/react': '^18.3.1',
+        '@types/react-dom': '^18.3.1',
+        '@vitejs/plugin-react': '^4.3.1',
+        '@tailwindcss/vite': '^4.2.2',
+        tailwindcss: '^4.2.2',
+        typescript: '^5.5.3',
+        vite: '^5.4.10',
+      },
+    }, null, 2);
+
+    return `\`\`\`json title="package.json"
+${pkg}
+\`\`\`
+
+\`\`\`html title="index.html"
+<!doctype html>
+<html lang='en'>
+  <head>
+    <meta charset='UTF-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+    <title>Shared Shopping List</title>
+    <script type='module' src='/src/main.jsx'></script>
+  </head>
+  <body>
+    <div id='root'></div>
+  </body>
+</html>
+\`\`\`
+
+\`\`\`ts title="vite.config.ts"
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+});
+\`\`\`
+
+\`\`\`tsx title="src/main.tsx"
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App.tsx';
+import './styles.css';
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+\`\`\`
+
+\`\`\`tsx title="src/App.tsx"
+import type { FormEvent } from 'react';
+import { useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+
+const promptLabel = ${JSON.stringify(desc)};
+
+type Member = { name: string; role: string; badge: string };
+type ShoppingItem = { id: number; name: string; aisle: string; owner: string; priority: string; quantity: string };
+
+const members = [
+  { name: 'Maya', role: 'Meal prep', badge: 'On store run' },
+  { name: 'Jon', role: 'Restock', badge: 'At home' },
+  { name: 'Ari', role: 'Budget', badge: 'Reviewing totals' },
+] satisfies Member[];
+
+const starterItems = [
+  { id: 1, name: 'Avocados', aisle: 'Produce', owner: 'Maya', priority: 'Need soon', quantity: '4' },
+  { id: 2, name: 'Sparkling water', aisle: 'Drinks', owner: 'Jon', priority: 'Weekly', quantity: '12' },
+  { id: 3, name: 'Chili crisp', aisle: 'Pantry', owner: 'Ari', priority: 'Refill', quantity: '1' },
+  { id: 4, name: 'Baby spinach', aisle: 'Produce', owner: 'Maya', priority: 'Tonight', quantity: '2 bags' },
+] satisfies ShoppingItem[];
+
+const activityFeed = [
+  'Maya moved avocados to Need soon before the evening run.',
+  'Jon said sparkling water is still on the weekly stock list.',
+  'Ari wants chili crisp kept under the pantry budget this week.',
+];
+
+export default function App() {
+  const [items, setItems] = useState(starterItems);
+  const [draft, setDraft] = useState('');
+
+  const groupedItems = useMemo(() => items.reduce<Record<string, ShoppingItem[]>>((acc, item) => {
+    acc[item.aisle] ??= [];
+    acc[item.aisle].push(item);
+    return acc;
+  }, {}), [items]);
+
+  const storeRun = useMemo(() => Object.entries(groupedItems).map(([aisle, aisleItems]) => ({
+    aisle,
+    picks: aisleItems.map((item) => item.name).join(', '),
+  })), [groupedItems]);
+
+  function addItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextName = draft.trim();
+    if (!nextName) return;
+    setItems((current) => [{
+      id: current.length + 1,
+      name: nextName,
+      aisle: 'Produce',
+      owner: 'You',
+      priority: 'Need soon',
+      quantity: '1',
+    }, ...current]);
+    setDraft('');
+  }
+
+  return (
+    <main className='min-h-screen bg-[#0b1412] text-stone-100'>
+      <div className='mx-auto flex min-h-screen max-w-7xl flex-col gap-5 px-4 py-5 md:px-8'>
+        <motion.header initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className='grid gap-4 border border-white/10 bg-[#0f1b17] p-5 xl:grid-cols-[1.15fr_0.85fr]'>
+          <div>
+            <p className='text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-emerald-300'>{promptLabel}</p>
+            <h1 className='mt-2 text-4xl font-semibold tracking-tight text-stone-50 sm:text-5xl'>Shared Shopping List</h1>
+            <p className='mt-3 max-w-2xl text-sm leading-6 text-stone-300 sm:text-base'>Built for a real store run: household context on one side, aisle-first list in the middle, and a route-ready store plan that feels like a product instead of a dashboard.</p>
+          </div>
+
+          <form onSubmit={addItem} className='grid gap-3 border border-white/10 bg-[#09100d] p-4'>
+            <div>
+              <div className='text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-stone-400'>Quick add</div>
+              <div className='mt-1 text-lg font-medium text-stone-100'>Add the next item before it slips</div>
+            </div>
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder='Quick-add milk, limes, detergent...'
+              className='w-full border border-white/10 bg-[#111c18] px-4 py-3 text-sm text-stone-100 outline-none placeholder:text-stone-500'
+            />
+            <button className='bg-emerald-300 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-200'>Quick-add item</button>
+          </form>
+        </motion.header>
+
+        <div className='grid gap-4 xl:grid-cols-[1.35fr_0.9fr]'>
+          <section className='space-y-4'>
+            <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className='border border-white/10 bg-[#0f1b17] p-5'>
+              <div className='mb-4 flex items-center justify-between gap-3'>
+                <h2 className='text-lg font-semibold text-stone-50'>Household</h2>
+                <span className='text-xs uppercase tracking-[0.24em] text-emerald-300'>3 active</span>
+              </div>
+              <div className='divide-y divide-white/10'>
+                {members.map((member) => (
+                  <div key={member.name} className='flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0'>
+                    <div>
+                      <div className='font-medium text-stone-100'>{member.name}</div>
+                      <div className='text-sm text-stone-400'>{member.role}</div>
+                    </div>
+                    <span className='border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-200'>{member.badge}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.article>
+
+            <motion.section initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className='space-y-4'>
+              <div className='flex items-center justify-between gap-3'>
+                <h2 className='text-lg font-semibold text-stone-50'>Shared Shopping List</h2>
+                <span className='text-xs uppercase tracking-[0.24em] text-stone-400'>{items.length} live items</span>
+              </div>
+
+              {Object.entries(groupedItems).map(([aisle, aisleItems], index) => (
+                <motion.section key={aisle} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.12 + index * 0.05 }} className='border-l-4 border-emerald-300 bg-stone-50 p-4 text-stone-900 shadow-[0_18px_45px_rgba(0,0,0,0.22)]'>
+                  <div className='mb-3 flex items-center justify-between gap-3 border-b border-stone-200 pb-3'>
+                    <h3 className='text-sm font-semibold uppercase tracking-[0.24em] text-stone-500'>{aisle}</h3>
+                    <span className='text-xs text-stone-400'>Aisle grouping</span>
+                  </div>
+                  <div className='grid gap-3'>
+                    {aisleItems.map((item) => (
+                      <div key={item.id} className='grid gap-2 border-b border-stone-200 pb-3 last:border-b-0 last:pb-0 sm:grid-cols-[1fr_auto] sm:items-center'>
+                        <div>
+                          <div className='font-semibold text-stone-900'>{item.name}</div>
+                          <div className='text-xs uppercase tracking-[0.18em] text-stone-500'>Added by {item.owner} · {item.priority}</div>
+                        </div>
+                        <span className='text-sm font-medium text-stone-700'>{item.quantity}</span>
+                      </div>
+                    ))}
+                  </div>
+                </motion.section>
+              ))}
+            </motion.section>
+          </section>
+
+          <aside className='space-y-4'>
+            <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }} className='border border-white/10 bg-[#0f1b17] p-5'>
+              <div className='mb-4 flex items-center justify-between gap-3'>
+                <h2 className='text-lg font-semibold text-stone-50'>Activity Chat</h2>
+                <span className='text-xs uppercase tracking-[0.24em] text-amber-300'>Live context</span>
+              </div>
+              <div className='space-y-3'>
+                {activityFeed.map((entry) => (
+                  <div key={entry} className='border border-white/10 bg-[#111c18] p-4 text-sm leading-6 text-stone-300'>{entry}</div>
+                ))}
+              </div>
+            </motion.article>
+
+            <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} className='border border-emerald-300/20 bg-emerald-300/8 p-5'>
+              <div className='mb-3 flex items-center justify-between gap-3'>
+                <h2 className='text-lg font-semibold text-stone-50'>Store Run</h2>
+                <span className='text-xs uppercase tracking-[0.24em] text-emerald-200'>Route ready</span>
+              </div>
+              <div className='space-y-3'>
+                {storeRun.map((stop) => (
+                  <div key={stop.aisle} className='border border-white/10 bg-[#0e1714] p-4'>
+                    <div className='text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200'>{stop.aisle}</div>
+                    <div className='mt-2 text-sm leading-6 text-stone-200'>{stop.picks}</div>
+                  </div>
+                ))}
+              </div>
+            </motion.article>
+          </aside>
+        </div>
+      </div>
+    </main>
+  );
+}
+\`\`\`
+
+\`\`\`css title="src/styles.css"
+@import 'tailwindcss';
+
+:root {
+  color-scheme: dark;
+  font-family: 'Segoe UI Variable Text', 'Trebuchet MS', sans-serif;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(52, 211, 153, 0.18), transparent 30%),
+    linear-gradient(180deg, #09110f 0%, #0b1412 48%, #070d0b 100%);
+}
+\`\`\`
+
+\`\`\`json title="tsconfig.json"
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}
+\`\`\``;
   }
 
   private generateBuilderSharedShoppingUpgrade(_desc: string): string {
-    return "```jsx title=\"src/App.jsx\"\n" +
-      "import { useMemo, useState } from 'react';\n" +
-      "import { motion } from 'framer-motion';\n\n" +
-      "const members = [\n" +
-      "  { name: 'Maya', role: 'Meal prep', badge: 'On store run' },\n" +
-      "  { name: 'Jon', role: 'Restock', badge: 'At home' },\n" +
-      "  { name: 'Ari', role: 'Budget', badge: 'Reviewing totals' },\n" +
-      "];\n\n" +
-      "const starterItems = [\n" +
-      "  { id: 1, name: 'Avocados', aisle: 'Produce', owner: 'Maya', priority: 'Need soon', quantity: '4' },\n" +
-      "  { id: 2, name: 'Sparkling water', aisle: 'Drinks', owner: 'Jon', priority: 'Weekly', quantity: '12' },\n" +
-      "  { id: 3, name: 'Chili crisp', aisle: 'Pantry', owner: 'Ari', priority: 'Refill', quantity: '1' },\n" +
-      "  { id: 4, name: 'Baby spinach', aisle: 'Produce', owner: 'Maya', priority: 'Tonight', quantity: '2 bags' },\n" +
-      "];\n\n" +
-      "const activityFeed = [\n" +
-      "  'Maya moved avocados to Need soon before the evening run.',\n" +
-      "  'Jon said sparkling water is still on the weekly stock list.',\n" +
-      "  'Ari wants chili crisp kept under the pantry budget this week.',\n" +
-      "];\n\n" +
-      "const storeRun = [\n" +
-      "  { aisle: 'Produce', picks: 'Avocados, baby spinach, limes' },\n" +
-      "  { aisle: 'Drinks', picks: 'Sparkling water, oat milk' },\n" +
-      "  { aisle: 'Pantry', picks: 'Chili crisp, jasmine rice' },\n" +
-      "];\n\n" +
-      "export default function App() {\n" +
-      "  const [items, setItems] = useState(starterItems);\n" +
-      "  const [draft, setDraft] = useState('');\n\n" +
-      "  const groupedItems = useMemo(() => items.reduce((acc, item) => {\n" +
-      "    acc[item.aisle] ??= [];\n" +
-      "    acc[item.aisle].push(item);\n" +
-      "    return acc;\n" +
-      "  }, {}), [items]);\n\n" +
-      "  function addItem(event) {\n" +
-      "    event.preventDefault();\n" +
-      "    const nextName = draft.trim();\n" +
-      "    if (!nextName) return;\n" +
-      "    setItems((current) => [{\n" +
-      "      id: current.length + 1,\n" +
-      "      name: nextName,\n" +
-      "      aisle: 'Produce',\n" +
-      "      owner: 'You',\n" +
-      "      priority: 'Need soon',\n" +
-      "      quantity: '1',\n" +
-      "    }, ...current]);\n" +
-      "    setDraft('');\n" +
-      "  }\n\n" +
-      "  return (\n" +
-      "    <main className=\"min-h-screen bg-slate-950 text-slate-100\">\n" +
-      "      <div className=\"mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-4 py-6 md:px-8\">\n" +
-      "        <motion.section initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} className=\"rounded-3xl border border-white/10 bg-white/5 p-5 shadow-2xl shadow-black/30 backdrop-blur\">\n" +
-      "          <div className=\"flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between\">\n" +
-      "            <div className=\"max-w-2xl\">\n" +
-      "              <p className=\"mb-2 text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300\">Household sync</p>\n" +
-      "              <h1 className=\"text-4xl font-semibold tracking-tight sm:text-5xl\">Shared Shopping List</h1>\n" +
-      "              <p className=\"mt-3 max-w-xl text-sm leading-6 text-slate-300\">Useful at home, fast in the store, and social enough that everyone knows who added what and what still matters tonight.</p>\n" +
-      "            </div>\n" +
-      "            <form onSubmit={addItem} className=\"grid gap-3 rounded-2xl border border-white/10 bg-slate-950/70 p-3 sm:grid-cols-[1fr_auto]\">\n" +
-      "              <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder=\"Quick-add milk, limes, detergent...\" className=\"min-w-[16rem] rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-100 outline-none ring-0 placeholder:text-slate-500\" />\n" +
-      "              <button className=\"rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300\">Quick-add item</button>\n" +
-      "            </form>\n" +
-      "          </div>\n" +
-      "        </motion.section>\n\n" +
-      "        <div className=\"grid gap-4 xl:grid-cols-[1.05fr_1.3fr_1fr_0.95fr]\">\n" +
-      "          <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.06 }} className=\"rounded-3xl border border-white/10 bg-slate-900/80 p-5\">\n" +
-      "            <div className=\"mb-4 flex items-center justify-between\"><h2 className=\"text-lg font-semibold\">Household</h2><span className=\"rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300\">3 active</span></div>\n" +
-      "            <div className=\"space-y-3\">{members.map((member) => <div key={member.name} className=\"rounded-2xl border border-white/10 bg-white/5 p-4\"><div className=\"flex items-center justify-between gap-3\"><div><div className=\"font-medium text-slate-100\">{member.name}</div><div className=\"text-sm text-slate-400\">{member.role}</div></div><span className=\"rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300\">{member.badge}</span></div></div>)}</div>\n" +
-      "          </motion.article>\n\n" +
-      "          <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }} className=\"rounded-3xl border border-white/10 bg-slate-900/80 p-5\">\n" +
-      "            <div className=\"mb-4 flex items-center justify-between\"><h2 className=\"text-lg font-semibold\">Shared Shopping List</h2><span className=\"rounded-full bg-cyan-400/15 px-3 py-1 text-xs font-medium text-cyan-300\">{items.length} live items</span></div>\n" +
-      "            <div className=\"space-y-4\">{Object.entries(groupedItems).map(([aisle, aisleItems]) => <section key={aisle} className=\"rounded-2xl border border-white/10 bg-white/5 p-4\"><div className=\"mb-3 flex items-center justify-between\"><h3 className=\"text-sm font-semibold uppercase tracking-[0.18em] text-slate-400\">{aisle}</h3><span className=\"text-xs text-slate-500\">Aisle grouping</span></div><div className=\"space-y-3\">{aisleItems.map((item) => <div key={item.id} className=\"flex items-center justify-between gap-4 rounded-2xl bg-slate-950/70 px-3 py-3\"><div><div className=\"font-medium text-slate-100\">{item.name}</div><div className=\"text-xs text-slate-400\">Added by {item.owner} · {item.priority}</div></div><span className=\"rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-200\">{item.quantity}</span></div>)}</div></section>)}</div>\n" +
-      "          </motion.article>\n\n" +
-      "          <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} className=\"rounded-3xl border border-white/10 bg-slate-900/80 p-5\">\n" +
-      "            <div className=\"mb-4 flex items-center justify-between\"><h2 className=\"text-lg font-semibold\">Activity Chat</h2><span className=\"rounded-full bg-amber-400/15 px-3 py-1 text-xs font-medium text-amber-300\">Live household context</span></div>\n" +
-      "            <div className=\"space-y-3\">{activityFeed.map((entry) => <div key={entry} className=\"rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300\">{entry}</div>)}</div>\n" +
-      "          </motion.article>\n\n" +
-      "          <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.24 }} className=\"rounded-3xl border border-cyan-400/20 bg-cyan-400/8 p-5\">\n" +
-      "            <div className=\"flex items-center justify-between gap-3\">\n" +
-      "              <h2 className=\"text-lg font-semibold\">Store Run</h2>\n" +
-      "              <span className=\"rounded-full bg-cyan-400 px-3 py-1 text-xs font-semibold text-slate-950\">In-store mode is ready</span>\n" +
-      "            </div>\n" +
-      "            <p className=\"mt-3 text-sm leading-6 text-slate-200\">In-store mode is ready. The list is already grouped aisle-by-aisle so the runner can sweep the store instead of bouncing across categories.</p>\n" +
-      "            <div className=\"mt-4 space-y-3\">{storeRun.map((stop) => <div key={stop.aisle} className=\"rounded-2xl border border-white/10 bg-slate-950/60 p-4\"><div className=\"text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200\">{stop.aisle}</div><div className=\"mt-2 text-sm text-slate-200\">{stop.picks}</div></div>)}</div>\n" +
-      "          </motion.article>\n" +
-      "        </div>\n" +
-      "      </div>\n" +
-      "    </main>\n" +
-      "  );\n" +
-      "}\n" +
-      "```";
+    return `\`\`\`jsx title="src/App.jsx"
+import { useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
+
+const members = [
+  { name: 'Maya', role: 'Meal prep', badge: 'On store run' },
+  { name: 'Jon', role: 'Restock', badge: 'At home' },
+  { name: 'Ari', role: 'Budget', badge: 'Reviewing totals' },
+];
+
+const starterItems = [
+  { id: 1, name: 'Avocados', aisle: 'Produce', owner: 'Maya', priority: 'Need soon', quantity: '4' },
+  { id: 2, name: 'Sparkling water', aisle: 'Drinks', owner: 'Jon', priority: 'Weekly', quantity: '12' },
+  { id: 3, name: 'Chili crisp', aisle: 'Pantry', owner: 'Ari', priority: 'Refill', quantity: '1' },
+  { id: 4, name: 'Baby spinach', aisle: 'Produce', owner: 'Maya', priority: 'Tonight', quantity: '2 bags' },
+];
+
+const activityFeed = [
+  'Maya moved avocados to Need soon before the evening run.',
+  'Jon said sparkling water is still on the weekly stock list.',
+  'Ari wants chili crisp kept under the pantry budget this week.',
+];
+
+export default function App() {
+  const [items, setItems] = useState(starterItems);
+  const [draft, setDraft] = useState('');
+
+  const groupedItems = useMemo(() => items.reduce((acc, item) => {
+    acc[item.aisle] ??= [];
+    acc[item.aisle].push(item);
+    return acc;
+  }, {}), [items]);
+
+  const storeRun = useMemo(() => Object.entries(groupedItems).map(([aisle, aisleItems]) => ({
+    aisle,
+    picks: aisleItems.map((item) => item.name).join(', '),
+  })), [groupedItems]);
+
+  function addItem(event) {
+    event.preventDefault();
+    const nextName = draft.trim();
+    if (!nextName) return;
+    setItems((current) => [{
+      id: current.length + 1,
+      name: nextName,
+      aisle: 'Produce',
+      owner: 'You',
+      priority: 'Need soon',
+      quantity: '1',
+    }, ...current]);
+    setDraft('');
+  }
+
+  return (
+    <main className='min-h-screen bg-[#0b1412] text-stone-100'>
+      <div className='mx-auto flex min-h-screen max-w-7xl flex-col gap-5 px-4 py-5 md:px-8'>
+        <motion.header initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className='grid gap-4 border border-white/10 bg-[#0f1b17] p-5 xl:grid-cols-[1.15fr_0.85fr]'>
+          <div>
+            <p className='text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-emerald-300'>Upgraded household sync</p>
+            <h1 className='mt-2 text-4xl font-semibold tracking-tight text-stone-50 sm:text-5xl'>Shared Shopping List</h1>
+            <p className='mt-3 max-w-2xl text-sm leading-6 text-stone-300 sm:text-base'>The list is grouped by aisle, the route is ready, and the household context stays visible while the runner moves through the store.</p>
+          </div>
+
+          <form onSubmit={addItem} className='grid gap-3 border border-white/10 bg-[#09100d] p-4'>
+            <div>
+              <div className='text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-stone-400'>Quick add</div>
+              <div className='mt-1 text-lg font-medium text-stone-100'>Add the next item before it slips</div>
+            </div>
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder='Quick-add milk, limes, detergent...'
+              className='w-full border border-white/10 bg-[#111c18] px-4 py-3 text-sm text-stone-100 outline-none placeholder:text-stone-500'
+            />
+            <button className='bg-emerald-300 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-200'>Quick-add item</button>
+          </form>
+        </motion.header>
+
+        <div className='grid gap-4 xl:grid-cols-[1.35fr_0.9fr]'>
+          <section className='space-y-4'>
+            <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className='border border-white/10 bg-[#0f1b17] p-5'>
+              <div className='mb-4 flex items-center justify-between gap-3'>
+                <h2 className='text-lg font-semibold text-stone-50'>Household</h2>
+                <span className='text-xs uppercase tracking-[0.24em] text-emerald-300'>3 active</span>
+              </div>
+              <div className='divide-y divide-white/10'>
+                {members.map((member) => (
+                  <div key={member.name} className='flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0'>
+                    <div>
+                      <div className='font-medium text-stone-100'>{member.name}</div>
+                      <div className='text-sm text-stone-400'>{member.role}</div>
+                    </div>
+                    <span className='border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-200'>{member.badge}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.article>
+
+            <motion.section initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className='space-y-4'>
+              <div className='flex items-center justify-between gap-3'>
+                <h2 className='text-lg font-semibold text-stone-50'>Shared Shopping List</h2>
+                <span className='text-xs uppercase tracking-[0.24em] text-stone-400'>{items.length} live items</span>
+              </div>
+
+              {Object.entries(groupedItems).map(([aisle, aisleItems], index) => (
+                <motion.section key={aisle} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.12 + index * 0.05 }} className='border-l-4 border-emerald-300 bg-stone-50 p-4 text-stone-900 shadow-[0_18px_45px_rgba(0,0,0,0.22)]'>
+                  <div className='mb-3 flex items-center justify-between gap-3 border-b border-stone-200 pb-3'>
+                    <h3 className='text-sm font-semibold uppercase tracking-[0.24em] text-stone-500'>{aisle}</h3>
+                    <span className='text-xs text-stone-400'>Aisle grouping</span>
+                  </div>
+                  <div className='grid gap-3'>
+                    {aisleItems.map((item) => (
+                      <div key={item.id} className='grid gap-2 border-b border-stone-200 pb-3 last:border-b-0 last:pb-0 sm:grid-cols-[1fr_auto] sm:items-center'>
+                        <div>
+                          <div className='font-semibold text-stone-900'>{item.name}</div>
+                          <div className='text-xs uppercase tracking-[0.18em] text-stone-500'>Added by {item.owner} · {item.priority}</div>
+                        </div>
+                        <span className='text-sm font-medium text-stone-700'>{item.quantity}</span>
+                      </div>
+                    ))}
+                  </div>
+                </motion.section>
+              ))}
+            </motion.section>
+          </section>
+
+          <aside className='space-y-4'>
+            <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }} className='border border-white/10 bg-[#0f1b17] p-5'>
+              <div className='mb-4 flex items-center justify-between gap-3'>
+                <h2 className='text-lg font-semibold text-stone-50'>Activity Chat</h2>
+                <span className='text-xs uppercase tracking-[0.24em] text-amber-300'>Live context</span>
+              </div>
+              <div className='space-y-3'>
+                {activityFeed.map((entry) => (
+                  <div key={entry} className='border border-white/10 bg-[#111c18] p-4 text-sm leading-6 text-stone-300'>{entry}</div>
+                ))}
+              </div>
+            </motion.article>
+
+            <motion.article initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} className='border border-emerald-300/20 bg-emerald-300/8 p-5'>
+              <div className='mb-3 flex items-center justify-between gap-3'>
+                <h2 className='text-lg font-semibold text-stone-50'>Store Run</h2>
+                <span className='text-xs uppercase tracking-[0.24em] text-emerald-200'>Route ready</span>
+              </div>
+              <div className='space-y-3'>
+                {storeRun.map((stop) => (
+                  <div key={stop.aisle} className='border border-white/10 bg-[#0e1714] p-4'>
+                    <div className='text-xs font-semibold uppercase tracking-[0.24em] text-emerald-200'>{stop.aisle}</div>
+                    <div className='mt-2 text-sm leading-6 text-stone-200'>{stop.picks}</div>
+                  </div>
+                ))}
+              </div>
+            </motion.article>
+          </aside>
+        </div>
+      </div>
+    </main>
+  );
+}
+\`\`\``;
   }
 
   private generateBuilderReactDashboard(_desc: string): string {
@@ -6247,24 +9330,310 @@ button { border: 0; border-radius: 999px; padding: 12px 18px; background: linear
     ].filter(Boolean).join('\n');
   }
 
-  private generateBuilderLandingPage(_desc: string): string {
-    return (
-      'Building a SaaS landing page with hero, features, and CTA sections.\n\n' +
-      '```json title="package.json"\n' +
-      '{\n  "name": "landing-page",\n  "private": true,\n  "version": "0.0.0",\n  "type": "module",\n  "scripts": { "dev": "vite", "build": "vite build" },\n  "dependencies": { "react": "^18.3.1", "react-dom": "^18.3.1" },\n  "devDependencies": {\n    "@types/react": "^18",\n    "@vitejs/plugin-react": "^4.3.1",\n    "vite": "^5.4.1"\n  }\n}\n' +
-      '```\n\n' +
-      '```tsx title="src/App.tsx"\n' +
-      'const features = [\n  { icon: \'⚡\', title: \'Lightning Fast\', desc: \'Optimized for performance from day one. Sub-second load times, zero bloat.\' },\n  { icon: \'🔒\', title: \'Secure by Default\', desc: \'End-to-end encryption, SOC2 compliant, zero-trust architecture.\' },\n  { icon: \'📊\', title: \'Real-time Analytics\', desc: \'Live dashboards, instant insights, no lag between action and data.\' },\n  { icon: \'🔧\', title: \'Easy Integration\', desc: \'REST API, webhooks, and 50+ native integrations. Connect in minutes.\' },\n  { icon: \'🌍\', title: \'Global CDN\', desc: \'Deployed across 40+ regions. Your users get the closest server automatically.\' },\n  { icon: \'🤝\', title: \'Team Collaboration\', desc: \'Real-time multi-user editing, comments, and version history built in.\' },\n];\n\nexport default function App() {\n  return (\n    <div style={{ fontFamily: \'Inter, sans-serif\', background: \'#fff\', color: \'#111\' }}>\n      {/* Nav */}\n      <nav style={{ display: \'flex\', justifyContent: \'space-between\', alignItems: \'center\', padding: \'16px 48px\', borderBottom: \'1px solid #f1f5f9\' }}>\n        <span style={{ fontWeight: 700, fontSize: 20 }}>Acme</span>\n        <div style={{ display: \'flex\', gap: 32, fontSize: 14, color: \'#64748b\' }}>\n          {[\'Product\', \'Pricing\', \'Docs\', \'Blog\'].map(l => <a key={l} href="#" style={{ textDecoration: \'none\', color: \'inherit\' }}>{l}</a>)}\n        </div>\n        <button style={{ background: \'#6366f1\', color: \'#fff\', border: \'none\', borderRadius: 8, padding: \'10px 20px\', fontSize: 14, cursor: \'pointer\', fontWeight: 600 }}>Get Started</button>\n      </nav>\n\n      {/* Hero */}\n      <section style={{ textAlign: \'center\', padding: \'96px 24px 80px\', background: \'linear-gradient(180deg, #f8f7ff 0%, #fff 100%)\' }}>\n        <div style={{ display: \'inline-block\', background: \'#eef2ff\', color: \'#6366f1\', borderRadius: 999, padding: \'6px 16px\', fontSize: 13, fontWeight: 600, marginBottom: 24 }}>Now in public beta</div>\n        <h1 style={{ fontSize: \'clamp(36px, 6vw, 72px)\', fontWeight: 800, lineHeight: 1.1, maxWidth: 800, margin: \'0 auto 24px\', letterSpacing: \'-1px\' }}>The fastest way to<br/><span style={{ color: \'#6366f1\' }}>ship great products</span></h1>\n        <p style={{ fontSize: 20, color: \'#64748b\', maxWidth: 560, margin: \'0 auto 40px\', lineHeight: 1.6 }}>Acme gives your team superpowers — build, ship, and iterate faster than ever before.</p>\n        <div style={{ display: \'flex\', gap: 16, justifyContent: \'center\', flexWrap: \'wrap\' }}>\n          <button style={{ background: \'#6366f1\', color: \'#fff\', border: \'none\', borderRadius: 10, padding: \'14px 28px\', fontSize: 16, cursor: \'pointer\', fontWeight: 700 }}>Start for free</button>\n          <button style={{ background: \'transparent\', color: \'#111\', border: \'2px solid #e2e8f0\', borderRadius: 10, padding: \'14px 28px\', fontSize: 16, cursor: \'pointer\', fontWeight: 600 }}>Watch demo →</button>\n        </div>\n        <p style={{ marginTop: 16, fontSize: 13, color: \'#94a3b8\' }}>No credit card required · Free tier available · Cancel anytime</p>\n      </section>\n\n      {/* Features */}\n      <section style={{ padding: \'80px 48px\' }}>\n        <h2 style={{ textAlign: \'center\', fontSize: 36, fontWeight: 800, marginBottom: 16 }}>Everything you need</h2>\n        <p style={{ textAlign: \'center\', color: \'#64748b\', fontSize: 18, marginBottom: 56 }}>Built for modern teams that move fast.</p>\n        <div style={{ display: \'grid\', gridTemplateColumns: \'repeat(auto-fit, minmax(280px, 1fr))\', gap: 32, maxWidth: 1100, margin: \'0 auto\' }}>\n          {features.map(f => (\n            <div key={f.title} style={{ padding: 24, border: \'1px solid #f1f5f9\', borderRadius: 12 }}>\n              <div style={{ fontSize: 28, marginBottom: 12 }}>{f.icon}</div>\n              <h3 style={{ fontWeight: 700, marginBottom: 8 }}>{f.title}</h3>\n              <p style={{ color: \'#64748b\', fontSize: 15, lineHeight: 1.6 }}>{f.desc}</p>\n            </div>\n          ))}\n        </div>\n      </section>\n\n      {/* CTA */}\n      <section style={{ background: \'#6366f1\', color: \'#fff\', textAlign: \'center\', padding: \'80px 24px\' }}>\n        <h2 style={{ fontSize: 40, fontWeight: 800, marginBottom: 16 }}>Ready to get started?</h2>\n        <p style={{ fontSize: 18, opacity: 0.85, marginBottom: 40 }}>Join 10,000+ teams already using Acme to ship faster.</p>\n        <div style={{ display: \'flex\', gap: 12, justifyContent: \'center\', maxWidth: 440, margin: \'0 auto\' }}>\n          <input placeholder="Enter your email" style={{ flex: 1, padding: \'14px 16px\', borderRadius: 8, border: \'none\', fontSize: 15 }}/>\n          <button style={{ background: \'#fff\', color: \'#6366f1\', border: \'none\', borderRadius: 8, padding: \'14px 20px\', fontWeight: 700, cursor: \'pointer\' }}>Get access</button>\n        </div>\n      </section>\n    </div>\n  );\n}\n' +
-      '```\n\n' +
-      '```tsx title="src/main.tsx"\n' +
-      'import React from \'react\';\nimport ReactDOM from \'react-dom/client\';\nimport App from \'./App\';\nReactDOM.createRoot(document.getElementById(\'root\') as HTMLElement).render(<React.StrictMode><App/></React.StrictMode>);\n' +
-      '```\n\n' +
-      '```html title="index.html"\n' +
-      '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Landing Page</title></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>\n' +
-      '```\n\n' +
-      '```js title="vite.config.js"\nimport { defineConfig } from \'vite\';\nimport react from \'@vitejs/plugin-react\';\nexport default defineConfig({ plugins: [react()] });\n```\n\n' +
-      '**Run:** `npm install && npm run dev`\n\nSections: Nav, Hero (headline + CTA), Feature grid (6 cards), Email capture CTA. Customize the copy, colors (#6366f1 → your brand), and feature cards.'
-    );
+  private generateBuilderLandingPage(desc: string): string {
+    const lower = desc.toLowerCase();
+    const accent = this.resolveLandingAccent(lower);
+    const brand = /\bincident|ops|workflow|handoff|release|deploy/i.test(lower) ? 'Northshift' : 'Signal Forge';
+
+    const appSource = [
+      "import { useState } from 'react';",
+      "import './styles.css';",
+      '',
+      "const proof = [",
+      "  { value: '12 min', label: 'to the first usable release' },",
+      "  { value: '89%', label: 'fewer handoff questions after launch' },",
+      "  { value: '4.8/5', label: 'from teams shipping weekly' },",
+      '];',
+      '',
+      "const features = [",
+      "  { title: 'One release lane', body: 'Keep scope, proof, and launch readiness aligned so the product page stops feeling like a loose collection of promises.' },",
+      "  { title: 'Reviewable changes', body: 'Every section has enough structure to iterate fast without turning the page into a starter-template clone.' },",
+      "  { title: 'Built for real previews', body: 'Responsive sections, clear CTA grouping, and a product story that still reads cleanly in the live sandbox.' },",
+      '];',
+      '',
+      "type ThemeMode = 'dark' | 'light';",
+      '',
+      'export default function App() {',
+      "  const [theme, setTheme] = useState<ThemeMode>('dark');",
+      "  const [activeFeature, setActiveFeature] = useState(features[0].title);",
+      "  const nextTheme = theme === 'dark' ? 'light' : 'dark';",
+      "  const themeLabel = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';",
+      "  const scrollToId = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });",
+      '',
+      '  return (',
+      "    <div className={`landing-shell theme-${theme}`}>",
+      '      <div className="landing-noise" />',
+      '      <header className="topbar">',
+      `        <div className="brand-lockup"><span className="brand-mark">V</span><span>${brand}</span></div>`,
+      '        <nav className="topnav">',
+      "          <button type=\"button\" onClick={() => scrollToId('platform')}>Platform</button>",
+      "          <button type=\"button\" onClick={() => scrollToId('live-proof')}>Preview</button>",
+      "          <button type=\"button\" onClick={() => scrollToId('release-flow')}>Flow</button>",
+      "          <button type=\"button\" onClick={() => scrollToId('launch-cta')}>Launch</button>",
+      '        </nav>',
+      '        <div className="topbar-actions">',
+      '          <button type="button" className="theme-toggle" aria-label={themeLabel} title={theme === \'dark\' ? \'Light mode\' : \'Dark mode\'} onClick={() => setTheme(nextTheme)}>',
+      '            {theme === \'dark\' ? (',
+      '              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">',
+      '                <circle cx="12" cy="12" r="4" />',
+      '                <path d="M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77" />',
+      '              </svg>',
+      '            ) : (',
+      '              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">',
+      '                <path d="M21 12.79A9 9 0 1 1 11.21 3A7 7 0 0 0 21 12.79Z" />',
+      '              </svg>',
+      '            )}',
+      '          </button>',
+      '          <button className="ghost-button">Book a demo</button>',
+      '        </div>',
+      '      </header>',
+      '',
+      '      <main className="hero-grid" id="platform">',
+      '        <section className="hero-panel" id="live-proof">',
+      "          <p className=\"eyebrow\">Developer workflow orchestration</p>",
+      "          <h1>Ship releases with <span>signal</span>, not ceremony.</h1>",
+      "          <p className=\"lede\">A dark, product-first landing page for teams that want sharper hierarchy, stronger proof, and a surface that still feels premium once the first preview is live.</p>",
+      '          <div className="hero-actions">',
+      '            <button className="primary-button" type="button" onClick={() => scrollToId(\'launch-cta\')}>Start the preview</button>',
+      '            <button className="secondary-button" type="button" onClick={() => { setActiveFeature(features[0].title); scrollToId(\'release-flow\'); }}>See the release flow</button>',
+      '          </div>',
+      '          <div className="proof-strip">',
+      '            {proof.map((item) => (',
+      '              <article key={item.label}>',
+      '                <strong>{item.value}</strong>',
+      '                <span>{item.label}</span>',
+      '              </article>',
+      '            ))}',
+      '          </div>',
+      '        </section>',
+      '',
+      '        <aside className="signal-panel">',
+      "          <p className=\"signal-label\">Why it feels better</p>",
+      "          <h2>Stronger hierarchy, darker default, real room to iterate.</h2>",
+      "          <p>The hero is designed to survive follow-up edits. You can recolor accents, tighten copy, or move sections around without the page collapsing back into a generic template feel.</p>",
+      '          <div className="signal-rail">',
+      "            <span>Dark-first shell</span>",
+      "            <span>Responsive sections</span>",
+      "            <span>Theme toggle included</span>",
+      '          </div>',
+      '        </aside>',
+      '      </main>',
+      '',
+      '      <section className="feature-grid" id="release-flow">',
+      '        {features.map((feature) => (',
+      '          <article key={feature.title} className={`feature-card ${activeFeature === feature.title ? \'feature-card-active\' : \'\'}`} onMouseEnter={() => setActiveFeature(feature.title)}>',
+      '            <p className="feature-kicker">Flow</p>',
+      '            <h3>{feature.title}</h3>',
+      '            <p>{feature.body}</p>',
+      '          </article>',
+      '        ))}',
+      '      </section>',
+      '',
+      '      <section className="cta-panel" id="launch-cta">',
+      "        <div><p className=\"eyebrow\">Ready to launch</p><h2>Make the landing page the calmest part of the release.</h2></div>",
+      '        <form className="cta-form">',
+      '          <input type="email" placeholder="team@company.com" />',
+      '          <button type="button" className="primary-button">Get early access</button>',
+      '        </form>',
+      '      </section>',
+      '    </div>',
+      '  );',
+      '}',
+    ].join('\n');
+
+    const stylesSource = [
+      ':root {',
+      `  --accent: ${accent.accent};`,
+      `  --accent-soft: ${accent.accentSoft};`,
+      '  --radius-xl: 32px;',
+      "  font-family: 'Satoshi', 'Inter', ui-sans-serif, system-ui, sans-serif;",
+      '  color: #f8fafc;',
+      '  background: #050816;',
+      '}',
+      '',
+      '* { box-sizing: border-box; }',
+      'html, body, #root { min-height: 100%; margin: 0; }',
+      'body { background: #050816; }',
+      'button, input { font: inherit; }',
+      'a { color: inherit; text-decoration: none; }',
+      '',
+      '.landing-shell {',
+      '  position: relative;',
+      '  min-height: 100vh;',
+      '  overflow: hidden;',
+      '  padding: 24px;',
+      '  background: radial-gradient(circle at top, var(--accent-soft), rgba(5,8,22,0) 34%), linear-gradient(180deg, #050816 0%, #020617 100%);',
+      '  color: var(--text);',
+      '}',
+      '',
+      '.theme-dark {',
+      '  --text: #f8fafc;',
+      '  --muted: #94a3b8;',
+      '  --panel: rgba(8, 11, 20, 0.9);',
+      '  --panel-strong: rgba(12, 18, 32, 0.96);',
+      '  --line: rgba(148, 163, 184, 0.14);',
+      '  --shadow: 0 30px 90px rgba(0, 0, 0, 0.28);',
+      '  --button-text: #020617;',
+      '}',
+      '',
+      '.theme-light {',
+      '  --text: #0f172a;',
+      '  --muted: #475569;',
+      '  --panel: rgba(255, 255, 255, 0.92);',
+      '  --panel-strong: rgba(248, 250, 252, 0.96);',
+      '  --line: rgba(148, 163, 184, 0.22);',
+      '  --shadow: 0 24px 80px rgba(15, 23, 42, 0.12);',
+      '  --button-text: #020617;',
+      '  background: radial-gradient(circle at top, var(--accent-soft), rgba(241,245,249,0) 34%), linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);',
+      '}',
+      '',
+      '.landing-noise {',
+      '  pointer-events: none;',
+      '  position: absolute;',
+      '  inset: 0;',
+      '  background-image: linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);',
+      '  background-size: 36px 36px;',
+      '  mask-image: radial-gradient(circle at center, black, transparent 78%);',
+      '  opacity: 0.35;',
+      '}',
+      '',
+      '.topbar, .hero-panel, .signal-panel, .feature-card, .cta-panel {',
+      '  position: relative;',
+      '  border: 1px solid var(--line);',
+      '  background: var(--panel);',
+      '  box-shadow: var(--shadow);',
+      '  backdrop-filter: blur(18px);',
+      '}',
+      '',
+      '.topbar {',
+      '  z-index: 1;',
+      '  width: min(1180px, 100%);',
+      '  margin: 0 auto;',
+      '  padding: 16px 18px;',
+      '  border-radius: 999px;',
+      '  display: flex;',
+      '  align-items: center;',
+      '  justify-content: space-between;',
+      '  gap: 18px;',
+      '}',
+      '',
+      '.brand-lockup { display: inline-flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: -0.03em; }',
+      '.brand-mark { display: inline-flex; height: 32px; width: 32px; align-items: center; justify-content: center; border-radius: 12px; background: linear-gradient(135deg, var(--accent), rgba(255,255,255,0.18)); color: #020617; font-size: 14px; font-weight: 800; }',
+      '.topnav { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 14px; }',
+      '.topnav button { border: none; background: transparent; color: inherit; padding: 0; cursor: pointer; }',
+      '.topbar-actions { display: flex; flex-wrap: wrap; gap: 10px; }',
+      '',
+      '.theme-toggle, .ghost-button, .primary-button, .secondary-button { border-radius: 18px; cursor: pointer; transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease; }',
+      '.theme-toggle, .ghost-button, .secondary-button { border: 1px solid var(--line); background: rgba(15,23,42,0.16); color: var(--text); }',
+      '.theme-toggle { width: 42px; height: 42px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }',
+      '.ghost-button { padding: 10px 14px; }',
+      '.primary-button { border: none; background: var(--accent); color: var(--button-text); padding: 14px 22px; font-weight: 700; box-shadow: 0 18px 42px rgba(0,0,0,0.18); }',
+      '.secondary-button { padding: 14px 22px; }',
+      '.theme-toggle:hover, .ghost-button:hover, .primary-button:hover, .secondary-button:hover { transform: translateY(-1px); }',
+      '',
+      '.hero-grid { width: min(1180px, 100%); margin: 28px auto 0; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr); gap: 22px; }',
+      '.hero-panel { padding: 44px; border-radius: var(--radius-xl); }',
+      '.signal-panel { padding: 28px; border-radius: 28px; align-self: stretch; }',
+      '.eyebrow, .signal-label, .feature-kicker { margin: 0; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; }',
+      '.hero-panel h1 { margin: 18px 0 16px; max-width: 10ch; font-size: clamp(3.5rem, 7vw, 6.4rem); line-height: 0.92; letter-spacing: -0.07em; }',
+      '.hero-panel h1 span { color: var(--accent); }',
+      '.lede, .signal-panel p, .feature-card p { color: var(--muted); line-height: 1.75; }',
+      '.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }',
+      '',
+      '.proof-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 28px; }',
+      '.proof-strip article, .signal-rail span { border: 1px solid var(--line); background: var(--panel-strong); border-radius: 20px; }',
+      '.proof-strip article { padding: 18px 16px; }',
+      '.proof-strip strong { display: block; font-size: 24px; letter-spacing: -0.05em; }',
+      '.proof-strip span { color: var(--muted); font-size: 14px; }',
+      '.signal-panel h2 { margin: 14px 0 12px; font-size: 28px; letter-spacing: -0.05em; }',
+      '.signal-rail { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }',
+      '.signal-rail span { padding: 10px 12px; font-size: 13px; }',
+      '',
+      '.feature-grid { width: min(1180px, 100%); margin: 22px auto 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }',
+      '.feature-card { padding: 24px; border-radius: 26px; }',
+      '.feature-card-active { border-color: color-mix(in srgb, var(--accent) 44%, var(--line)); box-shadow: 0 18px 52px rgba(0,0,0,0.16); transform: translateY(-2px); }',
+      '.feature-card h3 { margin: 14px 0 10px; font-size: 24px; letter-spacing: -0.04em; }',
+      '',
+      '.cta-panel { width: min(1180px, 100%); margin: 22px auto 0; padding: 28px; border-radius: 30px; display: flex; align-items: end; justify-content: space-between; gap: 18px; }',
+      '.cta-panel h2 { margin: 12px 0 0; font-size: clamp(2rem, 4vw, 3rem); letter-spacing: -0.05em; }',
+      '.cta-form { display: flex; flex-wrap: wrap; gap: 12px; min-width: min(100%, 380px); justify-content: flex-end; }',
+      '.cta-form input { min-width: 240px; flex: 1 1 240px; padding: 14px 16px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-strong); color: var(--text); }',
+      '',
+      '@media (max-width: 980px) {',
+      '  .topbar, .hero-grid, .feature-grid, .cta-panel { width: min(100%, calc(100% - 8px)); }',
+      '  .hero-grid, .feature-grid { grid-template-columns: 1fr; }',
+      '  .cta-panel { flex-direction: column; align-items: stretch; }',
+      '  .cta-form { justify-content: stretch; }',
+      '}',
+      '',
+      '@media (max-width: 720px) {',
+      '  .landing-shell { padding: 16px; }',
+      '  .topbar { border-radius: 28px; align-items: flex-start; }',
+      '  .topnav { display: none; }',
+      '  .hero-panel { padding: 28px; }',
+      '  .proof-strip { grid-template-columns: 1fr; }',
+      '}',
+    ].join('\n');
+
+    return [
+      'Building a dark, product-first landing page for a developer tool with a real theme toggle and responsive sections.',
+      '',
+      '```json title="package.json"',
+      '{',
+      '  "name": "northshift-landing",',
+      '  "private": true,',
+      '  "version": "0.0.0",',
+      '  "type": "module",',
+      '  "scripts": { "dev": "vite", "build": "vite build" },',
+      '  "dependencies": { "react": "^18.3.1", "react-dom": "^18.3.1" },',
+      '  "devDependencies": {',
+      '    "@types/react": "^18",',
+      '    "@vitejs/plugin-react": "^4.3.1",',
+      '    "vite": "^5.4.1"',
+      '  }',
+      '}',
+      '```',
+      '',
+      `\`\`\`tsx title="src/App.tsx"\n${appSource}\n\`\`\``,
+      '',
+      `\`\`\`css title="src/styles.css"\n${stylesSource}\n\`\`\``,
+      '',
+      '```tsx title="src/main.tsx"',
+      "import React from 'react';",
+      "import ReactDOM from 'react-dom/client';",
+      "import App from './App';",
+      '',
+      "ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(",
+      '  <React.StrictMode>',
+      '    <App />',
+      '  </React.StrictMode>,',
+      ');',
+      '```',
+      '',
+      '```html title="index.html"',
+      '<!DOCTYPE html>',
+      '<html lang="en">',
+      '  <head>',
+      '    <meta charset="UTF-8" />',
+      '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+      `    <title>${brand}</title>`,
+      '  </head>',
+      '  <body>',
+      '    <div id="root"></div>',
+      '    <script type="module" src="/src/main.tsx"></script>',
+      '  </body>',
+      '</html>',
+      '```',
+      '',
+      '```js title="vite.config.js"',
+      "import { defineConfig } from 'vite';",
+      "import react from '@vitejs/plugin-react';",
+      '',
+      'export default defineConfig({ plugins: [react()] });',
+      '```',
+      '',
+      '**Run:** `npm install && npm run dev`',
+    ].join('\n');
   }
 
   private generateBuilderMusicApp(_desc: string): string {
@@ -6320,45 +9689,529 @@ button { border: 0; border-radius: 999px; padding: 12px 18px; background: linear
   }
 
   private generateBuilderSocialBlogApp(desc: string): string {
-    return "```json title=\"package.json\"\n" +
-      JSON.stringify({
-        name: 'social-hub',
-        private: true,
-        version: '0.0.0',
-        type: 'module',
-        scripts: {
-          dev: 'vite',
-          build: 'vite build',
-          preview: 'vite preview'
-        },
-        dependencies: {
-          react: '^18.3.1',
-          'react-dom': '^18.3.1'
-        },
-        devDependencies: {
-          '@vitejs/plugin-react': '^4.3.1',
-          vite: '^5.4.10'
-        }
-      }, null, 2) +
-      "\n```\n\n" +
-      "```html title=\"index.html\"\n" +
-      "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <title>Social Hub</title>\n    <script type=\"module\" src=\"/src/main.jsx\"></script>\n  </head>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>\n" +
-      "```\n\n" +
-      "```jsx title=\"src/main.jsx\"\n" +
-      "import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App.jsx';\nimport './styles.css';\n\nReactDOM.createRoot(document.getElementById('root')).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n" +
-      "```\n\n" +
-      "```jsx title=\"src/App.jsx\"\n" +
-      "import React, { useState } from \"react\";\n\nconst seededPosts = [\n  { id: 1, title: \"Tonight's reset\", body: \"Shared a calm nightly reset ritual with the community and it immediately sparked discussion.\", author: \"Maya\", tag: \"Lifestyle\" },\n  { id: 2, title: \"Neighborhood coffee notes\", body: \"Wrote a quick city guide post after trying three late-night coffee spots in one weekend.\", author: \"Jon\", tag: \"City\" },\n  { id: 3, title: \"Small-team writing rituals\", body: \"A short post about how tiny editorial teams keep momentum without losing voice.\", author: \"Ari\", tag: \"Writing\" },\n];\n\nconst activity = [\n  \"Maya published a new lifestyle post 4m ago\",\n  \"Jon bookmarked Tonight's reset\",\n  \"Ari replied to Neighborhood coffee notes\",\n];\n\nexport default function App() {\n  const [posts, setPosts] = useState(seededPosts);\n  const [title, setTitle] = useState(\"\");\n  const [body, setBody] = useState(\"\");\n\n  function publishPost() {\n    const nextTitle = title.trim();\n    const nextBody = body.trim();\n    if (!nextTitle || !nextBody) return;\n\n    setPosts((current) => [\n      { id: Date.now(), title: nextTitle, body: nextBody, author: \"You\", tag: \"Fresh post\" },\n      ...current,\n    ]);\n    setTitle(\"\");\n    setBody(\"\");\n  }\n\n  return (\n    <main className=\"shell\">\n      <section className=\"hero\">\n        <p className=\"eyebrow\">Social blogging app from scratch</p>\n        <h1>Social Hub</h1>\n        <p className=\"lede\">A compact social blogging surface with a real post-to-feed loop, seeded community energy, and a clean dark layout.</p>\n      </section>\n\n      <section className=\"layout\">\n        <article className=\"panel composer\">\n          <div className=\"panel-head\">\n            <span className=\"kicker\">Compose</span>\n            <h2>Write a Post</h2>\n          </div>\n          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder=\"Post title\" />\n          <textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder=\"What are you publishing today?\" rows={6} />\n          <button onClick={publishPost}>Publish Post</button>\n        </article>\n\n        <article className=\"panel feed\">\n          <div className=\"panel-head\">\n            <span className=\"kicker\">Community</span>\n            <h2>Blog Feed</h2>\n          </div>\n          <div className=\"feed-list\">\n            {posts.map((post) => (\n              <article key={post.id} className=\"post-card\">\n                <div className=\"post-meta\">\n                  <span>{post.author}</span>\n                  <span>{post.tag}</span>\n                </div>\n                <h3>{post.title}</h3>\n                <p>{post.body}</p>\n              </article>\n            ))}\n          </div>\n        </article>\n\n        <aside className=\"panel pulse\">\n          <div className=\"panel-head\">\n            <span className=\"kicker\">Now</span>\n            <h2>Community Pulse</h2>\n          </div>\n          <div className=\"pulse-list\">\n            {activity.map((entry) => (\n              <div key={entry} className=\"pulse-item\">{entry}</div>\n            ))}\n          </div>\n          <div className=\"featured\">\n            <span className=\"featured-label\">Featured Post</span>\n            <strong>Tonight's reset</strong>\n            <p>Short reflective writing with strong community traction and clear personal voice.</p>\n          </div>\n        </aside>\n      </section>\n    </main>\n  );\n}\n" +
-      "```\n\n" +
-      "```css title=\"src/styles.css\"\n" +
-      ":root {\n  color: #eef2ff;\n  background: #050816;\n  font-family: Inter, ui-sans-serif, system-ui, sans-serif;\n}\n\n* { box-sizing: border-box; }\nbody { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #15345b 0%, #07101e 52%, #02040a 100%); }\nbutton, input, textarea { font: inherit; }\ninput, textarea { width: 100%; border: 1px solid rgba(148, 163, 184, 0.14); background: rgba(15, 23, 42, 0.8); color: #eef2ff; border-radius: 18px; padding: 14px 16px; }\ntextarea { resize: vertical; min-height: 140px; }\nbutton { border: 0; border-radius: 999px; padding: 12px 18px; background: linear-gradient(135deg, #38bdf8, #2563eb); color: white; cursor: pointer; }\n.shell { max-width: 1320px; margin: 0 auto; padding: 44px 18px 64px; }\n.hero { margin-bottom: 20px; padding: 28px; border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 28px; background: rgba(7, 15, 30, 0.78); backdrop-filter: blur(18px); }\n.eyebrow, .kicker { margin: 0 0 10px; color: #7dd3fc; text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.75rem; }\n.hero h1 { margin: 0; font-size: clamp(2.5rem, 6vw, 4.8rem); line-height: 0.94; }\n.lede { max-width: 62ch; color: #bfd1e7; line-height: 1.65; }\n.layout { display: grid; grid-template-columns: 1.05fr 1.3fr 0.85fr; gap: 18px; align-items: start; }\n.panel { border: 1px solid rgba(148, 163, 184, 0.14); border-radius: 26px; background: rgba(8, 15, 28, 0.76); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24); padding: 20px; }\n.panel-head h2 { margin: 0 0 14px; font-size: 1.2rem; }\n.composer { display: grid; gap: 14px; }\n.feed-list, .pulse-list { display: grid; gap: 14px; }\n.post-card, .pulse-item, .featured { border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.12); background: rgba(255, 255, 255, 0.03); padding: 16px; }\n.post-meta { display: flex; justify-content: space-between; gap: 12px; color: #94a3b8; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; }\n.post-card h3 { margin: 10px 0 8px; font-size: 1.08rem; }\n.post-card p, .featured p { margin: 0; color: #c5d2e4; line-height: 1.6; }\n.featured-label { display: inline-block; margin-bottom: 10px; color: #fbbf24; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.12em; }\n.featured strong { display: block; margin-bottom: 8px; font-size: 1rem; }\n@media (max-width: 1120px) { .layout { grid-template-columns: 1fr; } }\n@media (max-width: 640px) { .shell { padding: 24px 12px 40px; } .hero, .panel { border-radius: 22px; } }\n" +
-      "```";
+    const pkg = JSON.stringify({
+      name: 'social-hub',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: {
+        dev: 'vite',
+        build: 'vite build',
+        preview: 'vite preview',
+      },
+      dependencies: {
+        react: '^18.3.1',
+        'react-dom': '^18.3.1',
+      },
+      devDependencies: {
+        '@vitejs/plugin-react': '^4.3.1',
+        vite: '^5.4.10',
+      },
+    }, null, 2);
+
+    return `\`\`\`json title="package.json"
+${pkg}
+\`\`\`
+
+\`\`\`html title="index.html"
+<!doctype html>
+<html lang='en'>
+  <head>
+    <meta charset='UTF-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+    <title>Social Hub</title>
+    <script type='module' src='/src/main.jsx'></script>
+  </head>
+  <body>
+    <div id='root'></div>
+  </body>
+</html>
+\`\`\`
+
+\`\`\`jsx title="src/main.jsx"
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+import './styles.css';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
+\`\`\`
+
+\`\`\`jsx title="src/App.jsx"
+import React, { useState } from 'react';
+
+const promptLabel = ${JSON.stringify(desc)};
+
+const seededPosts = [
+  { id: 1, title: "Tonight's reset", body: 'Shared a calm nightly reset ritual with the community and it immediately sparked discussion.', author: 'Maya', tag: 'Lifestyle' },
+  { id: 2, title: 'Neighborhood coffee notes', body: 'Wrote a quick city guide post after trying three late-night coffee spots in one weekend.', author: 'Jon', tag: 'City' },
+  { id: 3, title: 'Small-team writing rituals', body: 'A short post about how tiny editorial teams keep momentum without losing voice.', author: 'Ari', tag: 'Writing' },
+];
+
+const activity = [
+  'Maya published a new lifestyle post 4m ago',
+  "Jon bookmarked Tonight's reset",
+  'Ari replied to Neighborhood coffee notes',
+];
+
+const trends = ['Evening routines', 'City diaries', 'Writing rituals'];
+
+export default function App() {
+  const [posts, setPosts] = useState(seededPosts);
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+
+  function publishPost() {
+    const nextTitle = title.trim();
+    const nextBody = body.trim();
+    if (!nextTitle || !nextBody) return;
+
+    setPosts((current) => [
+      { id: Date.now(), title: nextTitle, body: nextBody, author: 'You', tag: 'Fresh post' },
+      ...current,
+    ]);
+    setTitle('');
+    setBody('');
+  }
+
+  return (
+    <main className='social-shell'>
+      <header className='social-header'>
+        <div>
+          <p className='eyebrow'>{promptLabel}</p>
+          <h1>Social Hub</h1>
+          <p className='lede'>An editorial night-feed with a real publishing loop, live community signals, and a feed-first layout instead of another generic builder dashboard.</p>
+        </div>
+        <div className='ticker'>
+          {trends.map((trend) => (
+            <span key={trend}>{trend}</span>
+          ))}
+        </div>
+      </header>
+
+      <section className='social-grid'>
+        <aside className='composer-rail'>
+          <div className='section-head'>
+            <span className='label'>Compose</span>
+            <h2>Write a Post</h2>
+          </div>
+          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder='Post title' />
+          <textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder='What are you publishing today?' rows={7} />
+          <button type='button' onClick={publishPost}>Publish Post</button>
+        </aside>
+
+        <section className='feed-stage'>
+          <div className='section-head feed-head'>
+            <div>
+              <span className='label'>Community</span>
+              <h2>Blog Feed</h2>
+            </div>
+            <span className='count'>{posts.length} posts</span>
+          </div>
+          <div className='feed-list'>
+            {posts.map((post) => (
+              <article key={post.id} className='story'>
+                <div className='story-meta'>
+                  <span>{post.author}</span>
+                  <span>{post.tag}</span>
+                </div>
+                <h3>{post.title}</h3>
+                <p>{post.body}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <aside className='pulse-rail'>
+          <div className='section-head'>
+            <span className='label'>Now</span>
+            <h2>Community Pulse</h2>
+          </div>
+          <div className='pulse-list'>
+            {activity.map((entry) => (
+              <div key={entry} className='pulse-item'>{entry}</div>
+            ))}
+          </div>
+          <article className='featured-card'>
+            <span className='featured-label'>Featured Post</span>
+            <strong>Tonight's reset</strong>
+            <p>Short reflective writing with strong community traction and clear personal voice.</p>
+          </article>
+        </aside>
+      </section>
+    </main>
+  );
+}
+\`\`\`
+
+\`\`\`css title="src/styles.css"
+:root {
+  color: #f5eee7;
+  background: #0f1016;
+  font-family: 'Segoe UI Variable Text', 'Trebuchet MS', sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 18% 10%, rgba(255, 114, 93, 0.22), transparent 24%),
+    radial-gradient(circle at 78% 12%, rgba(199, 83, 140, 0.14), transparent 22%),
+    linear-gradient(180deg, #101117 0%, #14131a 52%, #0c0d12 100%);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f7f0e8;
+  padding: 1rem 1.05rem;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid rgba(255, 132, 112, 0.42);
+  outline-offset: 2px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 10rem;
+}
+
+button {
+  border: 0;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #ff6b57, #ff8866);
+  color: #130f12;
+  padding: 0.95rem 1rem;
+  cursor: pointer;
+  font-weight: 700;
+  box-shadow: 0 18px 34px rgba(255, 107, 87, 0.18);
+}
+
+.social-shell {
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 1.75rem 1.35rem 2.5rem;
+}
+
+.social-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(20rem, 0.85fr);
+  gap: 1rem;
+  align-items: end;
+  padding: 1.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 34px;
+  background: linear-gradient(135deg, rgba(23, 23, 31, 0.94), rgba(19, 20, 28, 0.86));
+  box-shadow: 0 26px 46px rgba(0, 0, 0, 0.28);
+}
+
+.eyebrow,
+.label,
+.count,
+.story-meta,
+.featured-label,
+.ticker span {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.72rem;
+}
+
+.eyebrow,
+.label,
+.ticker span {
+  color: #f4a792;
+}
+
+h1,
+h2,
+h3,
+strong {
+  margin: 0;
+  font-family: 'Aptos Display', 'Segoe UI Variable Display', sans-serif;
+}
+
+h1 {
+  max-width: 8ch;
+  font-size: clamp(3.2rem, 7vw, 6rem);
+  line-height: 0.9;
+  letter-spacing: -0.06em;
+}
+
+.lede,
+.story p,
+.pulse-item,
+.featured-card p {
+  color: #d6cac0;
+  line-height: 1.72;
+}
+
+.lede {
+  max-width: 54ch;
+  margin-top: 1rem;
+  font-size: 1.05rem;
+}
+
+.ticker {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.7rem;
+}
+
+.ticker span {
+  padding: 0.72rem 0.95rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.social-grid {
+  display: grid;
+  grid-template-columns: minmax(19rem, 22rem) minmax(0, 1fr) minmax(18rem, 21rem);
+  gap: 1rem;
+  margin-top: 1rem;
+  align-items: start;
+}
+
+.composer-rail,
+.feed-stage,
+.pulse-rail {
+  padding: 1.1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 28px;
+  background: linear-gradient(180deg, rgba(18, 18, 24, 0.92), rgba(15, 16, 22, 0.88));
+  box-shadow: 0 20px 38px rgba(0, 0, 0, 0.22);
+}
+
+.composer-rail {
+  position: sticky;
+  top: 1rem;
+}
+
+.composer-rail,
+.feed-list,
+.pulse-list {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.section-head {
+  margin-bottom: 0.85rem;
+}
+
+.section-head h2 {
+  margin-top: 0.35rem;
+  font-size: 1.5rem;
+}
+
+.feed-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: end;
+}
+
+.feed-list {
+  gap: 1rem;
+}
+
+.story {
+  padding: 1.15rem;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.015));
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+
+.story:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 132, 112, 0.18);
+}
+
+.story-meta,
+.count {
+  color: #9f96a0;
+}
+
+.story h3 {
+  margin: 0.75rem 0 0.5rem;
+  font-size: 1.4rem;
+}
+
+.pulse-item,
+.featured-card {
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.featured-card {
+  border-color: rgba(255, 108, 84, 0.22);
+  background: linear-gradient(180deg, rgba(255, 108, 84, 0.08), rgba(255, 255, 255, 0.03));
+}
+
+.featured-card strong {
+  display: block;
+  margin-top: 0.6rem;
+  font-size: 1.2rem;
+}
+
+@media (max-width: 1160px) {
+  .social-header,
+  .social-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ticker {
+    justify-content: flex-start;
+  }
+
+  .composer-rail {
+    position: static;
+  }
+}
+
+@media (max-width: 720px) {
+  .social-shell {
+    padding: 1rem 0.85rem 1.5rem;
+  }
+
+  .social-header,
+  .composer-rail,
+  .feed-stage,
+  .pulse-rail {
+    border-radius: 24px;
+  }
+}
+\`\`\``;
   }
 
   private generateBuilderSocialBlogUpgrade(_desc: string): string {
-    return "```jsx title=\"src/App.jsx\"\n" +
-      "import React, { useState } from \"react\";\n\nconst seededPosts = [\n  { id: 1, title: \"Tonight's reset\", body: \"Shared a calm nightly reset ritual with the community and it immediately sparked discussion.\", author: \"Maya\", tag: \"Lifestyle\" },\n  { id: 2, title: \"Neighborhood coffee notes\", body: \"Wrote a quick city guide post after trying three late-night coffee spots in one weekend.\", author: \"Jon\", tag: \"City\" },\n  { id: 3, title: \"Small-team writing rituals\", body: \"A short post about how tiny editorial teams keep momentum without losing voice.\", author: \"Ari\", tag: \"Writing\" },\n];\n\nconst activity = [\n  \"Maya published a new lifestyle post 4m ago\",\n  \"Jon bookmarked Tonight's reset\",\n  \"Ari replied to Neighborhood coffee notes\",\n];\n\nconst pulse = [\n  \"Writers are leaning into reflective posts tonight\",\n  \"Lifestyle tags are trending above city guides this hour\",\n  \"Featured stories are getting saved faster than replies\",\n];\n\nexport default function App() {\n  const [posts, setPosts] = useState(seededPosts);\n  const [title, setTitle] = useState(\"\");\n  const [body, setBody] = useState(\"\");\n\n  function publishPost() {\n    const nextTitle = title.trim();\n    const nextBody = body.trim();\n    if (!nextTitle || !nextBody) return;\n\n    setPosts((current) => [\n      { id: Date.now(), title: nextTitle, body: nextBody, author: \"You\", tag: \"Fresh post\" },\n      ...current,\n    ]);\n    setTitle(\"\");\n    setBody(\"\");\n  }\n\n  return (\n    <main className=\"shell\">\n      <section className=\"hero\">\n        <p className=\"eyebrow\">Upgraded social blogging app</p>\n        <h1>Social Hub</h1>\n        <p className=\"lede\">A compact social blogging surface with a real post-to-feed loop, seeded community energy, and a cleaner editorial pulse.</p>\n      </section>\n\n      <section className=\"layout\">\n        <article className=\"panel composer\">\n          <div className=\"panel-head\">\n            <span className=\"kicker\">Compose</span>\n            <h2>Write a Post</h2>\n          </div>\n          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder=\"Post title\" />\n          <textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder=\"What are you publishing today?\" rows={6} />\n          <button onClick={publishPost}>Publish Post</button>\n        </article>\n\n        <article className=\"panel feed\">\n          <div className=\"panel-head\">\n            <span className=\"kicker\">Community</span>\n            <h2>Blog Feed</h2>\n          </div>\n          <div className=\"feed-list\">\n            {posts.map((post) => (\n              <article key={post.id} className=\"post-card\">\n                <div className=\"post-meta\">\n                  <span>{post.author}</span>\n                  <span>{post.tag}</span>\n                </div>\n                <h3>{post.title}</h3>\n                <p>{post.body}</p>\n              </article>\n            ))}\n          </div>\n        </article>\n\n        <aside className=\"panel pulse\">\n          <div className=\"panel-head\">\n            <span className=\"kicker\">Now</span>\n            <h2>Community Pulse</h2>\n          </div>\n          <div className=\"pulse-list\">\n            {activity.map((entry) => (\n              <div key={entry} className=\"pulse-item\">{entry}</div>\n            ))}\n            {pulse.map((entry) => (\n              <div key={entry} className=\"pulse-item\">{entry}</div>\n            ))}\n          </div>\n          <div className=\"featured\">\n            <span className=\"featured-label\">Featured Post</span>\n            <strong>Tonight's reset</strong>\n            <p>Short reflective writing with strong community traction and clear personal voice.</p>\n          </div>\n        </aside>\n      </section>\n    </main>\n  );\n}\n" +
-      "```";
+    return `\`\`\`jsx title="src/App.jsx"
+import React, { useState } from 'react';
+
+const seededPosts = [
+  { id: 1, title: "Tonight's reset", body: 'Shared a calm nightly reset ritual with the community and it immediately sparked discussion.', author: 'Maya', tag: 'Lifestyle' },
+  { id: 2, title: 'Neighborhood coffee notes', body: 'Wrote a quick city guide post after trying three late-night coffee spots in one weekend.', author: 'Jon', tag: 'City' },
+  { id: 3, title: 'Small-team writing rituals', body: 'A short post about how tiny editorial teams keep momentum without losing voice.', author: 'Ari', tag: 'Writing' },
+];
+
+const activity = [
+  'Maya published a new lifestyle post 4m ago',
+  "Jon bookmarked Tonight's reset",
+  'Ari replied to Neighborhood coffee notes',
+  'Writers are leaning into reflective posts tonight',
+  'Featured stories are getting saved faster than replies',
+];
+
+const trends = ['Evening routines', 'City diaries', 'Writing rituals'];
+
+export default function App() {
+  const [posts, setPosts] = useState(seededPosts);
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+
+  function publishPost() {
+    const nextTitle = title.trim();
+    const nextBody = body.trim();
+    if (!nextTitle || !nextBody) return;
+
+    setPosts((current) => [
+      { id: Date.now(), title: nextTitle, body: nextBody, author: 'You', tag: 'Fresh post' },
+      ...current,
+    ]);
+    setTitle('');
+    setBody('');
+  }
+
+  return (
+    <main className='social-shell'>
+      <header className='social-header'>
+        <div>
+          <p className='eyebrow'>Upgraded social blogging app</p>
+          <h1>Social Hub</h1>
+          <p className='lede'>An editorial night-feed with a real publishing loop, live community signals, and a feed-first layout.</p>
+        </div>
+        <div className='ticker'>
+          {trends.map((trend) => (
+            <span key={trend}>{trend}</span>
+          ))}
+        </div>
+      </header>
+
+      <section className='social-grid'>
+        <aside className='composer-rail'>
+          <div className='section-head'>
+            <span className='label'>Compose</span>
+            <h2>Write a Post</h2>
+          </div>
+          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder='Post title' />
+          <textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder='What are you publishing today?' rows={7} />
+          <button type='button' onClick={publishPost}>Publish Post</button>
+        </aside>
+
+        <section className='feed-stage'>
+          <div className='section-head feed-head'>
+            <div>
+              <span className='label'>Community</span>
+              <h2>Blog Feed</h2>
+            </div>
+            <span className='count'>{posts.length} posts</span>
+          </div>
+          <div className='feed-list'>
+            {posts.map((post) => (
+              <article key={post.id} className='story'>
+                <div className='story-meta'>
+                  <span>{post.author}</span>
+                  <span>{post.tag}</span>
+                </div>
+                <h3>{post.title}</h3>
+                <p>{post.body}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <aside className='pulse-rail'>
+          <div className='section-head'>
+            <span className='label'>Now</span>
+            <h2>Community Pulse</h2>
+          </div>
+          <div className='pulse-list'>
+            {activity.map((entry) => (
+              <div key={entry} className='pulse-item'>{entry}</div>
+            ))}
+          </div>
+          <article className='featured-card'>
+            <span className='featured-label'>Featured Post</span>
+            <strong>Tonight's reset</strong>
+            <p>Short reflective writing with strong community traction and clear personal voice.</p>
+          </article>
+        </aside>
+      </section>
+    </main>
+  );
+}
+\`\`\``;
   }
 
   private generateBuilderReferenceSocialApp(_desc: string): string {
@@ -7749,6 +11602,39 @@ button { font: inherit; cursor: pointer; }
       "```";
   }
 
+  private generateBuilderNodeServer(desc: string): string {
+    return "```json title=\"package.json\"\n" +
+      JSON.stringify({
+        name: 'node-server-scratch',
+        private: true,
+        version: '0.0.0',
+        type: 'module',
+        scripts: {
+          dev: 'node server.js',
+          start: 'node server.js'
+        }
+      }, null, 2) +
+      "\n```\n\n" +
+      "```js title=\"server.js\"\n" +
+      "import http from 'node:http';\n\n" +
+      "const port = Number(process.env.PORT || 3000);\n" +
+      "const host = process.env.HOST || '0.0.0.0';\n\n" +
+      `const prompt = ${JSON.stringify(desc)};\n\n` +
+      "const server = http.createServer((req, res) => {\n" +
+      "  if (req.url === '/api/health') {\n" +
+      "    res.writeHead(200, { 'Content-Type': 'application/json' });\n" +
+      "    res.end(JSON.stringify({ status: 'ok', runtime: 'node', prompt }));\n" +
+      "    return;\n" +
+      "  }\n\n" +
+      "  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });\n" +
+      "  res.end(`<!doctype html><html><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" /><title>Node Scratch Server</title><style>body{font-family:Inter,system-ui;margin:0;padding:40px;background:#05131f;color:#e2e8f0}main{max-width:720px;margin:0 auto;padding:28px;border-radius:24px;background:rgba(15,23,42,.84);border:1px solid rgba(255,255,255,.08)}h1{margin-top:0}.pill{display:inline-flex;padding:4px 10px;border-radius:999px;background:rgba(56,189,248,.14);color:#7dd3fc}</style></head><body><main><span class=\"pill\">Node.js</span><h1>Node Scratch Server</h1><p>${prompt}</p><p>Open <strong>/api/health</strong> for JSON health.</p></main></body></html>`);\n" +
+      "});\n\n" +
+      "server.listen(port, host, () => {\n" +
+      "  console.log(`Node server running on http://${host}:${port}`);\n" +
+      "});\n" +
+      "```";
+  }
+
   private generateBuilderVinextApp(desc: string): string {
     if (/\b(default|leave\s+it\s+as\s+default|default\s+starter|default\s+home\s+screen|vanilla|plain)\b/i.test(desc)) {
       return this.generateBuilderVinextDefaultStarter(desc);
@@ -7985,7 +11871,7 @@ button { font: inherit; cursor: pointer; }
 
   private generateBuilderVinextDefaultStarter(_desc: string): string {
     return this.generateBuilderNextjsDefaultStarter(
-      'Starting from a clean Next.js App Router baseline so the first preview is reliable, runnable, and easy to extend. {{template:nextjs:Fresh Next.js App Router}}'
+      "Here's a real runnable base for Vinext right now — today's reliable Vinext path starts from a fresh Next.js app. {{template:nextjs:Fresh Next.js App Router}}"
     );
   }
 
@@ -7994,15 +11880,15 @@ button { font: inherit; cursor: pointer; }
       return this.generateBuilderNextjsTodoApp(desc);
     }
     const isCalculator = /calculator/i.test(desc);
-    const appName = isCalculator ? 'nextjs-calculator-app' : 'nextjs-builder-app';
-    const title = isCalculator ? 'Northstar Calculator' : 'Next.js Builder App';
+    const appName = isCalculator ? 'nextjs-calculator-app' : 'nextjs-workspace-app';
+    const title = isCalculator ? 'Northstar Calculator' : 'Next.js Workspace';
     const description = isCalculator
       ? 'A custom App Router calculator surface generated directly in Builder mode without falling back to a template.'
       : 'A custom App Router workspace generated directly in Builder mode without falling back to a template.';
 
     const pageSource = isCalculator
       ? "'use client';\n\nimport { useState } from 'react';\n\nconst buttons = [\n  '7', '8', '9', '/',\n  '4', '5', '6', '*',\n  '1', '2', '3', '-',\n  '0', '.', '=', '+',\n];\n\nexport default function Page() {\n  const [expression, setExpression] = useState('');\n  const [value, setValue] = useState('0');\n\n  function handlePress(button: string) {\n    if (button === '=') {\n      try {\n        const result = Function(`return (${expression || '0'})`)();\n        setValue(String(result));\n        setExpression(String(result));\n      } catch {\n        setValue('Error');\n      }\n      return;\n    }\n\n    const next = expression + button;\n    setExpression(next);\n    setValue(next);\n  }\n\n  function clearAll() {\n    setExpression('');\n    setValue('0');\n  }\n\n  return (\n    <main className=\"page-shell\">\n      <section className=\"hero\">\n        <p className=\"eyebrow\">" + desc + "</p>\n        <h1>Northstar Calculator</h1>\n        <p className=\"lede\">A polished App Router calculator with a clean keypad, live expression preview, and no template fallback.</p>\n      </section>\n\n      <section className=\"calculator\">\n        <div className=\"display\">\n          <span>Expression</span>\n          <strong>{value}</strong>\n        </div>\n\n        <div className=\"actions\">\n          <button onClick={clearAll} className=\"ghost\">Clear</button>\n        </div>\n\n        <div className=\"keypad\">\n          {buttons.map((button) => (\n            <button key={button} onClick={() => handlePress(button)} className={button === '=' ? 'primary' : ''}>\n              {button}\n            </button>\n          ))}\n        </div>\n      </section>\n    </main>\n  );\n}\n"
-      : "export default function Page() {\n  const highlights = [\n    { title: 'Intent-first shell', body: 'Turn a concrete product ask into a working App Router surface without relying on a starter template.' },\n    { title: 'Ready to extend', body: 'Use this as a clean baseline for routes, data wiring, and richer feature work.' },\n    { title: 'Builder-friendly', body: 'Generated directly from the request so the next prompt can refine the same app.' },\n  ];\n\n  return (\n    <main className=\"page-shell\">\n      <section className=\"hero\">\n        <p className=\"eyebrow\">" + desc + "</p>\n        <h1>Next.js Builder App</h1>\n        <p className=\"lede\">A custom App Router workspace generated directly in Builder mode without falling back to a template.</p>\n      </section>\n\n      <section className=\"grid\">\n        {highlights.map((item) => (\n          <article key={item.title} className=\"card\">\n            <h2>{item.title}</h2>\n            <p>{item.body}</p>\n          </article>\n        ))}\n      </section>\n    </main>\n  );\n}\n";
+      : "export default function Page() {\n  const highlights = [\n    { title: 'Intent-first shell', body: 'Turn a concrete product ask into a working App Router surface without relying on a starter template.' },\n    { title: 'Ready to extend', body: 'Use this as a clean baseline for routes, data wiring, and richer feature work.' },\n    { title: 'Builder-friendly', body: 'Generated directly from the request so the next prompt can refine the same app.' },\n  ];\n\n  return (\n    <main className=\"page-shell\">\n      <section className=\"hero\">\n        <p className=\"eyebrow\">" + desc + "</p>\n        <h1>Next.js Workspace</h1>\n        <p className=\"lede\">A custom App Router workspace generated directly in Builder mode without falling back to a template.</p>\n      </section>\n\n      <section className=\"grid\">\n        {highlights.map((item) => (\n          <article key={item.title} className=\"card\">\n            <h2>{item.title}</h2>\n            <p>{item.body}</p>\n          </article>\n        ))}\n      </section>\n    </main>\n  );\n}\n";
 
     return "```json title=\"package.json\"\n" +
       JSON.stringify({
@@ -8776,8 +12662,23 @@ button { font: inherit; cursor: pointer; }
   // ---- Full project generators ----
 
   private generateWebsite(desc: string): string {
-    const isPortfolio = /portfolio/i.test(desc);
-    const title = isPortfolio ? 'Portfolio' : 'Landing Page';
+    const isArtGallery = /art\s+gallery|artist\s+portfolio|museum|exhibition|curatorial/i.test(desc);
+    const isPhotographyPortfolio = !isArtGallery && /photographer|photography|photo\s+gallery|portrait|wedding/i.test(desc);
+    const isPortfolio = isPhotographyPortfolio || (!isArtGallery && /portfolio/i.test(desc));
+    const title = isArtGallery ? 'Art Gallery' : isPhotographyPortfolio ? 'Photographer Portfolio' : isPortfolio ? 'Portfolio' : 'Landing Page';
+    const brand = isArtGallery ? 'Atelier North' : isPhotographyPortfolio ? 'Ava Lens' : isPortfolio ? 'John Doe' : 'Brand';
+    const sectionLabel = isArtGallery ? 'Current Exhibitions' : isPhotographyPortfolio ? 'Featured Shoots' : isPortfolio ? 'Projects' : 'Features';
+    const heroTitle = isArtGallery ? 'Contemporary Work, Quietly Presented' : isPhotographyPortfolio ? 'Images That Feel Lived In' : isPortfolio ? 'Full-Stack Developer' : 'Build Something Amazing';
+    const heroCopy = isArtGallery
+      ? 'A considered digital gallery experience for exhibitions, artists, and collectors who want the work to stay central.'
+      : isPhotographyPortfolio
+      ? 'Editorial photography for weddings, portraits, and brands that want polished visuals with a human pulse.'
+      : isPortfolio
+        ? 'I build modern web applications with React, TypeScript, and Node.js.'
+        : 'The fastest way to go from idea to production.';
+    const heroCta = isArtGallery ? 'View the Exhibition' : isPhotographyPortfolio ? 'View the Gallery' : isPortfolio ? 'View My Work' : 'Get Started';
+    const contactTitle = isArtGallery ? 'Plan Your Visit' : isPhotographyPortfolio ? 'Book a Session' : 'Get In Touch';
+    const contactButton = isArtGallery ? 'Request Details' : isPhotographyPortfolio ? 'Send Inquiry' : 'Send Message';
     return `Here's a complete **${title}** with HTML + Tailwind CSS:\n\n\`\`\`html
 <!DOCTYPE html>
 <html lang="en">
@@ -8791,10 +12692,10 @@ button { font: inherit; cursor: pointer; }
   <!-- Navigation -->
   <nav class="fixed w-full bg-gray-900/80 backdrop-blur-sm border-b border-gray-800 z-50">
     <div class="max-w-6xl mx-auto px-6 py-4 flex justify-between items-center">
-      <a href="#" class="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">${isPortfolio ? 'John Doe' : 'Brand'}</a>
+      <a href="#" class="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">${brand}</a>
       <div class="hidden md:flex gap-8">
         <a href="#about" class="text-gray-300 hover:text-white transition">About</a>
-        <a href="#${isPortfolio ? 'projects' : 'features'}" class="text-gray-300 hover:text-white transition">${isPortfolio ? 'Projects' : 'Features'}</a>
+        <a href="#${isPortfolio ? 'projects' : 'features'}" class="text-gray-300 hover:text-white transition">${sectionLabel}</a>
         <a href="#contact" class="text-gray-300 hover:text-white transition">Contact</a>
       </div>
     </div>
@@ -8804,26 +12705,26 @@ button { font: inherit; cursor: pointer; }
   <section class="min-h-screen flex items-center justify-center px-6">
     <div class="text-center max-w-3xl">
       <h1 class="text-5xl md:text-7xl font-bold mb-6 bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent">
-        ${isPortfolio ? 'Full-Stack Developer' : 'Build Something Amazing'}
+        ${heroTitle}
       </h1>
-      <p class="text-xl text-gray-400 mb-8">${isPortfolio ? 'I build modern web applications with React, TypeScript, and Node.js.' : 'The fastest way to go from idea to production.'}</p>
+      <p class="text-xl text-gray-400 mb-8">${heroCopy}</p>
       <a href="#${isPortfolio ? 'projects' : 'features'}" class="inline-block px-8 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition transform hover:scale-105">
-        ${isPortfolio ? 'View My Work' : 'Get Started'}
+        ${heroCta}
       </a>
     </div>
   </section>
 
-  <!-- ${isPortfolio ? 'Projects' : 'Features'} -->
+  <!-- ${sectionLabel} -->
   <section id="${isPortfolio ? 'projects' : 'features'}" class="py-20 px-6">
     <div class="max-w-6xl mx-auto">
-      <h2 class="text-3xl font-bold text-center mb-12">${isPortfolio ? 'Projects' : 'Features'}</h2>
+      <h2 class="text-3xl font-bold text-center mb-12">${sectionLabel}</h2>
       <div class="grid md:grid-cols-3 gap-8">
         ${[1,2,3].map(i => `<div class="bg-gray-800 rounded-xl p-6 hover:bg-gray-750 transition">
           <div class="w-12 h-12 bg-blue-600/20 rounded-lg flex items-center justify-center mb-4">
             <span class="text-2xl">${['🚀','⚡','🎨'][i-1]}</span>
           </div>
-          <h3 class="text-xl font-semibold mb-2">${isPortfolio ? `Project ${i}` : `Feature ${i}`}</h3>
-          <p class="text-gray-400">${isPortfolio ? 'A full-stack application built with modern technologies.' : 'Description of this amazing feature goes here.'}</p>
+          <h3 class="text-xl font-semibold mb-2">${isPhotographyPortfolio ? `Shoot ${i}` : isPortfolio ? `Project ${i}` : `Feature ${i}`}</h3>
+          <p class="text-gray-400">${isPhotographyPortfolio ? 'A curated story-driven image collection designed to make the work feel premium and immediate.' : isPortfolio ? 'A full-stack application built with modern technologies.' : 'Description of this amazing feature goes here.'}</p>
         </div>`).join('\n        ')}
       </div>
     </div>
@@ -8832,18 +12733,18 @@ button { font: inherit; cursor: pointer; }
   <!-- Contact -->
   <section id="contact" class="py-20 px-6 bg-gray-800/50">
     <div class="max-w-xl mx-auto text-center">
-      <h2 class="text-3xl font-bold mb-8">Get In Touch</h2>
+      <h2 class="text-3xl font-bold mb-8">${contactTitle}</h2>
       <form class="space-y-4">
         <input type="text" placeholder="Your Name" class="w-full px-4 py-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-blue-500 focus:outline-none">
         <input type="email" placeholder="Your Email" class="w-full px-4 py-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-blue-500 focus:outline-none">
         <textarea placeholder="Your Message" rows="4" class="w-full px-4 py-3 bg-gray-800 rounded-lg border border-gray-700 focus:border-blue-500 focus:outline-none"></textarea>
-        <button type="submit" class="w-full py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition">Send Message</button>
+        <button type="submit" class="w-full py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition">${contactButton}</button>
       </form>
     </div>
   </section>
 
   <footer class="py-8 text-center text-gray-500 border-t border-gray-800">
-    <p>&copy; 2026 ${isPortfolio ? 'John Doe' : 'Brand'}. All rights reserved.</p>
+    <p>&copy; 2026 ${brand}. All rights reserved.</p>
   </footer>
 </body>
 </html>
@@ -9378,7 +13279,9 @@ export default function Dashboard() {
     // Skip policy/philosophy questions — "should you default to..." / "mention your assumption"
     if (/\bshould\b/i.test(lower) && /\b(default|ask|mention|assumption)\b/i.test(lower)) return null;
 
-    const packages: Array<{ name: string; npmName?: string; nodeApi?: boolean }> = [];
+    const packages: Array<{ name: string; npmName?: string; nodeApi?: boolean; githubReleaseApi?: string }> = [];
+    if (/\bbun\b/i.test(lower)) packages.push({ name: 'Bun', githubReleaseApi: 'https://api.github.com/repos/oven-sh/bun/releases/latest' });
+    if (/\bdeno\b/i.test(lower)) packages.push({ name: 'Deno', githubReleaseApi: 'https://api.github.com/repos/denoland/deno/releases/latest' });
     if (/\bnext\.?js\b/i.test(lower)) packages.push({ name: 'Next.js', npmName: 'next' });
     if (/\breact\b/i.test(lower)) packages.push({ name: 'React', npmName: 'react' });
     if (/\bnode\.?js\b/i.test(lower)) packages.push({ name: 'Node.js', nodeApi: true });
@@ -9397,6 +13300,13 @@ export default function Dashboard() {
             const data = await res.json() as Array<{ version: string; lts: string | false }>;
             if (data.length > 0) results.push(`**${pkg.name}:** ${data[0].version}${data[0].lts ? ` (${data[0].lts} LTS)` : ''}`);
           }
+        } else if (pkg.githubReleaseApi) {
+          const res = await fetch(pkg.githubReleaseApi);
+          if (res.ok) {
+            const data = await res.json() as { tag_name?: string };
+            const version = this.normalizeGitHubReleaseVersion(data.tag_name ?? '');
+            if (version) results.push(`**${pkg.name}:** ${version}`);
+          }
         } else if (pkg.npmName) {
           const res = await fetch(`https://registry.npmjs.org/${pkg.npmName}/latest`);
           if (res.ok) {
@@ -9408,6 +13318,103 @@ export default function Dashboard() {
     }
 
     return results.length > 0 ? results.join('\n') : null;
+  }
+
+  private normalizeGitHubReleaseVersion(tagName: string): string | null {
+    const trimmed = tagName.trim();
+    if (!trimmed) return null;
+
+    return trimmed.replace(/^bun-v/i, '').replace(/^v/i, '');
+  }
+
+  private tryOfficialDocsAnswer(input: string, lower: string): string | null {
+    if (this._activeMode === 'builder' || this._hasActiveSandboxContext) {
+      return null;
+    }
+
+    const asksForDocsPages = /\b(?:official|current)\b[\s\S]{0,30}\b(?:docs|documentation|page)\b|\b(?:docs|documentation|page)\b[\s\S]{0,30}\b(?:official|current)\b/i.test(input);
+    if (!asksForDocsPages) return null;
+
+    // Skip if user is asking about a made-up/fake feature — let downstream handlers verify
+    const impossibleFeatureRequest = /\b(made-up|fake|fictional|not real)\b/i.test(lower) ||
+      /\bdo not invent\b/i.test(lower) ||
+      /\bif that page is not real\b/i.test(lower);
+    if (impossibleFeatureRequest) return null;
+
+    // Skip version-specific queries — let version lookup handler deal with those
+    if (/\b(?:current|latest)\b/i.test(lower) && /\b(?:version|release)\b/i.test(lower)) return null;
+
+    const sources = this.buildOfficialDocsSources(lower);
+    if (sources.length === 0) return null;
+
+    this._lastSearchResponse = this.buildFallbackSearchResponse(this.renderOfficialDocsAnswer(sources), sources, 0.74);
+    return this._lastSearchResponse.answer;
+  }
+
+  private tryCurrentInfoGuardrail(input: string, lower: string): string | null {
+    const asksExactCurrentVersion = /\b(?:what|which|tell|give)\b[\s\S]{0,50}\b(?:current|latest|stable|exact|right\s+now|today)\b/i.test(input)
+      && /\b(?:version|release)\b/i.test(lower);
+
+    const asksExactCurrentApiOrDocs = /\b(?:what|which|tell|give|show|explain)\b[\s\S]{0,60}\b(?:current|latest|exact|right\s+now|today)\b/i.test(input)
+      && /\b(?:api|docs|documentation|syntax|router|hook|hooks|caching|revalidate|function|method)\b/i.test(lower);
+
+    if (!asksExactCurrentVersion && !asksExactCurrentApiOrDocs) return null;
+
+    const sources = this.buildOfficialDocsSources(lower);
+
+    if (asksExactCurrentApiOrDocs && sources.length > 0) {
+      return [
+        `I do not want to pretend the exact current ${this.resolveCurrentApiSubject(lower)} from memory.`,
+        '',
+        'Start with the official docs:',
+        ...sources.map((source) => `- ${source.title}: ${source.url}`),
+        '',
+        'If you want the exact current API surface beyond that, ask me to use web search or check the maintainer docs directly.',
+      ].join('\n');
+    }
+
+    if (!asksExactCurrentVersion) return null;
+
+    const subject = this.resolveCurrentInfoSubject(lower);
+    const source = this.resolveCurrentInfoSource(lower);
+
+    return `I do not want to bluff the exact current ${subject} without a fresh lookup. ${source ? `Check the official release page next: ${source}. ` : ''}If you want the exact answer, ask me to use web search or check the maintainer's current release page.`;
+  }
+
+  private resolveCurrentApiSubject(lower: string): string {
+    if (/\bnext\.?js\b|\bapp router\b|\bpages router\b/i.test(lower)) return 'Next.js API or docs state';
+    if (/\btailwind\b/i.test(lower)) return 'Tailwind CSS API or docs state';
+    if (/\bframer\s*motion\b|\bmotion\b/i.test(lower)) return 'Motion API or docs state';
+    if (/\bgsap\b/i.test(lower)) return 'GSAP API or docs state';
+    if (/\bthree\.?js\b/i.test(lower)) return 'Three.js API or docs state';
+    if (/\breact\b/i.test(lower)) return 'React API or docs state';
+    if (/\bnode\.?js\b|\bnode\b/i.test(lower)) return 'Node.js API or docs state';
+    if (/\bbun\b/i.test(lower)) return 'Bun API or docs state';
+    return 'API or docs state';
+  }
+
+  private resolveCurrentInfoSubject(lower: string): string {
+    if (/\bbun\b/i.test(lower)) return 'Bun version';
+    if (/\bdeno\b/i.test(lower)) return 'Deno version';
+    if (/\bnode\.?js\b|\bnode\b/i.test(lower)) return 'Node.js version';
+    if (/\bnext\.?js\b|\bnextjs\b/i.test(lower)) return 'Next.js version';
+    if (/\breact\b/i.test(lower)) return 'React version';
+    if (/\btypescript\b/i.test(lower)) return 'TypeScript version';
+    if (/\bvite\b/i.test(lower)) return 'Vite version';
+    if (/\btailwind/i.test(lower)) return 'Tailwind CSS version';
+    return 'version';
+  }
+
+  private resolveCurrentInfoSource(lower: string): string | null {
+    if (/\bbun\b/i.test(lower)) return 'https://github.com/oven-sh/bun/releases';
+    if (/\bdeno\b/i.test(lower)) return 'https://github.com/denoland/deno/releases';
+    if (/\bnode\.?js\b|\bnode\b/i.test(lower)) return 'https://nodejs.org/dist/index.json';
+    if (/\bnext\.?js\b|\bnextjs\b/i.test(lower)) return 'https://github.com/vercel/next.js/releases';
+    if (/\breact\b/i.test(lower)) return 'https://github.com/facebook/react/releases';
+    if (/\btypescript\b/i.test(lower)) return 'https://github.com/microsoft/TypeScript/releases';
+    if (/\bvite\b/i.test(lower)) return 'https://github.com/vitejs/vite/releases';
+    if (/\btailwind/i.test(lower)) return 'https://github.com/tailwindlabs/tailwindcss/releases';
+    return null;
   }
 
   private tryCodeExample(lower: string): string | null {
@@ -9460,6 +13467,32 @@ export default function Dashboard() {
     return null;
   }
 
+  private tryPracticalSetupKnowledge(input: string): { strategy: 'framework-devops'; text: string } | null {
+    if (this.skillRouter.isExplicitScaffoldRequest(input)) return null;
+    if (this._activeMode === 'builder' || this._hasActiveSandboxContext) return null;
+
+    const wantsAuthSetup = (
+      /^(?:how\s+do\s+i|how\s+to)\b.*\b(?:add|implement|set\s*up|setup|configure|integrate)\b.*\b(?:auth(?:entication)?|nextauth|auth\.?js|clerk|supabase\s+auth|lucia)\b/i.test(input)
+      || /\b(?:add|implement|set\s*up|setup|configure|integrate)\b.*\b(?:auth(?:entication)?|nextauth|auth\.?js|clerk|supabase\s+auth|lucia)\b.*\b(?:next\.?js|nextjs|react|app|project)\b/i.test(input)
+    );
+    if (wantsAuthSetup) {
+      const text = this.tryFrameworkDevopsKnowledge(input);
+      if (text) return { strategy: 'framework-devops', text };
+    }
+
+    const wantsPrismaSetup = (
+      /^(?:how\s+do\s+i|how\s+to)\b.*\b(?:set\s*up|setup|configure|install|connect|use)\b.*\bprisma\b/i.test(input)
+      || /\b(?:set\s*up|setup|configure|install|connect|use)\b.*\bprisma\b.*\b(?:postgres(?:ql)?|database|db)\b/i.test(input)
+      || (/\bprisma\b.*\b(?:postgres(?:ql)?|database|db)\b/i.test(input) && /\b(?:set\s*up|setup|configure|install|connect|use)\b/i.test(input))
+    );
+    if (wantsPrismaSetup) {
+      const text = this.tryFrameworkDevopsKnowledge(input);
+      if (text) return { strategy: 'framework-devops', text };
+    }
+
+    return null;
+  }
+
   private tryVersioningPolicy(lower: string): string | null {
     // "should you default to latest stable, ask for a version, or mention your assumption?"
     if (/\bdefault\b/i.test(lower) && /\b(version|stable|lts)\b/i.test(lower) && /\b(ask|mention|assumption)\b/i.test(lower)) {
@@ -9478,6 +13511,66 @@ export default function Dashboard() {
     }
     // Generic C program
     return 'Here\'s a **C program** template:\n\n```c\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\nint main(int argc, char *argv[]) {\n    printf("Hello from C!\\n");\n    return 0;\n}\n```\n\nTell me what the program should do and I\'ll generate the specific implementation.';
+  }
+
+  /**
+   * Generate a utility function/snippet based on the description and language.
+   * Handles requests like "write a debounce function in typescript",
+   * "create a throttle utility", "make a deep clone helper", etc.
+   */
+  private generateUtilitySnippet(desc: string, langHint: string): string {
+    const lang = langHint || 'typescript';
+    const langLabel = lang.charAt(0).toUpperCase() + lang.slice(1);
+
+    // --- Debounce ---
+    if (/debounce/i.test(desc)) {
+      if (/python/i.test(lang)) {
+        return `Here's a **debounce** function in **Python**:\n\n\`\`\`python\nimport threading\nfrom typing import Callable, Any\n\ndef debounce(delay: float) -> Callable:\n    """Decorator that delays execution until after 'delay' seconds of inactivity."""\n    def decorator(fn: Callable) -> Callable:\n        timer: threading.Timer | None = None\n        def debounced(*args: Any, **kwargs: Any) -> None:\n            nonlocal timer\n            if timer is not None:\n                timer.cancel()\n            timer = threading.Timer(delay, fn, args=args, kwargs=kwargs)\n            timer.start()\n        return debounced\n    return decorator\n\n# Usage\n@debounce(0.3)\ndef on_input_change(value: str) -> None:\n    print(f"Processing: {value}")\n\non_input_change("h")\non_input_change("he")\non_input_change("hel")  # Only this one fires after 300ms\n\`\`\``;
+      }
+      return `Here's a **debounce** function in **${langLabel}**:\n\n\`\`\`typescript\n/**\n * Returns a debounced version of the given function.\n * The function will only execute after \`delay\` ms of inactivity.\n */\nfunction debounce<T extends (...args: any[]) => any>(\n  fn: T,\n  delay: number\n): (...args: Parameters<T>) => void {\n  let timeoutId: ReturnType<typeof setTimeout> | null = null;\n\n  return (...args: Parameters<T>) => {\n    if (timeoutId !== null) clearTimeout(timeoutId);\n    timeoutId = setTimeout(() => {\n      timeoutId = null;\n      fn(...args);\n    }, delay);\n  };\n}\n\n// Usage\nconst debouncedSearch = debounce((query: string) => {\n  console.log("Searching:", query);\n}, 300);\n\ndebouncedSearch("h");\ndebouncedSearch("he");\ndebouncedSearch("hel");  // Only this one fires after 300ms\n\`\`\`\n\n**Key points:**\n- Generic type \`T\` preserves the original function's parameter types\n- Returns \`void\` since the call is delayed (no return value)\n- Clears previous timer on each call, so only the last call within \`delay\` ms executes`;
+    }
+
+    // --- Throttle ---
+    if (/throttle/i.test(desc)) {
+      return `Here's a **throttle** function in **${langLabel}**:\n\n\`\`\`typescript\n/**\n * Returns a throttled version of the given function.\n * The function executes at most once per \`limit\` ms.\n */\nfunction throttle<T extends (...args: any[]) => any>(\n  fn: T,\n  limit: number\n): (...args: Parameters<T>) => void {\n  let lastCall = 0;\n  let timeoutId: ReturnType<typeof setTimeout> | null = null;\n\n  return (...args: Parameters<T>) => {\n    const now = Date.now();\n    const remaining = limit - (now - lastCall);\n\n    if (remaining <= 0) {\n      if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }\n      lastCall = now;\n      fn(...args);\n    } else if (!timeoutId) {\n      timeoutId = setTimeout(() => {\n        lastCall = Date.now();\n        timeoutId = null;\n        fn(...args);\n      }, remaining);\n    }\n  };\n}\n\n// Usage\nconst throttledScroll = throttle(() => {\n  console.log("Scroll position:", window.scrollY);\n}, 200);\n\nwindow.addEventListener("scroll", throttledScroll);\n\`\`\`\n\n**Key points:**\n- Executes immediately on first call, then at most once per \`limit\` ms\n- Trailing call is guaranteed — the last invocation within a burst always fires\n- Useful for scroll, resize, and mousemove handlers`;
+    }
+
+    // --- Deep clone ---
+    if (/deep\s*(?:clone|copy)/i.test(desc)) {
+      return `Here's a **deep clone** function in **${langLabel}**:\n\n\`\`\`typescript\n/**\n * Deep clones a value, handling objects, arrays, dates, maps, sets, and regexes.\n * Does NOT handle circular references — use structuredClone() for that.\n */\nfunction deepClone<T>(value: T): T {\n  // Primitives and null\n  if (value === null || typeof value !== "object") return value;\n\n  // Built-in types\n  if (value instanceof Date) return new Date(value.getTime()) as T;\n  if (value instanceof RegExp) return new RegExp(value.source, value.flags) as T;\n  if (value instanceof Map) {\n    const map = new Map();\n    value.forEach((v, k) => map.set(deepClone(k), deepClone(v)));\n    return map as T;\n  }\n  if (value instanceof Set) {\n    const set = new Set();\n    value.forEach((v) => set.add(deepClone(v)));\n    return set as T;\n  }\n\n  // Arrays and plain objects\n  if (Array.isArray(value)) return value.map(deepClone) as T;\n  const clone = {} as Record<string, unknown>;\n  for (const key of Object.keys(value)) {\n    clone[key] = deepClone((value as Record<string, unknown>)[key]);\n  }\n  return clone as T;\n}\n\n// Usage\nconst original = { a: 1, b: { c: [2, 3] }, d: new Date() };\nconst cloned = deepClone(original);\ncloned.b.c.push(4);\nconsole.log(original.b.c); // [2, 3] — original unchanged\n\`\`\`\n\n**Modern alternative:** \`structuredClone(obj)\` — built-in, handles circular refs, available in Node 17+ and all modern browsers.`;
+    }
+
+    // --- Memoize ---
+    if (/memoi[zs]e/i.test(desc)) {
+      return `Here's a **memoize** function in **${langLabel}**:\n\n\`\`\`typescript\n/**\n * Caches results of expensive function calls.\n * Uses a Map for O(1) lookup by serialized arguments.\n */\nfunction memoize<T extends (...args: any[]) => any>(fn: T): T {\n  const cache = new Map<string, ReturnType<T>>();\n\n  return ((...args: Parameters<T>): ReturnType<T> => {\n    const key = JSON.stringify(args);\n    if (cache.has(key)) return cache.get(key)!;\n    const result = fn(...args);\n    cache.set(key, result);\n    return result;\n  }) as T;\n}\n\n// Usage\nconst expensiveCalc = memoize((n: number): number => {\n  console.log("Computing...");\n  return n * n;\n});\n\nexpensiveCalc(5); // logs "Computing...", returns 25\nexpensiveCalc(5); // returns 25 (cached, no log)\n\`\`\`\n\n**Caveats:**\n- Uses \`JSON.stringify\` for cache keys — works for primitives and simple objects\n- For object arguments, consider a \`WeakMap\`-based approach\n- Add a max cache size to prevent memory leaks in long-running processes`;
+    }
+
+    // --- Event emitter ---
+    if (/event\s*(?:emitter|bus|dispatcher)/i.test(desc)) {
+      return `Here's a type-safe **event emitter** in **${langLabel}**:\n\n\`\`\`typescript\ntype EventMap = Record<string, any[]>;\n\nclass EventEmitter<Events extends EventMap> {\n  private listeners = new Map<keyof Events, Set<Function>>();\n\n  on<K extends keyof Events>(event: K, fn: (...args: Events[K]) => void): () => void {\n    if (!this.listeners.has(event)) this.listeners.set(event, new Set());\n    this.listeners.get(event)!.add(fn);\n    return () => this.listeners.get(event)?.delete(fn);\n  }\n\n  emit<K extends keyof Events>(event: K, ...args: Events[K]): void {\n    this.listeners.get(event)?.forEach(fn => fn(...args));\n  }\n\n  off<K extends keyof Events>(event: K, fn: (...args: Events[K]) => void): void {\n    this.listeners.get(event)?.delete(fn);\n  }\n}\n\n// Usage\ninterface AppEvents {\n  userLogin: [userId: string];\n  message: [from: string, text: string];\n  error: [error: Error];\n}\n\nconst bus = new EventEmitter<AppEvents>();\nconst unsub = bus.on("message", (from, text) => console.log(from, text));\nbus.emit("message", "Alice", "Hello!");\nunsub(); // cleanup\n\`\`\``;
+    }
+
+    // --- Retry ---
+    if (/retry/i.test(desc)) {
+      return `Here's a **retry** utility in **${langLabel}**:\n\n\`\`\`typescript\nasync function retry<T>(\n  fn: () => Promise<T>,\n  options: { maxAttempts?: number; delay?: number; backoff?: number } = {}\n): Promise<T> {\n  const { maxAttempts = 3, delay = 1000, backoff = 2 } = options;\n\n  for (let attempt = 1; attempt <= maxAttempts; attempt++) {\n    try {\n      return await fn();\n    } catch (err) {\n      if (attempt === maxAttempts) throw err;\n      const waitMs = delay * Math.pow(backoff, attempt - 1);\n      await new Promise(r => setTimeout(r, waitMs));\n    }\n  }\n  throw new Error("Unreachable");\n}\n\n// Usage\nconst data = await retry(\n  () => fetch("https://api.example.com/data").then(r => r.json()),\n  { maxAttempts: 3, delay: 500, backoff: 2 }\n);\n\`\`\`\n\n**Features:**\n- Exponential backoff: waits 500ms → 1s → 2s\n- Generic return type preserves the function's return type\n- Throws the last error after all attempts are exhausted`;
+    }
+
+    // --- Pipe / compose ---
+    if (/pipe|compose/i.test(desc)) {
+      return `Here's **pipe** and **compose** in **${langLabel}**:\n\n\`\`\`typescript\n/** Left-to-right function composition */\nfunction pipe<T>(...fns: Array<(arg: T) => T>): (arg: T) => T {\n  return (arg: T) => fns.reduce((acc, fn) => fn(acc), arg);\n}\n\n/** Right-to-left function composition */\nfunction compose<T>(...fns: Array<(arg: T) => T>): (arg: T) => T {\n  return (arg: T) => fns.reduceRight((acc, fn) => fn(acc), arg);\n}\n\n// Usage\nconst trim = (s: string) => s.trim();\nconst lower = (s: string) => s.toLowerCase();\nconst exclaim = (s: string) => s + "!";\n\nconst process = pipe(trim, lower, exclaim);\nconsole.log(process("  HELLO  ")); // "hello!"\n\`\`\``;
+    }
+
+    // --- Generic fallback for other utility requests ---
+    const funcName = desc
+      .replace(/\b(?:function|utility|helper|hook|class|module|snippet|method|create|write|make|build|implement|generate|a|an|the|in|for|with|using)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!funcName) {
+      return `What utility function would you like? Some common ones:\n\n- **debounce** — delay execution until idle\n- **throttle** — limit execution frequency\n- **deepClone** — recursively copy objects\n- **memoize** — cache function results\n- **retry** — retry async operations with backoff\n- **pipe/compose** — chain functions\n- **eventEmitter** — pub/sub pattern\n\nJust say "write a [name] function in ${lang}" and I'll generate it.`;
+    }
+
+    return `Here's a **${funcName}** utility in **${langLabel}**:\n\n\`\`\`${lang === 'typescript' ? 'typescript' : lang}\n// ${funcName} implementation\n// TODO: This is a template — describe the specific behavior you need\n// and I'll generate a complete, working implementation.\n\nexport function ${funcName.replace(/\s+/g, '')}() {\n  // Implement ${funcName} logic here\n  throw new Error("Not implemented — tell me the specifics");\n}\n\`\`\`\n\nCan you describe what this ${funcName} should do? For example:\n- What inputs does it take?\n- What should it return?\n- Any edge cases to handle?`;
   }
 
   private generateAdvancedCalculatorUI(): string {
@@ -12924,8 +17017,9 @@ Classic number guessing game with hints and attempt tracking.`;
         '| **Examples** | Next.js, Nuxt.js | Create React App, Vite SPA |';
     }
 
-    // Next.js — require explicit "what is" / "hva er" to avoid intercepting feature-specific questions
-    if ((/what\s+is\s+next\.?js\b/i.test(input) || /hva\s+er\s+next\.?js/i.test(input))
+    // Next.js — catch bare "next.js" as well as "what is next.js" / "hva er next.js"
+    // Bare framework names signal "tell me about this" intent
+    if ((/(?:what\s+is\s+)?next\.?js\b/i.test(input) || /hva\s+er\s+next\.?js/i.test(input) || /^next\.?js[\s?!.]*$/i.test(input))
       && !/metadata|seo|middleware|context|parallel|usecallback|usememo|layout.*work|code\s+split|error\s+boundar|image.*optim|portal|form.*action|server\s+action|auth/i.test(input)) {
       return '**Next.js** is a **React framework** by Vercel for building full-stack web applications.\n\n' +
         '**Key features:**\n' +
@@ -13875,7 +17969,7 @@ Classic number guessing game with hints and attempt tracking.`;
 
   private tryCSFundamentals(input: string): string | null {
     // Gate: CS/networking/security/algorithms topics
-    const isCSQuestion = /\b(?:how\s+does|how\s+do|what\s+is|what\s+are|explain|tell\s+me\s+about|describe|what'?s|difference\s+between)\b/i.test(input);
+    const isCSQuestion = /\b(?:how\s+does|how\s+do|what\s+is|what\s+are|what\s+changed|what'?s\s+new|explain|tell\s+me\s+about|describe|what'?s|difference\s+between|recent\s+changes?)\b/i.test(input);
     if (!isCSQuestion) return null;
 
     // ── Networking ──
@@ -14258,6 +18352,51 @@ console.log('4');          // sync → stack
     }
 
     // ── Framework explanations (caught here to avoid TF-IDF false matches) ──
+
+    // React 19 specifically — must fire BEFORE generic "explain react"
+    if (/react\s*19|react.*(?:new\s+features|latest|recent\s+(?:changes|updates?|features?))|(?:what(?:'?s)?\s+(?:new|changed)|recent\s+changes|latest\s+features?).*(?:in\s+)?react/i.test(input)) {
+      return `**React 19** (released December 2024) — the biggest React release in years.
+
+**Major features:**
+
+1. **React Compiler** (formerly React Forget)
+   - Automatically memoizes components at build time
+   - Eliminates manual \`useMemo\`, \`useCallback\`, \`React.memo\`
+   - Opt-in via Babel plugin
+
+2. **\`use()\` hook** — read Promises and Context during render
+   \`\`\`jsx
+   function Comments({ commentsPromise }) {
+     const comments = use(commentsPromise); // suspends until resolved
+     return comments.map(c => <p key={c.id}>{c.text}</p>);
+   }
+   \`\`\`
+   Unlike \`useContext\`, \`use()\` can be called inside if/loops.
+
+3. **Actions** — async functions in transitions
+   \`\`\`jsx
+   <form action={submitForm}>
+   \`\`\`
+   Handles pending states, errors, and optimistic updates automatically.
+
+4. **\`ref\` as a regular prop** — no more \`forwardRef\` wrapper needed
+   \`\`\`tsx
+   function Input({ ref, ...props }) {
+     return <input ref={ref} {...props} />;
+   }
+   \`\`\`
+
+5. **Document metadata** — \`<title>\`, \`<meta>\`, \`<link>\` in components render to \`<head>\`
+
+6. **Asset loading** — \`preload()\`, \`preinit()\` for fonts, scripts, stylesheets
+
+7. **Improved error reporting** — better hydration mismatch messages, no more double-logging
+
+**Breaking changes:** \`propTypes\` and \`defaultProps\` removed on function components. Legacy Context API removed.
+
+Upgrade: \`npm install react@19 react-dom@19\``;
+    }
+
     if (/(?:explain|what\s+is|how\s+does|describe)\s+(?:how\s+)?react(?:\.?js)?\b|react\s+(?:explained|overview|basics?|introduction|fundamentals?|from\s+scratch)/i.test(input)) {
       return `**React** is a JavaScript library for building user interfaces.
 
@@ -14341,8 +18480,32 @@ app.listen(3000, () => console.log('Server running'));
     input = input.replace(/["'""''`]/g, ' ').replace(/\s+/g, ' ').trim();
 
     // Gate: broad knowledge topics
-    if (!/\b(capital|hovedstad|history|histor|who\s+(?:wrote|painted|invented|discovered|founded|created)|world\s+war|krig|berlin\s+wall|mona\s+lisa|shakespeare|boiling\s+point|speed\s+of\s+light|red\s+planet|mars\b|pacific|ocean|prime\s+number|prime\b|brendan\s+eich|bits?\s+in\s+(?:a\s+)?byte|ekofisk|bryggen|tyskebryggen|olympic|eidsvoll|grunnlov|constitution|gokstad|nidaros|tirpitz|lofot|seilskute|finnmark|1989|1945|1952|1994|1997|1998|2001|2004|2005|2007|2008|lillehammer|deep\s+blue|kasparov|google|wikipedia|youtube|iphone|apple|financial\s+crisis|finanskris|lehman|oil\s+fund|pensjonsfond|vg\b|verdens\s+gang|primary\s+source|reliable\s+fact|peer.?review|government\s+record|france|paris|japan|tokyo|australia|canberra|germany|berlin|sweden|stockholm|united\s+kingdom|london|iceland|reykjav[ií]k|italy|rome|spain|madrid|canada|ottawa|china|beijing|india|new\s+delhi|brazil|bras[ií]lia|russia|moscow|chemistry|chemical\s+formula|h2o|water|dna|planet|solar\s+system|ocean|light\s+speed|prime|byte|javascript\s+creat|\bwwii\b|\bww2\b|second\s+world\s+war|andre\s+verdenskrig|fall\s+of\s+(?:the\s+)?berlin|oil\s+field|viking\s+ship|cathedral|battleship|cod\s+fish|sailing\s+ship|shipping|maritime\s+center|chess|encyclopedia|video.?sharing|smartphone|recession|newspaper|fylke|rogaland|vestland|bergen|oslo|innlandet|vestfold|trøndelag|trondheim|finnmark|nordland|agder|tromsø|troms\b)/i.test(input)) {
+    if (!/\b(capital|hovedstad|history|histor|who\s+(?:wrote|painted|invented|discovered|founded|created)|world\s+war|krig|berlin\s+wall|mona\s+lisa|shakespeare|boiling\s+point|speed\s+of\s+light|red\s+planet|mars\b|pacific|ocean|prime\s+number|prime\b|brendan\s+eich|bits?\s+in\s+(?:a\s+)?byte|ekofisk|bryggen|tyskebryggen|olympic|eidsvoll|grunnlov|constitution|gokstad|nidaros|tirpitz|lofot|seilskute|finnmark|1989|1945|1952|1994|1997|1998|2001|2004|2005|2007|2008|lillehammer|deep\s+blue|kasparov|google|wikipedia|youtube|iphone|apple|financial\s+crisis|finanskris|lehman|oil\s+fund|pensjonsfond|vg\b|verdens\s+gang|primary\s+source|reliable\s+fact|peer.?review|government\s+record|france|paris|japan|tokyo|australia|canberra|germany|berlin|sweden|stockholm|united\s+kingdom|london|iceland|reykjav[ií]k|italy|rome|spain|madrid|canada|ottawa|china|beijing|india|new\s+delhi|brazil|bras[ií]lia|russia|moscow|chemistry|chemical\s+formula|h2o|water|dna|planet|solar\s+system|ocean|light\s+speed|prime|byte|javascript\s+creat|\bwwii\b|\bww2\b|second\s+world\s+war|andre\s+verdenskrig|fall\s+of\s+(?:the\s+)?berlin|oil\s+field|viking\s+ship|cathedral|battleship|cod\s+fish|sailing\s+ship|shipping|maritime\s+center|chess|encyclopedia|video.?sharing|smartphone|recession|newspaper|fylke|rogaland|vestland|bergen|oslo|innlandet|vestfold|trøndelag|trondheim|finnmark|nordland|agder|tromsø|troms\b|philosopher|meaning\s+of\s+life|existential|stoic|epicur|nietzsche|plato|aristotle|socrates|kant\b|utilitari|nihilis|absurd)/i.test(input)) {
       return null;
+    }
+
+    // ── Philosophy & meaning of life ──
+    if (/\b(?:philosopher|philosophy)\b.*\b(?:meaning|life|existence|purpose)\b/i.test(input)
+      || /\bmeaning\s+of\s+life\b.*\b(?:philosopher|philosophy|say|think|believe|view)\b/i.test(input)
+      || /\b(?:what\s+do|what\s+did)\s+philosopher/i.test(input)) {
+      return [
+        '**What philosophers say about the meaning of life:**',
+        '',
+        '**Ancient perspectives:**',
+        '- **Aristotle** — Eudaimonia (flourishing): the good life comes from cultivating virtue and living according to reason',
+        '- **Epicurus** — Pleasure and the absence of pain; simple pleasures, friendship, and philosophical contemplation',
+        '- **Stoics** (Marcus Aurelius, Seneca) — Live according to nature and reason; focus on what you can control, accept what you cannot',
+        '',
+        '**Modern perspectives:**',
+        '- **Kant** — Act according to duty and moral law; treat people as ends, never merely as means',
+        '- **Nietzsche** — Create your own meaning; "He who has a why to live can bear almost any how"',
+        '- **Camus** — Life is absurd but worth living; embrace it fully ("One must imagine Sisyphus happy")',
+        '- **Sartre** — Existence precedes essence; you define your own purpose through choices and actions',
+        '',
+        '**Common threads:** Most traditions agree that meaning comes from **relationships**, **purpose**, **growth**, and **contribution** — though they disagree sharply on the source of those values.',
+        '',
+        'Any particular philosopher or school of thought you\'re interested in?',
+      ].join('\n');
     }
 
     // ── Geography / capitals ──
@@ -14667,6 +18830,33 @@ app.listen(3000, () => console.log('Server running'));
 
   private tryFrameworkDevopsKnowledge(input: string): string | null {
     input = input.replace(/["'""''`]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // ── Popular programming languages — common general question ──
+    if (/\b(?:popular|top|best|most\s+(?:used|popular|common|in[\s-]?demand)|widely\s+used)\s+(?:programming\s+)?languages?\b/i.test(input)
+      || /\bprogramming\s+languages?\b.*\b(?:popular|top|best|most\s+(?:used|common))\b/i.test(input)) {
+      return [
+        '**Most popular programming languages (2025):**',
+        '',
+        '| Language | Primary use | Why it\'s popular |',
+        '|---|---|---|',
+        '| **JavaScript** | Web (frontend + backend) | Runs everywhere, massive ecosystem |',
+        '| **Python** | Data science, AI/ML, scripting | Simple syntax, incredible libraries |',
+        '| **TypeScript** | Web (typed JavaScript) | Catches bugs at compile time |',
+        '| **Java** | Enterprise, Android | Mature, stable, huge job market |',
+        '| **C#** | .NET, games (Unity) | Microsoft ecosystem, versatile |',
+        '| **Go** | Cloud infrastructure, CLIs | Fast, simple, great concurrency |',
+        '| **Rust** | Systems, performance-critical | Memory safety without GC |',
+        '| **C/C++** | Systems, embedded, games | Maximum performance, hardware access |',
+        '| **PHP** | Web backends (WordPress) | Powers ~75% of websites |',
+        '| **Swift/Kotlin** | iOS / Android native | Modern mobile development |',
+        '',
+        '**For web development:** JavaScript/TypeScript is the clear default.',
+        '**For data/AI:** Python dominates.',
+        '**For systems/performance:** Rust and Go are growing fast.',
+        '',
+        'What are you interested in building? I can recommend the best fit.',
+      ].join('\n');
+    }
 
     const normalizedTopic = this.normalizeFollowUpTopic(input);
     const topicWords = normalizedTopic.split(/\s+/).filter(Boolean);
@@ -16618,7 +20808,7 @@ app.listen(3000, () => console.log('Server running'));
     }
 
     // ── Authentication / Auth setup ──
-    if (/(?:setup|install|add|implement)\s+auth|next.?auth|auth\.?js|clerk|authentication.*(?:next|react|setup)/i.test(input) && !this.skillRouter.isExplicitScaffoldRequest(input)) {
+    if (/((?:how\s+do\s+i|how\s+to).*(?:add|implement|set\s*up|setup|configure|integrate).*(?:auth(?:entication)?|next.?auth|auth\.?js|clerk))|(?:setup|install|add|implement|configure|integrate)\s+(?:auth(?:entication)?|next.?auth|auth\.?js|clerk)|next.?auth|auth\.?js|clerk|authentication.*(?:next|react|setup)/i.test(input) && !this.skillRouter.isExplicitScaffoldRequest(input)) {
       return '**Authentication options for Next.js:**\n\n' +
         '| Solution | Type | Pros | Cons |\n|---|---|---|---|\n' +
         '| **NextAuth.js (Auth.js)** | Self-hosted | Free, flexible, many providers | Setup complexity |\n' +
@@ -16631,9 +20821,9 @@ app.listen(3000, () => console.log('Server running'));
     }
 
     // ── Prisma / Database setup ──
-    if (/prisma.*(?:setup|schema|what|explain)|database.*(?:setup|schema|next|orm)|what\s+is\s+prisma|drizzle\s+vs\s+prisma/i.test(input)) {
+    if (/((?:how\s+do\s+i|how\s+to).*(?:set\s*up|setup|configure|install|connect|use).*(?:prisma|postgres(?:ql)?))|(?:set\s*up|setup|configure|install|connect|use).*(?:prisma).*(?:postgres(?:ql)?|database|db)|prisma.*(?:setup|schema|what|explain)|database.*(?:setup|schema|next|orm)|what\s+is\s+prisma|drizzle\s+vs\s+prisma/i.test(input)) {
       return '**Prisma** is a modern TypeScript ORM for Node.js.\n\n' +
-        '**Setup:**\n```bash\nnpx prisma init --datasource-provider postgresql\n```\n\n' +
+        '**Install + setup:**\n```bash\npnpm add prisma @prisma/client\npnpm prisma init --datasource-provider postgresql\n```\n\n' +
         '**Schema (prisma/schema.prisma):**\n```prisma\ngenerator client {\n  provider = "prisma-client-js"\n}\n\ndatasource db {\n  provider = "postgresql"\n  url      = env("DATABASE_URL")\n}\n\nmodel User {\n  id        String   @id @default(cuid())\n  email     String   @unique\n  name      String?\n  password  String\n  role      Role     @default(USER)\n  posts     Post[]\n  createdAt DateTime @default(now())\n}\n\nmodel Post {\n  id        String   @id @default(cuid())\n  title     String\n  content   String?\n  published Boolean  @default(false)\n  author    User     @relation(fields: [authorId], references: [id])\n  authorId  String\n}\n\nenum Role {\n  USER\n  ADMIN\n}\n```\n\n' +
         '**Prisma vs Drizzle:**\n' +
         '| | Prisma | Drizzle |\n|---|---|---|\n' +
@@ -16717,7 +20907,35 @@ app.listen(3000, () => console.log('Server running'));
     }
 
     // ── State management ──
+    // Differentiate between overview/comparison vs tutorial/example vs specific library
     if (/state\s+manage|zustand|jotai|redux.*(?:what|explain|vs)|pinia.*(?:what|explain)/i.test(input)) {
+      // "zustand vs X" or "X vs zustand" — comparison mode
+      if (/zustand\s+(?:vs\.?|or|and)\s+\w|(?:vs\.?|or|and)\s+zustand/i.test(input)
+          || /jotai\s+(?:vs\.?|or|and)\s+\w|(?:vs\.?|or|and)\s+jotai/i.test(input)
+          || /redux\s+(?:vs\.?|or|and)\s+\w|(?:vs\.?|or|and)\s+redux/i.test(input)
+          || /(?:compare|comparison|difference|which.*better)/i.test(input)) {
+        return '**State management** in modern web apps:\n\n' +
+          '| Library | Framework | Approach | Bundle |\n|---|---|---|---|\n' +
+          '| **Zustand** | React | Tiny store, hooks-based | ~1 KB |\n' +
+          '| **Jotai** | React | Atomic (bottom-up) | ~2 KB |\n' +
+          '| **Redux Toolkit** | React | Flux pattern, reducers | ~11 KB |\n' +
+          '| **Pinia** | Vue | Composition API stores | ~1.5 KB |\n' +
+          '| **NgRx / Signals** | Angular | Reactive stores | Built-in |\n' +
+          '| **Recoil** | React | Atomic (Facebook) | ~20 KB |\n\n' +
+          '**2026 recommendation:** Zustand for React, Pinia for Vue, Signals for Angular.\n\n' +
+          '**Zustand example:**\n```typescript\nimport { create } from "zustand";\n\ninterface Store {\n  count: number;\n  increment: () => void;\n}\n\nconst useStore = create<Store>((set) => ({\n  count: 0,\n  increment: () => set((s) => ({ count: s.count + 1 })),\n}));\n```';
+      }
+
+      // Zustand-specific tutorial/example/how-to
+      if (/zustand/i.test(input) && !/state\s+manage/i.test(input)) {
+        return '**Zustand** — tiny, fast state management for React (~1 KB).\n\n' +
+          '**Install:** `npm install zustand`\n\n' +
+          '**1. Create a store:**\n```typescript\nimport { create } from "zustand";\n\ninterface TodoStore {\n  todos: { id: number; text: string; done: boolean }[];\n  addTodo: (text: string) => void;\n  toggleTodo: (id: number) => void;\n  removeTodo: (id: number) => void;\n}\n\nconst useTodoStore = create<TodoStore>((set) => ({\n  todos: [],\n  addTodo: (text) =>\n    set((state) => ({\n      todos: [...state.todos, { id: Date.now(), text, done: false }],\n    })),\n  toggleTodo: (id) =>\n    set((state) => ({\n      todos: state.todos.map((t) =>\n        t.id === id ? { ...t, done: !t.done } : t\n      ),\n    })),\n  removeTodo: (id) =>\n    set((state) => ({\n      todos: state.todos.filter((t) => t.id !== id),\n    })),\n}));\n```\n\n' +
+          '**2. Use in components:**\n```tsx\nfunction TodoList() {\n  const { todos, addTodo, toggleTodo, removeTodo } = useTodoStore();\n\n  return (\n    <ul>\n      {todos.map((todo) => (\n        <li key={todo.id}>\n          <input\n            type="checkbox"\n            checked={todo.done}\n            onChange={() => toggleTodo(todo.id)}\n          />\n          <span style={{ textDecoration: todo.done ? "line-through" : "none" }}>\n            {todo.text}\n          </span>\n          <button onClick={() => removeTodo(todo.id)}>×</button>\n        </li>\n      ))}\n    </ul>\n  );\n}\n```\n\n' +
+          '**Why Zustand over Redux:**\n- No boilerplate — no actions, reducers, or dispatch\n- No context provider needed — just import and use\n- ~1 KB vs ~11 KB for Redux Toolkit\n- Built-in devtools: `import { devtools } from "zustand/middleware"`';
+      }
+
+      // Generic state management overview
       return '**State management** in modern web apps:\n\n' +
         '| Library | Framework | Approach | Bundle |\n|---|---|---|---|\n' +
         '| **Zustand** | React | Tiny store, hooks-based | ~1 KB |\n' +
@@ -19856,7 +24074,7 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
     const clean = retrieved
       .filter(r => !KnowledgeStore.isJunkContent(r.text))
       .filter(r => r.text.trim().length >= 80)
-      .filter(r => r.score >= VaiEngine.SYNTHESIS_MIN_SCORE * 0.25);
+      .filter(r => r.score >= VaiEngine.SYNTHESIS_MIN_SCORE * 0.6);
     if (clean.length === 0) return null;
 
     const queryWords = input.toLowerCase().split(/\s+/)
@@ -19869,6 +24087,13 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
         return new RegExp(`\\b${escaped}\\b`, 'i').test(lower);
       }).length;
     };
+
+    // Require minimum query word coverage at the document level
+    // to prevent garbage matches where only 1 word out of 5+ overlaps
+    const topDocHits = countWholeWordHits(clean[0].text);
+    const docCoverage = queryWords.length > 0 ? topDocHits / queryWords.length : 0;
+    if (queryWords.length >= 3 && docCoverage < 0.3) return null;
+    if (queryWords.length >= 2 && topDocHits === 0) return null;
 
     const sentencePool = clean.flatMap(match => {
       const sentences = match.text.split(/(?<=[.!?])\s+/)
@@ -19883,7 +24108,7 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
     });
 
     const rankedSentences = sentencePool
-      .filter(sentence => sentence.hits > 0 || clean[0].score >= VaiEngine.SYNTHESIS_MIN_SCORE)
+      .filter(sentence => sentence.hits >= 1)
       .sort((a, b) => b.hits - a.hits || b.score - a.score || a.text.length - b.text.length);
 
     const uniqueSentences: Array<{ text: string; source: string; score: number; hits: number }> = [];
@@ -20017,7 +24242,9 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
       /\b(predictive prefetch|proactively load|load likely files|repo-native code assistant)\b/i.test(lower)
       && /use the headings?:[^\n.]*\bidea\b[^\n.]*\binputs\b[^\n.]*\bguardrails\b/i.test(lower)
     ) {
-      return this.renderPlainPredictivePrefetchMemo();
+      // Let tryRepoNativeArchitecture handle this — it renders the same memo
+      // but tracks as 'repo-native-architecture' strategy
+      return null;
     }
 
     if (
@@ -20290,8 +24517,8 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
   private tryTerminalHarnessResponse(input: string, history: readonly Message[]): string | null {
     if (!this.isTerminalHarnessRequest(input, history)) return null;
 
-    const phase = /(?:^|\n)phase=([^\n]+)/i.exec(input)?.[1]?.trim().toLowerCase() ?? 'act';
-    const verificationPassed = /(?:^|\n)-\s*verification=passed\b/i.test(input);
+    const phase = /(?:^|\n|\s)phase=([^\s\n]+)/i.exec(input)?.[1]?.trim().toLowerCase() ?? 'act';
+    const verificationPassed = /(?:^|\n|\s)-?\s*verification=passed\b/i.test(input);
 
     if (verificationPassed || phase === 'done-ready') {
       return JSON.stringify({ action: 'done', reason: 'verification passed' });
@@ -21470,10 +25697,589 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
   }
 
   /**
+   * Handle URL-based requests: "take a look at URL", "rebuild URL for me", etc.
+   * For GitHub URLs: fetches repo info via the public API and generates a project
+   * or presents repo details. For non-GitHub URLs with build intent: asks what the
+   * site does. For other URLs: returns null to let the search pipeline handle it.
+   */
+  private async tryUrlBasedRequest(lower: string, original: string): Promise<string | null> {
+    // Only fire if the input contains a URL
+    const urlMatch = original.match(/https?:\/\/\S+/i);
+    if (!urlMatch) return null;
+
+    const url = urlMatch[0].replace(/[.!?,;:)\]]+$/, ''); // strip trailing punctuation
+
+    // Extract domain/path for display
+    let urlLabel = url;
+    try {
+      const parsed = new URL(url);
+      const pathSegments = parsed.pathname.split('/').filter(Boolean);
+      if (parsed.hostname.includes('github.com') && pathSegments.length >= 2) {
+        urlLabel = `${pathSegments[0]}/${pathSegments[1]}`;
+      } else {
+        urlLabel = parsed.hostname.replace(/^www\./, '') + (pathSegments.length > 0 ? '/' + pathSegments.join('/') : '');
+      }
+    } catch { /* keep raw URL as label */ }
+
+    // Detect intent
+    const hasBuildIntent = /\b(?:build|create|make|design|clone|rebuild|replicate|recreate|copy|develop|implement|code)\b/i.test(lower);
+    const hasSimilarIntent = /\b(?:similar|like\s+(?:this|that)|inspired\s+by|something\s+like|based\s+on)\b/i.test(lower);
+
+    // ── GitHub URL handling ──────────────────────────────────────────────
+    const githubMatch = url.match(/github\.com\/([\w.-]+)\/([\w.-]+)/i);
+    if (githubMatch) {
+      const [, owner, repo] = githubMatch;
+      const repoInfo = await this.fetchGitHubRepoInfo(owner, repo);
+
+      if (hasBuildIntent || hasSimilarIntent) {
+        return this.generateProjectFromGitHub(owner, repo, repoInfo);
+      }
+
+      // Look / inspect / bare URL — present repo info and offer to build
+      return this.formatGitHubRepoSummary(owner, repo, repoInfo);
+    }
+
+    // ── Non-GitHub URLs with build intent ────────────────────────────────
+    if (hasBuildIntent || hasSimilarIntent) {
+      return [
+        `I can build something inspired by **${urlLabel}**! Tell me:`,
+        '',
+        '1. **What does the site/app do?** (e.g. "a link shortener", "a portfolio")',
+        '2. **Key features** you want in your version',
+        '3. **Tech preferences?** (React, Next.js, etc.) — or I\'ll recommend',
+        '',
+        'I\'ll generate the full project.',
+      ].join('\n');
+    }
+
+    // Non-GitHub URLs without build intent — let the search pipeline handle
+    return null;
+  }
+
+  /** Fetch public GitHub repo info. Returns null on any failure. */
+  private async fetchGitHubRepoInfo(owner: string, repo: string): Promise<{
+    description: string; language: string; topics: string[]; stars: number; homepage: string; readmeText: string;
+  } | null> {
+    try {
+      const headers = { 'User-Agent': 'VeggaAI/1.0', 'Accept': 'application/vnd.github.v3+json' };
+      const resp = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+        {
+          headers,
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+      if (!resp.ok) return null;
+      const data = await resp.json() as Record<string, unknown>;
+      let readmeText = '';
+      try {
+        const readmeResp = await fetch(
+          `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/readme`,
+          {
+            headers,
+            signal: AbortSignal.timeout(5000),
+          },
+        );
+        if (readmeResp.ok) {
+          const readmeData = await readmeResp.json() as Record<string, unknown>;
+          const encoded = typeof readmeData.content === 'string' ? readmeData.content.replace(/\s+/g, '') : '';
+          if (encoded) {
+            readmeText = Buffer.from(encoded, 'base64').toString('utf8').slice(0, 4000);
+          }
+        }
+      } catch {
+        // README fetch is optional; repo metadata alone is still useful.
+      }
+      return {
+        description: (data.description as string) || '',
+        language: (data.language as string) || '',
+        topics: Array.isArray(data.topics) ? data.topics as string[] : [],
+        stars: (data.stargazers_count as number) || 0,
+        homepage: (data.homepage as string) || '',
+        readmeText,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Given GitHub repo info, generate an actual project inspired by it. */
+  private generateProjectFromGitHub(
+    owner: string, repo: string,
+    info: { description: string; language: string; topics: string[]; stars: number; homepage: string; readmeText: string } | null,
+  ): string {
+    const repoName = `${owner}/${repo}`;
+    const desc = (info?.description || '').toLowerCase();
+    const lang = (info?.language || '').toLowerCase();
+    const topics = (info?.topics || []).join(' ').toLowerCase();
+    const home = (info?.homepage || '').toLowerCase();
+    const readme = (info?.readmeText || '').toLowerCase();
+    const repoLower = repo.toLowerCase();
+    const all = `${desc} ${topics} ${home} ${repoLower} ${readme}`;
+
+    // Context line shown before generated code
+    const ctx = info
+      ? `I looked up **${repoName}**${info.description ? ` — *"${info.description}"*` : ''}${info.language ? ` (${info.language}${(info.stars || 0) > 100 ? `, ${info.stars.toLocaleString()} stars` : ''})` : ''}\n\n`
+      : `Building a project inspired by **${repoName}**:\n\n`;
+
+    // ── Project type inference ──
+    if (/link.?in.?bio|linktree|bio.?link|personal.?link/i.test(all)) return this.generateLinkInBioProject(ctx);
+    if (/video\s+review|frame\.?io|creative\s+teams?|review\s+workspace|review\s+platform|timestamp(?:ed)?\s+comments?|video\s+feedback|share\s+cuts|upload.*review/i.test(all)) {
+      return this.generateCreativeReviewWorkspacePlan(ctx, repoName);
+    }
+    if (/portfolio/i.test(all)) return ctx + this.generateWebsite('portfolio');
+    if (/landing.?page/i.test(all)) return ctx + this.generateWebsite('landing page');
+    if (/dashboard|admin.?panel|analytics/i.test(all)) return ctx + this.generateDashboard(`dashboard inspired by ${repoName}`);
+    if (/\bblog\b|cms|content.?manage/i.test(all)) return ctx + this.generateBlog(`blog inspired by ${repoName}`);
+    if (/chat|messag|real.?time.?comm/i.test(all)) return ctx + this.generateChatApp(`chat app inspired by ${repoName}`);
+    if (/todo|task.?(?:list|manager|app)|kanban/i.test(all)) return ctx + this.generateReactApp(`todo app inspired by ${repoName}`);
+
+    // Web/frontend project (inferred from language) — generate a starter and invite customization
+    if (/typescript|javascript|html|css/i.test(lang) || /web|react|next|vue|svelte|frontend|tailwind/i.test(topics)) {
+      return [
+        ctx.trimEnd(),
+        '',
+        `I can see it's a **${info?.language || 'web'}** project, but I do not have enough repo signal yet to honestly rebuild the product shape.`,
+        '',
+        '**What I need for a faithful rebuild:**',
+        '- A one-line summary of what the product does',
+        '- 3 to 5 features that must survive in the rebuild',
+        '- Whether you want a close clone, a simplified first cut, or just the design language',
+      ].join('\n');
+    }
+
+    // Have info but can't determine type — ask for specifics
+    if (info) {
+      return [
+        ctx.trimEnd(),
+        '',
+        'I can build you a version — tell me:',
+        '',
+        '1. **What features** should it have?',
+        '2. **Tech preferences?** (React, Next.js, Node, Python, etc.)',
+        '',
+        'I\'ll generate the full project.',
+      ].join('\n');
+    }
+
+    // No API info at all — still be helpful
+    return `I couldn't fetch details for **${repoName}** right now, but I can still build it. Tell me what it does and I'll generate a version.`;
+  }
+
+  /** Present GitHub repo info and offer to build. */
+  private formatGitHubRepoSummary(
+    owner: string, repo: string,
+    info: { description: string; language: string; topics: string[]; stars: number; homepage: string; readmeText: string } | null,
+  ): string {
+    const repoName = `${owner}/${repo}`;
+
+    if (!info) {
+      return [
+        `I found **${repoName}** on GitHub but couldn't fetch its details right now.`,
+        '',
+        '**What I can do:**',
+        `- Say \`rebuild ${repoName}\` and I'll generate a version of it`,
+        '- Describe what it does and I\'ll discuss it or build something similar',
+        '- Paste code from it and I\'ll review or explain it',
+      ].join('\n');
+    }
+
+    const lines: string[] = [`**${repoName}**`];
+    if (info.description) lines.push(`> ${info.description}`);
+    lines.push('');
+    const details: string[] = [];
+    if (info.language) details.push(`**Language:** ${info.language}`);
+    if (info.stars > 0) details.push(`**Stars:** ${info.stars.toLocaleString()}`);
+    if (info.topics.length > 0) details.push(`**Topics:** ${info.topics.join(', ')}`);
+    if (info.homepage) details.push(`**Homepage:** ${info.homepage}`);
+    if (details.length > 0) lines.push(details.join(' · '));
+    lines.push('');
+    lines.push('**What would you like to do?**');
+    lines.push(`- \`rebuild ${repoName}\` — I'll generate a version of it`);
+    lines.push('- Describe specific features you want from it');
+    lines.push('- Paste code from it for review or explanation');
+
+    return lines.join('\n');
+  }
+
+  private generateCreativeReviewWorkspacePlan(contextLine: string, repoName: string): string {
+    return [
+      `${contextLine}This reads like a **creative review workspace**, not a generic landing page.`,
+      '',
+      '**Best first cut:**',
+      '- Workspace shell with projects, uploads, review queue, and shared review links',
+      '- Asset review page with video player, timestamped comments, mentions, status chips, and approval flow',
+      '- Dark, typography-first UI so the media stays primary and the chrome stays quiet',
+      '',
+      '**Recommended stack:**',
+      '- **Next.js** for the app shell and shareable review routes',
+      '- **PostgreSQL** for projects, assets, comments, and approvals',
+      '- **Object storage** for uploads plus signed playback URLs',
+      '',
+      '**Deploy now:**',
+      '{{deploy:nextjs:basic:Creative Review Workspace}}',
+      '',
+      `If you want, say: "make the first cut more like Frame.io", "focus on timestamped comments", or "rebuild ${repoName} as a lighter v1".`,
+    ].join('\n');
+  }
+
+  /** Generate a complete link-in-bio page (Linktree / lawn style). */
+  private generateLinkInBioProject(contextLine: string): string {
+    return `${contextLine}Here's a complete **link-in-bio page** — save as \`index.html\` and open in a browser:
+
+\`\`\`html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Links</title>
+  <script src="https://cdn.tailwindcss.com"><\/script>
+  <script>tailwindcss.config={theme:{extend:{fontFamily:{sans:['Inter','system-ui','sans-serif']}}}}<\/script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    .link-card{transition:all .2s ease}
+    .link-card:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,0,0,.4)}
+    .link-card:active{transform:scale(.98)}
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 flex items-center justify-center p-4">
+  <div class="w-full max-w-md text-center py-12">
+    <!-- Profile -->
+    <div class="w-24 h-24 mx-auto mb-4 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
+      <span class="text-3xl font-bold text-white">YN</span>
+    </div>
+    <h1 class="text-2xl font-bold text-white mb-1">Your Name</h1>
+    <p class="text-gray-400 text-sm mb-8">Developer · Designer · Creator</p>
+
+    <!-- Links -->
+    <div class="space-y-3 px-2">
+      <a href="#" class="link-card group flex items-center gap-3 w-full py-3.5 px-5 bg-white/[.07] backdrop-blur border border-white/10 rounded-2xl text-white hover:bg-white/[.12]">
+        <span class="text-lg">🌐</span><span class="font-medium flex-1 text-left">My Website</span>
+        <span class="text-gray-500 group-hover:text-gray-300 transition">→</span>
+      </a>
+      <a href="#" class="link-card group flex items-center gap-3 w-full py-3.5 px-5 bg-white/[.07] backdrop-blur border border-white/10 rounded-2xl text-white hover:bg-white/[.12]">
+        <span class="text-lg">🐙</span><span class="font-medium flex-1 text-left">GitHub</span>
+        <span class="text-gray-500 group-hover:text-gray-300 transition">→</span>
+      </a>
+      <a href="#" class="link-card group flex items-center gap-3 w-full py-3.5 px-5 bg-white/[.07] backdrop-blur border border-white/10 rounded-2xl text-white hover:bg-white/[.12]">
+        <span class="text-lg">🐦</span><span class="font-medium flex-1 text-left">Twitter / X</span>
+        <span class="text-gray-500 group-hover:text-gray-300 transition">→</span>
+      </a>
+      <a href="#" class="link-card group flex items-center gap-3 w-full py-3.5 px-5 bg-white/[.07] backdrop-blur border border-white/10 rounded-2xl text-white hover:bg-white/[.12]">
+        <span class="text-lg">💼</span><span class="font-medium flex-1 text-left">LinkedIn</span>
+        <span class="text-gray-500 group-hover:text-gray-300 transition">→</span>
+      </a>
+      <a href="#" class="link-card group flex items-center gap-3 w-full py-3.5 px-5 bg-white/[.07] backdrop-blur border border-white/10 rounded-2xl text-white hover:bg-white/[.12]">
+        <span class="text-lg">📧</span><span class="font-medium flex-1 text-left">Email Me</span>
+        <span class="text-gray-500 group-hover:text-gray-300 transition">→</span>
+      </a>
+      <a href="#" class="link-card group flex items-center gap-3 w-full py-3.5 px-5 bg-white/[.07] backdrop-blur border border-white/10 rounded-2xl text-white hover:bg-white/[.12]">
+        <span class="text-lg">☕</span><span class="font-medium flex-1 text-left">Buy Me a Coffee</span>
+        <span class="text-gray-500 group-hover:text-gray-300 transition">→</span>
+      </a>
+    </div>
+
+    <p class="mt-10 text-gray-600 text-xs">Built with ❤️</p>
+  </div>
+</body>
+</html>
+\`\`\`
+
+**To use:** Save as \`index.html\` and open in a browser. Works immediately — no build step needed.
+
+Want me to customize it with your actual links, change the color scheme, add animations, or convert to React/Next.js?`;
+  }
+
+  /**
+   * Handle real-time utility questions: time, date, day of week, conversation recall.
+   * These need special handling because vai:v0 has no external clock — we use the host runtime.
+   */
+  private tryUtilityQuestion(lower: string, original: string, history: readonly Message[]): string | null {
+    // ── Timezone conversion questions ── "what time is it in Tokyo if it's 3pm in New York"
+    const tzConvertMatch = lower.match(/what\s+time\s+(?:is\s+it\s+)?in\s+([a-z\s]+?)\s+(?:if|when|right\s+now\s+if)\s+(?:it(?:'?s|\s+is)\s+)?(\d{1,2})(?::(\d{2}))?\s*(?:am|pm)?\s+in\s+([a-z\s]+)/i)
+      || lower.match(/if\s+(?:it(?:'?s|\s+is)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s+in\s+([a-z\s]+?)\s*,?\s*what\s+time\s+(?:is\s+it\s+)?in\s+([a-z\s]+)/i);
+    if (tzConvertMatch) {
+      // Timezone offset map (UTC offsets for major cities)
+      const tzOffsets: Record<string, number> = {
+        'new york': -5, 'nyc': -5, 'eastern': -5, 'est': -5, 'et': -5,
+        'los angeles': -8, 'la': -8, 'pacific': -8, 'pst': -8, 'pt': -8,
+        'chicago': -6, 'central': -6, 'cst': -6, 'ct': -6,
+        'denver': -7, 'mountain': -7, 'mst': -7, 'mt': -7,
+        'london': 0, 'uk': 0, 'gmt': 0, 'utc': 0,
+        'paris': 1, 'berlin': 1, 'rome': 1, 'madrid': 1, 'cet': 1,
+        'oslo': 1, 'stockholm': 1, 'copenhagen': 1,
+        'moscow': 3, 'istanbul': 3,
+        'dubai': 4, 'mumbai': 5.5, 'delhi': 5.5, 'india': 5.5, 'ist': 5.5,
+        'bangkok': 7, 'jakarta': 7,
+        'singapore': 8, 'hong kong': 8, 'beijing': 8, 'shanghai': 8, 'china': 8,
+        'tokyo': 9, 'japan': 9, 'jst': 9,
+        'seoul': 9, 'korea': 9,
+        'sydney': 10, 'australia': 10, 'aest': 10,
+        'auckland': 12, 'new zealand': 12, 'nzst': 12,
+        'hawaii': -10, 'hst': -10, 'alaska': -9,
+        'norway': 1, 'trondheim': 1, 'bergen': 1,
+      };
+
+      // Parse both match forms
+      let targetCity: string, sourceHour: number, sourceMinute: number, sourceAmPm: string, sourceCity: string;
+      if (tzConvertMatch[5]) {
+        // Second form: "if it's 3pm in New York, what time in Tokyo"
+        sourceHour = parseInt(tzConvertMatch[1], 10);
+        sourceMinute = parseInt(tzConvertMatch[2] || '0', 10);
+        sourceAmPm = (tzConvertMatch[3] || '').toLowerCase();
+        sourceCity = tzConvertMatch[4].trim().toLowerCase();
+        targetCity = tzConvertMatch[5].trim().toLowerCase();
+      } else {
+        // First form: "what time in Tokyo if it's 3pm in New York"
+        targetCity = tzConvertMatch[1].trim().toLowerCase();
+        sourceHour = parseInt(tzConvertMatch[2], 10);
+        sourceMinute = parseInt(tzConvertMatch[3] || '0', 10);
+        sourceAmPm = '';
+        sourceCity = tzConvertMatch[4].trim().toLowerCase();
+        // Detect am/pm from original text
+        const ampmMatch = lower.match(new RegExp(tzConvertMatch[2] + '(?::\\d{2})?\\s*(am|pm)', 'i'));
+        if (ampmMatch) sourceAmPm = ampmMatch[1].toLowerCase();
+      }
+
+      const srcOffset = tzOffsets[sourceCity];
+      const tgtOffset = tzOffsets[targetCity];
+
+      if (srcOffset !== undefined && tgtOffset !== undefined) {
+        // Convert to 24h
+        let hour24 = sourceHour;
+        if (sourceAmPm === 'pm' && hour24 < 12) hour24 += 12;
+        if (sourceAmPm === 'am' && hour24 === 12) hour24 = 0;
+        if (!sourceAmPm && hour24 <= 12 && hour24 !== 0) {
+          // Ambiguous — check if original has am/pm
+          const pmHint = lower.includes('pm') || lower.includes('p.m');
+          const amHint = lower.includes('am') || lower.includes('a.m');
+          if (pmHint && hour24 < 12) hour24 += 12;
+        }
+
+        const diffHours = tgtOffset - srcOffset;
+        let targetHour = hour24 + diffHours;
+        let targetMin = sourceMinute;
+        // Handle half-hour offsets
+        if (diffHours % 1 !== 0) {
+          targetHour = Math.floor(hour24 + diffHours);
+          targetMin = sourceMinute + (diffHours > 0 ? 30 : -30);
+          if (targetMin >= 60) { targetMin -= 60; targetHour++; }
+          if (targetMin < 0) { targetMin += 60; targetHour--; }
+        }
+
+        let dayNote = '';
+        if (targetHour >= 24) { targetHour -= 24; dayNote = ' (next day)'; }
+        if (targetHour < 0) { targetHour += 24; dayNote = ' (previous day)'; }
+
+        const tgtAmPm = targetHour >= 12 ? 'PM' : 'AM';
+        const tgt12 = targetHour === 0 ? 12 : targetHour > 12 ? targetHour - 12 : targetHour;
+        const minStr = targetMin.toString().padStart(2, '0');
+        const srcLabel = sourceCity.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        const tgtLabel = targetCity.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        const diffStr = diffHours > 0 ? `+${diffHours}` : `${diffHours}`;
+
+        return `If it's **${sourceHour}${sourceAmPm ? sourceAmPm.toUpperCase() : ':' + sourceMinute.toString().padStart(2, '0')}** in ${srcLabel}, it's **${tgt12}:${minStr} ${tgtAmPm}**${dayNote} in ${tgtLabel}.\n\n${tgtLabel} is UTC${tgtOffset >= 0 ? '+' : ''}${tgtOffset}, ${srcLabel} is UTC${srcOffset >= 0 ? '+' : ''}${srcOffset} (${diffStr}h difference).`;
+      }
+    }
+
+    // ── Time questions ──
+    const isTimeQ = /\b(?:what\s+(?:is\s+)?(?:the\s+)?(?:current\s+)?time|what\s+time\s+is\s+it|hva\s+er\s+(?:klokk(?:a|en)|tiden)|hvor\s+mye\s+er\s+klokk(?:a|en)|which\s+time\s+(?:is\s+it|zone)|current\s+time)\b/i.test(lower)
+      || /^(?:time|klokka|tiden|the\s+time)[?!.\s]*$/i.test(lower);
+    if (isTimeQ) {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+      const timeStr24 = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      const isNorwegian = /\b(?:hva|klokk|tiden|hvor)\b/i.test(lower);
+      if (isNorwegian) {
+        return `Klokka er **${timeStr24}** (${timeStr}).`;
+      }
+      return `The current time is **${timeStr}** (${timeStr24}).`;
+    }
+
+    // ── Date questions ──
+    const isDateQ = /\b(?:what\s+(?:is\s+)?(?:the\s+)?(?:current\s+)?date|what\s+date\s+is\s+(?:it|today)|today'?s?\s+date|what\s+day\s+is\s+(?:it|today)|which\s+day\s+is\s+(?:it|today)|hva\s+er\s+(?:datoen|dato|dagen)\s*(?:i\s*dag)?|hvilken\s+dag\s+er\s+det)\b/i.test(lower)
+      || /^(?:date|today|dato|i\s+dag)[?!.\s]*$/i.test(lower);
+    if (isDateQ) {
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      const isNorwegian = /\b(?:hva|dato|dag|hvilken|i\s+dag)\b/i.test(lower);
+      if (isNorwegian) {
+        const nDateStr = now.toLocaleDateString('nb-NO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        return `I dag er det **${nDateStr}**.`;
+      }
+      return `Today is **${dateStr}**.`;
+    }
+
+    // ── "What was my first message?" / conversation memory ──
+    const isConversationRecall = /\b(?:(?:what|which)\s+(?:was|is)\s+(?:my|the)\s+(?:first|last|previous|earliest)\s+message|first\s+(?:thing|message)\s+(?:i|we)\s+(?:said|wrote|sent|asked|typed)|remember\s+(?:my|the)\s+first\s+(?:message|question))\b/i.test(lower);
+    if (isConversationRecall) {
+      const userMessages = history.filter(m => m.role === 'user');
+      if (userMessages.length > 0) {
+        const isFirst = /first|earliest/i.test(lower);
+        const target = isFirst ? userMessages[0] : userMessages[userMessages.length - 2]; // -2 because current is last
+        if (target) {
+          const preview = target.content.length > 200 ? target.content.slice(0, 200) + '...' : target.content;
+          return `Your ${isFirst ? 'first' : 'previous'} message was:\n\n> ${preview}`;
+        }
+      }
+      return "I don't see any earlier messages in this conversation. This looks like the start of our chat.";
+    }
+
+    return null;
+  }
+
+  /**
+   * Decompose multi-part questions ("what is X and also what is Y and what is Z")
+   * into individual answers when a single prompt contains multiple distinct questions.
+   */
+  private tryMultiQuestionDecomposition(lower: string, original: string, history: readonly Message[]): string | null {
+    // Must have explicit conjunctions separating distinct questions
+    // "and what/how..." only counts when followed by question words (is/are/do/does/was/were/should/would/will/about)
+    // to avoid splitting feature lists like "a feed and who to follow rail"
+    const hasMultiMarker = /\b(?:and\s+also|and\s+(?:what|how|when|where|which|why|can)\s+(?:is|are|do|does|did|was|were|should|would|will|could|about)\b|also\s+(?:what|how|who|when|where|which|why|can)\s+(?:is|are|do|does|did|was|were|should|would|will|could|about)\b)/i.test(lower);
+    if (!hasMultiMarker) return null;
+
+    // Skip when the "and why/how" part refers back to the main subject via pronoun —
+    // "What is X and why would I use it" is one compound question, not two.
+    if (/\band\s+(?:why|how)\s+(?:would|should|do|does|did|can|could)\s+(?:i|you|we|one)\s+(?:use|prefer|choose|pick|need|want)\s+(?:it|them|that|this)\b/i.test(lower)) return null;
+
+    // Skip "what is X and when/how should I Y" — single topic with usage guidance
+    if (/^(?:what|explain|describe)\b.+\band\s+(?:when|how)\s+(?:should|do|would|can)\s+(?:i|you|we)\s+/i.test(lower)) return null;
+
+    // Skip "what is X and how is it different from Y" — single comparison question
+    if (/\band\s+how\s+(?:is|are|does)\s+(?:it|they|that|this)\s+(?:different|distinct|compared)/i.test(lower)) return null;
+
+    // Split on "and also", "and what/how... is/are/do...", "also what/how... is/are/do..."
+    const parts = original.split(/\s+(?:and\s+also|and\s+(?=(?:what|how|when|where|which|why|can)\s+(?:is|are|do|does|did|was|were|should|would|will|could|about)\b)|also\s+(?=(?:what|how|who|when|where|which|why|can)\s+(?:is|are|do|does|did|was|were|should|would|will|could|about)\b))/i)
+      .map(p => p.trim().replace(/^[,;]\s*/, ''))
+      .filter(p => p.length > 3);
+
+    if (parts.length < 2) return null;
+
+    // Answer each sub-question individually
+    const answers: string[] = [];
+    for (const part of parts.slice(0, 4)) { // cap at 4 sub-questions
+      const subLower = part.toLowerCase().trim();
+
+      // Try utility (time/date)
+      const utilAnswer = this.tryUtilityQuestion(subLower, part, history);
+      if (utilAnswer) { answers.push(`**${part.replace(/[?.!]+$/, '')}?**\n${utilAnswer}`); continue; }
+
+      // Try math
+      const mathAnswer = this.tryMath(subLower);
+      if (mathAnswer) { answers.push(`**${part.replace(/[?.!]+$/, '')}?**\n${mathAnswer}`); continue; }
+
+      // Try conversation recall
+      const recallPattern = /\b(?:first\s+message|last\s+message|what\s+(?:did|was)\s+(?:i|my))\b/i.test(subLower);
+      if (recallPattern) {
+        const userMessages = history.filter(m => m.role === 'user');
+        if (userMessages.length > 1) {
+          const firstMsg = userMessages[0];
+          const preview = firstMsg.content.length > 150 ? firstMsg.content.slice(0, 150) + '...' : firstMsg.content;
+          answers.push(`**${part.replace(/[?.!]+$/, '')}?**\nYour first message was: "${preview}"`);
+          continue;
+        }
+      }
+
+      // Try conversational
+      const convAnswer = this.handleConversational(subLower, history);
+      if (convAnswer) { answers.push(`**${part.replace(/[?.!]+$/, '')}?**\n${convAnswer}`); continue; }
+
+      // Fallback for this sub-question
+      answers.push(`**${part.replace(/[?.!]+$/, '')}?**\nI don't have a good answer for this one — try asking it on its own so I can search properly.`);
+    }
+
+    return answers.join('\n\n---\n\n');
+  }
+
+  /**
    * Evaluate math expressions. Handles basic arithmetic, percentages, powers.
    * Also handles "10+10=20" (verify) and "1+1=X" patterns.
    */
   private tryMath(input: string): string | null {
+    const lower = input.toLowerCase();
+
+    // ── Unit conversions — "how many km is 50 miles", "convert 100 fahrenheit to celsius" ──
+    {
+      const unitConversions: Array<{ pattern: RegExp; convert: (n: number) => { result: number; from: string; to: string } }> = [
+        // Distance
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:miles?|mi)\s+(?:to|in|into)\s+(?:km|kilometers?|kilometres?)/i, convert: n => ({ result: n * 1.60934, from: 'miles', to: 'km' }) },
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:km|kilometers?|kilometres?)\s+(?:to|in|into)\s+(?:miles?|mi)/i, convert: n => ({ result: n / 1.60934, from: 'km', to: 'miles' }) },
+        { pattern: /how\s+many\s+(?:km|kilometers?|kilometres?)\s+(?:is|are|in)\s+(\d+(?:\.\d+)?)\s*(?:miles?|mi)/i, convert: n => ({ result: n * 1.60934, from: 'miles', to: 'km' }) },
+        { pattern: /how\s+many\s+(?:miles?|mi)\s+(?:is|are|in)\s+(\d+(?:\.\d+)?)\s*(?:km|kilometers?|kilometres?)/i, convert: n => ({ result: n / 1.60934, from: 'km', to: 'miles' }) },
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:feet|ft)\s+(?:to|in|into)\s+(?:meters?|metres?|m\b)/i, convert: n => ({ result: n * 0.3048, from: 'feet', to: 'meters' }) },
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:meters?|metres?|m)\s+(?:to|in|into)\s+(?:feet|ft)/i, convert: n => ({ result: n / 0.3048, from: 'meters', to: 'feet' }) },
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:inches?|in)\s+(?:to|in|into)\s+(?:cm|centimeters?|centimetres?)/i, convert: n => ({ result: n * 2.54, from: 'inches', to: 'cm' }) },
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:cm|centimeters?|centimetres?)\s+(?:to|in|into)\s+(?:inches?)/i, convert: n => ({ result: n / 2.54, from: 'cm', to: 'inches' }) },
+        // Weight
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:pounds?|lbs?)\s+(?:to|in|into)\s+(?:kg|kilograms?|kilos?)/i, convert: n => ({ result: n * 0.453592, from: 'lbs', to: 'kg' }) },
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:kg|kilograms?|kilos?)\s+(?:to|in|into)\s+(?:pounds?|lbs?)/i, convert: n => ({ result: n / 0.453592, from: 'kg', to: 'lbs' }) },
+        { pattern: /how\s+many\s+(?:kg|kilograms?|kilos?)\s+(?:is|are|in)\s+(\d+(?:\.\d+)?)\s*(?:pounds?|lbs?)/i, convert: n => ({ result: n * 0.453592, from: 'lbs', to: 'kg' }) },
+        { pattern: /how\s+many\s+(?:pounds?|lbs?)\s+(?:is|are|in)\s+(\d+(?:\.\d+)?)\s*(?:kg|kilograms?|kilos?)/i, convert: n => ({ result: n / 0.453592, from: 'kg', to: 'lbs' }) },
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:ounces?|oz)\s+(?:to|in|into)\s+(?:grams?|g\b)/i, convert: n => ({ result: n * 28.3495, from: 'oz', to: 'grams' }) },
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:grams?|g)\s+(?:to|in|into)\s+(?:ounces?|oz)/i, convert: n => ({ result: n / 28.3495, from: 'grams', to: 'oz' }) },
+        // Temperature
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:°?\s*(?:fahrenheit|f))\s+(?:to|in|into)\s+(?:°?\s*(?:celsius|c))/i, convert: n => ({ result: (n - 32) * 5 / 9, from: '°F', to: '°C' }) },
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:°?\s*(?:celsius|c))\s+(?:to|in|into)\s+(?:°?\s*(?:fahrenheit|f))/i, convert: n => ({ result: n * 9 / 5 + 32, from: '°C', to: '°F' }) },
+        // Volume
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:gallons?|gal)\s+(?:to|in|into)\s+(?:liters?|litres?|l\b)/i, convert: n => ({ result: n * 3.78541, from: 'gallons', to: 'liters' }) },
+        { pattern: /(\d+(?:\.\d+)?)\s*(?:liters?|litres?|l)\s+(?:to|in|into)\s+(?:gallons?|gal)/i, convert: n => ({ result: n / 3.78541, from: 'liters', to: 'gallons' }) },
+      ];
+
+      for (const { pattern, convert } of unitConversions) {
+        const m = lower.match(pattern);
+        if (m) {
+          // Find the first capture group that is a number
+          const numStr = m[1] || m[2];
+          const num = parseFloat(numStr);
+          if (!isNaN(num)) {
+            const { result, from, to } = convert(num);
+            return `${num} ${from} = **${this.formatNum(result)} ${to}**`;
+          }
+        }
+      }
+    }
+
+    // ── Date math — "how many days between March 15 and June 1" ──
+    {
+      const months: Record<string, number> = {
+        january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+        july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
+        jan: 0, feb: 1, mar: 2, apr: 3, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+      };
+      const dateMathMatch = lower.match(/how\s+many\s+(days?|weeks?|months?)\s+(?:between|from|until|till|to)\s+(\w+)\s+(\d{1,2})(?:\s*,?\s*(\d{4}))?\s+(?:and|to|until|till)\s+(\w+)\s+(\d{1,2})(?:\s*,?\s*(\d{4}))?/i);
+      if (dateMathMatch) {
+        const unit = dateMathMatch[1].toLowerCase().replace(/s$/, '');
+        const month1 = months[dateMathMatch[2].toLowerCase()];
+        const day1 = parseInt(dateMathMatch[3], 10);
+        const year1 = dateMathMatch[4] ? parseInt(dateMathMatch[4], 10) : new Date().getFullYear();
+        const month2 = months[dateMathMatch[5].toLowerCase()];
+        const day2 = parseInt(dateMathMatch[6], 10);
+        const year2 = dateMathMatch[7] ? parseInt(dateMathMatch[7], 10) : new Date().getFullYear();
+
+        if (month1 !== undefined && month2 !== undefined) {
+          const date1 = new Date(year1, month1, day1);
+          const date2 = new Date(year2, month2, day2);
+          const diffMs = Math.abs(date2.getTime() - date1.getTime());
+          const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+          const d1Str = date1.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+          const d2Str = date2.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+          if (unit === 'day') {
+            return `There are **${diffDays} days** between ${d1Str} and ${d2Str}.`;
+          } else if (unit === 'week') {
+            const weeks = (diffDays / 7).toFixed(1);
+            return `There are **${weeks} weeks** (${diffDays} days) between ${d1Str} and ${d2Str}.`;
+          } else if (unit === 'month') {
+            const months = ((date2.getFullYear() - date1.getFullYear()) * 12 + (date2.getMonth() - date1.getMonth()));
+            return `There are **${Math.abs(months)} months** (${diffDays} days) between ${d1Str} and ${d2Str}.`;
+          }
+        }
+      }
+    }
+
     // Strip conversational wrapping
     let expr = input
       .replace(/^(what\s+is|what's|whats|calculate|compute|solve|how\s+much\s+is|tell\s+me|can\s+you\s+calculate)\s+/i, '')
@@ -21919,7 +26725,12 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
           }
         }
       }
-      return null; // Let it fall through for other contexts
+      // No prior context — give a neutral response instead of falling through to garbage TF-IDF
+      if (/^(?:yes|yeah|yep|yup|sure|ok|okay|alright)[\s!.]*$/i.test(input)) {
+        return "What would you like to work on? I can build projects, explain concepts, debug errors, or discuss tech topics.";
+      } else {
+        return "No worries. What can I help you with? I can build projects, explain concepts, debug errors, or discuss tech topics.";
+      }
     }
 
     // "what about X?" with any prior message — topic follow-up
@@ -22290,9 +27101,28 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
       return sentences[Math.floor(Math.random() * sentences.length)];
     }
 
-    // Generic "write me a sentence" (English)
-    if (/(?:write|say|give|tell)\s+(?:me\s+)?(?:a\s+)?(?:sentence|phrase|something)\b/i.test(input) && !/\b(?:code|program|function|class|script)\b/i.test(input)) {
+    // Generic "write me a sentence" (English) — but NOT "give me something to build/try/learn"
+    if (/(?:write|say|give|tell)\s+(?:me\s+)?(?:a\s+)?(?:sentence|phrase|something)\b/i.test(input)
+        && !/\b(?:code|program|function|class|script|build|create|make|project|idea|try|learn|explore)\b/i.test(input)) {
       return 'The fastest path to understanding is through building — write code, break things, and learn from every failure.';
+    }
+
+    // "Give me something cool to build" / "what should I build" / project ideas
+    if (/\b(?:give\s+me\s+(?:something|an?\s+idea|ideas?)|suggest\s+(?:something|a\s+project|projects?)|what\s+(?:should|can|could)\s+i\s+(?:build|make|create)|project\s+ideas?|something\s+(?:cool|fun|interesting)\s+to\s+(?:build|make|create|try))\b/i.test(input)) {
+      const ideas = [
+        '**Real-time chat app** — WebSocket server + React frontend. Learn: events, state sync, presence indicators.',
+        '**Personal finance tracker** — categorize expenses, monthly charts, CSV import. Stack: Next.js + Prisma + PostgreSQL.',
+        '**CLI tool** — build a productivity tool (todo, notes, time tracker) with Node.js + Commander. Publish to npm.',
+        '**Multiplayer game** — tic-tac-toe or snake with Socket.io. Learn: game loops, state machines, latency.',
+        '**API aggregator dashboard** — pull GitHub stats, weather, news into one view. Learn: REST, caching, rate limits.',
+        '**Markdown blog engine** — static site generator with frontmatter, syntax highlighting, RSS. Deploy to Vercel.',
+        '**Screenshot-to-code tool** — upload a design, get HTML/CSS. Learn: image processing, layout algorithms.',
+      ];
+      const pick = (arr: string[], n: number) => {
+        const shuffled = [...arr].sort(() => Math.random() - 0.5);
+        return shuffled.slice(0, n);
+      };
+      return `Here are some project ideas:\n\n${pick(ideas, 4).map((idea, i) => `${i + 1}. ${idea}`).join('\n')}\n\nWant me to scaffold any of these?`;
     }
 
     // "What do you know about X?"
@@ -22342,7 +27172,7 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
       const looksLikeProblem = /\b(?:getting|having|seeing|facing|experiencing|encountering|running\s+into|dealing\s+with|stuck|confused|lost|unsure|not\s+sure|trying\s+to|can't|cannot|doesn't|don't|won't|error|issue|problem|bug|crash|fail|broken|missing|undefined|null|weird|strange)\b/i.test(input);
       // Must look like a name: not a common action/article/state word
       if (!looksLikeProblem && name.length >= 2 && name.length <= 25
-        && !/^(?:a|an|the|not|also|just|very|so|too|yet|well|still|already|now|here|there|back|done|new|good|bad|ok|okay|sure|glad|happy|ready|able|going|trying|looking|working|building|making|planning|developing|creating|using|getting|having|seeing|asking|thinking|wondering|feeling|saying|writing|reading|finding|following|checking|testing|starting|running|doing|waiting|hoping|wanting|needing|learning|fixing|adding|changing|moving|taking|putting|setting|calling|sending|loading|updating|showing|rendering|handling|connecting|deploying|installing|configuring|confused|stuck|lost|unsure|excited|sorry|aware|able|unable|sure|certain|afraid|worried|frustrated|happy|sad|tired|ready|new|old|here|there|back|done|gone|up|down|in|out|on|off)$/i.test(name)) {
+        && !/^(?:a|an|the|not|also|just|very|so|too|yet|well|still|already|now|here|there|back|done|new|good|bad|ok|okay|sure|glad|happy|ready|able|from|to|for|with|at|by|about|into|over|after|before|between|through|during|against|without|along|across|around|upon|toward|towards|under|above|below|near|behind|beside|beyond|going|trying|looking|working|building|making|planning|developing|creating|using|getting|having|seeing|asking|thinking|wondering|feeling|saying|writing|reading|finding|following|checking|testing|starting|running|doing|waiting|hoping|wanting|needing|learning|fixing|adding|changing|moving|taking|putting|setting|calling|sending|loading|updating|showing|rendering|handling|connecting|deploying|installing|configuring|confused|stuck|lost|unsure|excited|sorry|aware|able|unable|sure|certain|afraid|worried|frustrated|happy|sad|tired|ready|new|old|here|there|back|done|gone|up|down|in|out|on|off)$/i.test(name)) {
         const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
         // Check if there's more context after the name (e.g. "...and I am building a todo app")
         const rest = input.replace(nameIntroMatch[0], '').trim().replace(/^[,\s]+/, '');
@@ -22358,7 +27188,8 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
     // User is teaching: "Python is a programming language" / "remember that X means Y"
     // Also handles longer teaching like "I want to teach you about X: ..."
     // MUST NOT match questions: skip if starts with question words, command words, or contains "?"
-    if (!/^(what|who|how|why|when|where|which|can|do|does|did|is\s+(it|there)|are\s+(you|there)|explain|describe|tell|show|list|compare|give|write|create|build|make|generate|set\s?up|implement)\b/i.test(input) && !input.includes('?')) {
+    // MUST NOT match comparisons: "X vs Y which is better" is a question, not a teaching
+    if (!/^(what|who|how|why|when|where|which|can|do|does|did|is\s+(it|there)|are\s+(you|there)|explain|describe|tell|show|list|compare|give|write|create|build|make|generate|set\s?up|implement)\b/i.test(input) && !input.includes('?') && !/\b(?:vs\.?|versus|compare|difference|which\s+(?:is|are|one))\b/i.test(input)) {
       // Short teaching: "X is Y"
       const teachMatch = input.match(/^(?:remember\s+that\s+)?([A-Za-z][A-Za-z0-9 _-]{2,50})\s+(?:is|means|equals)\s+(.{3,200})$/i);
       if (teachMatch) {
@@ -22654,11 +27485,34 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
 
     // --- Project iteration follow-ups ---
     // "now add dark mode", "change the color to blue", "convert it to Python", "add auth", etc.
-    if (conversationTurns.length >= 3) {
+    // Also: "same design but about photography", "same but different theme", "same layout but for X"
+    if (conversationTurns.length >= 2) {
       const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
       const hasCodeBlock = lastAssistant && /```[\s\S]+```/.test(lastAssistant.content);
 
       if (hasCodeBlock) {
+        // "same but X" / "same design but Y" / "same layout but Z" patterns
+        const sameButMatch = input.match(/^(?:the\s+)?same\s+(?:(?:design|layout|style|look|UI|thing|app|project|page|site)\s+)?but\s+(?:(?:make|with|for|about)\s+)?(?:it\s+)?(?:about\s+|for\s+|with\s+)?(.+)/i);
+        if (sameButMatch) {
+          const change = sameButMatch[1].trim();
+          const langMatch = lastAssistant.content.match(/```(\w+)/);
+          const lang = langMatch ? langMatch[1] : 'html';
+          return `I'll keep the same design but adjust it for **${change}**:\n\n` +
+            this.generateIterationCode('make', change, lang, lastAssistant.content);
+        }
+
+        // "different theme/subject/topic" patterns
+        const differentMatch = input.match(/(?:different|new|another)\s+(theme|color.?scheme|palette|subject|topic|style|look|vibe)\b.*?(?:,?\s*(?:more\s+)?(.+))?$/i);
+        if (differentMatch) {
+          const aspect = differentMatch[1].toLowerCase();
+          const detail = (differentMatch[2] || '').trim();
+          const langMatch = lastAssistant.content.match(/```(\w+)/);
+          const lang = langMatch ? langMatch[1] : 'html';
+          const desc = detail ? `${aspect}: ${detail}` : aspect;
+          return `I'll restyle with a **${desc}**:\n\n` +
+            this.generateIterationCode('change', `the ${desc}`, lang, lastAssistant.content);
+        }
+
           const iterationMatch = input.match(/^(?:now\s+)?(?:can\s+you\s+)?(?:please\s+)?(add|change|modify|update|make|convert|port|switch|remove|delete|include|insert|replace|refactor|fix|style|use)(?:\s+(it|this|that))?\s+(.+)/i);
         if (iterationMatch) {
           const verb = iterationMatch[1].toLowerCase();
@@ -22688,6 +27542,54 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
             `For example: "Build me a REST API in ${targetLang}" or "Create a calculator in ${targetLang}". I'll generate complete, working ${targetLang} code.`;
         }
       }
+    }
+
+    // ── Personal context statements — "I am from Norway", "I'm a developer", "I work in fintech" ──
+    const personalContextMatch = input.match(/^i(?:'m| am)\s+(?:from\s+(\w[\w\s]*?)(?:\s+and\b|\s*[,.]|$)|a\s+(\w[\w\s]*?)(?:\s+and\b|\s*[,.]|$))/i)
+      || input.match(/^i\s+(?:work|live|reside)\s+(?:in|at|for)\s+(\w[\w\s]*?)(?:\s+and\b|\s*[,.]|$)/i);
+    if (personalContextMatch) {
+      const detail = (personalContextMatch[1] || personalContextMatch[2] || '').trim();
+      // Check if there's more context after the initial statement
+      const fullInput = input.toLowerCase();
+      const hasMoreContext = /\band\s+(?:i\s+)?(?:have\s+been|am|was|work|want|need|like|love)/i.test(fullInput);
+      const mentionsTech = /\b(?:web|software|frontend|backend|full[\s-]?stack|mobile|data|machine\s+learning|ai|dev(?:elop)?|programming|coding|engineer|design)/i.test(fullInput);
+      const soundsLikeProjectRequest = /\b(?:can\s+you|could\s+you|help\s+me|make|build|create|design|develop)\b/i.test(fullInput)
+        && /\b(?:website|site|app|application|project|portfolio|gallery|landing\s*page|homepage)\b/i.test(fullInput);
+
+      if (soundsLikeProjectRequest) {
+        return null;
+      }
+
+      if (hasMoreContext && mentionsTech) {
+        // "I am from Norway and I have been working on web development"
+        return `Welcome! Sounds like you have a solid background. What are you working on right now — or what would you like to build? I can help with code, architecture, debugging, or just exploring ideas.`;
+      }
+      if (hasMoreContext) {
+        return `Thanks for sharing! What can I help you with today? I'm good at coding, explaining tech topics, building projects, and problem-solving.`;
+      }
+      if (detail) {
+        return `Nice! What would you like to work on? I can help with coding, tech questions, building projects, and more.`;
+      }
+    }
+
+    // ── Weather questions — we can't check weather but should say so clearly ──
+    if (/\b(?:weather|temperature|forecast|rain(?:ing)?|snow(?:ing)?|sunny|cloudy|humid(?:ity)?)\b/i.test(input)
+      && /\b(?:today|tonight|tomorrow|right\s+now|outside|currently|this\s+week|this\s+weekend)\b/i.test(input)) {
+      return "I can't check the weather — I don't have access to real-time weather data or location services. Try checking a weather app or website like weather.com, or ask a voice assistant.\n\nI'm great at coding, tech questions, and building projects though — what can I help you with?";
+    }
+
+    // ── Casual personal statements — "I had a great day", "I'm tired", "I'm bored of X" ──
+    if (/^(?:i\s+(?:had|have|am\s+having)\s+(?:a\s+)?(?:great|good|nice|bad|terrible|awful|rough|long|busy|productive|lazy|chill|fun)\s+(?:day|night|morning|evening|weekend|week))/i.test(input)) {
+      const sentiment = /\b(?:great|good|nice|productive|fun|chill)\b/i.test(input) ? 'positive' : 'negative';
+      if (sentiment === 'positive') {
+        return "That's great to hear! Ready to cap it off with some coding or learning? I'm here if you want to build something, explore a topic, or just chat tech.";
+      }
+      return "Sorry to hear that. I'm here if you want to take your mind off it — we could build something cool, explore a topic, or work through a problem together.";
+    }
+
+    // ── "X vs Y" comparison questions should fall through to domain handlers, not get caught here ──
+    if (/\b(?:vs\.?|versus)\b/i.test(input) && /\b(?:which|better|compare|difference|prefer)\b/i.test(input)) {
+      return null; // Let comparison handlers or web search handle it
     }
 
     return null;
@@ -22840,3 +27742,4 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
     };
   }
 }
+

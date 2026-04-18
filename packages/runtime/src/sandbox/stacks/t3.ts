@@ -12,6 +12,8 @@ import {
   buildSetupScript,
   generateT3DemoSequence,
   generateAuthContext,
+  generateAuthApiRoutes,
+  generateSetupApiRoutes,
   generateAuthPage,
   generateUserMenu,
   generateMessagePanel,

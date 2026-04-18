@@ -1,13 +1,16 @@
 import { execSync, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { createServer } from './server.js';
 
 const isWindows = process.platform === 'win32';
-const __filename = typeof globalThis.__filename === 'string' ? globalThis.__filename : fileURLToPath(import.meta.url);
-const runtimeDir = path.dirname(__filename);
+const runtimeFile = typeof globalThis.__filename === 'string'
+  ? globalThis.__filename
+  : typeof __filename === 'string'
+    ? __filename
+    : process.argv[1] ?? process.cwd();
+const runtimeDir = path.dirname(runtimeFile);
 
 for (const candidate of [
   process.env.VAI_ENV_FILE,

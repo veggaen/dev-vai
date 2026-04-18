@@ -150,7 +150,7 @@ async function waitForDevServer(port: number, timeoutMs = VERIFY_TIMEOUT_MS): Pr
       const timer = setTimeout(() => ctrl.abort(), 2000);
       const res = await fetch(`http://localhost:${port}`, { signal: ctrl.signal });
       clearTimeout(timer);
-      if (res.ok || res.status < 500) return true;
+      if (res.ok) return true;
     } catch {
       // not ready yet
     }
@@ -645,7 +645,6 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
     const initialPreviewLoadCount = useSandboxStore.getState().previewLoadCount;
 
     try {
-      expandBuilder();
       const conversationId = activeConversationId;
       const liveConversation = conversationId
         ? useChatStore.getState().conversations.find((conversation) => conversation.id === conversationId) ?? null
@@ -685,6 +684,7 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
           pid = useSandboxStore.getState().projectId ?? linkedSandboxId;
         } catch (error) {
           linkedSandboxUnavailable = true;
+          pid = null;
           console.warn('[auto-sandbox] linked-sandbox-unavailable', {
             conversationId,
             linkedSandboxId,
@@ -1026,11 +1026,10 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
       setBuildStatus({ step: 'failed', message: (err as Error).message });
       toast.error(`Sandbox error: ${(err as Error).message}`);
     }
-  }, [activeConversation, activeConversationId, attachProject, createProject, destroyProject, writeFiles, installDeps, startDev, stopDev, setBuildStatus, expandBuilder, setConversationSandbox, verifyAndRepairIfNeeded, triggerRepair, injectProjectUpdate, recordProjectUpdateArtifact, withCapture]);
+  }, [activeConversation, activeConversationId, attachProject, createProject, destroyProject, writeFiles, installDeps, startDev, stopDev, setBuildStatus, setConversationSandbox, verifyAndRepairIfNeeded, triggerRepair, injectProjectUpdate, recordProjectUpdateArtifact, withCapture]);
 
   const processTemplate = useCallback(async (templateId: string, name: string, forceFreshProject = false) => {
     try {
-      expandBuilder();
       const conversationId = activeConversationId;
       const initialPreviewLoadCount = useSandboxStore.getState().previewLoadCount;
 
@@ -1147,11 +1146,10 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
       setBuildStatus({ step: 'failed', message: (err as Error).message });
       toast.error(`Sandbox error: ${(err as Error).message}`);
     }
-  }, [activeConversationId, destroyProject, scaffoldFromTemplate, setBuildStatus, expandBuilder, setConversationSandbox, injectProjectUpdate, recordProjectUpdateArtifact, withCapture]);
+  }, [activeConversationId, destroyProject, scaffoldFromTemplate, setBuildStatus, setConversationSandbox, injectProjectUpdate, recordProjectUpdateArtifact, withCapture]);
 
   const processDeploy = useCallback(async (action: { stackId: string; tier: string; name: string }) => {
     try {
-      expandBuilder();
       const conversationId = activeConversationId;
       const initialPreviewLoadCount = useSandboxStore.getState().previewLoadCount;
       withCapture((capture) => {
@@ -1253,7 +1251,7 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
       setBuildStatus({ step: 'failed', message: (err as Error).message });
       toast.error(`Sandbox error: ${(err as Error).message}`);
     }
-  }, [activeConversationId, deployStack, expandBuilder, setBuildStatus, setConversationSandbox, injectProjectUpdate, recordProjectUpdateArtifact, withCapture]);
+  }, [activeConversationId, deployStack, setBuildStatus, setConversationSandbox, injectProjectUpdate, recordProjectUpdateArtifact, withCapture]);
 
   useEffect(() => {
     if (isStreaming) {

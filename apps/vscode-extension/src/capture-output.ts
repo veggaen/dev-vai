@@ -20,8 +20,8 @@ import { pushEvent, getActiveSession } from './session.js';
 
 let lastDiagCount = 0;
 let lastDiagContent = '';
-let diagDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingDiagUris: vscode.Uri[] = [];
+const diagDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const pendingDiagUris: vscode.Uri[] = [];
 
 /* ── Copilot Command Tracking ──────────────────────────────────── */
 

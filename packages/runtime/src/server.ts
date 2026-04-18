@@ -63,6 +63,7 @@ export async function createServer(options?: ServerOptions) {
 
   const vaiEngine = new VaiEngine({
     persistPath: path.resolve(dbPath, '..', 'vai-knowledge.json'),
+    config,
   });
   models.register(vaiEngine);
 
@@ -120,7 +121,11 @@ export async function createServer(options?: ServerOptions) {
 
   const chatService = new ChatService(db, models, adaptiveController, {
     promptRewrite: config.chatPromptRewrite,
-    retrieveKnowledge: (query: string, limit?: number) => vaiEngine.retrieveRelevant(query, limit),
+    retrieveKnowledge: (query: string, limit?: number) => {
+      const results = vaiEngine.retrieveRelevant(query, limit);
+      pipeline.logRetrievalQuality(query, results, 'chat');
+      return results;
+    },
   });
   const sandboxManager = new SandboxManager();
   const platformAuth = new PlatformAuthService(db, config.platformAuth);
@@ -131,8 +136,21 @@ export async function createServer(options?: ServerOptions) {
 
   const app = Fastify({ logger: false, bodyLimit: 15 * 1024 * 1024 });
 
+  const allowedOrigins = config.allowedOrigins ?? [
+    'http://localhost:5173',
+    'http://localhost:3006',
+    'http://tauri.localhost',
+    'tauri://localhost',
+    'https://tauri.localhost',
+  ];
   await app.register(cors, {
-    origin: true,
+    origin: (origin, cb) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        cb(null, true);
+      } else {
+        cb(new Error(`Origin ${origin} not allowed`), false);
+      }
+    },
     credentials: true,
   });
   await app.register(websocket);
@@ -337,6 +355,22 @@ export async function createServer(options?: ServerOptions) {
     db.run(/* sql */ `CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_broadcast_deliveries_unique ON platform_broadcast_deliveries(broadcast_id, target_client_id)`);
   } catch {
     // Tables may already exist.
+  }
+
+  try {
+    db.run(/* sql */ `CREATE TABLE IF NOT EXISTS retrieval_quality_log (
+      id TEXT PRIMARY KEY,
+      query TEXT NOT NULL,
+      result_count INTEGER NOT NULL DEFAULT 0,
+      top_score REAL NOT NULL DEFAULT 0,
+      avg_score REAL NOT NULL DEFAULT 0,
+      is_hit INTEGER NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'chat',
+      created_at INTEGER NOT NULL
+    )`);
+    db.run(/* sql */ `CREATE INDEX IF NOT EXISTS retrieval_quality_log_created_at_idx ON retrieval_quality_log(created_at)`);
+  } catch {
+    // Table may already exist.
   }
 
   app.get('/api/intelligence/stats', async () => {

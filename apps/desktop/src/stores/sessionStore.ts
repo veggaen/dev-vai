@@ -1,5 +1,18 @@
 import { create } from 'zustand';
-import { API_BASE } from '../lib/api.js';
+import type {
+  CreateSessionResponse,
+  ImportSessionResponse,
+  SessionDetailResponse,
+  SessionEventListResponse,
+  SessionExportResponse,
+  SessionInsightsResponse,
+  SessionIntelligenceResponse,
+  SessionListResponse,
+  SessionPinnedEventsResponse,
+  SessionPinnedNotesResponse,
+  SessionSearchResponse,
+} from '@vai/api-types/session-responses';
+import { apiFetch } from '../lib/api.js';
 import type {
   AgentSession,
   ConversationScore,
@@ -13,14 +26,6 @@ import type {
   PinnedNote,
   PinnedNoteCategory,
 } from '@vai/core/browser';
-
-/* ── Types ─────────────────────────────────────────────────────── */
-
-interface SessionIntelligencePayload {
-  score: ConversationScore | null;
-  report: LearningReport | null;
-  analysis: SessionAnalysis | null;
-}
 
 const SESSION_EVENT_PAGE_SIZE = 200;
 const AUTO_INTELLIGENCE_EVENT_LIMIT = 2000;
@@ -92,6 +97,7 @@ interface SessionState {
   refreshActiveSession: () => Promise<void>;
   loadOlderEvents: () => Promise<void>;
   refreshSessionIntelligence: (sessionId: string, includeGlobal?: boolean) => Promise<void>;
+  refreshRecentInsights: (limit?: number) => Promise<void>;
   startPolling: (intervalMs?: number) => void;
   stopPolling: () => void;
 
@@ -152,9 +158,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const params = new URLSearchParams({ limit: '100' });
       if (statusFilter !== 'all') params.set('status', statusFilter);
 
-      const res = await fetch(`${API_BASE}/api/sessions?${params}`);
+      const res = await apiFetch(`/api/sessions?${params}`);
       if (!res.ok) throw new Error('Failed to fetch sessions');
-      const data = await res.json() as { sessions: AgentSession[]; total: number };
+      const data = await res.json() as SessionListResponse;
       set({ sessions: data.sessions, totalSessions: data.total, isLoading: false });
     } catch (err) {
       console.error('Failed to fetch sessions:', err);
@@ -180,14 +186,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       });
 
       const [sessionRes, eventsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/sessions/${id}`),
-        fetch(`${API_BASE}/api/sessions/${id}/events?limit=${SESSION_EVENT_PAGE_SIZE}&order=desc`),
+        apiFetch(`/api/sessions/${id}`),
+        apiFetch(`/api/sessions/${id}/events?limit=${SESSION_EVENT_PAGE_SIZE}&order=desc`),
       ]);
 
       if (!sessionRes.ok || !eventsRes.ok) throw new Error('Session not found');
 
-      const data = await sessionRes.json() as { session: AgentSession; eventCount: number };
-      const newestFirstEvents = await eventsRes.json() as SessionEvent[];
+      const data = await sessionRes.json() as SessionDetailResponse;
+      const newestFirstEvents = await eventsRes.json() as SessionEventListResponse;
       const initialEvents = [...newestFirstEvents].reverse();
       const eventTotal = data.eventCount ?? initialEvents.length;
       const isIntelligenceDeferred = eventTotal > AUTO_INTELLIGENCE_EVENT_LIMIT;
@@ -248,7 +254,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   deleteSession: async (id: string) => {
     try {
-      await fetch(`${API_BASE}/api/sessions/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/sessions/${id}`, { method: 'DELETE' });
       const { activeSessionId } = get();
       if (activeSessionId === id) {
         set({
@@ -277,13 +283,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   createSession: async (title, agentName, modelId) => {
     try {
-      const res = await fetch(`${API_BASE}/api/sessions`, {
+      const res = await apiFetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, agentName, modelId }),
       });
       if (!res.ok) throw new Error('Failed to create session');
-      const { id } = await res.json() as { id: string };
+      const { id } = await res.json() as CreateSessionResponse;
       await get().fetchSessions();
       return id;
     } catch (err) {
@@ -294,7 +300,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   endSession: async (id: string) => {
     try {
-      await fetch(`${API_BASE}/api/sessions/${id}/end`, {
+      await apiFetch(`/api/sessions/${id}/end`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'completed' }),
@@ -310,9 +316,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   exportSession: async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/sessions/${id}/export`);
+      const res = await apiFetch(`/api/sessions/${id}/export`);
       if (!res.ok) throw new Error('Failed to export');
-      return await res.json();
+      return await res.json() as SessionExportResponse;
     } catch (err) {
       console.error('Failed to export session:', err);
       return null;
@@ -321,13 +327,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   importSession: async (data: object) => {
     try {
-      const res = await fetch(`${API_BASE}/api/sessions/import`, {
+      const res = await apiFetch('/api/sessions/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error('Failed to import');
-      const { id } = await res.json() as { id: string };
+      const { id } = await res.json() as ImportSessionResponse;
       await get().fetchSessions();
       return id;
     } catch (err) {
@@ -362,7 +368,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   /* ── Push events to an active session ─────────────────────── */
   pushEvents: async (sessionId, events) => {
     try {
-      const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/events`, {
+      const res = await apiFetch(`/api/sessions/${sessionId}/events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ events }),
@@ -371,10 +377,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       // If we're viewing this session, append the new events locally for instant UI
       const { activeSessionId } = get();
       if (activeSessionId === sessionId) {
-        const data = await res.json() as { ids: string[] };
+        const data = await res.json() as { added: number };
         // Re-fetch to get the full event objects with timestamps
         await get().refreshActiveSession();
-        void data; // ids available if needed
+        void data;
       }
     } catch (err) {
       console.error('Failed to push events:', err);
@@ -384,7 +390,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   /* ── Update session title ─────────────────────────────────── */
   updateTitle: async (sessionId, title) => {
     try {
-      const res = await fetch(`${API_BASE}/api/sessions/${sessionId}`, {
+      const res = await apiFetch(`/api/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title }),
@@ -409,20 +415,20 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({ isLoadingIntelligence: true });
 
       const intelligencePromise = (async () => {
-        const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/intelligence`, {
+        const res = await apiFetch(`/api/sessions/${sessionId}/intelligence`, {
           signal: AbortSignal.timeout(10_000),
         });
         if (!res.ok) throw new Error('Failed to fetch session intelligence');
-        return await res.json() as SessionIntelligencePayload;
+        return await res.json() as SessionIntelligenceResponse;
       })();
 
       const insightsPromise = includeGlobal
         ? (async () => {
-            const res = await fetch(`${API_BASE}/api/sessions/insights?limit=20`, {
+            const res = await apiFetch('/api/sessions/insights?limit=20', {
               signal: AbortSignal.timeout(10_000),
             });
             if (!res.ok) throw new Error('Failed to fetch session insights');
-            return await res.json() as SessionInsightsAggregate;
+            return await res.json() as SessionInsightsResponse;
           })()
         : Promise.resolve<SessionInsightsAggregate | null>(null);
 
@@ -474,13 +480,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         : 0;
 
       const url = lastTs
-        ? `${API_BASE}/api/sessions/${activeSessionId}/events?after=${lastTs}`
-        : `${API_BASE}/api/sessions/${activeSessionId}/events`;
+        ? `/api/sessions/${activeSessionId}/events?after=${lastTs}`
+        : `/api/sessions/${activeSessionId}/events`;
 
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      const res = await apiFetch(url, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) return;
 
-      const newEvents = await res.json() as SessionEvent[];
+      const newEvents = await res.json() as SessionEventListResponse;
 
       // Only update state if there are actually new events — zero-blink
       if (newEvents.length > 0) {
@@ -514,13 +520,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         return;
       }
 
-      const res = await fetch(
-        `${API_BASE}/api/sessions/${activeSessionId}/events?before=${oldestTimestamp}&limit=${SESSION_EVENT_PAGE_SIZE}&order=desc`,
+      const res = await apiFetch(
+        `/api/sessions/${activeSessionId}/events?before=${oldestTimestamp}&limit=${SESSION_EVENT_PAGE_SIZE}&order=desc`,
         { signal: AbortSignal.timeout(10_000) },
       );
       if (!res.ok) throw new Error('Failed to load older events');
 
-      const olderNewestFirst = await res.json() as SessionEvent[];
+      const olderNewestFirst = await res.json() as SessionEventListResponse;
       const olderEvents = [...olderNewestFirst].reverse();
 
       set((state) => ({
@@ -536,11 +542,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   refreshRecentInsights: async (limit = 20) => {
     try {
-      const res = await fetch(`${API_BASE}/api/sessions/insights?limit=${limit}`, {
+      const res = await apiFetch(`/api/sessions/insights?limit=${limit}`, {
         signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) throw new Error('Failed to fetch session insights');
-      const data = await res.json() as SessionInsightsAggregate;
+      const data = await res.json() as SessionInsightsResponse;
       set({ sessionInsights: data });
     } catch (err) {
       console.error('Failed to fetch session insights:', err);
@@ -584,9 +590,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const params = new URLSearchParams({ q: query, limit: '50' });
       const { activeSessionId } = get();
       if (activeSessionId) params.set('sessionId', activeSessionId);
-      const res = await fetch(`${API_BASE}/api/sessions/search?${params}`);
+      const res = await apiFetch(`/api/sessions/search?${params}`);
       if (!res.ok) throw new Error('Search failed');
-      const data = await res.json() as { results: SearchResult[] };
+      const data = await res.json() as SessionSearchResponse;
       set({ searchResults: data.results, isSearching: false });
     } catch (err) {
       console.error('Search failed:', err);
@@ -599,9 +605,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   /* ── Pinned Events ──────────────────────────────────────── */
   fetchPinnedEvents: async (sessionId) => {
     try {
-      const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/pinned`);
+      const res = await apiFetch(`/api/sessions/${sessionId}/pinned`);
       if (!res.ok) return;
-      const data = await res.json() as { events: SessionEvent[] };
+      const data = await res.json() as SessionPinnedEventsResponse;
       set({ pinnedEvents: data.events });
     } catch {
       // Silent
@@ -610,7 +616,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   pinEvent: async (sessionId, eventId) => {
     try {
-      await fetch(`${API_BASE}/api/sessions/${sessionId}/events/${eventId}/pin`, {
+      await apiFetch(`/api/sessions/${sessionId}/events/${eventId}/pin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pinned: true }),
@@ -623,7 +629,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   unpinEvent: async (sessionId, eventId) => {
     try {
-      await fetch(`${API_BASE}/api/sessions/${sessionId}/events/${eventId}/pin`, {
+      await apiFetch(`/api/sessions/${sessionId}/events/${eventId}/pin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pinned: false }),
@@ -637,9 +643,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   /* ── Pinned Notes ───────────────────────────────────────── */
   fetchPinnedNotes: async (sessionId) => {
     try {
-      const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/notes`);
+      const res = await apiFetch(`/api/sessions/${sessionId}/notes`);
       if (!res.ok) return;
-      const data = await res.json() as { notes: PinnedNote[] };
+      const data = await res.json() as SessionPinnedNotesResponse;
       set({ pinnedNotes: data.notes });
     } catch {
       // Silent
@@ -648,7 +654,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   addPinnedNote: async (sessionId, content, category = 'custom', eventId) => {
     try {
-      await fetch(`${API_BASE}/api/sessions/${sessionId}/notes`, {
+      await apiFetch(`/api/sessions/${sessionId}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content, category, eventId }),
@@ -661,7 +667,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   resolvePinnedNote: async (noteId) => {
     try {
-      await fetch(`${API_BASE}/api/sessions/notes/${noteId}/resolve`, { method: 'POST' });
+      await apiFetch(`/api/sessions/notes/${noteId}/resolve`, { method: 'POST' });
       const { activeSessionId } = get();
       if (activeSessionId) await get().fetchPinnedNotes(activeSessionId);
     } catch (err) {

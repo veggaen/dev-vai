@@ -1,4 +1,5 @@
 import { useSandboxStore } from '../stores/sandboxStore.js';
+import { useLayoutStore } from '../stores/layoutStore.js';
 import {
   Terminal, Trash2, FolderTree, Copy, ChevronDown,
   Search, X, Lock, Unlock, Hash, Clock,
@@ -53,6 +54,7 @@ function stripAnsi(str: string): string {
  */
 export function DebugConsole() {
   const { status, logs, files, projectName, fetchLogs, destroyProject } = useSandboxStore();
+  const themePreference = useLayoutStore((state) => state.themePreference);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showCopyMenu, setShowCopyMenu] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState('');
@@ -65,6 +67,7 @@ export function DebugConsole() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const isLight = themePreference === 'light';
 
   // Track timestamps for each log line
   const timestampsRef = useRef<Map<number, number>>(new Map());
@@ -139,19 +142,23 @@ export function DebugConsole() {
   };
 
   return (
-    <div className="flex h-full flex-col border-t border-zinc-800 bg-zinc-950">
+    <div className={`flex h-full flex-col border-t ${
+      isLight ? 'border-zinc-200 bg-white' : 'border-zinc-800 bg-zinc-950'
+    }`}>
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-1.5">
+      <div className={`flex items-center justify-between border-b px-3 py-1.5 ${
+        isLight ? 'border-zinc-200 bg-zinc-50/90' : 'border-zinc-800'
+      }`}>
         <div className="flex items-center gap-2">
-          <Terminal className="h-3.5 w-3.5 text-zinc-500" />
-          <span className="text-xs font-medium text-zinc-400">Console</span>
+          <Terminal className={`h-3.5 w-3.5 ${isLight ? 'text-zinc-500' : 'text-zinc-500'}`} />
+          <span className={`text-xs font-medium ${isLight ? 'text-zinc-700' : 'text-zinc-400'}`}>Console</span>
           {projectName && (
-            <span className="text-[10px] text-zinc-600">— {projectName}</span>
+            <span className={`text-[10px] ${isLight ? 'text-zinc-500' : 'text-zinc-600'}`}>— {projectName}</span>
           )}
           <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
             status === 'running' ? 'bg-emerald-500/20 text-emerald-400' :
             status === 'failed' ? 'bg-red-500/20 text-red-400' :
-            status === 'idle' ? 'bg-zinc-800 text-zinc-500' :
+            status === 'idle' ? (isLight ? 'bg-zinc-100 text-zinc-500' : 'bg-zinc-800 text-zinc-500') :
             'bg-yellow-500/20 text-yellow-400'
           }`}>
             {status}
@@ -171,7 +178,7 @@ export function DebugConsole() {
         </div>
         <div className="flex items-center gap-0.5">
           {files.length > 0 && (
-            <span className="flex items-center gap-1 text-[10px] text-zinc-600" title={files.join('\n')}>
+            <span className={`flex items-center gap-1 text-[10px] ${isLight ? 'text-zinc-500' : 'text-zinc-600'}`} title={files.join('\n')}>
               <FolderTree className="h-3 w-3" />
               {files.length}
             </span>
@@ -185,7 +192,9 @@ export function DebugConsole() {
           {/* Toggle line numbers */}
           <button
             onClick={() => setShowLineNumbers((v) => !v)}
-            className={`rounded p-1 transition-colors ${showLineNumbers ? 'text-violet-400' : 'text-zinc-600'} hover:bg-zinc-800`}
+            className={`rounded p-1 transition-colors ${
+              showLineNumbers ? (isLight ? 'text-violet-700' : 'text-violet-400') : 'text-zinc-600'
+            } ${isLight ? 'hover:bg-zinc-100' : 'hover:bg-zinc-800'}`}
             title="Toggle line numbers"
           >
             <Hash className="h-3 w-3" />
@@ -194,7 +203,9 @@ export function DebugConsole() {
           {/* Toggle timestamps */}
           <button
             onClick={() => setShowTimestamps((v) => !v)}
-            className={`rounded p-1 transition-colors ${showTimestamps ? 'text-violet-400' : 'text-zinc-600'} hover:bg-zinc-800`}
+            className={`rounded p-1 transition-colors ${
+              showTimestamps ? (isLight ? 'text-violet-700' : 'text-violet-400') : 'text-zinc-600'
+            } ${isLight ? 'hover:bg-zinc-100' : 'hover:bg-zinc-800'}`}
             title="Toggle timestamps"
           >
             <Clock className="h-3 w-3" />
@@ -203,7 +214,9 @@ export function DebugConsole() {
           {/* Search toggle */}
           <button
             onClick={() => { setShowSearch((v) => !v); if (showSearch) setSearchQuery(''); }}
-            className={`rounded p-1 transition-colors ${showSearch ? 'text-violet-400' : 'text-zinc-600'} hover:bg-zinc-800`}
+            className={`rounded p-1 transition-colors ${
+              showSearch ? (isLight ? 'text-violet-700' : 'text-violet-400') : 'text-zinc-600'
+            } ${isLight ? 'hover:bg-zinc-100' : 'hover:bg-zinc-800'}`}
             title="Search logs (Ctrl+F)"
           >
             <Search className="h-3 w-3" />
@@ -212,7 +225,9 @@ export function DebugConsole() {
           {/* Scroll lock */}
           <button
             onClick={() => setScrollLocked((v) => !v)}
-            className={`rounded p-1 transition-colors ${scrollLocked ? 'text-amber-400' : 'text-zinc-600'} hover:bg-zinc-800`}
+            className={`rounded p-1 transition-colors ${
+              scrollLocked ? 'text-amber-400' : 'text-zinc-600'
+            } ${isLight ? 'hover:bg-zinc-100' : 'hover:bg-zinc-800'}`}
             title={scrollLocked ? 'Auto-scroll locked' : 'Auto-scroll active'}
           >
             {scrollLocked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
@@ -223,7 +238,9 @@ export function DebugConsole() {
             <div className="relative" ref={copyMenuRef}>
               <button
                 onClick={() => setShowCopyMenu(!showCopyMenu)}
-                className="flex items-center gap-0.5 rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+                className={`flex items-center gap-0.5 rounded p-1 text-zinc-600 ${
+                  isLight ? 'hover:bg-zinc-100 hover:text-zinc-900' : 'hover:bg-zinc-800 hover:text-zinc-300'
+                }`}
                 title="Copy console output"
               >
                 <Copy className="h-3 w-3" />
@@ -231,7 +248,9 @@ export function DebugConsole() {
               </button>
 
               {showCopyMenu && (
-                <div className="absolute right-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
+                <div className={`absolute right-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-lg border py-1 shadow-xl ${
+                  isLight ? 'border-zinc-200 bg-white' : 'border-zinc-700 bg-zinc-900'
+                }`}>
                   {COPY_OPTIONS.map((opt) => {
                     const count = filterLines(logs, opt.key).length;
                     return (
@@ -239,13 +258,17 @@ export function DebugConsole() {
                         key={opt.key}
                         onClick={() => handleCopy(opt.key)}
                         disabled={count === 0}
-                        className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-zinc-800 disabled:opacity-30"
+                        className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-xs transition-colors disabled:opacity-30 ${
+                          isLight ? 'hover:bg-zinc-100' : 'hover:bg-zinc-800'
+                        }`}
                       >
                         <div>
-                          <div className="text-zinc-300">{opt.label}</div>
-                          <div className="text-[9px] text-zinc-600">{opt.desc}</div>
+                          <div className={isLight ? 'text-zinc-800' : 'text-zinc-300'}>{opt.label}</div>
+                          <div className="text-[9px] text-zinc-500">{opt.desc}</div>
                         </div>
-                        <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-500">
+                        <span className={`ml-2 rounded px-1.5 py-0.5 text-[9px] text-zinc-500 ${
+                          isLight ? 'bg-zinc-100' : 'bg-zinc-800'
+                        }`}>
                           {count}
                         </span>
                       </button>
@@ -264,7 +287,9 @@ export function DebugConsole() {
                 useSandboxStore.setState({ logs: [] });
                 timestampsRef.current.clear();
               }}
-              className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+              className={`rounded p-1 text-zinc-600 ${
+                isLight ? 'hover:bg-zinc-100 hover:text-zinc-900' : 'hover:bg-zinc-800 hover:text-zinc-300'
+              }`}
               title="Clear console"
             >
               <X className="h-3 w-3" />
@@ -274,7 +299,9 @@ export function DebugConsole() {
           {projectName && (
             <button
               onClick={destroyProject}
-              className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-red-400"
+              className={`rounded p-1 text-zinc-600 ${
+                isLight ? 'hover:bg-red-50 hover:text-red-500' : 'hover:bg-zinc-800 hover:text-red-400'
+              }`}
               title="Destroy sandbox project"
             >
               <Trash2 className="h-3 w-3" />
@@ -285,7 +312,9 @@ export function DebugConsole() {
 
       {/* Search bar */}
       {showSearch && (
-        <div className="flex items-center gap-2 border-b border-zinc-800/60 bg-zinc-900/40 px-3 py-1">
+        <div className={`flex items-center gap-2 border-b px-3 py-1 ${
+          isLight ? 'border-zinc-200 bg-zinc-50' : 'border-zinc-800/60 bg-zinc-900/40'
+        }`}>
           <Search className="h-3 w-3 text-zinc-600" />
           <input
             ref={searchInputRef}
@@ -293,7 +322,9 @@ export function DebugConsole() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search logs..."
-            className="flex-1 bg-transparent text-xs text-zinc-300 placeholder-zinc-600 outline-none"
+            className={`flex-1 bg-transparent text-xs outline-none ${
+              isLight ? 'text-zinc-800 placeholder-zinc-400' : 'text-zinc-300 placeholder-zinc-600'
+            }`}
           />
           {searchQuery && (
             <span className="text-[10px] text-zinc-500">
@@ -302,7 +333,7 @@ export function DebugConsole() {
           )}
           <button
             onClick={() => { setSearchQuery(''); setShowSearch(false); }}
-            className="rounded p-0.5 text-zinc-600 hover:text-zinc-300"
+            className={`rounded p-0.5 text-zinc-600 ${isLight ? 'hover:text-zinc-900' : 'hover:text-zinc-300'}`}
           >
             <X className="h-3 w-3" />
           </button>
@@ -321,19 +352,23 @@ export function DebugConsole() {
               return (
                 <div
                   key={index}
-                  className={`flex hover:bg-zinc-800/30 ${
+                  className={`flex ${
+                    isLight ? 'hover:bg-zinc-100/90' : 'hover:bg-zinc-800/30'
+                  } ${
                     highlight ? 'bg-yellow-500/10' : ''
                   }`}
                 >
                   {/* Line number */}
                   {showLineNumbers && (
-                    <span className="w-8 shrink-0 select-none border-r border-zinc-800/40 px-1 text-right text-zinc-700">
+                    <span className={`w-8 shrink-0 select-none border-r px-1 text-right ${
+                      isLight ? 'border-zinc-200 text-zinc-400' : 'border-zinc-800/40 text-zinc-700'
+                    }`}>
                       {index + 1}
                     </span>
                   )}
                   {/* Timestamp */}
                   {showTimestamps && (
-                    <span className="w-16 shrink-0 select-none px-1 text-zinc-700">
+                    <span className={`w-16 shrink-0 select-none px-1 ${isLight ? 'text-zinc-400' : 'text-zinc-700'}`}>
                       {formatTimestamp(index)}
                     </span>
                   )}
@@ -345,7 +380,7 @@ export function DebugConsole() {
                         ? 'text-emerald-400'
                         : isWarningLine(cleaned)
                           ? 'text-yellow-400'
-                          : 'text-zinc-400'
+                          : isLight ? 'text-zinc-700' : 'text-zinc-400'
                   }`}>
                     {cleaned}
                   </span>

@@ -31,7 +31,7 @@ function SourceChip({ source, index }: { source: SearchSourceUI; index: number }
         onMouseLeave={() => setTooltipVisible(false)}
         onFocus={() => setTooltipVisible(true)}
         onBlur={() => setTooltipVisible(false)}
-        className="group/chip flex items-center gap-1.5 rounded-full border border-zinc-800/80 bg-zinc-900/60 px-2.5 py-1 text-[11px] text-zinc-400 transition-all hover:border-zinc-600/80 hover:bg-zinc-800/70 hover:text-zinc-200"
+        className="group/chip flex items-center gap-1.5 rounded-lg border border-zinc-800/80 bg-zinc-900/60 px-2.5 py-1 text-[11px] text-zinc-400 transition-all hover:border-zinc-600/80 hover:bg-zinc-800/70 hover:text-zinc-200"
         aria-label={`Source ${index + 1}: ${source.title || label}`}
       >
         <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center">
@@ -47,7 +47,7 @@ function SourceChip({ source, index }: { source: SearchSourceUI; index: number }
           )}
         </span>
         <span className="max-w-[80px] truncate font-medium">{label}</span>
-        <span className="rounded-full bg-zinc-800/80 px-1 py-px text-[9px] font-semibold text-zinc-500">{index + 1}</span>
+        <span className="rounded-md bg-zinc-800/80 px-1 py-px text-[9px] font-semibold text-zinc-500">{index + 1}</span>
       </a>
 
       {tooltipVisible && (
@@ -77,20 +77,20 @@ function SourceChipRow({ sources, confidence }: { sources: SearchSourceUI[]; con
     <div className="mb-3 flex flex-wrap items-center gap-1.5">
       <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">
         <Globe className="h-3 w-3" />
-        {sources.length} source{sources.length === 1 ? '' : 's'}
+        Grounded in {sources.length} source{sources.length === 1 ? '' : 's'}
       </span>
       <div className="h-3 w-px bg-zinc-800" />
       {visible.map((src, i) => (
         <SourceChip key={`${src.domain}-${i}`} source={src} index={i} />
       ))}
       {overflow > 0 && (
-        <span className="rounded-full border border-zinc-800/60 bg-zinc-900/40 px-2 py-1 text-[11px] text-zinc-600">
+        <span className="rounded-md border border-zinc-800/60 bg-zinc-900/40 px-2 py-1 text-[11px] text-zinc-600">
           +{overflow}
         </span>
       )}
       {confidence !== undefined && (
         <span
-          className={`ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
+          className={`ml-auto inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
             confidence >= 0.7
               ? 'bg-emerald-500/10 text-emerald-400'
               : confidence >= 0.4
@@ -119,7 +119,7 @@ function SourceList({ sources, confidence }: { sources: SearchSourceUI[]; confid
   return (
     <section className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-zinc-500">
-        <span className="font-semibold uppercase tracking-[0.18em] text-zinc-400">{sources.length} source{sources.length === 1 ? '' : 's'}</span>
+        <span className="font-semibold uppercase tracking-[0.18em] text-zinc-400">Grounded in {sources.length} source{sources.length === 1 ? '' : 's'}</span>
         {confidenceLabel && <span className="text-zinc-600">{confidenceLabel}</span>}
       </div>
 
@@ -156,7 +156,7 @@ function SourceList({ sources, confidence }: { sources: SearchSourceUI[]; confid
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">{label}</span>
-                  <span className={`rounded-full border px-1.5 py-px text-[9px] font-medium ${trustTone}`}>
+                <span className={`rounded-md border px-1.5 py-px text-[9px] font-medium ${trustTone}`}>
                     {source.trustTier}
                   </span>
                 </div>

@@ -208,6 +208,9 @@ export interface VaiConfig {
   /** Platform user auth and OAuth settings */
   readonly platformAuth: PlatformAuthConfig;
 
+  /** Allowed CORS origins. Defaults to localhost dev origins + tauri://localhost. Env: VAI_ALLOWED_ORIGINS (comma-separated) */
+  readonly allowedOrigins?: readonly string[];
+
   /** Conservative prompt hardening for ambiguous repo-native questions */
   readonly chatPromptRewrite: ChatPromptRewriteConfig;
 
@@ -220,4 +223,24 @@ export interface VaiConfig {
   readonly enableUsageTracking: boolean;
   /** Enable eval framework */
   readonly enableEval: boolean;
+
+  // ── Quality Gate ──
+  /** External LLM quality validation for low-confidence vai:v0 responses.
+   *  When enabled + a provider is available, responses below the confidence
+   *  threshold are sent to the external LLM for scoring. If the score is
+   *  too low, the LLM's improved version replaces the original. */
+  readonly qualityGate: {
+    /** Enable the quality gate (default: false) */
+    readonly enabled: boolean;
+    /** Confidence threshold below which responses get validated (0–1, default: 0.5) */
+    readonly confidenceThreshold: number;
+    /** Which provider to use for validation (default: first enabled external provider) */
+    readonly provider?: ProviderId;
+    /** Model to use for validation (overrides provider default) */
+    readonly model?: string;
+    /** Maximum latency budget in ms for the validation call (default: 5000) */
+    readonly timeoutMs: number;
+    /** Strategies that are NEVER validated (already high quality or too fast to delay) */
+    readonly skipStrategies: readonly string[];
+  };
 }

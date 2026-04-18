@@ -8,6 +8,7 @@ import {
   createBroadcastBodySchema,
 } from '@vai/api-types/broadcast';
 import { invalidRequestBody } from '../validation/http-validation.js';
+import { isLocalDevMutationAllowed } from '../security/request-trust.js';
 
 type AuthenticatedViewer = PlatformViewer & {
   authenticated: true;
@@ -264,13 +265,21 @@ export function registerBroadcastRoutes(
   });
 
   // ── Delete companion client by ID (local dev only) ──
-  app.delete<{ Params: { id: string } }>('/api/companion-clients/:id', async (request, _reply) => {
+  app.delete<{ Params: { id: string } }>('/api/companion-clients/:id', async (request, reply) => {
+    if (!isLocalDevMutationAllowed(request)) {
+      reply.code(403);
+      return { error: 'Companion client deletion is only allowed from a local dev runtime.' };
+    }
     projects.deleteCompanionClient(request.params.id);
     return { ok: true };
   });
 
   // ── Cleanup test companion clients by installationKey prefix ──
   app.delete<{ Querystring: { prefix: string } }>('/api/companion-clients', async (request, reply) => {
+    if (!isLocalDevMutationAllowed(request)) {
+      reply.code(403);
+      return { error: 'Companion client cleanup is only allowed from a local dev runtime.' };
+    }
     const prefix = request.query.prefix;
     if (!prefix || prefix.length < 5) {
       reply.code(400);

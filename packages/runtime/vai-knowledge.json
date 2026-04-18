@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "savedAt": "2026-04-13T21:52:01.781Z",
+  "savedAt": "2026-04-18T13:47:14.599Z",
   "learnedEntries": [
     {
       "pattern": "speaking-adaptive-depth",
@@ -6627,37 +6627,58 @@
     {
       "pattern": "jmgarridopaz/hexa-hotel",
       "response": "estanciaSeSolapaCon(estanciaRequerida) ) { return false; } } return true; } }. obtenerTodas(); for ( String numeroHabitacion : todasHabitaciones ) { if ( habitacionDisponible(numeroHabitacion,estancia) ) { return numeroHabitacion; } } return null; } private boolean habitacionDisponible ( String numeroHabitacion, Estancia estanciaRequerida ) { List reservasDeHabitacion = this. buscarPorHabitacion(numeroHabitacion); for ( Reserva reserva : reservasDeHabitacion ) { if ( reserva. reservaRepositorio = reservaRepositorio; } @Override public String reservarHabitacion ( LocalDate hoy, String emailUsuario, LocalDate desde, LocalDate hasta ) { Estancia estancia = new Estancia(desde,hasta); if ( estancia. guardar(reserva); return codigoReserva; } private String buscarHabitacionDisponible(Estancia estancia) { List todasHabitaciones = this. obtenerPrecioNoche(); Reserva reserva = new Reserva ( codigoReserva, emailUsuario, numeroHabitacion, estancia ); reserva. comienzaAntesDe(hoy) ) { throw new RuntimeException(\"La estancia no puede comenzar antes de la fecha actual\"); } String numeroHabitacion = buscarHabitacionDisponible(estancia); if (numeroHabitacion == null) { throw new RuntimeException(\"No existe habitación disponible para las fechas dadas\"); } String codigoReserva = this. habitacionRepositorio = habitacionRepositorio; this. List; public class HexaHotel implements RealizarReservasPort { private final ConsultarHabitacionesPort habitacionRepositorio; private final PersistirReservasPort reservaRepositorio; public HexaHotel(ConsultarHabitacionesPort habitacionRepositorio, PersistirReservasPort reservaRepositorio) { this. obtenerSiguienteCodigo(); BigDecimal eurosNoche = this.",
-      "frequency": 3,
+      "frequency": 4,
       "source": "https://github.com/jmgarridopaz/hexa-hotel/blob/main/src/main/java/es/uhu/etsi/tallerhexagonal/hexahotel/aplicacion/HexaHotel.java",
       "language": "code"
     },
     {
       "pattern": "jmgarridopaz/bluezone",
       "response": "The ending date-time is calculated from the paid amount, according to the rate of the zone. Run the entry point to the app: cd. This will happen if there is no valid ticket for the car and the rate of the zone. Car drivers will access the application using a Web UI (User Interface), and they can do the following: Query all the available rates in the city, in order to choose the one of the zone he wants to park the at. A ticket is valid if current date-time is between the starting and ending date-time of the ticket period. Driven actors needed by the application are: a rate repository, a ticket repository, and a payment service. Parking inspectors will access the application using a terminal with a CLI (Command Line Interface), and they can do the following: Check whether a car is illegally parked at a zone. sh Select the adapters to be plugged-in at each port, editing the \"ports-adapters. Users (driver actors) of the application are car drivers and parking inspectors. Purchase a parking ticket, paying an amount of money for parking a car at a zone, during a period of time.",
-      "frequency": 1,
+      "frequency": 2,
       "source": "https://github.com/jmgarridopaz/bluezone",
       "language": "code"
+    },
+    {
+      "pattern": "bishnudhiraj\n \n / \n \n animated-goggles \n \n\n public \n \n\n \n\n \n \n \n \n\n \n \n \n notifications\n you must be",
+      "response": "BishnuDhiraj\n \n / \n \n animated-goggles \n \n\n Public \n \n\n \n\n \n \n \n \n\n \n \n \n Notifications\n You must be signed in to change notification settings \n\n \n\n \n \n \n Fork\n 0 \n \n \n\n \n \n \n \n \n Star\n 0 \n \n \n\n \n\n \n \n\n \n \n\n \n\n \n \n\n \n \n \n\n \n \n \n \n \n \n \n This repository is empty. \n \n \n Care to check out the GitHub Channel on YouTube while you wait?",
+      "frequency": 1,
+      "source": "https://github.com/BishnuDhiraj/animated-goggles",
+      "language": "en"
+    },
+    {
+      "pattern": "build photography portfolio",
+      "response": "```json title=\"package.json\"\n{\n  \"name\": \"builder-app\",\n  \"private\": true,\n  \"version\": \"0.0.0\",\n  \"type\": \"module\",\n  \"scripts\": {\n    \"dev\": \"vite\",\n    \"build\": \"vite build\",\n    \"preview\": \"vite preview\"\n  },\n  \"dependencies\": {\n    \"react\": \"^18.3.1\",\n    \"react-dom\": \"^18.3.1\"\n  },\n  \"devDependencies\": {\n    \"@vitejs/plugin-react\": \"^4.3.1\",\n    \"vite\": \"^5.4.10\"\n  }\n}\n```\n\n```html title=\"index.",
+      "frequency": 1,
+      "source": "auto-learned",
+      "language": "en"
+    },
+    {
+      "pattern": "polish landing page",
+      "response": "Building a SaaS landing page with hero, features, and CTA sections.\n\n```json title=\"package.json\"\n{\n  \"name\": \"landing-page\",\n  \"private\": true,\n  \"version\": \"0.0.0\",\n  \"type\": \"module\",\n  \"scripts\": { \"dev\": \"vite\", \"build\": \"vite build\" },\n  \"dependencies\": { \"react\": \"^18.3.1\", \"react-dom\": \"^18.3.1\" },\n  \"devDependencies\": {\n    \"@types/react\": \"^18\",\n    \"@vitejs/plugin-react\": \"^4.3.1\",\n    \"vite\": \"^5.4.1\"\n  }\n}\n```\n\n```tsx title=\"src/App.",
+      "frequency": 1,
+      "source": "auto-learned",
+      "language": "en"
     }
   ],
   "strategyStats": {
     "general-knowledge": 71,
-    "framework-devops": 858,
+    "framework-devops": 863,
     "direct-match": 315,
     "web-stack": 112,
-    "web-search": 16,
-    "taught-match": 35,
+    "web-search": 18,
+    "taught-match": 36,
     "concept-lookup": 50,
     "math": 166,
     "binary": 19,
     "algorithm": 91,
     "code-gen": 31,
-    "conversational": 503,
-    "creative-code": 232,
+    "conversational": 507,
+    "creative-code": 240,
     "google-search": 30,
     "intelligence": 54,
     "engineering-judgment": 10,
     "app-build-guidance": 5,
-    "fallback": 75,
+    "fallback": 76,
     "frontend-architecture": 2,
     "frontend-engineering": 1,
     "ambiguous-build": 3,
@@ -6682,7 +6703,7 @@
     "entitlement-policy": 3,
     "repo-native-architecture": 16,
     "structured-benchmark-memo": 23,
-    "cs-fundamentals": 7,
+    "cs-fundamentals": 10,
     "benchmark-eval": 588,
     "code-task": 7,
     "advanced-code": 28,
@@ -6693,7 +6714,9 @@
     "literal-response": 17,
     "short-topic-local": 11,
     "short-topic-curated": 2,
-    "networking": 3
+    "networking": 3,
+    "utility": 3,
+    "chat-build-redirect": 5
   },
   "missedTopics": {
     "normal chat prompt: want": 1,
@@ -6737,6 +6760,7 @@
     "return only status\\:\\done\\, otes\\:\\ok\\}": 1,
     "compute 17*3+1. reply integer": 2,
     "one short paragraph, explain": 4,
-    "2–4 short bullet points,": 2
+    "2–4 short bullet points,": 2,
+    "changed recently react?": 1
   }
 }

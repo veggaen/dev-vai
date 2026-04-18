@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ProjectHandoffConsumeResponse } from '@vai/api-types/project-responses';
 import { apiFetch } from '../lib/api.js';
 import { useLayoutStore } from './layoutStore.js';
 
@@ -319,6 +320,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       deployPhase: 'idle', deploySteps: [], deployStartTime: 0,
       deployStackName: '', deployTierName: '',
     });
+    useLayoutStore.getState().setBuildStatus({ step: 'idle' });
   },
 
   cancelDeploy: () => {
@@ -332,6 +334,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       status: 'idle', error: null, projectId: null, persistentProjectId: null, projectName: null,
       devPort: null, previewReady: false, lastPreviewPort: null, files: [], logs: [], buildActivity: [],
     });
+    useLayoutStore.getState().setBuildStatus({ step: 'idle' });
   },
 
   reset: () => {
@@ -345,9 +348,16 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       deployPhase: 'idle', deploySteps: [], deployStartTime: 0,
       deployStackName: '', deployTierName: '',
     });
+    useLayoutStore.getState().setBuildStatus({ step: 'idle' });
   },
 
   attachProject: async (sandboxProjectId: string) => {
+    set((state) => ({
+      ...state,
+      buildActivity: [],
+      error: null,
+    }));
+    useLayoutStore.getState().setBuildStatus({ step: 'idle' });
     const res = await apiFetch(`/api/sandbox/${sandboxProjectId}`);
     if (!res.ok) {
       const message = res.status === 404
@@ -379,10 +389,9 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       lastPreviewPort: data.devPort,
       files: data.files,
       logs: data.logs,
+      buildActivity: [],
       error: null,
     });
-    useLayoutStore.getState().expandBuilder();
-
     // Auto-restart dev server if node_modules exist but server isn't running
     // (happens after runtime restarts — deps are already installed, just need to start)
     if (data.hasNodeModules && !data.devPort && data.status !== 'building') {
@@ -406,9 +415,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       return false;
     }
 
-    const payload = await res.json() as {
-      sandboxProjectId: string;
-    };
+    const payload = await res.json() as ProjectHandoffConsumeResponse;
 
     await get().attachProject(payload.sandboxProjectId);
     return true;
