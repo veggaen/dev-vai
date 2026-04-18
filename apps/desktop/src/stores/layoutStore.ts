@@ -30,6 +30,7 @@ export type SidebarState = 'expanded' | 'rail' | 'hidden';
 
 /** Layout density mode: compact (VSCode-like, edge-to-edge) vs open (floating, airy) */
 export type LayoutMode = 'compact' | 'open';
+export type ThemePreference = 'dark' | 'light';
 
 /**
  * Responsive breakpoints for V3gga's 3-monitor setup:
@@ -61,6 +62,8 @@ interface LayoutState {
 
   /** Layout density: compact (edge-to-edge) vs open (floating, airy) */
   layoutMode: LayoutMode;
+  /** Shell appearance preference */
+  themePreference: ThemePreference;
   /** Detected screen class based on viewport dimensions */
   screenClass: ScreenClass;
   /** Whether secondary sidebar is visible (ultrawide only) */
@@ -94,6 +97,8 @@ interface LayoutState {
   /** Toggle compact ↔ open layout mode */
   toggleLayoutMode: () => void;
   setLayoutMode: (mode: LayoutMode) => void;
+  toggleThemePreference: () => void;
+  setThemePreference: (theme: ThemePreference) => void;
   /** Update screen class from viewport dimensions */
   updateScreenClass: () => void;
   /** Toggle secondary sidebar (ultrawide only) */
@@ -120,7 +125,11 @@ function detectScreenClass(): ScreenClass {
 const LAYOUT_MODE_KEY = 'vai-layout-mode';
 const savedMode = (typeof localStorage !== 'undefined'
   ? localStorage.getItem(LAYOUT_MODE_KEY) as LayoutMode | null
-  : null) ?? 'open';
+  : null) ?? 'compact';
+const THEME_PREFERENCE_KEY = 'vai-theme-preference';
+const savedThemePreference = (typeof localStorage !== 'undefined'
+  ? localStorage.getItem(THEME_PREFERENCE_KEY) as ThemePreference | null
+  : null) ?? 'dark';
 
 export const useLayoutStore = create<LayoutState>((set, get) => ({
   mode: 'chat',
@@ -136,6 +145,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   showQuickSwitch: false,
   showSidebar: false,
   layoutMode: savedMode,
+  themePreference: savedThemePreference,
   screenClass: typeof window !== 'undefined' ? detectScreenClass() : 'desktop',
   showSecondarySidebar: false,
 
@@ -239,6 +249,15 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   setLayoutMode: (layoutMode) => {
     localStorage.setItem(LAYOUT_MODE_KEY, layoutMode);
     set({ layoutMode });
+  },
+  toggleThemePreference: () => set((s) => {
+    const next = s.themePreference === 'dark' ? 'light' : 'dark';
+    localStorage.setItem(THEME_PREFERENCE_KEY, next);
+    return { themePreference: next };
+  }),
+  setThemePreference: (themePreference) => {
+    localStorage.setItem(THEME_PREFERENCE_KEY, themePreference);
+    set({ themePreference });
   },
   updateScreenClass: () => set({ screenClass: detectScreenClass() }),
   toggleSecondarySidebar: () => set((s) => ({ showSecondarySidebar: !s.showSecondarySidebar })),

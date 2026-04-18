@@ -28,6 +28,34 @@ async function getViewerUserId(auth: PlatformAuthService, request: FastifyReques
   return viewer.user?.id ?? null;
 }
 
+function getOrRestoreProject(
+  projects: ProjectService,
+  sandbox: SandboxManager,
+  projectId: string,
+) {
+  const liveProject = sandbox.get(projectId);
+  if (liveProject) {
+    return liveProject;
+  }
+
+  const persistedProject = projects.getProjectBySandboxId(projectId);
+  if (
+    !persistedProject
+    || !persistedProject.rootDir
+    || !existsSync(persistedProject.rootDir)
+  ) {
+    return null;
+  }
+
+  return sandbox.rehydrate({
+    id: persistedProject.sandboxProjectId,
+    name: persistedProject.name,
+    rootDir: persistedProject.rootDir,
+    ownerUserId: persistedProject.ownerUserId,
+    status: 'idle',
+  });
+}
+
 async function getAuthorizedProject(
   auth: PlatformAuthService,
   projects: ProjectService,
@@ -37,7 +65,7 @@ async function getAuthorizedProject(
   projectId: string,
   access: 'read' | 'write',
 ) {
-  const project = sandbox.get(projectId);
+  const project = getOrRestoreProject(projects, sandbox, projectId);
   if (!project) {
     reply.status(404);
     return { error: 'Project not found' };

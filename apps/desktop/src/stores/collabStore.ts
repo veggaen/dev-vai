@@ -1,76 +1,20 @@
 import { create } from 'zustand';
 import { apiFetch } from '../lib/api.js';
+import type {
+  AuditRequestResponse,
+  GlobalCompanionClient,
+  ProjectCompanionClient,
+  ProjectPeerResponse,
+} from '@vai/api-types/project-responses';
 
-export interface CompanionClientSummary {
-  id: string;
-  clientName: string;
-  clientType: string;
-  launchTarget: string;
-  availableModels: string | null; // JSON: [{ id, family, name, vendor }]
-  availableChatInfo: string | null; // JSON: { chatApps: [{ id, label }], sessions: [{ sessionId, title, lastModified, chatApp }] }
-  lastSeenAt: string | null;
-  lastPolledAt: string | null;
-}
-
-export interface ClaimedByUserSummary {
-  id: string;
-  name: string | null;
-  email: string;
-}
-
-export interface ProjectPeer {
-  id: string;
-  projectId: string;
-  peerKey: string;
-  displayName: string;
-  ide: string;
-  model: string;
-  status: 'idle' | 'invited' | 'ready' | 'active';
-  launchTarget: string;
-  preferredClientId: string | null;
-  preferredClient: CompanionClientSummary | null;
-  instructions: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AuditResult {
-  id: string;
-  auditRequestId: string;
-  projectId: string;
-  peerKey: string;
-  status: 'pending' | 'claimed' | 'submitted';
-  claimedByUserId: string | null;
-  claimedByClientId: string | null;
-  claimedAt: string | null;
-  claimExpiresAt: string | null;
-  claimIsStale: boolean;
-  claimedByUser: ClaimedByUserSummary | null;
-  claimedByClient: CompanionClientSummary | null;
-  verdict: string | null;
-  confidence: number | null;
-  rationale: string | null;
-  submittedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AuditRequest {
-  id: string;
-  projectId: string;
-  prompt: string;
-  scope: string;
-  status: 'pending' | 'collecting' | 'completed';
-  consensusSummary: string | null;
-  winningPeerKey: string | null;
-  createdAt: string;
-  updatedAt: string;
-  results: AuditResult[];
-}
+export type CompanionClientSummary = GlobalCompanionClient;
+export type ProjectClientSummary = ProjectCompanionClient;
+export type ProjectPeer = ProjectPeerResponse;
+export type AuditRequest = AuditRequestResponse;
 
 interface CollabState {
   peers: ProjectPeer[];
-  companionClients: CompanionClientSummary[];
+  companionClients: ProjectClientSummary[];
   /** All companion clients for the authenticated user (no project needed) */
   globalClients: CompanionClientSummary[];
   audits: AuditRequest[];
@@ -114,7 +58,7 @@ export const useCollabStore = create<CollabState>((set) => ({
     try {
       const res = await apiFetch(`/api/projects/${projectId}/companion-clients`);
       if (!res.ok) throw new Error('Unable to load companion clients');
-      const companionClients = await res.json() as CompanionClientSummary[];
+      const companionClients = await res.json() as ProjectClientSummary[];
       set({ companionClients, loading: false });
     } catch (error) {
       set({ companionClients: [], loading: false, error: error instanceof Error ? error.message : 'Unable to load companion clients' });

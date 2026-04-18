@@ -41,6 +41,14 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Retrieval flywheel regression gate
+        if: matrix.node-version == 22
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/ci
+          pnpm vai:retrieval:eval -- --report-file "artifacts/ci/vai-retrieval-eval.json"
+
       - name: Benchmark deep memo headings and run live eval regressions
         if: matrix.node-version == 22
         shell: bash
@@ -110,6 +118,7 @@ jobs:
         with:
           name: vai-benchmark-and-live-eval-reports
           path: |
+            artifacts/ci/vai-retrieval-eval.json
             Temporary_files/ci/vai-chat-benchmark-report.json
             Temporary_files/ci/vai-eval-casual.json
             Temporary_files/ci/vai-eval-creative.json

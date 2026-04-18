@@ -86,6 +86,43 @@ interface MessageBubbleProps {
 }
 
 const INLINE_TOKEN_REGEX = /(\[[^\]]+\]\([^)]+\)|\[\d+\]|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
+const FOLLOW_UP_STOPWORDS = new Set([
+  'the', 'and', 'that', 'this', 'with', 'from', 'into', 'what', 'when', 'where', 'which',
+  'should', 'would', 'could', 'there', 'their', 'about', 'after', 'before', 'while', 'have',
+  'your', 'you', 'more', 'next', 'then', 'they', 'them', 'just', 'than', 'been', 'make',
+  'like', 'want', 'need', 'show', 'build', 'change', 'same', 'does', 'is', 'are', 'was',
+]);
+
+function tokenizeFollowUpSeed(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[`*_[\](){}:;,.!?/\\|-]+/g, ' ')
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 2 && !FOLLOW_UP_STOPWORDS.has(token));
+}
+
+function isReasonableFollowUp(question: string, content: string): boolean {
+  const normalized = question.trim();
+  if (normalized.length < 12 || normalized.length > 120) return false;
+  if (!/[?a-z]/i.test(normalized)) return false;
+
+  const prompty = /^(?:what|how|why|which|can|could|would|should|is|are|do|does|make|add|change|turn|show|explain)\b/i.test(normalized);
+  if (!prompty) return false;
+
+  const questionTokens = tokenizeFollowUpSeed(normalized);
+  if (questionTokens.length === 0) return false;
+
+  const contentTokens = new Set(tokenizeFollowUpSeed(content).slice(0, 80));
+  const overlap = questionTokens.filter((token) => contentTokens.has(token)).length;
+
+  // Permit explicit iteration prompts even when overlap is low.
+  if (/^(?:make|add|change|turn|show|explain)\b/i.test(normalized)) {
+    return overlap >= 1 || questionTokens.length <= 5;
+  }
+
+  return overlap >= 2;
+}
 
 function renderInlineWithCitations({
   text,
@@ -414,25 +451,25 @@ function GroundedBuildBriefCard({
   return (
     <div className="mb-4 rounded-[1.35rem] border border-violet-500/18 bg-[linear-gradient(180deg,rgba(76,29,149,0.18),rgba(17,17,22,0.92))] px-4 py-4 shadow-[0_16px_48px_rgba(0,0,0,0.18)]">
       <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-200/80">
-        <span className="rounded-full border border-violet-400/20 bg-violet-500/12 px-2 py-1 text-violet-100">
+        <span className="rounded-md border border-violet-400/20 bg-violet-500/12 px-2 py-1 text-violet-100">
           Grounded build brief
         </span>
-        <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-zinc-300">
+        <span className="rounded-md border border-zinc-800/70 bg-zinc-950/70 px-2 py-1 text-zinc-300">
           {brief.intent}
         </span>
-        <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-zinc-400">
+        <span className="rounded-md border border-zinc-800/70 bg-zinc-950/70 px-2 py-1 text-zinc-400">
           {confidenceLabel}
         </span>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="rounded-full border border-zinc-700/70 bg-zinc-900/70 px-2.5 py-1 text-[11px] font-medium text-zinc-200">
+        <span className="rounded-md border border-zinc-700/70 bg-zinc-900/70 px-2.5 py-1 text-[11px] font-medium text-zinc-200">
           {brief.focusLabel}
         </span>
         {brief.sourceDomains.slice(0, 3).map((domain) => (
           <span
             key={domain}
-            className="rounded-full border border-zinc-800/80 bg-zinc-900/40 px-2 py-1 text-[10px] text-zinc-500"
+            className="rounded-md border border-zinc-800/80 bg-zinc-900/40 px-2 py-1 text-[10px] text-zinc-500"
           >
             {domain}
           </span>
@@ -441,12 +478,12 @@ function GroundedBuildBriefCard({
 
       <p className="mt-3 text-[14px] leading-6 text-zinc-200">{brief.summary}</p>
 
-      <div className="mt-3 rounded-2xl border border-zinc-800/80 bg-zinc-950/55 px-3.5 py-3">
+      <div className="mt-3 rounded-[1rem] border border-zinc-800/60 bg-zinc-950/42 px-3.5 py-3">
         <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Recommendation</div>
         <p className="mt-1.5 text-[13px] leading-6 text-zinc-200">{brief.recommendation}</p>
       </div>
 
-      <div className="mt-3 rounded-2xl border border-zinc-800/80 bg-zinc-950/40 px-3.5 py-3 text-[12px] leading-6 text-zinc-300">
+      <div className="mt-3 rounded-[1rem] border border-zinc-800/60 bg-zinc-950/32 px-3.5 py-3 text-[12px] leading-6 text-zinc-300">
         <span className="font-semibold text-zinc-100">Next step:</span> {brief.nextStep}
       </div>
 
@@ -522,6 +559,13 @@ export function MessageBubble({
   const normalizedContent = isProjectUpdate ? stripProjectUpdatePrefix(artifactFreeContent) : artifactFreeContent;
   const extractedFiles = isUser ? [] : extractFilesFromMarkdown(normalizedContent);
   const hasAppliedFileBlocks = extractedFiles.length > 0;
+  const hasPendingFileBuild = !isUser
+    && isStreaming
+    && (
+      hasAppliedFileBlocks
+      || /title="[^"]+"/.test(normalizedContent)
+      || (/```/.test(normalizedContent) && /(?:package\.json|src\/|app\/|index\.html|tsconfig\.json|vite\.config)/i.test(normalizedContent))
+    );
   const projectUpdateBody = isProjectUpdate ? parseProjectUpdateBody(normalizedContent) : null;
 
   const useSilentFallback = !hasSandboxAction
@@ -542,8 +586,11 @@ export function MessageBubble({
     ? stripFileBlocksFromMarkdown(displayContent)
     : displayContent;
   const hasStructuredSources = !isUser && Boolean(sources?.length);
-  const hasStructuredFollowUps = !isUser && Boolean(followUps?.length);
-  const visibleFollowUps = hasStructuredFollowUps ? (followUps ?? []).slice(0, 2) : [];
+  const filteredFollowUps = !isUser
+    ? (followUps ?? []).filter((question) => isReasonableFollowUp(question, summarizedContent))
+    : [];
+  const hasStructuredFollowUps = !isUser && filteredFollowUps.length > 0;
+  const visibleFollowUps = hasStructuredFollowUps ? filteredFollowUps.slice(0, 2) : [];
   const isResearchMessage = !isUser && (hasStructuredSources || Boolean(groundedBuildBrief));
   const compactResearchMode = compactResearchChrome && isResearchMessage;
   const cleanedContent = isUser
@@ -640,10 +687,10 @@ export function MessageBubble({
             key={i}
             onClick={() => onFollowUp?.(q)}
             data-follow-up-button="button"
-            className={`group/chip flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] transition-all ${
+            className={`group/chip flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[12px] transition-all ${
               studioChrome
-                ? 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:border-orange-200 hover:bg-orange-50/80 hover:text-zinc-900'
-                : 'border-zinc-700/60 bg-zinc-900/50 text-zinc-300 hover:border-violet-500/30 hover:bg-zinc-800/70 hover:text-zinc-100'
+                ? 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:border-violet-200 hover:bg-violet-50/80 hover:text-zinc-900'
+                : 'border-zinc-800/70 bg-zinc-950/70 text-zinc-300 hover:border-violet-500/30 hover:bg-zinc-900 hover:text-zinc-100'
             }`}
           >
             {q}
@@ -739,13 +786,13 @@ export function MessageBubble({
                   ? 'rounded-2xl rounded-br-md border border-sky-200/80 bg-sky-50 px-4 py-3 text-zinc-900 shadow-sm'
                   : 'rounded-2xl rounded-br-md bg-zinc-800/50 px-4 py-3 text-zinc-100'
                 : isProjectUpdate
-                  ? 'w-full overflow-visible rounded-2xl border border-emerald-500/12 bg-emerald-500/[0.04] px-5 py-4 text-zinc-100'
+                  ? `w-full overflow-visible px-0 py-0 ${studioChrome ? 'text-zinc-800' : 'text-zinc-100'}`
                 : compactResearchMode
                   ? `w-full overflow-visible px-0 py-0 ${studioChrome ? 'text-zinc-800' : 'text-zinc-200'}`
                 : isResearchMessage
                   ? studioChrome
                     ? 'w-full overflow-visible rounded-2xl border border-zinc-200 bg-white px-5 py-4 text-zinc-800 shadow-sm'
-                    : 'w-full overflow-visible rounded-2xl border border-white/[0.05] bg-white/[0.02] px-5 py-4 text-zinc-200'
+                    : 'w-full overflow-visible rounded-[1.2rem] border border-zinc-800/60 bg-zinc-950/34 px-5 py-4 text-zinc-200'
                   : `w-full overflow-visible px-1 py-0.5 ${studioChrome ? 'text-zinc-800' : 'text-zinc-200'}`
             }`}
           >
@@ -755,7 +802,7 @@ export function MessageBubble({
                 <img
                   src={imageSrc}
                   alt="Attached screenshot"
-                  className="max-h-56 w-auto rounded-lg border border-white/10"
+                  className="max-h-56 w-auto rounded-lg border border-zinc-800/60"
                   loading="lazy"
                 />
               </div>
@@ -784,7 +831,21 @@ export function MessageBubble({
             )}
 
             {/* Text — low confidence responses get subtle visual decay */}
-            {isProjectUpdate && projectUpdateArtifact ? (
+            {hasPendingFileBuild ? (
+              <div className="space-y-2">
+                <p className={`text-sm leading-relaxed ${studioChrome ? 'text-zinc-800' : 'text-zinc-200'}`}>
+                  Applying project changes to the sandbox...
+                </p>
+                <div className={`space-y-1 text-xs ${studioChrome ? 'text-zinc-500' : 'text-zinc-500'}`}>
+                  <div>
+                    {extractedFiles.length > 0
+                      ? `Preparing ${extractedFiles.length} file${extractedFiles.length === 1 ? '' : 's'} for the preview update.`
+                      : 'Preparing files and preview updates.'}
+                  </div>
+                  <div>Preview and verification details will replace this stream automatically.</div>
+                </div>
+              </div>
+            ) : isProjectUpdate && projectUpdateArtifact ? (
               <ProjectArtifactCard
                 artifact={projectUpdateArtifact}
                 summary={projectUpdateBody?.summary || compactSummary}
@@ -866,17 +927,17 @@ export function MessageBubble({
                           onClick={() => onOpenSources?.()}
                           data-research-source-summary="button"
                           data-state={sourceRailOpen ? 'open' : 'closed'}
-                          className="group/source-summary flex w-full items-center justify-between rounded-2xl border border-zinc-800/80 bg-zinc-950/55 px-3.5 py-3 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900/70"
+                          className="group/source-summary flex w-full items-center justify-between rounded-[1rem] border border-zinc-800/60 bg-zinc-950/42 px-3.5 py-3 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900/70"
                         >
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="rounded-full border border-zinc-800/80 bg-zinc-900/60 px-2 py-0.5 text-[10px] font-medium text-zinc-200">
+                              <span className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-2 py-0.5 text-[10px] font-medium text-zinc-200">
                                 {sources.length} source{sources.length === 1 ? '' : 's'}
                               </span>
                               {sourceRailDomains.map((domain) => (
                                 <span
                                   key={domain}
-                                  className="rounded-full border border-zinc-800/80 bg-zinc-900/40 px-2 py-0.5 text-[10px] text-zinc-500"
+                                  className="rounded-md border border-zinc-800/80 bg-zinc-900/40 px-2 py-0.5 text-[10px] text-zinc-500"
                                 >
                                   {domain}
                                 </span>
@@ -897,7 +958,7 @@ export function MessageBubble({
                       </div>
                     ) : (
                       <div className="flex items-center gap-2 border-t border-zinc-900/80 pt-3 text-[11px] text-zinc-500">
-                        <span className="rounded-full border border-zinc-800/80 bg-zinc-900/50 px-2 py-0.5 text-[10px] text-zinc-300">
+                        <span className="rounded-md border border-zinc-800/80 bg-zinc-900/50 px-2 py-0.5 text-[10px] text-zinc-300">
                           {sources.length} source{sources.length === 1 ? '' : 's'}
                         </span>
                         {confidence !== undefined && (

@@ -65,6 +65,18 @@ describe('resolveAutoSandboxIntent', () => {
     expect(result.forceFreshProject).toBe(true);
   });
 
+  it('treats builder new-app requests on an attached project as fresh builds', () => {
+    const result = resolveAutoSandboxIntent({
+      userPrompt: 'Build me a client portal app with billing and settings.',
+      mode: 'builder',
+      hasActiveProject: true,
+      hasPackageJsonOutput: true,
+    });
+
+    expect(result.forceFreshProject).toBe(true);
+    expect(result.canAutoApplyFiles).toBe(true);
+  });
+
   it('primes builder UX for active-project chat edits before the response finishes', () => {
     const result = resolveSendTimeWorkIntent({
       userPrompt: 'Improve the current app and add a cleaner analytics rail.',
@@ -114,5 +126,18 @@ describe('resolveAutoSandboxIntent', () => {
     expect(result.shouldPrimeBuilder).toBe(true);
     expect(result.requestSystemPrompt).toContain('continues an active builder session');
     expect(result.requestSystemPrompt).toContain('changed files');
+  });
+
+  it('primes fresh builder builds away from the attached app when the ask sounds like a new app', () => {
+    const result = resolveSendTimeWorkIntent({
+      userPrompt: 'Build me a premium client portal app.',
+      mode: 'builder',
+      hasActiveProject: true,
+    });
+
+    expect(result.intent).toBe('build');
+    expect(result.shouldPrimeBuilder).toBe(true);
+    expect(result.buildStatusMessage).toContain('fresh runnable preview');
+    expect(result.requestSystemPrompt).toContain('Do not mutate the currently attached app');
   });
 });

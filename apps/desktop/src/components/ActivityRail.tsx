@@ -31,6 +31,7 @@ const BASE_RAIL_ITEMS: RailItem[] = [
 export function ActivityRail() {
   const { sidebarState, activePanel, setActivePanel, setShowQuickSwitch,
     layoutMode, toggleLayoutMode,
+    themePreference,
   } = useLayoutStore();
   const { status: engineStatus } = useEngineStore();
   const { conversations } = useChatStore();
@@ -44,6 +45,7 @@ export function ActivityRail() {
   const userButtonRef = useRef<HTMLButtonElement>(null);
 
   const isExpanded = sidebarState === 'expanded';
+  const isLight = themePreference === 'light';
   const allowedPanels = ROLE_NAV_ITEMS[role];
   const railItems: RailItem[] = role === 'owner'
     ? [...BASE_RAIL_ITEMS.slice(0, 2), { id: 'control' as const, icon: Shield, label: 'Control', shortcut: 'Ctrl+Shift+O' }, ...BASE_RAIL_ITEMS.slice(2)]
@@ -51,16 +53,20 @@ export function ActivityRail() {
 
   return (
     <div
-      className="flex h-full min-w-0 flex-shrink-0 flex-col items-center overflow-hidden border-r border-zinc-800/60 bg-zinc-950 py-2"
+      className={`flex h-full min-w-0 flex-shrink-0 flex-col items-center overflow-hidden border-r py-2 ${
+        isLight ? 'border-zinc-200 bg-white/90' : 'border-zinc-800/70 bg-zinc-950/88'
+      }`}
       style={{ width: 'var(--layout-rail-width)' }}
     >
       {/* Logo / Quick Switch trigger */}
       <button
         onClick={() => setShowQuickSwitch(true)}
-        className="group mb-3 flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-200 hover:bg-zinc-800 hover:shadow-sm hover:shadow-violet-500/10"
+        className={`group mb-3 flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-200 ${
+          isLight ? 'hover:bg-zinc-100' : 'hover:bg-zinc-900'
+        }`}
         title="Quick Switch (Ctrl+K)"
       >
-        <div className="relative flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-violet-600 to-blue-600 shadow-sm shadow-violet-500/20 transition-all duration-200 group-hover:scale-110 group-hover:shadow-md group-hover:shadow-violet-500/30">
+        <div className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-blue-600 shadow-sm shadow-violet-500/20 transition-all duration-200 group-hover:scale-110 group-hover:shadow-md group-hover:shadow-violet-500/30">
           <span className="text-xs font-bold text-white">V</span>
         </div>
       </button>
@@ -77,9 +83,13 @@ export function ActivityRail() {
               data-panel={item.id}
               onClick={() => setActivePanel(item.id)}
               title={`${item.label}${item.shortcut ? ` (${item.shortcut})` : ''}`}
-              className={`group/rail relative flex h-10 w-10 items-center justify-center rounded-lg transition-colors duration-200 ${isActive
-                  ? 'bg-zinc-800 text-zinc-100 shadow-sm shadow-violet-500/10'
-                  : 'text-zinc-600 hover:bg-zinc-800/60 hover:text-zinc-300'
+              className={`group/rail relative flex h-10 w-10 items-center justify-center rounded-xl border transition-colors duration-200 ${isActive
+                  ? isLight
+                    ? 'border-violet-200 bg-violet-50 text-violet-700 shadow-sm'
+                    : 'border-zinc-800/80 bg-zinc-900 text-zinc-100 shadow-sm shadow-violet-500/10'
+                  : isLight
+                    ? 'border-transparent text-zinc-500 hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-900'
+                    : 'border-transparent text-zinc-600 hover:border-zinc-800/70 hover:bg-zinc-900/70 hover:text-zinc-300'
                 }`}
               whileHover={{ scale: 1.08 }}
               whileTap={{ scale: 0.95 }}
@@ -89,7 +99,7 @@ export function ActivityRail() {
               {isActive && (
                 <motion.div
                   layoutId="rail-indicator"
-                  className="absolute left-0 h-5 w-[2px] rounded-r-full bg-violet-500 shadow-[0_0_8px_rgba(139,92,246,0.6)]"
+                  className="absolute left-0 h-5 w-[2px] rounded-r-full bg-violet-500 shadow-[0_0_8px_rgba(139,92,246,0.45)]"
                   transition={{ type: 'spring', stiffness: 350, damping: 30 }}
                 />
               )}
@@ -124,14 +134,14 @@ export function ActivityRail() {
       </div>
 
       {/* Bottom section: overlay toggle + layout mode + engine status */}
-      <div className="flex flex-col items-center gap-1 border-t border-zinc-800/60 pt-2">
+      <div className={`flex flex-col items-center gap-1 border-t pt-2 ${isLight ? 'border-zinc-200' : 'border-zinc-800/70'}`}>
         {/* Vai Actions / Overlay toggle — show/hide the demo overlay + action log */}
         <button
           onClick={() => setOverlayVisible(!overlayVisible)}
           title={overlayVisible ? 'Hide Vai overlays' : 'Show Vai overlays'}
-          className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all ${overlayVisible
-              ? 'bg-zinc-800/80 text-violet-400'
-              : 'text-zinc-600 hover:bg-zinc-800/60 hover:text-zinc-400'
+          className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all ${overlayVisible
+              ? isLight ? 'bg-violet-50 text-violet-700' : 'bg-zinc-900 text-violet-400'
+              : isLight ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800' : 'text-zinc-600 hover:bg-zinc-900/70 hover:text-zinc-400'
             }`}
         >
           <Activity className="h-4 w-4" />
@@ -141,9 +151,9 @@ export function ActivityRail() {
         <button
           onClick={toggleLayoutMode}
           title={`Switch to ${layoutMode === 'compact' ? 'open' : 'compact'} layout (Ctrl+Shift+M)`}
-          className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all ${layoutMode === 'open'
-              ? 'bg-violet-500/20 text-violet-400'
-              : 'text-zinc-600 hover:bg-zinc-800/60 hover:text-zinc-400'
+          className={`flex h-9 w-9 items-center justify-center rounded-xl transition-all ${layoutMode === 'open'
+              ? isLight ? 'bg-violet-50 text-violet-700' : 'bg-violet-500/20 text-violet-400'
+              : isLight ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800' : 'text-zinc-600 hover:bg-zinc-900/70 hover:text-zinc-400'
             }`}
         >
           {layoutMode === 'open' ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -170,11 +180,11 @@ export function ActivityRail() {
         <button
           ref={userButtonRef}
           onClick={() => setUserPopoverOpen((prev) => !prev)}
-          className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-all ${userPopoverOpen
-              ? 'bg-zinc-800/80 text-zinc-100'
+          className={`relative flex h-8 w-8 items-center justify-center rounded-xl transition-all ${userPopoverOpen
+              ? isLight ? 'bg-zinc-100 text-zinc-900' : 'bg-zinc-900 text-zinc-100'
               : authStatus === 'authenticated'
-                ? 'text-emerald-400 hover:bg-zinc-800/60 hover:text-emerald-300'
-                : 'text-zinc-600 hover:bg-zinc-800/60 hover:text-zinc-400'
+                ? isLight ? 'text-emerald-700 hover:bg-zinc-100 hover:text-emerald-600' : 'text-emerald-400 hover:bg-zinc-900/70 hover:text-emerald-300'
+                : isLight ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800' : 'text-zinc-600 hover:bg-zinc-900/70 hover:text-zinc-400'
             }`}
           title={authStatus === 'authenticated'
             ? `Account${authUser?.email ? ` (${authUser.email})` : ''}`

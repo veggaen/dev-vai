@@ -6,6 +6,7 @@ import type { SessionCapture } from '../lib/sessionCapture.js';
 import { useLayoutStore, type ChatMode } from './layoutStore.js';
 import { useAuthStore } from './authStore.js';
 import { useSandboxStore } from './sandboxStore.js';
+import { extractFilesFromMarkdown } from '../lib/file-extractor.js';
 
 interface ImageAttachment {
   data: string;
@@ -152,6 +153,33 @@ let broadcastPollTimer: ReturnType<typeof setInterval> | null = null;
 let activeWs: WebSocket | null = null;
 let activeStreamingAssistantId: string | null = null;
 
+function isProjectUpdateContent(content: string): boolean {
+  const trimmed = content.trim();
+  return trimmed.startsWith('Project update:') || trimmed.includes('[vai-artifact]');
+}
+
+function collapseRedundantProjectMessages(messages: ChatMessage[]): ChatMessage[] {
+  const collapsed: ChatMessage[] = [];
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const current = messages[index];
+    const next = messages[index + 1];
+
+    if (
+      current?.role === 'assistant'
+      && extractFilesFromMarkdown(current.content).length > 0
+      && next?.role === 'assistant'
+      && isProjectUpdateContent(next.content)
+    ) {
+      continue;
+    }
+
+    collapsed.push(current);
+  }
+
+  return collapsed;
+}
+
 /**
  * Generate a clean session title from the first user message.
  * Strips markdown, collapses whitespace, truncates at word boundary.
@@ -232,11 +260,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   startNewChat: () => {
+    if (activeWs) {
+      activeWs.close();
+      activeWs = null;
+    }
+    activeStreamingAssistantId = null;
     useLayoutStore.getState().setMode('chat');
     useLayoutStore.getState().collapseBuilder();
+    useSandboxStore.getState().reset();
     set({
       activeConversationId: null,
       messages: [],
+      isStreaming: false,
       broadcastMode: false,
       broadcastTargetClientIds: [],
     });
@@ -258,7 +293,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   selectConversation: async (id: string) => {
-    const res = await apiFetch(`/api/conversations/${id}/messages`);
+    const [res] = await Promise.all([
+      apiFetch(`/api/conversations/${id}/messages`),
+      get().fetchConversations(),
+    ]);
     const rawMessages = (await res.json()) as Array<{
       id: string;
       role: string;
@@ -271,12 +309,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const isBroadcastChat = id in broadcastChats;
     set({
       activeConversationId: id,
-      messages: rawMessages.map((m) => ({
+      messages: collapseRedundantProjectMessages(rawMessages.map((m) => ({
         id: m.id,
         role: m.role as ChatMessage['role'],
         content: m.content,
         imageId: m.imageId,
-      })),
+      }))),
       broadcastMode: isBroadcastChat,
       broadcastTargetClientIds: isBroadcastChat ? broadcastChats[id] : [],
     });
@@ -605,7 +643,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
 
-      set((state) => ({ messages: [...state.messages, message] }));
+      set((state) => {
+        const msgs = [...state.messages];
+        let replaced = false;
+
+        for (let index = msgs.length - 1; index >= 0; index -= 1) {
+          const candidate = msgs[index];
+          if (candidate.role !== 'assistant') break;
+          if (isProjectUpdateContent(candidate.content)) break;
+
+          if (extractFilesFromMarkdown(candidate.content).length > 0) {
+            msgs[index] = message;
+            replaced = true;
+            break;
+          }
+        }
+
+        return { messages: replaced ? msgs : [...msgs, message] };
+      });
     };
 
     if (!targetConversationId) {

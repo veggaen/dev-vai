@@ -623,7 +623,7 @@ export function generateTopicFollowUps(rawTopic: string, intent = 'general'): st
     default:
       return finalizeFollowUps([
         `Show me a practical example with ${subject}`,
-        `What should I build next with ${subject}?`,
+        `What are the most common mistakes with ${subject}?`,
         `What is the cleanest project structure for ${subject}?`,
       ]);
   }

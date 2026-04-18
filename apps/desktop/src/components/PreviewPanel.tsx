@@ -1,10 +1,10 @@
 import { useSandboxStore } from '../stores/sandboxStore.js';
-import { API_BASE } from '../lib/api.js';
+import { apiFetch } from '../lib/api.js';
 import {
   RefreshCw, Smartphone, Tablet, Monitor, Copy, ExternalLink,
   Code2, Eye, EyeOff, Trash2, Download, CheckCircle, XCircle, Loader2,
   Camera, Terminal, FolderTree, Play, Square, Maximize2, Minimize2,
-  ArrowLeft, ArrowRight, Save, RotateCcw, MessageSquare, File, PanelsTopLeft,
+  ArrowLeft, ArrowRight, Save, RotateCcw, MessageSquare, File, Moon, Sun,
 } from 'lucide-react';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -16,8 +16,9 @@ import { useChatStore } from '../stores/chatStore.js';
 
 /* ── Types ── */
 
-type ViewMode = 'dashboard' | 'preview' | 'code';
+type ViewMode = 'preview' | 'code';
 type BreakpointKey = 'mobile' | 'tablet' | 'desktop';
+type CodeLanguage = 'script' | 'markup' | 'style' | 'data' | 'plain';
 
 const BREAKPOINTS: Record<BreakpointKey, { width: number; icon: typeof Smartphone; label: string }> = {
   mobile:  { width: 375,  icon: Smartphone, label: 'Mobile (375px)' },
@@ -42,17 +43,78 @@ const STUDIO_PREVIEW_TIPS = [
   'Toggle mobile preview to catch layout issues before you ship.',
 ] as const;
 
-function StudioSunLogo({ className = '' }: { className?: string }) {
+function detectCodeLanguage(path: string | null): CodeLanguage {
+  const ext = path?.split('.').pop()?.toLowerCase() ?? '';
+  if (['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs'].includes(ext)) return 'script';
+  if (['html', 'xml', 'svg'].includes(ext)) return 'markup';
+  if (['css', 'scss', 'sass', 'less'].includes(ext)) return 'style';
+  if (['json', 'jsonc', 'json5', 'yaml', 'yml', 'toml'].includes(ext)) return 'data';
+  return 'plain';
+}
+
+function tokenizeCodeLine(line: string, language: CodeLanguage): Array<{ text: string; type: string }> {
+  const patterns: Record<CodeLanguage, RegExp | null> = {
+    script: /(?<comment>\/\/.*$)|(?<string>"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|`(?:\\.|[^`])*`)|(?<keyword>\b(?:import|export|from|const|let|var|function|return|if|else|for|while|switch|case|break|continue|class|extends|implements|interface|type|new|await|async|try|catch|finally|throw|true|false|null|undefined)\b)|(?<number>\b\d+(?:\.\d+)?\b)|(?<tag><\/?[A-Za-z][\w:-]*)/g,
+    markup: /(?<comment><!--.*?-->)|(?<string>"(?:\\.|[^"])*"|'(?:\\.|[^'])*')|(?<tag><\/?[A-Za-z][\w:-]*)|(?<attr>\b[A-Za-z_:][-A-Za-z0-9_:.]*(?==))/g,
+    style: /(?<comment>\/\*.*?\*\/)|(?<string>"(?:\\.|[^"])*"|'(?:\\.|[^'])*')|(?<keyword>\b(?:@media|@supports|@keyframes|from|to)\b)|(?<number>#(?:[0-9a-fA-F]{3,8})\b|\b\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%)?\b)|(?<attr>\b[a-z-]+(?=\s*:))/g,
+    data: /(?<string>"(?:\\.|[^"])*")|(?<keyword>\b(?:true|false|null)\b)|(?<number>\b-?\d+(?:\.\d+)?\b)|(?<attr>\b[A-Za-z0-9_.-]+(?=\s*:))/g,
+    plain: null,
+  };
+
+  const pattern = patterns[language];
+  if (!pattern || line.length === 0) {
+    return [{ text: line, type: 'plain' }];
+  }
+
+  const tokens: Array<{ text: string; type: string }> = [];
+  let lastIndex = 0;
+
+  for (const match of line.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      tokens.push({ text: line.slice(lastIndex, index), type: 'plain' });
+    }
+
+    const text = match[0];
+    const groups = match.groups ?? {};
+    const type = Object.keys(groups).find((key) => groups[key] !== undefined) ?? 'plain';
+    tokens.push({ text, type });
+    lastIndex = index + text.length;
+  }
+
+  if (lastIndex < line.length) {
+    tokens.push({ text: line.slice(lastIndex), type: 'plain' });
+  }
+
+  return tokens.length > 0 ? tokens : [{ text: line, type: 'plain' }];
+}
+
+function tokenClass(type: string, isLight: boolean): string {
+  switch (type) {
+    case 'comment':
+      return isLight ? 'text-zinc-400' : 'text-zinc-600';
+    case 'string':
+      return isLight ? 'text-emerald-700' : 'text-emerald-300';
+    case 'keyword':
+      return isLight ? 'text-violet-700' : 'text-violet-300';
+    case 'number':
+      return isLight ? 'text-sky-700' : 'text-sky-300';
+    case 'tag':
+      return isLight ? 'text-orange-700' : 'text-orange-300';
+    case 'attr':
+      return isLight ? 'text-blue-700' : 'text-blue-300';
+    default:
+      return isLight ? 'text-zinc-800' : 'text-zinc-200';
+  }
+}
+
+function StudioMark({ className = '' }: { className?: string }) {
   return (
     <div
-      className={`flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-b from-[#ff6b35] to-[#ff4d00] shadow-[0_20px_60px_rgba(255,107,53,0.35)] ${className}`}
+      className={`flex h-16 w-16 items-center justify-center rounded-[1.35rem] bg-[linear-gradient(135deg,#18181b,#27272a)] shadow-[0_20px_60px_rgba(0,0,0,0.24)] ring-1 ring-white/10 ${className}`}
       aria-hidden
     >
-      <div className="flex flex-col gap-[5px]">
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="h-[3px] w-8 rounded-full bg-white/90" style={{ opacity: 0.35 + i * 0.2 }} />
-        ))}
-      </div>
+      <span className="text-lg font-semibold tracking-[-0.08em] text-zinc-100">V</span>
     </div>
   );
 }
@@ -71,9 +133,9 @@ function StudioHandoffContent({
   );
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-1 flex-col items-center justify-center bg-[radial-gradient(ellipse_at_50%_18%,rgba(255,200,170,0.55),rgba(255,250,248,0)_55%),linear-gradient(180deg,#fffdfb,#f4f4f5)] px-6 py-10">
+    <div className="flex h-full min-h-0 w-full flex-1 flex-col items-center justify-center bg-[radial-gradient(ellipse_at_50%_18%,rgba(99,102,241,0.14),rgba(255,255,255,0)_55%),linear-gradient(180deg,#f5f5f5,#ededed)] px-6 py-10">
       <div className="flex flex-1 flex-col items-center justify-center">
-        <StudioSunLogo className="mb-8 scale-110" />
+        <StudioMark className="mb-8 scale-110" />
         <h3 className="text-center text-[22px] font-semibold tracking-tight text-zinc-900">
           Building your idea.
         </h3>
@@ -170,7 +232,8 @@ function BuildDashboard({
   onCopyUrl: () => void;
   onRefresh: () => void;
 }) {
-  const { showDebugConsole, showFileExplorer } = useLayoutStore();
+  const { showDebugConsole, showFileExplorer, themePreference } = useLayoutStore();
+  const studioChrome = themePreference === 'light';
   const hasFiles = files.length > 0;
   const featuredFiles = files
     .filter((file) => !file.includes('node_modules') && !file.endsWith('.lock'))
@@ -202,7 +265,7 @@ function BuildDashboard({
           }
           : {
             label: 'Waiting',
-            badge: 'border-white/10 bg-white/5 text-zinc-200',
+            badge: studioChrome ? 'border-zinc-200 bg-white text-zinc-700' : 'border-zinc-800/70 bg-zinc-950/80 text-zinc-200',
             copy: 'Ask for a screen, route, or product change to wake the builder surface up.',
           };
 
@@ -230,25 +293,38 @@ function BuildDashboard({
   ];
 
   return (
-    <div className="h-full overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),rgba(9,11,20,0)_38%),radial-gradient(circle_at_bottom,rgba(139,92,246,0.1),rgba(9,11,20,0)_34%),linear-gradient(180deg,rgba(15,18,29,0.98),rgba(6,8,15,0.98))] px-4 py-4 md:px-6">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
-        <section className="rounded-[2rem] border border-white/10 bg-[linear-gradient(135deg,rgba(20,27,44,0.96),rgba(10,13,22,0.92))] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.32)]">
+    <div className={`h-full overflow-y-auto px-4 py-4 md:px-6 ${
+      studioChrome
+        ? 'bg-[linear-gradient(180deg,#fafafa,#f5f5f5)]'
+        : 'bg-[linear-gradient(180deg,rgba(14,18,29,0.98),rgba(8,10,17,0.98))]'
+    }`}>
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-3">
+        <section className={`border px-4 py-4 ${
+          studioChrome
+            ? 'border-zinc-200 bg-white'
+            : 'border-zinc-800/70 bg-zinc-950/35'
+        }`}>
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-2xl">
               <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
-                <span className={`rounded-full border px-2.5 py-1 ${statusMeta.badge}`}>{statusMeta.label}</span>
-                <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-zinc-200">Builder Cockpit</span>
+                <span className={studioChrome ? 'text-zinc-700' : 'text-zinc-300'}>{statusMeta.label}</span>
+                <span className={studioChrome ? 'text-zinc-300' : 'text-zinc-700'}>•</span>
+                <span>Builder workspace</span>
               </div>
-              <h3 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-white">
+              <h3 className={`mt-4 text-2xl font-semibold tracking-[-0.03em] ${studioChrome ? 'text-zinc-900' : 'text-white'}`}>
                 {projectName || 'Workspace dashboard'}
               </h3>
-              <p className="mt-3 text-sm leading-7 text-zinc-300">{statusMeta.copy}</p>
+              <p className={`mt-3 text-sm leading-7 ${studioChrome ? 'text-zinc-600' : 'text-zinc-300'}`}>{statusMeta.copy}</p>
             </div>
 
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={onOpenPreview}
-                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3.5 py-2 text-[11px] font-medium text-zinc-100 transition-colors hover:bg-white/10"
+                className={`inline-flex items-center gap-2 rounded-md border px-3.5 py-2 text-[11px] font-medium transition-colors ${
+                  studioChrome
+                    ? 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:border-zinc-300 hover:bg-zinc-100'
+                    : 'border-zinc-800/70 bg-zinc-950/60 text-zinc-100 hover:border-zinc-700 hover:bg-zinc-900'
+                }`}
               >
                 <Eye className="h-3.5 w-3.5" />
                 Open Preview
@@ -256,14 +332,22 @@ function BuildDashboard({
               <button
                 onClick={onOpenCode}
                 disabled={!hasFiles}
-                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3.5 py-2 text-[11px] font-medium text-zinc-200 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                className={`inline-flex items-center gap-2 rounded-md border px-3.5 py-2 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  studioChrome
+                    ? 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:border-zinc-300 hover:bg-zinc-100'
+                    : 'border-zinc-800/70 bg-zinc-950/60 text-zinc-200 hover:border-zinc-700 hover:bg-zinc-900'
+                }`}
               >
                 <Code2 className="h-3.5 w-3.5" />
                 Open Code
               </button>
               <button
                 onClick={devPort ? onCopyUrl : onRefresh}
-                className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3.5 py-2 text-[11px] font-medium text-cyan-100 transition-colors hover:bg-cyan-400/15"
+                className={`inline-flex items-center gap-2 rounded-md border px-3.5 py-2 text-[11px] font-medium transition-colors ${
+                  studioChrome
+                    ? 'border-zinc-200 bg-zinc-900 text-white hover:bg-zinc-800'
+                    : 'border-zinc-700 bg-zinc-100 text-zinc-950 hover:bg-white'
+                }`}
               >
                 {devPort ? <Copy className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" />}
                 {devPort ? 'Copy URL' : 'Refresh Status'}
@@ -271,11 +355,13 @@ function BuildDashboard({
             </div>
           </div>
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className={`mt-5 grid gap-px overflow-hidden border sm:grid-cols-2 xl:grid-cols-4 ${
+            studioChrome ? 'border-zinc-200 bg-zinc-200' : 'border-zinc-800/70 bg-zinc-800/70'
+          }`}>
             {dashboardStats.map((item) => (
-              <div key={item.label} className="rounded-[1.35rem] border border-white/8 bg-black/20 px-4 py-4">
+              <div key={item.label} className={`px-4 py-4 ${studioChrome ? 'bg-white' : 'bg-zinc-950/45'}`}>
                 <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">{item.label}</div>
-                <div className="mt-3 text-lg font-semibold text-zinc-100">{item.value}</div>
+                <div className={`mt-3 text-lg font-semibold ${studioChrome ? 'text-zinc-900' : 'text-zinc-100'}`}>{item.value}</div>
                 <p className="mt-2 text-[11px] leading-6 text-zinc-500">{item.detail}</p>
               </div>
             ))}
@@ -283,25 +369,27 @@ function BuildDashboard({
         </section>
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
-          <section className="rounded-[1.8rem] border border-white/8 bg-white/[0.04] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.2)] backdrop-blur-xl">
+          <section className={`border px-4 py-4 ${studioChrome ? 'border-zinc-200 bg-white/90' : 'border-zinc-800/70 bg-zinc-950/40'}`}>
             <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">Pipeline</div>
-            <div className="mt-4 rounded-[1.35rem] border border-white/6 bg-black/20 p-4">
+            <div className="mt-4">
               {(status !== 'idle' && status !== 'failed') ? (
                 <BuildStepProgress status={status} />
               ) : (
-                <div className="rounded-[1.1rem] border border-white/6 bg-white/[0.03] px-3 py-3 text-[11px] text-zinc-400">
+                <div className={`border px-3 py-3 text-[11px] ${studioChrome ? 'border-zinc-200 bg-zinc-50 text-zinc-500' : 'border-zinc-800/70 bg-zinc-950/55 text-zinc-400'}`}>
                   The progress rail lights up as soon as the builder starts creating, installing, or booting a sandbox.
                 </div>
               )}
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <div className="rounded-[1.1rem] border border-white/6 bg-white/[0.03] px-3 py-3">
+              <div className={`mt-4 grid gap-px overflow-hidden border md:grid-cols-2 ${
+                studioChrome ? 'border-zinc-200 bg-zinc-200' : 'border-zinc-800/70 bg-zinc-800/70'
+              }`}>
+                <div className={`px-3 py-3 ${studioChrome ? 'bg-white' : 'bg-zinc-950/55'}`}>
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Current focus</div>
-                  <div className="mt-2 text-sm font-medium text-zinc-100">{activeStepLabel || statusMeta.label}</div>
+                  <div className={`mt-2 text-sm font-medium ${studioChrome ? 'text-zinc-900' : 'text-zinc-100'}`}>{activeStepLabel || statusMeta.label}</div>
                   <p className="mt-2 text-[11px] leading-6 text-zinc-500">{statusMeta.copy}</p>
                 </div>
-                <div className="rounded-[1.1rem] border border-white/6 bg-white/[0.03] px-3 py-3">
+                <div className={`px-3 py-3 ${studioChrome ? 'bg-white' : 'bg-zinc-950/55'}`}>
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Live target</div>
-                  <div className="mt-2 truncate font-mono text-[12px] text-zinc-300">{devPort ? previewUrl : 'Preview pending'}</div>
+                  <div className={`mt-2 truncate font-mono text-[12px] ${studioChrome ? 'text-zinc-700' : 'text-zinc-300'}`}>{devPort ? previewUrl : 'Preview pending'}</div>
                   <p className="mt-2 text-[11px] leading-6 text-zinc-500">
                     {devPort
                       ? 'Use Preview when you want to verify layout, hover states, and end-user polish.'
@@ -312,11 +400,11 @@ function BuildDashboard({
             </div>
           </section>
 
-          <section className="rounded-[1.8rem] border border-white/8 bg-white/[0.04] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.2)] backdrop-blur-xl">
+          <section className={`border px-4 py-4 ${studioChrome ? 'border-zinc-200 bg-white/90' : 'border-zinc-800/70 bg-zinc-950/40'}`}>
             <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">Source snapshot</div>
-            <div className="mt-4 rounded-[1.35rem] border border-white/6 bg-black/20 p-4">
+            <div className="mt-4">
               {featuredFiles.length > 0 ? (
-                <div className="space-y-2.5">
+                <div className={`overflow-hidden border ${studioChrome ? 'border-zinc-200' : 'border-zinc-800/70'}`}>
                   {featuredFiles.map((filePath) => {
                     const normalized = filePath.replace(/\\/g, '/');
                     const parts = normalized.split('/').filter(Boolean);
@@ -324,12 +412,14 @@ function BuildDashboard({
                     const parent = parts.join('/');
 
                     return (
-                      <div key={filePath} className="flex items-start gap-3 rounded-[1rem] border border-white/6 bg-white/[0.03] px-3 py-3">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/6 text-zinc-200">
+                      <div key={filePath} className={`flex items-start gap-3 border-b px-3 py-3 last:border-b-0 ${
+                        studioChrome ? 'border-zinc-200 bg-white' : 'border-zinc-800/70 bg-zinc-950/45'
+                      }`}>
+                        <div className={`flex h-8 w-8 items-center justify-center rounded-md ${studioChrome ? 'bg-zinc-100 text-zinc-700' : 'bg-zinc-900 text-zinc-200'}`}>
                           <File className="h-4 w-4" />
                         </div>
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-medium text-zinc-100">{fileName}</div>
+                          <div className={`truncate text-sm font-medium ${studioChrome ? 'text-zinc-900' : 'text-zinc-100'}`}>{fileName}</div>
                           <div className="truncate text-[11px] text-zinc-500">{parent || 'project root'}</div>
                         </div>
                       </div>
@@ -337,7 +427,7 @@ function BuildDashboard({
                   })}
                 </div>
               ) : (
-                <div className="rounded-[1.1rem] border border-white/6 bg-white/[0.03] px-3 py-3 text-[11px] leading-6 text-zinc-500">
+                <div className={`border px-3 py-3 text-[11px] leading-6 text-zinc-500 ${studioChrome ? 'border-zinc-200 bg-zinc-50' : 'border-zinc-800/70 bg-zinc-950/55'}`}>
                   Files appear here after the first scaffold or edit lands. Once they do, the Code tab becomes the fastest way to inspect and patch the generated surface.
                 </div>
               )}
@@ -467,8 +557,9 @@ function buildFileTreeEntries(files: string[]): FileTreeEntry[] {
    Code View — syntax-highlighted source viewer
    ═══════════════════════════════════ */
 function CodeView({ projectId }: { projectId: string }) {
-  const { files, writeFiles } = useSandboxStore();
+  const { files, writeFiles, fetchFiles } = useSandboxStore();
   const sendMessage = useChatStore((s) => s.sendMessage);
+  const themePreference = useLayoutStore((state) => state.themePreference);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [content, setContent] = useState<string>('');
   const [draft, setDraft] = useState<string>('');
@@ -477,34 +568,78 @@ function CodeView({ projectId }: { projectId: string }) {
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
   const [askingVai, setAskingVai] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const activeRequestRef = useRef(0);
   const fileTreeEntries = buildFileTreeEntries(files.filter((file) => !file.includes('node_modules') && !file.endsWith('.lock')));
 
-  // Auto-select first meaningful file
   useEffect(() => {
-    if (!selectedFile && files.length > 0) {
+    setSelectedFile(null);
+    setContent('');
+    setDraft('');
+    setIsEditing(false);
+  }, [projectId]);
+
+  useEffect(() => {
+    void fetchFiles();
+  }, [fetchFiles, projectId]);
+
+  // Auto-select the most meaningful file for the current project.
+  useEffect(() => {
+    if (files.length > 0 && (!selectedFile || !files.includes(selectedFile))) {
       const preferredFile = files.find((f) =>
-        f.endsWith('App.tsx') || f.endsWith('App.jsx') || f.endsWith('index.tsx') || f.endsWith('page.tsx')
-      ) || files.find((f) => f.endsWith('.tsx') || f.endsWith('.jsx')) || files[0];
+        f.endsWith('src/App.tsx')
+        || f.endsWith('src/App.jsx')
+        || f.endsWith('src/main.tsx')
+        || f.endsWith('src/main.jsx')
+        || f.endsWith('app/page.tsx')
+        || f.endsWith('src/app/page.tsx')
+      ) || files.find((f) =>
+        f.endsWith('.tsx')
+        || f.endsWith('.jsx')
+        || f.endsWith('.ts')
+        || f.endsWith('.js')
+        || f.endsWith('.html')
+        || f.endsWith('.css')
+      ) || files[0];
       setSelectedFile(preferredFile);
     }
   }, [files, selectedFile]);
 
+  useEffect(() => {
+    setIsEditing(false);
+  }, [selectedFile]);
+
   // Fetch file content
   useEffect(() => {
     if (!selectedFile || !projectId) return;
+    const requestId = activeRequestRef.current + 1;
+    activeRequestRef.current = requestId;
     setLoading(true);
-    fetch(`${API_BASE}/api/sandbox/${projectId}/file?path=${encodeURIComponent(selectedFile)}`)
-      .then((r) => r.json())
-      .then((data: { content: string }) => {
-        const next = data.content || '// Empty file';
+    void apiFetch(`/api/sandbox/${projectId}/file?path=${encodeURIComponent(selectedFile)}`)
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => null) as { error?: string } | null;
+          throw new Error(body?.error || 'Failed to load file');
+        }
+        return r.json() as Promise<{ content?: string }>;
+      })
+      .then((data) => {
+        if (activeRequestRef.current !== requestId) return;
+        const next = typeof data.content === 'string' ? data.content : '// Failed to load file';
         setContent(next);
         setDraft(next);
       })
-      .catch(() => {
-        setContent('// Failed to load file');
-        setDraft('// Failed to load file');
+      .catch((error: unknown) => {
+        if (activeRequestRef.current !== requestId) return;
+        const message = error instanceof Error ? error.message : 'Failed to load file';
+        setContent(`// ${message}`);
+        setDraft(`// ${message}`);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (activeRequestRef.current === requestId) {
+          setLoading(false);
+        }
+      });
   }, [selectedFile, projectId]);
 
   const handleCopy = () => {
@@ -540,11 +675,17 @@ function CodeView({ projectId }: { projectId: string }) {
 
   const lines = draft.split('\n');
   const isDirty = draft !== content;
+  const isLight = themePreference === 'light';
+  const language = detectCodeLanguage(selectedFile);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-zinc-950 md:flex-row">
-      <aside className="flex max-h-48 w-full shrink-0 flex-col border-b border-zinc-800/60 bg-zinc-950/90 md:max-h-none md:w-64 md:border-b-0 md:border-r">
-        <div className="border-b border-zinc-800/50 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+    <div className={`flex h-full min-h-0 flex-col md:flex-row ${isLight ? 'bg-white' : 'bg-zinc-950'}`}>
+      <aside className={`flex max-h-48 w-full shrink-0 flex-col border-b md:max-h-none md:w-64 md:border-b-0 md:border-r ${
+        isLight ? 'border-zinc-200 bg-zinc-50/90' : 'border-zinc-800/60 bg-zinc-950/90'
+      }`}>
+        <div className={`border-b px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] ${
+          isLight ? 'border-zinc-200 text-zinc-500' : 'border-zinc-800/50 text-zinc-500'
+        }`}>
           Project Explorer
         </div>
         <div className="flex-1 overflow-auto px-2 py-2">
@@ -553,7 +694,7 @@ function CodeView({ projectId }: { projectId: string }) {
               return (
                 <div
                   key={entry.id}
-                  className="truncate py-1 text-[11px] font-medium text-zinc-500"
+                className="truncate py-1 text-[11px] font-medium text-zinc-500"
                   style={{ paddingLeft: `${entry.depth * 14 + 8}px` }}
                 >
                   {entry.name}
@@ -568,13 +709,13 @@ function CodeView({ projectId }: { projectId: string }) {
                 onClick={() => setSelectedFile(entry.path)}
                 className={`flex w-full items-center rounded-md py-1.5 text-left text-[11px] transition-colors ${
                   isActive
-                    ? 'bg-zinc-800 text-zinc-100'
-                    : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                    ? isLight ? 'bg-zinc-200 text-zinc-900' : 'bg-zinc-800 text-zinc-100'
+                    : isLight ? 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
                 }`}
                 style={{ paddingLeft: `${entry.depth * 14 + 8}px`, paddingRight: '8px' }}
                 title={entry.path}
               >
-                <File className="mr-2 h-3.5 w-3.5 shrink-0 text-zinc-600" />
+                <File className={`mr-2 h-3.5 w-3.5 shrink-0 ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`} />
                 <span className="truncate">{entry.name}</span>
               </button>
             );
@@ -583,15 +724,31 @@ function CodeView({ projectId }: { projectId: string }) {
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between border-b border-zinc-800/40 px-3 py-1">
+        <div className={`flex items-center justify-between border-b px-3 py-1 ${
+          isLight ? 'border-zinc-200 bg-zinc-50/60' : 'border-zinc-800/40'
+        }`}>
           <span className="truncate text-[10px] text-zinc-500">{selectedFile || 'No file selected'}</span>
           <div className="flex items-center gap-1">
             {selectedFile && (
               <>
                 <button
+                  onClick={() => setIsEditing((current) => !current)}
+                  className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+                    isEditing
+                      ? isLight ? 'bg-zinc-900 text-white hover:bg-zinc-700' : 'bg-zinc-100 text-zinc-900 hover:bg-zinc-200'
+                      : isLight ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800' : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                  }`}
+                  title={isEditing ? 'Switch to highlighted read view' : 'Switch to raw edit mode'}
+                >
+                  {isEditing ? <Eye className="h-3 w-3" /> : <Code2 className="h-3 w-3" />}
+                  {isEditing ? 'Read view' : 'Edit raw'}
+                </button>
+                <button
                   onClick={handleReset}
                   disabled={!isDirty || saving}
-                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-40"
+                  className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors disabled:opacity-40 ${
+                    isLight ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800' : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                  }`}
                   title="Revert changes"
                 >
                   <RotateCcw className="h-3 w-3" />
@@ -600,7 +757,9 @@ function CodeView({ projectId }: { projectId: string }) {
                 <button
                   onClick={() => void handleSave()}
                   disabled={!isDirty || saving}
-                  className="flex items-center gap-1 rounded bg-emerald-500/12 px-1.5 py-0.5 text-[10px] text-emerald-300 transition-colors hover:bg-emerald-500/18 disabled:opacity-40"
+                  className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors disabled:opacity-40 ${
+                    isLight ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-emerald-500/12 text-emerald-300 hover:bg-emerald-500/18'
+                  }`}
                   title="Save changes"
                 >
                   <Save className="h-3 w-3" />
@@ -609,7 +768,9 @@ function CodeView({ projectId }: { projectId: string }) {
                 <button
                   onClick={handleAskVai}
                   disabled={askingVai || !draft}
-                  className="flex items-center gap-1 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-400 transition-colors hover:bg-violet-500/18 disabled:opacity-40"
+                  className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors disabled:opacity-40 ${
+                    isLight ? 'bg-violet-100 text-violet-700 hover:bg-violet-200' : 'bg-violet-500/10 text-violet-400 hover:bg-violet-500/18'
+                  }`}
                   title="Ask Vai about this file"
                 >
                   <MessageSquare className="h-3 w-3" />
@@ -619,7 +780,9 @@ function CodeView({ projectId }: { projectId: string }) {
             )}
             <button
               onClick={handleCopy}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+              className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+                isLight ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800' : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+              }`}
             >
               <Copy className="h-3 w-3" />
               {copied ? 'Copied!' : 'Copy'}
@@ -635,7 +798,9 @@ function CodeView({ projectId }: { projectId: string }) {
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
-                className="rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+                className={`rounded p-0.5 text-zinc-500 transition-colors ${
+                  isLight ? 'hover:bg-zinc-100 hover:text-zinc-800' : 'hover:bg-zinc-800 hover:text-zinc-300'
+                }`}
                 title="Download file"
               >
                 <Download className="h-3 w-3" />
@@ -644,30 +809,55 @@ function CodeView({ projectId }: { projectId: string }) {
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto bg-zinc-950">
+        <div className={`flex-1 overflow-auto ${isLight ? 'bg-white' : 'bg-zinc-950'}`}>
           {loading ? (
             <div className="flex h-full items-center justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-zinc-600" />
             </div>
           ) : (
             <div className="flex min-h-full text-[11px] leading-5 font-mono">
-              <div className="sticky left-0 flex flex-col items-end border-r border-zinc-800/40 bg-zinc-950 px-2 py-2 text-zinc-700 select-none">
+              <div className={`sticky left-0 flex flex-col items-end border-r px-2 py-2 select-none ${
+                isLight ? 'border-zinc-200 bg-zinc-50 text-zinc-400' : 'border-zinc-800/40 bg-zinc-950 text-zinc-700'
+              }`}>
                 {lines.map((_, i) => (
                   <span key={i}>{i + 1}</span>
                 ))}
               </div>
-              <textarea
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
-                    event.preventDefault();
-                    void handleSave();
-                  }
-                }}
-                spellCheck={false}
-                className="min-h-full flex-1 resize-none bg-transparent px-3 py-2 text-zinc-200 focus:outline-none"
-              />
+              {isEditing ? (
+                <textarea
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+                      event.preventDefault();
+                      void handleSave();
+                    }
+                  }}
+                  spellCheck={false}
+                  wrap="off"
+                  className={`min-h-full flex-1 resize-none bg-transparent px-3 py-2 whitespace-pre focus:outline-none ${
+                    isLight ? 'text-zinc-800' : 'text-zinc-200'
+                  }`}
+                />
+              ) : (
+                <pre className="min-h-full min-w-max flex-1 px-3 py-2">
+                  {lines.map((line, index) => (
+                    <div
+                      key={`${selectedFile ?? 'file'}-${index}`}
+                      className={isLight ? 'hover:bg-zinc-100/80' : 'hover:bg-zinc-900/70'}
+                    >
+                      {line.length > 0 ? tokenizeCodeLine(line, language).map((token, tokenIndex) => (
+                        <span
+                          key={`${selectedFile ?? 'file'}-${index}-${tokenIndex}`}
+                          className={tokenClass(token.type, isLight)}
+                        >
+                          {token.text}
+                        </span>
+                      )) : ' '}
+                    </div>
+                  ))}
+                </pre>
+              )}
             </div>
           )}
         </div>
@@ -683,7 +873,8 @@ function Toolbar({
   viewMode, setViewMode, projectName, previewUrl, devPort,
   breakpoint, setBreakpoint, onRefresh, onOpenExternal, onCopyUrl,
   onScreenshot, onDestroy, showActions, copied, hasFiles, hasActiveSandbox,
-  demoRunning, onToggleDemo, iframeRef, allowDashboard,
+  canShowConsoleChrome = false,
+  demoRunning, onToggleDemo, iframeRef,
   studioChrome = false,
 }: {
   viewMode: ViewMode;
@@ -702,10 +893,10 @@ function Toolbar({
   copied?: boolean;
   hasFiles?: boolean;
   hasActiveSandbox?: boolean;
+  canShowConsoleChrome?: boolean;
   demoRunning?: boolean;
   onToggleDemo?: () => void;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
-  allowDashboard?: boolean;
   /** Light “studio builder” chrome (Base44-like) */
   studioChrome?: boolean;
 }) {
@@ -713,42 +904,39 @@ function Toolbar({
     showDebugConsole, showFileExplorer,
     toggleDebugConsole, toggleFileExplorer,
     previewExpanded, togglePreviewExpanded, toggleBuilderPanel,
+    toggleThemePreference,
   } = useLayoutStore();
-  const showViewToggle = allowDashboard || hasFiles;
+  const showViewToggle = true;
 
   const chromeBtn = studioChrome
-    ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800'
-    : 'text-zinc-600 hover:bg-white/8 hover:text-zinc-300';
-  const chromeSurface = studioChrome
-    ? 'border-zinc-200 bg-zinc-50/90'
-    : 'border-white/8 bg-white/[0.03]';
+    ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
+    : 'text-zinc-500 hover:bg-zinc-900/80 hover:text-zinc-100';
   const chromeTabActive = studioChrome
-    ? 'bg-white text-zinc-900 shadow-sm ring-1 ring-zinc-200/80'
-    : 'bg-white/12 text-zinc-100 shadow-sm';
+    ? 'border-zinc-900 text-zinc-900'
+    : 'border-zinc-100 text-zinc-100';
   const chromeTabIdle = studioChrome
-    ? 'text-zinc-500 hover:text-zinc-800'
-    : 'text-zinc-500 hover:text-zinc-300';
-  const chromeUrlRing = studioChrome ? 'ring-zinc-200' : 'ring-white/8';
-  const chromeUrlBg = studioChrome ? 'bg-zinc-50 hover:bg-zinc-100' : 'bg-white/[0.06] hover:bg-white/[0.1]';
+    ? 'border-transparent text-zinc-500 hover:text-zinc-900'
+    : 'border-transparent text-zinc-500 hover:text-zinc-200';
+  const chromeUrlRing = studioChrome ? 'border-zinc-200' : 'border-zinc-800/70';
+  const chromeUrlBg = studioChrome ? 'bg-zinc-50 hover:bg-zinc-100' : 'bg-zinc-950 hover:bg-zinc-900';
   const iconGhost = studioChrome
-    ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800'
-    : 'text-zinc-500 hover:bg-white/8 hover:text-zinc-300';
+    ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
+    : 'text-zinc-500 hover:bg-zinc-900/80 hover:text-zinc-100';
   const bpOn = studioChrome
-    ? 'bg-orange-100 text-orange-700'
-    : 'bg-white/12 text-cyan-200';
+    ? 'bg-zinc-900 text-white'
+    : 'bg-zinc-100 text-zinc-950';
   const bpOff = studioChrome
-    ? 'text-zinc-500 hover:text-zinc-800'
-    : 'text-zinc-600 hover:text-zinc-400';
-  const rail = studioChrome ? 'bg-zinc-200' : 'bg-white/8';
+    ? 'text-zinc-500 hover:text-zinc-900'
+    : 'text-zinc-600 hover:text-zinc-300';
+  const rail = studioChrome ? 'bg-zinc-200' : 'bg-zinc-800/70';
 
   return (
-    <div className={`flex flex-wrap items-center gap-2 border-b px-3 py-2.5 ${
+    <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2 ${
       studioChrome
         ? 'border-zinc-200 bg-white'
-        : 'border-white/6 bg-[linear-gradient(180deg,rgba(18,24,39,0.96),rgba(10,12,20,0.92))]'
+        : 'border-zinc-800/75 bg-[linear-gradient(180deg,rgba(18,24,39,0.96),rgba(10,12,20,0.92))]'
     }`}>
-      {/* Browser nav buttons: back, forward, refresh */}
-      <div className={`flex items-center gap-0.5 rounded-full border p-0.5 ${chromeSurface}`}>
+      <div className="flex items-center gap-0.5">
         <button
           onClick={() => {
             try {
@@ -757,7 +945,7 @@ function Toolbar({
               return;
             }
           }}
-          className={`rounded-full p-1.5 transition-colors ${chromeBtn}`}
+          className={`rounded-md p-1.5 transition-colors ${chromeBtn}`}
           title="Back"
         >
           <ArrowLeft className="h-3 w-3" />
@@ -770,39 +958,27 @@ function Toolbar({
               return;
             }
           }}
-          className={`rounded-full p-1.5 transition-colors ${chromeBtn}`}
+          className={`rounded-md p-1.5 transition-colors ${chromeBtn}`}
           title="Forward"
         >
           <ArrowRight className="h-3 w-3" />
         </button>
         <button
           onClick={onRefresh}
-          className={`rounded-full p-1.5 transition-colors ${chromeBtn}`}
+          className={`rounded-md p-1.5 transition-colors ${chromeBtn}`}
           title="Refresh"
         >
           <RefreshCw className="h-3 w-3" />
         </button>
       </div>
 
-      {/* Builder tabs */}
+      <div className={`hidden h-4 w-px md:block ${rail}`} />
+
       {showViewToggle && (
-        <div className={`flex rounded-full border p-0.5 ${studioChrome ? 'border-zinc-200 bg-zinc-100/80' : 'border-white/10 bg-white/[0.04]'}`}>
-          {allowDashboard && (
-            <button
-              onClick={() => setViewMode('dashboard')}
-              className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-[10px] font-medium transition-all ${
-                viewMode === 'dashboard'
-                  ? chromeTabActive
-                  : chromeTabIdle
-              }`}
-            >
-              <PanelsTopLeft className="h-3 w-3" />
-              Dashboard
-            </button>
-          )}
+        <div className="flex items-center gap-3">
           <button
             onClick={() => setViewMode('preview')}
-            className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-[10px] font-medium transition-all ${
+            className={`flex items-center gap-1.5 border-b-2 px-0 py-1.5 text-[11px] font-medium transition-colors ${
               viewMode === 'preview'
                 ? chromeTabActive
                 : chromeTabIdle
@@ -814,7 +990,7 @@ function Toolbar({
           {hasFiles && (
             <button
               onClick={() => setViewMode('code')}
-              className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-[10px] font-medium transition-all ${
+              className={`flex items-center gap-1.5 border-b-2 px-0 py-1.5 text-[11px] font-medium transition-colors ${
                 viewMode === 'code'
                   ? chromeTabActive
                   : chromeTabIdle
@@ -827,15 +1003,14 @@ function Toolbar({
         </div>
       )}
 
-      {/* URL bar — clickable to copy URL */}
       <button
         type="button"
         onClick={devPort ? onCopyUrl : undefined}
         disabled={!devPort}
-        className={`flex min-w-[12rem] flex-1 items-center gap-2 rounded-full px-3 py-2 text-[11px] transition-colors ring-1 ${
+        className={`flex min-w-[13rem] flex-1 items-center gap-2 rounded-md border px-3 py-2 text-[11px] transition-colors ${
           devPort
-            ? `cursor-pointer ${chromeUrlBg} ${chromeUrlRing} hover:ring-zinc-300`
-            : `cursor-default ${studioChrome ? 'bg-zinc-50 ring-zinc-200' : 'bg-white/[0.03] ring-white/6'}`
+            ? `cursor-pointer ${chromeUrlBg} ${chromeUrlRing} hover:border-zinc-300`
+            : `cursor-default ${studioChrome ? 'bg-zinc-50 border-zinc-200' : 'bg-zinc-950/72 border-zinc-800/70'}`
         }`}
         title={devPort ? `Copy: ${previewUrl}` : 'No live preview'}
       >
@@ -846,24 +1021,23 @@ function Toolbar({
         </div>
         {devPort ? (
           <span className={`truncate font-mono ${studioChrome ? 'text-zinc-600' : 'text-zinc-400'}`}>{previewUrl}</span>
-        ) : projectName ? (
-          <span className={`truncate ${studioChrome ? 'text-zinc-500' : 'text-zinc-600'}`}>{projectName} — starting...</span>
         ) : (
-          <span className={studioChrome ? 'text-zinc-500' : 'text-zinc-700'}>No live preview</span>
+          <span className={studioChrome ? 'text-zinc-500' : 'text-zinc-700'}>
+            {hasActiveSandbox ? 'Starting preview...' : 'No live preview'}
+          </span>
         )}
       </button>
 
-      {/* Actions */}
       {showActions && (
-        <>
-          {/* Responsive breakpoints group */}
-          <div className={`flex gap-0.5 rounded-full border p-0.5 ${chromeSurface}`}>
+        <div className="flex items-center gap-0.5">
+          <div className={`hidden h-4 w-px md:block ${rail}`} />
+          <div className="flex items-center gap-0.5">
             {(Object.entries(BREAKPOINTS) as [BreakpointKey, typeof BREAKPOINTS[BreakpointKey]][]).map(
               ([key, { icon: Icon, label }]) => (
                 <button
                   key={key}
                   onClick={() => setBreakpoint(key)}
-                  className={`rounded-full p-1.5 transition-colors ${
+                  className={`rounded-md p-1.5 transition-colors ${
                     breakpoint === key ? bpOn : bpOff
                   }`}
                   title={label}
@@ -875,24 +1049,24 @@ function Toolbar({
           </div>
 
           <button onClick={onCopyUrl} disabled={!devPort}
-            className={`rounded-full p-1.5 transition-colors disabled:opacity-30 ${iconGhost}`} title={copied ? 'Copied!' : 'Copy URL'}>
+            className={`rounded-md p-1.5 transition-colors disabled:opacity-30 ${iconGhost}`} title={copied ? 'Copied!' : 'Copy URL'}>
             <Copy className="h-3 w-3" />
           </button>
           <button onClick={onScreenshot} disabled={!devPort}
-            className={`rounded-full p-1.5 transition-colors disabled:opacity-30 ${iconGhost}`} title="Take screenshot">
+            className={`rounded-md p-1.5 transition-colors disabled:opacity-30 ${iconGhost}`} title="Take screenshot">
             <Camera className="h-3 w-3" />
           </button>
           {onToggleDemo && (
             <button
               onClick={onToggleDemo}
-              className={`rounded-full p-1.5 transition-colors ${
+              className={`rounded-md p-1.5 transition-colors ${
                 demoRunning
                   ? studioChrome
                     ? 'text-red-600 hover:bg-red-50 hover:text-red-700'
-                    : 'text-red-400 hover:bg-white/8 hover:text-red-300'
+                    : 'text-red-400 hover:bg-zinc-900 hover:text-red-300'
                   : studioChrome
                     ? 'text-orange-600 hover:bg-orange-50 hover:text-orange-800'
-                    : 'text-violet-400 hover:bg-white/8 hover:text-violet-300'
+                    : 'text-violet-400 hover:bg-zinc-900 hover:text-violet-300'
               }`}
               title={demoRunning ? 'Stop demo' : 'Run Vai demo sequence'}
             >
@@ -900,70 +1074,77 @@ function Toolbar({
             </button>
           )}
           <button onClick={onOpenExternal} disabled={!devPort}
-            className={`rounded-full p-1.5 transition-colors disabled:opacity-30 ${iconGhost}`} title="Open in new tab">
+            className={`rounded-md p-1.5 transition-colors disabled:opacity-30 ${iconGhost}`} title="Open in new tab">
             <ExternalLink className="h-3 w-3" />
           </button>
           <button onClick={onDestroy}
-            className={`rounded-full p-1.5 transition-colors ${
+            className={`rounded-md p-1.5 transition-colors ${
               studioChrome
                 ? 'text-zinc-500 hover:bg-red-50 hover:text-red-600'
-                : 'text-zinc-600 hover:bg-white/8 hover:text-red-400'
+                : 'text-zinc-600 hover:bg-zinc-900 hover:text-red-400'
             }`} title="Destroy project">
             <Trash2 className="h-3 w-3" />
           </button>
-        </>
+        </div>
       )}
 
-      {/* Console + File explorer toggles — always visible when sandbox active */}
-      {hasActiveSandbox && (
-        <>
-          <div className={`mx-0.5 h-3.5 w-px ${rail}`} />
+      {canShowConsoleChrome && (
+        <div className="flex items-center gap-0.5">
+          <div className={`h-4 w-px ${rail}`} />
           <button
             onClick={toggleDebugConsole}
             title={showDebugConsole ? 'Hide console (Ctrl+J)' : 'Show console (Ctrl+J)'}
-            className={`rounded-full p-1.5 transition-colors ${
+            className={`rounded-md p-1.5 transition-colors ${
               showDebugConsole
                 ? studioChrome
                   ? 'text-emerald-600 hover:bg-emerald-50'
-                  : 'text-emerald-400 hover:bg-white/8'
+                  : 'text-emerald-400 hover:bg-zinc-900'
                 : chromeBtn
             }`}
           >
             <Terminal className="h-3 w-3" />
           </button>
-          <button
-            onClick={toggleFileExplorer}
-            title={showFileExplorer ? 'Hide files (Ctrl+E)' : 'Show files (Ctrl+E)'}
-            className={`rounded-full p-1.5 transition-colors ${
-              showFileExplorer
-                ? studioChrome
-                  ? 'text-amber-700 hover:bg-amber-50'
-                  : 'text-amber-400 hover:bg-white/8'
-                : chromeBtn
-            }`}
-          >
-            <FolderTree className="h-3 w-3" />
-          </button>
-        </>
+          {hasActiveSandbox && (
+            <button
+              onClick={toggleFileExplorer}
+              title={showFileExplorer ? 'Hide files (Ctrl+E)' : 'Show files (Ctrl+E)'}
+              className={`rounded-md p-1.5 transition-colors ${
+                showFileExplorer
+                  ? studioChrome
+                    ? 'text-amber-700 hover:bg-amber-50'
+                    : 'text-amber-400 hover:bg-zinc-900'
+                  : chromeBtn
+              }`}
+            >
+              <FolderTree className="h-3 w-3" />
+            </button>
+          )}
+        </div>
       )}
 
-      {/* Right side: Hide preview + Expand/Shrink */}
       <div className="ml-auto flex items-center gap-0.5">
+        <button
+          onClick={toggleThemePreference}
+          title={studioChrome ? 'Switch to dark theme' : 'Switch to light theme'}
+          className={`rounded-md p-1.5 transition-colors ${chromeBtn}`}
+        >
+          {studioChrome ? <Moon className="h-3 w-3" /> : <Sun className="h-3 w-3" />}
+        </button>
         <button
           onClick={toggleBuilderPanel}
           title="Hide preview (Ctrl+B)"
-          className={`rounded-full p-1.5 transition-colors ${chromeBtn}`}
+          className={`rounded-md p-1.5 transition-colors ${chromeBtn}`}
         >
           <EyeOff className="h-3 w-3" />
         </button>
         <button
           onClick={togglePreviewExpanded}
           title={previewExpanded ? 'Shrink preview' : 'Expand preview'}
-          className={`rounded-full p-1.5 transition-colors ${
+          className={`rounded-md p-1.5 transition-colors ${
             previewExpanded
               ? studioChrome
                 ? 'text-orange-600 hover:bg-orange-50'
-                : 'text-violet-400 hover:bg-white/8 hover:text-violet-300'
+                : 'text-violet-400 hover:bg-zinc-900 hover:text-violet-300'
               : chromeBtn
           }`}
         >
@@ -985,7 +1166,7 @@ export function PreviewPanel() {
     status, devPort, projectName, projectId, files,
     deployPhase, deploySteps, deployStartTime, deployStackName, deployTierName,
     deployStack, destroyProject, cancelDeploy, scaffoldFromTemplate,
-    markPreviewLoading, markPreviewReady,
+    markPreviewLoading, markPreviewReady, previewReady, fetchFiles,
   } = useSandboxStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
@@ -994,7 +1175,9 @@ export function PreviewPanel() {
   const [iframeReady, setIframeReady] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
+  const seenPreviewKeysRef = useRef<Set<string>>(new Set());
   const mode = useLayoutStore((s) => s.mode);
+  const themePreference = useLayoutStore((s) => s.themePreference);
   const buildStatus = useLayoutStore((s) => s.buildStatus);
   const isStreaming = useChatStore((s) => s.isStreaming);
 
@@ -1005,21 +1188,23 @@ export function PreviewPanel() {
   const previewUrl = devPort ? `http://localhost:${devPort}` : 'about:blank';
   const hasFiles = files.length > 0;
   const hasActiveSandbox = projectId !== null;
+  const canShowConsoleChrome = hasActiveSandbox || status === 'failed' || buildStatus.step === 'failed';
   const isBuildMode = mode === 'builder' || mode === 'agent';
-  /** Light studio chrome aligned with Base44-style builder UIs */
-  const studioChrome = isBuildMode;
+  const studioChrome = themePreference === 'light';
   const activeDeployStep = deploySteps.find((step) => step.status === 'running') ?? deploySteps.find((step) => step.status === 'pending') ?? null;
   const activeStepLabel = deployPhase === 'deploying'
     ? activeDeployStep?.label
     : buildStatus.step !== 'idle' && buildStatus.step !== 'ready'
       ? buildStatus.message || buildStatus.step
       : undefined;
-  const shouldShowPreviewOverlay = status === 'running' && Boolean(devPort) && !iframeReady;
+  const previewCacheKey = projectId && devPort ? `${projectId}:${devPort}` : null;
+  const hasWarmPreview = previewCacheKey ? seenPreviewKeysRef.current.has(previewCacheKey) : false;
+  const shouldShowPreviewOverlay = status === 'running' && Boolean(devPort) && !iframeReady && !hasWarmPreview;
 
   // Reset to preview if code tab becomes unavailable
   useEffect(() => {
-    if (viewMode === 'code' && !hasFiles) setViewMode(hasActiveSandbox ? 'dashboard' : 'preview');
-  }, [hasActiveSandbox, hasFiles, viewMode]);
+    if (viewMode === 'code' && !hasFiles) setViewMode('preview');
+  }, [hasFiles, viewMode]);
 
   // When a build is actively progressing, bias the panel back to the live preview.
   useEffect(() => {
@@ -1029,7 +1214,17 @@ export function PreviewPanel() {
   }, [hasFiles, status, viewMode]);
 
   useEffect(() => {
+    if (viewMode === 'code' && projectId) {
+      void fetchFiles();
+    }
+  }, [fetchFiles, projectId, viewMode]);
+
+  useEffect(() => {
     if (status === 'running' && devPort) {
+      if (previewCacheKey && seenPreviewKeysRef.current.has(previewCacheKey)) {
+        setIframeReady(true);
+        return;
+      }
       setIframeReady(false);
       markPreviewLoading(devPort);
       return;
@@ -1038,7 +1233,19 @@ export function PreviewPanel() {
       setIframeReady(false);
       markPreviewLoading(null);
     }
-  }, [devPort, markPreviewLoading, status]);
+  }, [devPort, markPreviewLoading, previewCacheKey, status]);
+
+  useEffect(() => {
+    if (status === 'running' && devPort && viewMode === 'code' && !hasWarmPreview) {
+      setViewMode('preview');
+    }
+  }, [devPort, hasWarmPreview, status, viewMode]);
+
+  useEffect(() => {
+    const openPreview = () => setViewMode('preview');
+    window.addEventListener('vai-open-preview', openPreview);
+    return () => window.removeEventListener('vai-open-preview', openPreview);
+  }, []);
 
   // Recovery: if we have a port but status is stuck building, force transition
   useEffect(() => {
@@ -1098,10 +1305,10 @@ export function PreviewPanel() {
             onRefresh={() => {}} onOpenExternal={() => {}} onCopyUrl={() => {}}
             onScreenshot={() => {}} onDestroy={() => {}} showActions={false}
             hasFiles={false} hasActiveSandbox={false}
-            demoRunning={demoRunning} onToggleDemo={toggleDemo} allowDashboard={false}
+            demoRunning={demoRunning} onToggleDemo={toggleDemo}
             studioChrome={studioChrome} />
           <div className="flex min-h-0 flex-1 flex-col">
-            {studioChrome && !isFailed ? (
+            {studioChrome && !isFailed && isBuildMode ? (
               <PreviewHandoffShell
                 studio
                 eyebrow="Preview"
@@ -1158,7 +1365,7 @@ export function PreviewPanel() {
           onRefresh={() => {}} onOpenExternal={() => {}} onCopyUrl={() => {}}
           onScreenshot={() => {}} onDestroy={() => {}} showActions={false}
           hasFiles={false} hasActiveSandbox={false}
-          demoRunning={demoRunning} onToggleDemo={toggleDemo} allowDashboard={false} />
+          demoRunning={demoRunning} onToggleDemo={toggleDemo} />
         <div className="flex-1 min-h-0">
           <TemplateGallery
             onDeploy={(stackId, tier, stackName, tierName) => deployStack(stackId, tier, stackName, tierName)}
@@ -1179,7 +1386,7 @@ export function PreviewPanel() {
           onRefresh={() => {}} onOpenExternal={() => {}} onCopyUrl={() => {}}
           onScreenshot={() => {}} onDestroy={cancelDeploy} showActions={false}
           hasFiles={false} hasActiveSandbox={false}
-          demoRunning={demoRunning} onToggleDemo={toggleDemo} allowDashboard={false} />
+          demoRunning={demoRunning} onToggleDemo={toggleDemo} />
         <div className="flex-1 overflow-hidden">
           <DeployProgress steps={deploySteps} stackName={deployStackName}
             tierName={deployTierName} startTime={deployStartTime}
@@ -1202,10 +1409,9 @@ export function PreviewPanel() {
         onRefresh={refresh} onOpenExternal={openExternal} onCopyUrl={handleCopyUrl}
         onScreenshot={handleScreenshot} onDestroy={destroyProject}
         showActions copied={copied}
-        hasFiles={hasFiles} hasActiveSandbox={hasActiveSandbox}
+        hasFiles={hasFiles} hasActiveSandbox={hasActiveSandbox} canShowConsoleChrome={canShowConsoleChrome}
         demoRunning={demoRunning} onToggleDemo={toggleDemo}
         iframeRef={iframeRef}
-        allowDashboard={hasActiveSandbox}
         studioChrome={studioChrome}
       />
 
@@ -1217,39 +1423,14 @@ export function PreviewPanel() {
       {/* ── Main content: Preview or Code ── */}
       <div className="relative flex-1 overflow-hidden">
         <AnimatePresence mode="wait">
-          {viewMode === 'dashboard' ? (
-            <motion.div
-              key="dashboard"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="h-full"
-            >
-              <BuildDashboard
-                projectName={projectName}
-                previewUrl={previewUrl}
-                devPort={devPort}
-                files={files}
-                status={status}
-                deployPhase={deployPhase}
-                buildStatus={buildStatus}
-                activeStepLabel={activeStepLabel}
-                breakpoint={breakpoint}
-                onOpenPreview={() => setViewMode('preview')}
-                onOpenCode={() => setViewMode('code')}
-                onCopyUrl={handleCopyUrl}
-                onRefresh={refresh}
-              />
-            </motion.div>
-          ) : viewMode === 'preview' ? (
+          {viewMode === 'preview' ? (
             <motion.div
               key="preview"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className={`flex h-full items-center justify-center p-4 ${
+              className={`flex h-full items-stretch justify-stretch ${
                 studioChrome
                   ? 'bg-[radial-gradient(ellipse_at_50%_0%,rgba(255,200,170,0.35),rgba(250,250,250,0)_50%),linear-gradient(180deg,#fafafa,#f4f4f5)]'
                   : 'bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),rgba(9,11,20,0)_44%),linear-gradient(180deg,rgba(15,18,29,0.98),rgba(6,8,15,0.98))]'
@@ -1270,13 +1451,18 @@ export function PreviewPanel() {
               ) : status === 'running' && devPort ? (
                 <div
                   ref={previewContainerRef}
-                  className={`relative h-full overflow-hidden rounded-[1.8rem] border bg-white shadow-[0_28px_90px_rgba(0,0,0,0.32)] ${
-                    studioChrome ? 'border-zinc-200/90 shadow-[0_20px_60px_rgba(0,0,0,0.08)]' : 'border-white/10'
+                  className={`relative h-full w-full overflow-hidden ${
+                    studioChrome
+                      ? 'bg-white'
+                      : 'bg-zinc-950'
                   }`}
                   style={{ width: breakpoint === 'desktop' ? '100%' : BREAKPOINTS[breakpoint].width, maxWidth: '100%' }}
                 >
                   <iframe ref={iframeRef} src={previewUrl} className="h-full w-full"
                     onLoad={() => setTimeout(() => {
+                      if (previewCacheKey) {
+                        seenPreviewKeysRef.current.add(previewCacheKey);
+                      }
                       setIframeReady(true);
                       markPreviewReady(devPort);
                     }, 180)}
@@ -1307,8 +1493,8 @@ export function PreviewPanel() {
                 <PreviewHandoffShell
                   studio={studioChrome}
                   eyebrow="Preview handoff"
-                  title={projectName ? `${projectName} is coming online` : 'Preparing the live app'}
-                  body={buildStatus.message || 'Creating the sandbox, wiring dependencies, and getting the first preview ready so the switch from chat to app feels deliberate instead of abrupt.'}
+                  title="Starting preview"
+                  body={buildStatus.message || 'Creating the sandbox, wiring dependencies, and reconnecting the live app for this conversation.'}
                   previewUrl={devPort ? `http://localhost:${devPort}` : undefined}
                   activeStep={activeStepLabel}
                 />

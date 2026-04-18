@@ -2,6 +2,17 @@ import type { FastifyInstance } from 'fastify';
 import { PlatformAuthService, type PlatformViewer } from '../auth/platform-auth.js';
 import { type HandoffTarget, ProjectService } from '../projects/service.js';
 import type { SandboxManager } from '../sandbox/manager.js';
+import {
+  createProjectAuditBodySchema,
+  projectAuditPollConsumeBodySchema,
+  projectHandoffConsumeBodySchema,
+  projectHandoffIntentBodySchema,
+  projectHandoffPollConsumeBodySchema,
+  projectPeersBodySchema,
+  projectShareLinkBodySchema,
+  submitProjectAuditResultBodySchema,
+} from '@vai/api-types/projects';
+import { invalidRequestBody } from '../validation/http-validation.js';
 
 type AuthenticatedViewer = PlatformViewer & {
   authenticated: true;
@@ -148,13 +159,17 @@ export function registerProjectRoutes(
         return { error: 'You do not have permission to manage project peers' };
       }
 
-      const peers = (request.body?.peers ?? [])
-        .filter((peer) => peer.displayName?.trim() && peer.ide?.trim() && peer.model?.trim())
+      const parsed = projectPeersBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+
+      const peers = parsed.data.peers
         .map((peer) => ({
           peerKey: peer.peerKey,
-          displayName: peer.displayName!.trim(),
+          displayName: peer.displayName,
           ide: normalizePeerIde(peer.ide),
-          model: peer.model!.trim(),
+          model: peer.model,
           status: normalizePeerStatus(peer.status),
           launchTarget: resolvePeerLaunchTarget(peer.launchTarget, peer.ide),
           preferredClientId: peer.preferredClientId?.trim() || null,
@@ -185,13 +200,18 @@ export function registerProjectRoutes(
         return { error: 'You do not have access to this project' };
       }
 
-      const prompt = request.body?.prompt?.trim();
-      if (!prompt) {
-        reply.code(400);
-        return { error: 'Audit prompt is required' };
+      const parsed = createProjectAuditBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
       }
 
-      return projects.createAuditRequest(request.params.id, viewer.user.id, prompt, request.body?.scope, request.body?.peerKeys);
+      return projects.createAuditRequest(
+        request.params.id,
+        viewer.user.id,
+        parsed.data.prompt,
+        parsed.data.scope,
+        parsed.data.peerKeys,
+      );
     },
   );
 
@@ -205,19 +225,17 @@ export function registerProjectRoutes(
         return { error: 'You do not have access to this project' };
       }
 
-      const peerKey = request.body?.peerKey?.trim();
-      const verdict = request.body?.verdict?.trim();
-      if (!peerKey || !verdict) {
-        reply.code(400);
-        return { error: 'peerKey and verdict are required' };
+      const parsed = submitProjectAuditResultBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
       }
 
       try {
         return projects.submitAuditResult(request.params.id, request.params.auditId, {
-          peerKey,
-          verdict,
-          confidence: request.body?.confidence,
-          rationale: request.body?.rationale ?? null,
+          peerKey: parsed.data.peerKey,
+          verdict: parsed.data.verdict,
+          confidence: parsed.data.confidence,
+          rationale: parsed.data.rationale ?? null,
           claimedByUserId: viewer.user.id,
           claimedByClientId: viewer.companionClient?.id ?? null,
         });
@@ -232,9 +250,14 @@ export function registerProjectRoutes(
     const viewer = await requireViewer(auth, request, reply);
     if (!viewer) return { error: 'Sign in to claim audit work' };
 
+    const parsed = projectAuditPollConsumeBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+
     const workItem = projects.pollPendingAuditWork(viewer.user.id, {
-      target: request.body?.target ? normalizeHandoffTarget(request.body.target) : 'vscode',
-      peerKey: request.body?.peerKey?.trim() || undefined,
+      target: parsed.data.target ? normalizeHandoffTarget(parsed.data.target) : 'vscode',
+      peerKey: parsed.data.peerKey || undefined,
       clientId: viewer.companionClient?.id ?? null,
     });
 
@@ -261,12 +284,17 @@ export function registerProjectRoutes(
         return { error: 'You do not have permission to share this project' };
       }
 
+      const parsed = projectShareLinkBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+
       const link = projects.createShareLink(
         request.params.id,
         viewer.user.id,
-        request.body?.role,
-        request.body?.expiresInHours,
-        request.body?.maxUses,
+        parsed.data.role,
+        parsed.data.expiresInHours,
+        parsed.data.maxUses,
       );
 
       return {
@@ -316,23 +344,31 @@ export function registerProjectRoutes(
         return { error: 'You do not have access to this project' };
       }
 
-      const target = normalizeHandoffTarget(request.body?.target);
-      const handoff = projects.createHandoffIntent(request.params.id, viewer.user.id, target, request.body?.clientInfo);
+      const parsed = projectHandoffIntentBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+
+      const target = normalizeHandoffTarget(parsed.data.target);
+      const handoff = projects.createHandoffIntent(request.params.id, viewer.user.id, target, parsed.data.clientInfo);
       return handoff;
     },
   );
 
   app.post<{ Body: { intentToken?: string; target?: HandoffTarget } }>('/api/projects/handoff/consume', async (request, reply) => {
-    const intentToken = request.body?.intentToken?.trim();
-    if (!intentToken) {
-      reply.code(400);
-      return { error: 'Missing handoff intent token' };
+    const parsed = projectHandoffConsumeBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
     }
 
     const viewer = await auth.getViewer(request);
 
     try {
-      const handoff = projects.consumeHandoffIntent(intentToken, request.body?.target ? normalizeHandoffTarget(request.body.target) : undefined, viewer.user?.id ?? null);
+      const handoff = projects.consumeHandoffIntent(
+        parsed.data.intentToken,
+        parsed.data.target ? normalizeHandoffTarget(parsed.data.target) : undefined,
+        viewer.user?.id ?? null,
+      );
       const liveSandbox = sandbox.get(handoff.project.sandboxProjectId);
       return {
         projectId: handoff.project.id,
@@ -354,7 +390,12 @@ export function registerProjectRoutes(
     const viewer = await requireViewer(auth, request, reply);
     if (!viewer) return { error: 'Sign in to poll handoff intents' };
 
-    const target = normalizeHandoffTarget(request.body?.target);
+    const parsed = projectHandoffPollConsumeBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidRequestBody(reply, parsed.error);
+    }
+
+    const target = normalizeHandoffTarget(parsed.data.target);
     const handoff = projects.pollPendingHandoff(viewer.user.id, target);
     if (!handoff) {
       reply.code(204);

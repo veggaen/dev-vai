@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 
-const trainerPath = 'Temporary_files/vai-personal-trainer.mjs';
+const trainerPath = 'scripts/vai-personal-trainer.mjs';
 const suites = [
   { mode: 'strict', args: ['--strict', '--json'], timeoutMs: 8 * 60_000 },
   { mode: 'adversarial', args: ['--adversarial', '--json'], timeoutMs: 14 * 60_000 },

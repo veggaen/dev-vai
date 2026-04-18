@@ -133,7 +133,7 @@ export function App() {
   const {
     showDebugConsole, showFileExplorer, showBuilderPanel,
     sidebarState, focusMode, previewExpanded, expandBuilder, view, activePanel,
-    layoutMode, updateScreenClass,
+    layoutMode, themePreference, updateScreenClass,
   } = useLayoutStore();
   const { projectId, deployPhase, status: sandboxStatus } = useSandboxStore();
   const showOwnerFeatures = isOwner && !ownerFeaturesHidden;
@@ -233,11 +233,16 @@ export function App() {
     };
   }, [updateScreenClass]);
 
-  const hasActiveSandbox = projectId !== null;
-
-  // Auto-expand builder when any sandbox build lifecycle starts or becomes live.
   useEffect(() => {
-    const shouldRevealPreview = deployPhase === 'deploying'
+    document.documentElement.dataset.theme = themePreference;
+    document.body.dataset.theme = themePreference;
+  }, [themePreference]);
+
+  const hasActiveSandbox = projectId !== null;
+  const canShowConsole = hasActiveSandbox || sandboxStatus === 'failed';
+
+  useEffect(() => {
+    const previewActive = deployPhase === 'deploying'
       || deployPhase === 'ready'
       || sandboxStatus === 'creating'
       || sandboxStatus === 'writing'
@@ -245,12 +250,8 @@ export function App() {
       || sandboxStatus === 'building'
       || sandboxStatus === 'running';
 
-    if (shouldRevealPreview && !prevRevealPreviewRef.current) {
-      expandBuilder();
-    }
-
-    prevRevealPreviewRef.current = shouldRevealPreview;
-  }, [deployPhase, sandboxStatus, expandBuilder]);
+    prevRevealPreviewRef.current = previewActive;
+  }, [deployPhase, sandboxStatus]);
 
   useEffect(() => {
     if (authStatus !== 'authenticated') return;
@@ -318,9 +319,11 @@ export function App() {
     <>
       <Toaster
         position="bottom-right"
-        theme="dark"
+        theme={themePreference === 'light' ? 'light' : 'dark'}
         toastOptions={{
-          className: 'bg-zinc-900/95 border-zinc-800 text-zinc-100 backdrop-blur-md',
+          className: themePreference === 'light'
+            ? 'bg-white/95 border-zinc-200 text-zinc-900 backdrop-blur-md'
+            : 'bg-zinc-900/95 border-zinc-800 text-zinc-100 backdrop-blur-md',
         }}
       />
 
@@ -338,10 +341,11 @@ export function App() {
       <div
         id="layout-root"
         data-layout-mode={layoutMode}
+        data-theme={themePreference}
         data-thorsen-sync={syncState}
         data-vinext-motion={motionBudget}
         data-vinext-trust={trustLevel}
-        className="relative isolate flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#0a0a0a]"
+        className="relative isolate flex min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--shell-bg)]"
         style={{
           padding: 'var(--layout-margin)',
           paddingTop: `calc(var(--layout-margin) + var(--safe-top))`,
@@ -451,12 +455,12 @@ export function App() {
                         )}
 
                         {/* Preview — main section */}
-                        <Panel id="preview" defaultSize={hasActiveSandbox && showDebugConsole ? '55' : '100'} minSize="20">
+                        <Panel id="preview" defaultSize={canShowConsole && showDebugConsole ? '55' : '100'} minSize="20">
                           <PreviewPanel />
                         </Panel>
 
                         {/* Console — bottom section when active */}
-                        {hasActiveSandbox && showDebugConsole && (
+                        {canShowConsole && showDebugConsole && (
                           <>
                             <ResizeHandle direction="horizontal" />
                             <Panel

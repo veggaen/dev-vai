@@ -1,4 +1,6 @@
 import Database from 'better-sqlite3';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
 
@@ -613,9 +615,15 @@ function migrateEvalRunsTrackConstraint(sqlite: InstanceType<typeof Database>): 
 let dbInstance: VaiDatabase | null = null;
 let rawDbInstance: InstanceType<typeof Database> | null = null;
 
+function ensureDbParentDir(path?: string): void {
+  if (!path || path === ':memory:') return;
+  mkdirSync(dirname(path), { recursive: true });
+}
+
 export function getDb(path?: string): VaiDatabase {
   if (dbInstance) return dbInstance;
 
+  ensureDbParentDir(path);
   const sqlite = new Database(path ?? ':memory:');
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('foreign_keys = ON');
@@ -629,6 +637,7 @@ export function getDb(path?: string): VaiDatabase {
 }
 
 export function createDb(path?: string): VaiDatabase {
+  ensureDbParentDir(path);
   const sqlite = new Database(path ?? ':memory:');
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('foreign_keys = ON');

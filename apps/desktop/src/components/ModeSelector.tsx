@@ -30,12 +30,13 @@ const MODE_DROPDOWN_ACCENTS: Partial<Record<ChatMode, string>> = {
  * Builder mode gets a violet accent to signal "live app generation".
  */
 export function ModeSelector() {
-  const { mode, setMode } = useLayoutStore();
+  const { mode, setMode, themePreference } = useLayoutStore();
   const activeConversationId = useChatStore((state) => state.activeConversationId);
   const updateConversationMode = useChatStore((state) => state.updateConversationMode);
   const workflowModes = useSettingsStore((state) => state.workflowModes);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const isLight = themePreference === 'light';
 
   useEffect(() => {
     if (!open) return;
@@ -49,13 +50,19 @@ export function ModeSelector() {
   const availableModes = MODES.filter((candidate) => workflowModes.includes(candidate.id));
   const current = availableModes.find((m) => m.id === mode) ?? availableModes[0] ?? MODES[0];
   const CurrentIcon = current.icon;
-  const accentClass = MODE_ACCENTS[current.id] ?? 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200';
+  const accentClass = isLight
+    ? current.id === 'builder'
+      ? 'text-violet-700 bg-violet-100 ring-violet-200 hover:bg-violet-200'
+      : current.id === 'agent'
+        ? 'text-blue-700 bg-blue-100 ring-blue-200 hover:bg-blue-200'
+        : 'text-zinc-700 bg-white ring-zinc-200 hover:bg-zinc-100'
+    : MODE_ACCENTS[current.id] ?? 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200';
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative z-[80]">
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium ring-1 transition-all ${accentClass}`}
+        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium ring-1 transition-all ${accentClass}`}
         title={`Mode: ${current.label} (Ctrl+1-5)`}
       >
         <CurrentIcon className="h-3.5 w-3.5" />
@@ -64,14 +71,28 @@ export function ModeSelector() {
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-0 mb-1.5 w-68 rounded-xl border border-zinc-700/60 bg-zinc-900/95 py-1.5 shadow-2xl shadow-black/40 backdrop-blur-sm">
-          <div className="mb-1 border-b border-zinc-800/60 px-3 pb-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">Response mode</span>
+        <div className={`absolute bottom-full left-0 mb-1.5 w-68 rounded-lg border py-1.5 shadow-xl backdrop-blur-sm ${
+          isLight
+            ? 'border-zinc-200 bg-white/98 shadow-[0_18px_48px_rgba(15,23,42,0.12)]'
+            : 'border-zinc-700/60 bg-zinc-900/95 shadow-2xl shadow-black/40'
+        }`}>
+          <div className={`mb-1 border-b px-3 pb-1.5 ${isLight ? 'border-zinc-200' : 'border-zinc-800/60'}`}>
+            <span className={`text-[10px] font-semibold uppercase tracking-[0.2em] ${isLight ? 'text-zinc-500' : 'text-zinc-600'}`}>Response mode</span>
           </div>
           {availableModes.map((m) => {
             const Icon = m.icon;
             const isActive = mode === m.id;
-            const dropAccent = MODE_DROPDOWN_ACCENTS[m.id] ?? 'text-zinc-400';
+            const dropAccent = isLight
+              ? m.id === 'builder'
+                ? 'bg-violet-100 text-violet-700'
+                : m.id === 'agent'
+                  ? 'bg-blue-100 text-blue-700'
+                  : m.id === 'plan'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : m.id === 'debate'
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-zinc-100 text-zinc-700'
+              : MODE_DROPDOWN_ACCENTS[m.id] ?? 'text-zinc-400';
 
             return (
               <button
@@ -86,11 +107,17 @@ export function ModeSelector() {
                 className={`group flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${
                   isActive
                     ? `${dropAccent} font-medium`
-                    : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
+                    : isLight
+                      ? 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
+                      : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
                 }`}
               >
                 <div className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
-                  isActive ? dropAccent.replace('text-', 'bg-').split(' ')[0] : 'bg-zinc-800/60 group-hover:bg-zinc-800'
+                  isActive
+                    ? dropAccent.replace('text-', 'bg-').split(' ')[0]
+                    : isLight
+                      ? 'bg-zinc-100 group-hover:bg-zinc-200'
+                      : 'bg-zinc-800/60 group-hover:bg-zinc-800'
                 }`}>
                   <Icon className="h-3.5 w-3.5 shrink-0" />
                 </div>
@@ -98,14 +125,20 @@ export function ModeSelector() {
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-medium">{m.label}</span>
                     {m.id === 'builder' && (
-                      <span className="rounded-full bg-violet-500/15 px-1.5 py-px text-[9px] font-semibold text-violet-400">live</span>
+                      <span className={`rounded-md px-1.5 py-px text-[9px] font-semibold ${
+                        isLight ? 'bg-violet-100 text-violet-700' : 'bg-violet-500/15 text-violet-400'
+                      }`}>live</span>
                     )}
                   </div>
-                  <p className="mt-0.5 truncate text-[10px] leading-tight text-zinc-600 group-hover:text-zinc-500">
+                  <p className={`mt-0.5 truncate text-[10px] leading-tight ${
+                    isLight ? 'text-zinc-500 group-hover:text-zinc-600' : 'text-zinc-600 group-hover:text-zinc-500'
+                  }`}>
                     {MODE_DESCRIPTIONS[m.id]}
                   </p>
                 </div>
-                <kbd className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                <kbd className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${
+                  isLight ? 'bg-zinc-100 text-zinc-500' : 'bg-zinc-800 text-zinc-500'
+                }`}>
                   ⌃{m.shortcut}
                 </kbd>
               </button>

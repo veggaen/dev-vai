@@ -1,4 +1,11 @@
 import { STOP_WORDS, QUERY_ACTION_WORDS } from './stop-words.js';
+import {
+  sourceBucket,
+  summarizeRetrievalTelemetry,
+  uniqueDomains,
+  type RetrievalTelemetryDiagnostics,
+  type RetrievalTelemetryEvent,
+} from './retrieval-telemetry.js';
 
 export class VaiTokenizer {
   private vocab: Map<string, number> = new Map();
@@ -122,6 +129,8 @@ export class KnowledgeStore {
   private documentFrequency: Map<string, number> = new Map();
   private wordToDocIndices: Map<string, Set<number>> = new Map();
   private concepts: Map<string, { definition: string; source: string; frequency: number }> = new Map();
+  private retrievalEvents: RetrievalTelemetryEvent[] = [];
+  private retrievalDomainHits: Map<string, number> = new Map();
 
   private static readonly COVERAGE_THRESHOLD = 0.25;
   private static readonly PER_WORD_BOOST = 0.15;
@@ -129,13 +138,15 @@ export class KnowledgeStore {
   private static readonly REVERSE_CONTAIN_FLOOR = 0.5;
   private static readonly TRUSTED_MIN_SCORE = 0.2;
   private static readonly TRUSTED_BOOST = 0.15;
-  private static readonly YOUTUBE_PENALTY = 0.6;
+  private static readonly YOUTUBE_PENALTY = 0.25;
   private static readonly COGNITIVE_PENALTY = 0.3;
   private static readonly UI_CHROME_PENALTY = 0.1;
   private static readonly QUERY_COVERAGE_WEIGHT = 0.7;
   private static readonly JACCARD_WEIGHT = 0.3;
   private static readonly MATCH_THRESHOLD = 0.25;
   private static readonly DOC_MATCH_THRESHOLD = 0.15;
+  private static readonly LOW_CONFIDENCE_THRESHOLD = 0.35;
+  private static readonly MAX_RETRIEVAL_EVENTS = 40;
 
   learn(text: string, source: string, _language: KnowledgeEntry['language'] = 'en'): void {
     const words = text.toLowerCase().split(/\s+/);
@@ -224,8 +235,30 @@ export class KnowledgeStore {
 
     let bestMatch: { name: string; definition: string; source: string } | null = null;
     let bestScore = 0;
+    const queryWords = lower.split(/\s+/);
     for (const [name, data] of this.concepts) {
-      if (name.includes(lower) || lower.includes(name)) {
+      const nameWords = name.split(/\s+/);
+
+      // Require word-boundary matching: concept name must appear as whole words in the query
+      // and must cover a significant portion (>50%) of the query words to avoid
+      // "good" matching "good beginner programming projects"
+      let matched: boolean;
+      if (name.includes(lower)) {
+        // Query is a subset of the concept name → ok (e.g. query "docker" matches concept "docker container")
+        matched = true;
+      } else if (lower.includes(name)) {
+        // Concept name is a substring of the query — require word-boundary match
+        // and the concept must cover at least half the query words
+        const nameWordsInQuery = nameWords.every(nw =>
+          queryWords.some(qw => qw === nw)
+        );
+        const coverage = nameWords.length / queryWords.length;
+        matched = nameWordsInQuery && coverage >= 0.5;
+      } else {
+        matched = false;
+      }
+
+      if (matched) {
         const score = data.frequency * (name === lower ? 10 : 1);
         if (score > bestScore) {
           bestScore = score;
@@ -430,7 +463,7 @@ export class KnowledgeStore {
       }
     }
 
-    const adaptiveThreshold = queryWords.length <= 2 ? 0.15 : queryWords.length <= 5 ? 0.2 : 0.25;
+    const adaptiveThreshold = queryWords.length <= 2 ? 0.30 : queryWords.length <= 5 ? 0.25 : 0.25;
     if (bestScore <= adaptiveThreshold || !best) return null;
     return best;
   }
@@ -548,11 +581,26 @@ export class KnowledgeStore {
 
     if (bestScore <= KnowledgeStore.MATCH_THRESHOLD || !best) return null;
     if (meaningfulQuery.length >= 3 && bestHits < 2) return null;
+
+    // Guard: for short queries (1-2 meaningful words), require high pattern coverage.
+    // "docker" should NOT match "build nextjs todo app" just because prefix-match
+    // found a shared 4-char prefix. Require that the matched pattern covers ≥50% of
+    // its own words — i.e. the query must be ABOUT the taught entry, not tangentially related.
+    if (meaningfulQuery.length <= 2 && best) {
+      const patternWords = normalize(best.pattern);
+      const pSet = new Set(patternWords);
+      const matchedPatternWords = [...pSet].filter(pw =>
+        meaningfulQuery.some(qw => prefixMatch(qw, pw))
+      );
+      const patternCoverage = matchedPatternWords.length / pSet.size;
+      if (patternCoverage < 0.4) return null;
+    }
+
     return best;
   }
 
   findBestDocumentMatch(query: string, threshold = KnowledgeStore.DOC_MATCH_THRESHOLD): { text: string; source: string; score: number } | null {
-    const results = this.retrieveRelevant(query, 1);
+    const results = this.retrieveRelevant(query, 1, false);
     if (results.length === 0 || results[0].score < threshold) return null;
     return results[0];
   }
@@ -641,12 +689,18 @@ export class KnowledgeStore {
     return false;
   }
 
-  retrieveRelevant(query: string, topK = 5): Array<{ text: string; source: string; score: number }> {
-    if (this.documents.length === 0) return [];
+  retrieveRelevant(query: string, topK = 5, trackTelemetry = true): Array<{ text: string; source: string; score: number }> {
+    if (this.documents.length === 0) {
+      if (trackTelemetry) this.recordRetrievalTelemetry(query, []);
+      return [];
+    }
 
     const queryWords = query.toLowerCase().split(/\s+/)
       .filter(word => word.length > 2 && !KnowledgeStore.STOP_WORDS.has(word));
-    if (queryWords.length === 0) return [];
+    if (queryWords.length === 0) {
+      if (trackTelemetry) this.recordRetrievalTelemetry(query, []);
+      return [];
+    }
 
     const candidateDocIndices = new Set<number>();
     for (const queryWord of queryWords) {
@@ -656,7 +710,10 @@ export class KnowledgeStore {
       }
     }
 
-    if (candidateDocIndices.size === 0) return [];
+    if (candidateDocIndices.size === 0) {
+      if (trackTelemetry) this.recordRetrievalTelemetry(query, []);
+      return [];
+    }
 
     const totalDocs = this.documents.length;
     const scored: Array<{ text: string; source: string; score: number }> = [];
@@ -689,9 +746,15 @@ export class KnowledgeStore {
       scored.push({ text, source: doc.source, score });
     }
 
-    return scored
+    const results = scored
       .sort((left, right) => right.score - left.score)
       .slice(0, topK);
+
+    if (trackTelemetry) {
+      this.recordRetrievalTelemetry(query, results);
+    }
+
+    return results;
   }
 
   get documentCount(): number {
@@ -700,6 +763,35 @@ export class KnowledgeStore {
 
   getWordDocCount(word: string): number {
     return this.wordToDocIndices.get(word.toLowerCase())?.size ?? 0;
+  }
+
+  getRetrievalDiagnostics(): RetrievalTelemetryDiagnostics {
+    return summarizeRetrievalTelemetry(this.retrievalEvents, this.retrievalDomainHits);
+  }
+
+  private recordRetrievalTelemetry(
+    query: string,
+    results: Array<{ text: string; source: string; score: number }>,
+  ): void {
+    const topScore = results[0]?.score ?? 0;
+    const domains = uniqueDomains(results.map((result) => sourceBucket(result.source)));
+    const event: RetrievalTelemetryEvent = {
+      at: Date.now(),
+      query,
+      topScore,
+      resultCount: results.length,
+      domains,
+      lowConfidence: results.length === 0 || topScore < KnowledgeStore.LOW_CONFIDENCE_THRESHOLD,
+    };
+
+    this.retrievalEvents.push(event);
+    if (this.retrievalEvents.length > KnowledgeStore.MAX_RETRIEVAL_EVENTS) {
+      this.retrievalEvents = this.retrievalEvents.slice(-KnowledgeStore.MAX_RETRIEVAL_EVENTS);
+    }
+
+    for (const domain of domains) {
+      this.retrievalDomainHits.set(domain, (this.retrievalDomainHits.get(domain) ?? 0) + 1);
+    }
   }
 
   private similarity(left: string, right: string): number {

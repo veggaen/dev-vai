@@ -1,0 +1,223 @@
+{
+  "name": "browsing-memory-golden",
+  "description": "Curated browsing-memory fixtures for retrieval and grounded-answer regression checks.",
+  "thresholds": {
+    "engineRecallAtK": 0.9,
+    "engineTop1Accuracy": 0.65,
+    "apiRecallAtK": 0.8,
+    "groundedPassRate": 0.65
+  },
+  "documents": [
+    {
+      "id": "react-rsc-cache",
+      "title": "React RSC Cache Notes",
+      "url": "https://notes.vai.local/react-rsc-cache",
+      "content": "React Server Components let the server render tree segments before the browser hydrates interactive islands. The notes explain that revalidatePath invalidates cached data for a route after a mutation. They also say server actions are a natural place to call revalidatePath when a form changes persistent data."
+    },
+    {
+      "id": "postgres-jsonb-indexing",
+      "title": "Postgres JSONB Indexing Guide",
+      "url": "https://notes.vai.local/postgres-jsonb-indexing",
+      "content": "PostgreSQL JSONB fields work well with GIN indexes when queries need containment or key lookup. The guide says the containment operator can stay fast because GIN indexes map document terms to row locations. It warns that wide JSON documents still need careful index choice and query discipline."
+    },
+    {
+      "id": "docker-healthchecks",
+      "title": "Docker Healthcheck Compose Notes",
+      "url": "https://notes.vai.local/docker-healthchecks",
+      "content": "Docker Compose healthchecks make startup order more reliable than sleeping for a fixed number of seconds. The article says depends_on with service_healthy waits for a container to become healthy before dependent services start. It recommends using a real HTTP or command probe instead of a blind timeout."
+    },
+    {
+      "id": "oauth-device-flow",
+      "title": "OAuth Device Flow Notes",
+      "url": "https://notes.vai.local/oauth-device-flow",
+      "content": "The OAuth device flow gives the user a short code and asks them to verify on a second device or browser. The notes say the client should respect the polling interval from the authorization server and avoid hammering the token endpoint. They also stress keeping the verification URL and user code obvious in the UI."
+    },
+    {
+      "id": "prompt-injection-browser",
+      "title": "Prompt Injection Browser Agent Notes",
+      "url": "https://notes.vai.local/prompt-injection-browser",
+      "content": "Browser agents should treat page content as untrusted because prompt injection can hide inside instructions, comments, or copied snippets. The notes recommend domain allowlists, explicit tool gating, and visible provenance for every action. They also say user confirmation should guard sensitive actions like external requests or file writes."
+    },
+    {
+      "id": "playwright-flakes",
+      "title": "Playwright Flaky Test Fixes",
+      "url": "https://notes.vai.local/playwright-flakes",
+      "content": "Playwright tests get less flaky when they rely on locator auto-waiting instead of arbitrary sleeps. The article recommends expect polling, semantic locators, and a small number of focused end-to-end flows. It explicitly says fixed timeouts should be a last resort because they hide race conditions instead of fixing them."
+    },
+    {
+      "id": "retrieval-ranking",
+      "title": "Retrieval Ranking and Reranking Notes",
+      "url": "https://notes.vai.local/retrieval-ranking",
+      "content": "A strong answer engine often starts with lexical retrieval like BM25, then adds semantic retrieval for recall, and finally reranks with a stronger model. The notes argue that hybrid retrieval gives better coverage than either lexical or vector search alone. They also say reranking improves precision by pushing the most relevant evidence to the top before synthesis."
+    }
+  ],
+  "queries": [
+    {
+      "id": "react-cache-1",
+      "query": "What invalidates cached data in the React server components notes?",
+      "expectedDocumentIds": ["react-rsc-cache"],
+      "requiredAnswerTerms": ["revalidatePath", "cache"],
+      "answerAnyOf": [["route", "mutation"]],
+      "minAnswerScore": 0.67
+    },
+    {
+      "id": "react-cache-2",
+      "query": "Where did the React RSC notes say to call revalidatePath?",
+      "expectedDocumentIds": ["react-rsc-cache"],
+      "requiredAnswerTerms": ["revalidatePath"],
+      "answerAnyOf": [["server action", "server actions"]],
+      "minAnswerScore": 0.67
+    },
+    {
+      "id": "react-cache-3",
+      "query": "What were the React RSC cache notes mainly about?",
+      "expectedDocumentIds": ["react-rsc-cache"],
+      "requiredAnswerTerms": ["Server Components"],
+      "answerAnyOf": [["revalidatePath", "cache"], ["browser", "hydrates"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "postgres-jsonb-1",
+      "query": "What kind of Postgres index did the JSONB guide recommend for containment queries?",
+      "expectedDocumentIds": ["postgres-jsonb-indexing"],
+      "requiredAnswerTerms": ["GIN"],
+      "answerAnyOf": [["containment", "key lookup"]],
+      "minAnswerScore": 0.67
+    },
+    {
+      "id": "postgres-jsonb-2",
+      "query": "Why did the JSONB indexing notes say GIN indexes help?",
+      "expectedDocumentIds": ["postgres-jsonb-indexing"],
+      "requiredAnswerTerms": ["GIN"],
+      "answerAnyOf": [["row locations", "containment"], ["JSONB", "document terms"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "postgres-jsonb-3",
+      "query": "What warning did the JSONB guide give about wide documents?",
+      "expectedDocumentIds": ["postgres-jsonb-indexing"],
+      "requiredAnswerTerms": ["wide"],
+      "answerAnyOf": [["index choice", "query discipline"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "docker-health-1",
+      "query": "What did the Docker Compose notes use instead of sleeping for startup order?",
+      "expectedDocumentIds": ["docker-healthchecks"],
+      "requiredAnswerTerms": ["healthcheck"],
+      "answerAnyOf": [["service_healthy", "healthy"], ["Compose", "depends_on"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "docker-health-2",
+      "query": "How do the Docker healthcheck notes say depends_on should work?",
+      "expectedDocumentIds": ["docker-healthchecks"],
+      "requiredAnswerTerms": ["depends_on"],
+      "answerAnyOf": [["service_healthy", "healthy"], ["dependent services", "before dependent services start"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "docker-health-3",
+      "query": "What kind of probe did the Docker article recommend?",
+      "expectedDocumentIds": ["docker-healthchecks"],
+      "requiredAnswerTerms": ["probe"],
+      "answerAnyOf": [["HTTP", "command"], ["timeout", "blind timeout"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "device-flow-1",
+      "query": "What does the OAuth device flow give the user first?",
+      "expectedDocumentIds": ["oauth-device-flow"],
+      "requiredAnswerTerms": ["code"],
+      "answerAnyOf": [["second device", "browser"], ["verify", "verification"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "device-flow-2",
+      "query": "How should the client poll in the OAuth device flow notes?",
+      "expectedDocumentIds": ["oauth-device-flow"],
+      "requiredAnswerTerms": ["polling interval"],
+      "answerAnyOf": [["authorization server", "token endpoint"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "device-flow-3",
+      "query": "What did the device flow notes say should stay obvious in the UI?",
+      "expectedDocumentIds": ["oauth-device-flow"],
+      "requiredAnswerTerms": ["verification URL", "user code"],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "prompt-injection-1",
+      "query": "Why did the browser agent notes say page content is untrusted?",
+      "expectedDocumentIds": ["prompt-injection-browser"],
+      "requiredAnswerTerms": ["prompt injection"],
+      "answerAnyOf": [["comments", "instructions", "copied snippets"], ["untrusted", "page content"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "prompt-injection-2",
+      "query": "What controls did the browser agent notes recommend for safer actions?",
+      "expectedDocumentIds": ["prompt-injection-browser"],
+      "requiredAnswerTerms": ["allowlists", "provenance"],
+      "answerAnyOf": [["tool gating", "confirmation"], ["domain", "sensitive actions"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "prompt-injection-3",
+      "query": "What should guard sensitive browser agent actions?",
+      "expectedDocumentIds": ["prompt-injection-browser"],
+      "requiredAnswerTerms": ["confirmation"],
+      "answerAnyOf": [["file writes", "external requests"], ["sensitive actions", "user"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "playwright-1",
+      "query": "What did the Playwright notes recommend instead of arbitrary sleeps?",
+      "expectedDocumentIds": ["playwright-flakes"],
+      "requiredAnswerTerms": ["auto-waiting"],
+      "answerAnyOf": [["locator", "locators"], ["sleeps", "fixed timeouts"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "playwright-2",
+      "query": "How did the Playwright article say to keep tests less flaky?",
+      "expectedDocumentIds": ["playwright-flakes"],
+      "requiredAnswerTerms": ["expect polling"],
+      "answerAnyOf": [["semantic locators", "focused end-to-end flows"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "playwright-3",
+      "query": "Why did the Playwright notes say fixed timeouts are a last resort?",
+      "expectedDocumentIds": ["playwright-flakes"],
+      "requiredAnswerTerms": ["race conditions"],
+      "answerAnyOf": [["hide", "instead of fixing"], ["fixed timeouts", "last resort"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "retrieval-1",
+      "query": "What does a strong answer engine usually start with before reranking?",
+      "expectedDocumentIds": ["retrieval-ranking"],
+      "requiredAnswerTerms": ["BM25"],
+      "answerAnyOf": [["lexical retrieval", "semantic retrieval"], ["rerank", "reranking"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "retrieval-2",
+      "query": "Why did the retrieval notes prefer hybrid retrieval?",
+      "expectedDocumentIds": ["retrieval-ranking"],
+      "requiredAnswerTerms": ["hybrid retrieval"],
+      "answerAnyOf": [["coverage", "recall"], ["lexical", "vector"]],
+      "minAnswerScore": 0.5
+    },
+    {
+      "id": "retrieval-3",
+      "query": "What benefit did the reranking notes claim before synthesis?",
+      "expectedDocumentIds": ["retrieval-ranking"],
+      "requiredAnswerTerms": ["precision"],
+      "answerAnyOf": [["top", "most relevant evidence"], ["synthesis", "reranking"]],
+      "minAnswerScore": 0.5
+    }
+  ]
+}

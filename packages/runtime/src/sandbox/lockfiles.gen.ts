@@ -1,7 +1,7 @@
 // AUTO-GENERATED — do not edit manually.
 // Regenerate: node scripts/gen-lockfiles.mjs
 // Bundled pnpm lockfiles for sandbox templates — frozen-lockfile = hard-links = fast installs.
-/* eslint-disable */
+ 
 export const NEXTJS_PNPM_LOCK = `lockfileVersion: '9.0'
 
 settings:

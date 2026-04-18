@@ -17,6 +17,19 @@ import {
   ingestUrlBodySchema,
 } from '@vai/api-types/ingest';
 import { invalidRequestBody } from '../validation/http-validation.js';
+import { hasTrustedCaptureAccess } from '../security/request-trust.js';
+
+function sanitizeCapturedContent(text: string): string {
+  return text
+    .replace(/password[:\s]*[\S]+/gi, '[REDACTED]')
+    .replace(/api[_-]?key[:\s]*[\S]+/gi, '[REDACTED]')
+    .replace(/secret[:\s]*[\S]+/gi, '[REDACTED]')
+    .replace(/token[:\s]*[\S]+/gi, '[REDACTED]')
+    .replace(/session[_-]?id[:\s]*[\S]+/gi, '[REDACTED]')
+    .replace(/bearer\s+[\S]+/gi, '[REDACTED]')
+    .replace(/\b\d{13,19}\b/g, '[CARD_NUMBER]')
+    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, '[EMAIL]');
+}
 
 /** Validate a URL is safe to fetch (no SSRF). */
 function validateUrl(raw: string): URL {
@@ -120,20 +133,33 @@ export function registerIngestRoutes(
       meta?: Record<string, unknown>;
     };
   }>('/api/capture', async (request, reply) => {
+    if (!hasTrustedCaptureAccess(request)) {
+      reply.code(403);
+      return {
+        error: 'Capture endpoint is restricted to local clients or requests with VAI_CAPTURE_API_KEY.',
+      };
+    }
+
     const parsed = captureExtensionBodySchema.safeParse(request.body ?? {});
     if (!parsed.success) {
       return invalidRequestBody(reply, parsed.error);
     }
     const { type, url, title, content, language, meta } = parsed.data;
+    const sanitizedMeta = {
+      ...(meta ?? {}),
+      contentSanitized: true,
+      sanitizedAt: new Date().toISOString(),
+    };
+    const sanitizedContent = sanitizeCapturedContent(content);
 
     let capture: RawCapture;
 
     switch (type) {
       case 'SAVE_TRANSCRIPT':
-        capture = createYouTubeCapture(url, title, content, meta);
+        capture = createYouTubeCapture(url, title, sanitizedContent, sanitizedMeta);
         break;
       case 'SAVE_GITHUB_REPO':
-        capture = createGitHubCapture(url, title, content, undefined, meta);
+        capture = createGitHubCapture(url, title, sanitizedContent, undefined, sanitizedMeta);
         break;
       case 'SAVE_SEARCH':
       case 'SAVE_CONTENT':
@@ -142,9 +168,9 @@ export function registerIngestRoutes(
           sourceType: 'web',
           url,
           title,
-          content,
+          content: sanitizedContent,
           language: (language as RawCapture['language']) ?? undefined,
-          meta,
+          meta: sanitizedMeta,
         };
         break;
     }
@@ -162,6 +188,11 @@ export function registerIngestRoutes(
     },
   );
 
+  // Dashboard metrics for ingest health and retrieval confidence
+  app.get('/api/ingest/metrics', async () => {
+    return pipeline.getDashboardMetrics();
+  });
+
   // List all ingested sources
   app.get('/api/sources', async () => {
     return pipeline.listSources();
@@ -174,6 +205,19 @@ export function registerIngestRoutes(
       return reply.status(404).send({ error: 'Source not found' });
     }
     return detail;
+  });
+
+  // Delete a source and all its chunks
+  app.delete<{ Params: { id: string } }>('/api/sources/:id', async (request, reply) => {
+    if (!hasTrustedCaptureAccess(request)) {
+      reply.code(403);
+      return { error: 'Source deletion is restricted to local clients.' };
+    }
+    const deleted = pipeline.deleteSource(request.params.id);
+    if (!deleted) {
+      return reply.status(404).send({ error: 'Source not found' });
+    }
+    return { ok: true };
   });
 
   // Re-process all existing sources with improved text cleaning

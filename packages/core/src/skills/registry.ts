@@ -8,7 +8,7 @@
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { SkillManifest, LoadedSkill, SkillTool, SkillPermission, SkillTrust } from './types.js';
 
 // ── SKILL.md frontmatter parser ──────────────────────────────────
@@ -223,10 +223,17 @@ export class SkillRegistry {
   private readonly skillsDir: string;
 
   constructor(skillsDir?: string) {
+    const runtimeFile = typeof globalThis.__filename === 'string'
+      ? globalThis.__filename
+      : typeof __filename === 'string'
+        ? __filename
+        : process.argv[1] ?? '';
+    const inferredSkillsDir = runtimeFile
+      ? resolve(dirname(runtimeFile), '../../../skills')
+      : join(process.cwd(), 'skills');
+
     // Default: skills/ at repo root (3 levels up from packages/core/src/skills/)
-    this.skillsDir = skillsDir ?? resolve(import.meta.url
-      ? new URL(import.meta.url).pathname.replace(/\/packages\/.*$/, '/skills')
-      : join(process.cwd(), 'skills'));
+    this.skillsDir = skillsDir ?? inferredSkillsDir;
 
     // Register builtins first
     for (const skill of BUILTIN_SKILLS) {

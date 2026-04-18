@@ -440,13 +440,11 @@ export class SandboxManager {
       // Always prefer pnpm: uses a global content-addressable store with hard-links,
       // so repeated installs with the same packages are nearly instant.
       // Fall back to npm only if pnpm isn't on PATH.
-      const hasLockfile = existsSync(join(project.rootDir, 'pnpm-lock.yaml'));
       const cmd = 'pnpm';
-      // --frozen-lockfile: skip resolution entirely if lockfile matches (fastest path)
-      // --no-frozen-lockfile: resolve normally when lockfile absent (custom AI-generated package.json)
-      const args = hasLockfile
-        ? ['install', '--frozen-lockfile', '--prefer-offline']
-        : ['install', '--no-frozen-lockfile', '--prefer-offline'];
+      // Always allow lockfile refresh for AI-edited package.json files.
+      // `--prefer-offline` still keeps repeated installs fast via pnpm's global store
+      // without showing a noisy frozen-lockfile failure on first boot.
+      const args = ['install', '--no-frozen-lockfile', '--prefer-offline'];
       const pkgPath = join(project.rootDir, 'package.json');
       if (existsSync(pkgPath)) {
         try {
@@ -596,11 +594,12 @@ export class SandboxManager {
     if (existsSync(pkgPath)) {
       const pkg = JSON.parse(await readFile(pkgPath, 'utf-8'));
       const scripts = pkg.scripts ?? {};
-      if (scripts.dev) {
+          if (scripts.dev) {
         const usePnpm = existsSync(join(project.rootDir, 'pnpm-lock.yaml'));
         // Next.js uses --hostname, and running it through `pnpm run dev -- --port ...`
         // injects a literal `--` that Next treats as a project directory.
         const isNextjs = typeof scripts.dev === 'string' && scripts.dev.includes('next');
+            const isVite = typeof scripts.dev === 'string' && /\bvite\b/.test(scripts.dev);
         if (isNextjs) {
           if (usePnpm) {
             cmd = 'pnpm';
@@ -609,6 +608,14 @@ export class SandboxManager {
             cmd = 'npx';
             args = ['next', 'dev', '--port', String(port), '--hostname', '0.0.0.0'];
           }
+            } else if (isVite) {
+              if (usePnpm) {
+                cmd = 'pnpm';
+                args = ['exec', 'vite', '--port', String(port), '--host', '0.0.0.0'];
+              } else {
+                cmd = 'npx';
+                args = ['vite', '--port', String(port), '--host', '0.0.0.0'];
+              }
         } else {
           cmd = usePnpm ? 'pnpm' : 'npm';
           args = ['run', 'dev', '--', '--port', String(port), '--host'];

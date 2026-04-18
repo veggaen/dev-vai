@@ -11,8 +11,12 @@ import type { ModelRegistry, ChatChunk, Message } from '../models/adapter.js';
 import { SkillRouter } from '../models/skill-router.js';
 import type { ThorsenAdaptiveController } from '../thorsen/types.js';
 import {
+  buildChatTurnQualitySystemHint,
+  buildTemporaryModeOverrideSystemHint,
   CHAT_STRUCTURE_SYSTEM_HINT,
   KNOWLEDGE_RETRIEVAL_SCORE_MIN,
+  isGenerationIntent,
+  resolveTemporaryTurnMode,
   shouldInjectChatStructureHint,
 } from './chat-quality.js';
 import { CONVERSATION_MODE_SYSTEM_PROMPTS, DEFAULT_CONVERSATION_MODE, type ConversationMode, isConversationMode } from './modes.js';
@@ -338,6 +342,13 @@ export class ChatService {
     if (modePrompt) {
       systemMessages.push({ role: 'system', content: modePrompt });
     }
+    const temporaryTurnMode = isTerminalHarness ? null : resolveTemporaryTurnMode(resolvedMode, content);
+    if (temporaryTurnMode) {
+      systemMessages.push({
+        role: 'system',
+        content: buildTemporaryModeOverrideSystemHint(temporaryTurnMode),
+      });
+    }
     const hasActiveSandbox = Boolean(conv.sandboxProjectId);
     if (hasActiveSandbox) {
       systemMessages.push({ role: 'system', content: ACTIVE_SANDBOX_EXECUTION_HINT });
@@ -373,10 +384,18 @@ export class ChatService {
       systemMessages.push({ role: 'system', content: CHAT_STRUCTURE_SYSTEM_HINT });
     }
 
+    if (!isTerminalHarness) {
+      const turnQualityHint = buildChatTurnQualitySystemHint(resolvedMode, content, chatMessages);
+      if (turnQualityHint) {
+        systemMessages.push({ role: 'system', content: turnQualityHint });
+      }
+    }
+
     // Knowledge augmentation for external models:
-    // When the user is chatting with an external model (not vai:v0),
-    // retrieve relevant Vai knowledge and inject it as context.
-    if (conv.modelId !== 'vai:v0' && this.retrieveKnowledge) {
+    // Skip entirely for generation intents (build/scaffold/create requests) — retrieved
+    // web captures won't help and will inject noise into the model's context.
+    // Also skip for vai:v0 which uses its own knowledge store directly.
+    if (conv.modelId !== 'vai:v0' && this.retrieveKnowledge && !isGenerationIntent(content)) {
       const relevant = this.retrieveKnowledge(content, 8);
       const useful = relevant.filter((r) => r.score > KNOWLEDGE_RETRIEVAL_SCORE_MIN);
       if (useful.length > 0) {

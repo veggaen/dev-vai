@@ -23,6 +23,7 @@ interface EngineState {
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 let pollTimeout: ReturnType<typeof setTimeout> | null = null;
 let polling = false;
+const INITIAL_CONNECT_TIMEOUT_MS = 60_000;
 
 function isTauriApp(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -111,13 +112,17 @@ export const useEngineStore = create<EngineState>((set, get) => ({
     poll();
     pollInterval = setInterval(poll, 2000);
 
-    // Only timeout on initial connect — don't timeout reconnections
+    // Only surface a timeout message on initial connect — keep polling so the
+    // app can self-recover if the sidecar finishes booting a bit later.
     if (!get().hasEverConnected) {
       pollTimeout = setTimeout(() => {
         if (!polling) return;
-        stopPolling();
-        set({ status: 'error', error: 'Engine failed to start within 30 seconds' });
-      }, 30_000);
+        pollTimeout = null;
+        set({
+          status: 'error',
+          error: 'Engine is taking longer than expected to start. Still checking...',
+        });
+      }, INITIAL_CONNECT_TIMEOUT_MS);
     }
   },
 }));

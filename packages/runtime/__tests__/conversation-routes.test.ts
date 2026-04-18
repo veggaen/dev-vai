@@ -12,6 +12,9 @@
  *   5. Assert status codes and response bodies
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createDb, ChatService, ModelRegistry } from '@vai/core';
 import type { ModelAdapter, ChatRequest, ChatResponse, ChatChunk, VaiDatabase } from '@vai/core';
@@ -46,6 +49,34 @@ describe('Conversation Routes', () => {
   let db: VaiDatabase;
   let chatService: ChatService;
   let adapter: TestAdapter;
+  let mockSandbox: {
+    create: (name: string) => Promise<{
+      id: string;
+      name: string;
+      rootDir: string;
+      ownerUserId: null;
+      files: Record<string, string>;
+      devProcess: null;
+      devPort: null;
+      logs: never[];
+      status: 'idle';
+      createdAt: Date;
+    }>;
+    get?: (id: string) => unknown;
+    rehydrate?: (project: { id: string; name: string; rootDir: string; ownerUserId: string | null; status?: string }) => unknown;
+  };
+  let mockProjects: {
+    syncSandboxProject: () => null;
+    removeProjectForSandbox: () => void;
+    getProjectBySandboxId?: (sandboxProjectId: string) => {
+      id: string;
+      sandboxProjectId: string;
+      name: string;
+      rootDir: string;
+      ownerUserId: string | null;
+    } | null;
+  };
+  const tempDirs: string[] = [];
 
   beforeEach(async () => {
     // Arrange: fresh DB + adapter + Fastify instance for each test
@@ -62,7 +93,7 @@ describe('Conversation Routes', () => {
       getViewer: async () => ({ authenticated: false, user: null }),
     } as unknown as import('../src/auth/platform-auth.js').PlatformAuthService;
 
-    const mockSandbox = {
+    mockSandbox = {
       create: async (name: string) => ({
         id: 'mock-sandbox-' + Date.now(),
         name,
@@ -75,19 +106,29 @@ describe('Conversation Routes', () => {
         status: 'idle' as const,
         createdAt: new Date(),
       }),
-    } as unknown as import('../src/sandbox/manager.js').SandboxManager;
+    };
 
-    const mockProjects = {
+    mockProjects = {
       syncSandboxProject: () => null,
       removeProjectForSandbox: () => {},
-    } as unknown as import('../src/projects/service.js').ProjectService;
+    };
 
-    registerConversationRoutes(app, chatService, 'test:mock', mockAuth, mockSandbox, mockProjects);
+    registerConversationRoutes(
+      app,
+      chatService,
+      'test:mock',
+      mockAuth,
+      mockSandbox as unknown as import('../src/sandbox/manager.js').SandboxManager,
+      mockProjects as unknown as import('../src/projects/service.js').ProjectService,
+    );
     await app.ready();
   });
 
   afterEach(async () => {
     await app.close();
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   describe('POST /api/conversations', () => {
@@ -206,6 +247,52 @@ describe('Conversation Routes', () => {
 
       expect(patchRes.statusCode).toBe(200);
       expect(patchRes.json().sandboxProjectId).toBe('sandbox-123');
+    });
+
+    it('rehydrates a persisted sandbox before linking it to the conversation', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/conversations',
+        payload: { modelId: 'test:mock', mode: 'chat' },
+      });
+      const { id } = createRes.json();
+
+      const sandboxRoot = mkdtempSync(join(tmpdir(), 'vai-conv-route-'));
+      tempDirs.push(sandboxRoot);
+
+      mockSandbox.get = () => undefined;
+      mockSandbox.rehydrate = (project) => ({
+        id: project.id,
+        name: project.name,
+        rootDir: project.rootDir,
+        ownerUserId: project.ownerUserId,
+        files: {},
+        devProcess: null,
+        devPort: null,
+        logs: [],
+        status: 'idle' as const,
+        createdAt: new Date(),
+      });
+      mockProjects.getProjectBySandboxId = (sandboxProjectId) => (
+        sandboxProjectId === 'sandbox-persisted'
+          ? {
+              id: 'project-1',
+              sandboxProjectId,
+              name: 'Persisted project',
+              rootDir: sandboxRoot,
+              ownerUserId: null,
+            }
+          : null
+      );
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/conversations/${id}`,
+        payload: { sandboxProjectId: 'sandbox-persisted' },
+      });
+
+      expect(patchRes.statusCode).toBe(200);
+      expect(patchRes.json().sandboxProjectId).toBe('sandbox-persisted');
     });
   });
 

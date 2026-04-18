@@ -78,6 +78,9 @@ export function AuthGate() {
               <p className="mt-5 max-w-xl text-sm leading-7 text-zinc-400 lg:text-base">
                 VeggaAI now has a provider-backed session layer. Google sign-in creates a platform user, links the provider account, and persists an httpOnly session for the shell.
               </p>
+              <p className="mt-3 max-w-xl text-sm leading-7 text-zinc-500">
+                After sign-in, the fastest way to feel the product is simple: capture one real page in the browser extension, then ask the desktop shell what you read and why it mattered.
+              </p>
             </div>
 
             <div className="mt-10 grid gap-3 text-sm text-zinc-300 sm:grid-cols-3">
@@ -109,6 +112,9 @@ export function AuthGate() {
                   </h2>
                   <p className="mt-3 text-sm leading-6 text-zinc-400">
                     The shell is gated because platform auth is enabled. Continue with Google to restore your working session. The desktop app now rechecks auth automatically while this screen is open.
+                  </p>
+                  <p className="mt-3 text-xs leading-5 text-zinc-500">
+                    Once you are through this gate, look for the memory workflow in chat or settings: capture a page, then ask a grounded recall question.
                   </p>
 
                   {isError && (

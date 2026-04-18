@@ -15,6 +15,7 @@
 
 import type { FastifyRequest, FastifyReply, FastifyInstance } from 'fastify';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { isLocalRequest } from '../security/request-trust.js';
 
 // ── Types ──
 
@@ -34,7 +35,6 @@ interface RateBucket {
 
 // ── Constants ──
 
-const LOCAL_HOSTS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost']);
 const RATE_WINDOW_MS = 60_000;
 
 // ── Rate limiter (in-memory, per-key) ──
@@ -100,13 +100,6 @@ function extractApiKey(request: FastifyRequest): string | null {
   }
 
   return null;
-}
-
-// ── Check if request is local ──
-
-function isLocalRequest(request: FastifyRequest): boolean {
-  const ip = request.ip;
-  return LOCAL_HOSTS.has(ip);
 }
 
 // ── Hook factory ──

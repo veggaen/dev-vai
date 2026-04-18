@@ -1,4 +1,4 @@
-import { unlinkSync } from 'node:fs';
+import { existsSync, rmSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
@@ -198,6 +198,28 @@ describe('Database', () => {
       getRawDb()?.close();
       resetDbInstance();
       unlinkSync(dbPath);
+    }
+  });
+
+  it('creates parent directories for file-backed databases automatically', () => {
+    const dbDir = join(tmpdir(), `vai-db-parent-${ulid()}`);
+    const dbPath = join(dbDir, 'nested', 'vai.sqlite');
+
+    try {
+      const fileDb = createDb(dbPath);
+      fileDb.insert(conversations).values({
+        id: ulid(),
+        title: 'Nested DB',
+        modelId: 'test',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }).run();
+
+      expect(existsSync(dbPath)).toBe(true);
+    } finally {
+      getRawDb()?.close();
+      resetDbInstance();
+      rmSync(dbDir, { recursive: true, force: true });
     }
   });
 });

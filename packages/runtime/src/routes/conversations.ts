@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { DEFAULT_CONVERSATION_MODE, type ChatPromptRewriteOverrides, type ChatService, type ConversationMode } from '@vai/core';
 import type { PlatformAuthService } from '../auth/platform-auth.js';
@@ -35,10 +36,33 @@ function syncSandboxProject(projects: ProjectService, project: unknown) {
   }
 }
 
-function getSandboxProject(sandbox: SandboxManager, sandboxProjectId: string) {
-  return typeof sandbox.get === 'function'
-    ? sandbox.get(sandboxProjectId)
-    : { id: sandboxProjectId };
+function getSandboxProject(projects: ProjectService, sandbox: SandboxManager, sandboxProjectId: string) {
+  if (typeof sandbox.get !== 'function') {
+    return { id: sandboxProjectId };
+  }
+
+  const liveProject = sandbox.get(sandboxProjectId);
+  if (liveProject) {
+    return liveProject;
+  }
+
+  const persistedProject = getProjectBySandboxId(projects, sandboxProjectId);
+  if (
+    !persistedProject
+    || !persistedProject.rootDir
+    || !existsSync(persistedProject.rootDir)
+    || typeof sandbox.rehydrate !== 'function'
+  ) {
+    return null;
+  }
+
+  return sandbox.rehydrate({
+    id: persistedProject.sandboxProjectId,
+    name: persistedProject.name,
+    rootDir: persistedProject.rootDir,
+    ownerUserId: persistedProject.ownerUserId,
+    status: 'idle',
+  });
 }
 
 function decorateConversation(
@@ -124,7 +148,7 @@ export function registerConversationRoutes(
 
       let sandboxProjectId: string | null = null;
       if (requestedSandboxProjectId) {
-        const existingSandbox = getSandboxProject(sandbox, requestedSandboxProjectId);
+        const existingSandbox = getSandboxProject(projects, sandbox, requestedSandboxProjectId);
         if (!existingSandbox) {
           reply.code(404);
           return { error: 'Sandbox project not found' };
@@ -199,7 +223,7 @@ export function registerConversationRoutes(
 
       if (sandboxProjectId !== undefined) {
         if (sandboxProjectId) {
-          const existingSandbox = getSandboxProject(sandbox, sandboxProjectId);
+          const existingSandbox = getSandboxProject(projects, sandbox, sandboxProjectId);
           if (!existingSandbox) {
             reply.code(404);
             return { error: 'Sandbox project not found' };

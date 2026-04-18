@@ -21,7 +21,7 @@
   --layout-viewport-width: 100dvw;
   --layout-viewport-height: 100dvh;
   --layout-rail-width: 48px;
-  --layout-sidebar-width: 264px;
+  --layout-sidebar-width: 280px;
   --layout-sidebar-effective-width: min(
     var(--layout-sidebar-width),
     calc(
@@ -45,6 +45,40 @@
   --vinext-motion-scale: 1;
   --vinext-panel-opacity: 1;
   --vinext-trust-ring: rgba(63, 63, 70, 0.28);
+
+  /* Shell theme defaults */
+  --shell-bg: #09090b;
+  --shell-bg-elevated: #111827;
+  --shell-surface: rgba(9, 11, 20, 0.78);
+  --shell-surface-strong: rgba(15, 23, 42, 0.92);
+  --shell-surface-muted: rgba(24, 24, 27, 0.82);
+  --shell-line: rgba(63, 63, 70, 0.72);
+  --shell-line-soft: rgba(63, 63, 70, 0.42);
+  --shell-text: #f4f4f5;
+  --shell-text-muted: #a1a1aa;
+  --shell-chip-bg: rgba(24, 24, 27, 0.82);
+  --shell-chip-text: #d4d4d8;
+  --shell-shadow-soft: rgba(0, 0, 0, 0.22);
+  --shell-accent: #8b5cf6;
+  --shell-accent-soft: rgba(139, 92, 246, 0.14);
+  --shell-radius-pill: 12px;
+}
+
+[data-theme="light"] {
+  --shell-bg: #f5f5f5;
+  --shell-bg-elevated: #ffffff;
+  --shell-surface: rgba(255, 255, 255, 0.9);
+  --shell-surface-strong: rgba(250, 250, 250, 0.98);
+  --shell-surface-muted: rgba(244, 244, 245, 0.92);
+  --shell-line: rgba(212, 212, 216, 0.95);
+  --shell-line-soft: rgba(212, 212, 216, 0.58);
+  --shell-text: #111827;
+  --shell-text-muted: #6b7280;
+  --shell-chip-bg: rgba(250, 250, 250, 0.96);
+  --shell-chip-text: #374151;
+  --shell-shadow-soft: rgba(15, 23, 42, 0.08);
+  --shell-accent: #7c3aed;
+  --shell-accent-soft: rgba(124, 58, 237, 0.1);
 }
 
 [data-thorsen-sync="wormhole"] {
@@ -71,13 +105,19 @@
 
 /* Open mode — floating, generous spacing */
 [data-layout-mode="open"] {
-  --layout-gap: 10px;
-  --layout-radius: 20px;
-  --layout-padding: 10px;
-  --layout-shadow: 0 28px 90px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(148, 163, 184, 0.04);
-  --layout-border: 1px solid rgba(255, 255, 255, 0.06);
-  --layout-margin: 10px;
-  --layout-panel-bg: linear-gradient(180deg, rgba(17, 24, 39, 0.9), rgba(9, 11, 20, 0.94));
+  --layout-gap: 8px;
+  --layout-radius: 14px;
+  --layout-padding: 8px;
+  --layout-shadow: 0 18px 44px rgba(0, 0, 0, 0.18);
+  --layout-border: 1px solid var(--shell-line-soft);
+  --layout-margin: 8px;
+  --layout-panel-bg: var(--shell-surface);
+}
+
+[data-theme="light"][data-layout-mode="open"] {
+  --layout-shadow: 0 16px 38px rgba(15, 23, 42, 0.06);
+  --layout-border: 1px solid rgba(226, 232, 240, 0.9);
+  --layout-panel-bg: rgba(255, 255, 255, 0.97);
 }
 
 /* ── Layout root transitions ── */
@@ -99,7 +139,7 @@
 /* Open mode panel styling */
 [data-layout-mode="open"] .layout-panel {
   border-radius: var(--layout-radius);
-  box-shadow: var(--layout-shadow), 0 0 0 1px var(--vinext-trust-ring);
+  box-shadow: var(--layout-shadow);
   background: var(--layout-panel-bg);
   border: var(--layout-border);
   overflow: hidden;
@@ -163,8 +203,8 @@ body {
   letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: #0a0a0a;
-  color: #e4e4e7;
+  background: var(--shell-bg);
+  color: var(--shell-text);
 }
 
 .shell-atmosphere {
@@ -173,8 +213,8 @@ body {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(139, 92, 246, 0.06), transparent),
-    linear-gradient(180deg, #0a0a0a 0%, #0a0a0a 100%);
+    radial-gradient(ellipse 80% 50% at 50% 0%, var(--shell-accent-soft), transparent),
+    linear-gradient(180deg, var(--shell-bg) 0%, var(--shell-bg) 100%);
 }
 
 .builder-shell-surface {
@@ -182,8 +222,8 @@ body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-  background: #0a0a0a;
+  box-shadow: inset 0 0 0 1px var(--shell-line-soft);
+  background: var(--shell-bg);
 }
 
 .builder-shell-surface::before {
@@ -196,14 +236,19 @@ body {
     radial-gradient(circle at top left, rgba(255, 255, 255, 0.02), transparent 28%);
 }
 
+[data-theme="light"] .builder-shell-surface::before {
+  background:
+    radial-gradient(circle at top left, rgba(124, 58, 237, 0.05), transparent 28%);
+}
+
 [data-layout-mode="open"] .builder-shell-surface {
   border-radius: 28px;
-  box-shadow: 0 36px 120px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: 0 36px 120px var(--shell-shadow-soft), inset 0 1px 0 var(--shell-line-soft);
 }
 
 [data-layout-mode="compact"] .builder-shell-surface {
   border-radius: 0;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 1px 0 var(--shell-line-soft);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -239,7 +284,7 @@ body {
 @media (min-width: 1024px) and (max-width: 1799px) {
   :root {
     --layout-rail-width: 48px;
-    --layout-sidebar-width: 264px;
+    --layout-sidebar-width: 288px;
   }
 }
 
@@ -247,7 +292,7 @@ body {
 @media (min-width: 1800px) and (max-width: 2999px) {
   :root {
     --layout-rail-width: 48px;
-    --layout-sidebar-width: 280px;
+    --layout-sidebar-width: 304px;
   }
 }
 
@@ -358,6 +403,51 @@ body {
 ::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 3px;
+}
+
+@layer components {
+  .ui-surface {
+    border: 1px solid var(--shell-line);
+    background: var(--shell-surface);
+    color: var(--shell-text);
+    box-shadow: 0 18px 48px var(--shell-shadow-soft);
+    backdrop-filter: blur(18px);
+  }
+
+  .ui-surface-muted {
+    border: 1px solid var(--shell-line-soft);
+    background: var(--shell-surface-muted);
+    color: var(--shell-text);
+  }
+
+  .ui-chip {
+    border: 1px solid var(--shell-line);
+    background: var(--shell-chip-bg);
+    color: var(--shell-chip-text);
+    border-radius: var(--shell-radius-pill);
+    backdrop-filter: blur(12px);
+  }
+
+  .ui-ghost-button {
+    border: 1px solid var(--shell-line);
+    background: var(--shell-chip-bg);
+    color: var(--shell-chip-text);
+    border-radius: 14px;
+    transition: background 180ms ease, border-color 180ms ease, transform 180ms ease, color 180ms ease;
+  }
+
+  .ui-ghost-button:hover {
+    border-color: color-mix(in srgb, var(--shell-accent) 28%, var(--shell-line));
+    background: color-mix(in srgb, var(--shell-accent-soft) 55%, var(--shell-chip-bg));
+    color: var(--shell-text);
+    transform: translateY(-1px);
+  }
+
+  .ui-section-label {
+    color: var(--shell-text-muted);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.14);

@@ -412,6 +412,25 @@ export const cognitiveLessons = sqliteTable('cognitive_lessons', {
 
 // ---- Usage Tracking ----
 
+export const retrievalQualityLog = sqliteTable('retrieval_quality_log', {
+  id: text('id').primaryKey(),
+  /** The search query that triggered this retrieval */
+  query: text('query').notNull(),
+  /** Number of results returned */
+  resultCount: integer('result_count').notNull().default(0),
+  /** Top-1 confidence score (0–1) */
+  topScore: real('top_score').notNull().default(0),
+  /** Average score across top-K results */
+  avgScore: real('avg_score').notNull().default(0),
+  /** Whether any result had score >= 0.5 (hit) */
+  isHit: integer('is_hit', { mode: 'boolean' }).notNull().default(false),
+  /** Source of this retrieval: 'chat' | 'search' | 'eval' */
+  source: text('source').notNull().default('chat'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+}, (t) => ({
+  createdAtIdx: index('retrieval_quality_log_created_at_idx').on(t.createdAt),
+}));
+
 export const usageRecords = sqliteTable('usage_records', {
   id: text('id').primaryKey(),
   modelId: text('model_id').notNull(),

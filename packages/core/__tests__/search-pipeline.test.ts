@@ -685,6 +685,33 @@ describe('generateFollowUps', () => {
     expect(followUps.some((item) => item.includes('Tailwind CSS') || item.includes('responsive design'))).toBe(true);
   });
 
+  it('does not suggest building something for general informational follow-ups', () => {
+    const response = {
+      answer: 'Official Tailwind docs explain responsive design utilities.',
+      sources: [
+        {
+          text: 'Responsive design in Tailwind CSS uses breakpoint prefixes.',
+          url: 'https://tailwindcss.com/docs/responsive-design',
+          domain: 'tailwindcss.com',
+          title: 'Responsive design - Tailwind CSS',
+          favicon: 'https://www.google.com/s2/favicons?domain=tailwindcss.com&sz=32',
+          trust: { tier: 'high' as const, score: 0.95, reason: 'Official docs' },
+          rank: 1,
+        },
+      ],
+      plan: { originalQuery: 'responsive design docs', intent: 'general' as const, entities: [], constraints: {}, fanOutQueries: ['responsive design docs'] },
+      rawResultCount: 1,
+      confidence: 0.9,
+      durationMs: 90,
+      sync: makeSync({ state: 'wormhole', latencyMs: 90, recommendedConcurrency: 6, medianLatencyMs: 90, p95LatencyMs: 90 }),
+      audit: [],
+    };
+
+    const followUps = generateFollowUps('responsive design docs', response);
+    expect(followUps.every((item) => !/what should i build next/i.test(item))).toBe(true);
+    expect(followUps.some((item) => /common mistakes|project structure/i.test(item))).toBe(true);
+  });
+
   it('uses version-aware follow-ups for source-backed version answers', () => {
     const response = {
       answer: '**Current version target**\n\n- **Bun**: bun-v1.3.10',
@@ -762,8 +789,8 @@ describe('generateFollowUps', () => {
 
     const followUps = generateFollowUps('setup vinext for me please', response);
     expect(followUps).toEqual([
-      'Set up the true default Vinext starter first',
-      'Upgrade this Vinext starter into a richer app shell',
+      'Turn this starter into a premium landing page',
+      'Add auth and a dashboard shell to this app',
       'When should I pick Vinext over Next.js or plain Vite?',
     ]);
   });

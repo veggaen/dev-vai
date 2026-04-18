@@ -8,17 +8,22 @@
     "./chat-ws": "./src/chat-ws.ts",
     "./conversations": "./src/conversations.ts",
     "./broadcast": "./src/broadcast.ts",
+    "./sessions": "./src/sessions.ts",
+    "./projects": "./src/projects.ts",
     "./sandbox": "./src/sandbox.ts",
     "./feedback": "./src/feedback.ts",
     "./search": "./src/search.ts",
     "./ingest": "./src/ingest.ts",
-    "./responses": "./src/responses.ts"
+    "./responses": "./src/responses.ts",
+    "./session-responses": "./src/session-responses.ts",
+    "./project-responses": "./src/project-responses.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@vai/core": "workspace:*",
     "zod": "^3.24.0"
   },
   "devDependencies": {

@@ -155,13 +155,13 @@ export class ToolExecutor {
     const messages = [...request.messages];
     const toolDefs = request.tools ?? this.getToolDefinitions();
     const allToolExecutions: ToolExecutionResult[] = [];
-    let totalUsage: TokenUsage = { promptTokens: 0, completionTokens: 0, cachedTokens: 0 };
+    const totalUsage: TokenUsage = { promptTokens: 0, completionTokens: 0, cachedTokens: 0 };
     const loopStart = performance.now();
 
     for (let iteration = 0; iteration < this.config.maxIterations; iteration++) {
       // Stream from the model
       let fullText = '';
-      let finishReason = 'stop';
+      const finishReason = 'stop';
       const toolCalls: ToolCall[] = [];
       const toolCallBuffers = new Map<string, { name: string; args: string }>();
 

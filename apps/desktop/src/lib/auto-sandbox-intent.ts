@@ -39,9 +39,11 @@ const BUILD_MODES = new Set<AutoSandboxMode>(['builder', 'agent']);
 const EXPLICIT_STARTER_REQUEST = /\b(?:next(?:\.js|\s*js)?|vinext)\b/i;
 const EXPLICIT_STARTER_ACTION = /\b(?:install|set\s*up|setup|fresh|from\s+scratch|new|default|plain|vanilla|clean)\b/i;
 const EXPLICIT_BUILD_ACTION = /\b(?:build|create|make|start|spin\s*up|launch|scaffold|generate|ship)\b/i;
-const EXPLICIT_BUILD_TARGET = /\b(?:app|application|project|site|website|dashboard|tool|mvp|workspace|shell|preview)\b/i;
+const EXPLICIT_BUILD_TARGET = /\b(?:app|application|project|site|website|dashboard|tool|mvp|workspace|shell|preview|page|landing|portfolio|gallery|blog)\b/i;
 const EXPLICIT_TRY_INTENT = /\b(?:try|preview|open|run|use|test)\b/i;
 const FRESH_PROJECT_REQUEST = /\b(?:fresh|from\s+scratch|new\s+app|new\s+project|start\s+over|clean)\b/i;
+const CURRENT_APP_REFERENCE = /\b(?:current|existing|active|this|same)\b/i;
+const NEW_BUILD_REQUEST = /^(?:now\s+)?(?:can\s+you\s+|could\s+you\s+|please\s+)?(?:make|build|create|generate|design|develop|scaffold|start)\b/i;
 
 export function resolveAutoSandboxIntent(input: ResolveAutoSandboxIntentInput): ResolvedAutoSandboxIntent {
   const { userPrompt, mode, hasActiveProject, hasPackageJsonOutput } = input;
@@ -55,12 +57,17 @@ export function resolveAutoSandboxIntent(input: ResolveAutoSandboxIntentInput): 
     hasActiveProject,
     isBuildMode,
   }));
+  const freshBuildOnAttachedProject = hasActiveProject
+    && NEW_BUILD_REQUEST.test(userPrompt)
+    && EXPLICIT_BUILD_TARGET.test(userPrompt)
+    && !CURRENT_APP_REFERENCE.test(userPrompt)
+    && !explicitChatEditRequest;
   const canAutoApplyFiles = isBuildMode || explicitChatBuildRequest || explicitChatEditRequest;
   const canAutoApplyDeploy = isBuildMode || explicitChatBuildRequest;
   const shouldReportMissingAction = isBuildMode || explicitChatBuildRequest || explicitChatEditRequest;
   const forceFreshProject = hasPackageJsonOutput
     && !explicitChatEditRequest
-    && FRESH_PROJECT_REQUEST.test(userPrompt);
+    && (FRESH_PROJECT_REQUEST.test(userPrompt) || freshBuildOnAttachedProject);
 
   return {
     isBuildMode,
@@ -76,6 +83,9 @@ export function resolveAutoSandboxIntent(input: ResolveAutoSandboxIntentInput): 
 
 export function resolveSendTimeWorkIntent(input: ResolveSendTimeWorkIntentInput): ResolvedSendTimeWorkIntent {
   const { userPrompt, mode, hasActiveProject } = input;
+  const builderNewBuildRequest = mode === 'builder'
+    && NEW_BUILD_REQUEST.test(userPrompt)
+    && EXPLICIT_BUILD_TARGET.test(userPrompt);
   const sandboxIntent = resolveAutoSandboxIntent({
     userPrompt,
     mode,
@@ -84,11 +94,18 @@ export function resolveSendTimeWorkIntent(input: ResolveSendTimeWorkIntentInput)
   });
 
   const shouldPrimeBuilder = sandboxIntent.explicitStarterRequest
+    || builderNewBuildRequest
     || sandboxIntent.explicitChatBuildRequest
     || sandboxIntent.explicitChatEditRequest;
   const stickyBuilderEdit = mode === 'builder'
     && hasActiveProject
+    && !builderNewBuildRequest
     && !sandboxIntent.explicitStarterRequest;
+  const freshBuildOnAttachedProject = hasActiveProject
+    && builderNewBuildRequest
+    && EXPLICIT_BUILD_TARGET.test(userPrompt)
+    && !CURRENT_APP_REFERENCE.test(userPrompt)
+    && !sandboxIntent.explicitChatEditRequest;
 
   if (!shouldPrimeBuilder && !stickyBuilderEdit) {
     return {
@@ -121,6 +138,8 @@ export function resolveSendTimeWorkIntent(input: ResolveSendTimeWorkIntentInput)
     shouldPrimeBuilder: true,
     buildStatusMessage: sandboxIntent.explicitStarterRequest
       ? 'Preparing a clean starter preview...'
+      : freshBuildOnAttachedProject
+        ? 'Preparing a fresh runnable preview...'
       : hasActiveProject
         ? 'Preparing a runnable update for the current app...'
         : 'Preparing a runnable preview from this request...',
@@ -130,9 +149,13 @@ export function resolveSendTimeWorkIntent(input: ResolveSendTimeWorkIntentInput)
       'Do not output research notes, grounding notes, citations, or architecture advice unless they are strictly required to unblock the build.',
       sandboxIntent.explicitStarterRequest
         ? 'Prefer the cleanest starter path, including sandbox template markers when that is the fastest honest way to launch the preview.'
+        : freshBuildOnAttachedProject
+          ? 'The user phrased this as a fresh build request. Do not mutate the currently attached app unless they explicitly ask to reuse it.'
         : 'Answer briefly and then emit the files and sandbox action markers needed to create or update the runnable preview in this turn.',
       'If you emit files for a new app, include a complete runnable file set with title="path/to/file" code blocks and include package.json.',
-      'If an active preview exists, continue that app unless the user explicitly asked for a fresh rebuild.',
+      freshBuildOnAttachedProject
+        ? 'Prefer a fresh runnable app for this turn instead of iterating the attached preview.'
+        : 'If an active preview exists, continue that app unless the user explicitly asked for a fresh rebuild.',
       'If you are truly blocked, ask one short blocking question instead of emitting speculative files.',
     ].join(' '),
   };
