@@ -47,10 +47,16 @@ function createConfig(): VaiConfig {
       sessionCookieName: 'vai_session',
       sessionTtlHours: 24 * 30,
       sessionSecret: 'test-session-secret',
+      defaultProvider: undefined,
       providers: {
         google: {
           enabled: false,
+          label: 'Google OAuth',
           scopes: ['openid', 'email', 'profile'],
+        },
+        workos: {
+          enabled: false,
+          label: 'WorkOS AuthKit',
         },
       },
     },

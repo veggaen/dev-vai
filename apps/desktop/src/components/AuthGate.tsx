@@ -26,7 +26,7 @@ function BrowserLinkLoading() {
 }
 
 export function AuthGate() {
-  const { status, enabled, googleEnabled, browserLinking, error, startGoogleLogin, startGoogleLoginInBrowser, fetchSession } = useAuthStore();
+  const { status, enabled, providerId, providerLabel, browserLinking, error, startLogin, startLoginInBrowser, fetchSession } = useAuthStore();
 
   useEffect(() => {
     if (!enabled || browserLinking) return;
@@ -59,6 +59,8 @@ export function AuthGate() {
 
   const isLoading = status === 'loading';
   const isError = status === 'error';
+  const providerName = providerLabel ?? 'platform auth';
+  const providerGlyph = providerName.slice(0, 1).toUpperCase() || 'V';
 
   return (
     <div className="relative flex h-screen items-center justify-center overflow-hidden bg-zinc-950 px-6">
@@ -76,7 +78,7 @@ export function AuthGate() {
                 One account for the shell that plans, builds, and ships.
               </h1>
               <p className="mt-5 max-w-xl text-sm leading-7 text-zinc-400 lg:text-base">
-                VeggaAI now has a provider-backed session layer. Google sign-in creates a platform user, links the provider account, and persists an httpOnly session for the shell.
+                VeggaAI now has a provider-backed session layer. The configured identity provider creates a platform user, links the provider account, and persists an httpOnly session for the shell.
               </p>
               <p className="mt-3 max-w-xl text-sm leading-7 text-zinc-500">
                 After sign-in, the fastest way to feel the product is simple: capture one real page in the browser extension, then ask the desktop shell what you read and why it mattered.
@@ -86,7 +88,7 @@ export function AuthGate() {
             <div className="mt-10 grid gap-3 text-sm text-zinc-300 sm:grid-cols-3">
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-zinc-500">Provider</div>
-                <div className="mt-2 text-base text-zinc-100">Google OAuth</div>
+                <div className="mt-2 text-base text-zinc-100">{providerName}</div>
               </div>
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-zinc-500">Session</div>
@@ -111,7 +113,7 @@ export function AuthGate() {
                     Sign in to continue
                   </h2>
                   <p className="mt-3 text-sm leading-6 text-zinc-400">
-                    The shell is gated because platform auth is enabled. Continue with Google to restore your working session. The desktop app now rechecks auth automatically while this screen is open.
+                    The shell is gated because platform auth is enabled. Continue with {providerName} to restore your working session. The desktop app now rechecks auth automatically while this screen is open.
                   </p>
                   <p className="mt-3 text-xs leading-5 text-zinc-500">
                     Once you are through this gate, look for the memory workflow in chat or settings: capture a page, then ask a grounded recall question.
@@ -123,26 +125,26 @@ export function AuthGate() {
                     </div>
                   )}
 
-                  {!googleEnabled && (
+                  {!providerId && (
                     <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/80 px-4 py-3 text-sm text-zinc-400">
-                      Google OAuth is not configured yet. Set GOOGLE_WEB_OAUTH_CLIENT_ID and GOOGLE_WEB_OAUTH_CLIENT_SECRET, then reload the runtime.
+                      Platform auth is enabled, but no browser auth provider is configured yet. Set the WorkOS or Google OAuth environment variables, then reload the runtime.
                     </div>
                   )}
 
                   <button
                     type="button"
-                    onClick={startGoogleLogin}
-                    disabled={!googleEnabled}
+                    onClick={startLogin}
+                    disabled={!providerId}
                     className="mt-6 flex w-full items-center justify-center gap-3 rounded-2xl bg-zinc-100 px-5 py-3 text-sm font-medium text-zinc-950 transition hover:bg-white disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500"
                   >
-                    <span className="grid h-6 w-6 place-items-center rounded-full bg-zinc-950 text-xs font-semibold text-zinc-100">G</span>
-                    Continue with Google
+                    <span className="grid h-6 w-6 place-items-center rounded-full bg-zinc-950 text-xs font-semibold text-zinc-100">{providerGlyph}</span>
+                    Continue with {providerName}
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => void startGoogleLoginInBrowser()}
-                    disabled={!googleEnabled}
+                    onClick={() => void startLoginInBrowser()}
+                    disabled={!providerId}
                     className="mt-3 w-full rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-3 text-sm text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-500"
                   >
                     Sign in via browser

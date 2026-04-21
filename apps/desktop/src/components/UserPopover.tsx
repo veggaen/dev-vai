@@ -23,12 +23,13 @@ export function UserPopover({ open, onClose, anchorRect }: UserPopoverProps) {
 
   const authEnabled = useAuthStore((s) => s.enabled);
   const authStatus = useAuthStore((s) => s.status);
-  const googleEnabled = useAuthStore((s) => s.googleEnabled);
+  const providerId = useAuthStore((s) => s.providerId);
+  const providerLabel = useAuthStore((s) => s.providerLabel);
   const authUser = useAuthStore((s) => s.user);
   const isOwner = useAuthStore((s) => s.isOwner);
   const fetchSession = useAuthStore((s) => s.fetchSession);
   const logout = useAuthStore((s) => s.logout);
-  const startGoogleLogin = useAuthStore((s) => s.startGoogleLogin);
+  const startLogin = useAuthStore((s) => s.startLogin);
   const syncBootstrap = useAuthStore((s) => s.syncBootstrap);
 
   const bootstrap = useSettingsStore((s) => s.bootstrap);
@@ -36,7 +37,11 @@ export function UserPopover({ open, onClose, anchorRect }: UserPopoverProps) {
 
   const bootstrapAuth = bootstrap?.auth;
   const effectiveAuthEnabled = authEnabled || bootstrapAuth?.enabled || false;
-  const effectiveGoogleEnabled = googleEnabled || bootstrapAuth?.providers.google.enabled || false;
+  const effectiveProviderId = providerId
+    ?? bootstrapAuth?.defaultProvider
+    ?? (bootstrapAuth?.providers.workos.enabled ? 'workos' : bootstrapAuth?.providers.google.enabled ? 'google' : null);
+  const effectiveProviderLabel = providerLabel
+    ?? (effectiveProviderId ? bootstrapAuth?.providers[effectiveProviderId].label ?? null : null);
   const accountName = authUser?.name || authUser?.email?.split('@')[0] || 'Platform account';
   const accountInitials = getUserInitials(authUser?.name, authUser?.email);
 
@@ -90,7 +95,7 @@ export function UserPopover({ open, onClose, anchorRect }: UserPopoverProps) {
   };
 
   const handleSignIn = () => {
-    startGoogleLogin();
+    startLogin();
     onClose();
   };
 
@@ -156,7 +161,7 @@ export function UserPopover({ open, onClose, anchorRect }: UserPopoverProps) {
             {/* Provider row */}
             <div className="flex items-center justify-between px-3 py-2">
               <span className="text-xs text-zinc-500">Provider</span>
-              <span className="text-xs text-zinc-300">{effectiveGoogleEnabled ? 'Google OAuth' : 'Unavailable'}</span>
+              <span className="text-xs text-zinc-300">{effectiveProviderLabel ?? 'Unavailable'}</span>
             </div>
 
             {/* Owner badge */}
@@ -186,13 +191,13 @@ export function UserPopover({ open, onClose, anchorRect }: UserPopoverProps) {
                 <LogOut className="h-3.5 w-3.5 text-red-400" />
                 Sign out
               </button>
-            ) : effectiveAuthEnabled && effectiveGoogleEnabled ? (
+            ) : effectiveAuthEnabled && effectiveProviderId ? (
               <button
                 onClick={handleSignIn}
                 className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-emerald-300 transition-colors hover:bg-emerald-500/10"
               >
                 <LogIn className="h-3.5 w-3.5 text-emerald-400" />
-                Sign in with Google
+                Sign in with {effectiveProviderLabel ?? 'provider'}
               </button>
             ) : null}
           </div>

@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq, gt, lt } from 'drizzle-orm';
+import { WorkOS } from '@workos-inc/node';
 import { schema, type VaiConfig, type VaiDatabase } from '@vai/core';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 
@@ -18,6 +19,22 @@ interface GoogleUserInfo {
   email_verified?: boolean;
   name?: string;
   picture?: string;
+}
+
+type PlatformAuthProviderId = keyof VaiConfig['platformAuth']['providers'];
+
+interface ProviderAccountProfile {
+  providerAccountId: string;
+  email: string;
+  emailVerified: boolean;
+  name: string | null;
+  avatarUrl: string | null;
+  accessToken: string;
+  refreshToken: string | null;
+  scope: string | null;
+  tokenType: string | null;
+  tokenExpiresAt: Date | null;
+  rawProfile: unknown;
 }
 
 interface DeviceCodeRecord {
@@ -214,7 +231,27 @@ function generateUserCode(): string {
   return `${value.slice(0, 4)}-${value.slice(4)}`;
 }
 
+function isPlatformAuthProviderId(value: string): value is PlatformAuthProviderId {
+  return value === 'google' || value === 'workos';
+}
+
+function formatName(parts: Array<string | null | undefined>): string | null {
+  const value = parts.map((part) => part?.trim() || '').filter(Boolean).join(' ').trim();
+  return value || null;
+}
+
+function normalizeUnixTimestamp(value: number | null | undefined): Date | null {
+  if (!Number.isFinite(value ?? Number.NaN)) {
+    return null;
+  }
+
+  const timestamp = value as number;
+  return new Date(timestamp > 10_000_000_000 ? timestamp : timestamp * 1000);
+}
+
 export class PlatformAuthService {
+  private workosClient: WorkOS | null = null;
+
   constructor(
     private readonly db: VaiDatabase,
     private readonly config: VaiConfig['platformAuth'],
@@ -224,16 +261,49 @@ export class PlatformAuthService {
     return this.config.enabled;
   }
 
-  isGoogleEnabled(): boolean {
-    return this.config.providers.google.enabled;
+  isProviderSupported(provider: string): provider is PlatformAuthProviderId {
+    return isPlatformAuthProviderId(provider);
+  }
+
+  isProviderEnabled(provider: PlatformAuthProviderId): boolean {
+    return this.config.providers[provider].enabled;
+  }
+
+  getDefaultProvider(): PlatformAuthProviderId | null {
+    if (this.config.defaultProvider && this.isProviderEnabled(this.config.defaultProvider)) {
+      return this.config.defaultProvider;
+    }
+
+    const firstEnabledProvider = Object.entries(this.config.providers)
+      .find(([, providerConfig]) => providerConfig.enabled)?.[0];
+
+    return firstEnabledProvider && isPlatformAuthProviderId(firstEnabledProvider)
+      ? firstEnabledProvider
+      : null;
+  }
+
+  getProviderLabel(provider: PlatformAuthProviderId | null | undefined): string {
+    if (!provider) {
+      return 'platform auth';
+    }
+
+    return this.config.providers[provider].label;
   }
 
   getPublicConfig() {
+    const defaultProvider = this.getDefaultProvider();
+
     return {
       enabled: this.config.enabled,
+      defaultProvider,
       providers: {
         google: {
           enabled: this.config.providers.google.enabled,
+          label: this.config.providers.google.label,
+        },
+        workos: {
+          enabled: this.config.providers.workos.enabled,
+          label: this.config.providers.workos.label,
         },
       },
     };
@@ -418,9 +488,18 @@ export class PlatformAuthService {
     return `${this.config.publicUrl}/api/auth/device?userCode=${encodeURIComponent(userCode)}&auto=1`;
   }
 
-  buildGoogleLoginUrl(returnTo?: string): string {
-    if (!returnTo) return `${this.config.publicUrl}/api/auth/google/start`;
-    return `${this.config.publicUrl}/api/auth/google/start?returnTo=${encodeURIComponent(returnTo)}`;
+  buildLoginUrl(returnTo?: string, provider?: PlatformAuthProviderId | null): string {
+    const targetProvider = provider ?? this.getDefaultProvider();
+    if (!targetProvider) {
+      throw new Error('No platform auth provider is configured');
+    }
+
+    const baseUrl = `${this.config.publicUrl}/api/auth/${targetProvider}/start`;
+    if (!returnTo) {
+      return baseUrl;
+    }
+
+    return `${baseUrl}?returnTo=${encodeURIComponent(returnTo)}`;
   }
 
   getLoginReturnTarget(request: FastifyRequest, userCode: string): string {
@@ -447,7 +526,30 @@ export class PlatformAuthService {
       .get();
   }
 
-  buildGoogleStartUrl(request: FastifyRequest, returnTo?: string): string {
+  async buildProviderStartUrl(provider: PlatformAuthProviderId, request: FastifyRequest, returnTo?: string): Promise<string> {
+    switch (provider) {
+      case 'google':
+        return this.buildGoogleStartUrl(request, returnTo);
+      case 'workos':
+        return this.buildWorkOSStartUrl(request, returnTo);
+    }
+  }
+
+  async handleProviderCallback(
+    provider: PlatformAuthProviderId,
+    code: string,
+    state: string,
+    request: FastifyRequest,
+  ): Promise<{ returnTo: string; cookieValue: string }> {
+    switch (provider) {
+      case 'google':
+        return this.handleGoogleCallback(code, state, request);
+      case 'workos':
+        return this.handleWorkOSCallback(code, state, request);
+    }
+  }
+
+  private buildGoogleStartUrl(request: FastifyRequest, returnTo?: string): string {
     if (!this.config.enabled || !this.config.providers.google.enabled || !this.config.providers.google.clientId) {
       throw new Error('Google auth is not configured');
     }
@@ -488,7 +590,42 @@ export class PlatformAuthService {
     return url.toString();
   }
 
-  async handleGoogleCallback(code: string, state: string, request: FastifyRequest): Promise<{ returnTo: string; cookieValue: string }> {
+  private async buildWorkOSStartUrl(request: FastifyRequest, returnTo?: string): Promise<string> {
+    const workosConfig = this.config.providers.workos;
+    if (!this.config.enabled || !workosConfig.enabled || !workosConfig.apiKey || !workosConfig.clientId || !workosConfig.redirectUri) {
+      throw new Error('WorkOS auth is not configured');
+    }
+
+    this.purgeExpiredRecords();
+
+    const safeReturnTo = this.sanitizeReturnTo(returnTo, request);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 10 * 60 * 1000);
+    const authorizationTarget = workosConfig.organizationId
+      ? { organizationId: workosConfig.organizationId }
+      : { provider: 'authkit' as const };
+    const authorizationResult = await this.getWorkOSClient().userManagement.getAuthorizationUrlWithPKCE({
+      ...authorizationTarget,
+      clientId: workosConfig.clientId,
+      redirectUri: workosConfig.redirectUri,
+    });
+
+    this.db.insert(schema.platformOauthStates)
+      .values({
+        id: randomUUID(),
+        provider: 'workos',
+        state: authorizationResult.state,
+        codeVerifier: authorizationResult.codeVerifier,
+        returnTo: safeReturnTo,
+        expiresAt,
+        createdAt: now,
+      })
+      .run();
+
+    return authorizationResult.url;
+  }
+
+  private async handleGoogleCallback(code: string, state: string, request: FastifyRequest): Promise<{ returnTo: string; cookieValue: string }> {
     if (!this.config.providers.google.clientId || !this.config.providers.google.clientSecret) {
       throw new Error('Google auth is not configured');
     }
@@ -540,7 +677,78 @@ export class PlatformAuthService {
     }
 
     const profile = await userInfoResponse.json() as GoogleUserInfo;
-    const userId = this.upsertGoogleUser(profile, tokens);
+    const userId = this.upsertProviderUser('google', {
+      providerAccountId: profile.sub,
+      email: profile.email,
+      emailVerified: Boolean(profile.email_verified),
+      name: profile.name ?? null,
+      avatarUrl: profile.picture ?? null,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token ?? null,
+      scope: tokens.scope ?? null,
+      tokenType: tokens.token_type ?? null,
+      tokenExpiresAt: typeof tokens.expires_in === 'number'
+        ? new Date(Date.now() + tokens.expires_in * 1000)
+        : null,
+      rawProfile: profile,
+    });
+    const cookieValue = this.createSession(userId, request);
+
+    return {
+      returnTo: oauthState.returnTo,
+      cookieValue,
+    };
+  }
+
+  private async handleWorkOSCallback(code: string, state: string, request: FastifyRequest): Promise<{ returnTo: string; cookieValue: string }> {
+    const workosConfig = this.config.providers.workos;
+    if (!workosConfig.apiKey || !workosConfig.clientId) {
+      throw new Error('WorkOS auth is not configured');
+    }
+
+    this.purgeExpiredRecords();
+
+    const oauthState = this.db.select()
+      .from(schema.platformOauthStates)
+      .where(and(
+        eq(schema.platformOauthStates.provider, 'workos'),
+        eq(schema.platformOauthStates.state, state),
+        gt(schema.platformOauthStates.expiresAt, new Date()),
+      ))
+      .get();
+
+    if (!oauthState) {
+      throw new Error('Auth session expired. Start login again.');
+    }
+
+    this.db.delete(schema.platformOauthStates)
+      .where(eq(schema.platformOauthStates.id, oauthState.id))
+      .run();
+
+    const response = await this.getWorkOSClient().userManagement.authenticateWithCode({
+      clientId: workosConfig.clientId,
+      code,
+      codeVerifier: oauthState.codeVerifier,
+    });
+
+    const userId = this.upsertProviderUser('workos', {
+      providerAccountId: response.user.id,
+      email: response.user.email,
+      emailVerified: response.user.emailVerified,
+      name: formatName([response.user.firstName, response.user.lastName]),
+      avatarUrl: response.user.profilePictureUrl ?? null,
+      accessToken: response.accessToken,
+      refreshToken: response.refreshToken ?? response.oauthTokens?.refreshToken ?? null,
+      scope: response.oauthTokens?.scopes?.join(' ') ?? null,
+      tokenType: null,
+      tokenExpiresAt: normalizeUnixTimestamp(response.oauthTokens?.expiresAt),
+      rawProfile: {
+        user: response.user,
+        organizationId: response.organizationId ?? null,
+        authenticationMethod: response.authenticationMethod ?? null,
+        oauthTokens: response.oauthTokens ?? null,
+      },
+    });
     const cookieValue = this.createSession(userId, request);
 
     return {
@@ -746,13 +954,13 @@ export class PlatformAuthService {
     return value?.trim() || null;
   }
 
-  private upsertGoogleUser(profile: GoogleUserInfo, tokens: GoogleTokenResponse): string {
+  private upsertProviderUser(provider: PlatformAuthProviderId, profile: ProviderAccountProfile): string {
     const now = new Date();
     const account = this.db.select()
       .from(schema.platformAccounts)
       .where(and(
-        eq(schema.platformAccounts.provider, 'google'),
-        eq(schema.platformAccounts.providerAccountId, profile.sub),
+        eq(schema.platformAccounts.provider, provider),
+        eq(schema.platformAccounts.providerAccountId, profile.providerAccountId),
       ))
       .get();
 
@@ -769,8 +977,8 @@ export class PlatformAuthService {
         this.db.update(schema.platformUsers)
           .set({
             name: profile.name ?? existingUser.name,
-            avatarUrl: profile.picture ?? existingUser.avatarUrl,
-            emailVerifiedAt: profile.email_verified ? (existingUser.emailVerifiedAt ?? now) : existingUser.emailVerifiedAt,
+            avatarUrl: profile.avatarUrl ?? existingUser.avatarUrl,
+            emailVerifiedAt: profile.emailVerified ? (existingUser.emailVerifiedAt ?? now) : existingUser.emailVerifiedAt,
             lastLoginAt: now,
             updatedAt: now,
           })
@@ -782,8 +990,8 @@ export class PlatformAuthService {
             id: userId,
             email: profile.email,
             name: profile.name ?? null,
-            avatarUrl: profile.picture ?? null,
-            emailVerifiedAt: profile.email_verified ? now : null,
+            avatarUrl: profile.avatarUrl ?? null,
+            emailVerifiedAt: profile.emailVerified ? now : null,
             lastLoginAt: now,
             createdAt: now,
             updatedAt: now,
@@ -795,8 +1003,8 @@ export class PlatformAuthService {
         .set({
           email: profile.email,
           name: profile.name ?? null,
-          avatarUrl: profile.picture ?? null,
-          emailVerifiedAt: profile.email_verified ? now : null,
+          avatarUrl: profile.avatarUrl ?? null,
+          emailVerifiedAt: profile.emailVerified ? now : null,
           lastLoginAt: now,
           updatedAt: now,
         })
@@ -804,20 +1012,16 @@ export class PlatformAuthService {
         .run();
     }
 
-    const tokenExpiresAt = typeof tokens.expires_in === 'number'
-      ? new Date(Date.now() + tokens.expires_in * 1000)
-      : null;
-
     if (account) {
       this.db.update(schema.platformAccounts)
         .set({
           userId,
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token ?? account.refreshToken,
-          scope: tokens.scope ?? account.scope,
-          tokenType: tokens.token_type ?? account.tokenType,
-          tokenExpiresAt,
-          rawProfile: JSON.stringify(profile),
+          accessToken: profile.accessToken,
+          refreshToken: profile.refreshToken ?? account.refreshToken,
+          scope: profile.scope ?? account.scope,
+          tokenType: profile.tokenType ?? account.tokenType,
+          tokenExpiresAt: profile.tokenExpiresAt,
+          rawProfile: JSON.stringify(profile.rawProfile),
           updatedAt: now,
         })
         .where(eq(schema.platformAccounts.id, account.id))
@@ -827,14 +1031,14 @@ export class PlatformAuthService {
         .values({
           id: randomUUID(),
           userId,
-          provider: 'google',
-          providerAccountId: profile.sub,
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token ?? null,
-          scope: tokens.scope ?? null,
-          tokenType: tokens.token_type ?? null,
-          tokenExpiresAt,
-          rawProfile: JSON.stringify(profile),
+          provider,
+          providerAccountId: profile.providerAccountId,
+          accessToken: profile.accessToken,
+          refreshToken: profile.refreshToken,
+          scope: profile.scope,
+          tokenType: profile.tokenType,
+          tokenExpiresAt: profile.tokenExpiresAt,
+          rawProfile: JSON.stringify(profile.rawProfile),
           createdAt: now,
           updatedAt: now,
         })
@@ -877,6 +1081,22 @@ export class PlatformAuthService {
     this.db.delete(schema.platformDeviceCodes)
       .where(lt(schema.platformDeviceCodes.expiresAt, now))
       .run();
+  }
+
+  private getWorkOSClient(): WorkOS {
+    const workosConfig = this.config.providers.workos;
+    if (!workosConfig.apiKey || !workosConfig.clientId) {
+      throw new Error('WorkOS auth is not configured');
+    }
+
+    if (!this.workosClient) {
+      this.workosClient = new WorkOS({
+        apiKey: workosConfig.apiKey,
+        clientId: workosConfig.clientId,
+      });
+    }
+
+    return this.workosClient;
   }
 
   private hashToken(token: string): string {

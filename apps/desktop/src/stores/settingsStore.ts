@@ -33,6 +33,13 @@ interface IdeTargetInfo {
   invitePresets: InvitePreset[];
 }
 
+type AuthProviderId = 'google' | 'workos';
+
+interface AuthProviderInfo {
+  enabled: boolean;
+  label: string;
+}
+
 interface PlatformBootstrap {
   product: {
     name: string;
@@ -51,10 +58,10 @@ interface PlatformBootstrap {
   };
   auth: {
     enabled: boolean;
+    defaultProvider?: AuthProviderId | null;
     providers: {
-      google: {
-        enabled: boolean;
-      };
+      google: AuthProviderInfo;
+      workos: AuthProviderInfo;
     };
     authenticated: boolean;
     user: null | {

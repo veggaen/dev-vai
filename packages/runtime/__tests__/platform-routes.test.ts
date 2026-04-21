@@ -81,10 +81,16 @@ describe('Platform Routes', () => {
         sessionCookieName: 'vai_session',
         sessionTtlHours: 24 * 30,
         sessionSecret: 'test-session-secret',
+        defaultProvider: undefined,
         providers: {
           google: {
             enabled: false,
+            label: 'Google OAuth',
             scopes: ['openid', 'email', 'profile'],
+          },
+          workos: {
+            enabled: false,
+            label: 'WorkOS AuthKit',
           },
         },
       },
@@ -120,6 +126,7 @@ describe('Platform Routes', () => {
     expect(body.workflow.modes).toContain('plan');
     expect(body.models.composition.planned).toBe(true);
     expect(body.auth.enabled).toBe(false);
+    expect(body.auth.defaultProvider).toBe(null);
     expect(body.auth.authenticated).toBe(false);
   });
 });

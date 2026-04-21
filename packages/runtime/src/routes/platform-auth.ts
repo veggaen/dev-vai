@@ -116,14 +116,36 @@ export function registerPlatformAuthRoutes(app: FastifyInstance, auth: PlatformA
   });
 
   app.get<{ Querystring: { returnTo?: string } }>(
-    '/api/auth/google/start',
+    '/api/auth/start',
     async (request, reply) => {
-      if (!auth.isEnabled() || !auth.isGoogleEnabled()) {
+      const provider = auth.getDefaultProvider();
+      if (!auth.isEnabled() || !provider) {
         reply.code(503);
-        return { error: 'Google auth is not configured' };
+        return { error: 'Platform auth is not configured' };
       }
 
-      const authorizationUrl = auth.buildGoogleStartUrl(request, request.query.returnTo);
+      const authorizationUrl = await auth.buildProviderStartUrl(provider, request, request.query.returnTo);
+      return reply.redirect(authorizationUrl);
+    },
+  );
+
+  app.get<{ Params: { provider: string }; Querystring: { returnTo?: string } }>(
+    '/api/auth/:provider/start',
+    async (request, reply) => {
+      const provider = auth.isProviderSupported(request.params.provider)
+        ? request.params.provider
+        : null;
+      if (!provider) {
+        reply.code(404);
+        return { error: 'Unknown auth provider' };
+      }
+
+      if (!auth.isEnabled() || !auth.isProviderEnabled(provider)) {
+        reply.code(503);
+        return { error: `${auth.getProviderLabel(provider)} is not configured` };
+      }
+
+      const authorizationUrl = await auth.buildProviderStartUrl(provider, request, request.query.returnTo);
       return reply.redirect(authorizationUrl);
     },
   );
@@ -163,7 +185,8 @@ export function registerPlatformAuthRoutes(app: FastifyInstance, auth: PlatformA
 
       const viewer = await auth.getViewer(request);
       if (!viewer.authenticated || !viewer.user) {
-        const loginUrl = auth.buildGoogleLoginUrl(auth.getLoginReturnTarget(request, userCode));
+        const loginUrl = auth.buildLoginUrl(auth.getLoginReturnTarget(request, userCode));
+        const providerLabel = auth.getProviderLabel(auth.getDefaultProvider());
         reply.type('text/html; charset=utf-8');
         return renderDevicePage(
           'Sign in to continue',
@@ -172,7 +195,7 @@ export function registerPlatformAuthRoutes(app: FastifyInstance, auth: PlatformA
             <p>You are linking code <code>${escapeHtml(deviceLink.userCode)}</code>.</p>
             <p class="muted">Sign in with the VeggaAI platform account you want this client to use.</p>
           </div>
-          <a class="button" href="${escapeHtml(loginUrl)}">Continue with Google</a>`,
+          <a class="button" href="${escapeHtml(loginUrl)}">Continue with ${escapeHtml(providerLabel)}</a>`,
         );
       }
 
@@ -255,9 +278,17 @@ export function registerPlatformAuthRoutes(app: FastifyInstance, auth: PlatformA
     },
   );
 
-  app.get<{ Querystring: { code?: string; state?: string; error?: string } }>(
-    '/api/auth/google/callback',
+  app.get<{ Params: { provider: string }; Querystring: { code?: string; state?: string; error?: string } }>(
+    '/api/auth/:provider/callback',
     async (request, reply) => {
+      const provider = auth.isProviderSupported(request.params.provider)
+        ? request.params.provider
+        : null;
+      if (!provider) {
+        reply.code(404);
+        return { error: 'Unknown auth provider' };
+      }
+
       const { code, state, error } = request.query;
 
       if (error) {
@@ -267,11 +298,11 @@ export function registerPlatformAuthRoutes(app: FastifyInstance, auth: PlatformA
 
       if (!code || !state) {
         reply.code(400);
-        return { error: 'Missing Google auth code or state' };
+        return { error: `Missing ${auth.getProviderLabel(provider)} auth code or state` };
       }
 
       try {
-        const result = await auth.handleGoogleCallback(code, state, request);
+        const result = await auth.handleProviderCallback(provider, code, state, request);
         auth.applySessionCookie(reply, result.cookieValue);
 
         // Append session token as URL hash fragment so the SPA can store it
@@ -282,7 +313,7 @@ export function registerPlatformAuthRoutes(app: FastifyInstance, auth: PlatformA
       } catch (callbackError) {
         reply.code(400);
         return {
-          error: callbackError instanceof Error ? callbackError.message : 'Google sign-in failed',
+          error: callbackError instanceof Error ? callbackError.message : `${auth.getProviderLabel(provider)} sign-in failed`,
         };
       }
     },

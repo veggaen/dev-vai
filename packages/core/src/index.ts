@@ -8,7 +8,7 @@ export { VaiError, VaiValidationError, type VaiErrorCode } from './errors/vai-er
 
 // Config
 export { loadConfig, printConfigDiagnostic, getModelProfile, getProviderProfiles, listModelIds } from './config/index.js';
-export type { VaiConfig, ProviderConfig, ProviderId, ModelProfile, ModelCapabilities, ModelCost, RoutingRule, FallbackChain, ChatPromptRewriteConfig, ChatPromptRewriteProfile, ChatPromptRewriteResponseDepth, ChatPromptRewriteRulesConfig } from './config/index.js';
+export type { VaiConfig, ProviderConfig, ProviderId, ModelProfile, ModelCapabilities, ModelCost, RoutingRule, FallbackChain, PlatformAuthConfig, PlatformAuthProviderId, PlatformAuthProviderConfig, GoogleOAuthConfig, WorkOSAuthConfig, ChatPromptRewriteConfig, ChatPromptRewriteProfile, ChatPromptRewriteResponseDepth, ChatPromptRewriteRulesConfig } from './config/index.js';
 
 // Models
 export {

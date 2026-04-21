@@ -16,6 +16,7 @@
     "@fastify/websocket": "^11.0.0",
     "@vai/api-types": "workspace:*",
     "@vai/core": "workspace:*",
+    "@workos-inc/node": "^8.13.0",
     "dotenv": "^16.4.0",
     "fastify": "^5.2.0",
     "zod": "^3.24.0"

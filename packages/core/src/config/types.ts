@@ -103,14 +103,24 @@ export interface FallbackChain {
 
 // ── Platform Auth ──
 
+export type PlatformAuthProviderId = 'google' | 'workos';
+
 export interface PlatformAuthProviderConfig {
   readonly enabled: boolean;
+  readonly label: string;
 }
 
 export interface GoogleOAuthConfig extends PlatformAuthProviderConfig {
   readonly clientId?: string;
   readonly clientSecret?: string;
   readonly scopes: readonly string[];
+}
+
+export interface WorkOSAuthConfig extends PlatformAuthProviderConfig {
+  readonly apiKey?: string;
+  readonly clientId?: string;
+  readonly redirectUri?: string;
+  readonly organizationId?: string;
 }
 
 export interface PlatformAuthConfig {
@@ -126,9 +136,12 @@ export interface PlatformAuthConfig {
   readonly sessionTtlHours: number;
   /** Secret used for session token hashing and auth state integrity */
   readonly sessionSecret: string;
+  /** Preferred provider when multiple auth methods are configured */
+  readonly defaultProvider?: PlatformAuthProviderId;
   /** Enabled platform auth providers */
   readonly providers: {
     readonly google: GoogleOAuthConfig;
+    readonly workos: WorkOSAuthConfig;
   };
 }
 

@@ -12,6 +12,11 @@ scripts/screenshots/
 __pycache__/
 *.pyc
 
+# Local environment secrets
+.env
+.env.local
+.env.*.local
+
 # Generated extension artifacts
 apps/extension/.output/
 apps/extension/.wxt/
@@ -28,3 +33,25 @@ pnpm-debug.log*
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+node_modules
+
+# Local runtime / desktop outputs
+.agents/
+.claude/
+.vai-server.pid
+.vai-session
+apps/desktop/dist/
+apps/desktop/src-tauri/binaries/
+apps/desktop/src-tauri/resources/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/*.db
+apps/desktop/src-tauri/*.db-shm
+apps/desktop/src-tauri/*.db-wal
+apps/vscode-extension/*.vsix
+packages/*/dist/
+packages/runtime/*.db
+packages/runtime/*.db-shm
+packages/runtime/*.db-wal
+vai.db
+vai.db-shm
+vai.db-wal

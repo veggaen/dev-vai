@@ -31,7 +31,7 @@ import { setApiSessionToken } from './lib/api.js';
 import { isDevAuthBypassEnabled } from './lib/dev-auth-bypass.js';
 
 /**
- * Check for a session token passed as a URL hash fragment after Google OAuth
+ * Check for a session token passed as a URL hash fragment after platform auth
  * callback. Store it in localStorage and clean the URL.
  */
 function consumeHashToken(): boolean {
@@ -153,7 +153,7 @@ export function App() {
     return () => stopVinextPolling();
   }, [startVinextPolling, stopVinextPolling]);
   useEffect(() => {
-    // Capture session token from URL hash (set by Google OAuth callback redirect)
+    // Capture session token from URL hash (set by platform auth callback redirect)
     const hadToken = consumeHashToken();
 
     void useSettingsStore.getState().fetchBootstrap().then((bootstrap) => {
@@ -163,7 +163,8 @@ export function App() {
       return useAuthStore.getState().fetchSession();
     }).then(() => {
       if (hadToken) {
-        toast.success('Signed in with Google');
+        const providerLabel = useAuthStore.getState().providerLabel ?? 'platform auth';
+        toast.success(`Signed in with ${providerLabel}`);
       }
     });
   }, []);

@@ -8,12 +8,19 @@ interface AuthUser {
   avatarUrl: string | null;
 }
 
+type AuthProviderId = 'google' | 'workos';
+
+interface AuthProviderInfo {
+  enabled: boolean;
+  label: string;
+}
+
 interface AuthBootstrap {
   enabled: boolean;
+  defaultProvider?: AuthProviderId | null;
   providers: {
-    google: {
-      enabled: boolean;
-    };
+    google: AuthProviderInfo;
+    workos: AuthProviderInfo;
   };
   authenticated: boolean;
   user: AuthUser | null;
@@ -64,7 +71,8 @@ function writeOwnerFeaturesHidden(hidden: boolean): void {
 interface AuthState {
   status: AuthStatus;
   enabled: boolean;
-  googleEnabled: boolean;
+  providerId: AuthProviderId | null;
+  providerLabel: string | null;
   user: AuthUser | null;
   /** Derived platform role: owner > admin > builder */
   role: AppRole;
@@ -74,8 +82,8 @@ interface AuthState {
   error: string | null;
   syncBootstrap: (auth: AuthBootstrap | null | undefined) => void;
   fetchSession: () => Promise<void>;
-  startGoogleLogin: () => void;
-  startGoogleLoginInBrowser: () => Promise<void>;
+  startLogin: () => void;
+  startLoginInBrowser: () => Promise<void>;
   logout: () => Promise<void>;
   setOwnerFeaturesHidden: (hidden: boolean) => void;
   toggleOwnerFeaturesHidden: () => void;
@@ -85,11 +93,28 @@ function isTauriApp(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-function buildGoogleLoginUrl(): string {
+function resolveProviderId(auth: AuthBootstrap): AuthProviderId | null {
+  if (auth.defaultProvider && auth.providers[auth.defaultProvider].enabled) {
+    return auth.defaultProvider;
+  }
+
+  if (auth.providers.workos.enabled) {
+    return 'workos';
+  }
+
+  if (auth.providers.google.enabled) {
+    return 'google';
+  }
+
+  return null;
+}
+
+function buildLoginUrl(providerId?: AuthProviderId | null): string {
   const currentUrl = typeof window !== 'undefined'
     ? `${window.location.origin}${window.location.pathname}${window.location.search}`
     : '/';
-  return `${API_BASE}/api/auth/google/start?returnTo=${encodeURIComponent(currentUrl)}`;
+  const basePath = providerId ? `/api/auth/${providerId}/start` : '/api/auth/start';
+  return `${API_BASE}${basePath}?returnTo=${encodeURIComponent(currentUrl)}`;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -143,10 +168,11 @@ function deriveRole(user: AuthUser | null): AppRole {
   return 'builder';
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'idle',
   enabled: false,
-  googleEnabled: false,
+  providerId: null,
+  providerLabel: null,
   user: null,
   role: 'builder',
   isOwner: false,
@@ -158,9 +184,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (!auth) return;
     const isOwner = matchesOwner(auth.user);
     const role = deriveRole(auth.user);
+    const providerId = resolveProviderId(auth);
     set({
       enabled: auth.enabled,
-      googleEnabled: auth.providers.google.enabled,
+      providerId,
+      providerLabel: providerId ? auth.providers[providerId].label : null,
       user: auth.user,
       role,
       isOwner,
@@ -184,10 +212,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       const payload = await response.json() as AuthBootstrap;
       const isOwner = matchesOwner(payload.user);
       const role = deriveRole(payload.user);
+      const providerId = resolveProviderId(payload);
 
       set({
         enabled: payload.enabled,
-        googleEnabled: payload.providers.google.enabled,
+        providerId,
+        providerLabel: providerId ? payload.providers[providerId].label : null,
         user: payload.user,
         role,
         isOwner,
@@ -207,12 +237,12 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  startGoogleLogin: () => {
-    const url = buildGoogleLoginUrl();
+  startLogin: () => {
+    const url = buildLoginUrl(get().providerId);
     window.location.assign(url);
   },
 
-  startGoogleLoginInBrowser: async () => {
+  startLoginInBrowser: async () => {
     set({
       browserLinking: true,
       error: null,

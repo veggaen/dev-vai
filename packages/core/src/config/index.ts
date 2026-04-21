@@ -11,9 +11,9 @@
  */
 
 import { isConversationMode } from '../chat/modes.js';
-import type { VaiConfig, ProviderConfig, ProviderId, PlatformAuthConfig, ChatPromptRewriteConfig } from './types.js';
+import type { VaiConfig, ProviderConfig, ProviderId, PlatformAuthConfig, PlatformAuthProviderId, ChatPromptRewriteConfig } from './types.js';
 
-export type { VaiConfig, ProviderConfig, ProviderId, ModelProfile, ModelCapabilities, ModelCost, RoutingRule, FallbackChain, PlatformAuthConfig, PlatformAuthProviderConfig, GoogleOAuthConfig, ChatPromptRewriteConfig, ChatPromptRewriteProfile, ChatPromptRewriteResponseDepth, ChatPromptRewriteRulesConfig } from './types.js';
+export type { VaiConfig, ProviderConfig, ProviderId, ModelProfile, ModelCapabilities, ModelCost, RoutingRule, FallbackChain, PlatformAuthConfig, PlatformAuthProviderId, PlatformAuthProviderConfig, GoogleOAuthConfig, WorkOSAuthConfig, ChatPromptRewriteConfig, ChatPromptRewriteProfile, ChatPromptRewriteResponseDepth, ChatPromptRewriteRulesConfig } from './types.js';
 export { MODEL_PROFILES, getModelProfile, getProviderProfiles, listModelIds } from './model-profiles.js';
 
 // ── Helpers ──
@@ -149,8 +149,22 @@ function buildPlatformAuthConfig(env: NodeJS.ProcessEnv): PlatformAuthConfig {
   const appUrl = env.VAI_APP_URL?.trim() || undefined;
   const googleClientId = firstEnv(env, ['GOOGLE_WEB_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_ID']);
   const googleClientSecret = firstEnv(env, ['GOOGLE_WEB_OAUTH_CLIENT_SECRET', 'GOOGLE_OAUTH_CLIENT_SECRET']);
+  const workosApiKey = env.WORKOS_API_KEY?.trim() || undefined;
+  const workosClientId = env.WORKOS_CLIENT_ID?.trim() || undefined;
+  const workosRedirectUri = env.WORKOS_REDIRECT_URI?.trim() || `${publicUrl}/api/auth/workos/callback`;
+  const workosOrganizationId = env.WORKOS_ORGANIZATION_ID?.trim() || undefined;
   const googleEnabled = !!(googleClientId && googleClientSecret);
-  const enabled = envBool(env, 'VAI_PLATFORM_AUTH_ENABLED', googleEnabled);
+  const workosEnabled = !!(workosApiKey && workosClientId);
+  const requestedDefaultProvider = env.VAI_PLATFORM_AUTH_PROVIDER?.trim().toLowerCase() as PlatformAuthProviderId | undefined;
+  const fallbackDefaultProvider: PlatformAuthProviderId | undefined = workosEnabled
+    ? 'workos'
+    : (googleEnabled ? 'google' : undefined);
+  const defaultProvider = requestedDefaultProvider === 'workos' && workosEnabled
+    ? 'workos'
+    : requestedDefaultProvider === 'google' && googleEnabled
+      ? 'google'
+      : fallbackDefaultProvider;
+  const enabled = envBool(env, 'VAI_PLATFORM_AUTH_ENABLED', googleEnabled || workosEnabled);
 
   return {
     enabled,
@@ -159,15 +173,25 @@ function buildPlatformAuthConfig(env: NodeJS.ProcessEnv): PlatformAuthConfig {
     sessionCookieName: envStr(env, 'VAI_SESSION_COOKIE_NAME', 'vai_session'),
     sessionTtlHours: envInt(env, 'VAI_SESSION_TTL_HOURS', 24 * 30),
     sessionSecret: envStr(env, 'VAI_SESSION_SECRET', 'vai-dev-session-secret-change-me'),
+    defaultProvider,
     providers: {
       google: {
         enabled: googleEnabled,
+        label: 'Google OAuth',
         clientId: googleClientId,
         clientSecret: googleClientSecret,
         scopes: (env.GOOGLE_OAUTH_SCOPES?.trim() || 'openid,email,profile')
           .split(',')
           .map((scope) => scope.trim())
           .filter(Boolean),
+      },
+      workos: {
+        enabled: workosEnabled,
+        label: 'WorkOS AuthKit',
+        apiKey: workosApiKey,
+        clientId: workosClientId,
+        redirectUri: workosRedirectUri,
+        organizationId: workosOrganizationId,
       },
     },
   };
