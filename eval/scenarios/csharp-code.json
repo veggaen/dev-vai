@@ -1,0 +1,46 @@
+{
+  "id": "csharp-code",
+  "label": "C#/.NET tasks â€” LINQ, async, nullable refs, records",
+  "scenarios": [
+    {
+      "id": "linq-query-syntax",
+      "messages": [{ "role": "user", "content": "Using LINQ in C#, give me the names of all users older than 18 from List<User>, sorted alphabetically." }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/\\.Where\\(|\\.Select\\(|\\.OrderBy|from\\s+\\w+\\s+in\\s+|select\\s+\\w+\\.Name|Age\\s*>|ToList|LINQ/i"
+        ]
+      }
+    },
+    {
+      "id": "async-task-httpclient",
+      "messages": [{ "role": "user", "content": "Show a C# async method that fetches JSON from a URL using HttpClient and deserializes it." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/async\\s+Task|await\\s+|HttpClient|GetAsync|GetFromJsonAsync|JsonSerializer|System\\.Text\\.Json|ReadAsStringAsync/i"
+        ]
+      }
+    },
+    {
+      "id": "nullable-reference-types",
+      "messages": [{ "role": "user", "content": "What do the ? and ! operators do on reference types in C# 8+ with nullable reference types enabled?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/nullable|null-?forgiving|reference type|warning|may be null|annotation|\\bnull\\b/i"
+        ]
+      }
+    },
+    {
+      "id": "record-init-only",
+      "messages": [{ "role": "user", "content": "Define a C# positional record for Money with Amount and Currency, immutable by default." }],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/public\\s+record\\s+Money|record\\s+Money|\\(decimal\\s+Amount|init\\s*;|with\\s*\\{|value equality/i"
+        ]
+      }
+    }
+  ]
+}

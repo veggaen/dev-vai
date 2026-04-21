@@ -1,0 +1,69 @@
+{
+  "id": "python-code",
+  "label": "Python-specific code tasks â€” type hints, async, comprehensions, decorators, context managers, dataclasses",
+  "scenarios": [
+    {
+      "id": "type-hints-basic-function",
+      "messages": [{ "role": "user", "content": "Write a Python function that takes a list of integers and returns the sum, with full type hints." }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/def\\s+\\w+.*:\\s*\\n|List\\[int\\]|list\\[int\\]|-> int|typing|sum\\(/i"
+        ],
+        "notContains": [
+          "/function\\s+\\w+\\s*\\(.*\\)\\s*\\{|const\\s+\\w+\\s*=\\s*\\(/i"
+        ]
+      }
+    },
+    {
+      "id": "async-await-basics",
+      "messages": [{ "role": "user", "content": "How do I fetch data from two URLs concurrently in Python using asyncio and aiohttp?" }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/async\\s+def|await\\s|asyncio\\.gather|aiohttp|ClientSession|asyncio\\.run/i"
+        ]
+      }
+    },
+    {
+      "id": "list-comprehension-filter",
+      "messages": [{ "role": "user", "content": "Using a list comprehension in Python, give me the squares of all even numbers from 0 to 20." }],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": [
+          "/\\[.*for\\s+\\w+\\s+in\\s+range|\\*\\*\\s*2|x\\s*\\*\\s*x|%\\s*2\\s*==\\s*0|if\\s+.*even|comprehension/i"
+        ]
+      }
+    },
+    {
+      "id": "decorator-timing",
+      "messages": [{ "role": "user", "content": "Write a Python decorator called @timeit that prints how long the wrapped function takes to run." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/def\\s+timeit|functools\\.wraps|time\\.(?:perf_counter|time)|@wraps|wrapper|\\*args.*\\*\\*kwargs/i"
+        ]
+      }
+    },
+    {
+      "id": "context-manager-with",
+      "messages": [{ "role": "user", "content": "Show me how to write a custom context manager in Python that opens and closes a database connection." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/__enter__|__exit__|contextlib|contextmanager|with\\s+\\w+|yield/i"
+        ]
+      }
+    },
+    {
+      "id": "dataclass-vs-dict",
+      "messages": [{ "role": "user", "content": "When should I use a @dataclass in Python instead of a plain dict?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/dataclass|type.{0,6}hint|attribute|immutable|frozen|schema|validation|__init__|keys|structure/i"
+        ]
+      }
+    }
+  ]
+}

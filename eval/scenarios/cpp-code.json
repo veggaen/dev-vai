@@ -1,0 +1,46 @@
+{
+  "id": "cpp-code",
+  "label": "C++ tasks â€” smart pointers, RAII, templates, move semantics",
+  "scenarios": [
+    {
+      "id": "unique-ptr-vs-shared",
+      "messages": [{ "role": "user", "content": "When should I use std::unique_ptr versus std::shared_ptr in modern C++?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/unique_ptr|shared_ptr|ownership|reference count|single owner|move|atomic|weak_ptr|overhead/i"
+        ]
+      }
+    },
+    {
+      "id": "raii-file-handle",
+      "messages": [{ "role": "user", "content": "Show me a C++ RAII wrapper around a FILE* so it's automatically closed when it goes out of scope." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/class\\s+\\w+|~\\w+\\(\\)|fclose|FILE\\s*\\*|destructor|RAII|std::fstream|ifstream|ofstream/i"
+        ]
+      }
+    },
+    {
+      "id": "template-function-add",
+      "messages": [{ "role": "user", "content": "Write a C++ template function add<T>(a, b) that returns a + b for any type T." }],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/template\\s*<\\s*(?:typename|class)\\s+T|T\\s+add\\s*\\(|return\\s+a\\s*\\+\\s*b|\\[\\]\\(auto/i"
+        ]
+      }
+    },
+    {
+      "id": "move-semantics-why",
+      "messages": [{ "role": "user", "content": "What problem do move semantics solve in C++11 and what is std::move actually doing?" }],
+      "assert": {
+        "minLength": 100,
+        "anyOfContains": [
+          "/rvalue|copy|expensive|move constructor|resource|ownership|std::move|cast|xvalue|temporary/i"
+        ]
+      }
+    }
+  ]
+}

@@ -104,7 +104,10 @@ const NORMALIZATION_RULES: ReadonlyArray<readonly [RegExp, string]> = [
 
 // "no, I mean X" is preserved here — the engine's corrective-follow-up
 // extractor depends on that literal prefix to reframe the prior topic.
-const RESTART_MARKER_RE = /\b(?:wait(?:,?\s+actually)?|scratch that|actually(?:,?\s+no)?|no,?\s+wait|hmm,?\s+no|let me rephrase)\b/gi;
+// Note: bare "actually" in mid-sentence is NOT a restart (e.g. "when do they
+// actually hit the database?") — restart forms require "wait actually" or
+// "actually, no/make/let/I mean …".
+const RESTART_MARKER_RE = /\b(?:wait(?:,?\s+actually)?|scratch that|actually,?\s+(?:no|make|let|i\s+mean)|no,?\s+wait|hmm,?\s+no|let me rephrase)\b/gi;
 
 function applyRestartMarkers(input: string): string {
   let lastIdx = -1;
@@ -163,6 +166,7 @@ export function stripDictationDisfluencies(input: string): string {
 }
 
 export function normalizeInputForUnderstanding(input: string): string {
+  if (typeof input !== 'string') return '';
   const trimmed = input.trim();
   if (trimmed.length === 0) return input;
   if (/```/.test(trimmed)) return input;

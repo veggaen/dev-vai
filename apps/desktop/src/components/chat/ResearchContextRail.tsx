@@ -130,52 +130,64 @@ export function ResearchContextRail({
   isOpen: boolean;
   onClose: () => void;
 }) {
-  if (sources.length === 0 || !isOpen) return null;
+  if (sources.length === 0) return null;
 
   return (
     <>
       <AnimatePresence>
-        <motion.button
-          type="button"
-          aria-label="Close sources sidebar"
-          onClick={onClose}
-          className="fixed inset-0 z-30 bg-black/45 xl:hidden"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-        />
+        {isOpen && (
+          <motion.button
+            key="research-rail-backdrop"
+            type="button"
+            aria-label="Close sources sidebar"
+            onClick={onClose}
+            className="fixed inset-0 z-30 bg-black/55 backdrop-blur-[2px] xl:hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+          />
+        )}
       </AnimatePresence>
 
       <AnimatePresence>
-        <motion.aside
-          data-research-sidebar="panel"
-          data-state="open"
-          className="fixed inset-x-4 bottom-24 top-20 z-40 xl:hidden"
-          initial={{ opacity: 0, x: 28 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 28 }}
-          transition={{ duration: 0.22, ease: 'easeOut' }}
-        >
-          <ResearchContextRailContent
-            question={question}
-            sources={sources}
-            onClose={onClose}
-            showCloseButton
-          />
-        </motion.aside>
+        {isOpen && (
+          <motion.aside
+            key="research-rail-mobile"
+            data-research-sidebar="panel"
+            data-state="open"
+            className="fixed inset-x-4 bottom-24 top-20 z-40 xl:hidden"
+            initial={{ opacity: 0, x: 36 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 36 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 32, mass: 0.7 }}
+          >
+            <ResearchContextRailContent
+              question={question}
+              sources={sources}
+              onClose={onClose}
+              showCloseButton
+            />
+          </motion.aside>
+        )}
       </AnimatePresence>
 
-      <motion.aside
-        data-research-sidebar="panel"
-        data-state="open"
-        className="hidden xl:block xl:sticky xl:top-6"
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: 20 }}
-        transition={{ duration: 0.22, ease: 'easeOut' }}
-      >
-        <ResearchContextRailContent question={question} sources={sources} />
-      </motion.aside>
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.aside
+            key="research-rail-desktop"
+            data-research-sidebar="panel"
+            data-state="open"
+            className="hidden xl:block xl:sticky xl:top-6"
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 24 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30, mass: 0.6 }}
+          >
+            <ResearchContextRailContent question={question} sources={sources} />
+          </motion.aside>
+        )}
+      </AnimatePresence>
     </>
   );
 }

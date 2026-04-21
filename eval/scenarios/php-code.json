@@ -1,0 +1,46 @@
+{
+  "id": "php-code",
+  "label": "PHP 8+ tasks â€” enums, readonly, Laravel, Composer",
+  "scenarios": [
+    {
+      "id": "enum-backed",
+      "messages": [{ "role": "user", "content": "Define a PHP 8.1 backed enum called Status with values 'active', 'paused', 'archived'." }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/enum\\s+Status\\s*:\\s*string|case\\s+Active|case\\s+Paused|case\\s+Archived|backed enum/i"
+        ]
+      }
+    },
+    {
+      "id": "readonly-property",
+      "messages": [{ "role": "user", "content": "In PHP 8.1, how do I declare a readonly property on a class and what does it prevent?" }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/readonly|cannot be modified|after initialization|immutable|constructor property promotion|public readonly/i"
+        ]
+      }
+    },
+    {
+      "id": "laravel-route-model-binding",
+      "messages": [{ "role": "user", "content": "In Laravel, how does route model binding work for a route like /users/{user}?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/route model binding|\\{user\\}|resolve|findOrFail|getRouteKeyName|Eloquent|User\\s+\\$user/i"
+        ]
+      }
+    },
+    {
+      "id": "composer-require-dev",
+      "messages": [{ "role": "user", "content": "What's the difference between `composer require` and `composer require --dev`?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/require-dev|development|production|installed in production|autoload|dev dependencies|runtime/i"
+        ]
+      }
+    }
+  ]
+}

@@ -142,8 +142,16 @@ describe('KnowledgeStore', () => {
 describe('VaiEngine', () => {
   let engine: VaiEngine;
 
+  // Default fetch stub — fast-rejects any outbound request so tests that don't
+  // explicitly mock fetch fall back to local-only logic in < 10ms instead of
+  // waiting for the real network (which can hang for 5000ms on CI).
+  // Tests that need specific fetch behavior override this via their own
+  // `globalThis.fetch = vi.fn(...)` assignment before making the call.
   beforeEach(() => {
     engine = new VaiEngine();
+    globalThis.fetch = vi.fn(async () => {
+      throw new TypeError('fetch disabled in test (default stub)');
+    }) as typeof fetch;
   });
 
   afterEach(() => {
@@ -409,7 +417,8 @@ describe('VaiEngine', () => {
     expect(engine.lastResponseMeta?.strategy).toBe('short-topic-local');
     expect(sourcesChunk?.sources).toBeGreaterThan(0);
     expect((sourcesChunk?.followUps ?? []).length).toBeGreaterThan(0);
-    expect(globalThis.fetch).toBe(originalFetch);
+    // Local primer path must not reach the network
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it('uses curated short-topic primers for abstract lexical prompts instead of junk web snippets', async () => {
@@ -3980,7 +3989,10 @@ describe('SkillRouter', () => {
       const config = makeQualityGateConfig({ enabled: false });
       const engine = new VaiEngine({ config: config as any });
 
-      globalThis.fetch = vi.fn().mockImplementation(originalFetch) as any;
+      // Fast-reject stub — we only care about call-shape, not success
+      globalThis.fetch = vi.fn(async () => {
+        throw new TypeError('fetch disabled in test');
+      }) as any;
 
       const chunks: any[] = [];
       for await (const chunk of engine.chatStream({
@@ -3999,7 +4011,9 @@ describe('SkillRouter', () => {
       const config = makeQualityGateConfig({ enabled: true, confidenceThreshold: 0.99 });
       const engine = new VaiEngine({ config: config as any });
 
-      globalThis.fetch = vi.fn().mockImplementation(originalFetch) as any;
+      globalThis.fetch = vi.fn(async () => {
+        throw new TypeError('fetch disabled in test');
+      }) as any;
 
       const chunks: any[] = [];
       for await (const chunk of engine.chatStream({

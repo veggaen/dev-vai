@@ -29,6 +29,14 @@ interface Scenario {
   systemPrompt?: string;
   messages: Array<{ role: 'user' | 'system' | 'assistant'; content: string }>;
   assert?: AssertSpec;
+  /**
+   * If set, the scenario is treated as a known-failing todo: it is skipped
+   * rather than executed. The value should be a short reason (e.g.
+   * "dispatcher has no language-aware routing for Ruby"). Scenarios marked
+   * pending still ship in the corpus so they can be lifted incrementally as
+   * the hand chain improves.
+   */
+  pending?: string;
 }
 
 interface Pack {
@@ -93,6 +101,7 @@ function evaluateAssertions(text: string, strategy: string | null, spec: AssertS
 }
 
 const SCENARIOS_ENABLED = process.env.VAI_SCENARIOS === '1' || process.env.VAI_SCENARIOS === 'true';
+const INCLUDE_PENDING = process.env.VAI_SCENARIOS_INCLUDE_PENDING === '1' || process.env.VAI_SCENARIOS_INCLUDE_PENDING === 'true';
 const packs = SCENARIOS_ENABLED ? loadPacks() : [];
 
 describe.skipIf(!SCENARIOS_ENABLED)('Vai scenario bench (in-process) — set VAI_SCENARIOS=1 to run', () => {
@@ -104,6 +113,10 @@ describe.skipIf(!SCENARIOS_ENABLED)('Vai scenario bench (in-process) — set VAI
   for (const pack of packs) {
     describe(`pack: ${pack.id} — ${pack.label ?? ''}`, () => {
       for (const scenario of pack.scenarios) {
+        if (scenario.pending && !INCLUDE_PENDING) {
+          it.skip(`${scenario.id} [pending: ${scenario.pending}]`, () => {});
+          continue;
+        }
         it(scenario.id, async () => {
           const messages: Array<{ role: 'user' | 'system' | 'assistant'; content: string }> = [];
           if (scenario.systemPrompt) messages.push({ role: 'system', content: scenario.systemPrompt });

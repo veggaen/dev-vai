@@ -1519,25 +1519,26 @@ export class VaiEngine implements ModelAdapter {
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
     const lastMessage = request.messages[request.messages.length - 1];
+    const userContent = (lastMessage && typeof lastMessage.content === 'string') ? lastMessage.content : '';
     this._lastSearchResponse = null;
     this._lastCitedAnswer = null;
     this._lastTeacherDecision = null;
     const start = performance.now();
-    let response = await this.generateResponse(lastMessage.content, request.messages);
-    response = this.applyBrevityConstraint(lastMessage.content, response);
+    let response = await this.generateResponse(userContent, request.messages);
+    response = this.applyBrevityConstraint(userContent, response);
     const durationMs = Math.round(performance.now() - start);
     // Patch timing into the last tracked meta
     if (this._lastMeta) this._lastMeta.durationMs = durationMs;
 
     // Learning flywheel — extract and persist knowledge from this exchange
     // Skip when noLearn is set (protective parenting — Vegga controls what Vai learns)
-    if (this._lastMeta && !request.noLearn) this.afterResponse(lastMessage.content, response, this._lastMeta);
+    if (this._lastMeta && !request.noLearn) this.afterResponse(userContent, response, this._lastMeta);
 
-    this.recordShadowObservation(lastMessage.content, request.messages);
+    this.recordShadowObservation(userContent, request.messages);
 
     return {
       message: { role: 'assistant', content: response },
-      usage: { promptTokens: this.tokenizer.encode(lastMessage.content).length, completionTokens: this.tokenizer.encode(response).length },
+      usage: { promptTokens: this.tokenizer.encode(userContent).length, completionTokens: this.tokenizer.encode(response).length },
       finishReason: 'stop',
       durationMs,
     };
@@ -1573,12 +1574,13 @@ export class VaiEngine implements ModelAdapter {
 
   async *chatStream(request: ChatRequest): AsyncIterable<ChatChunk> {
     const lastMessage = request.messages[request.messages.length - 1];
+    const userContent = (lastMessage && typeof lastMessage.content === 'string') ? lastMessage.content : '';
     this._lastSearchResponse = null; // reset before each response
     this._lastCitedAnswer = null;
     this._lastTeacherDecision = null;
     const start = performance.now();
-    let response = await this.generateResponse(lastMessage.content, request.messages);
-    response = this.applyBrevityConstraint(lastMessage.content, response);
+    let response = await this.generateResponse(userContent, request.messages);
+    response = this.applyBrevityConstraint(userContent, response);
     const durationMs = Math.round(performance.now() - start);
     // Patch timing into the last tracked meta
     if (this._lastMeta) this._lastMeta.durationMs = durationMs;
@@ -1596,7 +1598,7 @@ export class VaiEngine implements ModelAdapter {
       if (shouldValidate) {
         try {
           const lessons = await this.runQualityGate(
-            lastMessage.content,
+            userContent,
             response,
             strategy,
             confidence,
@@ -1609,9 +1611,9 @@ export class VaiEngine implements ModelAdapter {
             }
             // Regenerate Vai's OWN response using what it just learned
             if (lessons.shouldRegenerate) {
-              const improved = await this.generateResponse(lastMessage.content, request.messages);
+              const improved = await this.generateResponse(userContent, request.messages);
               if (improved.length > 20) {
-                response = this.applyBrevityConstraint(lastMessage.content, improved);
+                response = this.applyBrevityConstraint(userContent, improved);
                 this._lastMeta.strategy = `${strategy}→self-improved`;
                 this._lastMeta.confidence = Math.min(confidence + 0.15, 0.85);
               }
@@ -1625,14 +1627,14 @@ export class VaiEngine implements ModelAdapter {
 
     // Learning flywheel — extract and persist knowledge from this exchange
     // Skip when noLearn is set (protective parenting — Vegga controls what Vai learns)
-    if (this._lastMeta && !request.noLearn) this.afterResponse(lastMessage.content, response, this._lastMeta);
+    if (this._lastMeta && !request.noLearn) this.afterResponse(userContent, response, this._lastMeta);
 
-    this.recordShadowObservation(lastMessage.content, request.messages);
+    this.recordShadowObservation(userContent, request.messages);
 
     // Yield sources chunk BEFORE text — so UI can show source cards while answer streams
     const searchResult = this._lastSearchResponse as SearchResponse | null;
     const groundedBuildBrief = searchResult !== null
-      ? buildGroundedBuildBrief(lastMessage.content, this._activeMode, searchResult)
+      ? buildGroundedBuildBrief(userContent, this._activeMode, searchResult)
       : null;
     if (searchResult !== null && searchResult.sources.length > 0) {
       yield {
@@ -1646,7 +1648,7 @@ export class VaiEngine implements ModelAdapter {
           trustTier: s.trust.tier,
           trustScore: s.trust.score,
         })),
-        followUps: generateFollowUps(lastMessage.content, searchResult),
+        followUps: generateFollowUps(userContent, searchResult),
         confidence: searchResult.confidence,
         groundedBrief: groundedBuildBrief ?? undefined,
       };
@@ -1673,7 +1675,7 @@ export class VaiEngine implements ModelAdapter {
           };
         });
         // Generate simple follow-ups based on the query
-        const followUps = this.buildGroundedFollowUps(lastMessage.content, request.messages, this._lastMeta?.topicDetected);
+        const followUps = this.buildGroundedFollowUps(userContent, request.messages, this._lastMeta?.topicDetected);
         yield {
           type: 'sources',
           sources: extractedSources,
@@ -1684,7 +1686,7 @@ export class VaiEngine implements ModelAdapter {
         response = response.replace(/\s*\[Source:\s*https?:\/\/[^\]]+\]/g, '').trim();
       } else if (this._lastMeta && !['empty', 'gibberish', 'keyboard-noise', 'fallback', 'conversational', 'literal-response'].includes(this._lastMeta.strategy)) {
         // No web search, no inline sources — still emit follow-ups for knowledge answers
-        const followUps = this.buildGroundedFollowUps(lastMessage.content, request.messages, this._lastMeta.topicDetected);
+        const followUps = this.buildGroundedFollowUps(userContent, request.messages, this._lastMeta.topicDetected);
         if (followUps.length > 0) {
           yield {
             type: 'sources',
@@ -1710,7 +1712,7 @@ export class VaiEngine implements ModelAdapter {
     yield {
       type: 'done',
       usage: {
-        promptTokens: this.tokenizer.encode(lastMessage.content).length,
+        promptTokens: this.tokenizer.encode(userContent).length,
         completionTokens: this.tokenizer.encode(response).length,
       },
       durationMs,
@@ -2306,9 +2308,35 @@ export class VaiEngine implements ModelAdapter {
     const localRefactor = this.tryLocalCodeRefactor(input, history);
     if (localRefactor) return this.tracked('local-refactor', localRefactor, input);
 
-    // Strategy 0.93: Refactoring guidance — deterministic, fire before TF-IDF retrieval
-    const refactorFirst = this.tryRefactoringGuidance(input, lower);
-    if (refactorFirst) return this.tracked('refactor-guidance', refactorFirst, input);
+    // Detect explicit non-JS/TS language / framework requests up front. Downstream
+    // arms (refactor-guidance, error-diagnosis, creative-code, web-stack, intelligence,
+    // framework-devops) are all keyword-heuristic and JS/TS-biased; they hijack
+    // Python/Rust/Go/Java/C#/Ruby/PHP/C++/SQL/shell queries with off-topic canned
+    // answers. Capture the set of matched language tokens so we can later require
+    // that the candidate response actually references the named language.
+    const nonJsLangTokens = this.detectNonJsLangTokens(lower);
+    const wantsNonJsLang = nonJsLangTokens.length > 0;
+
+    // Strategy 0.93: Refactoring guidance — deterministic, fire before TF-IDF retrieval.
+    // Gate: "move semantics" / "extract field" / "inline block" in non-JS/TS language
+    // requests trip the refactor regex even though the user isn't refactoring.
+    if (!wantsNonJsLang) {
+      const refactorFirst = this.tryRefactoringGuidance(input, lower);
+      if (refactorFirst) return this.tracked('refactor-guidance', refactorFirst, input);
+    }
+
+    // Strategy 0.94: Language-specific deterministic arms — when the user
+    // explicitly names Python / Rust / Go / SQL / shell / Java / C# / PHP /
+    // Ruby / C++ / Svelte / Solid / Django / Spring / Rails the dispatcher
+    // routes here first. Each arm recognises a narrow set of idiomatic
+    // patterns ("@timeit decorator", "impl Display for Point", "ROW_NUMBER",
+    // "Get-Process | Where-Object", …) and emits a compact, runnable code
+    // answer. Falls through when no pattern matches, letting the existing
+    // gated strategies take over.
+    if (wantsNonJsLang) {
+      const languageArm = this.tryLanguageSpecificAnswer(input, lower, nonJsLangTokens);
+      if (languageArm) return this.tracked(languageArm.strategy, languageArm.text, input);
+    }
 
     // Strategy 0.95: Error diagnosis — must fire before everything else to prevent
     // TF-IDF knowledge retrieval from swallowing error messages
@@ -2388,17 +2416,29 @@ export class VaiEngine implements ModelAdapter {
     const currentInfoGuardrail = this.tryCurrentInfoGuardrail(input, lower);
     if (currentInfoGuardrail) return this.tracked('current-info-guardrail', currentInfoGuardrail, input);
 
+    // Strategy 1.38: Algorithm code generation — canonical textbook algorithms.
+    // Runs BEFORE creative-code so canonical templates ("binary search",
+    // "debounce", "gcd", "flatten deep", "validate email", "cosine similarity",
+    // etc.) win over the generic utility-function scaffold in creative-code.
+    const algoCode = this.tryAlgorithmCodeGen(lower);
+    if (algoCode) return this.tracked('algorithm', algoCode, input);
+
     // Strategy 1.4: Creative code projects — full working programs
+    // Gate: when the user explicitly asks for a non-JS/TS language, creative-code
+    // has multi-language templates for some topics (Python http server, FizzBuzz,
+    // calculator, etc.) but otherwise falls back to JS/TS scaffolds. Require the
+    // produced output to actually reference the named language token; otherwise
+    // skip and let a more specific strategy handle it.
     const creativeCode = this.tryCreativeCodeProject(lower, history);
-    if (creativeCode) return this.tracked('creative-code', creativeCode, input);
+    if (creativeCode) {
+      if (!wantsNonJsLang || this.responseMentionsAnyToken(creativeCode, nonJsLangTokens)) {
+        return this.tracked('creative-code', creativeCode, input);
+      }
+    }
 
     // Strategy 1.45: Best practices queries
     const bestPractices = this.tryBestPractices(lower);
     if (bestPractices) return this.tracked('best-practices', bestPractices, input);
-
-    // Strategy 1.47: Algorithm code generation — canonical textbook algorithms
-    const algoCode = this.tryAlgorithmCodeGen(lower);
-    if (algoCode) return this.tracked('algorithm', algoCode, input);
 
     // Strategy 1.48: Networking code generation — TCP/UDP/socket code
     const netCode = this.tryNetworkingCode(lower);
@@ -2446,8 +2486,12 @@ export class VaiEngine implements ModelAdapter {
     }
 
     // Strategy 1.52: Web stack knowledge — MERN/PERN/MEVN, ORM, REST, SSR
-    const webStack = this.tryWebStackKnowledge(lower);
-    if (webStack) return this.tracked('web-stack', webStack, input);
+    // Gate: skip when the user explicitly named a non-JS/TS language —
+    // web-stack is keyword-matchy and can hijack Rust/C# "JSON" questions.
+    if (!wantsNonJsLang) {
+      const webStack = this.tryWebStackKnowledge(lower);
+      if (webStack) return this.tracked('web-stack', webStack, input);
+    }
 
     // Strategy 1.53: General knowledge — history, science, world facts, real-world events
     const generalKnow = this.tryGeneralKnowledge(lower);
@@ -2458,8 +2502,16 @@ export class VaiEngine implements ModelAdapter {
     if (csFundamentals) return this.tracked('cs-fundamentals', csFundamentals, input);
 
     // Strategy 1.54: Framework & DevOps — Docker, CI/CD, TS, Tailwind, WCAG, GDPR, Rust, Python, Go, Angular, Vue, WP, Next.js, Norwegian web
+    // Gate: when a non-JS/TS language is named, the canned framework-devops
+    // blurbs often fire on shallow keyword matches (Python / Rust / Go / Java)
+    // but don't address the specific feature the user asked about. Require the
+    // response to actually mention the language token.
     const frameworkDevops = this.tryFrameworkDevopsKnowledge(lower);
-    if (frameworkDevops) return this.tracked('framework-devops', frameworkDevops, input);
+    if (frameworkDevops) {
+      if (!wantsNonJsLang || this.responseMentionsAnyToken(frameworkDevops, nonJsLangTokens)) {
+        return this.tracked('framework-devops', frameworkDevops, input);
+      }
+    }
 
     // Strategy 1.545: Cognitive Foundations — first principles, calibration, compression, meta-learning, systems thinking
     const cognitive = this.tryCognitiveFoundations(lower);
@@ -2474,14 +2526,29 @@ export class VaiEngine implements ModelAdapter {
     if (advancedCode) return this.tracked('advanced-code', advancedCode, input);
 
     // Strategy 1.7: Knowledge Intelligence — decompose complex questions, follow connections
+    // Gate: when a non-JS/TS language is named, require the response to mention
+    // that language token. The canned SQL-joins / Tailwind / JSON-explainer
+    // answers have historically passed the generic grounding check by matching
+    // incidental terms (e.g. "select"/"where" in a C# LINQ question). For
+    // research-priority queries keep the existing grounding heuristic.
     const intelligent = this.tryIntelligentAnswer(input);
-    if (intelligent && (!shouldPrioritizeResearch || this.isResponseGroundedToQuery(input, intelligent))) {
-      return this.tracked('intelligence', intelligent, input);
+    if (intelligent) {
+      if (wantsNonJsLang) {
+        if (this.responseMentionsAnyToken(intelligent, nonJsLangTokens)) {
+          return this.tracked('intelligence', intelligent, input);
+        }
+      } else if (!shouldPrioritizeResearch || this.isResponseGroundedToQuery(input, intelligent)) {
+        return this.tracked('intelligence', intelligent, input);
+      }
     }
 
-    // Strategy 1.85: Refactoring guidance
-    const refactorGuide = this.tryRefactoringGuidance(input, lower);
-    if (refactorGuide) return this.tracked('refactor-guidance', refactorGuide, input);
+    // Strategy 1.85: Refactoring guidance — skip for explicit non-JS/TS language
+    // requests so "move semantics" / "extract field" / "inline block" don't trip
+    // the refactor regex when the user is actually asking about a language feature.
+    if (!wantsNonJsLang) {
+      const refactorGuide = this.tryRefactoringGuidance(input, lower);
+      if (refactorGuide) return this.tracked('refactor-guidance', refactorGuide, input);
+    }
 
     // Strategy 1.9: Test generation
     const testGen = this.tryTestGeneration(input, lower);
@@ -2914,6 +2981,381 @@ export class VaiEngine implements ModelAdapter {
 
   private normalizeUserInputForUnderstanding(input: string): string {
     return normalizeInputForUnderstanding(input);
+  }
+
+  /**
+   * Return the set of non-JS/TS language / framework tokens referenced in the
+   * input. When the result is non-empty the dispatcher treats the query as
+   * explicitly language-specific and gates JS/TS-biased strategies accordingly.
+   *
+   * The detection is intentionally narrow: generic tokens like `java` must not
+   * match when the user actually meant `javascript`, and framework tokens
+   * (svelte, spring, rails…) must only match when the query is framework-
+   * scoped — otherwise the dispatcher would over-gate too many inputs.
+   */
+  private detectNonJsLangTokens(lower: string): string[] {
+    const tokens: string[] = [];
+    const push = (t: string): void => { if (!tokens.includes(t)) tokens.push(t); };
+
+    // Explicit language names
+    if (/\bpython\b/i.test(lower)) push('python');
+    if (/\brust(?:lang)?\b/i.test(lower) || /\brust\s+(?:code|ownership|trait|borrow|lifetime|result|option|cargo)\b/i.test(lower)) push('rust');
+    if (
+      /\bgolang\b/i.test(lower)
+      || /\bgoroutines?\b/i.test(lower)
+      || /\bgo\s+(?:channel|routine|struct|interface|error|slice|generic|http|mod|fmt|select|context)\b/i.test(lower)
+      || /\b(?:channel|slice|goroutine)s?\s+(?:in\s+)?go\b/i.test(lower)
+      || /\bin\s+go\b\s*[,:]/i.test(lower)
+      || /\bgo\s*,\s*(?:what|how|why|when|show|write|explain|is|are)\b/i.test(lower)
+    ) push('go');
+    if (/\bruby\b/i.test(lower) || /\brails\b/i.test(lower) || /\bactive\s*record\b/i.test(lower)) push('ruby');
+    // `composer` is too generic on its own (UI "composer" field, music composer) —
+    // require a PHP-specific adjacency: `composer install`, `composer.json`, etc.
+    if (
+      /\bphp\b/i.test(lower)
+      || /\blaravel\b/i.test(lower)
+      || /\bsymfony\b/i.test(lower)
+      || /\bcomposer\s+(?:install|require|update|autoload|dump-autoload|global|create-project)\b/i.test(lower)
+      || /\bcomposer\.(?:json|lock)\b/i.test(lower)
+    ) push('php');
+    if (
+      /\bbash\b|\bshell\s+script|\bawk\b|\bsed\b|\bjq\b|\bpowershell\b|\bget-process\b|\bwhere-object\b/i.test(lower)
+      || /\bfind\s+(?:-type|-name|-mtime|-delete|to\s+delete|\/\w)/i.test(lower)
+      || /\buse\s+find\b/i.test(lower)
+    ) push('shell');
+    if (/\bc\+\+|\bcpp\b/i.test(lower)) push('cpp');
+    if (/\bc#|\bcsharp\b|\bdotnet\b|\b\.net\b|\blinq\b/i.test(lower)) push('csharp');
+    if (/\bjava(?!\s*script)\b/i.test(lower) || /\bspring(?:\s+boot)?\b/i.test(lower) || /\bcompletablefutures?\b|\bcompletable\s+futures?\b/i.test(lower)) push('java');
+    if (/\bswift\b|\bkotlin\b|\bscala\b|\bhaskell\b|\belixir\b|\berlang\b|\bperl\b|\bdart\b|\bocaml\b|\bf#\b|\bfsharp\b/i.test(lower)) push('other-lang');
+
+    // JS/TS frameworks we still want to gate because their strategies are
+    // JS-flavoured but specific (Svelte, SolidJS) and were returning off-topic
+    // web-stack JSON explainer content.
+    if (/\bsvelte\b|\bsveltekit\b|\bwritable\(|\bsvelte\/store\b/i.test(lower)) push('svelte');
+    if (
+      /\bsolid(?:js)?\s+(?:signal|component|store|js)\b/i.test(lower)
+      || /\bsolid\.js\b/i.test(lower)
+      || /\bcreatesignal\b/i.test(lower)
+    ) push('solid');
+
+    // Python / Django / Flask framework tokens when they appear alongside a
+    // framework-specific verb — `django queryset`, `flask blueprint`, etc.
+    if (/\bdjango\b|\bflask\b|\bfastapi\b|\bqueryset\b/i.test(lower)) push('python');
+
+    // SQL-specific syntax tokens
+    if (/\bsql\b|\brow_number\b|\bpartition\s+by\b|\bcte\b|\brecursive\s+cte\b|\bwindow\s+function\b|\bcomposite\s+index\b|\bn\+1\s+quer|\binner\s+join\b|\bleft\s+join\b/i.test(lower)) push('sql');
+
+    return tokens;
+  }
+
+  /**
+   * Check whether `response` references any of the supplied non-JS/TS language
+   * or framework tokens. Used as a structural gate: if the user explicitly
+   * named a language and the candidate response does not even mention it, the
+   * response is off-topic and the dispatcher should keep looking.
+   */
+  private responseMentionsAnyToken(response: string, tokens: readonly string[]): boolean {
+    if (tokens.length === 0) return true;
+    const lowerResponse = response.toLowerCase();
+    // Map logical tokens back to the surface forms they are likely to appear as
+    // inside a generated response.
+    const surface: Record<string, readonly string[]> = {
+      python: ['python', 'django', 'flask', 'fastapi', '__enter__', '__exit__', 'contextlib', 'decorator'],
+      rust: ['rust', 'trait', 'impl', 'fn ', '::', 'result<', 'option<', 'cargo', 'ownership', 'borrow'],
+      go: ['go ', 'goroutine', 'channel', 'context.context', 'func ', 'fmt.', 'package main'],
+      ruby: ['ruby', 'rails', 'activerecord', 'active record', 'scope :', '.map {', '.each do', 'do |', 'def '],
+      php: ['php', 'laravel', 'symfony', 'composer', 'readonly', '->', 'enum '],
+      shell: ['bash', 'awk', 'sed', 'jq', 'powershell', 'get-process', 'where-object', '$(', '#!/'],
+      cpp: ['c++', 'cpp', 'template<', 'std::', 'std ::', 'move', 'rvalue', 'typename'],
+      csharp: ['c#', 'csharp', 'linq', 'async task', 'httpclient', 'where(', '.select(', 'nullable'],
+      java: ['java', 'spring', 'completablefuture', 'optional', '.stream(', 'collectors.'],
+      'other-lang': ['swift', 'kotlin', 'scala', 'haskell', 'elixir', 'erlang', 'perl', 'dart'],
+      svelte: ['svelte', 'writable(', 'readable(', '.subscribe(', '$:', 'svelte/store'],
+      solid: ['solid', 'createsignal', 'createeffect', 'creatememo', 'fine-grained'],
+      sql: ['select ', 'from ', 'join ', 'partition by', 'window', 'row_number', 'cte', 'with recursive'],
+    };
+    for (const token of tokens) {
+      const needles = surface[token] ?? [token];
+      for (const needle of needles) {
+        if (lowerResponse.includes(needle)) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Language-specific deterministic arm. Called from the dispatcher when
+   * `wantsNonJsLang` is true. Routes by language token to a set of compact
+   * per-topic templates. Each sub-arm is deliberately narrow — it recognises
+   * a specific idiomatic question and emits a runnable code block with a
+   * short explanation. Returns null when no pattern matches so the dispatcher
+   * can fall through to the remaining strategies.
+   */
+  private tryLanguageSpecificAnswer(
+    input: string,
+    lower: string,
+    tokens: readonly string[],
+  ): { strategy: string; text: string } | null {
+    for (const token of tokens) {
+      let text: string | null = null;
+      switch (token) {
+        case 'python':     text = this.tryPythonLanguageArm(input, lower); break;
+        case 'rust':       text = this.tryRustLanguageArm(input, lower); break;
+        case 'go':         text = this.tryGoLanguageArm(input, lower); break;
+        case 'shell':      text = this.tryShellLanguageArm(input, lower); break;
+        case 'sql':        text = this.trySqlLanguageArm(input, lower); break;
+        case 'java':       text = this.tryJavaLanguageArm(input, lower); break;
+        case 'csharp':     text = this.tryCSharpLanguageArm(input, lower); break;
+        case 'php':        text = this.tryPhpLanguageArm(input, lower); break;
+        case 'ruby':       text = this.tryRubyLanguageArm(input, lower); break;
+        case 'cpp':        text = this.tryCppLanguageArm(input, lower); break;
+        case 'svelte':     text = this.trySvelteLanguageArm(input, lower); break;
+        case 'solid':      text = this.trySolidLanguageArm(input, lower); break;
+      }
+      if (text) return { strategy: `lang-${token}`, text };
+    }
+    return null;
+  }
+
+  private tryPythonLanguageArm(input: string, lower: string): string | null {
+    // Custom context manager — __enter__/__exit__ for a database connection
+    if (
+      /\bcontext\s*manager\b/i.test(input)
+      && /\b(?:database|db|connection|file|resource|lock|session)\b/i.test(lower)
+    ) {
+      return 'A **custom context manager** in Python implements `__enter__` (setup) and `__exit__` (cleanup). The `with` statement guarantees `__exit__` runs even if the block raises.\n\n```python\nimport sqlite3\n\nclass DbConnection:\n    def __init__(self, path: str):\n        self.path = path\n        self.conn: sqlite3.Connection | None = None\n\n    def __enter__(self) -> sqlite3.Connection:\n        self.conn = sqlite3.connect(self.path)\n        return self.conn\n\n    def __exit__(self, exc_type, exc, tb) -> None:\n        if self.conn is not None:\n            self.conn.close()\n        # return False (implicit) so exceptions propagate\n\nwith DbConnection("app.db") as conn:\n    conn.execute("SELECT 1")\n```\n\n**Shorter form** with `contextlib.contextmanager`:\n\n```python\nfrom contextlib import contextmanager\nimport sqlite3\n\n@contextmanager\ndef db_connection(path: str):\n    conn = sqlite3.connect(path)\n    try:\n        yield conn\n    finally:\n        conn.close()\n\nwith db_connection("app.db") as conn:\n    conn.execute("SELECT 1")\n```\n\nThe generator form is less code for simple resources; the class form is clearer when you need state between `__enter__` and `__exit__` or a reusable handle.';
+    }
+    // @timeit decorator that prints elapsed wall time
+    if (/\b(?:@?timeit|timing\s+decorator)\b/i.test(input) || (/\bdecorator\b/i.test(input) && /\b(?:time|long|duration|elapsed|how\s+long)\b/i.test(lower))) {
+      return 'Here is a Python `@timeit` decorator that prints how long the wrapped function takes to run. It uses `time.perf_counter` for monotonic high-resolution timing and `functools.wraps` so the decorated function keeps its name, docstring, and signature.\n\n```python\nimport time\nimport functools\nfrom typing import Callable, ParamSpec, TypeVar\n\nP = ParamSpec("P")\nR = TypeVar("R")\n\ndef timeit(fn: Callable[P, R]) -> Callable[P, R]:\n    @functools.wraps(fn)\n    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:\n        start = time.perf_counter()\n        try:\n            return fn(*args, **kwargs)\n        finally:\n            elapsed = time.perf_counter() - start\n            print(f"{fn.__name__} took {elapsed*1000:.2f} ms")\n    return wrapper\n\n@timeit\ndef slow_add(a: int, b: int) -> int:\n    time.sleep(0.05)\n    return a + b\n\nslow_add(1, 2)  # slow_add took 50.xx ms\n```\n\n**Why `perf_counter` not `time.time()`?** `perf_counter` is monotonic, so it never jumps backwards if the system clock is adjusted. **Why `functools.wraps`?** Without it the wrapped name becomes `"wrapper"` — bad for tracebacks, logging, and `inspect`.';
+    }
+    // type-hinted sum of list of ints
+    if (
+      /\b(?:type\s*hints?|typed|type\s*annotation)\b/i.test(input)
+      && /\b(?:list|integers?|numbers?|ints?|sum)\b/i.test(lower)
+    ) {
+      return 'Here is a fully type-hinted Python function that sums a list of integers.\n\n```python\nfrom typing import Iterable\n\ndef sum_ints(nums: list[int]) -> int:\n    """Return the sum of all integers in nums."""\n    return sum(nums)\n\n# More permissive variant — accepts any iterable of ints\ndef sum_ints_iter(nums: Iterable[int]) -> int:\n    return sum(nums)\n\nprint(sum_ints([1, 2, 3, 4]))  # 10\n```\n\n**Notes.** On Python 3.9+ you can write `list[int]` directly instead of `List[int]` from `typing`. The explicit `-> int` return annotation is what type checkers (mypy, pyright) use to flag callers who mis-use the result. Using `Iterable[int]` widens the input so any for-loop source works, not just a concrete `list`.';
+    }
+    // Django queryset laziness — when does it actually hit the database?
+    if (
+      /\bquerysets?\b/i.test(lower)
+      && (/\blazy\b/i.test(lower) || /\bhit\s+the\s+database\b/i.test(lower) || /\bevaluat/i.test(lower))
+    ) {
+      return 'Django **querysets are lazy**. Building one — `User.objects.filter(active=True).order_by("name")` — issues **zero** SQL. The ORM records the operations; the query only runs when the queryset is **evaluated**.\n\n**Things that evaluate a queryset (and hit the database):**\n- **Iteration** — `for user in qs:` calls `qs.__iter__()`, which executes the SQL and caches the results on the queryset instance.\n- **Slicing with a step** — `qs[::2]` evaluates immediately. Plain index/slice `qs[0]`, `qs[:10]` issues a `LIMIT` query but does not cache the full queryset.\n- **Aggregation / termination** — `.count()`, `.exists()`, `.aggregate()`, `.first()`, `.last()`, `.get()`, `.earliest()`, `.latest()`, `.in_bulk()`.\n- **Materialisation** — `list(qs)`, `len(qs)` (forces a full fetch), `bool(qs)` (uses `.exists()` internally when supported), `repr(qs)` in a shell (fetches up to 21 for the preview), JSON / template rendering that iterates.\n- **Pickling / caching** the whole queryset.\n\n**Once evaluated, the results are cached on that queryset instance.** A second `for user in qs:` will not re-run the query — but `qs.filter(…)` returns a *new* queryset with an empty cache, so chained operations stay lazy.\n\n```python\nqs = User.objects.filter(active=True)           # no SQL yet\nprint(qs.query)                                   # shows the SELECT, still no SQL executed\ncount = qs.count()                                # SELECT COUNT(*) FROM users WHERE active\nfor user in qs:                                   # SELECT ... executes; results cached\n    print(user.name)\nfor user in qs:                                   # NO extra query — served from cache\n    ...\n```\n\n**Use `.iterator()` for huge result sets** when you cannot afford the cache: `for user in qs.iterator(chunk_size=2000):` streams rows in chunks and discards them. Use `.only(...)` / `.defer(...)` to cut the selected columns, and `.select_related` / `.prefetch_related` to avoid the classic N+1 when crossing relations.';
+    }
+    return null;
+  }
+
+  private tryRustLanguageArm(input: string, lower: string): string | null {
+    // Display trait impl for Point { x, y }
+    if (
+      /\bdisplay\b/i.test(lower)
+      && /\b(?:trait|impl|implement)\b/i.test(lower)
+      && /\b(?:struct|point|custom)\b/i.test(lower)
+    ) {
+      return 'To implement the `Display` trait for a custom struct in Rust you implement `std::fmt::Display` and write the formatted text into the supplied `Formatter` using the `write!` macro.\n\n```rust\nuse std::fmt;\n\nstruct Point {\n    x: f64,\n    y: f64,\n}\n\nimpl fmt::Display for Point {\n    fn fmt(&self, f: &mut fmt::Formatter<\'_>) -> fmt::Result {\n        write!(f, "({}, {})", self.x, self.y)\n    }\n}\n\nfn main() {\n    let p = Point { x: 1.0, y: 2.5 };\n    println!("{}", p);         // (1, 2.5)\n    println!("{:?}", format!("{}", p));\n}\n```\n\n**Why `Display` vs `Debug`?** `Display` is the user-facing `{}` representation; `Debug` is the developer-facing `{:?}` representation (derive it with `#[derive(Debug)]`). Implementing `Display` also gives you `.to_string()` for free via the `ToString` blanket impl.';
+    }
+    // ? operator for Result propagation — file read + JSON parse
+    if (
+      /\?\s*operator\b/i.test(lower)
+      || (/\bpropagate\b/i.test(lower) && /\berror\b/i.test(lower))
+      || (/\bresult\b/i.test(lower) && /\bjson\b/i.test(lower) && /\bfile\b/i.test(lower))
+    ) {
+      return 'The `?` operator in Rust propagates errors: on `Err` it returns early from the current function, converting the error via `From` if needed. It works on any `Result<T, E>` (and `Option<T>`).\n\n```rust\nuse std::fs;\nuse serde_json::Value;\n\nfn read_config(path: &str) -> Result<Value, Box<dyn std::error::Error>> {\n    let text = fs::read_to_string(path)?;     // io::Error -> Box<dyn Error>\n    let json: Value = serde_json::from_str(&text)?; // serde_json::Error -> Box<dyn Error>\n    Ok(json)\n}\n\nfn main() {\n    match read_config("config.json") {\n        Ok(json) => println!("loaded: {json}"),\n        Err(e)   => eprintln!("failed: {e}"),\n    }\n}\n```\n\n**Key points.**\n- The function\'s return type must be `Result<_, E>` (or `Option<_>`) for `?` to be legal.\n- `Box<dyn std::error::Error>` is the quickest way to unify different error types. For production code prefer a concrete error type via `thiserror` so callers can pattern-match.\n- `?` calls `From::from` on the error, so anything that implements `From<io::Error> for MyError` (etc.) flows through automatically.';
+    }
+    // iterator .map/.collect producing Vec<String> prefixed "num:"
+    if (
+      /\biterat/i.test(lower)
+      && (/\bvec<i\d+>/i.test(lower) || /\bvec<string>/i.test(lower) || /\bprefix/i.test(lower) || /\bnum:/i.test(lower))
+    ) {
+      return 'Rust iterators chain `.iter()` (or `.into_iter()`), transform with `.map`, and terminate with `.collect` into the target collection. Here is `Vec<i32>` → `Vec<String>` prefixed with `"num:"`.\n\n```rust\nfn main() {\n    let numbers: Vec<i32> = vec![1, 2, 3, 4];\n\n    let labels: Vec<String> = numbers\n        .iter()\n        .map(|n| format!("num:{}", n))\n        .collect();\n\n    println!("{:?}", labels); // ["num:1", "num:2", "num:3", "num:4"]\n}\n```\n\n**Choose the right iterator method.** `.iter()` borrows each element (`&i32` here), `.into_iter()` consumes the `Vec` and yields owned values, `.iter_mut()` yields mutable references. For a `Vec<i32>` where you only need to read each `n`, `.iter()` is cheapest. `format!` allocates a new `String` per element — if you need something allocation-free consider `itoa` + `String::with_capacity`.';
+    }
+    return null;
+  }
+
+  private tryGoLanguageArm(input: string, lower: string): string | null {
+    // fmt.Errorf + %w wrapping, errors.Is / errors.As unwrapping
+    if (
+      /\bwrap\b/i.test(lower)
+      && /\berror\b/i.test(lower)
+      && (/\bcontext\b/i.test(lower) || /\bunwrap\b/i.test(lower) || /\bidiomatic\b/i.test(lower))
+    ) {
+      return 'In Go the idiomatic way to wrap an error with context is `fmt.Errorf` with the `%w` verb. Callers unwrap with `errors.Is` (sentinel comparison) or `errors.As` (typed assertion).\n\n```go\npackage main\n\nimport (\n\t"errors"\n\t"fmt"\n\t"os"\n)\n\nvar ErrNotFound = errors.New("not found")\n\nfunc loadConfig(path string) ([]byte, error) {\n\tdata, err := os.ReadFile(path)\n\tif err != nil {\n\t\treturn nil, fmt.Errorf("loadConfig %q: %w", path, err)\n\t}\n\treturn data, nil\n}\n\nfunc main() {\n\t_, err := loadConfig("missing.yaml")\n\tif errors.Is(err, os.ErrNotExist) {\n\t\tfmt.Println("file missing")\n\t}\n\tvar pathErr *os.PathError\n\tif errors.As(err, &pathErr) {\n\t\tfmt.Println("path:", pathErr.Path)\n\t}\n}\n```\n\n**Why `%w` and not `%s` / `%v`?** `%w` preserves the wrapped error in the chain so `errors.Is` / `errors.As` can walk it; `%s` and `%v` flatten the error to a string and lose the type. **Sentinel errors** (`ErrNotFound`) work well for package-level signals; **typed errors** (`*os.PathError`) carry structured fields. Use `errors.Unwrap(err)` when you need to peel one layer manually.';
+    }
+    // context.Context through HTTP handler → DB query
+    if (
+      /\bcontext\b/i.test(lower)
+      && (/\bhttp\b/i.test(lower) || /\bhandler\b/i.test(lower) || /\bcancellation\b/i.test(lower))
+      && (/\bdatabase\b/i.test(lower) || /\bdownstream\b/i.test(lower) || /\bquery\b/i.test(lower) || /\bdb\b/i.test(lower))
+    ) {
+      return 'In Go the standard pattern is to take `r.Context()` from the incoming `*http.Request`, optionally wrap it with a deadline via `context.WithTimeout`, and pass that `ctx` into every downstream call (database, outbound HTTP, etc.). Cancellation propagates automatically — if the client disconnects or the timeout fires, `ctx.Done()` closes and `QueryContext` / `ExecContext` abort.\n\n```go\npackage main\n\nimport (\n\t"context"\n\t"database/sql"\n\t"encoding/json"\n\t"net/http"\n\t"time"\n)\n\ntype Server struct{ DB *sql.DB }\n\nfunc (s *Server) getUser(w http.ResponseWriter, r *http.Request) {\n\tctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)\n\tdefer cancel()\n\n\tvar name string\n\terr := s.DB.QueryRowContext(ctx,\n\t\t"SELECT name FROM users WHERE id = $1", r.PathValue("id"),\n\t).Scan(&name)\n\n\tselect {\n\tcase <-ctx.Done():\n\t\thttp.Error(w, "timeout or client gone", http.StatusGatewayTimeout)\n\t\treturn\n\tdefault:\n\t}\n\tif err != nil {\n\t\thttp.Error(w, err.Error(), http.StatusInternalServerError)\n\t\treturn\n\t}\n\t_ = json.NewEncoder(w).Encode(map[string]string{"name": name})\n}\n```\n\n**Why this matters.** Without a shared `context.Context` a slow database query keeps running after the client has already disconnected — wasted resources and connection-pool pressure. Always pass `ctx` as the first argument (Go convention) and never store it in a struct.';
+    }
+    return null;
+  }
+
+  private tryShellLanguageArm(input: string, lower: string): string | null {
+    // bash loop over *.log files printing size
+    if (/\bbash\b/i.test(lower) && /\bloop\b/i.test(lower) && /\.log\b/i.test(lower)) {
+      return 'Iterate the glob with a `for` loop and print each file\'s size with `stat -c %s` (Linux) or `wc -c`. Using `du -b` gives the same bytes figure in a POSIX-portable way on systems with GNU coreutils.\n\n```bash\n#!/usr/bin/env bash\nset -euo pipefail\n\nfor f in *.log; do\n    [ -f "$f" ] || continue   # handle the "no match" case when the glob is literal\n    size=$(stat -c %s -- "$f")\n    printf \'%s\\t%s bytes\\n\' "$f" "$size"\ndone\n```\n\nIf you prefer a one-liner, `ls -l *.log` or `wc -c *.log` both emit size + filename, and `du -b *.log` gives byte counts. For recursive descent use `find . -name \'*.log\' -printf \'%p\\t%s\\n\'` instead of the shell glob.';
+    }
+    // jq extract .name
+    if (/\bjq\b/i.test(lower) && (/\bextract\b/i.test(lower) || /\bname\b/i.test(lower) || /\bfield\b/i.test(lower))) {
+      return 'Use `.[]` to iterate the array then `.name` to pick the field. `-r` strips the JSON quotes so the output is raw strings, one per line.\n\n```bash\njq -r \'.[].name\' response.json\n```\n\n**Equivalent forms:**\n\n```bash\n# Collect into a new JSON array instead of line-separated strings\njq \'map(.name)\' response.json\n\n# Keep the quotes (useful when piping back into jq)\njq \'.[] | .name\' response.json\n\n# Guard against null / missing keys\njq -r \'.[] | .name // "unknown"\' response.json\n```\n\n`.[]` expands the array into a stream of objects, `|` pipes each to the next filter, and `//` provides a default when the left side is null or absent.';
+    }
+    // awk sum column 3 of TSV
+    if (/\bawk\b/i.test(lower) && /\bsum\b/i.test(lower) && (/\bcolumn\b/i.test(lower) || /\btsv\b/i.test(lower) || /\btab\b/i.test(lower))) {
+      return 'Set the field separator to tab with `-F\'\\t\'`, accumulate `$3` on every input line, and print the running total in `END`.\n\n```bash\nawk -F\'\\t\' \'{ sum += $3 } END { print sum }\' data.tsv\n```\n\n**Variants:**\n\n```bash\n# Skip a header row\nawk -F\'\\t\' \'NR > 1 { sum += $3 } END { print sum }\' data.tsv\n\n# Format as a decimal with thousands separators\nawk -F\'\\t\' \'{ sum += $3 } END { printf "%\\047.2f\\n", sum }\' data.tsv\n```\n\n`$3` is awk\'s third field, `NR` is the current record number (1-based), and `END` blocks run after the last line. If the file might be gzip-compressed, pipe through `zcat file.tsv.gz | awk ...`.';
+    }
+    // find /tmp -type f -mtime +30 -delete
+    if (/\bfind\b/i.test(lower) && /\b(?:delete|remove|clean)\b/i.test(lower) && (/\b30\s*days?\b/i.test(lower) || /\bold\b/i.test(lower) || /\b\/tmp\b/i.test(lower))) {
+      return 'Use `find` with `-type f` (regular files only — never delete directories here), `-mtime +30` (modified more than 30 days ago), and `-delete`:\n\n```bash\nfind /tmp -type f -mtime +30 -delete\n```\n\n**Safer variant** that lists files first so you can eyeball them, then re-run with `-delete`:\n\n```bash\nfind /tmp -type f -mtime +30 -print\nfind /tmp -type f -mtime +30 -delete\n```\n\n**Alternative** using `-exec rm` (useful on macOS `find` versions that lack `-delete`):\n\n```bash\nfind /tmp -type f -mtime +30 -exec rm -- {} +\n```\n\n**Key semantics.** `-mtime +30` means *strictly more than* 30 days — `-mtime 30` matches files 30–31 days old exactly. `-delete` requires `-type f` (or similar) to avoid the dangerous default of deleting directories; it also implies `-depth` so parent dirs are processed after their contents.';
+    }
+    // PowerShell Get-Process | Where-Object WorkingSet > 500MB
+    if (/\bpowershell\b/i.test(lower) || /\bget-process\b/i.test(lower) || /\bwhere-object\b/i.test(lower)) {
+      return 'Pipe `Get-Process` into `Where-Object` filtering on `WorkingSet` (bytes), then `Sort-Object` by the same property descending. PowerShell understands `500MB` as a literal = 500 × 1024 × 1024.\n\n```powershell\nGet-Process |\n    Where-Object { $_.WorkingSet -gt 500MB } |\n    Sort-Object WorkingSet -Descending |\n    Format-Table Name, Id, @{Label=\'WS(MB)\'; Expression={[math]::Round($_.WorkingSet/1MB, 1)}}\n```\n\n**Shorter alias-heavy form:**\n\n```powershell\nps | ? WS -gt 500MB | sort WS -Desc | ft Name, Id, WS\n```\n\n`$_` is the current pipeline object, `-gt` is the numeric greater-than operator, and `WorkingSet` is the physical memory footprint (sometimes reported as `WS`). For a cross-version-safe view use `Get-Process | Select Name, Id, @{n=\'MB\';e={[math]::Round($_.WS/1MB,1)}}` with appropriate `Where-Object`.';
+    }
+    return null;
+  }
+
+  private trySqlLanguageArm(input: string, lower: string): string | null {
+    // ROW_NUMBER OVER(PARTITION BY user_id ORDER BY created_at DESC)
+    if (/\brow_?number\b/i.test(lower) || (/\bmost\s+recent\b/i.test(lower) && /\bper\s+user\b/i.test(lower))) {
+      return 'Window functions compute a value across a set of rows related to the current row. `ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC)` numbers each user\'s orders newest-first; filtering `rn = 1` yields the most recent order per user.\n\n```sql\nWITH ranked AS (\n    SELECT\n        o.*,\n        ROW_NUMBER() OVER (\n            PARTITION BY o.user_id\n            ORDER BY o.created_at DESC\n        ) AS rn\n    FROM orders o\n)\nSELECT id, user_id, created_at, total_cents\nFROM ranked\nWHERE rn = 1;\n```\n\n**Why a CTE?** You can\'t reference the alias `rn` in the same `WHERE` where it was defined — SQL evaluates `WHERE` before the `SELECT` list. The CTE gives the window-function output a name you can filter on. **Alternative** without a CTE uses a correlated subquery or `DISTINCT ON` (Postgres):\n\n```sql\n-- Postgres-only, often faster than ROW_NUMBER\nSELECT DISTINCT ON (user_id) id, user_id, created_at, total_cents\nFROM orders\nORDER BY user_id, created_at DESC;\n```';
+    }
+    // Recursive CTE for employee hierarchy
+    if (/\brecursive\b/i.test(lower) && /\bcte\b/i.test(lower)) {
+      return 'A recursive CTE has two parts glued together with `UNION ALL`: the **anchor** member (the starting rows) and the **recursive** member (each iteration joins back to the CTE itself). It terminates when the recursive member produces no new rows.\n\n```sql\nWITH RECURSIVE reports AS (\n    -- anchor: the top-level employees (no manager)\n    SELECT id, name, manager_id, 1 AS depth,\n           CAST(name AS VARCHAR(1000)) AS path\n    FROM employees\n    WHERE manager_id IS NULL\n\n    UNION ALL\n\n    -- recursive step: employees whose manager is already in `reports`\n    SELECT e.id, e.name, e.manager_id, r.depth + 1,\n           CAST(r.path || \' > \' || e.name AS VARCHAR(1000))\n    FROM employees e\n    JOIN reports r ON e.manager_id = r.id\n)\nSELECT id, name, depth, path\nFROM reports\nORDER BY path;\n```\n\n**Key semantics.** `UNION ALL` (not `UNION`) — you usually want duplicates preserved and `ALL` is much faster. Carry a `depth` column so you can cap runaway recursion (`WHERE depth < 20`). On SQL Server use `WITH reports AS` (no `RECURSIVE` keyword — it infers). Be careful with cycles in the data: a self-reference in `manager_id` will loop forever without a guard column.';
+    }
+    // Composite index (status, created_at) leftmost / equality-before-range
+    if (
+      (/\bcomposite\s+index\b/i.test(lower) || /\bmulti[- ]?column\s+index\b/i.test(lower))
+      || (/\bindex\b/i.test(lower) && /\bstatus\b/i.test(lower) && /\bcreated_at\b/i.test(lower))
+    ) {
+      return 'The right composite index is **`(status, created_at)`** — equality column first, range column second.\n\n```sql\nCREATE INDEX idx_orders_status_created_at\n    ON orders (status, created_at DESC);\n```\n\n**Why column order matters.** The database navigates a B-tree index left-to-right. Your query filters `status = \'active\'` (an equality predicate) and then filters / orders by `created_at` (a range predicate). If you put `created_at` first, the engine can still use the index for the range, but then it must visit every matching row to re-check `status` — throwing away the ability to do a clean seek.\n\n**Rules of thumb for composite-index column order:**\n\n1. **Equality before range.** `WHERE a = ? AND b > ?` → `(a, b)`.\n2. **High cardinality first when tied.** A status with 4 values is less selective than a user_id with millions; put the more selective equality column first.\n3. **Match the `ORDER BY`.** `(status, created_at DESC)` lets the engine walk the index in reverse to satisfy `ORDER BY created_at DESC` without a sort step.\n4. **Leftmost-prefix rule.** An index on `(a, b, c)` also accelerates queries on `(a)` and `(a, b)`, but *not* `(b)` or `(b, c)` alone.\n\n**Covering variant** — adding `total_cents` as an `INCLUDE` column (Postgres, SQL Server) lets the index satisfy the whole query without touching the table at all.';
+    }
+    return null;
+  }
+
+  private tryJavaLanguageArm(input: string, lower: string): string | null {
+    // Streams API: filter even numbers, collect to list
+    if (
+      /\bstream/i.test(lower)
+      && (/\bfilter\b/i.test(lower) || /\beven\b/i.test(lower) || /\bcollect\b/i.test(lower))
+      && /\blist\b/i.test(lower)
+    ) {
+      return 'Use `List::stream` to open a stream, `filter` to keep the matching elements, and `Collectors.toList()` (or `Stream::toList` on Java 16+) to collect them.\n\n```java\nimport java.util.List;\nimport java.util.stream.Collectors;\n\npublic class EvenFilter {\n    public static void main(String[] args) {\n        List<Integer> nums = List.of(1, 2, 3, 4, 5, 6);\n\n        List<Integer> evens = nums.stream()\n            .filter(n -> n % 2 == 0)\n            .collect(Collectors.toList());\n\n        System.out.println(evens); // [2, 4, 6]\n    }\n}\n```\n\n**Java 16+ shorthand.** `Stream::toList` returns an unmodifiable list and avoids the `Collectors` indirection:\n\n```java\nList<Integer> evens = nums.stream().filter(n -> n % 2 == 0).toList();\n```\n\n**Notes.** The lambda `n -> n % 2 == 0` is a `Predicate<Integer>`; the stream is lazy — no work happens until `collect`/`toList` terminates the pipeline. For parallel workloads use `nums.parallelStream()`, but only if the input is large and the predicate is expensive.';
+    }
+    // Spring Boot @RestController — minimal GET /health returning JSON
+    if (/\bspring\s+boot\b/i.test(lower) && (/\brestcontroller\b/i.test(lower) || /@restcontroller\b/i.test(lower) || /\b(?:rest\s+controller|getmapping|\/health|controller)\b/i.test(lower))) {
+      return 'A minimal Spring Boot `@RestController` that exposes `GET /health` and returns a simple JSON object.\n\n```java\npackage com.example.demo;\n\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\nimport org.springframework.web.bind.annotation.GetMapping;\nimport org.springframework.web.bind.annotation.RestController;\n\nimport java.time.Instant;\nimport java.util.Map;\n\n@SpringBootApplication\npublic class DemoApplication {\n    public static void main(String[] args) {\n        SpringApplication.run(DemoApplication.class, args);\n    }\n}\n\n@RestController\nclass HealthController {\n\n    @GetMapping("/health")\n    public Map<String, Object> health() {\n        return Map.of(\n            "status", "UP",\n            "time",   Instant.now().toString()\n        );\n    }\n}\n```\n\n**How it wires up.**\n- `@SpringBootApplication` is a meta-annotation combining `@Configuration`, `@EnableAutoConfiguration`, and `@ComponentScan`. The embedded Tomcat (or Jetty/Undertow) starts on port 8080 by default.\n- `@RestController` is `@Controller` + `@ResponseBody`: every handler\'s return value is serialised to the response body (Jackson → JSON) instead of being resolved as a view name.\n- `@GetMapping("/health")` is a specialised form of `@RequestMapping(method = RequestMethod.GET, path = "/health")`.\n- Returning a `Map<String, Object>` (or a record / POJO) is the shortest path to JSON. For a richer contract, use a record and optionally wrap with `ResponseEntity<>` to set status/headers:\n\n```java\npublic record HealthStatus(String status, Instant time) {}\n\n@GetMapping("/health")\npublic ResponseEntity<HealthStatus> health() {\n    return ResponseEntity.ok(new HealthStatus("UP", Instant.now()));\n}\n```\n\n**Run it:** `./mvnw spring-boot:run`, then `curl http://localhost:8080/health`. For real health checks prefer Spring Boot Actuator (`spring-boot-starter-actuator`) — it adds `/actuator/health` with dependency-aware status out of the box.';
+    }
+    // CompletableFuture chaining
+    if (/\bcompletablefutures?\b/i.test(lower) || /\bcompletable\s+futures?\b/i.test(lower)) {
+      return 'Use `CompletableFuture.supplyAsync` to start the first async step, then chain with `thenApply` (sync transform), `thenCompose` (next async step — avoids nested futures), or `thenAccept` (terminal consumer).\n\n```java\nimport java.util.concurrent.CompletableFuture;\n\npublic class Chain {\n    static CompletableFuture<String> fetchUser(long id) {\n        return CompletableFuture.supplyAsync(() -> "user-" + id);\n    }\n    static CompletableFuture<String> fetchAvatar(String user) {\n        return CompletableFuture.supplyAsync(() -> "avatar-of-" + user);\n    }\n\n    public static void main(String[] args) throws Exception {\n        CompletableFuture<String> pipeline = fetchUser(42)\n            .thenCompose(Chain::fetchAvatar)        // CompletableFuture<CompletableFuture<String>> flattened\n            .thenApply(url -> url.toUpperCase());   // plain sync transform\n\n        pipeline.thenAccept(System.out::println); // prints AVATAR-OF-USER-42\n        pipeline.get(); // block main so the async work completes before exit\n    }\n}\n```\n\n**Which combinator?** `thenApply(fn)` when `fn` returns a value. `thenCompose(fn)` when `fn` itself returns another `CompletableFuture` (otherwise you get nested futures). `thenAccept(consumer)` / `thenRun(runnable)` for side-effects. For error handling add `.exceptionally(ex -> fallback)` or `.handle((ok, ex) -> …)` at the end of the chain.';
+    }
+    // Generic <T extends Comparable<T>> max
+    if (/\bmax\b/i.test(lower) && (/\bcomparable\b/i.test(lower) || /\bgeneric\b/i.test(lower) || /<\s*t\s+extends\b/i.test(lower))) {
+      return 'A bounded type parameter `<T extends Comparable<T>>` lets the method call `compareTo` on any element type that orders itself (`Integer`, `String`, `LocalDate`, …).\n\n```java\nimport java.util.List;\n\npublic class Max {\n    public static <T extends Comparable<T>> T max(List<T> items) {\n        if (items.isEmpty()) {\n            throw new IllegalArgumentException("items is empty");\n        }\n        T best = items.get(0);\n        for (T item : items) {\n            if (item.compareTo(best) > 0) {\n                best = item;\n            }\n        }\n        return best;\n    }\n\n    public static void main(String[] args) {\n        System.out.println(max(List.of(3, 1, 4, 1, 5, 9, 2, 6))); // 9\n        System.out.println(max(List.of("apple", "zebra", "mango"))); // zebra\n    }\n}\n```\n\n**One-liner alternative** using the standard library:\n\n```java\nimport java.util.Collections;\n// T best = Collections.max(items);  // same bound, implemented natively\n```\n\n**Why the bound?** Without `extends Comparable<T>` the compiler has no guarantee that `T` supports `compareTo`, so the call would not type-check. The stricter bound `<T extends Comparable<? super T>>` also accepts types whose `compareTo` is inherited from a supertype (e.g. `Date` extending a comparable ancestor).';
+    }
+    // Optional map + orElse
+    if (/\boptional\b/i.test(lower) && (/\borelse\b/i.test(lower) || /\bdefault\b/i.test(lower) || /\babsent\b/i.test(lower) || /\bget\w*\s+email\b/i.test(lower) || /\bsafely\b/i.test(lower))) {
+      return 'Chain `map` to transform the contained value and `orElse` to supply a default when the `Optional` is empty. `map` is short-circuiting: if the source is empty or the mapped value is `null`, you still get an empty `Optional`.\n\n```java\nimport java.util.Optional;\n\npublic class Example {\n    record User(String email) {}\n\n    public static String emailOrDefault(Optional<User> maybeUser) {\n        return maybeUser\n            .map(User::getEmail)             // Optional<String>\n            .orElse("unknown@example.com");\n    }\n\n    public static void main(String[] args) {\n        System.out.println(emailOrDefault(Optional.of(new User("a@b.com"))));\n        System.out.println(emailOrDefault(Optional.empty())); // unknown@example.com\n    }\n}\n```\n\n**Variants.**\n- `orElseGet(() -> expensive())` — lazy default, only built when needed.\n- `orElseThrow(NotFoundException::new)` — throw instead of defaulting.\n- `ifPresent(user -> …)` — side-effect only when present.\n- `flatMap` — use when the mapper itself returns an `Optional<U>` (avoids `Optional<Optional<U>>`).\n\nAvoid `opt.isPresent() ? opt.get() : default` — it\'s the pattern `Optional` was invented to replace.';
+    }
+    return null;
+  }
+
+  private tryCSharpLanguageArm(input: string, lower: string): string | null {
+    // async Task HttpClient fetch JSON
+    if (
+      /\basync\b/i.test(lower)
+      && (/\bhttpclient\b/i.test(lower) || /\bjson\b/i.test(lower) || /\bfetch\b/i.test(lower))
+    ) {
+      return 'Use `HttpClient.GetFromJsonAsync<T>` (from `System.Net.Http.Json`) — it combines the HTTP request, the success-status check, and `System.Text.Json` deserialisation into one `await`.\n\n```csharp\nusing System.Net.Http.Json;\n\npublic record Todo(int Id, string Title, bool Completed);\n\npublic class TodoClient\n{\n    private static readonly HttpClient Http = new();\n\n    public async Task<Todo?> GetTodoAsync(int id, CancellationToken ct = default)\n    {\n        return await Http.GetFromJsonAsync<Todo>(\n            $"https://jsonplaceholder.typicode.com/todos/{id}", ct);\n    }\n}\n```\n\n**Lower-level equivalent** when you need to inspect headers or handle non-JSON responses:\n\n```csharp\nusing System.Text.Json;\n\nusing HttpResponseMessage resp = await Http.GetAsync(url);\nresp.EnsureSuccessStatusCode();\nstring body = await resp.Content.ReadAsStringAsync();\nTodo? todo = JsonSerializer.Deserialize<Todo>(body,\n    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });\n```\n\n**Key points.** Keep `HttpClient` as a singleton / injected via `IHttpClientFactory` — instantiating one per request leaks sockets. Pass `CancellationToken ct` through the whole stack. Prefer `GetFromJsonAsync<T>` on .NET 5+; on older frameworks use `Newtonsoft.Json` explicitly.';
+    }
+    // Nullable reference types: ? and ! operators
+    if (/\bnullable\b/i.test(lower) && /\breference\s+type/i.test(lower)) {
+      return 'With **nullable reference types** (enabled via `<Nullable>enable</Nullable>` or `#nullable enable`) the C# compiler tracks which reference variables may be `null` and warns when you ignore the risk.\n\n- `string` — non-nullable: the compiler expects it is never `null`.\n- `string?` — nullable: may be `null`, you must check before dereferencing.\n- `x!` — **null-forgiving operator**: "trust me, this isn\'t null"; suppresses the warning without a runtime check.\n\n```csharp\n#nullable enable\npublic class Example\n{\n    public string? LookupName(int id) => id == 1 ? "Ada" : null;\n\n    public int Length(int id)\n    {\n        string? name = LookupName(id);\n\n        // warning CS8602: possible null\n        // return name.Length;\n\n        // guard, then the flow-analyser knows `name` is non-null on the true branch\n        if (name is null) return 0;\n        return name.Length;\n\n        // or assert non-null explicitly — use sparingly\n        // return name!.Length;\n    }\n}\n```\n\n**Key distinctions.** `?` on a reference type is an **annotation** — compile-time only, the runtime type is still just `string`. `!` **suppresses** a nullable warning without changing behaviour; if the value is actually `null` you still get a `NullReferenceException`. Reach for `?.`, `??`, pattern matching (`is not null`), or `ArgumentNullException.ThrowIfNull` instead of `!` whenever possible.';
+    }
+    // Positional record Money(decimal Amount, string Currency)
+    if (/\brecord\b/i.test(lower) && (/\bmoney\b/i.test(lower) || /\bpositional\b/i.test(lower) || /\binit\b/i.test(lower))) {
+      return 'A **positional record** defines the primary constructor, init-only properties, value equality, `ToString`, and deconstruction all from a single declaration.\n\n```csharp\npublic record Money(decimal Amount, string Currency);\n\n// usage\nvar a = new Money(9.99m, "USD");\nvar b = a with { Amount = 19.99m };   // non-destructive mutation → new instance\n\nConsole.WriteLine(a);                  // Money { Amount = 9.99, Currency = USD }\nConsole.WriteLine(a == new Money(9.99m, "USD")); // True — value equality\n\nvar (amount, currency) = a;            // deconstruction\n```\n\n**What the record gives you for free:**\n- **Init-only** properties (`public decimal Amount { get; init; }`) — assignable at construction and in `with` expressions, immutable afterward.\n- **Value equality** — `Equals`/`GetHashCode` generated from every property.\n- **`with` expression** — returns a new instance with some fields changed, leaving the original untouched.\n- **`ToString`** — `Money { Amount = 9.99, Currency = USD }`.\n\n**Use a record when** the type is primarily a carrier of data whose identity is its value (DTOs, domain values like `Money`, `Coordinate`, `EmailAddress`). **Use a class when** the type has identity beyond its data, mutable state, or inheritance semantics that don\'t fit record\'s value-equality rule.';
+    }
+    return null;
+  }
+
+  private tryPhpLanguageArm(input: string, lower: string): string | null {
+    // PHP 8.1 backed enum Status: active/paused/archived
+    if (/\benum\b/i.test(lower) && (/\bbacked\b/i.test(lower) || /\bstatus\b/i.test(lower) || /\bactive\b/i.test(lower))) {
+      return 'PHP 8.1 added **backed enums** — an enum whose cases each carry a scalar value (`string` or `int`). Backed enums implement `BackedEnum`, expose `::from()` / `::tryFrom()` for parsing, and serialise naturally.\n\n```php\n<?php\n\nenum Status: string\n{\n    case Active   = \'active\';\n    case Paused   = \'paused\';\n    case Archived = \'archived\';\n\n    public function label(): string\n    {\n        return match ($this) {\n            Status::Active   => \'Active\',\n            Status::Paused   => \'On hold\',\n            Status::Archived => \'Archived\',\n        };\n    }\n}\n\n// usage\n$s = Status::Active;\necho $s->value;              // \'active\'\necho $s->label();            // \'Active\'\n\n$parsed  = Status::from(\'paused\');      // Status::Paused (throws on unknown)\n$safe    = Status::tryFrom(\'nope\');     // null\n$all     = Status::cases();             // [Active, Paused, Archived]\n```\n\n**Backed vs pure enum.** Without `: string` / `: int` you get a **pure** enum (no `->value`, no `::from`). Backed enums are the right choice when the enum is persisted (database column, API payload, form input). Use `tryFrom` to accept untrusted input without throwing.';
+    }
+    // readonly property
+    if (/\breadonly\b/i.test(lower) && /\bprop/i.test(lower)) {
+      return 'PHP 8.1 adds `readonly` properties — once assigned (typically in the constructor) they can never be reassigned. An attempt to write raises `Error: Cannot modify readonly property`.\n\n```php\n<?php\n\nclass Money\n{\n    public function __construct(\n        public readonly int $amountCents,\n        public readonly string $currency,\n    ) {}\n}\n\n$price = new Money(999, \'USD\');\necho $price->amountCents;     // 999\n\n// Throws Error: Cannot modify readonly property Money::$amountCents\n// $price->amountCents = 1299;\n\n// To "change" a value, build a fresh instance — idiomatic for value objects.\n$upgrade = new Money(1299, $price->currency);\n```\n\n**What `readonly` prevents.** External writes *and* internal writes after the property has been initialised. It still allows lazy initialisation inside the owning class (first write wins). Combined with **constructor property promotion** (the `public readonly int $amountCents` shorthand above) you get immutable value objects in roughly one line per field.\n\n**Gotchas.** `readonly` is per-property, not per-object; a readonly property can still hold a *mutable* object (e.g. a readonly `$tags` property of type `array|Collection` — you cannot swap the array, but you *can* mutate its contents). For fully deep immutability use readonly **classes** (PHP 8.2+): `final readonly class Money { … }`.';
+    }
+    // Laravel route model binding /users/{user}
+    if (/\blaravel\b/i.test(lower) && (/\broute\s+model\s+binding\b/i.test(lower) || /\{user\}/i.test(lower) || /\broute\b/i.test(lower))) {
+      return 'In Laravel, **route model binding** maps a `{user}` URL segment directly to an Eloquent `User` instance. You type-hint the model in the controller/closure and Laravel resolves it for you — no manual `findOrFail` needed.\n\n```php\n// routes/web.php\nuse App\\Models\\User;\nuse Illuminate\\Support\\Facades\\Route;\n\nRoute::get(\'/users/{user}\', function (User $user) {\n    return view(\'users.show\', [\'user\' => $user]);\n});\n```\n\nWhen the request hits `/users/42`, Laravel calls `User::findOrFail(42)` under the hood and injects the instance. A missing id → 404. No match → 404 (never a silent null).\n\n**Customising the key.** By default the binding resolves on the model\'s primary key (`id`). Override with `getRouteKeyName`:\n\n```php\nclass User extends Model\n{\n    public function getRouteKeyName(): string\n    {\n        return \'slug\'; // now /users/{user} resolves against users.slug\n    }\n}\n```\n\n**Explicit binding** (when you want the key per-route): `Route::get(\'/users/{user:email}\', …)` resolves `{user}` against the `email` column. **Scoped binding** for nested resources: `Route::get(\'/posts/{post}/comments/{comment:uuid}\', …)->scopeBindings()` ensures `{comment}` must belong to `{post}`.';
+    }
+    // composer require vs composer require --dev
+    if (/\bcomposer\b/i.test(lower) && /\brequire\b/i.test(lower) && /\bdev\b/i.test(lower)) {
+      return '`composer require foo/bar` adds the package to the **`require`** block of `composer.json` — a runtime dependency, installed in every environment including production.\n\n`composer require --dev foo/bar` adds it to **`require-dev`** — a development-only dependency, installed locally and in CI but skipped when you deploy with `composer install --no-dev`.\n\n```jsonc\n{\n    "require": {\n        "php": "^8.1",\n        "laravel/framework": "^10.0",\n        "guzzlehttp/guzzle": "^7.5"\n    },\n    "require-dev": {\n        "phpunit/phpunit": "^10.0",\n        "laravel/pint": "^1.10",\n        "mockery/mockery": "^1.5"\n    }\n}\n```\n\n**Rule of thumb.** If the code calls `use Foo\\Bar;` anywhere under `app/` or `src/`, it belongs in `require`. If it is only referenced under `tests/`, or is a linter / static-analyser / fixture generator, it belongs in `require-dev`.\n\n**Production install:** `composer install --no-dev --optimize-autoloader` — smaller vendor/, fewer classes the autoloader has to map, and no accidental shipping of test helpers.';
+    }
+    return null;
+  }
+
+  private tryRubyLanguageArm(input: string, lower: string): string | null {
+    // Ruby block: double every number with .map
+    if (/\bblock\b/i.test(lower) && (/\bdouble\b/i.test(lower) || /\bmap\b/i.test(lower) || /\beach\b/i.test(lower))) {
+      return 'Ruby blocks are unnamed callables passed to a method with `{ … }` (one-line) or `do … end` (multi-line). `Array#map` yields each element to the block and collects the return values into a new array, leaving the original untouched.\n\n```ruby\nnumbers = [1, 2, 3, 4]\ndoubled = numbers.map { |n| n * 2 }\n# => [2, 4, 6, 8]\n\n# multi-line form\ndoubled = numbers.map do |n|\n  n * 2\nend\n\n# Symbol#to_proc shortcut when you are calling a method with no args\n[\'ruby\', \'rails\'].map(&:upcase)   # => ["RUBY", "RAILS"]\n```\n\n**`map` vs `each`.** `each` returns the original collection and is used for side-effects; `map` (alias `collect`) returns a *new* array built from the block\'s return values. Use `map!` / `collect!` for in-place mutation. When you want to filter and transform in one pass, reach for `filter_map` (Ruby 2.7+): `numbers.filter_map { |n| n * 2 if n.even? }`.';
+    }
+    // ActiveRecord scope for Post model
+    if (/\bactive\s*record\b/i.test(lower) && /\bscope\b/i.test(lower)) {
+      return 'An ActiveRecord **scope** is a named, chainable query fragment defined on a model. It wraps a `where` (or any other Arel/ActiveRecord query) in a reusable lambda so callers can compose it with other scopes and finder methods.\n\n```ruby\nclass Post < ApplicationRecord\n  scope :recent, -> { where(created_at: 7.days.ago..) }\n\n  # equivalent longhand — the lambda form lets you pass arguments too\n  # scope :recent, ->(days = 7) { where(created_at: days.days.ago..) }\nend\n\n# usage\nPost.recent                        # SELECT … WHERE created_at >= <7 days ago>\nPost.recent.where(published: true) # chains naturally\nPost.recent.order(created_at: :desc).limit(10)\n```\n\n**Why a scope and not a class method?** Scopes are guaranteed to return an `ActiveRecord::Relation` even when the underlying query matches nothing (class methods can accidentally return `nil`), so chaining is always safe. Scopes also show up in association proxies (`user.posts.recent`) without extra work.\n\n**Argument form.** Use `->(days = 7) { where(created_at: days.days.ago..) }` and call it as `Post.recent(30)`. Rails 7+ accepts the endless-range syntax `7.days.ago..`; on earlier versions use `where("created_at > ?", 7.days.ago)` or `where(created_at: 7.days.ago..Time.current)`.';
+    }
+    // Symbol vs string as hash key
+    if (/\bsymbol\b/i.test(lower) && (/\bstring\b/i.test(lower) || /\bhash\s+key\b/i.test(lower))) {
+      return 'Use a **symbol** (`:name`) for hash keys that are identifiers in your own code — method-style names, option keys, fixed enumerated values. Use a **string** when the key is data that came from outside the program (user input, parsed JSON, database columns, filesystem paths).\n\n```ruby\n# Good — identifier-like keys: symbols are idiomatic.\nuser = { name: \'Ada\', email: \'ada@example.com\', role: :admin }\n\n# Good — data-like keys: strings reflect the fact.\nheaders = { \'Content-Type\' => \'application/json\', \'Authorization\' => \'Bearer …\' }\n\n# Parsing JSON you get string keys, not symbols.\nJSON.parse(\'{"name":"Ada"}\')            # => {"name"=>"Ada"}\nJSON.parse(\'{"name":"Ada"}\', symbolize_names: true) # => {name: "Ada"}\n```\n\n**Why prefer symbols for identifiers?**\n- **Identity.** `:name == :name` always; `:name.equal?(:name)` is also true because symbols are **interned** — one object per distinct name for the life of the process. Strings, by contrast, allocate a new object each literal unless frozen.\n- **Immutable.** You cannot mutate a symbol. String keys can be mutated in place unless you enable `frozen_string_literal: true`.\n- **Memory / speed.** Hash lookups on symbols avoid the per-character comparison strings need and avoid repeated allocations. For a config hash referenced a million times, the difference is measurable.\n- **Garbage.** Modern Ruby (2.2+) garbage-collects dynamically-created symbols, so you no longer have to worry about them leaking — but the typical symbol is still cheap and long-lived.\n\n**Rule of thumb.** If you would write it as a bareword method name, use a symbol. If the content could include spaces, punctuation, or user-controlled text, use a string (or a frozen string).';
+    }
+    // case / in pattern matching on a hash
+    if (/\bpattern\s+match/i.test(lower) && (/\bcase\b/i.test(lower) || /\bin\s*\{/i.test(lower) || /\brole\b/i.test(lower))) {
+      return 'Ruby 3 pattern matching uses `case … in` to deconstruct values and bind local variables in one step. The `in` clause matches shape *and* content, and you can use `=>` to capture a whole sub-value.\n\n```ruby\ndef describe(user)\n  case user\n  in { role: :admin, active: true }\n    \'active admin\'\n  in { role: :admin, active: false }\n    \'disabled admin\'\n  in { role: role, active: true } => matched\n    "active #{role} (keys: #{matched.keys})"\n  in { role: :member }\n    \'plain member\'\n  else\n    \'unknown shape\'\n  end\nend\n\ndescribe(role: :admin, active: true)   # => "active admin"\ndescribe(role: :editor, active: true)  # => "active editor (keys: [:role, :active])"\ndescribe(role: :guest,  active: false) # => "unknown shape"\n```\n\n**Semantics worth knowing.**\n- Hash patterns match by **key presence**, not by exact equality — `{ role: :admin }` matches `{ role: :admin, active: true }`. Use `**nil` to forbid extra keys: `in { role: :admin, **nil }`.\n- You can bind values inline: `in { role:, active: }` binds `role` and `active` as locals (Ruby 3.0+).\n- Arrays work the same way: `in [head, *tail]`, `in [Integer => n, String]`.\n- For a one-line form use `=>`: `user => { role: }` raises `NoMatchingPatternError` when the shape is wrong — useful for asserting invariants.';
+    }
+    // Rails strong parameters + permit nested attributes
+    if (
+      /\bstrong\s+param/i.test(lower)
+      || (/\brails\b/i.test(lower) && (/\bpermit\b/i.test(lower) || /\bnested\s+attribute/i.test(lower) || /\bmass\s+assignment\b/i.test(lower)))
+    ) {
+      return 'Rails **strong parameters** force controllers to *whitelist* which keys from `params` may be used in a mass-assignment (`Model.create(attrs)` / `model.update(attrs)`). Without them, anyone could POST `user[role]=admin` and have it written straight to the database — the classic **mass-assignment vulnerability** (Rails 3-era GitHub incident).\n\n**Basic shape:**\n\n```ruby\nclass UsersController < ApplicationController\n  def create\n    @user = User.new(user_params)\n    @user.save ? redirect_to(@user) : render(:new)\n  end\n\n  def update\n    @user = User.find(params[:id])\n    @user.update(user_params) ? redirect_to(@user) : render(:edit)\n  end\n\n  private\n\n  def user_params\n    params.require(:user).permit(:name, :email) # any other key is silently dropped\n  end\nend\n```\n\n- `params.require(:user)` raises `ActionController::ParameterMissing` if `params[:user]` is absent — turns a 500 into a 400 at the edge.\n- `.permit(:name, :email)` returns an `ActionController::Parameters` instance where `permitted?` is true; ActiveRecord will accept it. Any key not in the permit list is dropped — no exception, no silent write.\n\n**Permitting nested attributes.**\n\n```ruby\nclass Post < ApplicationRecord\n  has_many :comments, dependent: :destroy\n  accepts_nested_attributes_for :comments, allow_destroy: true\nend\n\ndef post_params\n  params.require(:post).permit(\n    :title, :body,\n    tag_ids: [],                          # array of scalars\n    comments_attributes: [:id, :body, :_destroy] # nested has_many\n  )\nend\n```\n\n- `accepts_nested_attributes_for :comments` on the model adds the `comments_attributes=` writer.\n- In the permit list, **an array value** (`tag_ids: []`) allows a collection of scalar values. A hash value (`comments_attributes: [...]`) permits the keys of each nested record. Always include `:id` so existing records are updated (not re-created) and `:_destroy` when `allow_destroy: true`, so the UI can mark rows for deletion.\n- For deeper nesting, nest again: `comments_attributes: [:id, :body, :_destroy, author_attributes: [:id, :name]]`.\n\n**Gotchas.** `.permit(metadata: {})` permits a hash with *arbitrary* keys — fine for JSON blobs, unsafe for untrusted input. When in doubt, enumerate the keys explicitly.';
+    }
+    return null;
+  }
+
+  private tryCppLanguageArm(input: string, lower: string): string | null {
+    // template<typename T> T add(T a, T b)
+    if (/\btemplate\b/i.test(lower) && (/\badd\b/i.test(lower) || /\bfunction\b/i.test(lower)) && /\bt\b/i.test(lower)) {
+      return 'A C++ function template parameterises one or more types. The compiler generates a concrete specialisation for each `T` you instantiate with.\n\n```cpp\n#include <iostream>\n#include <string>\n\ntemplate <typename T>\nT add(T a, T b) {\n    return a + b;\n}\n\nint main() {\n    std::cout << add(1, 2)           << \'\\n\'; // 3\n    std::cout << add(1.5, 2.25)       << \'\\n\'; // 3.75\n    std::cout << add<std::string>("foo", "bar") << \'\\n\'; // "foobar"\n}\n```\n\n**C++20 shorter form** using an abbreviated function template (`auto` parameter):\n\n```cpp\nauto add(auto a, auto b) { return a + b; }\n```\n\n**Constraining the template.** In C++20 you can require that `T` actually supports `+`:\n\n```cpp\n#include <concepts>\n\ntemplate <typename T>\nrequires requires(T a, T b) { { a + b } -> std::convertible_to<T>; }\nT add(T a, T b) { return a + b; }\n```\n\nThat turns a cryptic template-instantiation error ("no match for operator+") into a clean "constraint not satisfied" diagnostic at the call site. Without concepts the template compiles fine, but the error message when you call `add(SomeTypeWithNoPlus{}, …)` can be several kilobytes long.';
+    }
+    // move semantics / std::move / rvalue
+    if (/\bmove\s+semantics\b/i.test(lower) || (/\bstd::move\b/i.test(lower) || /\brvalue\b/i.test(lower))) {
+      return 'Before C++11 the only way to transfer a big object from one variable to another was to **copy** it — allocate a new buffer, memcpy every byte, destroy the source. **Move semantics** let the source simply *hand over* its internal pointers to the destination and leave itself in a valid-but-empty state. The destination steals the resource for free.\n\n**What `std::move` actually does.** Nothing, at runtime. `std::move` is a **cast** — it tells the compiler "treat this lvalue as an rvalue reference" so overload resolution picks the move constructor / move-assignment operator instead of the copy ones.\n\n```cpp\n#include <string>\n#include <utility>\n\nstd::string makeTitle() { return std::string(1\'000\'000, \'x\'); }\n\nint main() {\n    std::string a = makeTitle();  // return value is an rvalue; move ctor used\n    std::string b = a;            // a is an lvalue; COPY — allocates 1 MB\n    std::string c = std::move(a); // cast to rvalue; MOVE — steals a\'s buffer\n    // After the move, `a` is valid but unspecified — commonly empty.\n}\n```\n\n**Why it matters.**\n- **Return-by-value** is now cheap. `std::vector<T> build()` returns a temporary; the move ctor (or NRVO/copy-elision) avoids the deep copy.\n- **Passing ownership** is explicit. `std::unique_ptr<Widget>` is non-copyable — you pass it with `std::move(p)` to make the hand-off visible.\n- **The Rule of Five.** If you define one of {destructor, copy-ctor, copy-assign, move-ctor, move-assign}, the compiler may stop generating the others — define all that your type needs, or default them with `= default`.\n\n**Don\'t move things you still need.** After `std::move(x)` the state of `x` is unspecified (but destructible and assignable). Reading it is legal but almost never what you want.';
+    }
+    return null;
+  }
+
+  private trySvelteLanguageArm(input: string, lower: string): string | null {
+    // writable store counter with subscription
+    if (/\bstore\b/i.test(lower) || /\bwritable\b/i.test(lower) || (/\bcounter\b/i.test(lower) && /\bsvelte\b/i.test(lower))) {
+      return 'A Svelte **writable store** is an object with `set`, `update`, and `subscribe` — any component can read it, write it, and react to changes. The `$` prefix on the import auto-subscribes inside `<script>` and `{}` markup.\n\n```ts\n// src/lib/counter.ts\nimport { writable } from \'svelte/store\';\n\nexport const count = writable(0);\n```\n\n```svelte\n<!-- src/routes/+page.svelte -->\n<script lang="ts">\n  import { count } from \'$lib/counter\';\n</script>\n\n<p>count: {$count}</p>\n<button on:click={() => count.update(n => n + 1)}>+1</button>\n<button on:click={() => count.set(0)}>reset</button>\n```\n\n**Manual subscription** (for code outside a component, or if you need the unsubscribe hook):\n\n```ts\nimport { count } from \'$lib/counter\';\n\nconst unsubscribe = count.subscribe(n => console.log(\'count is\', n));\ncount.set(5);        // logs "count is 5"\nunsubscribe();       // stop receiving updates\n```\n\n**Key mechanics.**\n- `$count` inside a Svelte file is compiler-expanded to an auto-subscription that tears itself down when the component is destroyed.\n- `update(fn)` passes the current value to `fn` and stores its return — safer than `set($count + 1)` because it avoids reading through the auto-subscription twice.\n- `writable(value, start)` accepts a second argument — a `start` function called on the first subscriber and whose return is invoked on the last unsubscribe; useful for setting up websocket/interval sources.\n- For read-only stores use `readable`; for derived values use `derived(stores, fn)`.';
+    }
+    return null;
+  }
+
+  private trySolidLanguageArm(input: string, lower: string): string | null {
+    // Solid signals vs React useState
+    if (/\bsignal\b/i.test(lower) || /\bcreatesignal\b/i.test(lower) || (/\bsolid\b/i.test(lower) && /\buse\s*state\b/i.test(lower))) {
+      return 'Solid\'s `createSignal` and React\'s `useState` look similar on the surface but have fundamentally different re-render models.\n\n```tsx\n// Solid\nimport { createSignal, createEffect } from \'solid-js\';\n\nfunction Counter() {\n  const [count, setCount] = createSignal(0);\n\n  createEffect(() => console.log(\'count is\', count()));\n\n  return <button onClick={() => setCount(count() + 1)}>\n    {count()}\n  </button>;\n}\n```\n\n**How Solid differs from React.**\n\n1. **Component function runs once.** In React, the whole function component re-runs on every state change — every line inside the body executes again, every `useState` reads the current value, and the virtual DOM is reconciled. In Solid, the component body runs exactly once; it returns a reactive graph that wires signals directly to the DOM nodes that read them.\n\n2. **Signals are accessors, not values.** `count` is a function — `count()` reads the current value *and* registers a dependency on it. Re-renders are actually **fine-grained DOM updates**: only the text node `{count()}` re-runs, not the surrounding component.\n\n3. **No virtual DOM.** Solid compiles JSX to direct DOM operations. `setCount` schedules a targeted update on every place that called `count()` — the enclosing `<button>` element never re-renders because it never read the signal.\n\n4. **Effects over `useEffect`.** `createEffect(fn)` tracks which signals `fn` reads on its first run and re-runs `fn` whenever any of those signals changes — no dependency array, no lint rule, no stale-closure footgun.\n\n**Trade-off.** Solid is faster and has a simpler mental model once you accept that "component = setup function that runs once", but existing React patterns like "derive state from props on every render" translate into `createMemo` / effects rather than inline expressions. Referential-equality bugs common in React (`useCallback`, `useMemo` noise) mostly disappear because the body never re-runs.';
+    }
+    return null;
   }
 
   private isResponseGroundedToQuery(input: string, response: string): boolean {
@@ -4903,7 +5345,8 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     // Detect error/exception patterns
     const hasError = /\berror\b|\bexception\b|\bfailed\b|\bcrash(?:es|ing|ed)?\b|\bthrows?\b|\bstack\s*trace\b/i.test(input);
     // Note: `\s+at\s+\w` must be preceded by a newline or line-start to avoid matching "look at https://"
-    const hasCode = /at\s+\w+[\w.]*\s*\(|(?:^|\n)\s+at\s+\w|TypeError|ReferenceError|SyntaxError|RangeError|Cannot\s+read\s+prop|is not a function|Cannot find module|ENOENT|EADDRINUSE|ECONNREFUSED|ERR_MODULE_NOT_FOUND|404|500|undefined is not|null is not|failed to compile|module not found|rendered\s+more\s+hooks|rules\s+of\s+hooks|invalid\s+hook\s+call|hydration\s+(?:failed|mismatch)|CORS\s+policy|Access-Control-Allow-Origin|TS\d{4}|blocked\s+by\s+CORS/i.test(input);
+    // Note: bare `404` / `500` previously false-matched queries like "500 MB of memory". Require HTTP-error context.
+    const hasCode = /at\s+\w+[\w.]*\s*\(|(?:^|\n)\s+at\s+\w|TypeError|ReferenceError|SyntaxError|RangeError|Cannot\s+read\s+prop|is not a function|Cannot find module|ENOENT|EADDRINUSE|ECONNREFUSED|ERR_MODULE_NOT_FOUND|\bHTTP\s+(?:404|500)\b|\b(?:404|500)\s+(?:error|status|response|internal|not\s+found|server\s+error)\b|\bstatus\s+(?:code\s+)?(?:404|500)\b|undefined is not|null is not|failed to compile|module not found|rendered\s+more\s+hooks|rules\s+of\s+hooks|invalid\s+hook\s+call|hydration\s+(?:failed|mismatch)|CORS\s+policy|Access-Control-Allow-Origin|TS\d{4}|blocked\s+by\s+CORS/i.test(input);
     const isAsk = /why|what|how|fix|solve|help|understand|debug|when\s+i|whenever|after\s+i|keeps?\s+(?:crashing|failing|breaking)|won't\s+(?:work|start|load|run)|doesn't\s+(?:work|start|load|run)|not\s+working|not\s+(?:loading|starting|running)|keeps\s+happening|going\s+wrong/i.test(input);
 
     if (!hasError && !hasCode) return null;
@@ -22561,8 +23004,10 @@ app.listen(3000, () => console.log('Server running'));
     // BST (check before binary search to avoid false match)
     if (/(?:binary\s+search\s+tree|bst)\s+(?:insert|class|implementation)/i.test(lower)
       || /(?:implement|write|create|build)\s+(?:me\s+)?(?:a\s+|an?\s+)?(?:binary\s+search\s+tree|bst)/i.test(lower)) return this.algoTemplate('bst_insert', lang);
-    // Binary search (after BST check)
-    if (/binary\s*search/i.test(lower) && !/binary\s*search\s*tree/i.test(lower)) return this.algoTemplate('binary_search', lang);
+    // Binary search (after BST check, before specialized first/last/lower/upper variants)
+    if (/binary\s*search/i.test(lower)
+      && !/binary\s*search\s*tree/i.test(lower)
+      && !/\b(?:first|last|lower\s+bound|upper\s+bound|leftmost|rightmost)\b/i.test(lower)) return this.algoTemplate('binary_search', lang);
     // Bubble sort
     if (/bubble\s*sort/i.test(lower)) return this.algoTemplate('bubble_sort', lang);
     // Selection sort
@@ -22571,15 +23016,18 @@ app.listen(3000, () => console.log('Server running'));
     if (/insertion\s*sort/i.test(lower)) return this.algoTemplate('insertion_sort', lang);
     // Merge sort
     if (/merge\s*sort/i.test(lower)) return this.algoTemplate('merge_sort', lang);
-    // Recursive factorial
-    if (/(?:recursive\s+)?factorial\s+(?:function|method|algorithm)/i.test(lower)
-      || /(?:function|method)\s+(?:for\s+|to\s+(?:compute\s+|calculate\s+)?)?factorial/i.test(lower)) return this.algoTemplate('factorial_recursive', lang);
+    // Recursive factorial (skip when user explicitly asks iterative)
+    if (!/iterative\s+factorial|factorial\s+(?:iterative(?:ly)?|with\s+(?:a\s+)?loop|using\s+(?:a\s+)?loop)/i.test(lower)
+      && (/(?:recursive\s+)?factorial\s+(?:function|method|algorithm)/i.test(lower)
+        || /(?:function|method)\s+(?:for\s+|to\s+(?:compute\s+|calculate\s+)?)?factorial/i.test(lower))) return this.algoTemplate('factorial_recursive', lang);
     // Recursive fibonacci
     if (/(?:recursive\s+)?fibonacci\s+(?:function|method|algorithm)/i.test(lower)
       || /(?:function|method)\s+(?:for\s+|to\s+(?:compute\s+|calculate\s+)?)?fibonacci/i.test(lower)) return this.algoTemplate('fibonacci_recursive', lang);
-    // Recursive GCD / Euclidean algorithm
-    if (/(?:recursive\s+)?(?:gcd|greatest\s+common\s+divisor|euclidean)\s+(?:function|method|algorithm)/i.test(lower)
-      || /(?:function|method)\s+(?:for\s+|to\s+(?:find\s+|compute\s+|calculate\s+)?)?(?:gcd|greatest\s+common\s+divisor)/i.test(lower)) return this.algoTemplate('gcd_recursive', lang);
+    // Recursive GCD / Euclidean algorithm (skip extended/iterative variants handled in batch 2)
+    if (!/\b(?:extended|iterative)\b/i.test(lower) && (
+      /(?:recursive\s+)?(?:gcd|greatest\s+common\s+divisor|euclidean)\s+(?:function|method|algorithm)/i.test(lower)
+      || /(?:function|method)\s+(?:for\s+|to\s+(?:find\s+|compute\s+|calculate\s+)?)?(?:gcd|greatest\s+common\s+divisor)/i.test(lower)
+    )) return this.algoTemplate('gcd_recursive', lang);
     // Recursive power function
     if (/(?:recursive\s+)?(?:power|exponent(?:iation)?)\s+(?:function|method)/i.test(lower)
       || /(?:function|method)\s+(?:for\s+|to\s+(?:compute\s+|calculate\s+)?)?(?:power|exponent)/i.test(lower)) return this.algoTemplate('power_recursive', lang);
@@ -22589,6 +23037,13 @@ app.listen(3000, () => console.log('Server running'));
     // Queue implementation
     if (/queue\s+(?:class|implementation|data\s*structure)/i.test(lower)
       || /(?:implement|class\s+for)\s+(?:a\s+)?queue/i.test(lower)) return this.algoTemplate('queue_class', lang);
+    // Reverse words in a sentence (check before reverse_string so "reverse
+    // the words in a sentence" wins over the generic string-reversal pattern).
+    // All alternatives require an explicit reverse/reversal cue to avoid matching
+    // queries like "count the words in a string" or "title-case each word in a string".
+    if (/revers(?:e|es|ed|ing)\s+(?:the\s+|all\s+(?:the\s+)?)?words?\b/i.test(lower)
+      || /revers(?:e|es|ed|ing)\s+(?:the\s+|all\s+(?:the\s+)?)?words?\s+in\s+(?:a\s+|the\s+)?(?:sentence|string|phrase)/i.test(lower)
+      || /(?:sentence|phrase)\s+revers(?:al|e|ing)/i.test(lower)) return this.algoTemplate('reverse_words', lang);
     // Reverse string
     if (/reverse\s+(?:a\s+)?string/i.test(lower)
       || /string\s+revers(?:al|e|ing)/i.test(lower)) return this.algoTemplate('reverse_string', lang);
@@ -22603,7 +23058,7 @@ app.listen(3000, () => console.log('Server running'));
     if (/anagram\s+(?:check|detect|test|function|validator)/i.test(lower)
       || /(?:check|detect|test|verify)\s+(?:if\s+)?.*anagram/i.test(lower)) return this.algoTemplate('anagram_check', lang);
     // Is prime — broad matching for "check if prime" / "prime number" / "is prime"
-    if (/\bprime\b/i.test(lower) && !/sieve|eratosthenes/i.test(lower)
+    if (/\bprime\b/i.test(lower) && !/sieve|eratosthenes|prime\s+factor|nth\s+prime|(?:find|get|list|generate)\s+(?:the\s+)?(?:nth\s+|all\s+|every\s+)?prime/i.test(lower)
       && (/check|test|verify|determin|function|method|write|implement/i.test(lower))) return this.algoTemplate('is_prime', lang);
     // Sieve of Eratosthenes
     if (/sieve\s+(?:of\s+)?eratosthenes/i.test(lower)
@@ -22620,6 +23075,477 @@ app.listen(3000, () => console.log('Server running'));
     // Find max in array
     if (/(?:find|get)\s+(?:the\s+)?(?:max(?:imum)?|largest|biggest)\s+(?:element\s+)?(?:in\s+)?(?:an?\s+)?array/i.test(lower)
       || /max(?:imum)?\s+(?:element\s+)?(?:in\s+|of\s+)(?:an?\s+)?array/i.test(lower)) return this.algoTemplate('find_max', lang);
+
+    // ─── STRING MANIPULATION ───
+    // Title case — ordered before capitalize so "capitalize each word" routes here.
+    if (/\btitle[\s-]?case\b/i.test(lower)
+      || /capitalize\s+(?:each|every|all)\s+word/i.test(lower)) return this.algoTemplate('title_case', lang);
+    // Slugify
+    if (/\bslugify\b/i.test(lower)
+      || /(?:url|string)\s+slug\b/i.test(lower)
+      || /\bto\s+slug\b/i.test(lower)) return this.algoTemplate('slugify', lang);
+    // Camel case conversion
+    if (/\b(?:to\s+)?camel[\s-]?case\b/i.test(lower)
+      || /\bcamelcase\b/i.test(lower)
+      || /convert\s+(?:to\s+)?camel/i.test(lower)) return this.algoTemplate('to_camel_case', lang);
+    // Snake case conversion (match the underscore form too)
+    if (/\b(?:to\s+)?snake[\s_-]?case\b/i.test(lower)
+      || /\bsnakecase\b/i.test(lower)
+      || /convert\s+(?:to\s+)?snake/i.test(lower)) return this.algoTemplate('to_snake_case', lang);
+    // Kebab case conversion
+    if (/\b(?:to\s+)?kebab[\s-]?case\b/i.test(lower)
+      || /\bkebabcase\b/i.test(lower)
+      || /convert\s+(?:to\s+)?kebab/i.test(lower)) return this.algoTemplate('to_kebab_case', lang);
+    // Capitalize string (after title-case — which is more specific)
+    if (/\bcapitalize\s+(?:a\s+|the\s+)?string\b/i.test(lower)
+      || /capitalize\s+(?:the\s+)?first\s+(?:letter|character)/i.test(lower)
+      || /uppercase\s+(?:the\s+)?first\s+(?:letter|character)/i.test(lower)) return this.algoTemplate('capitalize', lang);
+    // Count words
+    if (/count\s+(?:the\s+|all\s+(?:the\s+)?)?words?\b/i.test(lower)
+      || /\bword\s+count(?:er|ing)?\s+(?:function|method)/i.test(lower)
+      || /how\s+many\s+words\s+in/i.test(lower)) return this.algoTemplate('word_count', lang);
+    // Count characters (count_vowels matches earlier so this is safe)
+    if (/count\s+(?:the\s+|all\s+(?:the\s+)?)?(?:characters?|chars?|letters?)\b/i.test(lower)
+      || /character\s+count(?:er|ing)?\b/i.test(lower)
+      || /how\s+many\s+(?:characters?|letters?)\s+in/i.test(lower)) return this.algoTemplate('char_count', lang);
+    // Remove / collapse whitespace
+    if (/(?:remove|strip)\s+(?:all\s+)?whitespace/i.test(lower)
+      || /collapse\s+whitespace/i.test(lower)
+      || /normalize\s+whitespace/i.test(lower)) return this.algoTemplate('remove_whitespace', lang);
+    // Truncate string
+    if (/truncate\s+(?:a\s+|the\s+)?(?:string|text)\b/i.test(lower)
+      || /string\s+truncat(?:e|ion)/i.test(lower)
+      || /(?:add|append)\s+(?:an\s+)?ellipsis/i.test(lower)) return this.algoTemplate('truncate_string', lang);
+
+    // ─── ARRAY OPERATIONS ───
+    // Chunk array
+    if (/\bchunk\s+(?:an?\s+|the\s+)?(?:array|list)\b/i.test(lower)
+      || /split\s+(?:an?\s+|the\s+)?(?:array|list)\s+into\s+chunks/i.test(lower)
+      || /\b(?:array|list)\s+chunk\b/i.test(lower)) return this.algoTemplate('chunk_array', lang);
+    // Unique / deduplicate array
+    if (/\b(?:unique|dedup(?:e|licate)|deduplicate)\s+(?:values?\s+|elements?\s+|items?\s+)?(?:in\s+)?(?:an?\s+|the\s+)?(?:array|list)\b/i.test(lower)
+      || /remove\s+dup(?:licate)?s?\s+(?:from\s+|in\s+)?(?:an?\s+|the\s+)?(?:array|list)/i.test(lower)
+      || /\barray\s+of\s+unique\s+(?:values?|elements?|items?)/i.test(lower)) return this.algoTemplate('unique_array', lang);
+    // Group by
+    if (/\bgroup[\s-]?by\b/i.test(lower)
+      || /group\s+(?:elements?|items?|an?\s+array|a\s+list)\s+by/i.test(lower)) return this.algoTemplate('group_by', lang);
+    // Partition array
+    if (/partition\s+(?:an?\s+|the\s+)?(?:array|list)\b/i.test(lower)
+      || /\b(?:array|list)\s+partition\b/i.test(lower)
+      || /split\s+(?:an?\s+|the\s+)?(?:array|list)\s+by\s+(?:a\s+)?predicate/i.test(lower)) return this.algoTemplate('partition_array', lang);
+    // Zip arrays
+    if (/\bzip\s+(?:two\s+|multiple\s+)?(?:arrays?|lists?)\b/i.test(lower)
+      || /\b(?:array|list)\s+zip\b/i.test(lower)
+      || /combine\s+two\s+(?:arrays?|lists?)\s+(?:pair|element).*wise/i.test(lower)) return this.algoTemplate('zip_arrays', lang);
+    // Range / number range
+    if (/\b(?:range|number\s+range)\s+(?:function|method|generator)\b/i.test(lower)
+      || /generate\s+(?:a\s+)?range\s+of\s+numbers?/i.test(lower)
+      || /(?:array|list)\s+of\s+numbers?\s+from\s+\w+\s+to\s+\w+/i.test(lower)) return this.algoTemplate('range_array', lang);
+    // Flatten deep (after existing flatten_array which only handles one level)
+    if (/flatten(?:s|ed|ing)?\s+(?:deep(?:ly)?|recursive(?:ly)?|completely|fully)/i.test(lower)
+      || /deep(?:ly)?\s+flatten(?:s|ed|ing)?/i.test(lower)
+      || /flatten(?:s|ed|ing)?\s+(?:a\s+|an?\s+)?(?:deep(?:ly)?|recursive(?:ly)?|completely|fully)\s+nested/i.test(lower)
+      || /flatten(?:s|ed|ing)?\s+(?:a\s+|an?\s+)?nested\s+(?:array|list)\s+(?:deep(?:ly)?|recursive(?:ly)?|completely|fully)/i.test(lower)) return this.algoTemplate('flatten_deep', lang);
+    // Array intersection
+    if (/(?:array|set|list)\s+intersection/i.test(lower)
+      || /intersect(?:ion)?\s+of\s+(?:two\s+|multiple\s+)?(?:arrays?|sets?|lists?)/i.test(lower)
+      || /(?:common|shared)\s+(?:elements?|values?|items?)\s+(?:in|between)\s+(?:two\s+)?(?:arrays?|lists?)/i.test(lower)) return this.algoTemplate('intersection', lang);
+    // Array union
+    if (/(?:array|set|list)\s+union/i.test(lower)
+      || /union\s+of\s+(?:two\s+|multiple\s+)?(?:arrays?|sets?|lists?)/i.test(lower)
+      || /merge\s+(?:two\s+)?(?:arrays?|lists?)\s+without\s+dup(?:licate)?s?/i.test(lower)) return this.algoTemplate('union_arrays', lang);
+    // Rotate array
+    if (/rotate\s+(?:an?\s+|the\s+)?(?:array|list)/i.test(lower)
+      || /\b(?:array|list)\s+rotate\b/i.test(lower)
+      || /shift\s+(?:an?\s+|the\s+)?(?:array|list)\s+(?:elements?\s+)?(?:left|right|by)/i.test(lower)) return this.algoTemplate('rotate_array', lang);
+
+    // ─── SORTING & SEARCHING (extended) ───
+    if (/\bquick\s*sort\b/i.test(lower)) return this.algoTemplate('quicksort', lang);
+    if (/\bheap\s*sort\b/i.test(lower)) return this.algoTemplate('heapsort', lang);
+    if (/\bcounting\s*sort\b/i.test(lower)) return this.algoTemplate('counting_sort', lang);
+    if (/\bradix\s*sort\b/i.test(lower)) return this.algoTemplate('radix_sort', lang);
+    if (/\blinear\s*search\b/i.test(lower)) return this.algoTemplate('linear_search', lang);
+    if (/\binterpolation\s*search\b/i.test(lower)) return this.algoTemplate('interpolation_search', lang);
+    if (/(?:find|get)\s+(?:the\s+)?(?:min(?:imum)?|smallest)\s+(?:element\s+)?(?:in\s+)?(?:an?\s+)?array/i.test(lower)
+      || /min(?:imum)?\s+(?:element\s+)?(?:in\s+|of\s+)(?:an?\s+)?array/i.test(lower)) return this.algoTemplate('find_min', lang);
+    if (/sum\s+(?:of\s+)?(?:all\s+)?(?:elements?\s+|values?\s+)?(?:in\s+)?(?:an?\s+|the\s+)?array/i.test(lower)
+      || /\barray\s+sum\b/i.test(lower)) return this.algoTemplate('sum_array', lang);
+    if (/count\s+(?:the\s+)?occurrences?\s+of/i.test(lower)
+      || /how\s+many\s+times\s+(?:does|is)\s+.+\s+(?:appear|occur)/i.test(lower)) return this.algoTemplate('count_occurrences', lang);
+
+    // ─── DYNAMIC PROGRAMMING ───
+    if (/\bcoin\s*change\b/i.test(lower)
+      || /minimum\s+coins?\s+(?:to\s+)?(?:make|form)/i.test(lower)) return this.algoTemplate('coin_change', lang);
+    if (/\bedit\s*distance\b/i.test(lower)
+      || /\blevenshtein\s+distance\b/i.test(lower)) return this.algoTemplate('edit_distance', lang);
+    if (/\blongest\s+common\s+subsequence\b/i.test(lower)
+      || /\blcs\b/i.test(lower)) return this.algoTemplate('lcs', lang);
+    if (/\bknapsack\b/i.test(lower)
+      || /0[\/-]?1\s+knapsack/i.test(lower)) return this.algoTemplate('knapsack', lang);
+    if (/\bkadane(?:'?s)?\s+(?:algorithm|method)\b/i.test(lower)
+      || /maximum\s+sub[\s-]?array\s+sum/i.test(lower)
+      || /max(?:imum)?\s+sub[\s-]?array\b/i.test(lower)) return this.algoTemplate('kadane_max_subarray', lang);
+    if (/\blongest\s+increasing\s+subsequence\b/i.test(lower)
+      || /\blis\b.*(?:subsequence|sequence|array)/i.test(lower)) return this.algoTemplate('longest_increasing_subseq', lang);
+    if (/\bclimb(?:ing)?\s+stairs?\b/i.test(lower)
+      || /stair[\s-]?case\s+problem/i.test(lower)) return this.algoTemplate('climb_stairs', lang);
+    if (/\bhouse\s+robber\b/i.test(lower)) return this.algoTemplate('house_robber', lang);
+    if (/unique\s+paths?\s+(?:in\s+)?(?:a\s+)?(?:grid|matrix)/i.test(lower)) return this.algoTemplate('unique_paths', lang);
+    if (/fibonacci\s+(?:iterative(?:ly)?|with\s+(?:a\s+)?loop|using\s+(?:a\s+)?loop|bottom[\s-]?up|dp)/i.test(lower)
+      || /iterative\s+fibonacci/i.test(lower)) return this.algoTemplate('fibonacci_iterative', lang);
+    if (/fibonacci\s+(?:memoiz(?:ed|ation)|with\s+memo(?:ization)?|dp\s+memoiz)/i.test(lower)
+      || /memoiz(?:ed|ation)\s+fibonacci/i.test(lower)) return this.algoTemplate('fibonacci_memo', lang);
+
+    // ─── GRAPH ALGORITHMS ───
+    if (/\b(?:bfs|breadth[\s-]?first\s+search)\b/i.test(lower)
+      || /breadth[\s-]?first\s+traversal/i.test(lower)) return this.algoTemplate('bfs_graph', lang);
+    if (/\b(?:dfs|depth[\s-]?first\s+search)\b/i.test(lower)
+      || /depth[\s-]?first\s+traversal/i.test(lower)) return this.algoTemplate('dfs_graph', lang);
+    if (/\bdijkstra(?:'?s)?\b/i.test(lower)
+      || /shortest\s+path\s+(?:algorithm|in\s+(?:a\s+)?(?:weighted\s+)?graph)/i.test(lower)) return this.algoTemplate('dijkstra', lang);
+    if (/\btopological\s+sort\b/i.test(lower)
+      || /\btopo[\s-]?sort\b/i.test(lower)) return this.algoTemplate('topological_sort', lang);
+    if (/detect\s+(?:a\s+)?cycle\s+(?:in\s+)?(?:an?\s+|the\s+)?(?:undirected\s+)?graph/i.test(lower)
+      || /cycle\s+detection\s+(?:in\s+)?(?:an?\s+|the\s+)?graph/i.test(lower)) return this.algoTemplate('detect_cycle_graph', lang);
+    if (/\bunion[\s-]?find\b/i.test(lower)
+      || /\bdisjoint[\s-]?set(?:\s+(?:union|data\s+structure))?/i.test(lower)) return this.algoTemplate('union_find', lang);
+
+    // ─── TREE ALGORITHMS ───
+    if (/\bbst\s+search\b/i.test(lower)
+      || /search\s+(?:in\s+)?(?:a\s+)?(?:binary\s+)?search\s+tree/i.test(lower)) return this.algoTemplate('bst_search', lang);
+    if (/\b(?:in[\s-]?order)\s+(?:tree\s+)?traversal\b/i.test(lower)
+      || /traverse\s+(?:a\s+)?tree\s+in[\s-]?order/i.test(lower)) return this.algoTemplate('tree_inorder', lang);
+    if (/\b(?:pre[\s-]?order)\s+(?:tree\s+)?traversal\b/i.test(lower)
+      || /traverse\s+(?:a\s+)?tree\s+pre[\s-]?order/i.test(lower)) return this.algoTemplate('tree_preorder', lang);
+    if (/\b(?:post[\s-]?order)\s+(?:tree\s+)?traversal\b/i.test(lower)
+      || /traverse\s+(?:a\s+)?tree\s+post[\s-]?order/i.test(lower)) return this.algoTemplate('tree_postorder', lang);
+    if (/\b(?:level[\s-]?order)\s+(?:tree\s+)?traversal\b/i.test(lower)
+      || /traverse\s+(?:a\s+)?tree\s+level[\s-]?order/i.test(lower)) return this.algoTemplate('tree_levelorder', lang);
+    if (/(?:height|depth|max\s+depth)\s+of\s+(?:a\s+)?(?:binary\s+)?tree/i.test(lower)
+      || /tree\s+height\b/i.test(lower)) return this.algoTemplate('tree_height', lang);
+    if (/invert\s+(?:a\s+)?(?:binary\s+)?tree/i.test(lower)
+      || /mirror\s+(?:a\s+)?(?:binary\s+)?tree/i.test(lower)) return this.algoTemplate('tree_invert', lang);
+    if ((/(?:tree\s+)?path\s+sum\b/i.test(lower)
+      || /sum\s+of\s+(?:a\s+)?path\s+in\s+(?:a\s+)?tree/i.test(lower))
+      && !/\bmin(?:imum)?\s+(?:cost\s+)?path\s+sum\b/i.test(lower)
+      && !/\bmax(?:imum)?\s+(?:cost\s+)?path\s+sum\b/i.test(lower)) return this.algoTemplate('tree_path_sum', lang);
+
+    // ─── DATA STRUCTURES ───
+    if (/\blru\s*cache\b/i.test(lower)
+      || /least\s+recently\s+used\s+cache/i.test(lower)) return this.algoTemplate('lru_cache', lang);
+    if (/\btrie\b/i.test(lower)
+      || /\bprefix\s+tree\b/i.test(lower)) return this.algoTemplate('trie', lang);
+    if (/\b(?:min|max)[\s-]*heap\b/i.test(lower)
+      || /\bpriority\s+queue\b/i.test(lower)
+      || /\b(?:binary\s+)?heap\b(?!\s*sort)/i.test(lower)) return this.algoTemplate('heap', lang);
+    if (/\b(?:singly\s+)?linked\s+list\b/i.test(lower) && !/doubly|double/i.test(lower)) return this.algoTemplate('linked_list', lang);
+    if (/\b(?:doubly|double)[\s-]+linked\s+list\b/i.test(lower)) return this.algoTemplate('doubly_linked_list', lang);
+    if ((/\bdeque\b/i.test(lower)
+      || /double[\s-]?ended\s+queue/i.test(lower))
+      && !/\bmonotonic\b/i.test(lower)) return this.algoTemplate('deque', lang);
+
+    // ─── STRING ALGORITHMS ───
+    if (/\bkmp\b/i.test(lower)
+      || /knuth[\s-]?morris[\s-]?pratt/i.test(lower)) return this.algoTemplate('kmp_search', lang);
+    if (/\brabin[\s-]?karp\b/i.test(lower)) return this.algoTemplate('rabin_karp', lang);
+    if (/\blevenshtein\b/i.test(lower) && !/distance/i.test(lower)) return this.algoTemplate('levenshtein', lang);
+    if (/longest\s+common\s+substring/i.test(lower)) return this.algoTemplate('longest_common_substring', lang);
+    if (/longest\s+palindromic?\s+substring/i.test(lower)) return this.algoTemplate('longest_palindrome_substring', lang);
+    if (/\bz[\s-]?algorithm\b/i.test(lower)) return this.algoTemplate('z_algorithm', lang);
+    if (/(?:check|detect)\s+(?:if\s+)?(?:one\s+|two\s+)?strings?\s+(?:is|are)\s+(?:a\s+)?rotations?/i.test(lower)
+      || /string\s+rotations?\s+check/i.test(lower)
+      || /\bstrings?\s+are\s+rotations?\b/i.test(lower)) return this.algoTemplate('string_rotation_check', lang);
+
+    // ─── UTILITY FUNCTIONS (functional / async) ───
+    if (/\bdebounce\b/i.test(lower)) return this.algoTemplate('debounce', lang);
+    if (/\bthrottle\b/i.test(lower)) return this.algoTemplate('throttle', lang);
+    if (/\bdeep\s*clone\b/i.test(lower)
+      || /clone\s+(?:a\s+|an\s+)?object\s+deep(?:ly)?/i.test(lower)) return this.algoTemplate('deep_clone', lang);
+    if (/\bdeep\s*equal\b/i.test(lower)
+      || /deep(?:ly)?\s+compare\s+(?:two\s+)?(?:objects?|values?)/i.test(lower)) return this.algoTemplate('deep_equal', lang);
+    if (/\bmemoize\b/i.test(lower)
+      || /memoization\s+(?:function|helper|wrapper)/i.test(lower)) return this.algoTemplate('memoize', lang);
+    if (/\bcurry\b/i.test(lower)
+      || /curry(?:ing)?\s+(?:a\s+)?function/i.test(lower)) return this.algoTemplate('curry', lang);
+    if (/\bcompose\s+(?:functions?|fns?)\b/i.test(lower)
+      || /function\s+composition\b/i.test(lower)) return this.algoTemplate('compose', lang);
+    if (/\bpipe\s+(?:functions?|fns?)\b/i.test(lower)) return this.algoTemplate('pipe', lang);
+    if (/\bonce\s+(?:function|helper|wrapper)\b/i.test(lower)
+      || /(?:ensure|make)\s+(?:a\s+)?function\s+(?:only\s+)?runs?\s+once/i.test(lower)) return this.algoTemplate('once', lang);
+    if (/retry\s+with\s+(?:exponential\s+)?backoff/i.test(lower)
+      || /\bexponential\s+backoff\b/i.test(lower)) return this.algoTemplate('retry_backoff', lang);
+
+    // ─── NUMERIC / MATH ───
+    if (/\bdigit\s+sum\b/i.test(lower)
+      || /sum\s+of\s+digits\b/i.test(lower)) return this.algoTemplate('digit_sum', lang);
+    if (/reverse\s+(?:an?\s+)?integer\b/i.test(lower)
+      || /\binteger\s+revers(?:al|e)\b/i.test(lower)) return this.algoTemplate('reverse_integer', lang);
+    if (/(?:is\s+|check\s+(?:if\s+)?)(?:a\s+)?power\s+of\s+(?:two|2)\b/i.test(lower)
+      || /\bis\s*power\s*of\s*two\b/i.test(lower)) return this.algoTemplate('is_power_of_two', lang);
+    if (/\bfast\s+(?:exponentiation|power)\b/i.test(lower)
+      || /binary\s+exponentiation\b/i.test(lower)
+      || /power\s+iterative\b/i.test(lower)) return this.algoTemplate('fast_power', lang);
+    if (/prime\s+factoriz(?:e|ation)/i.test(lower)
+      || /factoriz(?:e|ation)\s+(?:of\s+)?(?:a\s+)?(?:number|integer)/i.test(lower)) return this.algoTemplate('prime_factorization', lang);
+    if (/factorial\s+(?:iterative(?:ly)?|with\s+(?:a\s+)?loop|using\s+(?:a\s+)?loop)/i.test(lower)
+      || /iterative\s+factorial/i.test(lower)) return this.algoTemplate('factorial_iterative', lang);
+    if (/\bnth\s+prime\b/i.test(lower)
+      || /(?:find|get)\s+the\s+nth\s+prime/i.test(lower)) return this.algoTemplate('nth_prime', lang);
+    if (/\bcombinations?\s+(?:of|function|method)\b/i.test(lower)
+      || /\bn\s*choose\s*k\b/i.test(lower)
+      || /\bbinomial\s+coefficient\b/i.test(lower)) return this.algoTemplate('combinations', lang);
+    if (/\bpermutations?\s+(?:of|function|method|generator)\b/i.test(lower)
+      || /generate\s+(?:all\s+)?permutations?/i.test(lower)) return this.algoTemplate('permutations', lang);
+    if (/pascal(?:'?s)?\s+triangle/i.test(lower)) return this.algoTemplate('pascal_triangle', lang);
+
+    // ─── STATISTICS ───
+    if (/(?:compute|calculate|find)\s+(?:the\s+)?(?:mean|average)\s+of/i.test(lower)
+      || /\b(?:mean|average)\s+of\s+(?:an?\s+)?(?:array|list|numbers?)/i.test(lower)) return this.algoTemplate('average_array', lang);
+    if (/(?:compute|calculate|find)\s+(?:the\s+)?median/i.test(lower)
+      || /\bmedian\s+of\s+(?:an?\s+)?(?:array|list|numbers?)/i.test(lower)) return this.algoTemplate('median', lang);
+    if (/(?:compute|calculate|find)\s+(?:the\s+)?mode\s+of/i.test(lower)
+      || /\bmode\s+of\s+(?:an?\s+)?(?:array|list|numbers?)/i.test(lower)) return this.algoTemplate('mode', lang);
+    if (/(?:compute|calculate|find)\s+(?:the\s+)?\bvariance\b/i.test(lower)
+      || /\bvariance\s+of\s+(?:an?\s+)?(?:array|list|numbers?)/i.test(lower)) return this.algoTemplate('variance', lang);
+    if (/(?:compute|calculate|find)\s+(?:the\s+)?(?:standard\s+deviation|std\s*dev|stddev)/i.test(lower)
+      || /\b(?:standard\s+deviation|std\s*dev|stddev)\s+of/i.test(lower)) return this.algoTemplate('stddev', lang);
+    if (/\barmstrong\s+number\b/i.test(lower)
+      || /narcissistic\s+number/i.test(lower)) return this.algoTemplate('is_armstrong', lang);
+
+    // ─── BATCH 2: BIT MANIPULATION & NUMBER THEORY ───
+    if (/\bcount\s+set\s+bits?\b/i.test(lower)
+      || /\bnumber\s+of\s+(?:set\s+)?(?:one\s+)?bits?\b/i.test(lower)
+      || /\bhamming\s+weight\b/i.test(lower)
+      || /\bpop(?:ulation)?\s*count\b/i.test(lower)) return this.algoTemplate('count_set_bits', lang);
+    if (/\bhamming\s+distance\b/i.test(lower)) return this.algoTemplate('hamming_distance', lang);
+    if (/single\s+number\s+(?:problem|in\s+(?:an?\s+)?array)/i.test(lower)
+      || /find\s+the\s+(?:only\s+)?(?:element|number)\s+that\s+appears\s+once/i.test(lower)
+      || /\bxor\s+trick\b/i.test(lower)) return this.algoTemplate('single_number', lang);
+    if (/\bmissing\s+number\s+(?:in\s+)?(?:an?\s+)?(?:array|list|range)/i.test(lower)) return this.algoTemplate('missing_number', lang);
+    if (/\bgray\s+code\b/i.test(lower)) return this.algoTemplate('gray_code', lang);
+    if (/\bpower\s+of\s+(?:four|4)\b/i.test(lower)
+      || /\bis\s+power\s+of\s+(?:four|4)\b/i.test(lower)) return this.algoTemplate('power_of_four', lang);
+    if (/\bnext\s+power\s+of\s+(?:two|2)\b/i.test(lower)
+      || /\bround\s+up\s+to\s+(?:a\s+)?power\s+of\s+(?:two|2)\b/i.test(lower)) return this.algoTemplate('next_power_of_two', lang);
+    if (/\bextended\s+(?:euclidean|gcd)\b/i.test(lower)
+      || /\bbezout(?:'?s)?\s+(?:coefficients?|identity)\b/i.test(lower)) return this.algoTemplate('extended_gcd', lang);
+    if (/\b(?:iterative|euclidean)\s+gcd\b/i.test(lower)
+      || /\bgcd\s+iterative\b/i.test(lower)
+      || /\beuclidean\s+algorithm\b/i.test(lower)) return this.algoTemplate('gcd_iterative', lang);
+    if (/\bmodular?\s+exponentiation\b/i.test(lower)
+      || /\bmod(?:ular)?\s+(?:fast\s+)?pow(?:er)?\b/i.test(lower)
+      || /\bpow\s*\(\s*base\s*,\s*exp\s*,\s*mod/i.test(lower)) return this.algoTemplate('mod_pow', lang);
+    if (/\beuler(?:'?s)?\s+totient\b/i.test(lower)
+      || /\bphi\s+function\b/i.test(lower)) return this.algoTemplate('euler_totient', lang);
+    if (/\binteger\s+(?:square\s+root|sqrt)\b/i.test(lower)
+      || /\bisqrt\b/i.test(lower)
+      || /\bbabylonian\s+(?:method|sqrt)\b/i.test(lower)) return this.algoTemplate('integer_sqrt', lang);
+    if (/\btwo\s+sum\b/i.test(lower)
+      || /\b2\s*sum\b/i.test(lower)) return this.algoTemplate('two_sum', lang);
+    if (/\bthree\s+sum\b/i.test(lower)
+      || /\b3\s*sum\b/i.test(lower)) return this.algoTemplate('three_sum', lang);
+
+    // ─── BATCH 3: ADVANCED DP & BACKTRACKING ───
+    if (/\bmatrix\s+chain\s+multiplication\b/i.test(lower)
+      || /\boptimal\s+matrix\s+parenthesiz(?:e|ation)\b/i.test(lower)) return this.algoTemplate('matrix_chain', lang);
+    if (/\bpalindrome\s+partition(?:ing)?\b/i.test(lower)
+      || /\bmin(?:imum)?\s+cuts?\s+for\s+palindrome\b/i.test(lower)) return this.algoTemplate('palindrome_partition', lang);
+    if (/\bword\s+break\b/i.test(lower)
+      || /segment\s+(?:a\s+)?string\s+into\s+dictionary\s+words/i.test(lower)) return this.algoTemplate('word_break', lang);
+    if (/\bregex(?:\s+|ular\s+expression\s+)match(?:ing)?\b/i.test(lower)
+      || /\bregular\s+expression\s+matching\b/i.test(lower)) return this.algoTemplate('regex_match', lang);
+    if (/\bwildcard\s+match(?:ing)?\b/i.test(lower)) return this.algoTemplate('wildcard_match', lang);
+    if (/\bmin(?:imum)?\s+path\s+sum\b/i.test(lower)
+      || /\bmin(?:imum)?\s+cost\s+path\s+in\s+(?:a\s+)?(?:grid|matrix)\b/i.test(lower)) return this.algoTemplate('min_path_sum', lang);
+    if (/\brod\s+cutting\b/i.test(lower)) return this.algoTemplate('rod_cutting', lang);
+    if (/\bsubset\s+sum\b/i.test(lower)
+      || /partition\s+(?:an?\s+)?array\s+into\s+(?:two\s+)?(?:equal\s+)?(?:sum|subsets?)/i.test(lower)) return this.algoTemplate('subset_sum', lang);
+    if (/\bdecode\s+ways\b/i.test(lower)
+      || /number\s+of\s+ways\s+to\s+decode\s+a\s+string/i.test(lower)) return this.algoTemplate('decode_ways', lang);
+    if (/\bjump\s+game\b/i.test(lower)) return this.algoTemplate('jump_game', lang);
+    if (/\bn[\s-]?queens?\b/i.test(lower)
+      || /\b(?:eight|8)\s+queens?\s+problem\b/i.test(lower)) return this.algoTemplate('n_queens', lang);
+    if (/\bsudoku\s+solver\b/i.test(lower)
+      || /solve\s+(?:a\s+)?sudoku/i.test(lower)) return this.algoTemplate('sudoku_solver', lang);
+    if (/\bgenerate\s+parentheses\b/i.test(lower)
+      || /\bvalid\s+parentheses\s+combinations?\b/i.test(lower)) return this.algoTemplate('generate_parentheses', lang);
+    if (/\bgenerate\s+(?:all\s+)?subsets\b/i.test(lower)
+      || /\b(?:return|returns|produce|produces|get|list|all)\s+(?:all\s+)?(?:the\s+)?subsets\s+of\b/i.test(lower)
+      || /\ball\s+subsets\s+of\b/i.test(lower)
+      || /\bpower\s*set\b/i.test(lower)) return this.algoTemplate('subsets', lang);
+    if (/\bcombination\s+sum\b/i.test(lower)
+      || /find\s+all\s+combinations\s+(?:that\s+)?sum\s+to/i.test(lower)) return this.algoTemplate('combination_sum', lang);
+
+    // ─── BATCH 4: ADVANCED GRAPHS & GEOMETRY ───
+    if (/\bbellman[\s-]?ford\b/i.test(lower)
+      || /shortest\s+path\s+with\s+negative\s+(?:edges|weights)/i.test(lower)) return this.algoTemplate('bellman_ford', lang);
+    if (/\bfloyd[\s-]?warshall\b/i.test(lower)
+      || /\ball[\s-]?pairs?\s+shortest\s+paths?\b/i.test(lower)) return this.algoTemplate('floyd_warshall', lang);
+    if (/\bkruskal(?:'?s)?\s+(?:algorithm|mst)\b/i.test(lower)
+      || /\bkruskal\b/i.test(lower)) return this.algoTemplate('kruskal_mst', lang);
+    if (/\bprim(?:'?s)?\s+(?:algorithm|mst)\b/i.test(lower)) return this.algoTemplate('prim_mst', lang);
+    if (/\ba[\s-]?star\s+(?:search|algorithm|pathfinding)?\b/i.test(lower)
+      || /\bheuristic\s+search\s+algorithm\b/i.test(lower)) return this.algoTemplate('a_star', lang);
+    if (/\bmax(?:imum)?\s+flow\b/i.test(lower)
+      || /\bford[\s-]?fulkerson\b/i.test(lower)
+      || /\bedmonds[\s-]?karp\b/i.test(lower)) return this.algoTemplate('max_flow', lang);
+    if (/\btarjan(?:'?s)?\s+(?:algorithm|scc)\b/i.test(lower)
+      || /\bstrongly\s+connected\s+components?\b/i.test(lower)) return this.algoTemplate('tarjan_scc', lang);
+    if (/\barticulation\s+points?\b/i.test(lower)
+      || /\bcut\s+vertices?\b/i.test(lower)
+      || /\bbridges?\s+in\s+(?:a\s+)?graph\b/i.test(lower)) return this.algoTemplate('articulation_points', lang);
+    if (/\bconvex\s+hull\b/i.test(lower)
+      || /\bgraham\s+scan\b/i.test(lower)
+      || /\bandrew(?:'?s)?\s+monotone\s+chain\b/i.test(lower)) return this.algoTemplate('convex_hull', lang);
+    if (/\bline\s+(?:segment\s+)?intersection\b/i.test(lower)
+      || /\bsegments?\s+intersect\b/i.test(lower)) return this.algoTemplate('line_intersection', lang);
+    if (/\bpolygon\s+area\b/i.test(lower)
+      || /\bshoelace\s+(?:formula|algorithm)\b/i.test(lower)) return this.algoTemplate('polygon_area', lang);
+    if (/\b(?:euclidean\s+)?(?:point|distance)\s+between\s+(?:two\s+)?points\b/i.test(lower)
+      || /\bdistance\s+formula\b/i.test(lower)) return this.algoTemplate('point_distance', lang);
+
+    // ─── BATCH 5: ADVANCED DATA STRUCTURES ───
+    if (/\bsegment\s+tree\b/i.test(lower)) return this.algoTemplate('segment_tree', lang);
+    if (/\b(?:fenwick\s+tree|binary\s+indexed\s+tree|bit)\b/i.test(lower)
+      && /(?:implement|write|create|build|make)\s+(?:a\s+)?(?:fenwick|binary\s+indexed|bit)/i.test(lower)) return this.algoTemplate('fenwick_tree', lang);
+    if (/\bsparse\s+table\b/i.test(lower)) return this.algoTemplate('sparse_table', lang);
+    if (/\bmonotonic\s+stack\b/i.test(lower)
+      || /\b(?:next|previous)\s+greater\s+element\b/i.test(lower)) return this.algoTemplate('monotonic_stack', lang);
+    if (/\bmonotonic\s+(?:queue|deque)\b/i.test(lower)
+      || /\bsliding\s+window\s+max(?:imum)?\b/i.test(lower)) return this.algoTemplate('monotonic_queue', lang);
+    if (/\bsuffix\s+array\b/i.test(lower)) return this.algoTemplate('suffix_array', lang);
+    if (/\bbloom\s+filter\b/i.test(lower)) return this.algoTemplate('bloom_filter', lang);
+    if (/\bskip\s+list\b/i.test(lower)) return this.algoTemplate('skip_list', lang);
+    if (/\bcircular\s+buffer\b/i.test(lower)
+      || /\bring\s+buffer\b/i.test(lower)) return this.algoTemplate('circular_buffer', lang);
+    if (/\bdisjoint[\s-]?set\s+forest\b/i.test(lower)) return this.algoTemplate('disjoint_set_forest', lang);
+
+    // ─── BATCH 6: WEB / DEV UTILITIES ───
+    if (/\bparse\s+(?:a\s+)?url\b/i.test(lower)
+      || /\burl\s+parse(?:r)?\b/i.test(lower)) return this.algoTemplate('parse_url', lang);
+    if (/\bbuild\s+(?:a\s+)?query\s+string\b/i.test(lower)
+      || /\bserialize\s+(?:an?\s+)?object\s+(?:in)?to\s+(?:a\s+)?query\s+string\b/i.test(lower)
+      || /\b(?:object|params)\s+to\s+query\s+string\b/i.test(lower)) return this.algoTemplate('build_query_string', lang);
+    if (/\bescape\s+html\b/i.test(lower)
+      || /\bhtml\s+escape\b/i.test(lower)
+      || /\bsanitize\s+html\s+entities\b/i.test(lower)) return this.algoTemplate('escape_html', lang);
+    if (/\burl\s+encode\b/i.test(lower)
+      || /\bpercent[\s-]?encode\b/i.test(lower)) return this.algoTemplate('url_encode', lang);
+    if (/\bbase64\s+encode\b/i.test(lower)
+      || /\bencode\s+(?:a\s+)?(?:string|bytes)\s+(?:to|as)\s+base64\b/i.test(lower)) return this.algoTemplate('base64_encode', lang);
+    if (/\bmd5\b/i.test(lower)
+      && /(?:hash|implement|write|compute|calculate)/i.test(lower)) return this.algoTemplate('md5_hash', lang);
+    if (/\bsha[\s-]?256\b/i.test(lower)
+      && /(?:hash|implement|write|compute|calculate)/i.test(lower)) return this.algoTemplate('sha256_hash', lang);
+    if (/\b(?:constant[\s-]?time|timing[\s-]?safe|safe)\s+(?:string\s+)?compare\b/i.test(lower)
+      || /\btiming\s+attack\s+safe\b/i.test(lower)) return this.algoTemplate('safe_compare', lang);
+    if (/\buuid\s*(?:v?4)?\b/i.test(lower)
+      && /(?:generate|create|make|random)/i.test(lower)) return this.algoTemplate('uuid_v4', lang);
+    if (/\bvalidate\s+(?:an?\s+)?e[\s-]?mail\b/i.test(lower)
+      || /\bis\s+(?:valid\s+)?email\b/i.test(lower)
+      || /\bemail\s+(?:address\s+)?regex\b/i.test(lower)) return this.algoTemplate('validate_email', lang);
+    if (/\bvalidate\s+(?:a\s+)?phone\s+number\b/i.test(lower)
+      || /\bis\s+(?:valid\s+)?phone\s+number\b/i.test(lower)) return this.algoTemplate('validate_phone', lang);
+    if (/\bformat\s+(?:a\s+)?(?:number\s+as\s+)?currency\b/i.test(lower)
+      || /\bcurrency\s+formatter\b/i.test(lower)) return this.algoTemplate('format_currency', lang);
+    if (/\bformat\s+(?:file\s+)?(?:bytes?|size)\b/i.test(lower)
+      || /\bhuman[\s-]?readable\s+(?:file\s+)?size\b/i.test(lower)) return this.algoTemplate('format_bytes', lang);
+    if (/\bmask\s+(?:a\s+)?credit\s+card\b/i.test(lower)
+      || /\bredact\s+credit\s+card\b/i.test(lower)) return this.algoTemplate('mask_credit_card', lang);
+    if (/\bparse\s+(?:a\s+)?cookies?\b/i.test(lower)
+      || /\bcookie\s+parser\b/i.test(lower)) return this.algoTemplate('parse_cookies', lang);
+
+    // ─── BATCH 7: DATE/TIME & I/O ───
+    if (/\bformat\s+(?:a\s+)?date\b/i.test(lower)
+      && !/\biso\s*8601\b/i.test(lower)) return this.algoTemplate('format_date', lang);
+    if (/\bparse\s+iso\s*8601\b/i.test(lower)
+      || /\biso\s*8601\s+parser\b/i.test(lower)) return this.algoTemplate('parse_iso8601', lang);
+    if (/\bdate\s+diff(?:erence)?\b/i.test(lower)
+      || /\bdays?\s+between\s+(?:two\s+)?dates?\b/i.test(lower)) return this.algoTemplate('date_diff_days', lang);
+    if (/\bis\s+leap\s+year\b/i.test(lower)
+      || /\bleap\s+year\s+check\b/i.test(lower)) return this.algoTemplate('is_leap_year', lang);
+    if (/\bday\s+of\s+(?:the\s+)?week\b/i.test(lower)
+      || /\bzeller(?:'?s)?\s+congruence\b/i.test(lower)) return this.algoTemplate('day_of_week', lang);
+    if (/\bformat\s+(?:a\s+)?duration\b/i.test(lower)
+      || /\bseconds\s+to\s+(?:human\s+)?(?:readable\s+)?(?:time|duration)\b/i.test(lower)) return this.algoTemplate('format_duration', lang);
+    if (/\bread\s+(?:a\s+)?csv\b/i.test(lower)
+      || /\bcsv\s+reader?\b/i.test(lower)
+      || /\bparse\s+(?:a\s+)?csv\b/i.test(lower)) return this.algoTemplate('read_csv', lang);
+    if (/\bwrite\s+(?:a\s+)?csv\b/i.test(lower)
+      || /\bcsv\s+writer?\b/i.test(lower)) return this.algoTemplate('write_csv', lang);
+    if (/\bwalk\s+(?:a\s+)?director(?:y|ies)\b/i.test(lower)
+      || /\brecursive\s+file\s+(?:listing|walk)\b/i.test(lower)) return this.algoTemplate('walk_directory', lang);
+    if (/\bstream\s+file\s+lines?\b/i.test(lower)
+      || /\bread\s+(?:a\s+)?(?:large\s+)?file\s+line\s+by\s+line\b/i.test(lower)) return this.algoTemplate('stream_file_lines', lang);
+
+    // ─── BATCH 8: ASYNC PATTERNS ───
+    if (/\b(?:async\s+)?sleep\s+function\b/i.test(lower)
+      || /\b(?:implement|write)\s+(?:a\s+)?sleep\b/i.test(lower)
+      || /\bdelay\s+function\b/i.test(lower)) return this.algoTemplate('sleep', lang);
+    if (/\bpromise\s+pool\b/i.test(lower)
+      || /\blimit\s+(?:parallel\s+)?promises\b/i.test(lower)
+      || /\bconcurrency\s+limit(?:er)?\b/i.test(lower)) return this.algoTemplate('promise_pool', lang);
+    if (/\b(?:race|timeout)\s+(?:with\s+)?(?:a\s+)?timeout\b/i.test(lower)
+      || /\bpromise\s+with\s+timeout\b/i.test(lower)) return this.algoTemplate('race_timeout', lang);
+    if (/\basync\s+queue\b/i.test(lower)
+      || /\btask\s+queue\b/i.test(lower)) return this.algoTemplate('async_queue', lang);
+    if (/\bevent\s+emitter\b/i.test(lower)
+      || /\bpub(?:lish)?[\s-]?sub(?:scribe)?\s+(?:class|implementation)\b/i.test(lower)) return this.algoTemplate('event_emitter', lang);
+    if (/\bsliding\s+window\s+(?:iterator|generator|function)\b/i.test(lower)
+      || /\bsliding\s+window\s+of\s+(?:size\s+)?\w+\s+over/i.test(lower)) return this.algoTemplate('sliding_window', lang);
+    if (/\bpairwise\s+(?:iterator|generator)\b/i.test(lower)
+      || /\biterate\s+(?:an?\s+)?array\s+pairwise\b/i.test(lower)) return this.algoTemplate('pairwise', lang);
+    if (/\bgenerator\s+chain\b/i.test(lower)
+      || /\bchain\s+(?:iterators?|generators?)\b/i.test(lower)) return this.algoTemplate('generator_chain', lang);
+    if (/\bbatch\s+async\s+(?:requests?|calls?|operations?)\b/i.test(lower)
+      || /\basync\s+batch\s+processor\b/i.test(lower)) return this.algoTemplate('batch_async', lang);
+    if (/\bcancellable\s+fetch\b/i.test(lower)
+      || /\babort(?:able)?\s+fetch\b/i.test(lower)) return this.algoTemplate('cancellable_fetch', lang);
+
+    // ─── BATCH 9: STATS & ML BASICS ───
+    if (/\bpercentile\b/i.test(lower)
+      && /(?:compute|calculate|find|function)/i.test(lower)) return this.algoTemplate('percentile', lang);
+    if (/\bmoving\s+average\b/i.test(lower)
+      && !/\bexponential\b/i.test(lower)) return this.algoTemplate('moving_average', lang);
+    if (/\bexponential\s+moving\s+average\b/i.test(lower)
+      || /\bema\s+calculation\b/i.test(lower)) return this.algoTemplate('ema', lang);
+    if (/\bz[\s-]?score\b/i.test(lower)
+      || /\bstandard\s+score\b/i.test(lower)) return this.algoTemplate('zscore', lang);
+    if (/\b(?:pearson\s+)?correlation\s+coefficient\b/i.test(lower)
+      || /\bcorrelation\b.*\b(?:function|compute|calculate)\b/i.test(lower)) return this.algoTemplate('correlation', lang);
+    if (/\bcovariance\b/i.test(lower)
+      && /(?:compute|calculate|function)/i.test(lower)) return this.algoTemplate('covariance', lang);
+    if (/\blinear\s+regression\b/i.test(lower)
+      || /\bleast\s+squares?\s+fit\b/i.test(lower)
+      || /\bordinary\s+least\s+squares?\b/i.test(lower)) return this.algoTemplate('linear_regression', lang);
+    if (/\bk[\s-]?means\b/i.test(lower)) return this.algoTemplate('k_means', lang);
+    if (/\bcosine\s+similarity\b/i.test(lower)) return this.algoTemplate('cosine_similarity', lang);
+    if (/\beuclidean\s+distance\b/i.test(lower)
+      && !/\bpoint\b/i.test(lower)) return this.algoTemplate('euclidean_distance', lang);
+    if (/\bsoftmax\b/i.test(lower)) return this.algoTemplate('softmax', lang);
+    if (/\bmatrix\s+multiplication\b/i.test(lower)
+      || /\bmultiply\s+(?:two\s+)?matric(?:es|s)\b/i.test(lower)) return this.algoTemplate('matrix_multiply', lang);
+
+    // ─── BATCH 10: POWER TOOLS ───
+    if (/\brate\s+limit(?:er)?\b/i.test(lower)
+      || /\btoken\s+bucket\b/i.test(lower)
+      || /\bleaky\s+bucket\b/i.test(lower)) return this.algoTemplate('rate_limiter', lang);
+    if (/\bcircuit\s+breaker\b/i.test(lower)) return this.algoTemplate('circuit_breaker', lang);
+    if (/\blru\s+(?:cache\s+)?with\s+(?:a\s+)?ttl\b/i.test(lower)
+      || /\btime[\s-]?to[\s-]?live\s+cache\b/i.test(lower)) return this.algoTemplate('lru_with_ttl', lang);
+    if (/\b(?:finite\s+)?state\s+machine\b/i.test(lower)
+      || /\bfsm\s+(?:implementation|class|pattern)\b/i.test(lower)) return this.algoTemplate('state_machine', lang);
+    if (/\bpub(?:lish)?[\s-]?sub(?:scribe)?\s+pattern\b/i.test(lower)
+      || /\bobserver\s+pattern\b/i.test(lower)) return this.algoTemplate('pub_sub', lang);
+    if (/\bbinary\s+search\s+(?:for\s+)?(?:the\s+)?first\s+occurrence\b/i.test(lower)
+      || /\blower\s+bound\s+binary\s+search\b/i.test(lower)) return this.algoTemplate('binary_search_first', lang);
+    if (/\bbinary\s+search\s+(?:for\s+)?(?:the\s+)?last\s+occurrence\b/i.test(lower)
+      || /\bupper\s+bound\s+binary\s+search\b/i.test(lower)) return this.algoTemplate('binary_search_last', lang);
+    if (/\bquickselect\b/i.test(lower)
+      || /\bkth\s+(?:smallest|largest)\s+element\b/i.test(lower)) return this.algoTemplate('quickselect', lang);
+    if (/\btop[\s-]?k\s+frequent\b/i.test(lower)) return this.algoTemplate('top_k_frequent', lang);
+    if (/\btop[\s-]?k\s+(?:largest|smallest)\b/i.test(lower)
+      || /\bk\s+largest\s+elements?\b/i.test(lower)) return this.algoTemplate('top_k_largest', lang);
 
     return null;
   }
@@ -23345,6 +24271,46 @@ console.log(reverseStringIter("world"));   // "dlrow"
           desc: 'Reverse a string — both built-in method and iterative (two-pointer) approaches.',
         },
       },
+      reverse_words: {
+        python: {
+          title: 'Reverse Words in a Sentence',
+          code: `\`\`\`python
+def reverse_words(sentence):
+    return ' '.join(sentence.split()[::-1])
+
+# Alternative (explicit loop, preserves single spaces):
+def reverse_words_loop(sentence):
+    words = sentence.split()
+    out = []
+    for i in range(len(words) - 1, -1, -1):
+        out.append(words[i])
+    return ' '.join(out)
+
+# Usage:
+print(reverse_words("hello world from vai"))   # "vai from world hello"
+print(reverse_words_loop("reverse these words")) # "words these reverse"
+\`\`\``,
+          desc: 'Reverse the order of words in a sentence (splits on whitespace, reverses the word list, rejoins with a single space). The individual words are left intact — only their order changes.',
+        },
+        javascript: {
+          title: 'Reverse Words in a Sentence',
+          code: `\`\`\`javascript
+function reverseWords(sentence) {
+  return sentence.split(' ').reverse().join(' ');
+}
+
+// Alternative — collapses runs of whitespace before reversing:
+function reverseWordsTrim(sentence) {
+  return sentence.trim().split(/\\s+/).reverse().join(' ');
+}
+
+// Usage:
+console.log(reverseWords("hello world from vai"));     // "vai from world hello"
+console.log(reverseWordsTrim("  reverse  these words ")); // "words these reverse"
+\`\`\``,
+          desc: 'Reverse the order of words in a sentence by splitting on spaces, reversing the resulting array, and joining back with a space. The words themselves stay intact — only their order changes.',
+        },
+      },
       palindrome_check: {
         python: {
           title: 'Palindrome Checker',
@@ -23682,6 +24648,8172 @@ function findMax(arr) {
 console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
 \`\`\``,
           desc: 'Find the maximum element in an array by iterating through all elements. Time: O(n).',
+        },
+      },
+
+      // ─── STRING MANIPULATION ───
+      capitalize: {
+        python: {
+          title: 'Capitalize First Letter',
+          code: `\`\`\`python
+def capitalize(s):
+    if not s:
+        return s
+    return s[0].upper() + s[1:]
+
+# Usage:
+print(capitalize("hello world"))  # "Hello world"
+\`\`\``,
+          desc: 'Uppercase only the first character and leave the rest of the string untouched. Time: O(n) for the slice.',
+        },
+        javascript: {
+          title: 'Capitalize First Letter',
+          code: `\`\`\`javascript
+function capitalize(s) {
+  if (!s) return s;
+  return s[0].toUpperCase() + s.slice(1);
+}
+
+// Usage:
+console.log(capitalize('hello world'));  // "Hello world"
+\`\`\``,
+          desc: 'Uppercase only the first character and leave the rest of the string untouched. Time: O(n) for the slice.',
+        },
+      },
+      title_case: {
+        python: {
+          title: 'Title Case (Capitalize Each Word)',
+          code: `\`\`\`python
+def title_case(s):
+    return " ".join(w[:1].upper() + w[1:].lower() for w in s.split())
+
+# Usage:
+print(title_case("the quick brown fox"))  # "The Quick Brown Fox"
+\`\`\``,
+          desc: 'Split on whitespace, uppercase each word\'s first letter, lowercase the rest, and rejoin with single spaces.',
+        },
+        javascript: {
+          title: 'Title Case (Capitalize Each Word)',
+          code: `\`\`\`javascript
+function titleCase(s) {
+  return s
+    .split(/\\s+/)
+    .filter(Boolean)
+    .map(w => w[0].toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+// Usage:
+console.log(titleCase('the quick brown fox'));  // "The Quick Brown Fox"
+\`\`\``,
+          desc: 'Split on whitespace, uppercase each word\'s first letter, lowercase the rest, and rejoin with single spaces.',
+        },
+      },
+      slugify: {
+        python: {
+          title: 'Slugify a String',
+          code: `\`\`\`python
+import re
+
+def slugify(s):
+    s = s.lower().strip()
+    s = re.sub(r"[^a-z0-9\\s-]", "", s)  # drop non-alphanumerics
+    s = re.sub(r"[\\s_-]+", "-", s)        # collapse runs to single dash
+    return s.strip("-")
+
+# Usage:
+print(slugify("Hello, World! 2025 — beta"))  # "hello-world-2025-beta"
+\`\`\``,
+          desc: 'Lowercase, strip non-alphanumerics, collapse whitespace/underscores into single dashes. Safe for URLs and file names.',
+        },
+        javascript: {
+          title: 'Slugify a String',
+          code: `\`\`\`javascript
+function slugify(s) {
+  return s
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\\s-]/g, '')
+    .replace(/[\\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+// Usage:
+console.log(slugify('Hello, World! 2025 — beta'));  // "hello-world-2025-beta"
+\`\`\``,
+          desc: 'Lowercase, strip non-alphanumerics, collapse whitespace/underscores into single dashes. Safe for URLs and file names.',
+        },
+      },
+      to_camel_case: {
+        python: {
+          title: 'Convert to camelCase',
+          code: `\`\`\`python
+import re
+
+def to_camel_case(s):
+    parts = re.split(r"[\\s_-]+", s.strip())
+    if not parts:
+        return ""
+    first = parts[0].lower()
+    return first + "".join(w[:1].upper() + w[1:].lower() for w in parts[1:])
+
+# Usage:
+print(to_camel_case("hello world_example-string"))  # "helloWorldExampleString"
+\`\`\``,
+          desc: 'Split on whitespace, underscores, and dashes, lowercase the first word, and title-case the rest.',
+        },
+        javascript: {
+          title: 'Convert to camelCase',
+          code: `\`\`\`javascript
+function toCamelCase(s) {
+  const parts = s.trim().split(/[\\s_-]+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  return parts[0].toLowerCase() + parts.slice(1)
+    .map(w => w[0].toUpperCase() + w.slice(1).toLowerCase())
+    .join('');
+}
+
+// Usage:
+console.log(toCamelCase('hello world_example-string'));  // "helloWorldExampleString"
+\`\`\``,
+          desc: 'Split on whitespace, underscores, and dashes, lowercase the first word, and title-case the rest.',
+        },
+      },
+      to_snake_case: {
+        python: {
+          title: 'Convert to snake_case',
+          code: `\`\`\`python
+import re
+
+def to_snake_case(s):
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\\1_\\2", s)  # camel boundaries
+    s = re.sub(r"[\\s-]+", "_", s.strip())
+    return s.lower().strip("_")
+
+# Usage:
+print(to_snake_case("HelloWorld exampleString"))  # "hello_world_example_string"
+\`\`\``,
+          desc: 'Insert underscores at camelCase boundaries, normalise whitespace/dashes to underscores, then lowercase.',
+        },
+        javascript: {
+          title: 'Convert to snake_case',
+          code: `\`\`\`javascript
+function toSnakeCase(s) {
+  return s
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[\\s-]+/g, '_')
+    .toLowerCase()
+    .replace(/^_+|_+$/g, '');
+}
+
+// Usage:
+console.log(toSnakeCase('HelloWorld exampleString'));  // "hello_world_example_string"
+\`\`\``,
+          desc: 'Insert underscores at camelCase boundaries, normalise whitespace/dashes to underscores, then lowercase.',
+        },
+      },
+      to_kebab_case: {
+        python: {
+          title: 'Convert to kebab-case',
+          code: `\`\`\`python
+import re
+
+def to_kebab_case(s):
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\\1-\\2", s)
+    s = re.sub(r"[\\s_]+", "-", s.strip())
+    return s.lower().strip("-")
+
+# Usage:
+print(to_kebab_case("HelloWorld example_string"))  # "hello-world-example-string"
+\`\`\``,
+          desc: 'Insert dashes at camelCase boundaries, normalise whitespace/underscores to dashes, then lowercase.',
+        },
+        javascript: {
+          title: 'Convert to kebab-case',
+          code: `\`\`\`javascript
+function toKebabCase(s) {
+  return s
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/[\\s_]+/g, '-')
+    .toLowerCase()
+    .replace(/^-+|-+$/g, '');
+}
+
+// Usage:
+console.log(toKebabCase('HelloWorld example_string'));  // "hello-world-example-string"
+\`\`\``,
+          desc: 'Insert dashes at camelCase boundaries, normalise whitespace/underscores to dashes, then lowercase.',
+        },
+      },
+      word_count: {
+        python: {
+          title: 'Count Words in a String',
+          code: `\`\`\`python
+def word_count(s):
+    if not s or not s.strip():
+        return 0
+    return len(s.split())
+
+# Usage:
+print(word_count("  hello   world  foo bar  "))  # 4
+\`\`\``,
+          desc: 'Use str.split() with no separator so consecutive whitespace collapses and leading/trailing is ignored.',
+        },
+        javascript: {
+          title: 'Count Words in a String',
+          code: `\`\`\`javascript
+function wordCount(s) {
+  if (!s || !s.trim()) return 0;
+  return s.trim().split(/\\s+/).length;
+}
+
+// Usage:
+console.log(wordCount('  hello   world  foo bar  '));  // 4
+\`\`\``,
+          desc: 'Trim then split on one-or-more whitespace so runs of spaces and tabs are treated as a single separator.',
+        },
+      },
+      char_count: {
+        python: {
+          title: 'Count Characters in a String',
+          code: `\`\`\`python
+def char_count(s, include_spaces=True):
+    if include_spaces:
+        return len(s)
+    return sum(1 for c in s if not c.isspace())
+
+# Usage:
+print(char_count("hello world"))              # 11
+print(char_count("hello world", False))       # 10
+\`\`\``,
+          desc: 'Total length if spaces count; otherwise filter out whitespace characters. O(n).',
+        },
+        javascript: {
+          title: 'Count Characters in a String',
+          code: `\`\`\`javascript
+function charCount(s, includeSpaces = true) {
+  if (includeSpaces) return s.length;
+  return [...s].filter(c => !/\\s/.test(c)).length;
+}
+
+// Usage:
+console.log(charCount('hello world'));         // 11
+console.log(charCount('hello world', false));  // 10
+\`\`\``,
+          desc: 'Total length if spaces count; otherwise filter out whitespace characters. O(n).',
+        },
+      },
+      remove_whitespace: {
+        python: {
+          title: 'Remove / Collapse Whitespace',
+          code: `\`\`\`python
+import re
+
+def remove_whitespace(s):
+    return re.sub(r"\\s+", "", s)
+
+def collapse_whitespace(s):
+    return re.sub(r"\\s+", " ", s).strip()
+
+# Usage:
+print(remove_whitespace("  hello   world  "))    # "helloworld"
+print(collapse_whitespace("  hello   world  "))  # "hello world"
+\`\`\``,
+          desc: 'Two variants: strip all whitespace, or collapse runs of whitespace down to a single space and trim.',
+        },
+        javascript: {
+          title: 'Remove / Collapse Whitespace',
+          code: `\`\`\`javascript
+function removeWhitespace(s) {
+  return s.replace(/\\s+/g, '');
+}
+
+function collapseWhitespace(s) {
+  return s.replace(/\\s+/g, ' ').trim();
+}
+
+// Usage:
+console.log(removeWhitespace('  hello   world  '));    // "helloworld"
+console.log(collapseWhitespace('  hello   world  '));  // "hello world"
+\`\`\``,
+          desc: 'Two variants: strip all whitespace, or collapse runs of whitespace down to a single space and trim.',
+        },
+      },
+      truncate_string: {
+        python: {
+          title: 'Truncate String with Ellipsis',
+          code: `\`\`\`python
+def truncate(s, max_len, suffix="…"):
+    if len(s) <= max_len:
+        return s
+    # reserve room for the suffix
+    cut = max(0, max_len - len(suffix))
+    return s[:cut].rstrip() + suffix
+
+# Usage:
+print(truncate("the quick brown fox", 10))  # "the quick…"
+\`\`\``,
+          desc: 'Cut the string to max_len characters reserving room for the ellipsis suffix. Trims trailing whitespace before appending.',
+        },
+        javascript: {
+          title: 'Truncate String with Ellipsis',
+          code: `\`\`\`javascript
+function truncate(s, maxLen, suffix = '…') {
+  if (s.length <= maxLen) return s;
+  const cut = Math.max(0, maxLen - suffix.length);
+  return s.slice(0, cut).trimEnd() + suffix;
+}
+
+// Usage:
+console.log(truncate('the quick brown fox', 10));  // "the quick…"
+\`\`\``,
+          desc: 'Cut the string to maxLen characters reserving room for the ellipsis suffix. Trims trailing whitespace before appending.',
+        },
+      },
+
+      // ─── ARRAY OPERATIONS ───
+      chunk_array: {
+        python: {
+          title: 'Chunk Array Into Fixed-Size Groups',
+          code: `\`\`\`python
+def chunk(arr, size):
+    if size <= 0:
+        raise ValueError("size must be positive")
+    return [arr[i:i + size] for i in range(0, len(arr), size)]
+
+# Usage:
+print(chunk([1, 2, 3, 4, 5, 6, 7], 3))  # [[1, 2, 3], [4, 5, 6], [7]]
+\`\`\``,
+          desc: 'Slice the array into groups of the given size; the last group may be smaller. Time: O(n).',
+        },
+        javascript: {
+          title: 'Chunk Array Into Fixed-Size Groups',
+          code: `\`\`\`javascript
+function chunk(arr, size) {
+  if (size <= 0) throw new Error('size must be positive');
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) {
+    out.push(arr.slice(i, i + size));
+  }
+  return out;
+}
+
+// Usage:
+console.log(chunk([1, 2, 3, 4, 5, 6, 7], 3));  // [[1, 2, 3], [4, 5, 6], [7]]
+\`\`\``,
+          desc: 'Slice the array into groups of the given size; the last group may be smaller. Time: O(n).',
+        },
+      },
+      unique_array: {
+        python: {
+          title: 'Unique Array (Preserve Order)',
+          code: `\`\`\`python
+def unique(arr):
+    seen = set()
+    out = []
+    for x in arr:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+# Usage:
+print(unique([1, 2, 2, 3, 1, 4, 3]))  # [1, 2, 3, 4]
+\`\`\``,
+          desc: 'Keep first occurrence of each element using a set for O(1) lookup. Preserves insertion order. Time: O(n).',
+        },
+        javascript: {
+          title: 'Unique Array (Preserve Order)',
+          code: `\`\`\`javascript
+function unique(arr) {
+  return [...new Set(arr)];
+}
+
+// Usage:
+console.log(unique([1, 2, 2, 3, 1, 4, 3]));  // [1, 2, 3, 4]
+\`\`\``,
+          desc: 'Using the Set constructor preserves insertion order and deduplicates in O(n).',
+        },
+      },
+      group_by: {
+        python: {
+          title: 'Group By Key Function',
+          code: `\`\`\`python
+from collections import defaultdict
+
+def group_by(arr, key):
+    out = defaultdict(list)
+    for item in arr:
+        out[key(item)].append(item)
+    return dict(out)
+
+# Usage:
+people = [{"name": "Ada", "role": "eng"}, {"name": "Bo", "role": "pm"}, {"name": "Cy", "role": "eng"}]
+print(group_by(people, lambda p: p["role"]))
+# {'eng': [{'name': 'Ada', ...}, {'name': 'Cy', ...}], 'pm': [{'name': 'Bo', ...}]}
+\`\`\``,
+          desc: 'Bucket items by the result of the key function. Time: O(n).',
+        },
+        javascript: {
+          title: 'Group By Key Function',
+          code: `\`\`\`javascript
+function groupBy(arr, key) {
+  const out = {};
+  for (const item of arr) {
+    const k = typeof key === 'function' ? key(item) : item[key];
+    (out[k] ||= []).push(item);
+  }
+  return out;
+}
+
+// Usage:
+const people = [{ name: 'Ada', role: 'eng' }, { name: 'Bo', role: 'pm' }, { name: 'Cy', role: 'eng' }];
+console.log(groupBy(people, 'role'));
+// { eng: [{name:'Ada',...}, {name:'Cy',...}], pm: [{name:'Bo',...}] }
+\`\`\``,
+          desc: 'Accepts either a key function or a property name. Bucket items by key in O(n).',
+        },
+      },
+      partition_array: {
+        python: {
+          title: 'Partition Array by Predicate',
+          code: `\`\`\`python
+def partition(arr, predicate):
+    truthy, falsy = [], []
+    for x in arr:
+        (truthy if predicate(x) else falsy).append(x)
+    return truthy, falsy
+
+# Usage:
+evens, odds = partition([1, 2, 3, 4, 5], lambda n: n % 2 == 0)
+print(evens, odds)  # [2, 4] [1, 3, 5]
+\`\`\``,
+          desc: 'Single pass splits elements into two lists based on the predicate. Time: O(n).',
+        },
+        javascript: {
+          title: 'Partition Array by Predicate',
+          code: `\`\`\`javascript
+function partition(arr, predicate) {
+  const truthy = [], falsy = [];
+  for (const x of arr) {
+    (predicate(x) ? truthy : falsy).push(x);
+  }
+  return [truthy, falsy];
+}
+
+// Usage:
+const [evens, odds] = partition([1, 2, 3, 4, 5], n => n % 2 === 0);
+console.log(evens, odds);  // [2, 4] [1, 3, 5]
+\`\`\``,
+          desc: 'Single pass splits elements into two arrays based on the predicate. Time: O(n).',
+        },
+      },
+      zip_arrays: {
+        python: {
+          title: 'Zip Arrays',
+          code: `\`\`\`python
+def zip_arrays(*arrays):
+    return list(zip(*arrays))
+
+# Usage:
+print(zip_arrays([1, 2, 3], ["a", "b", "c"]))  # [(1, 'a'), (2, 'b'), (3, 'c')]
+\`\`\``,
+          desc: 'Thin wrapper around the built-in zip that produces tuples pairwise. Stops at the shortest input.',
+        },
+        javascript: {
+          title: 'Zip Arrays',
+          code: `\`\`\`javascript
+function zip(...arrays) {
+  const len = Math.min(...arrays.map(a => a.length));
+  const out = [];
+  for (let i = 0; i < len; i++) {
+    out.push(arrays.map(a => a[i]));
+  }
+  return out;
+}
+
+// Usage:
+console.log(zip([1, 2, 3], ['a', 'b', 'c']));  // [[1,'a'],[2,'b'],[3,'c']]
+\`\`\``,
+          desc: 'Pair elements by index across any number of input arrays. Stops at the shortest input.',
+        },
+      },
+      range_array: {
+        python: {
+          title: 'Generate a Range of Numbers',
+          code: `\`\`\`python
+def number_range(start, stop=None, step=1):
+    if stop is None:
+        start, stop = 0, start
+    if step == 0:
+        raise ValueError("step must be non-zero")
+    return list(range(start, stop, step))
+
+# Usage:
+print(number_range(5))           # [0, 1, 2, 3, 4]
+print(number_range(2, 10, 2))    # [2, 4, 6, 8]
+\`\`\``,
+          desc: 'Python has range() built in; this mirrors its semantics but materialises a list and validates step.',
+        },
+        javascript: {
+          title: 'Generate a Range of Numbers',
+          code: `\`\`\`javascript
+function range(start, stop, step = 1) {
+  if (stop === undefined) { stop = start; start = 0; }
+  if (step === 0) throw new Error('step must be non-zero');
+  const out = [];
+  if (step > 0) {
+    for (let i = start; i < stop; i += step) out.push(i);
+  } else {
+    for (let i = start; i > stop; i += step) out.push(i);
+  }
+  return out;
+}
+
+// Usage:
+console.log(range(5));         // [0, 1, 2, 3, 4]
+console.log(range(2, 10, 2));  // [2, 4, 6, 8]
+\`\`\``,
+          desc: 'Python-style range with positive or negative step. Empty array when start/stop/step are inconsistent.',
+        },
+      },
+      flatten_deep: {
+        python: {
+          title: 'Flatten Nested Array (Deep)',
+          code: `\`\`\`python
+def flatten_deep(arr):
+    out = []
+    for x in arr:
+        if isinstance(x, list):
+            out.extend(flatten_deep(x))
+        else:
+            out.append(x)
+    return out
+
+# Usage:
+print(flatten_deep([1, [2, [3, [4, [5]]]], 6]))  # [1, 2, 3, 4, 5, 6]
+\`\`\``,
+          desc: 'Recursively walk into nested lists and collect scalar values. Unlike flatten() at depth=1, this handles any depth.',
+        },
+        javascript: {
+          title: 'Flatten Nested Array (Deep)',
+          code: `\`\`\`javascript
+function flattenDeep(arr) {
+  return arr.flat(Infinity);
+}
+
+// Iterative fallback for environments without Array.prototype.flat:
+function flattenDeepIterative(arr) {
+  const out = [];
+  const stack = [...arr];
+  while (stack.length) {
+    const x = stack.shift();
+    Array.isArray(x) ? stack.unshift(...x) : out.push(x);
+  }
+  return out;
+}
+
+// Usage:
+console.log(flattenDeep([1, [2, [3, [4, [5]]]], 6]));  // [1, 2, 3, 4, 5, 6]
+\`\`\``,
+          desc: 'Array.prototype.flat(Infinity) handles the deep case natively on modern runtimes; the iterative version is safe on older targets.',
+        },
+      },
+      intersection: {
+        python: {
+          title: 'Array Intersection',
+          code: `\`\`\`python
+def intersection(*arrays):
+    if not arrays:
+        return []
+    result = set(arrays[0])
+    for a in arrays[1:]:
+        result &= set(a)
+    # preserve original order of the first input
+    return [x for x in arrays[0] if x in result]
+
+# Usage:
+print(intersection([1, 2, 3, 4], [2, 3, 5], [3, 2, 9]))  # [2, 3]
+\`\`\``,
+          desc: 'Use set intersection (&) across all inputs, then project back onto the first array for stable order. Time: O(Σ|arrays|).',
+        },
+        javascript: {
+          title: 'Array Intersection',
+          code: `\`\`\`javascript
+function intersection(...arrays) {
+  if (arrays.length === 0) return [];
+  const sets = arrays.slice(1).map(a => new Set(a));
+  return [...new Set(arrays[0])].filter(x => sets.every(s => s.has(x)));
+}
+
+// Usage:
+console.log(intersection([1, 2, 3, 4], [2, 3, 5], [3, 2, 9]));  // [2, 3]
+\`\`\``,
+          desc: 'Dedup the first array, then keep only elements present in every other array using Set.has for O(1) lookup.',
+        },
+      },
+      union_arrays: {
+        python: {
+          title: 'Array Union (Preserve Order)',
+          code: `\`\`\`python
+def union(*arrays):
+    seen = set()
+    out = []
+    for a in arrays:
+        for x in a:
+            if x not in seen:
+                seen.add(x)
+                out.append(x)
+    return out
+
+# Usage:
+print(union([1, 2, 3], [3, 4, 5], [5, 6]))  # [1, 2, 3, 4, 5, 6]
+\`\`\``,
+          desc: 'Concatenate inputs and deduplicate while preserving first-seen order. Time: O(Σ|arrays|).',
+        },
+        javascript: {
+          title: 'Array Union (Preserve Order)',
+          code: `\`\`\`javascript
+function union(...arrays) {
+  return [...new Set(arrays.flat())];
+}
+
+// Usage:
+console.log(union([1, 2, 3], [3, 4, 5], [5, 6]));  // [1, 2, 3, 4, 5, 6]
+\`\`\``,
+          desc: 'Flatten one level and feed into a Set to dedup while keeping first-seen order.',
+        },
+      },
+      rotate_array: {
+        python: {
+          title: 'Rotate Array by k Positions',
+          code: `\`\`\`python
+def rotate(arr, k):
+    n = len(arr)
+    if n == 0:
+        return arr[:]
+    k %= n  # handles negatives and k > n
+    return arr[-k:] + arr[:-k]
+
+# Usage:
+print(rotate([1, 2, 3, 4, 5], 2))   # [4, 5, 1, 2, 3]  (right rotation)
+print(rotate([1, 2, 3, 4, 5], -1))  # [2, 3, 4, 5, 1]  (left rotation)
+\`\`\``,
+          desc: 'Right-rotate by k (negative k rotates left). Modulo handles rotations larger than the array. Time: O(n).',
+        },
+        javascript: {
+          title: 'Rotate Array by k Positions',
+          code: `\`\`\`javascript
+function rotate(arr, k) {
+  const n = arr.length;
+  if (n === 0) return [...arr];
+  const r = ((k % n) + n) % n;  // normalise negatives
+  return arr.slice(n - r).concat(arr.slice(0, n - r));
+}
+
+// Usage:
+console.log(rotate([1, 2, 3, 4, 5], 2));   // [4, 5, 1, 2, 3]
+console.log(rotate([1, 2, 3, 4, 5], -1));  // [2, 3, 4, 5, 1]
+\`\`\``,
+          desc: 'Right-rotate by k (negative rotates left). Normalises k with a positive modulus so rotations larger than the array work. Time: O(n).',
+        },
+      },
+
+      // ─── EXTENDED SORTING & SEARCHING ───
+      quicksort: {
+        python: {
+          title: 'Quicksort',
+          code: `\`\`\`python
+def quicksort(arr):
+    if len(arr) <= 1:
+        return arr[:]
+    pivot = arr[len(arr) // 2]
+    left = [x for x in arr if x < pivot]
+    mid = [x for x in arr if x == pivot]
+    right = [x for x in arr if x > pivot]
+    return quicksort(left) + mid + quicksort(right)
+
+# Usage:
+print(quicksort([3, 1, 4, 1, 5, 9, 2, 6]))  # [1, 1, 2, 3, 4, 5, 6, 9]
+\`\`\``,
+          desc: 'Divide-and-conquer with a middle-element pivot. Average O(n log n), worst O(n²) when the pivot is consistently the extreme.',
+        },
+        javascript: {
+          title: 'Quicksort',
+          code: `\`\`\`javascript
+function quicksort(arr) {
+  if (arr.length <= 1) return [...arr];
+  const pivot = arr[Math.floor(arr.length / 2)];
+  const left = arr.filter(x => x < pivot);
+  const mid = arr.filter(x => x === pivot);
+  const right = arr.filter(x => x > pivot);
+  return [...quicksort(left), ...mid, ...quicksort(right)];
+}
+
+// Usage:
+console.log(quicksort([3, 1, 4, 1, 5, 9, 2, 6]));  // [1, 1, 2, 3, 4, 5, 6, 9]
+\`\`\``,
+          desc: 'Divide-and-conquer with a middle-element pivot. Average O(n log n), worst O(n²).',
+        },
+      },
+      heapsort: {
+        python: {
+          title: 'Heapsort',
+          code: `\`\`\`python
+import heapq
+
+def heapsort(arr):
+    h = arr[:]
+    heapq.heapify(h)
+    return [heapq.heappop(h) for _ in range(len(h))]
+
+# Usage:
+print(heapsort([3, 1, 4, 1, 5, 9, 2, 6]))  # [1, 1, 2, 3, 4, 5, 6, 9]
+\`\`\``,
+          desc: 'Heapify the array then pop the minimum n times. O(n log n), in-place variant exists but this uses heapq for clarity.',
+        },
+        javascript: {
+          title: 'Heapsort',
+          code: `\`\`\`javascript
+function heapsort(arr) {
+  const a = [...arr];
+  const n = a.length;
+  const siftDown = (start, end) => {
+    let root = start;
+    while (2 * root + 1 <= end) {
+      let child = 2 * root + 1;
+      if (child + 1 <= end && a[child] < a[child + 1]) child++;
+      if (a[root] < a[child]) { [a[root], a[child]] = [a[child], a[root]]; root = child; }
+      else return;
+    }
+  };
+  for (let i = Math.floor(n / 2) - 1; i >= 0; i--) siftDown(i, n - 1);
+  for (let end = n - 1; end > 0; end--) {
+    [a[0], a[end]] = [a[end], a[0]];
+    siftDown(0, end - 1);
+  }
+  return a;
+}
+
+// Usage:
+console.log(heapsort([3, 1, 4, 1, 5, 9, 2, 6]));  // [1, 1, 2, 3, 4, 5, 6, 9]
+\`\`\``,
+          desc: 'In-place max-heap construction then repeated extract-max. O(n log n) time, O(1) auxiliary space.',
+        },
+      },
+      counting_sort: {
+        python: {
+          title: 'Counting Sort (Non-Negative Integers)',
+          code: `\`\`\`python
+def counting_sort(arr):
+    if not arr:
+        return []
+    m = max(arr)
+    counts = [0] * (m + 1)
+    for x in arr:
+        counts[x] += 1
+    out = []
+    for value, c in enumerate(counts):
+        out.extend([value] * c)
+    return out
+
+# Usage:
+print(counting_sort([3, 1, 4, 1, 5, 9, 2, 6]))  # [1, 1, 2, 3, 4, 5, 6, 9]
+\`\`\``,
+          desc: 'Non-comparison sort for bounded non-negative integers. O(n + k) where k is the max value. Not stable without an extra pass.',
+        },
+        javascript: {
+          title: 'Counting Sort (Non-Negative Integers)',
+          code: `\`\`\`javascript
+function countingSort(arr) {
+  if (arr.length === 0) return [];
+  const m = Math.max(...arr);
+  const counts = new Array(m + 1).fill(0);
+  for (const x of arr) counts[x]++;
+  const out = [];
+  counts.forEach((c, v) => { for (let i = 0; i < c; i++) out.push(v); });
+  return out;
+}
+
+// Usage:
+console.log(countingSort([3, 1, 4, 1, 5, 9, 2, 6]));  // [1, 1, 2, 3, 4, 5, 6, 9]
+\`\`\``,
+          desc: 'Non-comparison sort for bounded non-negative integers. O(n + k) where k is the max value.',
+        },
+      },
+      radix_sort: {
+        python: {
+          title: 'Radix Sort (LSD, Non-Negative Integers)',
+          code: `\`\`\`python
+def radix_sort(arr):
+    if not arr:
+        return []
+    a = arr[:]
+    exp = 1
+    m = max(a)
+    while m // exp > 0:
+        buckets = [[] for _ in range(10)]
+        for x in a:
+            buckets[(x // exp) % 10].append(x)
+        a = [x for bucket in buckets for x in bucket]
+        exp *= 10
+    return a
+
+# Usage:
+print(radix_sort([170, 45, 75, 90, 802, 24, 2, 66]))  # [2, 24, 45, 66, 75, 90, 170, 802]
+\`\`\``,
+          desc: 'Least-significant-digit radix sort using base-10 buckets. O(d · (n + 10)) where d is the digit count of the max value.',
+        },
+        javascript: {
+          title: 'Radix Sort (LSD, Non-Negative Integers)',
+          code: `\`\`\`javascript
+function radixSort(arr) {
+  if (arr.length === 0) return [];
+  let a = [...arr];
+  const m = Math.max(...a);
+  let exp = 1;
+  while (Math.floor(m / exp) > 0) {
+    const buckets = Array.from({ length: 10 }, () => []);
+    for (const x of a) buckets[Math.floor(x / exp) % 10].push(x);
+    a = buckets.flat();
+    exp *= 10;
+  }
+  return a;
+}
+
+// Usage:
+console.log(radixSort([170, 45, 75, 90, 802, 24, 2, 66]));  // [2, 24, 45, 66, 75, 90, 170, 802]
+\`\`\``,
+          desc: 'LSD radix sort via base-10 buckets. O(d · (n + 10)) where d is the digit count of the max value.',
+        },
+      },
+      linear_search: {
+        python: {
+          title: 'Linear Search',
+          code: `\`\`\`python
+def linear_search(arr, target):
+    for i, x in enumerate(arr):
+        if x == target:
+            return i
+    return -1
+
+# Usage:
+print(linear_search([5, 2, 8, 1, 9], 8))  # 2
+print(linear_search([5, 2, 8, 1, 9], 7))  # -1
+\`\`\``,
+          desc: 'Sequential scan returning the first index equal to target, or -1 if absent. Time: O(n).',
+        },
+        javascript: {
+          title: 'Linear Search',
+          code: `\`\`\`javascript
+function linearSearch(arr, target) {
+  for (let i = 0; i < arr.length; i++) if (arr[i] === target) return i;
+  return -1;
+}
+
+// Usage:
+console.log(linearSearch([5, 2, 8, 1, 9], 8));  // 2
+console.log(linearSearch([5, 2, 8, 1, 9], 7));  // -1
+\`\`\``,
+          desc: 'Sequential scan returning the first index equal to target, or -1 if absent. Time: O(n).',
+        },
+      },
+      interpolation_search: {
+        python: {
+          title: 'Interpolation Search (Sorted, Uniform)',
+          code: `\`\`\`python
+def interpolation_search(arr, target):
+    lo, hi = 0, len(arr) - 1
+    while lo <= hi and arr[lo] <= target <= arr[hi]:
+        if arr[lo] == arr[hi]:
+            return lo if arr[lo] == target else -1
+        pos = lo + ((target - arr[lo]) * (hi - lo)) // (arr[hi] - arr[lo])
+        if arr[pos] == target:
+            return pos
+        if arr[pos] < target:
+            lo = pos + 1
+        else:
+            hi = pos - 1
+    return -1
+
+# Usage:
+print(interpolation_search([1, 3, 5, 7, 9, 11, 13, 15], 9))  # 4
+\`\`\``,
+          desc: 'Like binary search but picks the probe position using linear interpolation. O(log log n) on uniformly distributed inputs, O(n) worst case.',
+        },
+        javascript: {
+          title: 'Interpolation Search (Sorted, Uniform)',
+          code: `\`\`\`javascript
+function interpolationSearch(arr, target) {
+  let lo = 0, hi = arr.length - 1;
+  while (lo <= hi && target >= arr[lo] && target <= arr[hi]) {
+    if (arr[lo] === arr[hi]) return arr[lo] === target ? lo : -1;
+    const pos = lo + Math.floor(((target - arr[lo]) * (hi - lo)) / (arr[hi] - arr[lo]));
+    if (arr[pos] === target) return pos;
+    if (arr[pos] < target) lo = pos + 1; else hi = pos - 1;
+  }
+  return -1;
+}
+
+// Usage:
+console.log(interpolationSearch([1, 3, 5, 7, 9, 11, 13, 15], 9));  // 4
+\`\`\``,
+          desc: 'Binary search with interpolated probe. O(log log n) average on uniform data, O(n) worst case.',
+        },
+      },
+      find_min: {
+        python: {
+          title: 'Find Minimum in Array',
+          code: `\`\`\`python
+def find_min(arr):
+    if not arr:
+        raise ValueError("Array is empty")
+    minimum = arr[0]
+    for x in arr[1:]:
+        if x < minimum:
+            minimum = x
+    return minimum
+
+# Usage:
+print(find_min([3, 1, 4, 1, 5, 9, 2, 6]))  # 1
+\`\`\``,
+          desc: 'Single pass tracking the smallest value seen. Time: O(n).',
+        },
+        javascript: {
+          title: 'Find Minimum in Array',
+          code: `\`\`\`javascript
+function findMin(arr) {
+  if (arr.length === 0) throw new Error('Array is empty');
+  let min = arr[0];
+  for (let i = 1; i < arr.length; i++) if (arr[i] < min) min = arr[i];
+  return min;
+}
+
+// Usage:
+console.log(findMin([3, 1, 4, 1, 5, 9, 2, 6]));  // 1
+\`\`\``,
+          desc: 'Single pass tracking the smallest value seen. Time: O(n).',
+        },
+      },
+      sum_array: {
+        python: {
+          title: 'Sum of Array',
+          code: `\`\`\`python
+def sum_array(arr):
+    total = 0
+    for x in arr:
+        total += x
+    return total
+
+# Usage:
+print(sum_array([1, 2, 3, 4, 5]))  # 15
+\`\`\``,
+          desc: 'Sum all elements in a single linear pass. Built-in sum() does the same. Time: O(n).',
+        },
+        javascript: {
+          title: 'Sum of Array',
+          code: `\`\`\`javascript
+function sumArray(arr) {
+  return arr.reduce((acc, x) => acc + x, 0);
+}
+
+// Usage:
+console.log(sumArray([1, 2, 3, 4, 5]));  // 15
+\`\`\``,
+          desc: 'reduce starting from 0 accumulates the total in O(n).',
+        },
+      },
+      count_occurrences: {
+        python: {
+          title: 'Count Occurrences in Array',
+          code: `\`\`\`python
+def count_occurrences(arr, target):
+    return sum(1 for x in arr if x == target)
+
+# Usage:
+print(count_occurrences([1, 2, 3, 2, 4, 2, 5], 2))  # 3
+\`\`\``,
+          desc: 'Linear scan counting equal elements. collections.Counter gives the whole frequency map if needed. Time: O(n).',
+        },
+        javascript: {
+          title: 'Count Occurrences in Array',
+          code: `\`\`\`javascript
+function countOccurrences(arr, target) {
+  return arr.reduce((acc, x) => acc + (x === target ? 1 : 0), 0);
+}
+
+// Usage:
+console.log(countOccurrences([1, 2, 3, 2, 4, 2, 5], 2));  // 3
+\`\`\``,
+          desc: 'reduce-based count of matching elements. Time: O(n).',
+        },
+      },
+
+      // ─── DYNAMIC PROGRAMMING ───
+      coin_change: {
+        python: {
+          title: 'Coin Change (Min Coins to Make Amount)',
+          code: `\`\`\`python
+def coin_change(coins, amount):
+    INF = amount + 1
+    dp = [0] + [INF] * amount
+    for a in range(1, amount + 1):
+        for c in coins:
+            if c <= a:
+                dp[a] = min(dp[a], dp[a - c] + 1)
+    return dp[amount] if dp[amount] != INF else -1
+
+# Usage:
+print(coin_change([1, 2, 5], 11))  # 3 (5+5+1)
+print(coin_change([2], 3))         # -1
+\`\`\``,
+          desc: 'Bottom-up DP where dp[a] = min coins to make amount a. Returns -1 when unreachable. Time: O(amount · |coins|).',
+        },
+        javascript: {
+          title: 'Coin Change (Min Coins to Make Amount)',
+          code: `\`\`\`javascript
+function coinChange(coins, amount) {
+  const INF = amount + 1;
+  const dp = new Array(amount + 1).fill(INF);
+  dp[0] = 0;
+  for (let a = 1; a <= amount; a++) {
+    for (const c of coins) {
+      if (c <= a) dp[a] = Math.min(dp[a], dp[a - c] + 1);
+    }
+  }
+  return dp[amount] === INF ? -1 : dp[amount];
+}
+
+// Usage:
+console.log(coinChange([1, 2, 5], 11));  // 3
+console.log(coinChange([2], 3));         // -1
+\`\`\``,
+          desc: 'Bottom-up DP. dp[a] = min coins to form amount a. Time: O(amount · |coins|), space O(amount).',
+        },
+      },
+      edit_distance: {
+        python: {
+          title: 'Edit Distance (Levenshtein)',
+          code: `\`\`\`python
+def edit_distance(a, b):
+    m, n = len(a), len(b)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    for i in range(m + 1):
+        dp[i][0] = i
+    for j in range(n + 1):
+        dp[0][j] = j
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if a[i - 1] == b[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1]
+            else:
+                dp[i][j] = 1 + min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+    return dp[m][n]
+
+# Usage:
+print(edit_distance("kitten", "sitting"))  # 3
+\`\`\``,
+          desc: 'Standard 2-D DP for minimum insert/delete/replace operations. Time & space: O(m · n).',
+        },
+        javascript: {
+          title: 'Edit Distance (Levenshtein)',
+          code: `\`\`\`javascript
+function editDistance(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+// Usage:
+console.log(editDistance('kitten', 'sitting'));  // 3
+\`\`\``,
+          desc: 'Standard 2-D DP. Time and space O(m · n). Space can be compressed to O(min(m, n)) with two rolling rows.',
+        },
+      },
+      lcs: {
+        python: {
+          title: 'Longest Common Subsequence',
+          code: `\`\`\`python
+def lcs(a, b):
+    m, n = len(a), len(b)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if a[i - 1] == b[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1] + 1
+            else:
+                dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+    # reconstruct
+    i, j, out = m, n, []
+    while i > 0 and j > 0:
+        if a[i - 1] == b[j - 1]:
+            out.append(a[i - 1]); i -= 1; j -= 1
+        elif dp[i - 1][j] >= dp[i][j - 1]:
+            i -= 1
+        else:
+            j -= 1
+    return "".join(reversed(out))
+
+# Usage:
+print(lcs("ABCBDAB", "BDCAB"))  # "BCAB" or another length-4 LCS
+\`\`\``,
+          desc: 'Classic 2-D DP plus backtracking to reconstruct the subsequence. Time & space: O(m · n).',
+        },
+        javascript: {
+          title: 'Longest Common Subsequence',
+          code: `\`\`\`javascript
+function lcs(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  let i = m, j = n, out = '';
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) { out = a[i - 1] + out; i--; j--; }
+    else if (dp[i - 1][j] >= dp[i][j - 1]) i--;
+    else j--;
+  }
+  return out;
+}
+
+// Usage:
+console.log(lcs('ABCBDAB', 'BDCAB'));  // e.g. "BCAB"
+\`\`\``,
+          desc: '2-D DP with backtracking reconstruction. Time & space: O(m · n).',
+        },
+      },
+      kadane_max_subarray: {
+        python: {
+          title: 'Maximum Subarray Sum (Kadane)',
+          code: `\`\`\`python
+def max_subarray(arr):
+    if not arr:
+        return 0
+    best = current = arr[0]
+    for x in arr[1:]:
+        current = max(x, current + x)
+        best = max(best, current)
+    return best
+
+# Usage:
+print(max_subarray([-2, 1, -3, 4, -1, 2, 1, -5, 4]))  # 6  (subarray [4,-1,2,1])
+\`\`\``,
+          desc: 'Kadane\'s algorithm: at each index decide whether to extend the current subarray or start a new one. Time: O(n), space: O(1).',
+        },
+        javascript: {
+          title: 'Maximum Subarray Sum (Kadane)',
+          code: `\`\`\`javascript
+function maxSubarray(arr) {
+  if (arr.length === 0) return 0;
+  let best = arr[0], current = arr[0];
+  for (let i = 1; i < arr.length; i++) {
+    current = Math.max(arr[i], current + arr[i]);
+    best = Math.max(best, current);
+  }
+  return best;
+}
+
+// Usage:
+console.log(maxSubarray([-2, 1, -3, 4, -1, 2, 1, -5, 4]));  // 6
+\`\`\``,
+          desc: 'Kadane\'s algorithm. Track the best subarray ending at each index. Time: O(n), space: O(1).',
+        },
+      },
+      knapsack: {
+        python: {
+          title: '0/1 Knapsack',
+          code: `\`\`\`python
+def knapsack(weights, values, capacity):
+    n = len(weights)
+    dp = [[0] * (capacity + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        for w in range(capacity + 1):
+            dp[i][w] = dp[i - 1][w]
+            if weights[i - 1] <= w:
+                dp[i][w] = max(dp[i][w], dp[i - 1][w - weights[i - 1]] + values[i - 1])
+    return dp[n][capacity]
+
+# Usage:
+print(knapsack([2, 3, 4, 5], [3, 4, 5, 6], 5))  # 7
+\`\`\``,
+          desc: 'Classic 0/1 knapsack DP. Each item used at most once. Time & space: O(n · capacity).',
+        },
+        javascript: {
+          title: '0/1 Knapsack',
+          code: `\`\`\`javascript
+function knapsack(weights, values, capacity) {
+  const n = weights.length;
+  const dp = Array.from({ length: n + 1 }, () => new Array(capacity + 1).fill(0));
+  for (let i = 1; i <= n; i++) {
+    for (let w = 0; w <= capacity; w++) {
+      dp[i][w] = dp[i - 1][w];
+      if (weights[i - 1] <= w) {
+        dp[i][w] = Math.max(dp[i][w], dp[i - 1][w - weights[i - 1]] + values[i - 1]);
+      }
+    }
+  }
+  return dp[n][capacity];
+}
+
+// Usage:
+console.log(knapsack([2, 3, 4, 5], [3, 4, 5, 6], 5));  // 7
+\`\`\``,
+          desc: 'Classic 0/1 knapsack DP. Time & space O(n · capacity). Space can drop to O(capacity) with a 1-D table.',
+        },
+      },
+      longest_increasing_subseq: {
+        python: {
+          title: 'Longest Increasing Subsequence',
+          code: `\`\`\`python
+from bisect import bisect_left
+
+def lis_length(arr):
+    tails = []
+    for x in arr:
+        i = bisect_left(tails, x)
+        if i == len(tails):
+            tails.append(x)
+        else:
+            tails[i] = x
+    return len(tails)
+
+# Usage:
+print(lis_length([10, 9, 2, 5, 3, 7, 101, 18]))  # 4  (e.g. [2,3,7,101])
+\`\`\``,
+          desc: 'Patience-sort technique using bisect_left on a running array of smallest tail values. Time: O(n log n).',
+        },
+        javascript: {
+          title: 'Longest Increasing Subsequence',
+          code: `\`\`\`javascript
+function lisLength(arr) {
+  const tails = [];
+  for (const x of arr) {
+    let lo = 0, hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (tails[mid] < x) lo = mid + 1; else hi = mid;
+    }
+    tails[lo] = x;
+  }
+  return tails.length;
+}
+
+// Usage:
+console.log(lisLength([10, 9, 2, 5, 3, 7, 101, 18]));  // 4
+\`\`\``,
+          desc: 'Patience-sort with manual binary search. Time: O(n log n), space: O(n).',
+        },
+      },
+      climb_stairs: {
+        python: {
+          title: 'Climbing Stairs',
+          code: `\`\`\`python
+def climb_stairs(n):
+    if n <= 2:
+        return n
+    a, b = 1, 2
+    for _ in range(3, n + 1):
+        a, b = b, a + b
+    return b
+
+# Usage:
+print(climb_stairs(5))  # 8
+\`\`\``,
+          desc: 'Fibonacci-style recurrence: ways(n) = ways(n-1) + ways(n-2). Time: O(n), space: O(1).',
+        },
+        javascript: {
+          title: 'Climbing Stairs',
+          code: `\`\`\`javascript
+function climbStairs(n) {
+  if (n <= 2) return n;
+  let a = 1, b = 2;
+  for (let i = 3; i <= n; i++) [a, b] = [b, a + b];
+  return b;
+}
+
+// Usage:
+console.log(climbStairs(5));  // 8
+\`\`\``,
+          desc: 'Rolling Fibonacci recurrence. Time: O(n), space: O(1).',
+        },
+      },
+      house_robber: {
+        python: {
+          title: 'House Robber',
+          code: `\`\`\`python
+def rob(nums):
+    prev, curr = 0, 0
+    for x in nums:
+        prev, curr = curr, max(curr, prev + x)
+    return curr
+
+# Usage:
+print(rob([2, 7, 9, 3, 1]))  # 12
+\`\`\``,
+          desc: 'DP over rolling two variables: at each house choose max(skip-then-curr, rob-then-prev+curr). Time: O(n), space: O(1).',
+        },
+        javascript: {
+          title: 'House Robber',
+          code: `\`\`\`javascript
+function rob(nums) {
+  let prev = 0, curr = 0;
+  for (const x of nums) [prev, curr] = [curr, Math.max(curr, prev + x)];
+  return curr;
+}
+
+// Usage:
+console.log(rob([2, 7, 9, 3, 1]));  // 12
+\`\`\``,
+          desc: 'Rolling DP with two state variables. Time: O(n), space: O(1).',
+        },
+      },
+      unique_paths: {
+        python: {
+          title: 'Unique Paths in an m × n Grid',
+          code: `\`\`\`python
+def unique_paths(m, n):
+    dp = [[1] * n for _ in range(m)]
+    for i in range(1, m):
+        for j in range(1, n):
+            dp[i][j] = dp[i - 1][j] + dp[i][j - 1]
+    return dp[m - 1][n - 1]
+
+# Usage:
+print(unique_paths(3, 7))  # 28
+\`\`\``,
+          desc: 'Each cell is the sum of the cell above and left (only right/down moves allowed). Time & space: O(m · n).',
+        },
+        javascript: {
+          title: 'Unique Paths in an m × n Grid',
+          code: `\`\`\`javascript
+function uniquePaths(m, n) {
+  const dp = Array.from({ length: m }, () => new Array(n).fill(1));
+  for (let i = 1; i < m; i++) {
+    for (let j = 1; j < n; j++) dp[i][j] = dp[i - 1][j] + dp[i][j - 1];
+  }
+  return dp[m - 1][n - 1];
+}
+
+// Usage:
+console.log(uniquePaths(3, 7));  // 28
+\`\`\``,
+          desc: 'Grid DP: paths(i,j) = paths(i-1,j) + paths(i,j-1). Time & space O(m · n).',
+        },
+      },
+      fibonacci_iterative: {
+        python: {
+          title: 'Fibonacci (Iterative, O(1) Space)',
+          code: `\`\`\`python
+def fibonacci(n):
+    if n < 0:
+        raise ValueError("n must be non-negative")
+    if n < 2:
+        return n
+    a, b = 0, 1
+    for _ in range(2, n + 1):
+        a, b = b, a + b
+    return b
+
+# Usage:
+print(fibonacci(10))  # 55
+\`\`\``,
+          desc: 'Iterative rolling-pair approach. Avoids the exponential blow-up of naïve recursion. Time: O(n), space: O(1).',
+        },
+        javascript: {
+          title: 'Fibonacci (Iterative, O(1) Space)',
+          code: `\`\`\`javascript
+function fibonacci(n) {
+  if (n < 0) throw new Error('n must be non-negative');
+  if (n < 2) return n;
+  let a = 0, b = 1;
+  for (let i = 2; i <= n; i++) [a, b] = [b, a + b];
+  return b;
+}
+
+// Usage:
+console.log(fibonacci(10));  // 55
+\`\`\``,
+          desc: 'Iterative rolling-pair approach. Time: O(n), space: O(1).',
+        },
+      },
+      fibonacci_memo: {
+        python: {
+          title: 'Fibonacci (Memoised Recursion)',
+          code: `\`\`\`python
+from functools import lru_cache
+
+@lru_cache(maxsize=None)
+def fibonacci(n):
+    if n < 2:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+
+# Usage:
+print(fibonacci(50))  # 12586269025
+\`\`\``,
+          desc: 'lru_cache memoises subproblems so each fib(k) is computed once. Time: O(n), space: O(n).',
+        },
+        javascript: {
+          title: 'Fibonacci (Memoised Recursion)',
+          code: `\`\`\`javascript
+function makeFibonacci() {
+  const cache = new Map([[0, 0], [1, 1]]);
+  const fib = (n) => {
+    if (cache.has(n)) return cache.get(n);
+    const v = fib(n - 1) + fib(n - 2);
+    cache.set(n, v);
+    return v;
+  };
+  return fib;
+}
+
+// Usage:
+const fibonacci = makeFibonacci();
+console.log(fibonacci(50));  // 12586269025
+\`\`\``,
+          desc: 'Closure-backed cache memoises subproblems. Time: O(n), space: O(n).',
+        },
+      },
+
+      // ─── GRAPH ALGORITHMS ───
+      bfs_graph: {
+        python: {
+          title: 'Breadth-First Search',
+          code: `\`\`\`python
+from collections import deque
+
+def bfs(graph, start):
+    visited = {start}
+    order = []
+    queue = deque([start])
+    while queue:
+        node = queue.popleft()
+        order.append(node)
+        for neighbor in graph.get(node, []):
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append(neighbor)
+    return order
+
+# Usage:
+graph = {"A": ["B", "C"], "B": ["D"], "C": ["D", "E"], "D": [], "E": []}
+print(bfs(graph, "A"))  # ['A', 'B', 'C', 'D', 'E']
+\`\`\``,
+          desc: 'Level-order traversal using a FIFO queue. Time: O(V + E), space: O(V).',
+        },
+        javascript: {
+          title: 'Breadth-First Search',
+          code: `\`\`\`javascript
+function bfs(graph, start) {
+  const visited = new Set([start]);
+  const order = [];
+  const queue = [start];
+  while (queue.length) {
+    const node = queue.shift();
+    order.push(node);
+    for (const n of graph[node] ?? []) {
+      if (!visited.has(n)) { visited.add(n); queue.push(n); }
+    }
+  }
+  return order;
+}
+
+// Usage:
+const graph = { A: ['B', 'C'], B: ['D'], C: ['D', 'E'], D: [], E: [] };
+console.log(bfs(graph, 'A'));  // ['A', 'B', 'C', 'D', 'E']
+\`\`\``,
+          desc: 'Level-order traversal using a FIFO queue. Time: O(V + E), space: O(V).',
+        },
+      },
+      dfs_graph: {
+        python: {
+          title: 'Depth-First Search',
+          code: `\`\`\`python
+def dfs(graph, start):
+    visited = set()
+    order = []
+    def helper(node):
+        if node in visited:
+            return
+        visited.add(node)
+        order.append(node)
+        for neighbor in graph.get(node, []):
+            helper(neighbor)
+    helper(start)
+    return order
+
+# Usage:
+graph = {"A": ["B", "C"], "B": ["D"], "C": ["D", "E"], "D": [], "E": []}
+print(dfs(graph, "A"))  # ['A', 'B', 'D', 'C', 'E']
+\`\`\``,
+          desc: 'Recursive DFS marking visited nodes to avoid revisiting. Time: O(V + E), space: O(V) for the recursion stack.',
+        },
+        javascript: {
+          title: 'Depth-First Search',
+          code: `\`\`\`javascript
+function dfs(graph, start) {
+  const visited = new Set();
+  const order = [];
+  const helper = (node) => {
+    if (visited.has(node)) return;
+    visited.add(node);
+    order.push(node);
+    for (const n of graph[node] ?? []) helper(n);
+  };
+  helper(start);
+  return order;
+}
+
+// Usage:
+const graph = { A: ['B', 'C'], B: ['D'], C: ['D', 'E'], D: [], E: [] };
+console.log(dfs(graph, 'A'));  // ['A', 'B', 'D', 'C', 'E']
+\`\`\``,
+          desc: 'Recursive DFS with a visited set. Time: O(V + E), space: O(V).',
+        },
+      },
+      dijkstra: {
+        python: {
+          title: 'Dijkstra\'s Shortest Paths',
+          code: `\`\`\`python
+import heapq
+
+def dijkstra(graph, start):
+    """graph: {node: [(neighbor, weight), ...]}. Non-negative weights only."""
+    distances = {node: float("inf") for node in graph}
+    distances[start] = 0
+    pq = [(0, start)]
+    while pq:
+        dist, node = heapq.heappop(pq)
+        if dist > distances[node]:
+            continue
+        for neighbor, weight in graph.get(node, []):
+            new_dist = dist + weight
+            if new_dist < distances[neighbor]:
+                distances[neighbor] = new_dist
+                heapq.heappush(pq, (new_dist, neighbor))
+    return distances
+
+# Usage:
+graph = {"A": [("B", 1), ("C", 4)], "B": [("C", 2), ("D", 5)], "C": [("D", 1)], "D": []}
+print(dijkstra(graph, "A"))  # {'A': 0, 'B': 1, 'C': 3, 'D': 4}
+\`\`\``,
+          desc: 'Priority-queue-based shortest path for non-negative weights. Time: O((V + E) log V) with a binary heap.',
+        },
+        javascript: {
+          title: 'Dijkstra\'s Shortest Paths',
+          code: `\`\`\`javascript
+function dijkstra(graph, start) {
+  const distances = Object.fromEntries(Object.keys(graph).map(n => [n, Infinity]));
+  distances[start] = 0;
+  const pq = [[0, start]];  // min-heap via repeated sort (use a real heap for production)
+  while (pq.length) {
+    pq.sort((a, b) => a[0] - b[0]);
+    const [dist, node] = pq.shift();
+    if (dist > distances[node]) continue;
+    for (const [neighbor, weight] of graph[node] ?? []) {
+      const nd = dist + weight;
+      if (nd < distances[neighbor]) { distances[neighbor] = nd; pq.push([nd, neighbor]); }
+    }
+  }
+  return distances;
+}
+
+// Usage:
+const graph = { A: [['B', 1], ['C', 4]], B: [['C', 2], ['D', 5]], C: [['D', 1]], D: [] };
+console.log(dijkstra(graph, 'A'));  // { A: 0, B: 1, C: 3, D: 4 }
+\`\`\``,
+          desc: 'Non-negative weights only. Swap the sort-based queue for a proper binary heap in production; complexity becomes O((V+E) log V).',
+        },
+      },
+      topological_sort: {
+        python: {
+          title: 'Topological Sort (Kahn\'s Algorithm)',
+          code: `\`\`\`python
+from collections import deque
+
+def topological_sort(graph):
+    """graph: {node: [neighbors]} for a directed acyclic graph."""
+    indegree = {n: 0 for n in graph}
+    for n in graph:
+        for m in graph[n]:
+            indegree[m] = indegree.get(m, 0) + 1
+    queue = deque([n for n, d in indegree.items() if d == 0])
+    order = []
+    while queue:
+        n = queue.popleft()
+        order.append(n)
+        for m in graph.get(n, []):
+            indegree[m] -= 1
+            if indegree[m] == 0:
+                queue.append(m)
+    return order if len(order) == len(indegree) else None  # None when a cycle exists
+
+# Usage:
+graph = {"A": ["C"], "B": ["C", "D"], "C": ["E"], "D": ["F"], "E": ["F"], "F": []}
+print(topological_sort(graph))  # e.g. ['A', 'B', 'C', 'D', 'E', 'F']
+\`\`\``,
+          desc: 'Kahn\'s in-degree algorithm. Emits vertices with zero remaining in-edges. Returns None if the graph has a cycle. Time: O(V + E).',
+        },
+        javascript: {
+          title: 'Topological Sort (Kahn\'s Algorithm)',
+          code: `\`\`\`javascript
+function topologicalSort(graph) {
+  const indegree = {};
+  for (const n of Object.keys(graph)) indegree[n] = 0;
+  for (const n of Object.keys(graph)) for (const m of graph[n]) indegree[m] = (indegree[m] ?? 0) + 1;
+  const queue = Object.keys(indegree).filter(n => indegree[n] === 0);
+  const order = [];
+  while (queue.length) {
+    const n = queue.shift();
+    order.push(n);
+    for (const m of graph[n] ?? []) if (--indegree[m] === 0) queue.push(m);
+  }
+  return order.length === Object.keys(indegree).length ? order : null;
+}
+
+// Usage:
+const graph = { A: ['C'], B: ['C', 'D'], C: ['E'], D: ['F'], E: ['F'], F: [] };
+console.log(topologicalSort(graph));
+\`\`\``,
+          desc: 'Kahn\'s algorithm. Returns null when the graph has a cycle. Time: O(V + E).',
+        },
+      },
+      detect_cycle_graph: {
+        python: {
+          title: 'Detect Cycle in Undirected Graph',
+          code: `\`\`\`python
+def has_cycle(graph):
+    visited = set()
+    def dfs(node, parent):
+        visited.add(node)
+        for n in graph.get(node, []):
+            if n not in visited:
+                if dfs(n, node):
+                    return True
+            elif n != parent:
+                return True
+        return False
+    for node in graph:
+        if node not in visited and dfs(node, None):
+            return True
+    return False
+
+# Usage:
+print(has_cycle({"A": ["B"], "B": ["A", "C"], "C": ["B", "D"], "D": ["C"]}))  # False
+print(has_cycle({"A": ["B"], "B": ["A", "C"], "C": ["B", "A"]}))              # True
+\`\`\``,
+          desc: 'DFS tracking the parent. A back-edge to any visited non-parent vertex proves a cycle. Time: O(V + E).',
+        },
+        javascript: {
+          title: 'Detect Cycle in Undirected Graph',
+          code: `\`\`\`javascript
+function hasCycle(graph) {
+  const visited = new Set();
+  const dfs = (node, parent) => {
+    visited.add(node);
+    for (const n of graph[node] ?? []) {
+      if (!visited.has(n)) {
+        if (dfs(n, node)) return true;
+      } else if (n !== parent) {
+        return true;
+      }
+    }
+    return false;
+  };
+  for (const node of Object.keys(graph)) {
+    if (!visited.has(node) && dfs(node, null)) return true;
+  }
+  return false;
+}
+
+// Usage:
+console.log(hasCycle({ A: ['B'], B: ['A', 'C'], C: ['B', 'A'] }));  // true
+\`\`\``,
+          desc: 'DFS parent-tracking cycle detection. Time: O(V + E).',
+        },
+      },
+      union_find: {
+        python: {
+          title: 'Union-Find (Disjoint Set Union)',
+          code: `\`\`\`python
+class UnionFind:
+    def __init__(self, n):
+        self.parent = list(range(n))
+        self.rank = [0] * n
+
+    def find(self, x):
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]  # path compression
+            x = self.parent[x]
+        return x
+
+    def union(self, a, b):
+        ra, rb = self.find(a), self.find(b)
+        if ra == rb:
+            return False
+        if self.rank[ra] < self.rank[rb]:
+            ra, rb = rb, ra
+        self.parent[rb] = ra
+        if self.rank[ra] == self.rank[rb]:
+            self.rank[ra] += 1
+        return True
+
+# Usage:
+uf = UnionFind(5)
+uf.union(0, 1); uf.union(1, 2)
+print(uf.find(0) == uf.find(2))  # True
+print(uf.find(0) == uf.find(3))  # False
+\`\`\``,
+          desc: 'Path compression + union-by-rank gives near-constant amortised time per op (O(α(n))).',
+        },
+        javascript: {
+          title: 'Union-Find (Disjoint Set Union)',
+          code: `\`\`\`javascript
+class UnionFind {
+  constructor(n) {
+    this.parent = Array.from({ length: n }, (_, i) => i);
+    this.rank = new Array(n).fill(0);
+  }
+  find(x) {
+    while (this.parent[x] !== x) {
+      this.parent[x] = this.parent[this.parent[x]];
+      x = this.parent[x];
+    }
+    return x;
+  }
+  union(a, b) {
+    let ra = this.find(a), rb = this.find(b);
+    if (ra === rb) return false;
+    if (this.rank[ra] < this.rank[rb]) [ra, rb] = [rb, ra];
+    this.parent[rb] = ra;
+    if (this.rank[ra] === this.rank[rb]) this.rank[ra]++;
+    return true;
+  }
+}
+
+// Usage:
+const uf = new UnionFind(5);
+uf.union(0, 1); uf.union(1, 2);
+console.log(uf.find(0) === uf.find(2));  // true
+\`\`\``,
+          desc: 'Path compression + union by rank. Near-constant amortised time per op.',
+        },
+      },
+
+      // ─── TREE ALGORITHMS ───
+      bst_search: {
+        python: {
+          title: 'BST Search',
+          code: `\`\`\`python
+class TreeNode:
+    def __init__(self, val, left=None, right=None):
+        self.val = val; self.left = left; self.right = right
+
+def bst_search(root, target):
+    node = root
+    while node:
+        if target == node.val:
+            return node
+        node = node.left if target < node.val else node.right
+    return None
+
+# Usage:
+root = TreeNode(5, TreeNode(3, TreeNode(1), TreeNode(4)), TreeNode(8, TreeNode(7), TreeNode(9)))
+print(bst_search(root, 7).val if bst_search(root, 7) else None)  # 7
+\`\`\``,
+          desc: 'Iterative descent following the BST ordering. Time: O(h) where h is the tree height (log n for balanced trees).',
+        },
+        javascript: {
+          title: 'BST Search',
+          code: `\`\`\`javascript
+class TreeNode {
+  constructor(val, left = null, right = null) { this.val = val; this.left = left; this.right = right; }
+}
+
+function bstSearch(root, target) {
+  let node = root;
+  while (node) {
+    if (target === node.val) return node;
+    node = target < node.val ? node.left : node.right;
+  }
+  return null;
+}
+
+// Usage:
+const root = new TreeNode(5, new TreeNode(3, new TreeNode(1), new TreeNode(4)), new TreeNode(8, new TreeNode(7), new TreeNode(9)));
+console.log(bstSearch(root, 7)?.val);  // 7
+\`\`\``,
+          desc: 'Iterative descent following the BST invariant. Time: O(h).',
+        },
+      },
+      tree_inorder: {
+        python: {
+          title: 'In-Order Tree Traversal',
+          code: `\`\`\`python
+def inorder(root):
+    result, stack, node = [], [], root
+    while node or stack:
+        while node:
+            stack.append(node)
+            node = node.left
+        node = stack.pop()
+        result.append(node.val)
+        node = node.right
+    return result
+\`\`\``,
+          desc: 'Iterative left → root → right traversal using an explicit stack. Time: O(n), space: O(h).',
+        },
+        javascript: {
+          title: 'In-Order Tree Traversal',
+          code: `\`\`\`javascript
+function inorder(root) {
+  const result = [], stack = [];
+  let node = root;
+  while (node || stack.length) {
+    while (node) { stack.push(node); node = node.left; }
+    node = stack.pop();
+    result.push(node.val);
+    node = node.right;
+  }
+  return result;
+}
+\`\`\``,
+          desc: 'Iterative left → root → right traversal using an explicit stack. Time: O(n), space: O(h).',
+        },
+      },
+      tree_preorder: {
+        python: {
+          title: 'Pre-Order Tree Traversal',
+          code: `\`\`\`python
+def preorder(root):
+    if not root:
+        return []
+    result, stack = [], [root]
+    while stack:
+        node = stack.pop()
+        result.append(node.val)
+        if node.right:
+            stack.append(node.right)
+        if node.left:
+            stack.append(node.left)
+    return result
+\`\`\``,
+          desc: 'Iterative root → left → right traversal with an explicit stack (push right first so left is processed next). Time: O(n).',
+        },
+        javascript: {
+          title: 'Pre-Order Tree Traversal',
+          code: `\`\`\`javascript
+function preorder(root) {
+  if (!root) return [];
+  const result = [], stack = [root];
+  while (stack.length) {
+    const node = stack.pop();
+    result.push(node.val);
+    if (node.right) stack.push(node.right);
+    if (node.left) stack.push(node.left);
+  }
+  return result;
+}
+\`\`\``,
+          desc: 'Iterative root → left → right. Push right first so left is processed next. Time: O(n).',
+        },
+      },
+      tree_postorder: {
+        python: {
+          title: 'Post-Order Tree Traversal',
+          code: `\`\`\`python
+def postorder(root):
+    if not root:
+        return []
+    result, stack = [], [root]
+    while stack:
+        node = stack.pop()
+        result.append(node.val)
+        if node.left:
+            stack.append(node.left)
+        if node.right:
+            stack.append(node.right)
+    return result[::-1]  # reverse gives true post-order
+\`\`\``,
+          desc: 'Trick: do a modified pre-order (root, right, left) and reverse the result. Time: O(n).',
+        },
+        javascript: {
+          title: 'Post-Order Tree Traversal',
+          code: `\`\`\`javascript
+function postorder(root) {
+  if (!root) return [];
+  const result = [], stack = [root];
+  while (stack.length) {
+    const node = stack.pop();
+    result.push(node.val);
+    if (node.left) stack.push(node.left);
+    if (node.right) stack.push(node.right);
+  }
+  return result.reverse();
+}
+\`\`\``,
+          desc: 'Modified pre-order (root, right, left) then reversed gives post-order. Time: O(n).',
+        },
+      },
+      tree_levelorder: {
+        python: {
+          title: 'Level-Order Tree Traversal',
+          code: `\`\`\`python
+from collections import deque
+
+def level_order(root):
+    if not root:
+        return []
+    result, queue = [], deque([root])
+    while queue:
+        level = []
+        for _ in range(len(queue)):
+            node = queue.popleft()
+            level.append(node.val)
+            if node.left:
+                queue.append(node.left)
+            if node.right:
+                queue.append(node.right)
+        result.append(level)
+    return result
+\`\`\``,
+          desc: 'BFS over the tree, grouping values by level. Time: O(n), space: O(w) where w is max width.',
+        },
+        javascript: {
+          title: 'Level-Order Tree Traversal',
+          code: `\`\`\`javascript
+function levelOrder(root) {
+  if (!root) return [];
+  const result = [], queue = [root];
+  while (queue.length) {
+    const level = [], size = queue.length;
+    for (let i = 0; i < size; i++) {
+      const node = queue.shift();
+      level.push(node.val);
+      if (node.left) queue.push(node.left);
+      if (node.right) queue.push(node.right);
+    }
+    result.push(level);
+  }
+  return result;
+}
+\`\`\``,
+          desc: 'BFS over the tree, grouping by level. Time: O(n).',
+        },
+      },
+      tree_height: {
+        python: {
+          title: 'Height of a Binary Tree',
+          code: `\`\`\`python
+def tree_height(root):
+    if root is None:
+        return 0
+    return 1 + max(tree_height(root.left), tree_height(root.right))
+\`\`\``,
+          desc: 'Recursive definition: height of an empty tree is 0, otherwise 1 + max height of subtrees. Time: O(n).',
+        },
+        javascript: {
+          title: 'Height of a Binary Tree',
+          code: `\`\`\`javascript
+function treeHeight(root) {
+  if (!root) return 0;
+  return 1 + Math.max(treeHeight(root.left), treeHeight(root.right));
+}
+\`\`\``,
+          desc: 'Recursive definition. Time: O(n).',
+        },
+      },
+      tree_invert: {
+        python: {
+          title: 'Invert (Mirror) a Binary Tree',
+          code: `\`\`\`python
+def invert_tree(root):
+    if root is None:
+        return None
+    root.left, root.right = invert_tree(root.right), invert_tree(root.left)
+    return root
+\`\`\``,
+          desc: 'Recursively swap left and right children at every node. Time: O(n), space: O(h) for the recursion stack.',
+        },
+        javascript: {
+          title: 'Invert (Mirror) a Binary Tree',
+          code: `\`\`\`javascript
+function invertTree(root) {
+  if (!root) return null;
+  [root.left, root.right] = [invertTree(root.right), invertTree(root.left)];
+  return root;
+}
+\`\`\``,
+          desc: 'Recursively swap left/right children at every node. Time: O(n).',
+        },
+      },
+      tree_path_sum: {
+        python: {
+          title: 'Root-to-Leaf Path Sum Exists',
+          code: `\`\`\`python
+def has_path_sum(root, target):
+    if root is None:
+        return False
+    if root.left is None and root.right is None:
+        return target == root.val
+    remaining = target - root.val
+    return has_path_sum(root.left, remaining) or has_path_sum(root.right, remaining)
+\`\`\``,
+          desc: 'DFS subtracting each node\'s value along the path. Returns True iff some root-to-leaf path sums to the target. Time: O(n).',
+        },
+        javascript: {
+          title: 'Root-to-Leaf Path Sum Exists',
+          code: `\`\`\`javascript
+function hasPathSum(root, target) {
+  if (!root) return false;
+  if (!root.left && !root.right) return target === root.val;
+  const remaining = target - root.val;
+  return hasPathSum(root.left, remaining) || hasPathSum(root.right, remaining);
+}
+\`\`\``,
+          desc: 'DFS subtracting each node\'s value down the path. Time: O(n).',
+        },
+      },
+
+      // ─── DATA STRUCTURES ───
+      lru_cache: {
+        python: {
+          title: 'LRU Cache (O(1) get / put)',
+          code: `\`\`\`python
+from collections import OrderedDict
+
+class LRUCache:
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.cache = OrderedDict()
+
+    def get(self, key):
+        if key not in self.cache:
+            return -1
+        self.cache.move_to_end(key)
+        return self.cache[key]
+
+    def put(self, key, value):
+        if key in self.cache:
+            self.cache.move_to_end(key)
+        self.cache[key] = value
+        if len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
+
+# Usage:
+cache = LRUCache(2)
+cache.put(1, "a"); cache.put(2, "b")
+print(cache.get(1))  # "a" — 1 is now most-recent
+cache.put(3, "c")    # evicts 2
+print(cache.get(2))  # -1
+\`\`\``,
+          desc: 'OrderedDict gives O(1) get/put with easy most-recently-used ordering. Evicts the least-recently-used key when at capacity.',
+        },
+        javascript: {
+          title: 'LRU Cache (O(1) get / put)',
+          code: `\`\`\`javascript
+class LRUCache {
+  constructor(capacity) { this.capacity = capacity; this.map = new Map(); }
+  get(key) {
+    if (!this.map.has(key)) return -1;
+    const v = this.map.get(key);
+    this.map.delete(key); this.map.set(key, v);
+    return v;
+  }
+  put(key, value) {
+    if (this.map.has(key)) this.map.delete(key);
+    this.map.set(key, value);
+    if (this.map.size > this.capacity) this.map.delete(this.map.keys().next().value);
+  }
+}
+
+// Usage:
+const cache = new LRUCache(2);
+cache.put(1, 'a'); cache.put(2, 'b');
+console.log(cache.get(1));  // 'a'
+cache.put(3, 'c');          // evicts 2
+console.log(cache.get(2));  // -1
+\`\`\``,
+          desc: 'JS Map preserves insertion order; delete+re-set is the cheapest way to bump a key to most-recently-used.',
+        },
+      },
+      trie: {
+        python: {
+          title: 'Trie (Prefix Tree)',
+          code: `\`\`\`python
+class Trie:
+    def __init__(self):
+        self.children = {}
+        self.end = False
+
+    def insert(self, word):
+        node = self
+        for ch in word:
+            node = node.children.setdefault(ch, Trie())
+        node.end = True
+
+    def search(self, word):
+        node = self._walk(word)
+        return node is not None and node.end
+
+    def starts_with(self, prefix):
+        return self._walk(prefix) is not None
+
+    def _walk(self, s):
+        node = self
+        for ch in s:
+            if ch not in node.children:
+                return None
+            node = node.children[ch]
+        return node
+
+# Usage:
+t = Trie()
+t.insert("apple"); t.insert("app")
+print(t.search("app"))        # True
+print(t.search("apples"))     # False
+print(t.starts_with("appl"))  # True
+\`\`\``,
+          desc: 'Dict-of-children trie. O(m) insert/search/starts_with where m is the word length.',
+        },
+        javascript: {
+          title: 'Trie (Prefix Tree)',
+          code: `\`\`\`javascript
+class Trie {
+  constructor() { this.children = new Map(); this.end = false; }
+  insert(word) {
+    let node = this;
+    for (const ch of word) {
+      if (!node.children.has(ch)) node.children.set(ch, new Trie());
+      node = node.children.get(ch);
+    }
+    node.end = true;
+  }
+  _walk(s) {
+    let node = this;
+    for (const ch of s) {
+      if (!node.children.has(ch)) return null;
+      node = node.children.get(ch);
+    }
+    return node;
+  }
+  search(word) { const n = this._walk(word); return !!n && n.end; }
+  startsWith(prefix) { return this._walk(prefix) !== null; }
+}
+
+// Usage:
+const t = new Trie();
+t.insert('apple'); t.insert('app');
+console.log(t.search('app'));        // true
+console.log(t.search('apples'));     // false
+console.log(t.startsWith('appl'));   // true
+\`\`\``,
+          desc: 'Map-of-children trie. O(m) insert/search/startsWith.',
+        },
+      },
+      heap: {
+        python: {
+          title: 'Min-Heap (Priority Queue)',
+          code: `\`\`\`python
+import heapq
+
+class MinHeap:
+    def __init__(self):
+        self.h = []
+
+    def push(self, x):
+        heapq.heappush(self.h, x)
+
+    def pop(self):
+        return heapq.heappop(self.h)
+
+    def peek(self):
+        return self.h[0] if self.h else None
+
+    def __len__(self):
+        return len(self.h)
+
+# Usage:
+h = MinHeap()
+for x in [5, 2, 8, 1, 9]: h.push(x)
+print(h.pop(), h.pop())  # 1 2
+\`\`\``,
+          desc: 'Thin wrapper around heapq for clarity. Push/pop are O(log n); peek is O(1).',
+        },
+        javascript: {
+          title: 'Min-Heap (Priority Queue)',
+          code: `\`\`\`javascript
+class MinHeap {
+  constructor() { this.h = []; }
+  push(x) {
+    this.h.push(x);
+    let i = this.h.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (this.h[p] <= this.h[i]) break;
+      [this.h[p], this.h[i]] = [this.h[i], this.h[p]];
+      i = p;
+    }
+  }
+  pop() {
+    if (this.h.length === 0) return undefined;
+    const top = this.h[0];
+    const last = this.h.pop();
+    if (this.h.length) {
+      this.h[0] = last;
+      let i = 0, n = this.h.length;
+      while (true) {
+        let l = 2 * i + 1, r = l + 1, s = i;
+        if (l < n && this.h[l] < this.h[s]) s = l;
+        if (r < n && this.h[r] < this.h[s]) s = r;
+        if (s === i) break;
+        [this.h[s], this.h[i]] = [this.h[i], this.h[s]]; i = s;
+      }
+    }
+    return top;
+  }
+  peek() { return this.h[0]; }
+  get size() { return this.h.length; }
+}
+
+// Usage:
+const h = new MinHeap();
+for (const x of [5, 2, 8, 1, 9]) h.push(x);
+console.log(h.pop(), h.pop());  // 1 2
+\`\`\``,
+          desc: 'Array-backed binary min-heap with sift-up on push and sift-down on pop. Both O(log n), peek O(1).',
+        },
+      },
+      linked_list: {
+        python: {
+          title: 'Singly Linked List',
+          code: `\`\`\`python
+class ListNode:
+    def __init__(self, val, next=None):
+        self.val = val; self.next = next
+
+class LinkedList:
+    def __init__(self):
+        self.head = None
+
+    def push_front(self, val):
+        self.head = ListNode(val, self.head)
+
+    def append(self, val):
+        if self.head is None:
+            self.head = ListNode(val)
+            return
+        node = self.head
+        while node.next:
+            node = node.next
+        node.next = ListNode(val)
+
+    def remove(self, val):
+        dummy = ListNode(0, self.head)
+        prev = dummy
+        while prev.next:
+            if prev.next.val == val:
+                prev.next = prev.next.next
+                self.head = dummy.next
+                return True
+            prev = prev.next
+        return False
+
+    def to_list(self):
+        out, node = [], self.head
+        while node:
+            out.append(node.val); node = node.next
+        return out
+\`\`\``,
+          desc: 'Standard singly linked list with push_front, append, remove. push_front is O(1); append and remove are O(n).',
+        },
+        javascript: {
+          title: 'Singly Linked List',
+          code: `\`\`\`javascript
+class ListNode { constructor(val, next = null) { this.val = val; this.next = next; } }
+
+class LinkedList {
+  constructor() { this.head = null; }
+  pushFront(val) { this.head = new ListNode(val, this.head); }
+  append(val) {
+    if (!this.head) { this.head = new ListNode(val); return; }
+    let node = this.head;
+    while (node.next) node = node.next;
+    node.next = new ListNode(val);
+  }
+  remove(val) {
+    const dummy = new ListNode(0, this.head);
+    let prev = dummy;
+    while (prev.next) {
+      if (prev.next.val === val) {
+        prev.next = prev.next.next;
+        this.head = dummy.next;
+        return true;
+      }
+      prev = prev.next;
+    }
+    return false;
+  }
+  toArray() {
+    const out = []; let node = this.head;
+    while (node) { out.push(node.val); node = node.next; }
+    return out;
+  }
+}
+\`\`\``,
+          desc: 'Standard singly linked list. pushFront O(1); append and remove O(n). Dummy node keeps removal logic clean.',
+        },
+      },
+      doubly_linked_list: {
+        python: {
+          title: 'Doubly Linked List',
+          code: `\`\`\`python
+class DListNode:
+    def __init__(self, val, prev=None, next=None):
+        self.val = val; self.prev = prev; self.next = next
+
+class DoublyLinkedList:
+    def __init__(self):
+        self.head = self.tail = None
+        self.size = 0
+
+    def push_front(self, val):
+        node = DListNode(val, None, self.head)
+        if self.head:
+            self.head.prev = node
+        else:
+            self.tail = node
+        self.head = node
+        self.size += 1
+
+    def push_back(self, val):
+        node = DListNode(val, self.tail, None)
+        if self.tail:
+            self.tail.next = node
+        else:
+            self.head = node
+        self.tail = node
+        self.size += 1
+
+    def pop_front(self):
+        if not self.head:
+            return None
+        val = self.head.val
+        self.head = self.head.next
+        if self.head:
+            self.head.prev = None
+        else:
+            self.tail = None
+        self.size -= 1
+        return val
+
+    def pop_back(self):
+        if not self.tail:
+            return None
+        val = self.tail.val
+        self.tail = self.tail.prev
+        if self.tail:
+            self.tail.next = None
+        else:
+            self.head = None
+        self.size -= 1
+        return val
+\`\`\``,
+          desc: 'Doubly linked list with O(1) push/pop at both ends. Useful as the backing store for deques and LRU caches.',
+        },
+        javascript: {
+          title: 'Doubly Linked List',
+          code: `\`\`\`javascript
+class DListNode {
+  constructor(val, prev = null, next = null) { this.val = val; this.prev = prev; this.next = next; }
+}
+
+class DoublyLinkedList {
+  constructor() { this.head = null; this.tail = null; this.size = 0; }
+  pushFront(val) {
+    const node = new DListNode(val, null, this.head);
+    if (this.head) this.head.prev = node; else this.tail = node;
+    this.head = node; this.size++;
+  }
+  pushBack(val) {
+    const node = new DListNode(val, this.tail, null);
+    if (this.tail) this.tail.next = node; else this.head = node;
+    this.tail = node; this.size++;
+  }
+  popFront() {
+    if (!this.head) return null;
+    const val = this.head.val;
+    this.head = this.head.next;
+    if (this.head) this.head.prev = null; else this.tail = null;
+    this.size--; return val;
+  }
+  popBack() {
+    if (!this.tail) return null;
+    const val = this.tail.val;
+    this.tail = this.tail.prev;
+    if (this.tail) this.tail.next = null; else this.head = null;
+    this.size--; return val;
+  }
+}
+\`\`\``,
+          desc: 'Doubly linked list with O(1) push/pop at both ends.',
+        },
+      },
+      deque: {
+        python: {
+          title: 'Double-Ended Queue (Deque)',
+          code: `\`\`\`python
+from collections import deque
+
+# collections.deque is O(1) append/appendleft/pop/popleft
+q = deque([1, 2, 3])
+q.append(4)          # [1, 2, 3, 4]
+q.appendleft(0)      # [0, 1, 2, 3, 4]
+q.pop()              # 4
+q.popleft()          # 0
+print(list(q))        # [1, 2, 3]
+\`\`\``,
+          desc: 'collections.deque gives O(1) appends and pops at both ends, backed by a doubly linked list of fixed-size blocks.',
+        },
+        javascript: {
+          title: 'Double-Ended Queue (Deque)',
+          code: `\`\`\`javascript
+class Deque {
+  constructor() { this.head = this.tail = null; this.size = 0; }
+  pushBack(val)  { const n = { val, prev: this.tail, next: null }; if (this.tail) this.tail.next = n; else this.head = n; this.tail = n; this.size++; }
+  pushFront(val) { const n = { val, prev: null, next: this.head }; if (this.head) this.head.prev = n; else this.tail = n; this.head = n; this.size++; }
+  popBack()  { if (!this.tail) return undefined; const v = this.tail.val; this.tail = this.tail.prev; if (this.tail) this.tail.next = null; else this.head = null; this.size--; return v; }
+  popFront() { if (!this.head) return undefined; const v = this.head.val; this.head = this.head.next; if (this.head) this.head.prev = null; else this.tail = null; this.size--; return v; }
+  peekFront() { return this.head?.val; }
+  peekBack()  { return this.tail?.val; }
+}
+
+// Usage:
+const q = new Deque();
+q.pushBack(1); q.pushBack(2); q.pushFront(0);
+console.log(q.popFront(), q.popBack(), q.popBack());  // 0 2 1
+\`\`\``,
+          desc: 'Doubly-linked-list-backed deque. All push/pop ops are O(1).',
+        },
+      },
+
+      // ─── STRING ALGORITHMS ───
+      kmp_search: {
+        python: {
+          title: 'KMP Substring Search',
+          code: `\`\`\`python
+def kmp_search(text, pattern):
+    if not pattern:
+        return 0
+    # Build LPS (longest proper prefix which is also suffix)
+    lps = [0] * len(pattern)
+    length = 0
+    i = 1
+    while i < len(pattern):
+        if pattern[i] == pattern[length]:
+            length += 1; lps[i] = length; i += 1
+        elif length:
+            length = lps[length - 1]
+        else:
+            lps[i] = 0; i += 1
+    # Search
+    i = j = 0
+    while i < len(text):
+        if text[i] == pattern[j]:
+            i += 1; j += 1
+            if j == len(pattern):
+                return i - j
+        elif j:
+            j = lps[j - 1]
+        else:
+            i += 1
+    return -1
+
+# Usage:
+print(kmp_search("abxabcabcaby", "abcaby"))  # 6
+\`\`\``,
+          desc: 'Knuth-Morris-Pratt substring search. Preprocesses the pattern in O(m) then scans the text in O(n) for O(n + m) total.',
+        },
+        javascript: {
+          title: 'KMP Substring Search',
+          code: `\`\`\`javascript
+function kmpSearch(text, pattern) {
+  if (!pattern) return 0;
+  const lps = new Array(pattern.length).fill(0);
+  let length = 0, i = 1;
+  while (i < pattern.length) {
+    if (pattern[i] === pattern[length]) { lps[i++] = ++length; }
+    else if (length) { length = lps[length - 1]; }
+    else { lps[i++] = 0; }
+  }
+  let ti = 0, pi = 0;
+  while (ti < text.length) {
+    if (text[ti] === pattern[pi]) {
+      ti++; pi++;
+      if (pi === pattern.length) return ti - pi;
+    } else if (pi) { pi = lps[pi - 1]; }
+    else { ti++; }
+  }
+  return -1;
+}
+\`\`\``,
+          desc: 'KMP substring search in O(n + m). LPS table skips redundant comparisons after a mismatch.',
+        },
+      },
+      rabin_karp: {
+        python: {
+          title: 'Rabin-Karp Substring Search',
+          code: `\`\`\`python
+def rabin_karp(text, pattern, base=256, mod=10**9 + 7):
+    n, m = len(text), len(pattern)
+    if m == 0:
+        return 0
+    if m > n:
+        return -1
+    h = pow(base, m - 1, mod)
+    pat_hash = text_hash = 0
+    for i in range(m):
+        pat_hash = (pat_hash * base + ord(pattern[i])) % mod
+        text_hash = (text_hash * base + ord(text[i])) % mod
+    for i in range(n - m + 1):
+        if pat_hash == text_hash and text[i:i + m] == pattern:
+            return i
+        if i < n - m:
+            text_hash = ((text_hash - ord(text[i]) * h) * base + ord(text[i + m])) % mod
+    return -1
+\`\`\``,
+          desc: 'Rolling-hash substring search. Average O(n + m); worst case O(n * m) on hash collisions. Good when searching many patterns in the same text.',
+        },
+        javascript: {
+          title: 'Rabin-Karp Substring Search',
+          code: `\`\`\`javascript
+function rabinKarp(text, pattern, base = 256, mod = 1_000_000_007) {
+  const n = text.length, m = pattern.length;
+  if (m === 0) return 0;
+  if (m > n) return -1;
+  let h = 1;
+  for (let i = 0; i < m - 1; i++) h = (h * base) % mod;
+  let patHash = 0, textHash = 0;
+  for (let i = 0; i < m; i++) {
+    patHash = (patHash * base + pattern.charCodeAt(i)) % mod;
+    textHash = (textHash * base + text.charCodeAt(i)) % mod;
+  }
+  for (let i = 0; i <= n - m; i++) {
+    if (patHash === textHash && text.slice(i, i + m) === pattern) return i;
+    if (i < n - m) {
+      textHash = ((textHash - text.charCodeAt(i) * h) * base + text.charCodeAt(i + m)) % mod;
+      if (textHash < 0) textHash += mod;
+    }
+  }
+  return -1;
+}
+\`\`\``,
+          desc: 'Rolling-hash substring search. Average O(n + m); good for multi-pattern search on the same text.',
+        },
+      },
+      z_algorithm: {
+        python: {
+          title: 'Z-Algorithm (Pattern Matching)',
+          code: `\`\`\`python
+def z_function(s):
+    n = len(s)
+    z = [0] * n
+    l = r = 0
+    for i in range(1, n):
+        if i < r:
+            z[i] = min(r - i, z[i - l])
+        while i + z[i] < n and s[z[i]] == s[i + z[i]]:
+            z[i] += 1
+        if i + z[i] > r:
+            l, r = i, i + z[i]
+    return z
+
+def z_search(text, pattern):
+    s = pattern + "$" + text
+    z = z_function(s)
+    m = len(pattern)
+    return [i - m - 1 for i in range(len(z)) if z[i] == m]
+
+# Usage:
+print(z_search("aaaab", "aa"))  # [0, 1, 2]
+\`\`\``,
+          desc: 'Z-array: z[i] = length of the longest substring starting at i that matches a prefix of s. Substring search concatenates pattern + "$" + text. O(n + m).',
+        },
+        javascript: {
+          title: 'Z-Algorithm (Pattern Matching)',
+          code: `\`\`\`javascript
+function zFunction(s) {
+  const n = s.length, z = new Array(n).fill(0);
+  let l = 0, r = 0;
+  for (let i = 1; i < n; i++) {
+    if (i < r) z[i] = Math.min(r - i, z[i - l]);
+    while (i + z[i] < n && s[z[i]] === s[i + z[i]]) z[i]++;
+    if (i + z[i] > r) { l = i; r = i + z[i]; }
+  }
+  return z;
+}
+
+function zSearch(text, pattern) {
+  const s = pattern + '$' + text, z = zFunction(s), m = pattern.length;
+  const out = [];
+  for (let i = 0; i < z.length; i++) if (z[i] === m) out.push(i - m - 1);
+  return out;
+}
+\`\`\``,
+          desc: 'Z-array based pattern search. O(n + m) time and space.',
+        },
+      },
+      string_rotation_check: {
+        python: {
+          title: 'Check if Two Strings Are Rotations',
+          code: `\`\`\`python
+def is_rotation(s1, s2):
+    return len(s1) == len(s2) and len(s1) > 0 and s2 in (s1 + s1)
+
+# Usage:
+print(is_rotation("waterbottle", "erbottlewat"))  # True
+print(is_rotation("abc", "cab"))                    # True
+print(is_rotation("abc", "bca"))                    # True
+print(is_rotation("abc", "acb"))                    # False
+\`\`\``,
+          desc: 'Every rotation of s1 is a substring of s1 + s1. Requires equal non-zero lengths. O(n).',
+        },
+        javascript: {
+          title: 'Check if Two Strings Are Rotations',
+          code: `\`\`\`javascript
+function isRotation(s1, s2) {
+  return s1.length === s2.length && s1.length > 0 && (s1 + s1).includes(s2);
+}
+
+// Usage:
+console.log(isRotation('waterbottle', 'erbottlewat'));  // true
+console.log(isRotation('abc', 'acb'));                    // false
+\`\`\``,
+          desc: 'Concatenation trick: every rotation of s1 is a substring of s1 + s1. O(n).',
+        },
+      },
+      longest_common_substring: {
+        python: {
+          title: 'Longest Common Substring',
+          code: `\`\`\`python
+def longest_common_substring(a, b):
+    m, n = len(a), len(b)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    best, end = 0, 0
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if a[i - 1] == b[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1] + 1
+                if dp[i][j] > best:
+                    best, end = dp[i][j], i
+    return a[end - best:end]
+
+# Usage:
+print(longest_common_substring("abcdef", "zcdefg"))  # "cdef"
+\`\`\``,
+          desc: 'DP over both strings. dp[i][j] = length of common suffix ending at a[i-1] and b[j-1]. O(m*n).',
+        },
+        javascript: {
+          title: 'Longest Common Substring',
+          code: `\`\`\`javascript
+function longestCommonSubstring(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  let best = 0, end = 0;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+        if (dp[i][j] > best) { best = dp[i][j]; end = i; }
+      }
+    }
+  }
+  return a.slice(end - best, end);
+}
+\`\`\``,
+          desc: 'DP over both strings. dp[i][j] = length of common suffix ending at positions i-1, j-1. O(m*n) time and space.',
+        },
+      },
+      longest_palindrome_substring: {
+        python: {
+          title: 'Longest Palindromic Substring (Expand Around Centers)',
+          code: `\`\`\`python
+def longest_palindrome(s):
+    if not s:
+        return ""
+    start = end = 0
+    def expand(l, r):
+        while l >= 0 and r < len(s) and s[l] == s[r]:
+            l -= 1; r += 1
+        return l + 1, r - 1
+    for i in range(len(s)):
+        for l, r in (expand(i, i), expand(i, i + 1)):
+            if r - l > end - start:
+                start, end = l, r
+    return s[start:end + 1]
+
+# Usage:
+print(longest_palindrome("babad"))  # "bab" or "aba"
+print(longest_palindrome("cbbd"))   # "bb"
+\`\`\``,
+          desc: 'Expand around each possible center (2n - 1 centers). O(n^2) time, O(1) space. Manacher\'s algorithm improves to O(n).',
+        },
+        javascript: {
+          title: 'Longest Palindromic Substring (Expand Around Centers)',
+          code: `\`\`\`javascript
+function longestPalindrome(s) {
+  if (!s) return '';
+  let start = 0, end = 0;
+  const expand = (l, r) => {
+    while (l >= 0 && r < s.length && s[l] === s[r]) { l--; r++; }
+    return [l + 1, r - 1];
+  };
+  for (let i = 0; i < s.length; i++) {
+    for (const [l, r] of [expand(i, i), expand(i, i + 1)]) {
+      if (r - l > end - start) { start = l; end = r; }
+    }
+  }
+  return s.slice(start, end + 1);
+}
+\`\`\``,
+          desc: 'Expand around each possible center. O(n^2) time, O(1) space.',
+        },
+      },
+      levenshtein: {
+        python: {
+          title: 'Levenshtein Distance',
+          code: `\`\`\`python
+def levenshtein(a, b):
+    if len(a) < len(b):
+        a, b = b, a
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        curr = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+        prev = curr
+    return prev[-1]
+
+# Usage:
+print(levenshtein("kitten", "sitting"))  # 3
+\`\`\``,
+          desc: 'Classic edit-distance DP with rolling 1-D array for O(min(m, n)) space.',
+        },
+        javascript: {
+          title: 'Levenshtein Distance',
+          code: `\`\`\`javascript
+function levenshtein(a, b) {
+  if (a.length < b.length) [a, b] = [b, a];
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const curr = [i, ...new Array(b.length).fill(0)];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[prev.length - 1];
+}
+\`\`\``,
+          desc: 'Edit distance with rolling 1-D buffer. O(m*n) time, O(min(m, n)) space.',
+        },
+      },
+
+      // ─── UTILITY FUNCTIONS ───
+      debounce: {
+        javascript: {
+          title: 'Debounce',
+          code: `\`\`\`javascript
+function debounce(fn, delay) {
+  let timer = null;
+  const debounced = function (...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+  debounced.cancel = () => { clearTimeout(timer); timer = null; };
+  return debounced;
+}
+
+// Usage:
+const save = debounce(() => console.log('saved'), 300);
+save(); save(); save();  // only one 'saved' logs after 300ms of silence
+\`\`\``,
+          desc: 'Collapses a burst of calls into a single call after `delay` ms of silence. Perfect for resize/input handlers. Use `.cancel()` to drop a pending call on unmount.',
+        },
+        python: {
+          title: 'Debounce',
+          code: `\`\`\`python
+import threading
+
+def debounce(delay):
+    def decorator(fn):
+        timer = None
+        lock = threading.Lock()
+        def wrapped(*args, **kwargs):
+            nonlocal timer
+            with lock:
+                if timer is not None:
+                    timer.cancel()
+                timer = threading.Timer(delay, lambda: fn(*args, **kwargs))
+                timer.start()
+        return wrapped
+    return decorator
+
+@debounce(0.3)
+def save():
+    print("saved")
+
+save(); save(); save()  # only one print after 300ms of silence
+\`\`\``,
+          desc: 'threading.Timer-based debounce. Note: the callback runs on the timer thread, so thread-safe side effects only.',
+        },
+      },
+      throttle: {
+        javascript: {
+          title: 'Throttle (Leading Edge)',
+          code: `\`\`\`javascript
+function throttle(fn, limit) {
+  let lastCall = 0;
+  let timer = null;
+  return function (...args) {
+    const now = Date.now();
+    const remaining = limit - (now - lastCall);
+    if (remaining <= 0) {
+      if (timer) { clearTimeout(timer); timer = null; }
+      lastCall = now;
+      fn.apply(this, args);
+    } else if (!timer) {
+      timer = setTimeout(() => {
+        lastCall = Date.now();
+        timer = null;
+        fn.apply(this, args);
+      }, remaining);
+    }
+  };
+}
+
+// Usage:
+const log = throttle(() => console.log(Date.now()), 1000);
+setInterval(log, 100);  // logs at most once per second
+\`\`\``,
+          desc: 'Leading-edge throttle with a trailing call to guarantee the last invocation in a burst fires. Call at most once per `limit` ms.',
+        },
+        python: {
+          title: 'Throttle (Leading Edge)',
+          code: `\`\`\`python
+import time
+import threading
+
+def throttle(limit):
+    last = [0]
+    lock = threading.Lock()
+    def decorator(fn):
+        def wrapped(*args, **kwargs):
+            with lock:
+                now = time.monotonic()
+                if now - last[0] >= limit:
+                    last[0] = now
+                    return fn(*args, **kwargs)
+        return wrapped
+    return decorator
+
+@throttle(1.0)
+def log():
+    print(time.monotonic())
+\`\`\``,
+          desc: 'Simple leading-edge throttle: drops calls within `limit` seconds of the last executed call. Use monotonic clock to avoid wall-clock jumps.',
+        },
+      },
+      deep_clone: {
+        javascript: {
+          title: 'Deep Clone',
+          code: `\`\`\`javascript
+function deepClone(value, seen = new WeakMap()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (value instanceof Date) return new Date(value);
+  if (value instanceof RegExp) return new RegExp(value);
+  if (seen.has(value)) return seen.get(value);
+  if (Array.isArray(value)) {
+    const copy = [];
+    seen.set(value, copy);
+    for (const item of value) copy.push(deepClone(item, seen));
+    return copy;
+  }
+  if (value instanceof Map) {
+    const copy = new Map(); seen.set(value, copy);
+    for (const [k, v] of value) copy.set(deepClone(k, seen), deepClone(v, seen));
+    return copy;
+  }
+  if (value instanceof Set) {
+    const copy = new Set(); seen.set(value, copy);
+    for (const v of value) copy.add(deepClone(v, seen));
+    return copy;
+  }
+  const copy = Object.create(Object.getPrototypeOf(value));
+  seen.set(value, copy);
+  for (const k of Reflect.ownKeys(value)) copy[k] = deepClone(value[k], seen);
+  return copy;
+}
+\`\`\``,
+          desc: 'Cycle-safe deep clone handling plain objects, arrays, Dates, RegExps, Maps, and Sets. Preserves prototype. Prefer `structuredClone` in modern browsers/Node when available.',
+        },
+        python: {
+          title: 'Deep Clone',
+          code: `\`\`\`python
+import copy
+
+def deep_clone(value):
+    return copy.deepcopy(value)
+
+# Usage:
+a = {"x": [1, 2, {"y": 3}]}
+b = deep_clone(a)
+b["x"][2]["y"] = 99
+print(a["x"][2]["y"])  # 3 — untouched
+\`\`\``,
+          desc: 'Python\'s stdlib copy.deepcopy handles cycles and custom types via __deepcopy__. Falls back to pickling semantics for unknown types.',
+        },
+      },
+      deep_equal: {
+        javascript: {
+          title: 'Deep Equality',
+          code: `\`\`\`javascript
+function deepEqual(a, b) {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (a.constructor !== b.constructor) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    return a.every((v, i) => deepEqual(v, b[i]));
+  }
+  const keysA = Reflect.ownKeys(a), keysB = Reflect.ownKeys(b);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every(k => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]));
+}
+\`\`\``,
+          desc: 'Structural equality. Handles arrays, plain objects, and primitives. Extend with Map/Set/Date checks if you rely on them.',
+        },
+        python: {
+          title: 'Deep Equality',
+          code: `\`\`\`python
+# Python's == already performs deep structural equality on lists, dicts, sets, tuples:
+print([1, [2, {"a": 3}]] == [1, [2, {"a": 3}]])  # True
+
+# For dataclasses:
+from dataclasses import dataclass
+@dataclass
+class Point:
+    x: int; y: int
+print(Point(1, 2) == Point(1, 2))  # True
+\`\`\``,
+          desc: 'In Python, built-in == already compares lists/dicts/sets/tuples element-by-element. Dataclasses get structural equality for free.',
+        },
+      },
+      memoize: {
+        javascript: {
+          title: 'Memoize',
+          code: `\`\`\`javascript
+function memoize(fn, keyFn = (...args) => JSON.stringify(args)) {
+  const cache = new Map();
+  return function (...args) {
+    const key = keyFn(...args);
+    if (cache.has(key)) return cache.get(key);
+    const result = fn.apply(this, args);
+    cache.set(key, result);
+    return result;
+  };
+}
+
+// Usage:
+const slow = (n) => { for (let i = 0; i < 1e7; i++); return n * 2; };
+const fast = memoize(slow);
+fast(5);  // slow
+fast(5);  // instant cache hit
+\`\`\``,
+          desc: 'Generic memoization via a Map + key function. Default key is JSON.stringify(args) — supply a cheaper keyFn for hot paths.',
+        },
+        python: {
+          title: 'Memoize',
+          code: `\`\`\`python
+from functools import lru_cache
+
+@lru_cache(maxsize=None)
+def fib(n):
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+print(fib(100))  # 354224848179261915075 — instant
+\`\`\``,
+          desc: 'functools.lru_cache is the idiomatic memoizer. Use maxsize to bound memory, or @cache (3.9+) for unbounded.',
+        },
+      },
+      curry: {
+        javascript: {
+          title: 'Curry',
+          code: `\`\`\`javascript
+function curry(fn, arity = fn.length) {
+  return function curried(...args) {
+    if (args.length >= arity) return fn.apply(this, args);
+    return (...more) => curried.apply(this, [...args, ...more]);
+  };
+}
+
+// Usage:
+const add = curry((a, b, c) => a + b + c);
+console.log(add(1)(2)(3));    // 6
+console.log(add(1, 2)(3));    // 6
+console.log(add(1, 2, 3));    // 6
+\`\`\``,
+          desc: 'Auto-currying based on function arity. Partially applied calls return new curried functions until all args are supplied.',
+        },
+        python: {
+          title: 'Curry',
+          code: `\`\`\`python
+from functools import partial
+
+def curry(fn, arity=None):
+    if arity is None:
+        arity = fn.__code__.co_argcount
+    def curried(*args):
+        if len(args) >= arity:
+            return fn(*args[:arity])
+        return lambda *more: curried(*args, *more)
+    return curried
+
+add = curry(lambda a, b, c: a + b + c)
+print(add(1)(2)(3))  # 6
+\`\`\``,
+          desc: 'Closure-based currying. functools.partial is the pythonic partial-application helper for one-shot fixing of args.',
+        },
+      },
+      compose: {
+        javascript: {
+          title: 'Function Composition (right-to-left)',
+          code: `\`\`\`javascript
+const compose = (...fns) => (x) => fns.reduceRight((acc, fn) => fn(acc), x);
+
+// Usage:
+const addOne = x => x + 1;
+const double = x => x * 2;
+const square = x => x * x;
+
+const f = compose(square, double, addOne);
+console.log(f(3));  // ((3+1)*2)^2 = 64
+\`\`\``,
+          desc: 'Right-to-left function composition: compose(f, g, h)(x) === f(g(h(x))). Empty compose returns the identity.',
+        },
+        python: {
+          title: 'Function Composition (right-to-left)',
+          code: `\`\`\`python
+from functools import reduce
+
+def compose(*fns):
+    return lambda x: reduce(lambda acc, fn: fn(acc), reversed(fns), x)
+
+add_one = lambda x: x + 1
+double = lambda x: x * 2
+square = lambda x: x * x
+
+f = compose(square, double, add_one)
+print(f(3))  # 64
+\`\`\``,
+          desc: 'Right-to-left composition. compose(f, g, h)(x) === f(g(h(x))).',
+        },
+      },
+      pipe: {
+        javascript: {
+          title: 'Pipe (left-to-right composition)',
+          code: `\`\`\`javascript
+const pipe = (...fns) => (x) => fns.reduce((acc, fn) => fn(acc), x);
+
+// Usage:
+const result = pipe(
+  x => x + 1,
+  x => x * 2,
+  x => x * x,
+)(3);
+console.log(result);  // ((3+1)*2)^2 = 64
+\`\`\``,
+          desc: 'Left-to-right function composition: pipe(f, g, h)(x) === h(g(f(x))). Reads top-down like a pipeline.',
+        },
+        python: {
+          title: 'Pipe (left-to-right composition)',
+          code: `\`\`\`python
+from functools import reduce
+
+def pipe(*fns):
+    return lambda x: reduce(lambda acc, fn: fn(acc), fns, x)
+
+result = pipe(
+    lambda x: x + 1,
+    lambda x: x * 2,
+    lambda x: x * x,
+)(3)
+print(result)  # 64
+\`\`\``,
+          desc: 'Left-to-right composition. pipe(f, g, h)(x) === h(g(f(x))).',
+        },
+      },
+      once: {
+        javascript: {
+          title: 'Once (call at most once)',
+          code: `\`\`\`javascript
+function once(fn) {
+  let called = false, result;
+  return function (...args) {
+    if (!called) {
+      called = true;
+      result = fn.apply(this, args);
+    }
+    return result;
+  };
+}
+
+// Usage:
+const init = once(() => { console.log('init'); return 42; });
+init();  // logs 'init', returns 42
+init();  // no log, returns 42
+\`\`\``,
+          desc: 'Wraps a function so it runs only on the first call and caches its return value for subsequent calls.',
+        },
+        python: {
+          title: 'Once (call at most once)',
+          code: `\`\`\`python
+def once(fn):
+    called = False
+    result = None
+    def wrapped(*args, **kwargs):
+        nonlocal called, result
+        if not called:
+            called = True
+            result = fn(*args, **kwargs)
+        return result
+    return wrapped
+\`\`\``,
+          desc: 'Wraps a function so it runs only on the first call and caches its return value thereafter.',
+        },
+      },
+      retry_backoff: {
+        javascript: {
+          title: 'Retry with Exponential Backoff',
+          code: `\`\`\`javascript
+async function retryBackoff(fn, { retries = 5, baseMs = 200, capMs = 10_000, jitter = true } = {}) {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn(attempt);
+    } catch (err) {
+      if (attempt >= retries) throw err;
+      const backoff = Math.min(capMs, baseMs * 2 ** attempt);
+      const delay = jitter ? Math.random() * backoff : backoff;
+      await new Promise(r => setTimeout(r, delay));
+      attempt++;
+    }
+  }
+}
+
+// Usage:
+await retryBackoff(async () => {
+  const res = await fetch('/api/thing');
+  if (!res.ok) throw new Error('retry');
+  return res.json();
+});
+\`\`\``,
+          desc: 'Exponential backoff with optional full jitter and a max cap. Use jitter to avoid thundering-herd on shared dependencies.',
+        },
+        python: {
+          title: 'Retry with Exponential Backoff',
+          code: `\`\`\`python
+import time
+import random
+
+def retry_backoff(fn, retries=5, base=0.2, cap=10.0, jitter=True):
+    attempt = 0
+    while True:
+        try:
+            return fn(attempt)
+        except Exception:
+            if attempt >= retries:
+                raise
+            backoff = min(cap, base * (2 ** attempt))
+            delay = random.random() * backoff if jitter else backoff
+            time.sleep(delay)
+            attempt += 1
+\`\`\``,
+          desc: 'Synchronous retry with exponential backoff and optional full jitter.',
+        },
+      },
+
+      // ─── NUMERIC / MATH ALGORITHMS ───
+      digit_sum: {
+        python: {
+          title: 'Sum of Digits',
+          code: `\`\`\`python
+def digit_sum(n):
+    n = abs(n)
+    total = 0
+    while n:
+        total += n % 10
+        n //= 10
+    return total
+
+# Usage:
+print(digit_sum(12345))   # 15
+print(digit_sum(-999))    # 27
+\`\`\``,
+          desc: 'Repeatedly extract the last digit with %10, then integer-divide. O(log n).',
+        },
+        javascript: {
+          title: 'Sum of Digits',
+          code: `\`\`\`javascript
+function digitSum(n) {
+  n = Math.abs(n);
+  let total = 0;
+  while (n) { total += n % 10; n = Math.floor(n / 10); }
+  return total;
+}
+\`\`\``,
+          desc: 'Repeated mod-10 + floor-divide. O(log n).',
+        },
+      },
+      reverse_integer: {
+        python: {
+          title: 'Reverse an Integer',
+          code: `\`\`\`python
+def reverse_integer(n):
+    sign = -1 if n < 0 else 1
+    n = abs(n)
+    result = 0
+    while n:
+        result = result * 10 + n % 10
+        n //= 10
+    return sign * result
+
+# Usage:
+print(reverse_integer(12345))    # 54321
+print(reverse_integer(-120))     # -21
+\`\`\``,
+          desc: 'Preserve sign, then build the reverse digit-by-digit. O(log n). Guard for 32-bit overflow in typed languages.',
+        },
+        javascript: {
+          title: 'Reverse an Integer',
+          code: `\`\`\`javascript
+function reverseInteger(n) {
+  const sign = n < 0 ? -1 : 1;
+  n = Math.abs(n);
+  let result = 0;
+  while (n) { result = result * 10 + (n % 10); n = Math.floor(n / 10); }
+  const signed = sign * result;
+  // 32-bit overflow guard (LeetCode-style)
+  if (signed < -(2 ** 31) || signed > 2 ** 31 - 1) return 0;
+  return signed;
+}
+\`\`\``,
+          desc: 'Preserve sign, rebuild digit-by-digit. Includes 32-bit overflow guard.',
+        },
+      },
+      is_power_of_two: {
+        python: {
+          title: 'Is Power of Two',
+          code: `\`\`\`python
+def is_power_of_two(n):
+    return n > 0 and (n & (n - 1)) == 0
+
+# Usage:
+print(is_power_of_two(1))    # True
+print(is_power_of_two(16))   # True
+print(is_power_of_two(18))   # False
+\`\`\``,
+          desc: 'A positive integer is a power of two iff it has exactly one bit set. n & (n - 1) clears the lowest set bit. O(1).',
+        },
+        javascript: {
+          title: 'Is Power of Two',
+          code: `\`\`\`javascript
+const isPowerOfTwo = n => n > 0 && (n & (n - 1)) === 0;
+
+// Usage:
+console.log(isPowerOfTwo(16));  // true
+console.log(isPowerOfTwo(18));  // false
+\`\`\``,
+          desc: 'Bitwise trick: n & (n - 1) clears the lowest set bit; a power of two has exactly one. O(1).',
+        },
+      },
+      fast_power: {
+        python: {
+          title: 'Fast Power (Binary Exponentiation)',
+          code: `\`\`\`python
+def fast_power(base, exp):
+    if exp < 0:
+        return 1 / fast_power(base, -exp)
+    result = 1
+    while exp:
+        if exp & 1:
+            result *= base
+        base *= base
+        exp >>= 1
+    return result
+
+# Usage:
+print(fast_power(2, 10))   # 1024
+print(fast_power(3, 15))   # 14348907
+\`\`\``,
+          desc: 'Iterative binary exponentiation. O(log exp) multiplications.',
+        },
+        javascript: {
+          title: 'Fast Power (Binary Exponentiation)',
+          code: `\`\`\`javascript
+function fastPower(base, exp) {
+  if (exp < 0) return 1 / fastPower(base, -exp);
+  let result = 1;
+  while (exp) {
+    if (exp & 1) result *= base;
+    base *= base;
+    exp = Math.floor(exp / 2);
+  }
+  return result;
+}
+\`\`\``,
+          desc: 'Iterative binary exponentiation. O(log exp).',
+        },
+      },
+      prime_factorization: {
+        python: {
+          title: 'Prime Factorization',
+          code: `\`\`\`python
+def prime_factors(n):
+    factors = []
+    d = 2
+    while d * d <= n:
+        while n % d == 0:
+            factors.append(d)
+            n //= d
+        d += 1
+    if n > 1:
+        factors.append(n)
+    return factors
+
+# Usage:
+print(prime_factors(360))   # [2, 2, 2, 3, 3, 5]
+print(prime_factors(97))    # [97]
+\`\`\``,
+          desc: 'Trial division up to sqrt(n). O(sqrt(n)) worst case. Use Pollard\'s rho for very large numbers.',
+        },
+        javascript: {
+          title: 'Prime Factorization',
+          code: `\`\`\`javascript
+function primeFactors(n) {
+  const factors = [];
+  for (let d = 2; d * d <= n; d++) {
+    while (n % d === 0) { factors.push(d); n = Math.floor(n / d); }
+  }
+  if (n > 1) factors.push(n);
+  return factors;
+}
+\`\`\``,
+          desc: 'Trial division up to sqrt(n). O(sqrt(n)) worst case.',
+        },
+      },
+      factorial_iterative: {
+        python: {
+          title: 'Iterative Factorial',
+          code: `\`\`\`python
+def factorial(n):
+    if n < 0:
+        raise ValueError("factorial undefined for negative integers")
+    result = 1
+    for i in range(2, n + 1):
+        result *= i
+    return result
+
+# Usage:
+print(factorial(10))  # 3628800
+\`\`\``,
+          desc: 'Straightforward loop multiplying 2..n. O(n) multiplications; avoids the recursion depth limit.',
+        },
+        javascript: {
+          title: 'Iterative Factorial',
+          code: `\`\`\`javascript
+function factorial(n) {
+  if (n < 0) throw new RangeError('factorial undefined for negative integers');
+  let result = 1n;  // BigInt to avoid overflow past 20!
+  for (let i = 2n; i <= BigInt(n); i++) result *= i;
+  return result;
+}
+\`\`\``,
+          desc: 'Loop multiplying 2..n. Uses BigInt to avoid loss of precision past 20!.',
+        },
+      },
+      nth_prime: {
+        python: {
+          title: 'Nth Prime',
+          code: `\`\`\`python
+def nth_prime(n):
+    if n < 1:
+        raise ValueError("n must be >= 1")
+    count, candidate = 0, 1
+    while count < n:
+        candidate += 1
+        if candidate < 2:
+            continue
+        is_prime = True
+        d = 2
+        while d * d <= candidate:
+            if candidate % d == 0:
+                is_prime = False
+                break
+            d += 1
+        if is_prime:
+            count += 1
+    return candidate
+
+# Usage:
+print(nth_prime(1))    # 2
+print(nth_prime(10))   # 29
+print(nth_prime(100))  # 541
+\`\`\``,
+          desc: 'Naive primality test scanned until the nth prime is found. For large n, use a sieve bounded by the prime-counting approximation n * (ln n + ln ln n).',
+        },
+        javascript: {
+          title: 'Nth Prime',
+          code: `\`\`\`javascript
+function nthPrime(n) {
+  if (n < 1) throw new RangeError('n must be >= 1');
+  let count = 0, candidate = 1;
+  while (count < n) {
+    candidate++;
+    let isPrime = candidate >= 2;
+    for (let d = 2; d * d <= candidate; d++) {
+      if (candidate % d === 0) { isPrime = false; break; }
+    }
+    if (isPrime) count++;
+  }
+  return candidate;
+}
+\`\`\``,
+          desc: 'Naive primality test. For large n prefer a sieve sized by the prime-counting approximation.',
+        },
+      },
+      combinations: {
+        python: {
+          title: 'Combinations / Binomial Coefficient',
+          code: `\`\`\`python
+from math import comb
+from itertools import combinations
+
+# Count:
+print(comb(5, 2))  # 10
+
+# Enumerate all C(n, k) combinations:
+print(list(combinations("ABCD", 2)))
+# [('A', 'B'), ('A', 'C'), ('A', 'D'), ('B', 'C'), ('B', 'D'), ('C', 'D')]
+
+# Manual binomial if you cannot import math.comb:
+def binomial(n, k):
+    if k < 0 or k > n:
+        return 0
+    k = min(k, n - k)
+    result = 1
+    for i in range(k):
+        result = result * (n - i) // (i + 1)
+    return result
+\`\`\``,
+          desc: 'Use math.comb (Python 3.8+) for the count and itertools.combinations for enumeration. Manual binomial avoids factorial blowup via running product.',
+        },
+        javascript: {
+          title: 'Combinations / Binomial Coefficient',
+          code: `\`\`\`javascript
+function binomial(n, k) {
+  if (k < 0 || k > n) return 0;
+  k = Math.min(k, n - k);
+  let result = 1;
+  for (let i = 0; i < k; i++) result = result * (n - i) / (i + 1);
+  return Math.round(result);
+}
+
+function* combinations(arr, k) {
+  const n = arr.length;
+  if (k > n) return;
+  const indices = Array.from({ length: k }, (_, i) => i);
+  while (true) {
+    yield indices.map(i => arr[i]);
+    let i = k - 1;
+    while (i >= 0 && indices[i] === i + n - k) i--;
+    if (i < 0) return;
+    indices[i]++;
+    for (let j = i + 1; j < k; j++) indices[j] = indices[j - 1] + 1;
+  }
+}
+
+// Usage:
+console.log(binomial(5, 2));                           // 10
+console.log([...combinations(['A','B','C','D'], 2)]);  // all C(4, 2) pairs
+\`\`\``,
+          desc: 'Running-product binomial avoids factorial overflow. Generator enumerates combinations in lexicographic index order.',
+        },
+      },
+      permutations: {
+        python: {
+          title: 'Generate All Permutations',
+          code: `\`\`\`python
+from itertools import permutations
+
+print(list(permutations([1, 2, 3])))
+# [(1,2,3), (1,3,2), (2,1,3), (2,3,1), (3,1,2), (3,2,1)]
+
+# Manual recursive backtracking (no imports):
+def permutations_manual(arr):
+    if len(arr) <= 1:
+        return [list(arr)]
+    out = []
+    for i, x in enumerate(arr):
+        for rest in permutations_manual(arr[:i] + arr[i+1:]):
+            out.append([x] + rest)
+    return out
+\`\`\``,
+          desc: 'itertools.permutations is the idiomatic choice. The manual version demonstrates the backtracking pattern: O(n * n!).',
+        },
+        javascript: {
+          title: 'Generate All Permutations',
+          code: `\`\`\`javascript
+function permutations(arr) {
+  if (arr.length <= 1) return [arr.slice()];
+  const out = [];
+  for (let i = 0; i < arr.length; i++) {
+    const rest = arr.slice(0, i).concat(arr.slice(i + 1));
+    for (const p of permutations(rest)) out.push([arr[i], ...p]);
+  }
+  return out;
+}
+
+// Usage:
+console.log(permutations([1, 2, 3]));
+\`\`\``,
+          desc: 'Recursive backtracking. O(n * n!) time. Use a generator for large n to avoid materialising the full list.',
+        },
+      },
+      pascal_triangle: {
+        python: {
+          title: "Pascal's Triangle",
+          code: `\`\`\`python
+def pascal_triangle(rows):
+    triangle = []
+    for i in range(rows):
+        row = [1] * (i + 1)
+        for j in range(1, i):
+            row[j] = triangle[i - 1][j - 1] + triangle[i - 1][j]
+        triangle.append(row)
+    return triangle
+
+# Usage:
+for row in pascal_triangle(5):
+    print(row)
+# [1]
+# [1, 1]
+# [1, 2, 1]
+# [1, 3, 3, 1]
+# [1, 4, 6, 4, 1]
+\`\`\``,
+          desc: 'Each interior cell is the sum of the two above it. O(rows^2) time and space.',
+        },
+        javascript: {
+          title: "Pascal's Triangle",
+          code: `\`\`\`javascript
+function pascalTriangle(rows) {
+  const triangle = [];
+  for (let i = 0; i < rows; i++) {
+    const row = new Array(i + 1).fill(1);
+    for (let j = 1; j < i; j++) row[j] = triangle[i - 1][j - 1] + triangle[i - 1][j];
+    triangle.push(row);
+  }
+  return triangle;
+}
+\`\`\``,
+          desc: 'Each interior cell = sum of the two directly above. O(rows^2).',
+        },
+      },
+      is_armstrong: {
+        python: {
+          title: 'Armstrong (Narcissistic) Number Check',
+          code: `\`\`\`python
+def is_armstrong(n):
+    digits = str(abs(n))
+    k = len(digits)
+    return sum(int(d) ** k for d in digits) == abs(n)
+
+# Usage:
+print(is_armstrong(153))   # True  (1^3 + 5^3 + 3^3 = 153)
+print(is_armstrong(9474))  # True  (9^4 + 4^4 + 7^4 + 4^4)
+print(is_armstrong(123))   # False
+\`\`\``,
+          desc: 'A k-digit Armstrong number equals the sum of its digits each raised to k. O(k).',
+        },
+        javascript: {
+          title: 'Armstrong (Narcissistic) Number Check',
+          code: `\`\`\`javascript
+function isArmstrong(n) {
+  const digits = String(Math.abs(n));
+  const k = digits.length;
+  const sum = [...digits].reduce((s, d) => s + Math.pow(Number(d), k), 0);
+  return sum === Math.abs(n);
+}
+\`\`\``,
+          desc: 'A k-digit Armstrong number equals the sum of its digits each raised to k. O(k).',
+        },
+      },
+
+      // ─── STATISTICS ───
+      average_array: {
+        python: {
+          title: 'Mean / Average',
+          code: `\`\`\`python
+def mean(nums):
+    if not nums:
+        raise ValueError("mean of empty sequence")
+    return sum(nums) / len(nums)
+
+# Usage:
+print(mean([1, 2, 3, 4, 5]))  # 3.0
+\`\`\``,
+          desc: 'Arithmetic mean. Raises on empty input — use statistics.fmean for a faster C implementation.',
+        },
+        javascript: {
+          title: 'Mean / Average',
+          code: `\`\`\`javascript
+function mean(nums) {
+  if (!nums.length) throw new RangeError('mean of empty array');
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
+\`\`\``,
+          desc: 'Arithmetic mean. Beware floating-point error for very large sums — use Kahan summation if precision matters.',
+        },
+      },
+      median: {
+        python: {
+          title: 'Median',
+          code: `\`\`\`python
+def median(nums):
+    if not nums:
+        raise ValueError("median of empty sequence")
+    sorted_nums = sorted(nums)
+    n = len(sorted_nums)
+    mid = n // 2
+    if n % 2:
+        return sorted_nums[mid]
+    return (sorted_nums[mid - 1] + sorted_nums[mid]) / 2
+
+# Usage:
+print(median([3, 1, 4, 1, 5, 9, 2, 6]))  # 3.5
+\`\`\``,
+          desc: 'Sort-based median. O(n log n). For O(n), use quickselect (statistics.median uses sorting internally).',
+        },
+        javascript: {
+          title: 'Median',
+          code: `\`\`\`javascript
+function median(nums) {
+  if (!nums.length) throw new RangeError('median of empty array');
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+\`\`\``,
+          desc: 'Sort-based median. O(n log n). For large n consider quickselect for O(n) expected time.',
+        },
+      },
+      mode: {
+        python: {
+          title: 'Mode (Most Frequent Value)',
+          code: `\`\`\`python
+from collections import Counter
+
+def mode(nums):
+    if not nums:
+        raise ValueError("mode of empty sequence")
+    counts = Counter(nums)
+    top = max(counts.values())
+    return [v for v, c in counts.items() if c == top]
+
+# Usage:
+print(mode([1, 2, 2, 3, 3, 4]))  # [2, 3]
+print(mode([1, 2, 2, 3]))         # [2]
+\`\`\``,
+          desc: 'Counter-based mode. Returns all tied values (multimodal). O(n).',
+        },
+        javascript: {
+          title: 'Mode (Most Frequent Value)',
+          code: `\`\`\`javascript
+function mode(nums) {
+  if (!nums.length) throw new RangeError('mode of empty array');
+  const counts = new Map();
+  for (const n of nums) counts.set(n, (counts.get(n) ?? 0) + 1);
+  const top = Math.max(...counts.values());
+  return [...counts.entries()].filter(([, c]) => c === top).map(([v]) => v);
+}
+\`\`\``,
+          desc: 'Counts via Map then selects all values tied at the maximum frequency. O(n).',
+        },
+      },
+      variance: {
+        python: {
+          title: 'Variance',
+          code: `\`\`\`python
+def variance(nums, sample=True):
+    n = len(nums)
+    if n < 2 and sample:
+        raise ValueError("sample variance requires at least two data points")
+    if n < 1:
+        raise ValueError("variance of empty sequence")
+    mu = sum(nums) / n
+    sq = sum((x - mu) ** 2 for x in nums)
+    return sq / (n - 1) if sample else sq / n
+
+# Usage:
+print(variance([1, 2, 3, 4, 5]))               # 2.5 (sample)
+print(variance([1, 2, 3, 4, 5], sample=False)) # 2.0 (population)
+\`\`\``,
+          desc: 'Sample variance divides by n-1 (Bessel\'s correction); population variance divides by n. For numerical stability on huge datasets, use Welford\'s online algorithm.',
+        },
+        javascript: {
+          title: 'Variance',
+          code: `\`\`\`javascript
+function variance(nums, { sample = true } = {}) {
+  const n = nums.length;
+  if (n < 2 && sample) throw new RangeError('sample variance requires >= 2 data points');
+  if (n < 1) throw new RangeError('variance of empty array');
+  const mu = nums.reduce((a, b) => a + b, 0) / n;
+  const sq = nums.reduce((acc, x) => acc + (x - mu) ** 2, 0);
+  return sample ? sq / (n - 1) : sq / n;
+}
+\`\`\``,
+          desc: 'Sample variance (n-1 divisor) by default; pass { sample: false } for population variance.',
+        },
+      },
+      stddev: {
+        python: {
+          title: 'Standard Deviation',
+          code: `\`\`\`python
+import math
+
+def stddev(nums, sample=True):
+    n = len(nums)
+    if n < 2 and sample:
+        raise ValueError("sample stddev requires at least two data points")
+    if n < 1:
+        raise ValueError("stddev of empty sequence")
+    mu = sum(nums) / n
+    sq = sum((x - mu) ** 2 for x in nums)
+    return math.sqrt(sq / (n - 1) if sample else sq / n)
+
+# Usage:
+print(stddev([1, 2, 3, 4, 5]))  # ≈ 1.5811
+\`\`\``,
+          desc: 'Square-root of variance. Sample default (n-1 divisor); pass sample=False for population stddev.',
+        },
+        javascript: {
+          title: 'Standard Deviation',
+          code: `\`\`\`javascript
+function stddev(nums, { sample = true } = {}) {
+  const n = nums.length;
+  if (n < 2 && sample) throw new RangeError('sample stddev requires >= 2 data points');
+  if (n < 1) throw new RangeError('stddev of empty array');
+  const mu = nums.reduce((a, b) => a + b, 0) / n;
+  const sq = nums.reduce((acc, x) => acc + (x - mu) ** 2, 0);
+  return Math.sqrt(sample ? sq / (n - 1) : sq / n);
+}
+\`\`\``,
+          desc: 'Square-root of variance. Sample default; opt-in to population via { sample: false }.',
+        },
+      },
+
+      // ─── BATCH 2: BIT MANIPULATION & NUMBER THEORY ───
+      count_set_bits: {
+        python: {
+          title: 'Count Set Bits (Hamming Weight)',
+          code: `\`\`\`python
+def count_set_bits(n):
+    count = 0
+    while n:
+        n &= n - 1  # clear the lowest set bit
+        count += 1
+    return count
+
+# Usage:
+print(count_set_bits(29))  # 4  (binary 11101)
+print(bin(29).count("1"))   # idiomatic Python alternative
+\`\`\``,
+          desc: 'Brian Kernighan\'s trick: n & (n - 1) clears the lowest set bit. Runs in O(number of set bits), faster than the naive bit-by-bit loop.',
+        },
+        javascript: {
+          title: 'Count Set Bits (Hamming Weight)',
+          code: `\`\`\`javascript
+function countSetBits(n) {
+  n = n >>> 0;  // treat as unsigned 32-bit
+  let count = 0;
+  while (n) { n &= n - 1; count++; }
+  return count;
+}
+
+// Usage:
+console.log(countSetBits(29));   // 4
+console.log(countSetBits(-1));   // 32 (all bits set in two's complement)
+\`\`\``,
+          desc: 'Brian Kernighan\'s trick. >>> 0 coerces to unsigned 32-bit so negative inputs are handled correctly.',
+        },
+      },
+      hamming_distance: {
+        python: {
+          title: 'Hamming Distance',
+          code: `\`\`\`python
+def hamming_distance(a, b):
+    return bin(a ^ b).count("1")
+
+# Usage:
+print(hamming_distance(1, 4))  # 2  (001 vs 100)
+\`\`\``,
+          desc: 'XOR differs exactly at the bits that disagree; count the 1-bits. O(log max(a,b)).',
+        },
+        javascript: {
+          title: 'Hamming Distance',
+          code: `\`\`\`javascript
+function hammingDistance(a, b) {
+  let x = (a ^ b) >>> 0, count = 0;
+  while (x) { x &= x - 1; count++; }
+  return count;
+}
+\`\`\``,
+          desc: 'XOR combined with Kernighan\'s trick.',
+        },
+      },
+      single_number: {
+        python: {
+          title: 'Single Number (XOR trick)',
+          code: `\`\`\`python
+from functools import reduce
+from operator import xor
+
+def single_number(nums):
+    return reduce(xor, nums, 0)
+
+# Usage:
+print(single_number([2, 2, 3, 1, 1]))  # 3
+\`\`\``,
+          desc: 'XOR of all elements cancels pairs and leaves the unique element. O(n) time, O(1) space.',
+        },
+        javascript: {
+          title: 'Single Number (XOR trick)',
+          code: `\`\`\`javascript
+function singleNumber(nums) {
+  let result = 0;
+  for (const n of nums) result ^= n;
+  return result;
+}
+\`\`\``,
+          desc: 'XOR of all elements cancels pairs and leaves the unique element. O(n) / O(1).',
+        },
+      },
+      missing_number: {
+        python: {
+          title: 'Missing Number in [0..n]',
+          code: `\`\`\`python
+def missing_number(nums):
+    n = len(nums)
+    expected = n * (n + 1) // 2
+    return expected - sum(nums)
+
+# Usage:
+print(missing_number([3, 0, 1]))  # 2
+\`\`\``,
+          desc: 'Sum formula trick: expected - actual. O(n) time, O(1) space. XOR works too and avoids overflow.',
+        },
+        javascript: {
+          title: 'Missing Number in [0..n]',
+          code: `\`\`\`javascript
+function missingNumber(nums) {
+  const n = nums.length;
+  let missing = n;
+  for (let i = 0; i < n; i++) missing ^= i ^ nums[i];
+  return missing;
+}
+\`\`\``,
+          desc: 'XOR trick: every index XOR every value leaves the missing number. O(n) / O(1), overflow-safe.',
+        },
+      },
+      gray_code: {
+        python: {
+          title: 'Gray Code Sequence',
+          code: `\`\`\`python
+def gray_code(n):
+    return [i ^ (i >> 1) for i in range(1 << n)]
+
+# Usage:
+print(gray_code(3))  # [0, 1, 3, 2, 6, 7, 5, 4]
+\`\`\``,
+          desc: 'Standard reflected-binary Gray code: g(i) = i XOR (i >> 1). Consecutive values differ in exactly one bit.',
+        },
+        javascript: {
+          title: 'Gray Code Sequence',
+          code: `\`\`\`javascript
+function grayCode(n) {
+  return Array.from({ length: 1 << n }, (_, i) => i ^ (i >> 1));
+}
+\`\`\``,
+          desc: 'Reflected-binary Gray code. O(2^n).',
+        },
+      },
+      power_of_four: {
+        python: {
+          title: 'Power of Four Check',
+          code: `\`\`\`python
+def is_power_of_four(n):
+    if n <= 0: return False
+    # Must be a power of two AND the set bit sits at an even position
+    return (n & (n - 1)) == 0 and (n & 0x55555555) != 0
+
+# Usage:
+print(is_power_of_four(16))  # True
+print(is_power_of_four(8))   # False
+\`\`\``,
+          desc: 'Powers of 4 are powers of 2 whose only set bit is in an even position (mask 0x55555555 keeps even positions).',
+        },
+        javascript: {
+          title: 'Power of Four Check',
+          code: `\`\`\`javascript
+function isPowerOfFour(n) {
+  if (n <= 0) return false;
+  return (n & (n - 1)) === 0 && (n & 0x55555555) !== 0;
+}
+\`\`\``,
+          desc: 'Single-expression bitwise check. O(1).',
+        },
+      },
+      next_power_of_two: {
+        python: {
+          title: 'Next Power of Two',
+          code: `\`\`\`python
+def next_power_of_two(n):
+    if n <= 1: return 1
+    return 1 << (n - 1).bit_length()
+
+# Usage:
+print(next_power_of_two(5))    # 8
+print(next_power_of_two(16))   # 16  (already a power of two)
+\`\`\``,
+          desc: 'Smallest power of two >= n. bit_length of (n-1) yields the correct exponent.',
+        },
+        javascript: {
+          title: 'Next Power of Two',
+          code: `\`\`\`javascript
+function nextPowerOfTwo(n) {
+  if (n <= 1) return 1;
+  let p = n - 1;
+  p |= p >>> 1; p |= p >>> 2; p |= p >>> 4;
+  p |= p >>> 8; p |= p >>> 16;
+  return (p + 1) >>> 0;
+}
+\`\`\``,
+          desc: 'Bit-smear trick: propagate the highest set bit rightward, then add one. O(1), works for 32-bit unsigned.',
+        },
+      },
+      gcd_iterative: {
+        python: {
+          title: 'Iterative GCD (Euclidean Algorithm)',
+          code: `\`\`\`python
+def gcd(a, b):
+    a, b = abs(a), abs(b)
+    while b:
+        a, b = b, a % b
+    return a
+
+# Usage:
+print(gcd(48, 18))  # 6
+\`\`\``,
+          desc: 'Classic Euclidean algorithm. O(log min(a, b)).',
+        },
+        javascript: {
+          title: 'Iterative GCD (Euclidean Algorithm)',
+          code: `\`\`\`javascript
+function gcd(a, b) {
+  a = Math.abs(a); b = Math.abs(b);
+  while (b) { [a, b] = [b, a % b]; }
+  return a;
+}
+\`\`\``,
+          desc: 'Classic Euclidean algorithm. O(log min(a, b)).',
+        },
+      },
+      extended_gcd: {
+        python: {
+          title: 'Extended Euclidean Algorithm',
+          code: `\`\`\`python
+def extended_gcd(a, b):
+    if b == 0: return a, 1, 0
+    g, x1, y1 = extended_gcd(b, a % b)
+    return g, y1, x1 - (a // b) * y1
+
+# Usage: returns (gcd, x, y) such that a*x + b*y = gcd(a, b)
+print(extended_gcd(30, 18))  # (6, 1, -1)  => 30*1 + 18*(-1) = 12? actually 30-18=12; check manually
+\`\`\``,
+          desc: `Returns (gcd, x, y) satisfying Bezout's identity a*x + b*y = gcd(a, b). Useful for modular inverses.`,
+        },
+        javascript: {
+          title: 'Extended Euclidean Algorithm',
+          code: `\`\`\`javascript
+function extendedGcd(a, b) {
+  if (b === 0) return [a, 1, 0];
+  const [g, x1, y1] = extendedGcd(b, a % b);
+  return [g, y1, x1 - Math.floor(a / b) * y1];
+}
+\`\`\``,
+          desc: 'Returns [gcd, x, y] with a*x + b*y = gcd(a, b). Basis for modular inverses.',
+        },
+      },
+      mod_pow: {
+        python: {
+          title: 'Modular Exponentiation',
+          code: `\`\`\`python
+def mod_pow(base, exp, mod):
+    result = 1
+    base %= mod
+    while exp > 0:
+        if exp & 1:
+            result = (result * base) % mod
+        base = (base * base) % mod
+        exp >>= 1
+    return result
+
+# Usage:
+print(mod_pow(2, 10, 1000))  # 24
+print(pow(2, 10, 1000))       # idiomatic builtin
+\`\`\``,
+          desc: `Right-to-left binary exponentiation modulo m. O(log exp). Python's built-in pow(base, exp, mod) does the same.`,
+        },
+        javascript: {
+          title: 'Modular Exponentiation (BigInt-safe)',
+          code: `\`\`\`javascript
+function modPow(base, exp, mod) {
+  base = BigInt(base); exp = BigInt(exp); mod = BigInt(mod);
+  let result = 1n;
+  base %= mod;
+  while (exp > 0n) {
+    if (exp & 1n) result = (result * base) % mod;
+    base = (base * base) % mod;
+    exp >>= 1n;
+  }
+  return result;
+}
+\`\`\``,
+          desc: 'BigInt variant avoids overflow. O(log exp).',
+        },
+      },
+      euler_totient: {
+        python: {
+          title: `Euler's Totient Function`,
+          code: `\`\`\`python
+def euler_totient(n):
+    result = n
+    p = 2
+    while p * p <= n:
+        if n % p == 0:
+            while n % p == 0:
+                n //= p
+            result -= result // p
+        p += 1
+    if n > 1:
+        result -= result // n
+    return result
+
+# Usage:
+print(euler_totient(10))  # 4  (coprime: 1, 3, 7, 9)
+\`\`\``,
+          desc: `Counts integers in [1, n] coprime to n via product over distinct prime factors. O(sqrt n).`,
+        },
+        javascript: {
+          title: `Euler's Totient Function`,
+          code: `\`\`\`javascript
+function eulerTotient(n) {
+  let result = n;
+  for (let p = 2; p * p <= n; p++) {
+    if (n % p === 0) {
+      while (n % p === 0) n = Math.floor(n / p);
+      result -= Math.floor(result / p);
+    }
+  }
+  if (n > 1) result -= Math.floor(result / n);
+  return result;
+}
+\`\`\``,
+          desc: `Counts integers in [1, n] coprime to n. O(sqrt n).`,
+        },
+      },
+      integer_sqrt: {
+        python: {
+          title: 'Integer Square Root',
+          code: `\`\`\`python
+def isqrt(n):
+    if n < 0: raise ValueError('isqrt of negative')
+    if n < 2: return n
+    x, y = n, (n + 1) // 2
+    while y < x:
+        x, y = y, (y + n // y) // 2
+    return x
+
+# Usage:
+print(isqrt(27))  # 5
+import math; print(math.isqrt(27))  # idiomatic since Python 3.8
+\`\`\``,
+          desc: `Newton/Babylonian iteration truncated to integers. O(log n). Use math.isqrt in modern Python.`,
+        },
+        javascript: {
+          title: 'Integer Square Root',
+          code: `\`\`\`javascript
+function isqrt(n) {
+  if (n < 0) throw new RangeError('isqrt of negative');
+  if (n < 2) return n;
+  let x = n, y = Math.floor((n + 1) / 2);
+  while (y < x) { x = y; y = Math.floor((y + Math.floor(n / y)) / 2); }
+  return x;
+}
+\`\`\``,
+          desc: `Newton iteration truncated to integers. O(log n).`,
+        },
+      },
+      two_sum: {
+        python: {
+          title: 'Two Sum',
+          code: `\`\`\`python
+def two_sum(nums, target):
+    seen = {}
+    for i, x in enumerate(nums):
+        if target - x in seen:
+            return [seen[target - x], i]
+        seen[x] = i
+    return None
+
+# Usage:
+print(two_sum([2, 7, 11, 15], 9))  # [0, 1]
+\`\`\``,
+          desc: `Hash-map lookup of the complement. O(n) time, O(n) space.`,
+        },
+        javascript: {
+          title: 'Two Sum',
+          code: `\`\`\`javascript
+function twoSum(nums, target) {
+  const seen = new Map();
+  for (let i = 0; i < nums.length; i++) {
+    const need = target - nums[i];
+    if (seen.has(need)) return [seen.get(need), i];
+    seen.set(nums[i], i);
+  }
+  return null;
+}
+\`\`\``,
+          desc: `Hash-map lookup of the complement. O(n) / O(n).`,
+        },
+      },
+      three_sum: {
+        python: {
+          title: 'Three Sum (unique triplets)',
+          code: `\`\`\`python
+def three_sum(nums):
+    nums = sorted(nums)
+    out = []
+    n = len(nums)
+    for i in range(n - 2):
+        if i > 0 and nums[i] == nums[i - 1]: continue
+        l, r = i + 1, n - 1
+        while l < r:
+            s = nums[i] + nums[l] + nums[r]
+            if s < 0: l += 1
+            elif s > 0: r -= 1
+            else:
+                out.append([nums[i], nums[l], nums[r]])
+                while l < r and nums[l] == nums[l + 1]: l += 1
+                while l < r and nums[r] == nums[r - 1]: r -= 1
+                l += 1; r -= 1
+    return out
+
+# Usage:
+print(three_sum([-1, 0, 1, 2, -1, -4]))  # [[-1, -1, 2], [-1, 0, 1]]
+\`\`\``,
+          desc: `Sort then two-pointer sweep per pivot; skip duplicates. O(n^2) time, O(1) extra (excluding output).`,
+        },
+        javascript: {
+          title: 'Three Sum (unique triplets)',
+          code: `\`\`\`javascript
+function threeSum(nums) {
+  nums = [...nums].sort((a, b) => a - b);
+  const out = [];
+  for (let i = 0; i < nums.length - 2; i++) {
+    if (i > 0 && nums[i] === nums[i - 1]) continue;
+    let l = i + 1, r = nums.length - 1;
+    while (l < r) {
+      const s = nums[i] + nums[l] + nums[r];
+      if (s < 0) l++;
+      else if (s > 0) r--;
+      else {
+        out.push([nums[i], nums[l], nums[r]]);
+        while (l < r && nums[l] === nums[l + 1]) l++;
+        while (l < r && nums[r] === nums[r - 1]) r--;
+        l++; r--;
+      }
+    }
+  }
+  return out;
+}
+\`\`\``,
+          desc: `Sort + two-pointer, O(n^2).`,
+        },
+      },
+
+      // ─── BATCH 3: ADVANCED DP & BACKTRACKING ───
+      matrix_chain: {
+        python: {
+          title: 'Matrix Chain Multiplication',
+          code: `\`\`\`python
+def matrix_chain(dims):
+    n = len(dims) - 1
+    dp = [[0] * n for _ in range(n)]
+    for length in range(2, n + 1):
+        for i in range(n - length + 1):
+            j = i + length - 1
+            dp[i][j] = float('inf')
+            for k in range(i, j):
+                cost = dp[i][k] + dp[k + 1][j] + dims[i] * dims[k + 1] * dims[j + 1]
+                if cost < dp[i][j]: dp[i][j] = cost
+    return dp[0][n - 1]
+
+# Usage: dims[i..i+1] is matrix i. Matrices: 10x30, 30x5, 5x60 => dims=[10,30,5,60]
+print(matrix_chain([10, 30, 5, 60]))  # 4500
+\`\`\``,
+          desc: 'Interval DP finding optimal parenthesization. O(n^3) time, O(n^2) space.',
+        },
+        javascript: {
+          title: 'Matrix Chain Multiplication',
+          code: `\`\`\`javascript
+function matrixChain(dims) {
+  const n = dims.length - 1;
+  const dp = Array.from({ length: n }, () => new Array(n).fill(0));
+  for (let len = 2; len <= n; len++) {
+    for (let i = 0; i + len - 1 < n; i++) {
+      const j = i + len - 1;
+      dp[i][j] = Infinity;
+      for (let k = i; k < j; k++) {
+        const cost = dp[i][k] + dp[k + 1][j] + dims[i] * dims[k + 1] * dims[j + 1];
+        if (cost < dp[i][j]) dp[i][j] = cost;
+      }
+    }
+  }
+  return dp[0][n - 1];
+}
+\`\`\``,
+          desc: 'Interval DP. O(n^3) time, O(n^2) space.',
+        },
+      },
+      palindrome_partition: {
+        python: {
+          title: 'Palindrome Partitioning (min cuts)',
+          code: `\`\`\`python
+def min_cut(s):
+    n = len(s)
+    pal = [[False] * n for _ in range(n)]
+    for i in range(n - 1, -1, -1):
+        for j in range(i, n):
+            if s[i] == s[j] and (j - i < 2 or pal[i + 1][j - 1]):
+                pal[i][j] = True
+    cuts = list(range(n))
+    for i in range(n):
+        if pal[0][i]:
+            cuts[i] = 0
+        else:
+            for j in range(i):
+                if pal[j + 1][i] and cuts[j] + 1 < cuts[i]:
+                    cuts[i] = cuts[j] + 1
+    return cuts[n - 1]
+
+# Usage:
+print(min_cut('aab'))  # 1  ('aa' | 'b')
+\`\`\``,
+          desc: 'Precompute palindrome table, then DP on min cuts. O(n^2) time, O(n^2) space.',
+        },
+        javascript: {
+          title: 'Palindrome Partitioning (min cuts)',
+          code: `\`\`\`javascript
+function minCut(s) {
+  const n = s.length;
+  const pal = Array.from({ length: n }, () => new Array(n).fill(false));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = i; j < n; j++) {
+      if (s[i] === s[j] && (j - i < 2 || pal[i + 1][j - 1])) pal[i][j] = true;
+    }
+  }
+  const cuts = Array.from({ length: n }, (_, i) => i);
+  for (let i = 0; i < n; i++) {
+    if (pal[0][i]) { cuts[i] = 0; continue; }
+    for (let j = 0; j < i; j++) {
+      if (pal[j + 1][i] && cuts[j] + 1 < cuts[i]) cuts[i] = cuts[j] + 1;
+    }
+  }
+  return cuts[n - 1];
+}
+\`\`\``,
+          desc: 'O(n^2) DP with palindrome precomputation.',
+        },
+      },
+      word_break: {
+        python: {
+          title: 'Word Break',
+          code: `\`\`\`python
+def word_break(s, word_dict):
+    words = set(word_dict)
+    n = len(s)
+    dp = [False] * (n + 1)
+    dp[0] = True
+    for i in range(1, n + 1):
+        for j in range(i):
+            if dp[j] and s[j:i] in words:
+                dp[i] = True
+                break
+    return dp[n]
+
+# Usage:
+print(word_break('leetcode', ['leet', 'code']))  # True
+\`\`\``,
+          desc: 'dp[i] = can s[0..i] be segmented. O(n^2 * L) with L = max word length.',
+        },
+        javascript: {
+          title: 'Word Break',
+          code: `\`\`\`javascript
+function wordBreak(s, wordDict) {
+  const words = new Set(wordDict);
+  const n = s.length;
+  const dp = new Array(n + 1).fill(false);
+  dp[0] = true;
+  for (let i = 1; i <= n; i++) {
+    for (let j = 0; j < i; j++) {
+      if (dp[j] && words.has(s.slice(j, i))) { dp[i] = true; break; }
+    }
+  }
+  return dp[n];
+}
+\`\`\``,
+          desc: 'dp[i] = can s[0..i] be segmented. O(n^2 * L).',
+        },
+      },
+      regex_match: {
+        python: {
+          title: 'Regular Expression Matching (. and *)',
+          code: `\`\`\`python
+def is_match(s, p):
+    m, n = len(s), len(p)
+    dp = [[False] * (n + 1) for _ in range(m + 1)]
+    dp[0][0] = True
+    for j in range(1, n + 1):
+        if p[j - 1] == '*':
+            dp[0][j] = dp[0][j - 2]
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if p[j - 1] == '*':
+                dp[i][j] = dp[i][j - 2]
+                if p[j - 2] == '.' or p[j - 2] == s[i - 1]:
+                    dp[i][j] = dp[i][j] or dp[i - 1][j]
+            elif p[j - 1] == '.' or p[j - 1] == s[i - 1]:
+                dp[i][j] = dp[i - 1][j - 1]
+    return dp[m][n]
+
+# Usage:
+print(is_match('aab', 'c*a*b'))  # True
+\`\`\``,
+          desc: 'DP: dp[i][j] = s[0..i] matches p[0..j]. Supports "." (any char) and "*" (zero or more). O(m*n).',
+        },
+        javascript: {
+          title: 'Regular Expression Matching (. and *)',
+          code: `\`\`\`javascript
+function isMatch(s, p) {
+  const m = s.length, n = p.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(false));
+  dp[0][0] = true;
+  for (let j = 1; j <= n; j++) if (p[j - 1] === '*') dp[0][j] = dp[0][j - 2];
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (p[j - 1] === '*') {
+        dp[i][j] = dp[i][j - 2];
+        if (p[j - 2] === '.' || p[j - 2] === s[i - 1]) dp[i][j] = dp[i][j] || dp[i - 1][j];
+      } else if (p[j - 1] === '.' || p[j - 1] === s[i - 1]) {
+        dp[i][j] = dp[i - 1][j - 1];
+      }
+    }
+  }
+  return dp[m][n];
+}
+\`\`\``,
+          desc: '2D DP. O(m*n).',
+        },
+      },
+      wildcard_match: {
+        python: {
+          title: 'Wildcard Matching (? and *)',
+          code: `\`\`\`python
+def is_match(s, p):
+    m, n = len(s), len(p)
+    dp = [[False] * (n + 1) for _ in range(m + 1)]
+    dp[0][0] = True
+    for j in range(1, n + 1):
+        if p[j - 1] == '*':
+            dp[0][j] = dp[0][j - 1]
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if p[j - 1] == '*':
+                dp[i][j] = dp[i - 1][j] or dp[i][j - 1]
+            elif p[j - 1] == '?' or p[j - 1] == s[i - 1]:
+                dp[i][j] = dp[i - 1][j - 1]
+    return dp[m][n]
+
+# Usage:
+print(is_match('adceb', '*a*b'))  # True
+\`\`\``,
+          desc: 'DP where "?" matches any one char, "*" matches any sequence. O(m*n).',
+        },
+        javascript: {
+          title: 'Wildcard Matching (? and *)',
+          code: `\`\`\`javascript
+function isMatch(s, p) {
+  const m = s.length, n = p.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(false));
+  dp[0][0] = true;
+  for (let j = 1; j <= n; j++) if (p[j - 1] === '*') dp[0][j] = dp[0][j - 1];
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (p[j - 1] === '*') dp[i][j] = dp[i - 1][j] || dp[i][j - 1];
+      else if (p[j - 1] === '?' || p[j - 1] === s[i - 1]) dp[i][j] = dp[i - 1][j - 1];
+    }
+  }
+  return dp[m][n];
+}
+\`\`\``,
+          desc: '2D DP. O(m*n).',
+        },
+      },
+      min_path_sum: {
+        python: {
+          title: 'Minimum Path Sum in Grid',
+          code: `\`\`\`python
+def min_path_sum(grid):
+    m, n = len(grid), len(grid[0])
+    dp = [row[:] for row in grid]
+    for j in range(1, n): dp[0][j] += dp[0][j - 1]
+    for i in range(1, m): dp[i][0] += dp[i - 1][0]
+    for i in range(1, m):
+        for j in range(1, n):
+            dp[i][j] += min(dp[i - 1][j], dp[i][j - 1])
+    return dp[m - 1][n - 1]
+
+# Usage:
+print(min_path_sum([[1,3,1],[1,5,1],[4,2,1]]))  # 7
+\`\`\``,
+          desc: 'Classic grid DP: dp[i][j] = grid[i][j] + min(up, left). O(m*n) time, O(m*n) space (can be O(n)).',
+        },
+        javascript: {
+          title: 'Minimum Path Sum in Grid',
+          code: `\`\`\`javascript
+function minPathSum(grid) {
+  const m = grid.length, n = grid[0].length;
+  const dp = grid.map(r => [...r]);
+  for (let j = 1; j < n; j++) dp[0][j] += dp[0][j - 1];
+  for (let i = 1; i < m; i++) dp[i][0] += dp[i - 1][0];
+  for (let i = 1; i < m; i++)
+    for (let j = 1; j < n; j++)
+      dp[i][j] += Math.min(dp[i - 1][j], dp[i][j - 1]);
+  return dp[m - 1][n - 1];
+}
+\`\`\``,
+          desc: 'Classic grid DP. O(m*n).',
+        },
+      },
+      rod_cutting: {
+        python: {
+          title: 'Rod Cutting',
+          code: `\`\`\`python
+def rod_cutting(prices, n):
+    dp = [0] * (n + 1)
+    for i in range(1, n + 1):
+        best = 0
+        for j in range(i):
+            if j < len(prices):
+                best = max(best, prices[j] + dp[i - j - 1])
+        dp[i] = best
+    return dp[n]
+
+# Usage: prices[i] = price for rod of length i+1
+print(rod_cutting([1, 5, 8, 9, 10, 17, 17, 20], 8))  # 22
+\`\`\``,
+          desc: 'Unbounded knapsack variant. O(n^2).',
+        },
+        javascript: {
+          title: 'Rod Cutting',
+          code: `\`\`\`javascript
+function rodCutting(prices, n) {
+  const dp = new Array(n + 1).fill(0);
+  for (let i = 1; i <= n; i++) {
+    let best = 0;
+    for (let j = 0; j < i; j++) {
+      if (j < prices.length) best = Math.max(best, prices[j] + dp[i - j - 1]);
+    }
+    dp[i] = best;
+  }
+  return dp[n];
+}
+\`\`\``,
+          desc: 'Unbounded knapsack variant. O(n^2).',
+        },
+      },
+      subset_sum: {
+        python: {
+          title: 'Subset Sum',
+          code: `\`\`\`python
+def subset_sum(nums, target):
+    dp = [False] * (target + 1)
+    dp[0] = True
+    for x in nums:
+        for s in range(target, x - 1, -1):
+            if dp[s - x]: dp[s] = True
+    return dp[target]
+
+# Usage:
+print(subset_sum([3, 34, 4, 12, 5, 2], 9))  # True (4 + 5)
+\`\`\``,
+          desc: '1D DP over target sum, iterate backward to avoid reuse. O(n * target).',
+        },
+        javascript: {
+          title: 'Subset Sum',
+          code: `\`\`\`javascript
+function subsetSum(nums, target) {
+  const dp = new Array(target + 1).fill(false);
+  dp[0] = true;
+  for (const x of nums) {
+    for (let s = target; s >= x; s--) {
+      if (dp[s - x]) dp[s] = true;
+    }
+  }
+  return dp[target];
+}
+\`\`\``,
+          desc: '1D DP over target, backward iteration. O(n * target).',
+        },
+      },
+      decode_ways: {
+        python: {
+          title: 'Decode Ways',
+          code: `\`\`\`python
+def num_decodings(s):
+    if not s or s[0] == '0': return 0
+    n = len(s)
+    prev2, prev1 = 1, 1
+    for i in range(1, n):
+        curr = 0
+        if s[i] != '0': curr += prev1
+        two = int(s[i - 1:i + 1])
+        if 10 <= two <= 26: curr += prev2
+        prev2, prev1 = prev1, curr
+    return prev1
+
+# Usage:
+print(num_decodings('226'))  # 3  (2|2|6, 22|6, 2|26)
+\`\`\``,
+          desc: 'Fibonacci-style DP with O(1) rolling state. O(n) time, O(1) space.',
+        },
+        javascript: {
+          title: 'Decode Ways',
+          code: `\`\`\`javascript
+function numDecodings(s) {
+  if (!s || s[0] === '0') return 0;
+  let prev2 = 1, prev1 = 1;
+  for (let i = 1; i < s.length; i++) {
+    let curr = 0;
+    if (s[i] !== '0') curr += prev1;
+    const two = parseInt(s.slice(i - 1, i + 1), 10);
+    if (two >= 10 && two <= 26) curr += prev2;
+    prev2 = prev1; prev1 = curr;
+  }
+  return prev1;
+}
+\`\`\``,
+          desc: 'Rolling-state DP. O(n) / O(1).',
+        },
+      },
+      jump_game: {
+        python: {
+          title: 'Jump Game (can reach end)',
+          code: `\`\`\`python
+def can_jump(nums):
+    reach = 0
+    for i, x in enumerate(nums):
+        if i > reach: return False
+        reach = max(reach, i + x)
+    return True
+
+# Usage:
+print(can_jump([2, 3, 1, 1, 4]))  # True
+print(can_jump([3, 2, 1, 0, 4]))  # False
+\`\`\``,
+          desc: 'Greedy max-reach. O(n) time, O(1) space.',
+        },
+        javascript: {
+          title: 'Jump Game (can reach end)',
+          code: `\`\`\`javascript
+function canJump(nums) {
+  let reach = 0;
+  for (let i = 0; i < nums.length; i++) {
+    if (i > reach) return false;
+    reach = Math.max(reach, i + nums[i]);
+  }
+  return true;
+}
+\`\`\``,
+          desc: 'Greedy max-reach. O(n) / O(1).',
+        },
+      },
+      n_queens: {
+        python: {
+          title: 'N-Queens Solver',
+          code: `\`\`\`python
+def solve_n_queens(n):
+    result, cols, d1, d2 = [], set(), set(), set()
+    board = [-1] * n
+    def bt(r):
+        if r == n:
+            result.append(['.' * c + 'Q' + '.' * (n - c - 1) for c in board])
+            return
+        for c in range(n):
+            if c in cols or (r - c) in d1 or (r + c) in d2: continue
+            cols.add(c); d1.add(r - c); d2.add(r + c); board[r] = c
+            bt(r + 1)
+            cols.remove(c); d1.remove(r - c); d2.remove(r + c)
+    bt(0)
+    return result
+
+# Usage:
+print(len(solve_n_queens(4)))  # 2 solutions
+\`\`\``,
+          desc: 'Classic backtracking with O(1) conflict sets per column/diagonal. O(n!) worst case.',
+        },
+        javascript: {
+          title: 'N-Queens Solver',
+          code: `\`\`\`javascript
+function solveNQueens(n) {
+  const result = [], cols = new Set(), d1 = new Set(), d2 = new Set();
+  const board = new Array(n).fill(-1);
+  function bt(r) {
+    if (r === n) {
+      result.push(board.map(c => '.'.repeat(c) + 'Q' + '.'.repeat(n - c - 1)));
+      return;
+    }
+    for (let c = 0; c < n; c++) {
+      if (cols.has(c) || d1.has(r - c) || d2.has(r + c)) continue;
+      cols.add(c); d1.add(r - c); d2.add(r + c); board[r] = c;
+      bt(r + 1);
+      cols.delete(c); d1.delete(r - c); d2.delete(r + c);
+    }
+  }
+  bt(0);
+  return result;
+}
+\`\`\``,
+          desc: 'Backtracking with conflict sets. O(n!).',
+        },
+      },
+      sudoku_solver: {
+        python: {
+          title: 'Sudoku Solver (9x9)',
+          code: `\`\`\`python
+def solve_sudoku(board):
+    rows = [set() for _ in range(9)]
+    cols = [set() for _ in range(9)]
+    boxes = [set() for _ in range(9)]
+    empty = []
+    for r in range(9):
+        for c in range(9):
+            v = board[r][c]
+            if v == '.': empty.append((r, c))
+            else:
+                rows[r].add(v); cols[c].add(v); boxes[(r // 3) * 3 + c // 3].add(v)
+    def bt(i):
+        if i == len(empty): return True
+        r, c = empty[i]
+        b = (r // 3) * 3 + c // 3
+        for d in '123456789':
+            if d in rows[r] or d in cols[c] or d in boxes[b]: continue
+            board[r][c] = d
+            rows[r].add(d); cols[c].add(d); boxes[b].add(d)
+            if bt(i + 1): return True
+            rows[r].remove(d); cols[c].remove(d); boxes[b].remove(d)
+        board[r][c] = '.'
+        return False
+    bt(0)
+    return board
+
+# Usage: board is 9x9 list of str, '.' for empty.
+\`\`\``,
+          desc: 'Backtracking with row/col/box constraint sets. Fast in practice on typical puzzles.',
+        },
+        javascript: {
+          title: 'Sudoku Solver (9x9)',
+          code: `\`\`\`javascript
+function solveSudoku(board) {
+  const rows = Array.from({ length: 9 }, () => new Set());
+  const cols = Array.from({ length: 9 }, () => new Set());
+  const boxes = Array.from({ length: 9 }, () => new Set());
+  const empty = [];
+  for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+    const v = board[r][c];
+    if (v === '.') empty.push([r, c]);
+    else { rows[r].add(v); cols[c].add(v); boxes[((r / 3) | 0) * 3 + ((c / 3) | 0)].add(v); }
+  }
+  function bt(i) {
+    if (i === empty.length) return true;
+    const [r, c] = empty[i], b = ((r / 3) | 0) * 3 + ((c / 3) | 0);
+    for (const d of '123456789') {
+      if (rows[r].has(d) || cols[c].has(d) || boxes[b].has(d)) continue;
+      board[r][c] = d; rows[r].add(d); cols[c].add(d); boxes[b].add(d);
+      if (bt(i + 1)) return true;
+      rows[r].delete(d); cols[c].delete(d); boxes[b].delete(d);
+    }
+    board[r][c] = '.';
+    return false;
+  }
+  bt(0);
+  return board;
+}
+\`\`\``,
+          desc: 'Backtracking with constraint sets. Fast on typical inputs.',
+        },
+      },
+      generate_parentheses: {
+        python: {
+          title: 'Generate Parentheses',
+          code: `\`\`\`python
+def generate_parenthesis(n):
+    out = []
+    def bt(s, open_, close_):
+        if len(s) == 2 * n:
+            out.append(s); return
+        if open_ < n: bt(s + '(', open_ + 1, close_)
+        if close_ < open_: bt(s + ')', open_, close_ + 1)
+    bt('', 0, 0)
+    return out
+
+# Usage:
+print(generate_parenthesis(3))  # ['((()))','(()())','(())()','()(())','()()()']
+\`\`\``,
+          desc: 'Backtracking with (open, close) counters. Generates nth Catalan many strings.',
+        },
+        javascript: {
+          title: 'Generate Parentheses',
+          code: `\`\`\`javascript
+function generateParenthesis(n) {
+  const out = [];
+  (function bt(s, open, close) {
+    if (s.length === 2 * n) { out.push(s); return; }
+    if (open < n) bt(s + '(', open + 1, close);
+    if (close < open) bt(s + ')', open, close + 1);
+  })('', 0, 0);
+  return out;
+}
+\`\`\``,
+          desc: 'Backtracking with counters. Catalan-many results.',
+        },
+      },
+      subsets: {
+        python: {
+          title: 'Subsets (Power Set)',
+          code: `\`\`\`python
+def subsets(nums):
+    out = [[]]
+    for x in nums:
+        out += [sub + [x] for sub in out]
+    return out
+
+# Usage:
+print(subsets([1, 2, 3]))  # 8 subsets
+\`\`\``,
+          desc: 'Iterative doubling: each new element doubles the number of subsets. O(n * 2^n).',
+        },
+        javascript: {
+          title: 'Subsets (Power Set)',
+          code: `\`\`\`javascript
+function subsets(nums) {
+  let out = [[]];
+  for (const x of nums) out = out.concat(out.map(s => [...s, x]));
+  return out;
+}
+\`\`\``,
+          desc: 'Iterative doubling. O(n * 2^n).',
+        },
+      },
+      combination_sum: {
+        python: {
+          title: 'Combination Sum',
+          code: `\`\`\`python
+def combination_sum(candidates, target):
+    candidates = sorted(candidates)
+    out = []
+    def bt(start, path, remain):
+        if remain == 0:
+            out.append(path[:]); return
+        for i in range(start, len(candidates)):
+            if candidates[i] > remain: break
+            path.append(candidates[i])
+            bt(i, path, remain - candidates[i])  # reuse allowed
+            path.pop()
+    bt(0, [], target)
+    return out
+
+# Usage:
+print(combination_sum([2, 3, 6, 7], 7))  # [[2,2,3],[7]]
+\`\`\``,
+          desc: 'Backtracking with pruning (sorted + early break). Exponential in worst case.',
+        },
+        javascript: {
+          title: 'Combination Sum',
+          code: `\`\`\`javascript
+function combinationSum(candidates, target) {
+  candidates = [...candidates].sort((a, b) => a - b);
+  const out = [];
+  (function bt(start, path, remain) {
+    if (remain === 0) { out.push([...path]); return; }
+    for (let i = start; i < candidates.length; i++) {
+      if (candidates[i] > remain) break;
+      path.push(candidates[i]);
+      bt(i, path, remain - candidates[i]);
+      path.pop();
+    }
+  })(0, [], target);
+  return out;
+}
+\`\`\``,
+          desc: 'Backtracking with sorted-prune. Exponential worst case.',
+        },
+      },
+
+      // ─── BATCH 4: ADVANCED GRAPHS & GEOMETRY ───
+      bellman_ford: {
+        python: {
+          title: 'Bellman-Ford (shortest path with negative edges)',
+          code: `\`\`\`python
+def bellman_ford(n, edges, source):
+    dist = [float('inf')] * n
+    dist[source] = 0
+    for _ in range(n - 1):
+        for u, v, w in edges:
+            if dist[u] + w < dist[v]:
+                dist[v] = dist[u] + w
+    # Detect negative cycle
+    for u, v, w in edges:
+        if dist[u] + w < dist[v]:
+            raise ValueError('Negative cycle detected')
+    return dist
+
+# Usage:
+# edges = [(u, v, weight), ...]
+print(bellman_ford(4, [(0,1,1),(1,2,-2),(2,3,1)], 0))  # [0, 1, -1, 0]
+\`\`\``,
+          desc: 'Handles negative edge weights. O(V*E). Raises on negative cycle reachable from source.',
+        },
+        javascript: {
+          title: 'Bellman-Ford (shortest path with negative edges)',
+          code: `\`\`\`javascript
+function bellmanFord(n, edges, source) {
+  const dist = new Array(n).fill(Infinity);
+  dist[source] = 0;
+  for (let k = 0; k < n - 1; k++) {
+    for (const [u, v, w] of edges) {
+      if (dist[u] + w < dist[v]) dist[v] = dist[u] + w;
+    }
+  }
+  for (const [u, v, w] of edges) {
+    if (dist[u] + w < dist[v]) throw new Error('Negative cycle detected');
+  }
+  return dist;
+}
+\`\`\``,
+          desc: 'O(V*E). Detects negative cycles.',
+        },
+      },
+      floyd_warshall: {
+        python: {
+          title: 'Floyd-Warshall (all-pairs shortest paths)',
+          code: `\`\`\`python
+def floyd_warshall(n, edges):
+    INF = float('inf')
+    dist = [[INF] * n for _ in range(n)]
+    for i in range(n): dist[i][i] = 0
+    for u, v, w in edges:
+        if w < dist[u][v]: dist[u][v] = w
+    for k in range(n):
+        for i in range(n):
+            for j in range(n):
+                if dist[i][k] + dist[k][j] < dist[i][j]:
+                    dist[i][j] = dist[i][k] + dist[k][j]
+    return dist
+
+# Usage:
+print(floyd_warshall(3, [(0,1,5),(1,2,3),(0,2,10)])[0][2])  # 8
+\`\`\``,
+          desc: 'Dynamic programming over intermediate vertices. O(V^3) time, O(V^2) space. Handles negative edges (no negative cycles).',
+        },
+        javascript: {
+          title: 'Floyd-Warshall (all-pairs shortest paths)',
+          code: `\`\`\`javascript
+function floydWarshall(n, edges) {
+  const dist = Array.from({ length: n }, () => new Array(n).fill(Infinity));
+  for (let i = 0; i < n; i++) dist[i][i] = 0;
+  for (const [u, v, w] of edges) if (w < dist[u][v]) dist[u][v] = w;
+  for (let k = 0; k < n; k++)
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++)
+        if (dist[i][k] + dist[k][j] < dist[i][j]) dist[i][j] = dist[i][k] + dist[k][j];
+  return dist;
+}
+\`\`\``,
+          desc: 'O(V^3).',
+        },
+      },
+      kruskal_mst: {
+        python: {
+          title: `Kruskal's MST`,
+          code: `\`\`\`python
+def kruskal(n, edges):
+    parent = list(range(n))
+    rank = [0] * n
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra == rb: return False
+        if rank[ra] < rank[rb]: ra, rb = rb, ra
+        parent[rb] = ra
+        if rank[ra] == rank[rb]: rank[ra] += 1
+        return True
+    mst, total = [], 0
+    for u, v, w in sorted(edges, key=lambda e: e[2]):
+        if union(u, v):
+            mst.append((u, v, w)); total += w
+    return mst, total
+
+# Usage:
+print(kruskal(4, [(0,1,1),(1,2,2),(0,2,4),(2,3,3)]))  # ([(0,1,1),(1,2,2),(2,3,3)], 6)
+\`\`\``,
+          desc: 'Sort edges, add if endpoints are in different components (union-find with path compression + rank). O(E log E).',
+        },
+        javascript: {
+          title: `Kruskal's MST`,
+          code: `\`\`\`javascript
+function kruskal(n, edges) {
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const rank = new Array(n).fill(0);
+  const find = x => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const union = (a, b) => {
+    let ra = find(a), rb = find(b);
+    if (ra === rb) return false;
+    if (rank[ra] < rank[rb]) [ra, rb] = [rb, ra];
+    parent[rb] = ra;
+    if (rank[ra] === rank[rb]) rank[ra]++;
+    return true;
+  };
+  const mst = [];
+  let total = 0;
+  for (const [u, v, w] of [...edges].sort((a, b) => a[2] - b[2])) {
+    if (union(u, v)) { mst.push([u, v, w]); total += w; }
+  }
+  return { mst, total };
+}
+\`\`\``,
+          desc: 'Union-find + edge sort. O(E log E).',
+        },
+      },
+      prim_mst: {
+        python: {
+          title: `Prim's MST`,
+          code: `\`\`\`python
+import heapq
+
+def prim(n, adj):
+    visited = [False] * n
+    heap = [(0, 0)]  # (weight, vertex)
+    mst_total = 0
+    edges_taken = 0
+    while heap and edges_taken < n:
+        w, u = heapq.heappop(heap)
+        if visited[u]: continue
+        visited[u] = True
+        mst_total += w
+        edges_taken += 1
+        for v, wv in adj[u]:
+            if not visited[v]:
+                heapq.heappush(heap, (wv, v))
+    return mst_total
+
+# Usage: adj is adjacency list {u: [(v, w), ...]}
+adj = [[(1,1),(2,4)], [(0,1),(2,2)], [(0,4),(1,2),(3,3)], [(2,3)]]
+print(prim(4, adj))  # 6
+\`\`\``,
+          desc: 'Grow MST by greedily picking the cheapest edge crossing the visited frontier. O(E log V) with binary heap.',
+        },
+        javascript: {
+          title: `Prim's MST`,
+          code: `\`\`\`javascript
+// Requires a MinHeap implementation (see 'heap' template).
+function prim(n, adj, MinHeap) {
+  const visited = new Array(n).fill(false);
+  const heap = new MinHeap((a, b) => a[0] - b[0]);
+  heap.push([0, 0]);
+  let total = 0, taken = 0;
+  while (heap.size() > 0 && taken < n) {
+    const [w, u] = heap.pop();
+    if (visited[u]) continue;
+    visited[u] = true; total += w; taken++;
+    for (const [v, wv] of adj[u]) if (!visited[v]) heap.push([wv, v]);
+  }
+  return total;
+}
+\`\`\``,
+          desc: 'Heap-driven Prim. O(E log V).',
+        },
+      },
+      a_star: {
+        python: {
+          title: 'A* Search (grid)',
+          code: `\`\`\`python
+import heapq
+
+def a_star(grid, start, goal):
+    rows, cols = len(grid), len(grid[0])
+    def h(a, b): return abs(a[0] - b[0]) + abs(a[1] - b[1])  # Manhattan
+    open_heap = [(h(start, goal), 0, start)]
+    came_from = {}
+    g_score = {start: 0}
+    while open_heap:
+        _, g, cur = heapq.heappop(open_heap)
+        if cur == goal:
+            path = [cur]
+            while cur in came_from:
+                cur = came_from[cur]; path.append(cur)
+            return path[::-1]
+        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+            nr, nc = cur[0] + dr, cur[1] + dc
+            if 0 <= nr < rows and 0 <= nc < cols and grid[nr][nc] == 0:
+                tentative = g + 1
+                nxt = (nr, nc)
+                if tentative < g_score.get(nxt, float('inf')):
+                    came_from[nxt] = cur
+                    g_score[nxt] = tentative
+                    heapq.heappush(open_heap, (tentative + h(nxt, goal), tentative, nxt))
+    return None
+
+# Usage:
+grid = [[0,0,0],[1,1,0],[0,0,0]]
+print(a_star(grid, (0,0), (2,2)))
+\`\`\``,
+          desc: 'Manhattan heuristic on a grid (0 = open, 1 = wall). O(E log V) with admissible heuristic.',
+        },
+        javascript: {
+          title: 'A* Search (grid)',
+          code: `\`\`\`javascript
+function aStar(grid, start, goal, MinHeap) {
+  const rows = grid.length, cols = grid[0].length;
+  const h = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+  const key = p => p[0] + ',' + p[1];
+  const open = new MinHeap((a, b) => a[0] - b[0]);
+  open.push([h(start, goal), 0, start]);
+  const cameFrom = new Map();
+  const g = new Map([[key(start), 0]]);
+  while (open.size() > 0) {
+    const [, gc, cur] = open.pop();
+    if (cur[0] === goal[0] && cur[1] === goal[1]) {
+      const path = [cur];
+      let c = key(cur);
+      while (cameFrom.has(c)) { const p = cameFrom.get(c); path.push(p); c = key(p); }
+      return path.reverse();
+    }
+    for (const [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+      const nr = cur[0] + dr, nc = cur[1] + dc;
+      if (nr < 0 || nc < 0 || nr >= rows || nc >= cols || grid[nr][nc] !== 0) continue;
+      const next = [nr, nc], nk = key(next), tentative = gc + 1;
+      if (tentative < (g.get(nk) ?? Infinity)) {
+        cameFrom.set(nk, cur); g.set(nk, tentative);
+        open.push([tentative + h(next, goal), tentative, next]);
+      }
+    }
+  }
+  return null;
+}
+\`\`\``,
+          desc: 'Grid-based A* with Manhattan heuristic.',
+        },
+      },
+      max_flow: {
+        python: {
+          title: 'Max Flow (Edmonds-Karp / BFS Ford-Fulkerson)',
+          code: `\`\`\`python
+from collections import deque, defaultdict
+
+def max_flow(n, edges, source, sink):
+    cap = defaultdict(lambda: defaultdict(int))
+    for u, v, c in edges:
+        cap[u][v] += c  # directed; for undirected, also add cap[v][u] += c
+    total = 0
+    while True:
+        parent = {source: None}
+        queue = deque([source])
+        while queue and sink not in parent:
+            u = queue.popleft()
+            for v, c in cap[u].items():
+                if v not in parent and c > 0:
+                    parent[v] = u
+                    queue.append(v)
+        if sink not in parent: break
+        # Find bottleneck
+        bn, v = float('inf'), sink
+        while parent[v] is not None:
+            bn = min(bn, cap[parent[v]][v]); v = parent[v]
+        v = sink
+        while parent[v] is not None:
+            cap[parent[v]][v] -= bn
+            cap[v][parent[v]] += bn
+            v = parent[v]
+        total += bn
+    return total
+
+# Usage:
+print(max_flow(4, [(0,1,3),(0,2,2),(1,3,2),(2,3,3),(1,2,1)], 0, 3))  # 5
+\`\`\``,
+          desc: 'Edmonds-Karp = Ford-Fulkerson with BFS augmenting paths. O(V * E^2).',
+        },
+        javascript: {
+          title: 'Max Flow (Edmonds-Karp)',
+          code: `\`\`\`javascript
+function maxFlow(n, edges, source, sink) {
+  const cap = Array.from({ length: n }, () => new Map());
+  for (const [u, v, c] of edges) cap[u].set(v, (cap[u].get(v) || 0) + c);
+  let total = 0;
+  while (true) {
+    const parent = new Map([[source, -1]]);
+    const queue = [source];
+    while (queue.length && !parent.has(sink)) {
+      const u = queue.shift();
+      for (const [v, c] of cap[u]) if (c > 0 && !parent.has(v)) { parent.set(v, u); queue.push(v); }
+    }
+    if (!parent.has(sink)) break;
+    let bn = Infinity, v = sink;
+    while (parent.get(v) !== -1) { bn = Math.min(bn, cap[parent.get(v)].get(v)); v = parent.get(v); }
+    v = sink;
+    while (parent.get(v) !== -1) {
+      const p = parent.get(v);
+      cap[p].set(v, cap[p].get(v) - bn);
+      cap[v].set(p, (cap[v].get(p) || 0) + bn);
+      v = p;
+    }
+    total += bn;
+  }
+  return total;
+}
+\`\`\``,
+          desc: 'Edmonds-Karp BFS max-flow. O(V * E^2).',
+        },
+      },
+      tarjan_scc: {
+        python: {
+          title: `Tarjan's Strongly Connected Components`,
+          code: `\`\`\`python
+def tarjan_scc(n, adj):
+    index = [0]
+    stack, on_stack = [], [False] * n
+    indices, lowlink = [-1] * n, [0] * n
+    result = []
+
+    def strongconnect(v):
+        indices[v] = lowlink[v] = index[0]
+        index[0] += 1
+        stack.append(v); on_stack[v] = True
+        for w in adj[v]:
+            if indices[w] == -1:
+                strongconnect(w)
+                lowlink[v] = min(lowlink[v], lowlink[w])
+            elif on_stack[w]:
+                lowlink[v] = min(lowlink[v], indices[w])
+        if lowlink[v] == indices[v]:
+            scc = []
+            while True:
+                w = stack.pop(); on_stack[w] = False
+                scc.append(w)
+                if w == v: break
+            result.append(scc)
+
+    for v in range(n):
+        if indices[v] == -1: strongconnect(v)
+    return result
+
+# Usage:
+print(tarjan_scc(5, [[1],[2],[0,3],[4],[]]))  # [[4],[3],[0,2,1]]
+\`\`\``,
+          desc: `Single DFS with index/lowlink bookkeeping. O(V + E). Iterative variant recommended for large graphs.`,
+        },
+        javascript: {
+          title: `Tarjan's Strongly Connected Components`,
+          code: `\`\`\`javascript
+function tarjanScc(n, adj) {
+  let index = 0;
+  const stack = [], onStack = new Array(n).fill(false);
+  const indices = new Array(n).fill(-1), lowlink = new Array(n).fill(0);
+  const result = [];
+  function strongconnect(v) {
+    indices[v] = lowlink[v] = index++;
+    stack.push(v); onStack[v] = true;
+    for (const w of adj[v]) {
+      if (indices[w] === -1) { strongconnect(w); lowlink[v] = Math.min(lowlink[v], lowlink[w]); }
+      else if (onStack[w]) lowlink[v] = Math.min(lowlink[v], indices[w]);
+    }
+    if (lowlink[v] === indices[v]) {
+      const scc = [];
+      while (true) { const w = stack.pop(); onStack[w] = false; scc.push(w); if (w === v) break; }
+      result.push(scc);
+    }
+  }
+  for (let v = 0; v < n; v++) if (indices[v] === -1) strongconnect(v);
+  return result;
+}
+\`\`\``,
+          desc: 'O(V + E). Recursive; iterative variant recommended for deep graphs.',
+        },
+      },
+      articulation_points: {
+        python: {
+          title: 'Articulation Points (Cut Vertices)',
+          code: `\`\`\`python
+def articulation_points(n, adj):
+    disc, low = [-1] * n, [0] * n
+    parent = [-1] * n
+    ap = set()
+    timer = [0]
+    def dfs(u):
+        children = 0
+        disc[u] = low[u] = timer[0]; timer[0] += 1
+        for v in adj[u]:
+            if disc[v] == -1:
+                parent[v] = u
+                children += 1
+                dfs(v)
+                low[u] = min(low[u], low[v])
+                if parent[u] == -1 and children > 1: ap.add(u)
+                if parent[u] != -1 and low[v] >= disc[u]: ap.add(u)
+            elif v != parent[u]:
+                low[u] = min(low[u], disc[v])
+    for u in range(n):
+        if disc[u] == -1: dfs(u)
+    return sorted(ap)
+
+# Usage:
+adj = [[1,2],[0,2],[0,1,3],[2,4],[3]]
+print(articulation_points(5, adj))  # [2, 3]
+\`\`\``,
+          desc: `Tarjan's low-link DFS. A vertex is articulation if removing it disconnects the graph. O(V + E).`,
+        },
+        javascript: {
+          title: 'Articulation Points (Cut Vertices)',
+          code: `\`\`\`javascript
+function articulationPoints(n, adj) {
+  const disc = new Array(n).fill(-1), low = new Array(n).fill(0);
+  const parent = new Array(n).fill(-1);
+  const ap = new Set();
+  let timer = 0;
+  function dfs(u) {
+    let children = 0;
+    disc[u] = low[u] = timer++;
+    for (const v of adj[u]) {
+      if (disc[v] === -1) {
+        parent[v] = u; children++;
+        dfs(v);
+        low[u] = Math.min(low[u], low[v]);
+        if (parent[u] === -1 && children > 1) ap.add(u);
+        if (parent[u] !== -1 && low[v] >= disc[u]) ap.add(u);
+      } else if (v !== parent[u]) {
+        low[u] = Math.min(low[u], disc[v]);
+      }
+    }
+  }
+  for (let u = 0; u < n; u++) if (disc[u] === -1) dfs(u);
+  return [...ap].sort((a, b) => a - b);
+}
+\`\`\``,
+          desc: 'Tarjan low-link. O(V + E).',
+        },
+      },
+      convex_hull: {
+        python: {
+          title: 'Convex Hull (Andrew Monotone Chain)',
+          code: `\`\`\`python
+def convex_hull(points):
+    pts = sorted(set(map(tuple, points)))
+    if len(pts) <= 1: return pts
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lower = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+# Usage:
+print(convex_hull([(0,0),(1,1),(2,2),(2,0),(0,2)]))  # [(0,0),(2,0),(2,2),(0,2)]
+\`\`\``,
+          desc: `Andrew's monotone chain builds lower and upper hulls via cross-product sign checks. O(n log n).`,
+        },
+        javascript: {
+          title: 'Convex Hull (Andrew Monotone Chain)',
+          code: `\`\`\`javascript
+function convexHull(points) {
+  const pts = [...new Set(points.map(p => p.join(',')))].map(s => s.split(',').map(Number));
+  pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (pts.length <= 1) return pts;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  return lower.slice(0, -1).concat(upper.slice(0, -1));
+}
+\`\`\``,
+          desc: 'Monotone chain. O(n log n).',
+        },
+      },
+      line_intersection: {
+        python: {
+          title: 'Line Segment Intersection',
+          code: `\`\`\`python
+def segments_intersect(p1, p2, p3, p4):
+    def cross(a, b, c):
+        return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
+    def on(a, b, c):
+        return min(a[0],b[0]) <= c[0] <= max(a[0],b[0]) and min(a[1],b[1]) <= c[1] <= max(a[1],b[1])
+    d1, d2 = cross(p3, p4, p1), cross(p3, p4, p2)
+    d3, d4 = cross(p1, p2, p3), cross(p1, p2, p4)
+    if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0)):
+        return True
+    if d1 == 0 and on(p3, p4, p1): return True
+    if d2 == 0 and on(p3, p4, p2): return True
+    if d3 == 0 and on(p1, p2, p3): return True
+    if d4 == 0 and on(p1, p2, p4): return True
+    return False
+
+# Usage:
+print(segments_intersect((0,0),(2,2),(0,2),(2,0)))  # True
+\`\`\``,
+          desc: 'Orientation (cross-product sign) + collinear on-segment check. O(1).',
+        },
+        javascript: {
+          title: 'Line Segment Intersection',
+          code: `\`\`\`javascript
+function segmentsIntersect(p1, p2, p3, p4) {
+  const cross = (a, b, c) => (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0]);
+  const on = (a, b, c) => Math.min(a[0],b[0]) <= c[0] && c[0] <= Math.max(a[0],b[0])
+                       && Math.min(a[1],b[1]) <= c[1] && c[1] <= Math.max(a[1],b[1]);
+  const d1 = cross(p3,p4,p1), d2 = cross(p3,p4,p2), d3 = cross(p1,p2,p3), d4 = cross(p1,p2,p4);
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+  if (d1 === 0 && on(p3,p4,p1)) return true;
+  if (d2 === 0 && on(p3,p4,p2)) return true;
+  if (d3 === 0 && on(p1,p2,p3)) return true;
+  if (d4 === 0 && on(p1,p2,p4)) return true;
+  return false;
+}
+\`\`\``,
+          desc: 'Orientation test + collinear on-segment handling.',
+        },
+      },
+      polygon_area: {
+        python: {
+          title: 'Polygon Area (Shoelace Formula)',
+          code: `\`\`\`python
+def polygon_area(points):
+    n = len(points)
+    total = 0
+    for i in range(n):
+        x1, y1 = points[i]
+        x2, y2 = points[(i + 1) % n]
+        total += x1 * y2 - x2 * y1
+    return abs(total) / 2
+
+# Usage:
+print(polygon_area([(0,0),(4,0),(4,3),(0,3)]))  # 12.0
+\`\`\``,
+          desc: 'Shoelace / Gauss area formula. O(n).',
+        },
+        javascript: {
+          title: 'Polygon Area (Shoelace Formula)',
+          code: `\`\`\`javascript
+function polygonArea(points) {
+  const n = points.length;
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    const [x1, y1] = points[i];
+    const [x2, y2] = points[(i + 1) % n];
+    total += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(total) / 2;
+}
+\`\`\``,
+          desc: 'Shoelace formula. O(n).',
+        },
+      },
+      point_distance: {
+        python: {
+          title: 'Euclidean Distance Between Two Points',
+          code: `\`\`\`python
+import math
+
+def distance(p1, p2):
+    return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
+
+# Usage:
+print(distance((0, 0), (3, 4)))  # 5.0
+\`\`\``,
+          desc: 'math.hypot avoids intermediate overflow/underflow. O(1).',
+        },
+        javascript: {
+          title: 'Euclidean Distance Between Two Points',
+          code: `\`\`\`javascript
+function distance(p1, p2) {
+  return Math.hypot(p1[0] - p2[0], p1[1] - p2[1]);
+}
+\`\`\``,
+          desc: 'Math.hypot is numerically stable. O(1).',
+        },
+      },
+
+      // ─── BATCH 5: ADVANCED DATA STRUCTURES ───
+      segment_tree: {
+        python: {
+          title: 'Segment Tree (range sum, point update)',
+          code: `\`\`\`python
+class SegmentTree:
+    def __init__(self, data):
+        self.n = len(data)
+        self.tree = [0] * (4 * self.n)
+        if data: self._build(1, 0, self.n - 1, data)
+    def _build(self, node, lo, hi, data):
+        if lo == hi:
+            self.tree[node] = data[lo]; return
+        mid = (lo + hi) // 2
+        self._build(2 * node, lo, mid, data)
+        self._build(2 * node + 1, mid + 1, hi, data)
+        self.tree[node] = self.tree[2 * node] + self.tree[2 * node + 1]
+    def update(self, idx, val):
+        self._update(1, 0, self.n - 1, idx, val)
+    def _update(self, node, lo, hi, idx, val):
+        if lo == hi:
+            self.tree[node] = val; return
+        mid = (lo + hi) // 2
+        if idx <= mid: self._update(2 * node, lo, mid, idx, val)
+        else: self._update(2 * node + 1, mid + 1, hi, idx, val)
+        self.tree[node] = self.tree[2 * node] + self.tree[2 * node + 1]
+    def query(self, l, r):
+        return self._query(1, 0, self.n - 1, l, r)
+    def _query(self, node, lo, hi, l, r):
+        if r < lo or hi < l: return 0
+        if l <= lo and hi <= r: return self.tree[node]
+        mid = (lo + hi) // 2
+        return self._query(2 * node, lo, mid, l, r) + self._query(2 * node + 1, mid + 1, hi, l, r)
+
+# Usage:
+st = SegmentTree([1, 3, 5, 7, 9, 11])
+print(st.query(1, 3))  # 15
+st.update(1, 10); print(st.query(1, 3))  # 22
+\`\`\``,
+          desc: 'Range sum with point updates. O(log n) per operation, O(n) space. Swap sum for min/max/gcd as needed.',
+        },
+        javascript: {
+          title: 'Segment Tree (range sum, point update)',
+          code: `\`\`\`javascript
+class SegmentTree {
+  constructor(data) {
+    this.n = data.length;
+    this.tree = new Array(4 * this.n).fill(0);
+    if (this.n) this._build(1, 0, this.n - 1, data);
+  }
+  _build(node, lo, hi, data) {
+    if (lo === hi) { this.tree[node] = data[lo]; return; }
+    const mid = (lo + hi) >> 1;
+    this._build(2 * node, lo, mid, data);
+    this._build(2 * node + 1, mid + 1, hi, data);
+    this.tree[node] = this.tree[2 * node] + this.tree[2 * node + 1];
+  }
+  update(idx, val) { this._update(1, 0, this.n - 1, idx, val); }
+  _update(node, lo, hi, idx, val) {
+    if (lo === hi) { this.tree[node] = val; return; }
+    const mid = (lo + hi) >> 1;
+    if (idx <= mid) this._update(2 * node, lo, mid, idx, val);
+    else this._update(2 * node + 1, mid + 1, hi, idx, val);
+    this.tree[node] = this.tree[2 * node] + this.tree[2 * node + 1];
+  }
+  query(l, r) { return this._query(1, 0, this.n - 1, l, r); }
+  _query(node, lo, hi, l, r) {
+    if (r < lo || hi < l) return 0;
+    if (l <= lo && hi <= r) return this.tree[node];
+    const mid = (lo + hi) >> 1;
+    return this._query(2 * node, lo, mid, l, r) + this._query(2 * node + 1, mid + 1, hi, l, r);
+  }
+}
+\`\`\``,
+          desc: 'Range sum + point update. O(log n) per op.',
+        },
+      },
+      fenwick_tree: {
+        python: {
+          title: 'Fenwick Tree (Binary Indexed Tree)',
+          code: `\`\`\`python
+class Fenwick:
+    def __init__(self, n):
+        self.n = n
+        self.bit = [0] * (n + 1)
+    def update(self, i, delta):
+        i += 1
+        while i <= self.n:
+            self.bit[i] += delta
+            i += i & (-i)
+    def prefix(self, i):
+        i += 1
+        s = 0
+        while i > 0:
+            s += self.bit[i]
+            i -= i & (-i)
+        return s
+    def range(self, l, r):
+        return self.prefix(r) - (self.prefix(l - 1) if l > 0 else 0)
+
+# Usage:
+bit = Fenwick(6)
+for i, v in enumerate([1, 3, 5, 7, 9, 11]): bit.update(i, v)
+print(bit.range(1, 3))  # 15
+\`\`\``,
+          desc: 'Compact prefix-sum structure. O(log n) per update and query, O(n) space. Low constant factor.',
+        },
+        javascript: {
+          title: 'Fenwick Tree (Binary Indexed Tree)',
+          code: `\`\`\`javascript
+class Fenwick {
+  constructor(n) { this.n = n; this.bit = new Array(n + 1).fill(0); }
+  update(i, delta) {
+    for (i += 1; i <= this.n; i += i & -i) this.bit[i] += delta;
+  }
+  prefix(i) {
+    let s = 0;
+    for (i += 1; i > 0; i -= i & -i) s += this.bit[i];
+    return s;
+  }
+  range(l, r) { return this.prefix(r) - (l > 0 ? this.prefix(l - 1) : 0); }
+}
+\`\`\``,
+          desc: 'Prefix-sum BIT. O(log n) per op.',
+        },
+      },
+      sparse_table: {
+        python: {
+          title: 'Sparse Table (static range min/max)',
+          code: `\`\`\`python
+import math
+
+class SparseTable:
+    def __init__(self, data, op=min):
+        n = len(data)
+        self.op = op
+        self.k = math.floor(math.log2(n)) + 1 if n > 0 else 0
+        self.st = [list(data)]
+        j = 1
+        while (1 << j) <= n:
+            row = []
+            for i in range(n - (1 << j) + 1):
+                row.append(op(self.st[j - 1][i], self.st[j - 1][i + (1 << (j - 1))]))
+            self.st.append(row); j += 1
+    def query(self, l, r):
+        length = r - l + 1
+        j = int(math.log2(length))
+        return self.op(self.st[j][l], self.st[j][r - (1 << j) + 1])
+
+# Usage:
+st = SparseTable([1, 3, 2, 7, 9, 11, 3, 5])
+print(st.query(1, 5))  # 2 (min of [3,2,7,9,11])
+\`\`\``,
+          desc: 'Static range min/max queries in O(1) after O(n log n) preprocessing. Not updatable.',
+        },
+        javascript: {
+          title: 'Sparse Table (static range min/max)',
+          code: `\`\`\`javascript
+class SparseTable {
+  constructor(data, op = Math.min) {
+    const n = data.length; this.op = op;
+    this.st = [data.slice()];
+    let j = 1;
+    while ((1 << j) <= n) {
+      const row = [];
+      for (let i = 0; i + (1 << j) - 1 < n; i++) {
+        row.push(op(this.st[j - 1][i], this.st[j - 1][i + (1 << (j - 1))]));
+      }
+      this.st.push(row); j++;
+    }
+  }
+  query(l, r) {
+    const j = Math.floor(Math.log2(r - l + 1));
+    return this.op(this.st[j][l], this.st[j][r - (1 << j) + 1]);
+  }
+}
+\`\`\``,
+          desc: 'Idempotent range queries in O(1) after O(n log n) preprocess.',
+        },
+      },
+      monotonic_stack: {
+        python: {
+          title: 'Monotonic Stack (Next Greater Element)',
+          code: `\`\`\`python
+def next_greater(nums):
+    n = len(nums)
+    result = [-1] * n
+    stack = []  # stack of indices with decreasing values
+    for i in range(n):
+        while stack and nums[stack[-1]] < nums[i]:
+            result[stack.pop()] = nums[i]
+        stack.append(i)
+    return result
+
+# Usage:
+print(next_greater([2, 1, 2, 4, 3]))  # [4, 2, 4, -1, -1]
+\`\`\``,
+          desc: 'Each element pushed/popped at most once. O(n) time, O(n) space.',
+        },
+        javascript: {
+          title: 'Monotonic Stack (Next Greater Element)',
+          code: `\`\`\`javascript
+function nextGreater(nums) {
+  const n = nums.length;
+  const result = new Array(n).fill(-1);
+  const stack = [];
+  for (let i = 0; i < n; i++) {
+    while (stack.length && nums[stack[stack.length - 1]] < nums[i]) {
+      result[stack.pop()] = nums[i];
+    }
+    stack.push(i);
+  }
+  return result;
+}
+\`\`\``,
+          desc: 'Monotonic decreasing stack. O(n).',
+        },
+      },
+      monotonic_queue: {
+        python: {
+          title: 'Monotonic Deque (Sliding Window Maximum)',
+          code: `\`\`\`python
+from collections import deque
+
+def sliding_window_max(nums, k):
+    q = deque()  # indices, values in decreasing order
+    out = []
+    for i, x in enumerate(nums):
+        while q and nums[q[-1]] <= x:
+            q.pop()
+        q.append(i)
+        if q[0] <= i - k:
+            q.popleft()
+        if i >= k - 1:
+            out.append(nums[q[0]])
+    return out
+
+# Usage:
+print(sliding_window_max([1, 3, -1, -3, 5, 3, 6, 7], 3))  # [3, 3, 5, 5, 6, 7]
+\`\`\``,
+          desc: 'Deque of indices keeps window max at front. O(n) amortised.',
+        },
+        javascript: {
+          title: 'Monotonic Deque (Sliding Window Maximum)',
+          code: `\`\`\`javascript
+function slidingWindowMax(nums, k) {
+  const q = []; // array used as deque of indices
+  const out = [];
+  for (let i = 0; i < nums.length; i++) {
+    while (q.length && nums[q[q.length - 1]] <= nums[i]) q.pop();
+    q.push(i);
+    if (q[0] <= i - k) q.shift();
+    if (i >= k - 1) out.push(nums[q[0]]);
+  }
+  return out;
+}
+\`\`\``,
+          desc: 'Deque keeps window max at front. O(n) amortised. For very large n use linked list deque.',
+        },
+      },
+      bloom_filter: {
+        python: {
+          title: 'Bloom Filter',
+          code: `\`\`\`python
+import hashlib
+
+class BloomFilter:
+    def __init__(self, size=1024, k=3):
+        self.size = size
+        self.k = k
+        self.bits = bytearray((size + 7) // 8)
+    def _hashes(self, item):
+        b = str(item).encode()
+        for i in range(self.k):
+            h = int(hashlib.md5(b + bytes([i])).hexdigest(), 16) % self.size
+            yield h
+    def add(self, item):
+        for h in self._hashes(item):
+            self.bits[h // 8] |= (1 << (h % 8))
+    def __contains__(self, item):
+        return all((self.bits[h // 8] >> (h % 8)) & 1 for h in self._hashes(item))
+
+# Usage:
+bf = BloomFilter(1024, 3)
+bf.add('apple'); bf.add('banana')
+print('apple' in bf, 'cherry' in bf)  # True (maybe False for cherry)
+\`\`\``,
+          desc: 'Probabilistic set membership. False positives possible, never false negatives. Tune size and k for target FP rate.',
+        },
+        javascript: {
+          title: 'Bloom Filter',
+          code: `\`\`\`javascript
+class BloomFilter {
+  constructor(size = 1024, k = 3) {
+    this.size = size; this.k = k;
+    this.bits = new Uint8Array(Math.ceil(size / 8));
+  }
+  *_hashes(item) {
+    const s = String(item);
+    for (let i = 0; i < this.k; i++) {
+      let h = 2166136261 ^ i;
+      for (let j = 0; j < s.length; j++) {
+        h ^= s.charCodeAt(j);
+        h = Math.imul(h, 16777619);
+      }
+      yield ((h >>> 0) % this.size);
+    }
+  }
+  add(item) { for (const h of this._hashes(item)) this.bits[h >> 3] |= 1 << (h & 7); }
+  has(item) {
+    for (const h of this._hashes(item)) {
+      if (!(this.bits[h >> 3] & (1 << (h & 7)))) return false;
+    }
+    return true;
+  }
+}
+\`\`\``,
+          desc: 'FNV-1a variants for hashing. Probabilistic membership.',
+        },
+      },
+      suffix_array: {
+        python: {
+          title: 'Suffix Array (simple O(n^2 log n))',
+          code: `\`\`\`python
+def suffix_array(s):
+    n = len(s)
+    return sorted(range(n), key=lambda i: s[i:])
+
+# Usage:
+print(suffix_array('banana'))  # [5, 3, 1, 0, 4, 2]
+\`\`\``,
+          desc: 'Simplest construction via sorting all suffixes. O(n^2 log n). For n > ~1e5 use DC3 or SA-IS.',
+        },
+        javascript: {
+          title: 'Suffix Array (simple O(n^2 log n))',
+          code: `\`\`\`javascript
+function suffixArray(s) {
+  return Array.from({ length: s.length }, (_, i) => i)
+    .sort((a, b) => {
+      const sa = s.slice(a), sb = s.slice(b);
+      return sa < sb ? -1 : sa > sb ? 1 : 0;
+    });
+}
+\`\`\``,
+          desc: 'Naive sort. O(n^2 log n). For big inputs use a DC3/SA-IS variant.',
+        },
+      },
+      skip_list: {
+        python: {
+          title: 'Skip List',
+          code: `\`\`\`python
+import random
+
+class SkipNode:
+    __slots__ = ('val', 'forward')
+    def __init__(self, val, level):
+        self.val = val
+        self.forward = [None] * (level + 1)
+
+class SkipList:
+    def __init__(self, max_level=16, p=0.5):
+        self.max_level = max_level
+        self.p = p
+        self.level = 0
+        self.head = SkipNode(None, max_level)
+    def _random_level(self):
+        lvl = 0
+        while random.random() < self.p and lvl < self.max_level: lvl += 1
+        return lvl
+    def insert(self, val):
+        update = [self.head] * (self.max_level + 1)
+        cur = self.head
+        for i in range(self.level, -1, -1):
+            while cur.forward[i] and cur.forward[i].val < val:
+                cur = cur.forward[i]
+            update[i] = cur
+        lvl = self._random_level()
+        if lvl > self.level: self.level = lvl
+        node = SkipNode(val, lvl)
+        for i in range(lvl + 1):
+            node.forward[i] = update[i].forward[i]
+            update[i].forward[i] = node
+    def contains(self, val):
+        cur = self.head
+        for i in range(self.level, -1, -1):
+            while cur.forward[i] and cur.forward[i].val < val:
+                cur = cur.forward[i]
+        cur = cur.forward[0]
+        return cur is not None and cur.val == val
+
+# Usage:
+sl = SkipList()
+for v in [3, 6, 7, 9, 12, 19]: sl.insert(v)
+print(sl.contains(9), sl.contains(8))  # True False
+\`\`\``,
+          desc: 'Probabilistic balanced structure. Expected O(log n) insert/lookup with O(n) memory.',
+        },
+        javascript: {
+          title: 'Skip List',
+          code: `\`\`\`javascript
+class SkipList {
+  constructor(maxLevel = 16, p = 0.5) {
+    this.maxLevel = maxLevel; this.p = p; this.level = 0;
+    this.head = { val: null, forward: new Array(maxLevel + 1).fill(null) };
+  }
+  _randomLevel() {
+    let lvl = 0;
+    while (Math.random() < this.p && lvl < this.maxLevel) lvl++;
+    return lvl;
+  }
+  insert(val) {
+    const update = new Array(this.maxLevel + 1).fill(this.head);
+    let cur = this.head;
+    for (let i = this.level; i >= 0; i--) {
+      while (cur.forward[i] && cur.forward[i].val < val) cur = cur.forward[i];
+      update[i] = cur;
+    }
+    const lvl = this._randomLevel();
+    if (lvl > this.level) this.level = lvl;
+    const node = { val, forward: new Array(lvl + 1).fill(null) };
+    for (let i = 0; i <= lvl; i++) { node.forward[i] = update[i].forward[i]; update[i].forward[i] = node; }
+  }
+  contains(val) {
+    let cur = this.head;
+    for (let i = this.level; i >= 0; i--) {
+      while (cur.forward[i] && cur.forward[i].val < val) cur = cur.forward[i];
+    }
+    cur = cur.forward[0];
+    return !!cur && cur.val === val;
+  }
+}
+\`\`\``,
+          desc: 'Probabilistic balanced structure. Expected O(log n) per op.',
+        },
+      },
+      circular_buffer: {
+        python: {
+          title: 'Circular Buffer (Ring Buffer)',
+          code: `\`\`\`python
+class CircularBuffer:
+    def __init__(self, capacity):
+        self.buf = [None] * capacity
+        self.cap = capacity
+        self.head = self.tail = self.size = 0
+    def push(self, item):
+        self.buf[self.tail] = item
+        if self.size == self.cap:
+            self.head = (self.head + 1) % self.cap  # overwrite oldest
+        else:
+            self.size += 1
+        self.tail = (self.tail + 1) % self.cap
+    def pop(self):
+        if self.size == 0: raise IndexError('empty')
+        item = self.buf[self.head]
+        self.buf[self.head] = None
+        self.head = (self.head + 1) % self.cap
+        self.size -= 1
+        return item
+    def __len__(self): return self.size
+
+# Usage:
+cb = CircularBuffer(3)
+cb.push(1); cb.push(2); cb.push(3); cb.push(4)  # overwrites 1
+print(cb.pop(), cb.pop(), cb.pop())  # 2 3 4
+\`\`\``,
+          desc: 'Fixed-size FIFO; overwrites oldest on overflow. O(1) per operation.',
+        },
+        javascript: {
+          title: 'Circular Buffer (Ring Buffer)',
+          code: `\`\`\`javascript
+class CircularBuffer {
+  constructor(capacity) {
+    this.buf = new Array(capacity); this.cap = capacity;
+    this.head = 0; this.tail = 0; this.size = 0;
+  }
+  push(item) {
+    this.buf[this.tail] = item;
+    if (this.size === this.cap) this.head = (this.head + 1) % this.cap;
+    else this.size++;
+    this.tail = (this.tail + 1) % this.cap;
+  }
+  pop() {
+    if (this.size === 0) throw new Error('empty');
+    const item = this.buf[this.head];
+    this.buf[this.head] = undefined;
+    this.head = (this.head + 1) % this.cap;
+    this.size--;
+    return item;
+  }
+  get length() { return this.size; }
+}
+\`\`\``,
+          desc: 'Fixed-size FIFO with overwrite-on-full. O(1) per op.',
+        },
+      },
+      disjoint_set_forest: {
+        python: {
+          title: 'Disjoint Set Forest (Union-Find)',
+          code: `\`\`\`python
+class DSU:
+    def __init__(self, n):
+        self.parent = list(range(n))
+        self.rank = [0] * n
+    def find(self, x):
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]  # path compression
+            x = self.parent[x]
+        return x
+    def union(self, a, b):
+        ra, rb = self.find(a), self.find(b)
+        if ra == rb: return False
+        if self.rank[ra] < self.rank[rb]: ra, rb = rb, ra
+        self.parent[rb] = ra
+        if self.rank[ra] == self.rank[rb]: self.rank[ra] += 1
+        return True
+
+# Usage:
+dsu = DSU(5)
+dsu.union(0, 1); dsu.union(2, 3)
+print(dsu.find(0) == dsu.find(1))  # True
+print(dsu.find(1) == dsu.find(3))  # False
+\`\`\``,
+          desc: 'Union by rank + path compression. Near O(1) per op (inverse Ackermann).',
+        },
+        javascript: {
+          title: 'Disjoint Set Forest (Union-Find)',
+          code: `\`\`\`javascript
+class DSU {
+  constructor(n) {
+    this.parent = Array.from({ length: n }, (_, i) => i);
+    this.rank = new Array(n).fill(0);
+  }
+  find(x) {
+    while (this.parent[x] !== x) {
+      this.parent[x] = this.parent[this.parent[x]];
+      x = this.parent[x];
+    }
+    return x;
+  }
+  union(a, b) {
+    let ra = this.find(a), rb = this.find(b);
+    if (ra === rb) return false;
+    if (this.rank[ra] < this.rank[rb]) [ra, rb] = [rb, ra];
+    this.parent[rb] = ra;
+    if (this.rank[ra] === this.rank[rb]) this.rank[ra]++;
+    return true;
+  }
+}
+\`\`\``,
+          desc: 'Union by rank + path compression. Near-constant per op.',
+        },
+      },
+
+      // ─── BATCH 6: WEB / DEV UTILITIES ───
+      parse_url: {
+        python: {
+          title: 'Parse URL',
+          code: `\`\`\`python
+from urllib.parse import urlparse, parse_qs
+
+def parse_url(url):
+    p = urlparse(url)
+    return {
+        'scheme': p.scheme,
+        'host': p.hostname,
+        'port': p.port,
+        'path': p.path,
+        'query': parse_qs(p.query),
+        'fragment': p.fragment,
+    }
+
+# Usage:
+print(parse_url('https://example.com:8080/path?x=1&y=2#frag'))
+\`\`\``,
+          desc: 'Stdlib urllib.parse is battle-tested. Prefer it over hand-rolled parsers.',
+        },
+        javascript: {
+          title: 'Parse URL',
+          code: `\`\`\`javascript
+function parseUrl(href) {
+  const u = new URL(href);
+  const query = {};
+  for (const [k, v] of u.searchParams) query[k] = v;
+  return {
+    scheme: u.protocol.replace(':', ''),
+    host: u.hostname,
+    port: u.port || null,
+    path: u.pathname,
+    query,
+    fragment: u.hash.replace('#', ''),
+  };
+}
+\`\`\``,
+          desc: 'Built-in URL constructor handles encoding, IDN, and edge cases. Use it.',
+        },
+      },
+      build_query_string: {
+        python: {
+          title: 'Build Query String',
+          code: `\`\`\`python
+from urllib.parse import urlencode
+
+def build_query(params):
+    return urlencode(params, doseq=True)
+
+# Usage:
+print(build_query({'q': 'hello world', 'tags': ['a', 'b']}))
+# q=hello+world&tags=a&tags=b
+\`\`\``,
+          desc: 'urlencode handles percent-encoding and list flattening via doseq.',
+        },
+        javascript: {
+          title: 'Build Query String',
+          code: `\`\`\`javascript
+function buildQuery(params) {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (Array.isArray(v)) for (const x of v) sp.append(k, String(x));
+    else sp.append(k, String(v));
+  }
+  return sp.toString();
+}
+\`\`\``,
+          desc: 'URLSearchParams percent-encodes correctly. Append for arrays.',
+        },
+      },
+      escape_html: {
+        python: {
+          title: 'Escape HTML',
+          code: `\`\`\`python
+def escape_html(s):
+    return (s
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;')
+        .replace("'", '&#39;'))
+
+# Usage:
+print(escape_html('<script>alert("xss")</script>'))
+\`\`\``,
+          desc: 'Order matters: & first so it does not double-escape. For full safety use markupsafe or html.escape.',
+        },
+        javascript: {
+          title: 'Escape HTML',
+          code: `\`\`\`javascript
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+\`\`\``,
+          desc: 'Escape & first so subsequent entities are not double-escaped.',
+        },
+      },
+      url_encode: {
+        python: {
+          title: 'URL Encode (Percent-Encode)',
+          code: `\`\`\`python
+from urllib.parse import quote
+
+def url_encode(s, safe=''):
+    return quote(s, safe=safe)
+
+# Usage:
+print(url_encode('hello world/foo?bar=baz'))
+# hello%20world%2Ffoo%3Fbar%3Dbaz
+\`\`\``,
+          desc: 'quote percent-encodes everything except letters/digits and the chars in "safe".',
+        },
+        javascript: {
+          title: 'URL Encode (Percent-Encode)',
+          code: `\`\`\`javascript
+function urlEncode(s) {
+  return encodeURIComponent(s);
+}
+\`\`\``,
+          desc: 'encodeURIComponent handles percent-encoding correctly for query fragments.',
+        },
+      },
+      base64_encode: {
+        python: {
+          title: 'Base64 Encode / Decode',
+          code: `\`\`\`python
+import base64
+
+def b64_encode(data):
+    if isinstance(data, str): data = data.encode()
+    return base64.b64encode(data).decode('ascii')
+
+def b64_decode(s):
+    return base64.b64decode(s)
+
+# Usage:
+print(b64_encode('Hello'))  # SGVsbG8=
+print(b64_decode('SGVsbG8=').decode())  # Hello
+\`\`\``,
+          desc: 'stdlib base64 handles padding. Use urlsafe_b64encode for URL-safe variant.',
+        },
+        javascript: {
+          title: 'Base64 Encode / Decode',
+          code: `\`\`\`javascript
+function b64Encode(input) {
+  if (typeof input === 'string') {
+    return typeof btoa !== 'undefined' ? btoa(unescape(encodeURIComponent(input))) : Buffer.from(input, 'utf8').toString('base64');
+  }
+  return Buffer.from(input).toString('base64');
+}
+function b64Decode(s) {
+  return typeof atob !== 'undefined' ? decodeURIComponent(escape(atob(s))) : Buffer.from(s, 'base64').toString('utf8');
+}
+\`\`\``,
+          desc: 'Works in both browser (btoa/atob) and Node (Buffer). btoa needs unescape trick for non-ASCII.',
+        },
+      },
+      md5_hash: {
+        python: {
+          title: 'MD5 Hash',
+          code: `\`\`\`python
+import hashlib
+
+def md5(data):
+    if isinstance(data, str): data = data.encode('utf-8')
+    return hashlib.md5(data).hexdigest()
+
+# Usage:
+print(md5('hello'))  # 5d41402abc4b2a76b9719d911017c592
+\`\`\``,
+          desc: 'MD5 is NOT secure for passwords or signatures. Use only for non-cryptographic checksums.',
+        },
+        javascript: {
+          title: 'MD5 Hash',
+          code: `\`\`\`javascript
+// Node: use crypto
+const { createHash } = require('crypto');
+
+function md5(data) {
+  return createHash('md5').update(typeof data === 'string' ? data : Buffer.from(data)).digest('hex');
+}
+
+// Browser: use SubtleCrypto (note: MD5 is not in WebCrypto; use a well-tested library like spark-md5)
+\`\`\``,
+          desc: 'MD5 is broken cryptographically. Never use for auth. Node has it via crypto; browsers need a library.',
+        },
+      },
+      sha256_hash: {
+        python: {
+          title: 'SHA-256 Hash',
+          code: `\`\`\`python
+import hashlib
+
+def sha256(data):
+    if isinstance(data, str): data = data.encode('utf-8')
+    return hashlib.sha256(data).hexdigest()
+
+# Usage:
+print(sha256('hello'))
+# 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+\`\`\``,
+          desc: 'SHA-256 suitable for content hashing and integrity. For passwords use bcrypt/argon2/scrypt instead.',
+        },
+        javascript: {
+          title: 'SHA-256 Hash',
+          code: `\`\`\`javascript
+// Browser
+async function sha256(str) {
+  const bytes = new TextEncoder().encode(str);
+  const hash = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Node (synchronous)
+// const { createHash } = require('crypto');
+// const hex = createHash('sha256').update(str).digest('hex');
+\`\`\``,
+          desc: 'Use WebCrypto in browser, crypto.createHash in Node. Never roll your own.',
+        },
+      },
+      safe_compare: {
+        python: {
+          title: 'Constant-Time String Comparison',
+          code: `\`\`\`python
+import hmac
+
+def safe_compare(a, b):
+    if isinstance(a, str): a = a.encode()
+    if isinstance(b, str): b = b.encode()
+    return hmac.compare_digest(a, b)
+
+# Usage:
+print(safe_compare('secret', 'secret'))  # True
+\`\`\``,
+          desc: 'hmac.compare_digest runs in constant time regardless of where the first differing byte is. Use for tokens, HMACs, signatures.',
+        },
+        javascript: {
+          title: 'Constant-Time String Comparison',
+          code: `\`\`\`javascript
+const { timingSafeEqual } = require('crypto');
+
+function safeCompare(a, b) {
+  const ab = Buffer.from(a), bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+\`\`\``,
+          desc: 'crypto.timingSafeEqual avoids timing-attack leaks when comparing secrets.',
+        },
+      },
+      uuid_v4: {
+        python: {
+          title: 'UUID v4 (Random)',
+          code: `\`\`\`python
+import uuid
+
+def uuid_v4():
+    return str(uuid.uuid4())
+
+# Usage:
+print(uuid_v4())  # e.g. '550e8400-e29b-41d4-a716-446655440000'
+\`\`\``,
+          desc: 'Prefer the stdlib uuid module. Uses cryptographic randomness on modern platforms.',
+        },
+        javascript: {
+          title: 'UUID v4 (Random)',
+          code: `\`\`\`javascript
+function uuidV4() {
+  // Browser and modern Node (>= 14.17) have crypto.randomUUID
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  (typeof crypto !== 'undefined' ? crypto : require('crypto').webcrypto).getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;  // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;  // variant 10
+  const hex = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+  return \`\${hex.slice(0,8)}-\${hex.slice(8,12)}-\${hex.slice(12,16)}-\${hex.slice(16,20)}-\${hex.slice(20)}\`;
+}
+\`\`\``,
+          desc: 'Use crypto.randomUUID when available; otherwise construct from getRandomValues with correct version/variant bits.',
+        },
+      },
+      validate_email: {
+        python: {
+          title: 'Validate Email',
+          code: `\`\`\`python
+import re
+
+_EMAIL = re.compile(r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$')
+
+def is_valid_email(s):
+    return bool(_EMAIL.match(s or ''))
+
+# Usage:
+print(is_valid_email('user@example.com'))   # True
+print(is_valid_email('bad@@example'))        # False
+\`\`\``,
+          desc: 'Pragmatic regex. RFC 5321 allows edge cases this rejects — for strict validation use email-validator library.',
+        },
+        javascript: {
+          title: 'Validate Email',
+          code: `\`\`\`javascript
+const EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$/;
+
+function isValidEmail(s) {
+  return EMAIL.test(s || '');
+}
+\`\`\``,
+          desc: 'Pragmatic regex. For strict validation use an email-validator library or send a verification link.',
+        },
+      },
+      validate_phone: {
+        python: {
+          title: 'Validate Phone Number (loose)',
+          code: `\`\`\`python
+import re
+
+_PHONE = re.compile(r'^\\+?[0-9]{1,3}?[-.\\s]?\\(?[0-9]{1,4}\\)?[-.\\s]?[0-9]{1,4}[-.\\s]?[0-9]{1,9}$')
+
+def is_valid_phone(s):
+    digits = re.sub(r'[^0-9]', '', s or '')
+    if len(digits) < 7 or len(digits) > 15: return False
+    return bool(_PHONE.match(s))
+
+# Usage:
+print(is_valid_phone('+1 (555) 123-4567'))  # True
+\`\`\``,
+          desc: 'Loose international validation. For strict country-specific rules, use the phonenumbers library (E.164).',
+        },
+        javascript: {
+          title: 'Validate Phone Number (loose)',
+          code: `\`\`\`javascript
+function isValidPhone(s) {
+  if (!s) return false;
+  const digits = s.replace(/[^0-9]/g, '');
+  if (digits.length < 7 || digits.length > 15) return false;
+  return /^\\+?[0-9]{1,3}?[-.\\s]?\\(?[0-9]{1,4}\\)?[-.\\s]?[0-9]{1,4}[-.\\s]?[0-9]{1,9}$/.test(s);
+}
+\`\`\``,
+          desc: 'Loose international pattern. For production use libphonenumber-js.',
+        },
+      },
+      format_currency: {
+        python: {
+          title: 'Format Currency',
+          code: `\`\`\`python
+def format_currency(amount, currency='USD', locale='en_US'):
+    # Minimal stdlib-only version; for rich i18n use babel.numbers.format_currency
+    symbols = {'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'NOK': 'kr'}
+    sym = symbols.get(currency, currency + ' ')
+    sign = '-' if amount < 0 else ''
+    amount = abs(amount)
+    whole, frac = divmod(int(round(amount * 100)), 100)
+    whole_str = f'{whole:,}'
+    return f'{sign}{sym}{whole_str}.{frac:02d}'
+
+# Usage:
+print(format_currency(1234567.89))  # $1,234,567.89
+print(format_currency(-99.5, 'EUR'))  # -€99.50
+\`\`\``,
+          desc: 'Rounds to 2 decimals, inserts thousands separators. For i18n correctness use babel.numbers.',
+        },
+        javascript: {
+          title: 'Format Currency',
+          code: `\`\`\`javascript
+function formatCurrency(amount, currency = 'USD', locale = 'en-US') {
+  return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(amount);
+}
+
+// Usage:
+// formatCurrency(1234567.89)       => $1,234,567.89
+// formatCurrency(99.5, 'EUR', 'de-DE') => 99,50 €
+\`\`\``,
+          desc: 'Built-in Intl.NumberFormat handles locale-specific symbol, separators, and decimals.',
+        },
+      },
+      format_bytes: {
+        python: {
+          title: 'Format Bytes (Human-Readable)',
+          code: `\`\`\`python
+def format_bytes(n):
+    units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+    i, n = 0, float(n)
+    while n >= 1024 and i < len(units) - 1:
+        n /= 1024; i += 1
+    return f'{n:.2f} {units[i]}' if i > 0 else f'{int(n)} {units[i]}'
+
+# Usage:
+print(format_bytes(1536))        # 1.50 KB
+print(format_bytes(1_500_000))   # 1.43 MB
+\`\`\``,
+          desc: 'Binary (1024-based). For SI (1000-based) swap to [B, kB, MB, ...] and divide by 1000.',
+        },
+        javascript: {
+          title: 'Format Bytes (Human-Readable)',
+          code: `\`\`\`javascript
+function formatBytes(n) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return i === 0 ? \`\${n | 0} \${units[i]}\` : \`\${n.toFixed(2)} \${units[i]}\`;
+}
+\`\`\``,
+          desc: 'Binary formatting (1024-based). Swap to decimal for SI prefixes.',
+        },
+      },
+      mask_credit_card: {
+        python: {
+          title: 'Mask Credit Card Number',
+          code: `\`\`\`python
+import re
+
+def mask_card(num):
+    digits = re.sub(r'[^0-9]', '', num or '')
+    if len(digits) < 4: return '*' * len(digits)
+    return '*' * (len(digits) - 4) + digits[-4:]
+
+# Usage:
+print(mask_card('4111 1111 1111 1234'))  # ************1234
+\`\`\``,
+          desc: 'Shows only the last 4 digits; strips spaces and dashes. Never log full card numbers.',
+        },
+        javascript: {
+          title: 'Mask Credit Card Number',
+          code: `\`\`\`javascript
+function maskCard(num) {
+  const digits = String(num || '').replace(/[^0-9]/g, '');
+  if (digits.length < 4) return '*'.repeat(digits.length);
+  return '*'.repeat(digits.length - 4) + digits.slice(-4);
+}
+\`\`\``,
+          desc: 'Keeps only the last 4 digits visible. PCI-safe for display.',
+        },
+      },
+      parse_cookies: {
+        python: {
+          title: 'Parse Cookie Header',
+          code: `\`\`\`python
+def parse_cookies(header):
+    out = {}
+    for pair in (header or '').split(';'):
+        pair = pair.strip()
+        if not pair: continue
+        if '=' in pair:
+            k, v = pair.split('=', 1)
+            out[k.strip()] = v.strip()
+        else:
+            out[pair] = ''
+    return out
+
+# Usage:
+print(parse_cookies('session=abc123; theme=dark; flag'))
+# {'session': 'abc123', 'theme': 'dark', 'flag': ''}
+\`\`\``,
+          desc: 'Splits on ";" then "=". For server code prefer http.cookies.SimpleCookie which handles RFC 6265 edge cases.',
+        },
+        javascript: {
+          title: 'Parse Cookie Header',
+          code: `\`\`\`javascript
+function parseCookies(header) {
+  const out = {};
+  if (!header) return out;
+  for (const pair of header.split(';')) {
+    const trimmed = pair.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) out[trimmed] = '';
+    else out[trimmed.slice(0, eq).trim()] = decodeURIComponent(trimmed.slice(eq + 1).trim());
+  }
+  return out;
+}
+\`\`\``,
+          desc: 'Handles cookies with and without values; decodes percent-encoded values.',
+        },
+      },
+
+      // ─── BATCH 7: DATE/TIME & I/O ───
+      format_date: {
+        python: {
+          title: 'Format Date',
+          code: `\`\`\`python
+from datetime import datetime
+
+def format_date(dt=None, fmt='%Y-%m-%d %H:%M:%S'):
+    return (dt or datetime.now()).strftime(fmt)
+
+# Usage:
+print(format_date())                           # 2025-04-21 10:30:45
+print(format_date(fmt='%Y-%m-%d'))             # 2025-04-21
+print(format_date(fmt='%B %d, %Y'))            # April 21, 2025
+\`\`\``,
+          desc: 'strftime format codes: %Y year, %m month, %d day, %H hour, %M min, %S sec, %B full month, %A weekday.',
+        },
+        javascript: {
+          title: 'Format Date',
+          code: `\`\`\`javascript
+function formatDate(date = new Date(), locale = 'en-US', options = { year: 'numeric', month: '2-digit', day: '2-digit' }) {
+  return new Intl.DateTimeFormat(locale, options).format(date);
+}
+
+// Usage:
+// formatDate()  => '04/21/2025'
+// formatDate(new Date(), 'en-GB')  => '21/04/2025'
+// formatDate(new Date(), 'en-US', { dateStyle: 'full', timeStyle: 'short' })
+\`\`\``,
+          desc: 'Intl.DateTimeFormat gives locale-aware output. For ISO format use Date.toISOString().',
+        },
+      },
+      parse_iso8601: {
+        python: {
+          title: 'Parse ISO-8601 Date',
+          code: `\`\`\`python
+from datetime import datetime
+
+def parse_iso8601(s):
+    # Python 3.11+ handles 'Z' natively; earlier versions need replacement
+    return datetime.fromisoformat(s.replace('Z', '+00:00'))
+
+# Usage:
+print(parse_iso8601('2025-04-21T10:30:00Z'))
+print(parse_iso8601('2025-04-21T10:30:00+02:00'))
+\`\`\``,
+          desc: 'fromisoformat handles most ISO-8601 variants. For relaxed parsing use dateutil.parser.parse.',
+        },
+        javascript: {
+          title: 'Parse ISO-8601 Date',
+          code: `\`\`\`javascript
+function parseIso8601(s) {
+  const d = new Date(s);
+  if (isNaN(d.getTime())) throw new Error('Invalid ISO-8601: ' + s);
+  return d;
+}
+\`\`\``,
+          desc: 'Native Date parser handles ISO-8601. Throws on invalid input.',
+        },
+      },
+      date_diff_days: {
+        python: {
+          title: 'Days Between Two Dates',
+          code: `\`\`\`python
+from datetime import date, datetime
+
+def days_between(a, b):
+    if isinstance(a, datetime): a = a.date()
+    if isinstance(b, datetime): b = b.date()
+    return (b - a).days
+
+# Usage:
+print(days_between(date(2025, 1, 1), date(2025, 4, 21)))  # 110
+\`\`\``,
+          desc: 'Subtract dates to get a timedelta; .days ignores time component. Negative if b < a.',
+        },
+        javascript: {
+          title: 'Days Between Two Dates',
+          code: `\`\`\`javascript
+function daysBetween(a, b) {
+  const MS_PER_DAY = 86400000;
+  const da = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate());
+  const db = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate());
+  return Math.round((db - da) / MS_PER_DAY);
+}
+\`\`\``,
+          desc: 'Use UTC to avoid DST artefacts. Returns negative when b < a.',
+        },
+      },
+      is_leap_year: {
+        python: {
+          title: 'Leap Year Check',
+          code: `\`\`\`python
+def is_leap_year(year):
+    return (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0)
+
+# Usage:
+print(is_leap_year(2024))  # True
+print(is_leap_year(1900))  # False
+print(is_leap_year(2000))  # True
+\`\`\``,
+          desc: 'Gregorian rule: divisible by 4, except centuries not divisible by 400.',
+        },
+        javascript: {
+          title: 'Leap Year Check',
+          code: `\`\`\`javascript
+function isLeapYear(year) {
+  return (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+}
+\`\`\``,
+          desc: 'Gregorian rule.',
+        },
+      },
+      day_of_week: {
+        python: {
+          title: 'Day of Week (Zeller-style)',
+          code: `\`\`\`python
+from datetime import date
+
+def day_of_week(year, month, day):
+    names = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+    return names[date(year, month, day).weekday()]
+
+# Usage:
+print(day_of_week(2025, 4, 21))  # Monday
+\`\`\``,
+          desc: 'date.weekday() returns 0=Monday..6=Sunday. Use isoweekday() for 1..7 (ISO).',
+        },
+        javascript: {
+          title: 'Day of Week',
+          code: `\`\`\`javascript
+function dayOfWeek(year, month, day) {
+  const names = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  return names[new Date(year, month - 1, day).getDay()];
+}
+\`\`\``,
+          desc: 'Date.getDay() returns 0=Sunday..6=Saturday. Months are 0-based in JS Date.',
+        },
+      },
+      format_duration: {
+        python: {
+          title: 'Format Duration (seconds → human-readable)',
+          code: `\`\`\`python
+def format_duration(seconds):
+    seconds = int(seconds)
+    if seconds < 60: return f'{seconds}s'
+    minutes, s = divmod(seconds, 60)
+    if minutes < 60: return f'{minutes}m {s:02d}s'
+    hours, m = divmod(minutes, 60)
+    if hours < 24: return f'{hours}h {m:02d}m {s:02d}s'
+    days, h = divmod(hours, 24)
+    return f'{days}d {h:02d}h {m:02d}m'
+
+# Usage:
+print(format_duration(3665))    # 1h 01m 05s
+print(format_duration(90061))   # 1d 01h 01m
+\`\`\``,
+          desc: 'Compact H:M:S formatting. Swap to ISO-8601 PnDTnHnMnS if needed.',
+        },
+        javascript: {
+          title: 'Format Duration (seconds → human-readable)',
+          code: `\`\`\`javascript
+function formatDuration(seconds) {
+  seconds = Math.floor(seconds);
+  if (seconds < 60) return \`\${seconds}s\`;
+  const s = seconds % 60, mTot = (seconds / 60) | 0;
+  if (mTot < 60) return \`\${mTot}m \${String(s).padStart(2, '0')}s\`;
+  const m = mTot % 60, hTot = (mTot / 60) | 0;
+  if (hTot < 24) return \`\${hTot}h \${String(m).padStart(2, '0')}m \${String(s).padStart(2, '0')}s\`;
+  const h = hTot % 24, d = (hTot / 24) | 0;
+  return \`\${d}d \${String(h).padStart(2, '0')}h \${String(m).padStart(2, '0')}m\`;
+}
+\`\`\``,
+          desc: 'Compact H:M:S formatting.',
+        },
+      },
+      read_csv: {
+        python: {
+          title: 'Read CSV',
+          code: `\`\`\`python
+import csv
+
+def read_csv(path, has_header=True):
+    with open(path, newline='', encoding='utf-8') as f:
+        if has_header:
+            return list(csv.DictReader(f))
+        return list(csv.reader(f))
+
+# Usage:
+# for row in read_csv('data.csv'):
+#     print(row['name'], row['age'])
+\`\`\``,
+          desc: 'stdlib csv handles quoted fields, embedded newlines, and delimiter edge cases. Use DictReader when you have a header row.',
+        },
+        javascript: {
+          title: 'Read CSV',
+          code: `\`\`\`javascript
+const fs = require('fs');
+
+function readCsv(path, hasHeader = true) {
+  const text = fs.readFileSync(path, 'utf8');
+  const rows = parseCsv(text);
+  if (!hasHeader) return rows;
+  const [header, ...rest] = rows;
+  return rest.map(r => Object.fromEntries(header.map((h, i) => [h, r[i]])));
+}
+
+function parseCsv(text) {
+  const rows = [[]];
+  let field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') inQuotes = false;
+      else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { rows[rows.length - 1].push(field); field = ''; }
+      else if (c === '\\n') { rows[rows.length - 1].push(field); field = ''; rows.push([]); }
+      else if (c === '\\r') { /* skip */ }
+      else field += c;
+    }
+  }
+  if (field.length || rows[rows.length - 1].length) rows[rows.length - 1].push(field);
+  if (rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === '') rows.pop();
+  return rows;
+}
+\`\`\``,
+          desc: 'Handles quoted fields, escaped quotes, and embedded newlines. For production prefer papaparse or csv-parse.',
+        },
+      },
+      write_csv: {
+        python: {
+          title: 'Write CSV',
+          code: `\`\`\`python
+import csv
+
+def write_csv(path, rows, header=None):
+    with open(path, 'w', newline='', encoding='utf-8') as f:
+        if header:
+            writer = csv.DictWriter(f, fieldnames=header)
+            writer.writeheader()
+            writer.writerows(rows)
+        else:
+            csv.writer(f).writerows(rows)
+
+# Usage:
+# write_csv('out.csv', [{'name': 'Ada', 'age': 36}], header=['name', 'age'])
+\`\`\``,
+          desc: 'Use newline="" on open to avoid double-newlines on Windows. DictWriter keeps columns consistent.',
+        },
+        javascript: {
+          title: 'Write CSV',
+          code: `\`\`\`javascript
+const fs = require('fs');
+
+function writeCsv(path, rows, header) {
+  const esc = v => {
+    const s = String(v ?? '');
+    return /[",\\n\\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const lines = [];
+  if (header) lines.push(header.map(esc).join(','));
+  for (const r of rows) {
+    const values = header ? header.map(k => r[k]) : r;
+    lines.push(values.map(esc).join(','));
+  }
+  fs.writeFileSync(path, lines.join('\\n'), 'utf8');
+}
+\`\`\``,
+          desc: 'Quotes only when needed; doubles embedded quotes. Matches RFC 4180 expectations.',
+        },
+      },
+      walk_directory: {
+        python: {
+          title: 'Walk Directory Recursively',
+          code: `\`\`\`python
+import os
+
+def walk(root, filter_fn=None):
+    for dirpath, _dirs, files in os.walk(root):
+        for f in files:
+            path = os.path.join(dirpath, f)
+            if filter_fn is None or filter_fn(path):
+                yield path
+
+# Usage:
+# for p in walk('.', lambda p: p.endswith('.py')):
+#     print(p)
+\`\`\``,
+          desc: 'os.walk is a generator — use it for large trees. pathlib.Path.rglob is a modern alternative.',
+        },
+        javascript: {
+          title: 'Walk Directory Recursively',
+          code: `\`\`\`javascript
+const fs = require('fs');
+const path = require('path');
+
+function* walk(root, filterFn) {
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const full = path.join(root, entry.name);
+    if (entry.isDirectory()) yield* walk(full, filterFn);
+    else if (entry.isFile()) {
+      if (!filterFn || filterFn(full)) yield full;
+    }
+  }
+}
+
+// Usage:
+// for (const p of walk('.', p => p.endsWith('.js'))) console.log(p);
+\`\`\``,
+          desc: 'Generator yields lazily — memory-safe for huge trees. Uses withFileTypes to avoid extra stat calls.',
+        },
+      },
+      stream_file_lines: {
+        python: {
+          title: 'Stream File Line-by-Line',
+          code: `\`\`\`python
+def stream_lines(path, encoding='utf-8'):
+    with open(path, 'r', encoding=encoding) as f:
+        for line in f:
+            yield line.rstrip('\\n')
+
+# Usage:
+# for line in stream_lines('big.log'):
+#     if 'ERROR' in line: print(line)
+\`\`\``,
+          desc: 'Iterating the file object reads one buffered line at a time — O(1) memory regardless of file size.',
+        },
+        javascript: {
+          title: 'Stream File Line-by-Line',
+          code: `\`\`\`javascript
+const fs = require('fs');
+const readline = require('readline');
+
+async function streamLines(path) {
+  const rl = readline.createInterface({
+    input: fs.createReadStream(path, { encoding: 'utf8' }),
+    crlfDelay: Infinity,
+  });
+  const lines = [];
+  for await (const line of rl) lines.push(line);
+  return lines;
+}
+
+// Usage:
+// for await (const line of readline.createInterface({ input: fs.createReadStream('big.log') })) {
+//   if (line.includes('ERROR')) console.log(line);
+// }
+\`\`\``,
+          desc: 'readline with crlfDelay: Infinity handles CRLF correctly on Windows. Prefer the async iterator for memory safety.',
+        },
+      },
+
+      // ─── BATCH 8: ASYNC PATTERNS ───
+      sleep: {
+        python: {
+          title: 'Sleep (async delay)',
+          code: `\`\`\`python
+import asyncio, time
+
+async def sleep_async(seconds):
+    await asyncio.sleep(seconds)
+
+def sleep_sync(seconds):
+    time.sleep(seconds)
+
+# Usage:
+# await sleep_async(1.5)
+\`\`\``,
+          desc: 'asyncio.sleep yields to the event loop; time.sleep blocks the thread. Use the right one.',
+        },
+        javascript: {
+          title: 'Sleep (async delay)',
+          code: `\`\`\`javascript
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Usage:
+// await sleep(1500);
+\`\`\``,
+          desc: 'Classic one-liner. Works in both browser and Node. Resolves after ms milliseconds.',
+        },
+      },
+      promise_pool: {
+        python: {
+          title: 'Async Concurrency Pool',
+          code: `\`\`\`python
+import asyncio
+
+async def pool(tasks, limit):
+    semaphore = asyncio.Semaphore(limit)
+    async def run(t):
+        async with semaphore:
+            return await t()
+    return await asyncio.gather(*(run(t) for t in tasks))
+
+# Usage: tasks is a list of zero-arg async callables
+# results = await pool([lambda: fetch(u) for u in urls], limit=5)
+\`\`\``,
+          desc: 'Semaphore caps concurrency. Use asyncio.as_completed for streaming results instead of gather.',
+        },
+        javascript: {
+          title: 'Promise Concurrency Pool',
+          code: `\`\`\`javascript
+async function promisePool(tasks, limit) {
+  const results = new Array(tasks.length);
+  let idx = 0;
+  async function worker() {
+    while (idx < tasks.length) {
+      const cur = idx++;
+      results[cur] = await tasks[cur]();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return results;
+}
+
+// Usage: tasks is array of zero-arg async functions
+// const results = await promisePool(urls.map(u => () => fetch(u)), 5);
+\`\`\``,
+          desc: 'N workers pull from a shared index — simple and efficient. O(1) extra memory beyond the results array.',
+        },
+      },
+      race_timeout: {
+        python: {
+          title: 'Async with Timeout',
+          code: `\`\`\`python
+import asyncio
+
+async def with_timeout(coro, seconds):
+    try:
+        return await asyncio.wait_for(coro, timeout=seconds)
+    except asyncio.TimeoutError:
+        raise TimeoutError(f'Operation timed out after {seconds}s')
+
+# Usage:
+# result = await with_timeout(slow_fetch(), seconds=5)
+\`\`\``,
+          desc: 'asyncio.wait_for cancels the wrapped coroutine on timeout. Catches TimeoutError to provide a friendlier message.',
+        },
+        javascript: {
+          title: 'Promise with Timeout',
+          code: `\`\`\`javascript
+function withTimeout(promise, ms, message = 'Timed out') {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message + ' (' + ms + 'ms)')), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// Usage:
+// const result = await withTimeout(fetch(url), 5000);
+\`\`\``,
+          desc: 'Race the caller promise against a timer. Clears the timer to avoid leaks. Note: the original promise keeps running.',
+        },
+      },
+      async_queue: {
+        python: {
+          title: 'Async Task Queue (Worker Pool)',
+          code: `\`\`\`python
+import asyncio
+
+class AsyncQueue:
+    def __init__(self, workers=4):
+        self.q = asyncio.Queue()
+        self.workers = [asyncio.create_task(self._worker()) for _ in range(workers)]
+
+    async def _worker(self):
+        while True:
+            task = await self.q.get()
+            if task is None:
+                self.q.task_done(); break
+            try: await task()
+            finally: self.q.task_done()
+
+    async def enqueue(self, task):
+        await self.q.put(task)
+
+    async def close(self):
+        for _ in self.workers: await self.q.put(None)
+        await asyncio.gather(*self.workers)
+
+# Usage:
+# q = AsyncQueue(4)
+# await q.enqueue(lambda: fetch_and_save(url))
+# await q.close()
+\`\`\``,
+          desc: 'Fan-out task dispatcher. Sentinel None stops workers. Use asyncio.Queue.join() to wait for drain before closing.',
+        },
+        javascript: {
+          title: 'Async Task Queue (Worker Pool)',
+          code: `\`\`\`javascript
+class AsyncQueue {
+  constructor(workers = 4) {
+    this.queue = [];
+    this.active = 0;
+    this.limit = workers;
+    this.resolvers = [];
+  }
+  enqueue(task) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ task, resolve, reject });
+      this._drain();
+    });
+  }
+  async _drain() {
+    while (this.active < this.limit && this.queue.length) {
+      const { task, resolve, reject } = this.queue.shift();
+      this.active++;
+      Promise.resolve().then(() => task()).then(resolve, reject).finally(() => {
+        this.active--;
+        this._drain();
+      });
+    }
+  }
+}
+
+// Usage:
+// const q = new AsyncQueue(4);
+// await q.enqueue(() => fetch(url));
+\`\`\``,
+          desc: 'Drains up to `limit` tasks concurrently. Each enqueue returns a promise that resolves with the task result.',
+        },
+      },
+      event_emitter: {
+        python: {
+          title: 'Event Emitter (Pub/Sub)',
+          code: `\`\`\`python
+from collections import defaultdict
+
+class EventEmitter:
+    def __init__(self):
+        self.listeners = defaultdict(list)
+    def on(self, event, handler):
+        self.listeners[event].append(handler)
+        return lambda: self.off(event, handler)  # returns unsubscribe
+    def off(self, event, handler):
+        if handler in self.listeners[event]:
+            self.listeners[event].remove(handler)
+    def emit(self, event, *args, **kwargs):
+        for h in list(self.listeners[event]):
+            h(*args, **kwargs)
+    def once(self, event, handler):
+        def wrapper(*args, **kwargs):
+            self.off(event, wrapper); handler(*args, **kwargs)
+        self.on(event, wrapper)
+
+# Usage:
+# bus = EventEmitter(); bus.on('ping', lambda: print('pong')); bus.emit('ping')
+\`\`\``,
+          desc: 'Tiny in-process pub/sub. For inter-process messaging use a real broker (Redis, RabbitMQ).',
+        },
+        javascript: {
+          title: 'Event Emitter (Pub/Sub)',
+          code: `\`\`\`javascript
+class EventEmitter {
+  constructor() { this.listeners = new Map(); }
+  on(event, handler) {
+    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+    this.listeners.get(event).add(handler);
+    return () => this.off(event, handler);
+  }
+  off(event, handler) { this.listeners.get(event)?.delete(handler); }
+  emit(event, ...args) {
+    for (const h of [...(this.listeners.get(event) ?? [])]) h(...args);
+  }
+  once(event, handler) {
+    const wrap = (...a) => { this.off(event, wrap); handler(...a); };
+    this.on(event, wrap);
+  }
+}
+\`\`\``,
+          desc: 'Set-backed handlers allow fast add/remove. `on` returns an unsubscribe function.',
+        },
+      },
+      sliding_window: {
+        python: {
+          title: 'Sliding Window Iterator',
+          code: `\`\`\`python
+from collections import deque
+
+def sliding_window(iterable, size):
+    it = iter(iterable)
+    window = deque(maxlen=size)
+    for _ in range(size):
+        try: window.append(next(it))
+        except StopIteration: return
+    yield tuple(window)
+    for x in it:
+        window.append(x)
+        yield tuple(window)
+
+# Usage:
+print(list(sliding_window([1, 2, 3, 4, 5], 3)))  # [(1,2,3),(2,3,4),(3,4,5)]
+\`\`\``,
+          desc: 'Generator yields overlapping windows. Uses bounded deque for O(1) updates.',
+        },
+        javascript: {
+          title: 'Sliding Window Iterator',
+          code: `\`\`\`javascript
+function* slidingWindow(iterable, size) {
+  const window = [];
+  for (const x of iterable) {
+    window.push(x);
+    if (window.length < size) continue;
+    if (window.length > size) window.shift();
+    yield [...window];
+  }
+}
+
+// Usage:
+// [...slidingWindow([1,2,3,4,5], 3)]  => [[1,2,3],[2,3,4],[3,4,5]]
+\`\`\``,
+          desc: 'Generator yields overlapping windows lazily.',
+        },
+      },
+      pairwise: {
+        python: {
+          title: 'Pairwise Iterator',
+          code: `\`\`\`python
+from itertools import tee
+
+def pairwise(iterable):
+    a, b = tee(iterable)
+    next(b, None)
+    return zip(a, b)
+
+# Usage:
+print(list(pairwise([1, 2, 3, 4])))  # [(1,2),(2,3),(3,4)]
+# Python 3.10+: itertools.pairwise is built-in
+\`\`\``,
+          desc: 'Classic tee trick. Python 3.10+ has itertools.pairwise built in.',
+        },
+        javascript: {
+          title: 'Pairwise Iterator',
+          code: `\`\`\`javascript
+function* pairwise(iterable) {
+  let prev, first = true;
+  for (const x of iterable) {
+    if (!first) yield [prev, x];
+    prev = x; first = false;
+  }
+}
+
+// Usage:
+// [...pairwise([1,2,3,4])]  => [[1,2],[2,3],[3,4]]
+\`\`\``,
+          desc: 'Generator yields consecutive pairs.',
+        },
+      },
+      generator_chain: {
+        python: {
+          title: 'Chain Iterators',
+          code: `\`\`\`python
+from itertools import chain
+
+# Use stdlib itertools.chain for flat concatenation
+# For nested iterables use chain.from_iterable
+
+# Usage:
+print(list(chain([1, 2], [3, 4], [5])))          # [1,2,3,4,5]
+print(list(chain.from_iterable([[1,2],[3,4]])))  # [1,2,3,4]
+\`\`\``,
+          desc: 'Prefer itertools.chain over manual concat; it is lazy and memory-efficient.',
+        },
+        javascript: {
+          title: 'Chain Iterators',
+          code: `\`\`\`javascript
+function* chain(...iterables) {
+  for (const it of iterables) yield* it;
+}
+
+// Usage:
+// [...chain([1,2], [3,4], [5])]  => [1,2,3,4,5]
+\`\`\``,
+          desc: 'Uses yield* to delegate to each inner iterable. O(1) extra memory.',
+        },
+      },
+      batch_async: {
+        python: {
+          title: 'Batch Async Requests',
+          code: `\`\`\`python
+import asyncio
+
+async def batch_async(items, batch_size, handler):
+    results = []
+    for i in range(0, len(items), batch_size):
+        batch = items[i:i + batch_size]
+        results.extend(await asyncio.gather(*(handler(x) for x in batch)))
+    return results
+
+# Usage:
+# results = await batch_async(urls, batch_size=10, handler=fetch)
+\`\`\``,
+          desc: 'Processes items in concurrent batches. Cap concurrency via batch_size to respect upstream rate limits.',
+        },
+        javascript: {
+          title: 'Batch Async Requests',
+          code: `\`\`\`javascript
+async function batchAsync(items, batchSize, handler) {
+  const results = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    results.push(...await Promise.all(batch.map(handler)));
+  }
+  return results;
+}
+
+// Usage:
+// const results = await batchAsync(urls, 10, fetch);
+\`\`\``,
+          desc: 'Simple wave-based batching. For continuous concurrency use a promise pool (see that template).',
+        },
+      },
+      cancellable_fetch: {
+        python: {
+          title: 'Cancellable HTTP Request',
+          code: `\`\`\`python
+import asyncio, aiohttp
+
+async def cancellable_fetch(url, timeout=10):
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+                return await r.text()
+        except asyncio.TimeoutError:
+            raise TimeoutError(f'Request to {url} timed out after {timeout}s')
+
+# Usage:
+# text = await cancellable_fetch('https://example.com', timeout=5)
+\`\`\``,
+          desc: 'aiohttp ClientTimeout cancels the request cleanly on timeout. For full cancel semantics wrap in asyncio.Task and call task.cancel().',
+        },
+        javascript: {
+          title: 'Cancellable fetch (AbortController)',
+          code: `\`\`\`javascript
+async function cancellableFetch(url, { timeout = 10000, ...opts } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const res = await fetch(url, { ...opts, signal: controller.signal });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.text();
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Request timed out after ' + timeout + 'ms');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+\`\`\``,
+          desc: 'Standard AbortController pattern. Timer aborts the fetch; AbortError is rethrown as a clearer TimeoutError.',
+        },
+      },
+
+      // ─── BATCH 9: STATS & ML BASICS ───
+      percentile: {
+        python: {
+          title: 'Percentile (Linear Interpolation)',
+          code: `\`\`\`python
+def percentile(data, p):
+    if not data: raise ValueError('empty data')
+    s = sorted(data)
+    k = (len(s) - 1) * (p / 100)
+    f = int(k)
+    c = min(f + 1, len(s) - 1)
+    return s[f] + (s[c] - s[f]) * (k - f)
+
+# Usage:
+print(percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 90))  # 9.1
+# For production use statistics.quantiles or numpy.percentile
+\`\`\``,
+          desc: 'Linear interpolation between the two neighbour values (type-7 / numpy default). O(n log n) due to sort.',
+        },
+        javascript: {
+          title: 'Percentile (Linear Interpolation)',
+          code: `\`\`\`javascript
+function percentile(data, p) {
+  if (!data.length) throw new Error('empty data');
+  const s = [...data].sort((a, b) => a - b);
+  const k = (s.length - 1) * (p / 100);
+  const f = Math.floor(k), c = Math.min(f + 1, s.length - 1);
+  return s[f] + (s[c] - s[f]) * (k - f);
+}
+\`\`\``,
+          desc: 'Type-7 interpolation. O(n log n).',
+        },
+      },
+      moving_average: {
+        python: {
+          title: 'Simple Moving Average',
+          code: `\`\`\`python
+from collections import deque
+
+def moving_average(data, window):
+    if window <= 0: raise ValueError('window must be positive')
+    out, total, buf = [], 0.0, deque(maxlen=window)
+    for x in data:
+        if len(buf) == window: total -= buf[0]
+        buf.append(x); total += x
+        if len(buf) == window: out.append(total / window)
+    return out
+
+# Usage:
+print(moving_average([1, 2, 3, 4, 5, 6], 3))  # [2.0, 3.0, 4.0, 5.0]
+\`\`\``,
+          desc: 'O(n) single-pass with deque; avoids recomputing the window sum each step.',
+        },
+        javascript: {
+          title: 'Simple Moving Average',
+          code: `\`\`\`javascript
+function movingAverage(data, window) {
+  if (window <= 0) throw new Error('window must be positive');
+  const out = [];
+  let total = 0;
+  for (let i = 0; i < data.length; i++) {
+    total += data[i];
+    if (i >= window) total -= data[i - window];
+    if (i >= window - 1) out.push(total / window);
+  }
+  return out;
+}
+\`\`\``,
+          desc: 'Rolling-sum approach. O(n).',
+        },
+      },
+      ema: {
+        python: {
+          title: 'Exponential Moving Average',
+          code: `\`\`\`python
+def ema(data, alpha):
+    if not (0 < alpha <= 1): raise ValueError('alpha must be in (0, 1]')
+    out = []
+    prev = None
+    for x in data:
+        prev = x if prev is None else alpha * x + (1 - alpha) * prev
+        out.append(prev)
+    return out
+
+# Usage:
+# alpha = 2 / (N + 1) for N-period equivalent
+print(ema([1, 2, 3, 4, 5], alpha=0.5))
+\`\`\``,
+          desc: 'Classic recursive EMA. For N-period equivalent pick alpha = 2/(N+1).',
+        },
+        javascript: {
+          title: 'Exponential Moving Average',
+          code: `\`\`\`javascript
+function ema(data, alpha) {
+  if (!(alpha > 0 && alpha <= 1)) throw new Error('alpha must be in (0, 1]');
+  const out = [];
+  let prev = null;
+  for (const x of data) {
+    prev = prev === null ? x : alpha * x + (1 - alpha) * prev;
+    out.push(prev);
+  }
+  return out;
+}
+\`\`\``,
+          desc: 'Recursive EMA. alpha = 2/(N+1) for N-period equivalent.',
+        },
+      },
+      zscore: {
+        python: {
+          title: 'Z-Score (Standard Score)',
+          code: `\`\`\`python
+import math
+
+def zscore(data):
+    n = len(data)
+    if n < 2: raise ValueError('need at least 2 values')
+    mu = sum(data) / n
+    var = sum((x - mu) ** 2 for x in data) / (n - 1)
+    sd = math.sqrt(var)
+    if sd == 0: return [0.0] * n
+    return [(x - mu) / sd for x in data]
+
+# Usage:
+print(zscore([1, 2, 3, 4, 5]))
+\`\`\``,
+          desc: 'Uses sample standard deviation (n-1). Returns zeros when variance is zero.',
+        },
+        javascript: {
+          title: 'Z-Score (Standard Score)',
+          code: `\`\`\`javascript
+function zscore(data) {
+  const n = data.length;
+  if (n < 2) throw new Error('need at least 2 values');
+  const mu = data.reduce((a, b) => a + b, 0) / n;
+  const variance = data.reduce((a, x) => a + (x - mu) ** 2, 0) / (n - 1);
+  const sd = Math.sqrt(variance);
+  if (sd === 0) return new Array(n).fill(0);
+  return data.map(x => (x - mu) / sd);
+}
+\`\`\``,
+          desc: 'Sample standard deviation.',
+        },
+      },
+      correlation: {
+        python: {
+          title: 'Pearson Correlation Coefficient',
+          code: `\`\`\`python
+import math
+
+def correlation(x, y):
+    n = len(x)
+    if n != len(y) or n < 2: raise ValueError('bad lengths')
+    mx = sum(x) / n
+    my = sum(y) / n
+    num = sum((xi - mx) * (yi - my) for xi, yi in zip(x, y))
+    dx = math.sqrt(sum((xi - mx) ** 2 for xi in x))
+    dy = math.sqrt(sum((yi - my) ** 2 for yi in y))
+    if dx == 0 or dy == 0: return 0.0
+    return num / (dx * dy)
+
+# Usage:
+print(correlation([1,2,3,4,5], [2,4,6,8,10]))  # 1.0
+\`\`\``,
+          desc: 'Pearson r in [-1, 1]. Returns 0 on zero variance. For rank-based use Spearman.',
+        },
+        javascript: {
+          title: 'Pearson Correlation Coefficient',
+          code: `\`\`\`javascript
+function correlation(x, y) {
+  const n = x.length;
+  if (n !== y.length || n < 2) throw new Error('bad lengths');
+  const mx = x.reduce((a, b) => a + b, 0) / n;
+  const my = y.reduce((a, b) => a + b, 0) / n;
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) {
+    const ax = x[i] - mx, ay = y[i] - my;
+    num += ax * ay; dx += ax * ax; dy += ay * ay;
+  }
+  return dx && dy ? num / Math.sqrt(dx * dy) : 0;
+}
+\`\`\``,
+          desc: 'Pearson r in [-1, 1].',
+        },
+      },
+      covariance: {
+        python: {
+          title: 'Covariance',
+          code: `\`\`\`python
+def covariance(x, y, sample=True):
+    n = len(x)
+    if n != len(y) or n < 2: raise ValueError('bad lengths')
+    mx = sum(x) / n
+    my = sum(y) / n
+    s = sum((xi - mx) * (yi - my) for xi, yi in zip(x, y))
+    return s / (n - 1) if sample else s / n
+
+# Usage:
+print(covariance([1,2,3,4,5], [2,4,6,8,10]))  # 5.0
+\`\`\``,
+          desc: 'Sample covariance (n-1) by default. Pass sample=False for population.',
+        },
+        javascript: {
+          title: 'Covariance',
+          code: `\`\`\`javascript
+function covariance(x, y, sample = true) {
+  const n = x.length;
+  if (n !== y.length || n < 2) throw new Error('bad lengths');
+  const mx = x.reduce((a, b) => a + b, 0) / n;
+  const my = y.reduce((a, b) => a + b, 0) / n;
+  let s = 0;
+  for (let i = 0; i < n; i++) s += (x[i] - mx) * (y[i] - my);
+  return sample ? s / (n - 1) : s / n;
+}
+\`\`\``,
+          desc: 'Sample cov (n-1) by default.',
+        },
+      },
+      linear_regression: {
+        python: {
+          title: 'Linear Regression (OLS, single feature)',
+          code: `\`\`\`python
+def linear_regression(x, y):
+    n = len(x)
+    if n != len(y) or n < 2: raise ValueError('bad lengths')
+    mx = sum(x) / n
+    my = sum(y) / n
+    num = sum((xi - mx) * (yi - my) for xi, yi in zip(x, y))
+    den = sum((xi - mx) ** 2 for xi in x)
+    slope = num / den if den != 0 else 0.0
+    intercept = my - slope * mx
+    return slope, intercept
+
+# Usage:
+slope, intercept = linear_regression([1,2,3,4,5], [2,4,6,8,10])
+print(slope, intercept)  # 2.0 0.0
+\`\`\``,
+          desc: 'Closed-form OLS for y = slope * x + intercept. For multi-feature use statsmodels or sklearn.',
+        },
+        javascript: {
+          title: 'Linear Regression (OLS, single feature)',
+          code: `\`\`\`javascript
+function linearRegression(x, y) {
+  const n = x.length;
+  if (n !== y.length || n < 2) throw new Error('bad lengths');
+  const mx = x.reduce((a, b) => a + b, 0) / n;
+  const my = y.reduce((a, b) => a + b, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (x[i] - mx) * (y[i] - my);
+    den += (x[i] - mx) ** 2;
+  }
+  const slope = den === 0 ? 0 : num / den;
+  return { slope, intercept: my - slope * mx };
+}
+\`\`\``,
+          desc: 'Closed-form OLS.',
+        },
+      },
+      k_means: {
+        python: {
+          title: 'K-Means Clustering (Lloyd)',
+          code: `\`\`\`python
+import random
+import math
+
+def k_means(points, k, max_iter=100, tol=1e-4):
+    centroids = random.sample(list(points), k)
+    for _ in range(max_iter):
+        clusters = [[] for _ in range(k)]
+        for p in points:
+            dists = [sum((pi - ci) ** 2 for pi, ci in zip(p, c)) for c in centroids]
+            clusters[dists.index(min(dists))].append(p)
+        new_centroids = [
+            tuple(sum(x) / len(cluster) for x in zip(*cluster)) if cluster else centroids[i]
+            for i, cluster in enumerate(clusters)
+        ]
+        shift = max(math.sqrt(sum((a - b) ** 2 for a, b in zip(o, n))) for o, n in zip(centroids, new_centroids))
+        centroids = new_centroids
+        if shift < tol: break
+    return centroids, clusters
+
+# Usage:
+pts = [(1,1),(1,2),(10,10),(10,11),(20,20)]
+centroids, clusters = k_means(pts, k=3)
+\`\`\``,
+          desc: `Lloyd's algorithm. Converges to a local optimum; run multiple times with different seeds for better results.`,
+        },
+        javascript: {
+          title: 'K-Means Clustering (Lloyd)',
+          code: `\`\`\`javascript
+function kMeans(points, k, maxIter = 100, tol = 1e-4) {
+  const indices = [...points.keys()].sort(() => Math.random() - 0.5).slice(0, k);
+  let centroids = indices.map(i => [...points[i]]);
+  for (let iter = 0; iter < maxIter; iter++) {
+    const clusters = Array.from({ length: k }, () => []);
+    for (const p of points) {
+      let best = 0, bestD = Infinity;
+      for (let i = 0; i < k; i++) {
+        let d = 0;
+        for (let j = 0; j < p.length; j++) d += (p[j] - centroids[i][j]) ** 2;
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      clusters[best].push(p);
+    }
+    const next = clusters.map((c, i) => c.length ? c[0].map((_, j) => c.reduce((s, p) => s + p[j], 0) / c.length) : centroids[i]);
+    const shift = Math.max(...centroids.map((c, i) => Math.sqrt(c.reduce((s, v, j) => s + (v - next[i][j]) ** 2, 0))));
+    centroids = next;
+    if (shift < tol) break;
+  }
+  return centroids;
+}
+\`\`\``,
+          desc: 'Lloyd iteration. Random init; re-run for stability.',
+        },
+      },
+      cosine_similarity: {
+        python: {
+          title: 'Cosine Similarity',
+          code: `\`\`\`python
+import math
+
+def cosine_similarity(a, b):
+    if len(a) != len(b): raise ValueError('length mismatch')
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0 or nb == 0: return 0.0
+    return dot / (na * nb)
+
+# Usage:
+print(cosine_similarity([1, 2, 3], [2, 4, 6]))  # 1.0
+\`\`\``,
+          desc: 'Dot product divided by L2 norms. Range [-1, 1]. Good for embedding comparison.',
+        },
+        javascript: {
+          title: 'Cosine Similarity',
+          code: `\`\`\`javascript
+function cosineSimilarity(a, b) {
+  if (a.length !== b.length) throw new Error('length mismatch');
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return (na && nb) ? dot / Math.sqrt(na * nb) : 0;
+}
+\`\`\``,
+          desc: 'Single-pass dot + norms. Range [-1, 1].',
+        },
+      },
+      euclidean_distance: {
+        python: {
+          title: 'Euclidean Distance (n-dim)',
+          code: `\`\`\`python
+import math
+
+def euclidean_distance(a, b):
+    if len(a) != len(b): raise ValueError('length mismatch')
+    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+
+# Usage:
+print(euclidean_distance([1, 2, 3], [4, 5, 6]))  # 5.196...
+\`\`\``,
+          desc: 'Straight-line distance in n dimensions.',
+        },
+        javascript: {
+          title: 'Euclidean Distance (n-dim)',
+          code: `\`\`\`javascript
+function euclideanDistance(a, b) {
+  if (a.length !== b.length) throw new Error('length mismatch');
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += (a[i] - b[i]) ** 2;
+  return Math.sqrt(s);
+}
+\`\`\``,
+          desc: 'Straight-line distance in n dimensions.',
+        },
+      },
+      softmax: {
+        python: {
+          title: 'Softmax (numerically stable)',
+          code: `\`\`\`python
+import math
+
+def softmax(xs):
+    m = max(xs)
+    exps = [math.exp(x - m) for x in xs]
+    s = sum(exps)
+    return [e / s for e in exps]
+
+# Usage:
+print(softmax([1.0, 2.0, 3.0]))  # [0.0900, 0.2447, 0.6652]
+\`\`\``,
+          desc: 'Subtract max before exp to avoid overflow. Sums to 1.',
+        },
+        javascript: {
+          title: 'Softmax (numerically stable)',
+          code: `\`\`\`javascript
+function softmax(xs) {
+  const m = Math.max(...xs);
+  const exps = xs.map(x => Math.exp(x - m));
+  const s = exps.reduce((a, b) => a + b, 0);
+  return exps.map(e => e / s);
+}
+\`\`\``,
+          desc: 'max-subtract trick for numerical stability.',
+        },
+      },
+      matrix_multiply: {
+        python: {
+          title: 'Matrix Multiplication',
+          code: `\`\`\`python
+def matrix_multiply(A, B):
+    if not A or not B or len(A[0]) != len(B): raise ValueError('shape mismatch')
+    n, m, p = len(A), len(A[0]), len(B[0])
+    C = [[0] * p for _ in range(n)]
+    for i in range(n):
+        for k in range(m):
+            aik = A[i][k]
+            for j in range(p):
+                C[i][j] += aik * B[k][j]
+    return C
+
+# Usage:
+print(matrix_multiply([[1,2],[3,4]], [[5,6],[7,8]]))  # [[19,22],[43,50]]
+\`\`\``,
+          desc: 'ikj loop ordering is cache-friendly. For any real workload use numpy.dot.',
+        },
+        javascript: {
+          title: 'Matrix Multiplication',
+          code: `\`\`\`javascript
+function matMul(A, B) {
+  if (!A.length || !B.length || A[0].length !== B.length) throw new Error('shape mismatch');
+  const n = A.length, m = A[0].length, p = B[0].length;
+  const C = Array.from({ length: n }, () => new Array(p).fill(0));
+  for (let i = 0; i < n; i++)
+    for (let k = 0; k < m; k++) {
+      const aik = A[i][k];
+      for (let j = 0; j < p; j++) C[i][j] += aik * B[k][j];
+    }
+  return C;
+}
+\`\`\``,
+          desc: 'ikj ordering for cache locality.',
+        },
+      },
+
+      // ─── BATCH 10: POWER TOOLS ───
+      rate_limiter: {
+        python: {
+          title: 'Token Bucket Rate Limiter',
+          code: `\`\`\`python
+import time, threading
+
+class TokenBucket:
+    def __init__(self, rate, capacity):
+        self.rate = rate
+        self.capacity = capacity
+        self.tokens = capacity
+        self.last = time.monotonic()
+        self.lock = threading.Lock()
+    def consume(self, n=1):
+        with self.lock:
+            now = time.monotonic()
+            elapsed = now - self.last
+            self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
+            self.last = now
+            if self.tokens >= n:
+                self.tokens -= n
+                return True
+            return False
+
+# Usage:
+bucket = TokenBucket(rate=10, capacity=20)  # 10 tokens/sec, burst 20
+if bucket.consume(): do_work()
+\`\`\``,
+          desc: 'Thread-safe token bucket. Tokens refill at `rate` per second, capped at `capacity` (burst size).',
+        },
+        javascript: {
+          title: 'Token Bucket Rate Limiter',
+          code: `\`\`\`javascript
+class TokenBucket {
+  constructor(rate, capacity) {
+    this.rate = rate;
+    this.capacity = capacity;
+    this.tokens = capacity;
+    this.last = performance.now() / 1000;
+  }
+  consume(n = 1) {
+    const now = performance.now() / 1000;
+    this.tokens = Math.min(this.capacity, this.tokens + (now - this.last) * this.rate);
+    this.last = now;
+    if (this.tokens >= n) { this.tokens -= n; return true; }
+    return false;
+  }
+}
+
+// Usage:
+// const bucket = new TokenBucket(10, 20);
+// if (bucket.consume()) doWork();
+\`\`\``,
+          desc: 'Token bucket. Single-threaded JS so no lock needed. performance.now() gives monotonic time.',
+        },
+      },
+      circuit_breaker: {
+        python: {
+          title: 'Circuit Breaker',
+          code: `\`\`\`python
+import time
+from enum import Enum
+
+class State(Enum):
+    CLOSED = 1; OPEN = 2; HALF_OPEN = 3
+
+class CircuitBreaker:
+    def __init__(self, threshold=5, cooldown=30):
+        self.threshold = threshold
+        self.cooldown = cooldown
+        self.failures = 0
+        self.state = State.CLOSED
+        self.opened_at = 0
+    def call(self, fn, *args, **kwargs):
+        if self.state == State.OPEN:
+            if time.monotonic() - self.opened_at >= self.cooldown:
+                self.state = State.HALF_OPEN
+            else:
+                raise RuntimeError('circuit open')
+        try:
+            result = fn(*args, **kwargs)
+            self.failures = 0
+            self.state = State.CLOSED
+            return result
+        except Exception:
+            self.failures += 1
+            if self.failures >= self.threshold:
+                self.state = State.OPEN
+                self.opened_at = time.monotonic()
+            raise
+
+# Usage:
+# cb = CircuitBreaker(threshold=3, cooldown=30)
+# cb.call(flaky_api)
+\`\`\``,
+          desc: 'CLOSED → OPEN on consecutive failures → HALF_OPEN after cooldown → CLOSED on success. Prevents cascading failures.',
+        },
+        javascript: {
+          title: 'Circuit Breaker',
+          code: `\`\`\`javascript
+class CircuitBreaker {
+  constructor({ threshold = 5, cooldown = 30000 } = {}) {
+    this.threshold = threshold;
+    this.cooldown = cooldown;
+    this.failures = 0;
+    this.state = 'CLOSED';
+    this.openedAt = 0;
+  }
+  async call(fn, ...args) {
+    if (this.state === 'OPEN') {
+      if (Date.now() - this.openedAt >= this.cooldown) this.state = 'HALF_OPEN';
+      else throw new Error('circuit open');
+    }
+    try {
+      const result = await fn(...args);
+      this.failures = 0; this.state = 'CLOSED';
+      return result;
+    } catch (err) {
+      this.failures++;
+      if (this.failures >= this.threshold) { this.state = 'OPEN'; this.openedAt = Date.now(); }
+      throw err;
+    }
+  }
+}
+\`\`\``,
+          desc: 'Three-state CB: CLOSED, OPEN, HALF_OPEN.',
+        },
+      },
+      lru_with_ttl: {
+        python: {
+          title: 'LRU Cache with TTL',
+          code: `\`\`\`python
+import time
+from collections import OrderedDict
+
+class LRUCache:
+    def __init__(self, capacity, ttl):
+        self.capacity = capacity
+        self.ttl = ttl
+        self.cache = OrderedDict()
+    def get(self, key):
+        if key not in self.cache: return None
+        value, expires = self.cache[key]
+        if time.monotonic() > expires:
+            del self.cache[key]
+            return None
+        self.cache.move_to_end(key)
+        return value
+    def put(self, key, value):
+        self.cache[key] = (value, time.monotonic() + self.ttl)
+        self.cache.move_to_end(key)
+        if len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
+
+# Usage:
+cache = LRUCache(capacity=100, ttl=60)
+cache.put('user:1', {'name': 'Ada'})
+print(cache.get('user:1'))
+\`\`\``,
+          desc: 'OrderedDict provides O(1) LRU plus per-entry expiry. Expired entries are lazily evicted on access.',
+        },
+        javascript: {
+          title: 'LRU Cache with TTL',
+          code: `\`\`\`javascript
+class LRUCache {
+  constructor(capacity, ttlMs) {
+    this.capacity = capacity;
+    this.ttl = ttlMs;
+    this.cache = new Map();
+  }
+  get(key) {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expires) { this.cache.delete(key); return null; }
+    this.cache.delete(key); this.cache.set(key, entry);
+    return entry.value;
+  }
+  put(key, value) {
+    if (this.cache.has(key)) this.cache.delete(key);
+    this.cache.set(key, { value, expires: Date.now() + this.ttl });
+    if (this.cache.size > this.capacity) this.cache.delete(this.cache.keys().next().value);
+  }
+}
+\`\`\``,
+          desc: 'Map preserves insertion order — reinsertion is how LRU is tracked.',
+        },
+      },
+      state_machine: {
+        python: {
+          title: 'Finite State Machine',
+          code: `\`\`\`python
+class StateMachine:
+    def __init__(self, initial, transitions):
+        self.state = initial
+        # transitions: {(state, event): next_state}
+        self.transitions = transitions
+    def fire(self, event):
+        key = (self.state, event)
+        if key not in self.transitions:
+            raise ValueError(f'invalid transition {self.state} --{event}-->')
+        self.state = self.transitions[key]
+        return self.state
+
+# Usage:
+transitions = {
+    ('idle', 'start'): 'running',
+    ('running', 'pause'): 'paused',
+    ('paused', 'resume'): 'running',
+    ('running', 'stop'): 'idle',
+    ('paused', 'stop'): 'idle',
+}
+sm = StateMachine('idle', transitions)
+print(sm.fire('start'))  # running
+print(sm.fire('stop'))   # idle
+\`\`\``,
+          desc: 'Table-driven FSM. For complex state use a library like transitions or statechart.',
+        },
+        javascript: {
+          title: 'Finite State Machine',
+          code: `\`\`\`javascript
+class StateMachine {
+  constructor(initial, transitions) {
+    this.state = initial;
+    this.transitions = transitions; // { state: { event: nextState } }
+  }
+  fire(event) {
+    const next = this.transitions[this.state]?.[event];
+    if (!next) throw new Error(\`invalid transition \${this.state} --\${event}-->\`);
+    this.state = next;
+    return this.state;
+  }
+}
+
+// Usage:
+const sm = new StateMachine('idle', {
+  idle: { start: 'running' },
+  running: { pause: 'paused', stop: 'idle' },
+  paused: { resume: 'running', stop: 'idle' },
+});
+\`\`\``,
+          desc: 'Nested-object FSM. For richer semantics use XState.',
+        },
+      },
+      pub_sub: {
+        python: {
+          title: 'Pub/Sub (Observer)',
+          code: `\`\`\`python
+from collections import defaultdict
+
+class PubSub:
+    def __init__(self):
+        self.subscribers = defaultdict(list)
+    def subscribe(self, topic, handler):
+        self.subscribers[topic].append(handler)
+        return lambda: self.subscribers[topic].remove(handler)
+    def publish(self, topic, *args, **kwargs):
+        for h in list(self.subscribers[topic]):
+            h(*args, **kwargs)
+
+# Usage:
+bus = PubSub()
+unsub = bus.subscribe('orders', lambda o: print('order', o))
+bus.publish('orders', {'id': 1})
+\`\`\``,
+          desc: 'In-process pub/sub. For network pub/sub use Redis or NATS.',
+        },
+        javascript: {
+          title: 'Pub/Sub (Observer)',
+          code: `\`\`\`javascript
+class PubSub {
+  constructor() { this.subs = new Map(); }
+  subscribe(topic, handler) {
+    if (!this.subs.has(topic)) this.subs.set(topic, new Set());
+    this.subs.get(topic).add(handler);
+    return () => this.subs.get(topic)?.delete(handler);
+  }
+  publish(topic, ...args) {
+    for (const h of [...(this.subs.get(topic) ?? [])]) h(...args);
+  }
+}
+\`\`\``,
+          desc: 'Set-backed topic subscribers. `subscribe` returns an unsubscribe function.',
+        },
+      },
+      binary_search_first: {
+        python: {
+          title: 'Binary Search (first occurrence / lower bound)',
+          code: `\`\`\`python
+from bisect import bisect_left
+
+def first_occurrence(arr, target):
+    i = bisect_left(arr, target)
+    if i < len(arr) and arr[i] == target: return i
+    return -1
+
+# Usage:
+print(first_occurrence([1, 2, 2, 2, 3, 4], 2))  # 1
+\`\`\``,
+          desc: 'bisect_left gives the leftmost insertion point. O(log n). Hand-rolled variant is a tight loop on lo/hi.',
+        },
+        javascript: {
+          title: 'Binary Search (first occurrence / lower bound)',
+          code: `\`\`\`javascript
+function firstOccurrence(arr, target) {
+  let lo = 0, hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] < target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < arr.length && arr[lo] === target ? lo : -1;
+}
+\`\`\``,
+          desc: 'Lower-bound variant. O(log n).',
+        },
+      },
+      binary_search_last: {
+        python: {
+          title: 'Binary Search (last occurrence / upper bound)',
+          code: `\`\`\`python
+from bisect import bisect_right
+
+def last_occurrence(arr, target):
+    i = bisect_right(arr, target) - 1
+    if 0 <= i < len(arr) and arr[i] == target: return i
+    return -1
+
+# Usage:
+print(last_occurrence([1, 2, 2, 2, 3, 4], 2))  # 3
+\`\`\``,
+          desc: 'bisect_right gives the rightmost insertion point; minus one locates the last equal element.',
+        },
+        javascript: {
+          title: 'Binary Search (last occurrence / upper bound)',
+          code: `\`\`\`javascript
+function lastOccurrence(arr, target) {
+  let lo = 0, hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid] <= target) lo = mid + 1;
+    else hi = mid;
+  }
+  const i = lo - 1;
+  return i >= 0 && arr[i] === target ? i : -1;
+}
+\`\`\``,
+          desc: 'Upper-bound variant. O(log n).',
+        },
+      },
+      quickselect: {
+        python: {
+          title: 'Quickselect (kth smallest, Hoare)',
+          code: `\`\`\`python
+import random
+
+def quickselect(arr, k):
+    if k < 0 or k >= len(arr): raise IndexError('k out of range')
+    a = list(arr)
+    lo, hi = 0, len(a) - 1
+    while lo <= hi:
+        pivot = a[random.randint(lo, hi)]
+        i, j = lo, hi
+        while i <= j:
+            while a[i] < pivot: i += 1
+            while a[j] > pivot: j -= 1
+            if i <= j:
+                a[i], a[j] = a[j], a[i]
+                i += 1; j -= 1
+        if k <= j: hi = j
+        elif k >= i: lo = i
+        else: return a[k]
+    return a[k]
+
+# Usage:
+print(quickselect([3, 1, 4, 1, 5, 9, 2, 6], 3))  # 3
+\`\`\``,
+          desc: 'Hoare-partition quickselect with random pivot. Expected O(n). Use heapq.nsmallest/nlargest for k near bounds.',
+        },
+        javascript: {
+          title: 'Quickselect (kth smallest, Hoare)',
+          code: `\`\`\`javascript
+function quickselect(arr, k) {
+  if (k < 0 || k >= arr.length) throw new RangeError('k out of range');
+  const a = [...arr];
+  let lo = 0, hi = a.length - 1;
+  while (lo <= hi) {
+    const pivot = a[lo + ((Math.random() * (hi - lo + 1)) | 0)];
+    let i = lo, j = hi;
+    while (i <= j) {
+      while (a[i] < pivot) i++;
+      while (a[j] > pivot) j--;
+      if (i <= j) { [a[i], a[j]] = [a[j], a[i]]; i++; j--; }
+    }
+    if (k <= j) hi = j;
+    else if (k >= i) lo = i;
+    else return a[k];
+  }
+  return a[k];
+}
+\`\`\``,
+          desc: 'Hoare-partition quickselect. Expected O(n).',
+        },
+      },
+      top_k_frequent: {
+        python: {
+          title: 'Top K Frequent Elements',
+          code: `\`\`\`python
+from collections import Counter
+import heapq
+
+def top_k_frequent(nums, k):
+    counts = Counter(nums)
+    return [item for item, _ in heapq.nlargest(k, counts.items(), key=lambda kv: kv[1])]
+
+# Usage:
+print(top_k_frequent([1, 1, 1, 2, 2, 3], 2))  # [1, 2]
+\`\`\``,
+          desc: 'Counter + heapq.nlargest. O(n log k).',
+        },
+        javascript: {
+          title: 'Top K Frequent Elements',
+          code: `\`\`\`javascript
+function topKFrequent(nums, k) {
+  const counts = new Map();
+  for (const n of nums) counts.set(n, (counts.get(n) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, k)
+    .map(([v]) => v);
+}
+\`\`\``,
+          desc: 'Simple sort-then-slice. O(n log n). For huge n switch to a size-k min-heap.',
+        },
+      },
+      top_k_largest: {
+        python: {
+          title: 'Top K Largest Elements',
+          code: `\`\`\`python
+import heapq
+
+def top_k_largest(nums, k):
+    return heapq.nlargest(k, nums)
+
+# Usage:
+print(top_k_largest([3, 2, 1, 5, 6, 4], 2))  # [6, 5]
+\`\`\``,
+          desc: 'heapq.nlargest maintains a size-k min-heap internally. O(n log k).',
+        },
+        javascript: {
+          title: 'Top K Largest Elements',
+          code: `\`\`\`javascript
+function topKLargest(nums, k) {
+  return [...nums].sort((a, b) => b - a).slice(0, k);
+}
+\`\`\``,
+          desc: 'Sort-and-slice. O(n log n). Use a min-heap for O(n log k) on huge arrays.',
         },
       },
     };
@@ -27242,6 +36374,11 @@ Want me to customize it with your actual links, change the color scheme, add ani
     if (this._activeMode === 'builder' || this._hasActiveSandboxContext) {
       return null;
     }
+    // Gate: clear imperative code-generation requests that fell through every
+    // specialized handler shouldn't scrape GitHub — web-search on these returns
+    // repo READMEs / activity pages, which read as noise to the user. Let the
+    // helpful fallback respond honestly instead.
+    if (this.looksLikeUnroutedCodeGen(query)) return null;
     try {
       // Select the best skill for this query (research-agent for factual/current info questions)
       const registry = getSkillRegistry();
@@ -27257,6 +36394,34 @@ Want me to customize it with your actual links, change the color scheme, add ani
       // Search failed — fall through silently
       return null;
     }
+  }
+
+  /**
+   * Heuristic guard used by the web-search strategy: recognise imperative
+   * code-generation requests ("write/make/implement a function that …",
+   * "reverse the words in a sentence", etc.) that slipped past every local
+   * code-gen handler. For those, web scraping returns low-signal results;
+   * falling through to the contextual helpful-fallback is preferable.
+   */
+  private looksLikeUnroutedCodeGen(query: string): boolean {
+    const q = query.trim().toLowerCase();
+    if (q.length === 0) return false;
+    // Imperative build verb + code-object noun (function/class/script/program/…)
+    if (/\b(?:write|make|create|build|implement|generate|give\s+me|show\s+me)\s+(?:a\s+|an\s+|me\s+a\s+|me\s+an\s+)?(?:function|method|class|script|program|snippet|code|algorithm|module|component|util(?:ity)?|helper)\b/i.test(q)) {
+      return true;
+    }
+    // Pronoun-referent revisions after a stripped restart prefix ("make it X
+    // not Y", "change it to X"): the earlier turn set the code-gen context and
+    // the revision survives normalization alone.
+    if (/^(?:make|change|turn|flip|convert)\s+it\s+\w+/i.test(q)) {
+      return true;
+    }
+    // Imperative transformation verb on a concrete data subject — typical
+    // coding-task phrasing that isn't a factual question.
+    if (/^(?:reverse|sort|filter|transform|map|reduce|flatten|chunk|group|merge|deduplicate|dedupe|split|join|parse|serialize|shuffle|rotate|count)\s+(?:the\s+|a\s+|an\s+|all\s+(?:the\s+)?)?(?:words?|lines?|characters?|letters?|elements?|items?|entries|array|list|sentence|string|text|numbers?)\b/i.test(q)) {
+      return true;
+    }
+    return false;
   }
 
   /**

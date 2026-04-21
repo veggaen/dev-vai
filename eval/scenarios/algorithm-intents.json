@@ -1,0 +1,160 @@
+{
+  "id": "algorithm-intents",
+  "label": "Algorithm code-gen — string, array, graph, DP, stats, async, utilities",
+  "scenarios": [
+    {
+      "id": "reverse-words",
+      "messages": [{ "role": "user", "content": "write a python function that reverses the words in a sentence" }],
+      "assert": {
+        "minLength": 60,
+        "contains": ["/def |split|join/i"],
+        "notContains": ["/reverse each character|reverse characters/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "slugify",
+      "messages": [{ "role": "user", "content": "implement a slugify function in javascript" }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": ["/slug|replace|toLowerCase|normalize/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "flatten-deep",
+      "messages": [{ "role": "user", "content": "write a function that flattens a nested array deeply" }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": ["/flat|recurs|isArray|reduce/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "two-sum",
+      "messages": [{ "role": "user", "content": "implement two sum in python" }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": ["/dict|hash|map|target/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "binary-search",
+      "messages": [{ "role": "user", "content": "write a binary search function in javascript" }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": ["/mid|low|high|left|right/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "count-set-bits",
+      "messages": [{ "role": "user", "content": "implement count set bits in python" }],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": ["/n\\s*&|bin\\(|popcount|count/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "gcd",
+      "messages": [{ "role": "user", "content": "write a gcd function using the euclidean algorithm in python" }],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": ["/gcd|a\\s*%\\s*b|while|euclid/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "n-queens",
+      "messages": [{ "role": "user", "content": "implement n queens in python" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": ["/queen|backtrack|column|diagon/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "subsets",
+      "messages": [{ "role": "user", "content": "write a function that returns all subsets of an array in javascript" }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": ["/subset|power|push|concat/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "bellman-ford",
+      "messages": [{ "role": "user", "content": "implement bellman ford shortest path in python" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": ["/bellman|edge|weight|distance|relax/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "segment-tree",
+      "messages": [{ "role": "user", "content": "implement a segment tree in python" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": ["/tree|segment|update|query|build/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "validate-email",
+      "messages": [{ "role": "user", "content": "write a function to validate an email in javascript" }],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": ["/@|regex|test|email|\\./i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "rate-limiter",
+      "messages": [{ "role": "user", "content": "implement a rate limiter in javascript" }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": ["/limit|bucket|window|timestamp|allow/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "debounce",
+      "messages": [{ "role": "user", "content": "write a debounce function in javascript" }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": ["/clearTimeout|setTimeout|delay|wait/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "k-means",
+      "messages": [{ "role": "user", "content": "implement k means clustering in python" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": ["/centroid|cluster|distance|mean/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "cosine-similarity",
+      "messages": [{ "role": "user", "content": "write a cosine similarity function in python" }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": ["/dot|norm|sqrt|cosine|similarity/i"],
+        "strategyIn": ["algorithm"]
+      }
+    },
+    {
+      "id": "quickselect",
+      "messages": [{ "role": "user", "content": "implement quickselect in python" }],
+      "assert": {
+        "minLength": 50,
+        "anyOfContains": ["/pivot|partition|kth|select/i"],
+        "strategyIn": ["algorithm"]
+      }
+    }
+  ]
+}

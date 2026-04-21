@@ -1,0 +1,56 @@
+{
+  "id": "sql-queries",
+  "label": "SQL tasks â€” joins, window functions, CTEs, indexing, performance",
+  "scenarios": [
+    {
+      "id": "inner-vs-left-join",
+      "messages": [{ "role": "user", "content": "Explain the difference between INNER JOIN and LEFT JOIN using a users/orders example." }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/INNER\\s+JOIN|LEFT\\s+JOIN|NULL|no matching|without an order|preserves|both sides|left table/i"
+        ]
+      }
+    },
+    {
+      "id": "window-row-number",
+      "messages": [{ "role": "user", "content": "Write a SQL query using ROW_NUMBER() to get the most recent order per user from an orders table." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/ROW_NUMBER\\s*\\(\\)|PARTITION\\s+BY|OVER\\s*\\(|ORDER\\s+BY.*DESC|WHERE\\s+rn\\s*=\\s*1|window/i"
+        ]
+      }
+    },
+    {
+      "id": "cte-recursive",
+      "messages": [{ "role": "user", "content": "Show a recursive CTE in SQL that walks an employee table with manager_id to build a reporting hierarchy." }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/WITH\\s+RECURSIVE|UNION\\s+ALL|manager_id|employee|anchor|recursive|hierarchy|cte/i"
+        ]
+      }
+    },
+    {
+      "id": "index-composite-order",
+      "messages": [{ "role": "user", "content": "I query WHERE status = 'active' AND created_at > ? ORDER BY created_at DESC. What composite index should I add and why?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/\\(status,\\s*created_at\\)|composite index|leftmost|column order|equality before range|covering|seek|cardinality/i"
+        ]
+      }
+    },
+    {
+      "id": "n-plus-one-detect",
+      "messages": [{ "role": "user", "content": "What is an N+1 query problem and how do I fix it when loading posts with their authors?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/N\\+1|JOIN|eager loading|batch|IN\\s*\\(|preload|includes|per (?:row|record)|one query per/i"
+        ]
+      }
+    }
+  ]
+}

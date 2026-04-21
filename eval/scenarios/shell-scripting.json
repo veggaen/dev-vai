@@ -1,0 +1,56 @@
+{
+  "id": "shell-scripting",
+  "label": "Shell scripting tasks â€” bash, PowerShell, jq, awk, find pipelines",
+  "scenarios": [
+    {
+      "id": "bash-loop-files",
+      "messages": [{ "role": "user", "content": "Write a bash loop that prints the size of every .log file in the current directory." }],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/for\\s+\\w+\\s+in\\s+\\*\\.log|du\\s+|stat\\s+-c|ls\\s+-l|wc\\s+-c|while\\s+read|find\\s+\\.\\s+-name/i"
+        ]
+      }
+    },
+    {
+      "id": "jq-extract-field",
+      "messages": [{ "role": "user", "content": "Using jq, extract the 'name' field from every object in a JSON array read from response.json." }],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": [
+          "/jq\\s+['\"]?\\.\\[\\]|jq\\s+-r|\\.name|response\\.json|map\\(\\.name\\)/i"
+        ]
+      }
+    },
+    {
+      "id": "awk-sum-column",
+      "messages": [{ "role": "user", "content": "Use awk to sum the third column of a tab-separated file data.tsv." }],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": [
+          "/awk\\s+|-F['\"]?\\\\t|\\$3|\\{\\s*sum\\s*\\+=|END\\s*\\{\\s*print|data\\.tsv/i"
+        ]
+      }
+    },
+    {
+      "id": "find-delete-old",
+      "messages": [{ "role": "user", "content": "Use find to delete files older than 30 days in /tmp, but only regular files." }],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": [
+          "/find\\s+\\/tmp|-type\\s+f|-mtime\\s*\\+30|-delete|-exec\\s+rm|30\\s*days/i"
+        ]
+      }
+    },
+    {
+      "id": "powershell-filter-processes",
+      "messages": [{ "role": "user", "content": "In PowerShell, list all processes using more than 500 MB of memory, sorted by size descending." }],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/Get-Process|Where-Object|Sort-Object|WorkingSet|WS\\s*\\/|500MB|-Descending|\\$_\\./i"
+        ]
+      }
+    }
+  ]
+}

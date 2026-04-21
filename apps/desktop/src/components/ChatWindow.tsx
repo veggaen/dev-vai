@@ -142,8 +142,8 @@ interface FileAttachment {
 }
 
 const LARGE_PASTE_THRESHOLD = 500;
-const MIN_INPUT_HEIGHT = 56;
-const MAX_INPUT_HEIGHT = 200;
+const MIN_INPUT_HEIGHT = 44;
+const MAX_INPUT_HEIGHT = 240;
 
 export function ChatWindow() {
   const {
@@ -1307,7 +1307,7 @@ export function ChatWindow() {
         ) : (
           /* ═══════════ MESSAGE THREAD ═══════════ */
           /* justify-end makes sparse messages sit at the bottom, above input */
-          <div className={`mx-auto flex min-h-full w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100vw-2rem))]' : 'max-w-[min(56rem,calc(100vw-2rem))]'} flex-col px-4 py-5 md:px-5`}>
+          <div className={`mx-auto flex min-h-full w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100vw-2rem))]' : 'max-w-[min(68rem,calc(100vw-2rem))]'} flex-col px-4 py-5 md:px-5`}>
             {hasResearchRailContext && latestResearchContext && (
               <div className="mb-4 flex justify-end">
                 <button
@@ -1327,7 +1327,7 @@ export function ChatWindow() {
               </div>
             )}
 
-            <div className={useResearchRailWideLayout ? 'grid min-h-full grid-cols-1 gap-8 xl:grid-cols-[minmax(0,52rem)_22rem] xl:items-start' : ''}>
+            <div className={useResearchRailWideLayout ? 'grid min-h-full grid-cols-1 gap-8 xl:grid-cols-[minmax(0,60rem)_24rem] xl:items-start' : ''}>
               <div className="flex min-h-full flex-col justify-start">
                 {messages.map((msg, idx) => {
                   const fb = fallbackDeployMap.get(idx);
@@ -1392,7 +1392,7 @@ export function ChatWindow() {
 
       {/* ── Input area — centered, auto-growing ── */}
       <div className="flex-shrink-0">
-        <div className={`mx-auto w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100vw-2rem))]' : 'max-w-[min(56rem,calc(100vw-2rem))]'} px-4 pb-4 pt-2 md:px-5`}>
+        <div className={`mx-auto w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100vw-2rem))]' : 'max-w-[min(68rem,calc(100vw-2rem))]'} px-4 pb-4 pt-2 md:px-5`}>
 
           {/* Image preview row */}
           {pastedImage && (
@@ -1452,14 +1452,14 @@ export function ChatWindow() {
           )}
           {/* The input box */}
           <motion.div
-            className={`relative flex flex-col overflow-visible rounded-[1rem] border transition-all ${
+            className={`relative flex flex-col overflow-visible rounded-[1.25rem] border transition-all ${
               deliveryRoute === 'broadcast'
                 ? studioBuilderChrome
                   ? 'border-blue-200 bg-white shadow-sm'
-                  : 'border-blue-500/15 bg-zinc-950/82'
+                  : 'border-blue-500/15 bg-zinc-950/82 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.55)]'
                 : studioBuilderChrome
                   ? 'border-zinc-200 bg-white shadow-sm'
-                  : 'border-zinc-800/60 bg-zinc-950/82'
+                  : 'border-zinc-800/60 bg-zinc-950/82 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.55)]'
             }`}
             animate={canSend ? { borderColor: deliveryRoute === 'broadcast' ? 'rgba(96,165,250,0.24)' : studioBuilderChrome ? 'rgba(228,228,231,1)' : 'rgba(63,63,70,0.75)' } : {}}
             transition={{ duration: 0.2 }}
@@ -1682,9 +1682,9 @@ export function ChatWindow() {
                       : MODE_PLACEHOLDERS[mode]
               }
               rows={1}
-              className={`resize-none overflow-y-auto bg-transparent px-4 pb-1 text-sm leading-relaxed focus:outline-none ${
+              className={`resize-none overflow-y-auto bg-transparent px-4 pb-2.5 pt-2.5 text-sm leading-relaxed focus:outline-none ${
                 studioBuilderChrome ? 'text-zinc-900 placeholder-zinc-400' : 'text-zinc-100 placeholder-zinc-600'
-              } pt-3`}
+              }`}
               style={{ minHeight: `${MIN_INPUT_HEIGHT}px`, maxHeight: `${MAX_INPUT_HEIGHT}px` }}
             />
             {mentionAt !== null && textareaRef.current && (
