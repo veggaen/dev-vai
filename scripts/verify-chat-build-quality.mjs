@@ -69,6 +69,8 @@ function parseArgs(argv) {
   let e2eQuick = false;
   let promptfoo = false;
   let hexaApi = false;
+  let scenarios = false;
+  let scenariosLive = false;
   let baseUrl = process.env.VAI_API?.trim() || 'http://127.0.0.1:3006';
 
   for (let i = 0; i < argv.length; i++) {
@@ -79,6 +81,8 @@ function parseArgs(argv) {
     else if (a === '--e2e-quick') e2eQuick = true;
     else if (a === '--promptfoo') promptfoo = true;
     else if (a === '--hexa-api') hexaApi = true;
+    else if (a === '--scenarios') scenarios = true;
+    else if (a === '--scenarios-live') scenariosLive = true;
     else if (a === '--base-url' && argv[i + 1]) {
       baseUrl = argv[++i].replace(/\/$/, '');
     } else if (/^https?:\/\//i.test(a)) {
@@ -86,7 +90,7 @@ function parseArgs(argv) {
     }
   }
 
-  return { live, skipProApp, unitWide, e2eQuick, promptfoo, hexaApi, baseUrl };
+  return { live, skipProApp, unitWide, e2eQuick, promptfoo, hexaApi, scenarios, scenariosLive, baseUrl };
 }
 
 function runVitest(args, label) {
@@ -189,6 +193,21 @@ async function main() {
       console.error('[verify-chat-build-quality] promptfoo eval failed');
       process.exit(r.status ?? 1);
     }
+  }
+
+  if (args.scenarios) {
+    runNode('scripts/vai-scenarios-run.mjs', []);
+  }
+
+  if (args.scenariosLive) {
+    const ok = await probe(`${args.baseUrl}/health`);
+    if (!ok) {
+      console.error(
+        `[verify-chat-build-quality] --scenarios-live: runtime not reachable at ${args.baseUrl}/health.`,
+      );
+      process.exit(1);
+    }
+    runNode('scripts/vai-scenario-bench.mjs', ['--base-url', args.baseUrl], { VAI_API: args.baseUrl });
   }
 
   console.log('\n[verify-chat-build-quality] DONE — all requested tiers passed.\n');

@@ -402,3 +402,52 @@ describe('classifyQuestionCategory', () => {
     expect(classifyQuestionCategory('general')).toBe('operational');
   });
 });
+
+// ─── KnowledgeStore.isJunkContent (Fix C regressions) ─────────────────────
+
+describe('KnowledgeStore.isJunkContent (Fix C)', () => {
+  it('flags raw "=== description ===" blob markers as junk', () => {
+    const blob = 'Some paragraph before.\n=== description ===\nThis is the scraped channel description that should never leak as an answer.';
+    expect(KnowledgeStore.isJunkContent(blob)).toBe(true);
+  });
+
+  it('flags "=== transcript ===" blob markers as junk', () => {
+    const blob = 'Intro text.\n=== transcript ===\n00:00 Hello and welcome back to the channel today we are going to be learning about something.';
+    expect(KnowledgeStore.isJunkContent(blob)).toBe(true);
+  });
+
+  it('flags "=== captions ===" and "=== metadata ===" markers as junk', () => {
+    expect(KnowledgeStore.isJunkContent('something\n=== captions ===\nmore text here with enough words to exceed the short-text threshold test.')).toBe(true);
+    expect(KnowledgeStore.isJunkContent('heading\n=== metadata ===\nfields and values that are structural not semantic content at all.')).toBe(true);
+  });
+
+  it('flags title-header + URL blobs as junk', () => {
+    const blob = 'title: Some Scraped Video Title\nhttps://youtube.com/watch?v=abc123\nextra description text that follows the title marker.';
+    expect(KnowledgeStore.isJunkContent(blob)).toBe(true);
+  });
+
+  it('flags link-dump content (many URLs, low prose) as junk', () => {
+    const blob = 'See these links https://example.com https://foo.com https://bar.com https://baz.com for details.';
+    expect(KnowledgeStore.isJunkContent(blob)).toBe(true);
+  });
+
+  it('flags transcript-style "click this link" + promo-code patterns as junk', () => {
+    const blob = 'Click this link https://sponsor.com to get 20% off with promo code SAVE20 on your next purchase from our partner.';
+    expect(KnowledgeStore.isJunkContent(blob)).toBe(true);
+  });
+
+  it('does not flag clean explanatory prose as junk', () => {
+    const clean = 'TypeScript is a typed superset of JavaScript that compiles to plain JavaScript. It adds static typing and improves tooling.';
+    expect(KnowledgeStore.isJunkContent(clean)).toBe(false);
+  });
+
+  it('does not flag single-URL content with real prose as junk', () => {
+    const withUrl = 'React is a JavaScript library for building user interfaces created by Meta. The documentation is available at https://react.dev for reference.';
+    expect(KnowledgeStore.isJunkContent(withUrl)).toBe(false);
+  });
+
+  it('does not flag prose containing the word "title" as junk', () => {
+    const clean = 'The title of the book was intriguing and drew many readers in with its bold cover design and evocative imagery.';
+    expect(KnowledgeStore.isJunkContent(clean)).toBe(false);
+  });
+});

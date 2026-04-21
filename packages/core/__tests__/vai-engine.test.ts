@@ -3446,6 +3446,113 @@ describe('VaiEngine', () => {
     // Must NOT hit error-diagnosis (which previously matched "at https" as a stack trace)
     expect(response.message.content).not.toMatch(/Diagnosing|stack trace|error/i);
   });
+
+  // ─── De-robotization regressions (Fixes A/B/D/F) ──────────────────────────
+
+  it('strips leading prepositions from "what do you know of X" topic extraction (Fix A)', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'what do you know of redbull?' }],
+    });
+    const body = response.message.content;
+    // Topic should be "redbull", never quoted as "of redbull"
+    expect(body).not.toMatch(/["']of\s+redbull["']/i);
+    expect(body).not.toMatch(/\babout\s+["']?of\s+redbull/i);
+  });
+
+  it('strips leading prepositions for "on" and "regarding" variants (Fix A)', async () => {
+    const r1 = await engine.chat({
+      messages: [{ role: 'user', content: 'what do you know on kubernetes?' }],
+    });
+    const r2 = await engine.chat({
+      messages: [{ role: 'user', content: 'what do you know regarding websockets?' }],
+    });
+    expect(r1.message.content).not.toMatch(/["']on\s+kubernetes["']/i);
+    expect(r2.message.content).not.toMatch(/["']regarding\s+websockets["']/i);
+  });
+
+  it('does not emit a bare "Yes." for meta-question "do you know of X" (Fix B)', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'do you know of redbull?' }],
+    });
+    const body = response.message.content.trim();
+    // A bare "**Yes.**" or "Yes." response with no reasoning is the failure mode
+    expect(body).not.toBe('**Yes.**');
+    expect(body).not.toBe('Yes.');
+    expect(body).not.toMatch(/^\*\*Yes\.\*\*\s*$/);
+    expect(body).not.toMatch(/^Yes\.\s*$/);
+    // Must have real content — at least a sentence worth
+    expect(body.length).toBeGreaterThan(15);
+  });
+
+  it('does not emit bare "Yes." for "do you remember X" meta-questions (Fix B)', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'do you remember typescript?' }],
+    });
+    const body = response.message.content.trim();
+    expect(body).not.toMatch(/^\*\*Yes\.\*\*\s*$/);
+    expect(body).not.toMatch(/^Yes\.\s*$/);
+  });
+
+  it('returns the Nth user message by index for "what is the second message here?" (Fix F)', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'user', content: 'first thing I said' },
+        { role: 'assistant', content: 'ok' },
+        { role: 'user', content: 'the second message content' },
+        { role: 'assistant', content: 'got it' },
+        { role: 'user', content: 'what is the second message here?' },
+      ],
+    });
+    // Should quote the actual second user message, not synthesize from knowledge
+    expect(response.message.content).toContain('the second message content');
+  });
+
+  it('returns the first message for "what was the first message?" (Fix F)', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'user', content: 'hello there partner' },
+        { role: 'assistant', content: 'hey' },
+        { role: 'user', content: 'what was the first message?' },
+      ],
+    });
+    expect(response.message.content).toContain('hello there partner');
+  });
+
+  it('returns the last user message for "what is the last message?" (Fix F)', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'user', content: 'msg one' },
+        { role: 'assistant', content: 'ok' },
+        { role: 'user', content: 'msg two here' },
+        { role: 'assistant', content: 'sure' },
+        { role: 'user', content: 'what is the last message?' },
+      ],
+    });
+    expect(response.message.content).toContain('msg two here');
+  });
+
+  it('gracefully handles out-of-range ordinal ("what is the tenth message?") (Fix F)', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'user', content: 'only one earlier message' },
+        { role: 'assistant', content: 'ok' },
+        { role: 'user', content: 'what is the tenth message here?' },
+      ],
+    });
+    const body = response.message.content;
+    // Should not fabricate a tenth message or search knowledge for "tenth message"
+    expect(body).toMatch(/only\s+\d+\s+prior|no\s+tenth|no\s+earlier/i);
+  });
+
+  it('does not double-echo "I don\'t have a good answer" on multi-question that all fail to split (Fix D)', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'hello who are you and what is this place' }],
+    });
+    const body = response.message.content;
+    // The old bug emitted the "I don't have a good answer for this one" fallback twice.
+    const matches = body.match(/I don't have a good answer for this one/gi) ?? [];
+    expect(matches.length).toBeLessThanOrEqual(1);
+  });
 });
 
 /* ══════════════════════════════════════════════════════════════════

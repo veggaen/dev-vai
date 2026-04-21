@@ -1,0 +1,75 @@
+{
+  "id": "iterative-refinement",
+  "label": "Short refinement turns ('smaller', 'no library', 'try again') must operate on the prior artifact",
+  "scenarios": [
+    {
+      "id": "make-it-smaller",
+      "messages": [
+        { "role": "user", "content": "Write a JavaScript function that finds the longest word in a sentence." },
+        { "role": "user", "content": "Make it smaller." }
+      ],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": [
+          "/reduce|split|sort|Math\\.max|one.?liner|=>|function/i"
+        ],
+        "maxLength": 1500
+      }
+    },
+    {
+      "id": "without-lodash",
+      "messages": [
+        { "role": "user", "content": "Deep clone a nested object in JS." },
+        { "role": "user", "content": "Do it without lodash or any library." }
+      ],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/structuredClone|JSON\\.parse|recurs|for .+ in|Object\\.entries|Object\\.keys/i"
+        ],
+        "notContains": [
+          "/lodash|_\\.|import _|require\\('lodash'\\)/i"
+        ]
+      }
+    },
+    {
+      "id": "more-idiomatic",
+      "messages": [
+        { "role": "user", "content": "Sum all even numbers in an array in JavaScript." },
+        { "role": "user", "content": "Rewrite it more idiomatically." }
+      ],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": [
+          "/\\.filter|\\.reduce|=>|arrow function|chain/i"
+        ]
+      }
+    },
+    {
+      "id": "try-again-different-approach",
+      "messages": [
+        { "role": "user", "content": "Reverse a string in Python." },
+        { "role": "user", "content": "Try again with a different approach." }
+      ],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": [
+          "/reversed|for .+ in|while|recurs|\\[::-1\\]|join/i"
+        ]
+      }
+    },
+    {
+      "id": "simpler-please",
+      "messages": [
+        { "role": "user", "content": "Implement a simple pub/sub event emitter in TypeScript." },
+        { "role": "user", "content": "Simpler please." }
+      ],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/Map|Record|on\\(|emit\\(|off\\(|listener|callback|subscribe|publish/i"
+        ]
+      }
+    }
+  ]
+}

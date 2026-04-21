@@ -1,0 +1,62 @@
+{
+  "id": "ambiguous-requests",
+  "label": "Under-specified prompts should trigger clarification, not confabulation",
+  "scenarios": [
+    {
+      "id": "fix-that-bug-cold",
+      "messages": [{ "role": "user", "content": "fix that bug" }],
+      "assert": {
+        "minLength": 40,
+        "maxLength": 2500,
+        "anyOfContains": [
+          "/which|what bug|more (?:context|detail|info)|paste|share|stack trace|error message|file|clarify|not sure what/i"
+        ],
+        "notContains": [
+          "/```(?:javascript|typescript|tsx|jsx|python|go|rust)[\\s\\S]{200,}/i"
+        ]
+      }
+    },
+    {
+      "id": "make-it-nicer",
+      "messages": [{ "role": "user", "content": "make it nicer" }],
+      "assert": {
+        "minLength": 30,
+        "maxLength": 2500,
+        "anyOfContains": [
+          "/what (?:component|file|page|screen|code|project)|which (?:one|part|element)|paste|show me|more detail|not sure what/i"
+        ]
+      }
+    },
+    {
+      "id": "it-doesnt-work",
+      "messages": [{ "role": "user", "content": "it doesn't work" }],
+      "assert": {
+        "minLength": 30,
+        "maxLength": 2500,
+        "anyOfContains": [
+          "/what (?:isn'?t|is not|doesn'?t|happens)|error message|stack trace|expected|actual|paste|share|logs?|symptom/i"
+        ]
+      }
+    },
+    {
+      "id": "do-the-thing",
+      "messages": [{ "role": "user", "content": "do the thing" }],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/which thing|what do you want|more context|clarify|not sure what|which (?:action|task)/i"
+        ]
+      }
+    },
+    {
+      "id": "help",
+      "messages": [{ "role": "user", "content": "help" }],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/what (?:do you need|can i help|are you working on|would you like)|tell me more|describe|area/i"
+        ]
+      }
+    }
+  ]
+}

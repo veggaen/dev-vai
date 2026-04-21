@@ -139,6 +139,43 @@ describe('buildSearchPlan', () => {
     expect(plan.entities).toContain('capital');
     expect(plan.entities).toContain('France');
   });
+
+  // ─── Fix E: strip "do you know (of|about)" meta-prefixes from primary subject
+  it('strips "what do you know about X" prefix from fan-out queries (Fix E)', () => {
+    const plan = buildSearchPlan('what do you know about redbull');
+    for (const q of plan.fanOutQueries.slice(1)) {
+      expect(q.toLowerCase()).not.toContain('what do you know');
+      expect(q.toLowerCase()).not.toContain('do you know');
+    }
+  });
+
+  it('strips "do you know of X" prefix and leading "of" from fan-out queries (Fix E)', () => {
+    const plan = buildSearchPlan('do you know of redbull');
+    for (const q of plan.fanOutQueries.slice(1)) {
+      expect(q.toLowerCase()).not.toContain('do you know');
+      expect(q.toLowerCase()).not.toMatch(/\bof\s+redbull\b/);
+    }
+  });
+
+  it('strips "have you heard of X" prefix from fan-out queries (Fix E)', () => {
+    const plan = buildSearchPlan('have you heard of kubernetes');
+    for (const q of plan.fanOutQueries.slice(1)) {
+      expect(q.toLowerCase()).not.toContain('have you heard');
+    }
+  });
+
+  it('strips "what do you know on X" and "regarding X" (Fix E)', () => {
+    const planOn = buildSearchPlan('what do you know on websockets');
+    const planReg = buildSearchPlan('what do you know regarding kafka');
+    for (const q of planOn.fanOutQueries.slice(1)) {
+      expect(q.toLowerCase()).not.toMatch(/\bon\s+websockets\b/);
+      expect(q.toLowerCase()).not.toContain('what do you know');
+    }
+    for (const q of planReg.fanOutQueries.slice(1)) {
+      expect(q.toLowerCase()).not.toMatch(/\bregarding\s+kafka\b/);
+      expect(q.toLowerCase()).not.toContain('what do you know');
+    }
+  });
 });
 
 // ── URL Validation (SSRF Protection) ──

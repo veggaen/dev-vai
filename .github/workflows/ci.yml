@@ -41,6 +41,14 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Scenario bench regression gate
+        shell: bash
+        env:
+          VAI_SCENARIOS: '1'
+        run: |
+          set -euo pipefail
+          pnpm exec vitest run packages/core/__tests__/scenarios.test.ts --reporter=basic
+
       - name: Retrieval flywheel regression gate
         if: matrix.node-version == 22
         shell: bash

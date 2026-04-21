@@ -6,6 +6,7 @@ import {
   type RetrievalTelemetryDiagnostics,
   type RetrievalTelemetryEvent,
 } from './retrieval-telemetry.js';
+import { HybridRetriever } from './hybrid-retrieval.js';
 
 export class VaiTokenizer {
   private vocab: Map<string, number> = new Map();
@@ -131,6 +132,8 @@ export class KnowledgeStore {
   private concepts: Map<string, { definition: string; source: string; frequency: number }> = new Map();
   private retrievalEvents: RetrievalTelemetryEvent[] = [];
   private retrievalDomainHits: Map<string, number> = new Map();
+  private hybridRetriever: HybridRetriever | null = null;
+  private hybridDirtyFrom = 0;
 
   private static readonly COVERAGE_THRESHOLD = 0.25;
   private static readonly PER_WORD_BOOST = 0.15;
@@ -686,6 +689,16 @@ export class KnowledgeStore {
     if (/\b(?:last updated|page migrating|copy page|sidebar|breadcrumb|skip to (?:content|main))\b/i.test(lower) && wordCount < 60) return true;
     if (text.trim().length < 10 && !/[.!?]$/.test(text.trim())) return true;
 
+    // Raw ingested-memory blob markers. These are structural delimiters from the
+    // scraper/loader that should never surface in a user-facing answer.
+    if (/===\s*(?:description|transcript|captions?|metadata|title)\s*===/i.test(text)) return true;
+    if (/^\s*title\s*:\s*.{5,}\s*\n/i.test(text) && /https?:\/\//i.test(text)) return true;
+    // Heavy link-dump content: many URLs with little connective prose.
+    const urlCount = (text.match(/https?:\/\/\S+/gi) ?? []).length;
+    if (urlCount >= 3 && wordCount < urlCount * 15) return true;
+    // Transcript-style "click this link" + URL + promo-code patterns.
+    if (/\bclick\s+this\s+link\b/i.test(lower) && urlCount >= 1 && /\b(?:promo|code|discount|sponsor|% off)\b/i.test(lower)) return true;
+
     return false;
   }
 
@@ -693,6 +706,18 @@ export class KnowledgeStore {
     if (this.documents.length === 0) {
       if (trackTelemetry) this.recordRetrievalTelemetry(query, []);
       return [];
+    }
+
+    // Hybrid BM25 + trigram retrieval is now the default path. Set
+    // VAI_HYBRID_RETRIEVAL=0 (or VAI_DISABLE_HYBRID_RETRIEVAL=1) to fall back
+    // to the legacy inverted-index scorer, which remains available as a safety
+    // escape hatch if a downstream regression surfaces.
+    const hybridDisabled = process.env.VAI_HYBRID_RETRIEVAL === '0'
+      || process.env.VAI_DISABLE_HYBRID_RETRIEVAL === '1';
+    if (!hybridDisabled) {
+      const hybridResults = this.retrieveRelevantHybrid(query, topK);
+      if (trackTelemetry) this.recordRetrievalTelemetry(query, hybridResults);
+      return hybridResults;
     }
 
     const queryWords = query.toLowerCase().split(/\s+/)
@@ -755,6 +780,64 @@ export class KnowledgeStore {
     }
 
     return results;
+  }
+
+  /**
+   * Hybrid BM25 + character-trigram retrieval. Lazily rebuilds an index from
+   * the current `documents` list, then applies the same source boosts and
+   * junk filters as `retrieveRelevant`. Returns results ordered by blended
+   * score. Callers that want telemetry should go through `retrieveRelevant`.
+   */
+  retrieveRelevantHybrid(query: string, topK = 5): Array<{ text: string; source: string; score: number }> {
+    if (this.documents.length === 0) return [];
+    if (!this.hybridRetriever || this.hybridDirtyFrom < this.documents.length) {
+      const retriever = this.hybridRetriever ?? new HybridRetriever();
+      for (let i = this.hybridDirtyFrom; i < this.documents.length; i++) {
+        const doc = this.documents[i];
+        retriever.add({ id: doc.id, text: doc.words.join(' '), source: doc.source });
+      }
+      this.hybridRetriever = retriever;
+      this.hybridDirtyFrom = this.documents.length;
+    }
+
+    const hits = this.hybridRetriever.retrieve(query, Math.max(topK * 2, topK));
+    // Emulate the legacy inverted-index candidate filter: require at least one
+    // *content* token (non-stopword, non-action-word) to surface as a lexical
+    // hit against the candidate doc. Prevents pure-trigram similarity and
+    // ubiquitous fillers ("explain", "detail", "in") from surfacing unrelated
+    // documents when no meaningful query term matches. Preserves paraphrase
+    // recall and keeps the "unknown topic → empty results → uncertainty-
+    // guardrail" contract intact.
+    const contentTokens = query.toLowerCase().split(/\s+/)
+      .map((w) => w.replace(/[^a-z0-9æøå]+/g, ''))
+      .filter((w) => w.length > 2 && !KnowledgeStore.STOP_WORDS.has(w));
+    const contentTokenSet = new Set(contentTokens);
+    const candidates = contentTokenSet.size === 0
+      ? hits.filter((h) => h.bm25 > 0)
+      : hits.filter((h) => {
+          if (h.bm25 <= 0) return false;
+          const docWords = new Set(h.doc.text.toLowerCase().split(/\s+/));
+          for (const tok of contentTokenSet) if (docWords.has(tok)) return true;
+          return false;
+        });
+    const scored: Array<{ text: string; source: string; score: number }> = [];
+    for (const hit of candidates) {
+      const text = hit.doc.text;
+      if (/^veggaai\s+ai\s+online\s+\d+\s+words/i.test(text)) continue;
+      if (text.startsWith('[no transcript available')) continue;
+      if (KnowledgeStore.isJunkContent(text)) continue;
+
+      let score = hit.score;
+      const source = hit.doc.source ?? '';
+      if (source.startsWith('entry:bootstrap') || source.startsWith('entry:user-taught') || source.startsWith('entry:vcus')) {
+        score *= 1.4;
+      } else if (source.includes('youtube.com') || source.includes('youtu.be') || source === 'youtube') {
+        score *= 0.6;
+      }
+      scored.push({ text, source, score });
+    }
+
+    return scored.sort((left, right) => right.score - left.score).slice(0, topK);
   }
 
   get documentCount(): number {

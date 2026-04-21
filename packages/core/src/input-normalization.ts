@@ -97,12 +97,77 @@ const NORMALIZATION_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bprgramming\b/gi, 'programming'],
 ];
 
+// ── Voice / dictation disfluency handling ───────────────────────────────
+// Applied BEFORE the typo rules so that restarts strip off the discarded
+// portion and fillers don't survive into routing signals. Skipped when the
+// input contains code fences (handled by the main entry point).
+
+// "no, I mean X" is preserved here — the engine's corrective-follow-up
+// extractor depends on that literal prefix to reframe the prior topic.
+const RESTART_MARKER_RE = /\b(?:wait(?:,?\s+actually)?|scratch that|actually(?:,?\s+no)?|no,?\s+wait|hmm,?\s+no|let me rephrase)\b/gi;
+
+function applyRestartMarkers(input: string): string {
+  let lastIdx = -1;
+  let lastLen = 0;
+  RESTART_MARKER_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = RESTART_MARKER_RE.exec(input)) !== null) {
+    lastIdx = match.index;
+    lastLen = match[0].length;
+  }
+  if (lastIdx < 0) return input;
+  const after = input.slice(lastIdx + lastLen).replace(/^[\s,.:;]+/, '');
+  if (after.length < 8) return input;
+  return after;
+}
+
+function stripDisfluencies(input: string): string {
+  let out = input;
+
+  out = applyRestartMarkers(out);
+
+  // Filler tokens — standalone "mm" is excluded because it clobbers valid
+  // uppercase tokens like "MM" in date formats (YYYY-MM-DD).
+  out = out.replace(/\b(?:um+|uh+|erm+|ah+|hmm+)\b[,.\s]*/gi, ' ');
+  // "you know" as a discourse filler — only when comma-bounded or trailing,
+  // never when it's the main verb ("what do you know about X?").
+  out = out.replace(/,\s*you\s+know\s*,\s*/gi, ', ');
+  out = out.replace(/,\s*you\s+know\s*[.?!]?\s*$/gi, '');
+  out = out.replace(/\b(?:sort of|kind of|kinda|sorta)\b[,.\s]*/gi, ' ');
+  out = out.replace(/\bso\s+like\b[,\s]*/gi, ' ');
+  out = out.replace(/,\s*like,\s*/gi, ', ');
+  out = out.replace(/,\s*like\s+/gi, ' ');
+
+  out = out.replace(/\s+comma\b/gi, ',');
+  out = out.replace(/\s+(?:period|full\s+stop)\b/gi, '.');
+  out = out.replace(/\s+question\s+mark\b/gi, '?');
+  out = out.replace(/\s+exclamation(?:\s+(?:point|mark))?\b/gi, '!');
+
+  out = out.replace(/\b([a-z]{2,})\s+([a-z]{1,3})\s+\1\s+\2\b/gi, '$1 $2');
+  out = out.replace(/\b([a-z]{2,})\s+\1\b/gi, '$1');
+
+  out = out.replace(/[\s,.]+(?:yeah\s+)?(?:that'?s it|i think that'?s it|you know what i mean|if that makes sense)\s*\??\s*$/gi, '');
+
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Exposed for unit tests. Runs only the disfluency pass (no typo normalization).
+ */
+export function stripDictationDisfluencies(input: string): string {
+  if (typeof input !== 'string') return input;
+  const trimmed = input.trim();
+  if (trimmed.length === 0) return input;
+  if (/```/.test(trimmed)) return input;
+  return stripDisfluencies(trimmed);
+}
+
 export function normalizeInputForUnderstanding(input: string): string {
   const trimmed = input.trim();
   if (trimmed.length === 0) return input;
   if (/```/.test(trimmed)) return input;
 
-  let normalized = trimmed;
+  let normalized = stripDisfluencies(trimmed);
   for (const [pattern, replacement] of NORMALIZATION_RULES) {
     normalized = normalized.replace(pattern, replacement);
   }

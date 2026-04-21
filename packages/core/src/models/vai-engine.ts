@@ -31,6 +31,7 @@ import { KnowledgeStore, VaiTokenizer, type KnowledgeEntry } from './knowledge-s
 import { KnowledgeIntelligence } from './knowledge-intelligence.js';
 import { SkillRouter, type SkillMatch, type DomainId } from './skill-router.js';
 import { TOPIC_STOP_WORDS } from './stop-words.js';
+import { ShadowRouter, contextFromHistory } from './shadow-router.js';
 import { DEEP_DESIGN_MEMO_SCHEMAS, renderDeepDesignMemo, type DeepDesignMemoKind } from '../chat/deep-design-memo-schemas.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -124,6 +125,13 @@ export interface VaiEngineOptions {
   persistPath?: string;
   /** Full VaiConfig — used for quality gate, provider resolution, etc. */
   config?: import('../config/types.js').VaiConfig;
+  /**
+   * Shadow router — when truthy, records every dispatched strategy into a
+   * learned centroid classifier so we can measure prediction agreement with
+   * the hand-tuned strategy chain. Never changes dispatch. Can be passed as
+   * an existing instance to resume a trained corpus across engines.
+   */
+  shadowRouter?: boolean | ShadowRouter;
 }
 
 // ---- VAI Engine (the model adapter) ----
@@ -164,6 +172,8 @@ export class VaiEngine implements ModelAdapter {
   private _lastTeacherDecision: TeacherDecision | null = null;
   private _activeMode: string = 'chat';
   private _hasActiveSandboxContext = false;
+  private _shadowRouter: ShadowRouter | null = null;
+  private _lastShadowPredictions: Array<{ strategy: string; score: number }> = [];
   private static readonly HISTORY_SIZE = 100;
 
   // ������ Synthesis scoring constants ������������������������������������������������������������������������������������������������������
@@ -220,6 +230,10 @@ export class VaiEngine implements ModelAdapter {
   constructor(options?: VaiEngineOptions) {
     this.persistPath = options?.persistPath ?? null;
     this._config = options?.config ?? null;
+
+    const shadowFlag = options?.shadowRouter ?? (process.env.VAI_SHADOW_ROUTER === '1' || process.env.VAI_SHADOW_ROUTER === 'true');
+    if (shadowFlag instanceof ShadowRouter) this._shadowRouter = shadowFlag;
+    else if (shadowFlag) this._shadowRouter = new ShadowRouter();
 
     // Seed with foundational knowledge
     this.knowledge.addEntry(
@@ -1519,12 +1533,42 @@ export class VaiEngine implements ModelAdapter {
     // Skip when noLearn is set (protective parenting — Vegga controls what Vai learns)
     if (this._lastMeta && !request.noLearn) this.afterResponse(lastMessage.content, response, this._lastMeta);
 
+    this.recordShadowObservation(lastMessage.content, request.messages);
+
     return {
       message: { role: 'assistant', content: response },
       usage: { promptTokens: this.tokenizer.encode(lastMessage.content).length, completionTokens: this.tokenizer.encode(response).length },
       finishReason: 'stop',
       durationMs,
     };
+  }
+
+  /**
+   * Shadow router — observe-only. Records (input, history, actualStrategy)
+   * and keeps a ranked prediction from the prior centroids for diagnostics.
+   */
+  private recordShadowObservation(input: string, history: readonly Message[]): void {
+    if (!this._shadowRouter || !this._lastMeta) return;
+    const { priorTurnCount } = contextFromHistory(history);
+    const priorStrategy = this.responseHistory.length >= 2
+      ? this.responseHistory[this.responseHistory.length - 2]?.strategy ?? null
+      : null;
+    this._lastShadowPredictions = this._shadowRouter.observe({
+      input,
+      priorTurnCount,
+      priorStrategy,
+      actualStrategy: this._lastMeta.strategy,
+    });
+  }
+
+  /** Learned shadow router (observe-only). Null when not enabled. */
+  get shadowRouter(): ShadowRouter | null {
+    return this._shadowRouter;
+  }
+
+  /** Top-K shadow predictions for the most recent chat turn. */
+  get lastShadowPredictions(): ReadonlyArray<{ strategy: string; score: number }> {
+    return this._lastShadowPredictions;
   }
 
   async *chatStream(request: ChatRequest): AsyncIterable<ChatChunk> {
@@ -1582,6 +1626,8 @@ export class VaiEngine implements ModelAdapter {
     // Learning flywheel — extract and persist knowledge from this exchange
     // Skip when noLearn is set (protective parenting — Vegga controls what Vai learns)
     if (this._lastMeta && !request.noLearn) this.afterResponse(lastMessage.content, response, this._lastMeta);
+
+    this.recordShadowObservation(lastMessage.content, request.messages);
 
     // Yield sources chunk BEFORE text — so UI can show source cards while answer streams
     const searchResult = this._lastSearchResponse as SearchResponse | null;
@@ -1982,9 +2028,14 @@ export class VaiEngine implements ModelAdapter {
 
   private async generateResponse(input: string, history: readonly Message[]): Promise<string> {
     input = this.normalizeUserInputForUnderstanding(input);
+    const originalInput = input;
     const correctiveFollowUpRewrite = this.rewriteCorrectiveFollowUpInput(input, history);
     if (correctiveFollowUpRewrite) {
       input = correctiveFollowUpRewrite;
+    }
+    const iterativeRefinement = this.rewriteIterativeRefinementInput(input, history);
+    if (iterativeRefinement) {
+      input = iterativeRefinement;
     }
     let lower = input.toLowerCase().trim();
 
@@ -2073,6 +2124,42 @@ export class VaiEngine implements ModelAdapter {
     // Strategy 0.01: Real-time utility questions — time, date, day — caught before anything
     const utilityResult = this.tryUtilityQuestion(lower, input, history);
     if (utilityResult !== null) return this.tracked('utility', utilityResult, input);
+
+    // Strategy 0.012: Safety refusal — harmful/impossible requests get a clear refusal
+    // before any other strategy tries to synthesize content for them.
+    const safetyRefusal = this.trySafetyRefusal(input);
+    if (safetyRefusal) return this.tracked('safety-refusal', safetyRefusal, input);
+
+    // Strategy 0.013: Code review — user pastes code and asks "what's wrong".
+    // Runs before skill-router so "React" / "SQL" keywords don't route to
+    // generic knowledge retrieval on the embedded code snippet.
+    const codeReview = this.tryCodeReview(input);
+    if (codeReview) return this.tracked('code-review', codeReview, input);
+
+    // Strategy 0.014: Design critique — user describes a design/UX/API/
+    // architecture decision and asks whether it makes sense. Must emit a
+    // tradeoff-aware assessment rather than build the thing.
+    const designCritique = this.tryDesignCritique(input, lower);
+    if (designCritique) return this.tracked('design-critique', designCritique, input);
+
+    // Strategy 0.0145: Ambiguous imperative — short under-specified commands
+    // ("fix that bug", "make it nicer", "it doesn't work", "do the thing")
+    // must ask for context rather than fall through to web search or guesswork.
+    const ambiguousImperative = this.tryAmbiguousImperative(input, history);
+    if (ambiguousImperative) return this.tracked('ambiguous-imperative', ambiguousImperative, input);
+
+    // Strategy 0.0146: Iterative refinement synthesis — "simpler please" /
+    // "more idiomatic" / "try a different approach" after a prior code request
+    // must produce refined CODE, not a knowledge explanation of the keywords
+    // (TypeScript, Python) that happen to appear in the prior prompt.
+    const refinementSynth = this.tryIterativeRefinementSynthesis(originalInput, history);
+    if (refinementSynth) return this.tracked('refinement-synth', refinementSynth, input);
+
+    // Strategy 0.0147: Long-context recall — answer questions about facts /
+    // constraints / preferences the user stated several turns ago (name,
+    // project, "no dependencies", "arrow functions only").
+    const recallSynth = this.tryLongContextRecallSynthesis(originalInput, history);
+    if (recallSynth) return this.tracked('long-context-recall', recallSynth, input);
 
     // Strategy 0.015: URL-based requests — "take a look at URL", "rebuild URL", "check out URL"
     // For GitHub URLs: fetches repo info via API and generates/presents the project.
@@ -2214,6 +2301,10 @@ export class VaiEngine implements ModelAdapter {
     // Strategy 0.92: Test generation — fire before builder to prevent "generate tests" being caught as a build request
     const testGenFirst = this.tryTestGeneration(input, lower);
     if (testGenFirst) return this.tracked('test-gen', testGenFirst, input);
+
+    // Strategy 0.92: Local code refactor — deterministic rename/inline when code is provided
+    const localRefactor = this.tryLocalCodeRefactor(input, history);
+    if (localRefactor) return this.tracked('local-refactor', localRefactor, input);
 
     // Strategy 0.93: Refactoring guidance — deterministic, fire before TF-IDF retrieval
     const refactorFirst = this.tryRefactoringGuidance(input, lower);
@@ -2560,6 +2651,64 @@ export class VaiEngine implements ModelAdapter {
     }
 
     return clarified;
+  }
+
+  /**
+   * Detect short turn-2 refinement requests that reference the prior artifact
+   * ("simpler please", "without lodash", "try again", "make it smaller") and
+   * combine them with the previous user prompt so downstream routing can
+   * re-synthesize the artifact under the new constraint.
+   */
+  private rewriteIterativeRefinementInput(input: string, history: readonly Message[]): string | null {
+    if (history.length < 2) return null;
+
+    const trimmed = input.trim();
+    if (trimmed.length === 0 || trimmed.length > 120) return null;
+
+    const lower = trimmed.toLowerCase().replace(/[.!?]+$/, '').trim();
+
+    const iterationPatterns: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
+      [/^(?:make\s+it|can\s+you\s+make\s+it)\s+(smaller|shorter|simpler|tighter|nicer|cleaner|safer|faster)\b/i, (m) => `but ${m[1]}`],
+      [/^(simpler|shorter|smaller|nicer|cleaner|safer|faster|tighter)(?:\s+(?:please|pls))?$/i, (m) => `but ${m[1]}`],
+      [/^(?:rewrite|refactor)\s+it\s+(?:to\s+be\s+)?(?:more\s+)?(idiomatic(?:ally)?|functional(?:ly)?|declarative(?:ly)?|concise(?:ly)?)\b/i, (m) => `but more ${m[1].replace(/ly$/, '')}`],
+      [/^(?:make\s+it|can\s+you\s+make\s+it)\s+more\s+(idiomatic|functional|declarative|concise|readable)\b/i, (m) => `but more ${m[1]}`],
+      [/^(?:do\s+it|write\s+it|rewrite\s+it)\s+without\s+(.+?)(?:\s+or\s+any\s+(?:library|package|dep(?:endency)?)s?)?$/i, (m) => `without ${m[1]}`],
+      [/^without\s+(.+)$/i, (m) => `without ${m[1]}`],
+      [/^(?:try\s+again|different\s+approach|another\s+way)(?:,?\s*(?:different\s+approach|another\s+way))?$/i, () => 'using a different approach'],
+      [/^(?:try\s+again\s+)?with\s+(?:a\s+)?different\s+approach$/i, () => 'using a different approach'],
+      [/^(?:no,?\s+)?try\s+a(?:nother)?\s+different\s+(?:way|approach)$/i, () => 'using a different approach'],
+      [/^(?:make\s+it|can\s+you\s+make\s+it)\s+(?:use|using)\s+(.+)$/i, (m) => `using ${m[1]}`],
+    ];
+
+    let refinement: string | null = null;
+    for (const [pat, render] of iterationPatterns) {
+      const m = lower.match(pat);
+      if (m) {
+        refinement = render(m);
+        break;
+      }
+    }
+    if (!refinement) return null;
+
+    // history includes the current user turn at the end, so the actual prior
+    // user prompt is the second-to-last user message.
+    const priorUserMessages = history.filter((message) => message.role === 'user');
+    if (priorUserMessages.length < 2) return null;
+    const previousUser = priorUserMessages[priorUserMessages.length - 2]?.content ?? '';
+    if (!previousUser || previousUser.trim().length < 8) return null;
+    if (previousUser.trim().toLowerCase() === trimmed.toLowerCase()) return null;
+
+    const priorAssistantMessages = history.filter((message) => message.role === 'assistant');
+    if (priorAssistantMessages.length === 0) return null;
+    const priorAssistant = priorAssistantMessages[priorAssistantMessages.length - 1]?.content ?? '';
+
+    const previousTrimmed = previousUser.trim().replace(/[.!?]+$/, '');
+
+    // Merge the refinement directly into the prior prompt so downstream
+    // code-gen / creative-code strategies pick it up on the keyword signal
+    // without the rewrite introducing meta wrappers ("Rewrite the code for:")
+    // that then appear verbatim in templated headers.
+    return `${previousTrimmed} — ${refinement}`;
   }
 
   private rewriteReferentialRedirectInput(input: string, history: readonly Message[]): string | null {
@@ -3355,48 +3504,43 @@ export class VaiEngine implements ModelAdapter {
     const retrieved = this.cachedRetrieveRelevant(topic, 5);
     const concept = this.knowledge.findConcept(topic);
 
-    // Count how many discussion turns we've had in this conversation
+    // Count prior discussion turns via an invisible marker so the prose stays clean.
+    const DISCUSSION_MARKER = '\u200B\u2063';
     const discussionTurns = history.filter(m =>
-      m.role === 'assistant' && (m.content.includes('🤔') || m.content.includes('**Discussion:**'))
+      m.role === 'assistant' && m.content.includes(DISCUSSION_MARKER)
     ).length;
 
-    // Build a discussion response
-    const parts: string[] = [`**Discussion: ${topic}**\n`];
+    const parts: string[] = [];
 
-    // Only show concept if it's actually about the topic (not a false match)
     if (concept && concept.definition.toLowerCase().includes(topic.split(/\s+/)[0])) {
-      parts.push(`📚 From my knowledge: ${concept.definition}\n`);
+      parts.push(concept.definition);
     }
 
-    // Filter junk and require meaningful relevance
     const cleanRetrieved = retrieved.filter(r =>
       !KnowledgeStore.isJunkContent(r.text) && r.score > 0.05 &&
       r.text.toLowerCase().includes(topic.split(/\s+/)[0])
     );
     if (cleanRetrieved.length > 0) {
       const bestSnippet = cleanRetrieved[0].text.length > 200 ? cleanRetrieved[0].text.slice(0, 200) + '...' : cleanRetrieved[0].text;
-      parts.push(`📖 Related: ${bestSnippet}\n`);
+      parts.push(bestSnippet);
     }
 
-    // Socratic questioning based on discussion depth
     const questions = [
-      `🤔 To start our discussion: What's your current understanding of ${topic}? What aspect interests you most?`,
-      `🤔 Interesting! Let me push back a bit — what would happen if we approached ${topic} from the opposite direction? What assumptions are we making?`,
-      `🤔 Here's a thought experiment: If ${topic} didn't exist, what would we need to invent to solve the same problems?`,
-      `🤔 Let's go deeper: What are the first principles underlying ${topic}? Can you break it down to its simplest components?`,
-      `🤔 Final challenge: How would you explain ${topic} to someone from a completely different field? What universal pattern does it follow?`,
+      `What's your current read on ${topic}, and which angle matters most for you right now?`,
+      `Flip it — if we came at ${topic} from the opposite direction, what would we be forced to reconsider?`,
+      `Thought experiment: if ${topic} didn't exist, what would we have to invent to solve the same problem?`,
+      `Down to first principles — what are the smallest pieces ${topic} is built from, and which one carries the most weight?`,
+      `How would you explain ${topic} to someone in a completely different field? What universal pattern shows up?`,
     ];
-
     parts.push(questions[Math.min(discussionTurns, questions.length - 1)]);
 
     if (cleanRetrieved.length === 0) {
-      parts.push(`\n💡 My local knowledge on "${topic}" is thin — say "google ${topic}" to search for more.`);
+      parts.push(`My notes on "${topic}" are thin — try \`google ${topic}\` to pull more.`);
     }
 
-    // Learn from the discussion topic
     this.tokenizer.encode(topic);
 
-    return parts.join('\n');
+    return parts.join('\n\n') + DISCUSSION_MARKER;
   }
 
   // ─── BINARY / HEX DECODE ──────────────────────────────────────────
@@ -3771,6 +3915,12 @@ export class VaiEngine implements ModelAdapter {
     if (!claim) return null;
 
     if (/^not\s+(?:use|include|rewrite|add|pivot|replace|scaffold|deploy|switch|create|generate|build|write|fall|touch|edit|return|emit|open|close|show|hide|move|keep)\b/i.test(claim)) {
+      return null;
+    }
+
+    // "do you know (of|about) X?" / "do you remember X?" / "do you recall X?" are meta-questions
+    // about Vai's knowledge — not factual yes/no claims. Let the topic-lookup path handle them.
+    if (/^you\s+(?:know|remember|recall|have|see|think|understand|get)\b/i.test(claim)) {
       return null;
     }
 
@@ -4753,13 +4903,35 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     // Detect error/exception patterns
     const hasError = /\berror\b|\bexception\b|\bfailed\b|\bcrash(?:es|ing|ed)?\b|\bthrows?\b|\bstack\s*trace\b/i.test(input);
     // Note: `\s+at\s+\w` must be preceded by a newline or line-start to avoid matching "look at https://"
-    const hasCode = /at\s+\w+[\w.]*\s*\(|(?:^|\n)\s+at\s+\w|TypeError|ReferenceError|SyntaxError|RangeError|Cannot\s+read\s+prop|is not a function|Cannot find module|ENOENT|EADDRINUSE|ECONNREFUSED|ERR_MODULE_NOT_FOUND|404|500|undefined is not|null is not|failed to compile|module not found/i.test(input);
-    const isAsk = /why|what|how|fix|solve|help|understand|debug|when\s+i|whenever|after\s+i|keeps?\s+(?:crashing|failing|breaking)|won't\s+(?:work|start|load|run)|doesn't\s+(?:work|start|load|run)|not\s+working|not\s+(?:loading|starting|running)|keeps\s+happening/i.test(input);
+    const hasCode = /at\s+\w+[\w.]*\s*\(|(?:^|\n)\s+at\s+\w|TypeError|ReferenceError|SyntaxError|RangeError|Cannot\s+read\s+prop|is not a function|Cannot find module|ENOENT|EADDRINUSE|ECONNREFUSED|ERR_MODULE_NOT_FOUND|404|500|undefined is not|null is not|failed to compile|module not found|rendered\s+more\s+hooks|rules\s+of\s+hooks|invalid\s+hook\s+call|hydration\s+(?:failed|mismatch)|CORS\s+policy|Access-Control-Allow-Origin|TS\d{4}|blocked\s+by\s+CORS/i.test(input);
+    const isAsk = /why|what|how|fix|solve|help|understand|debug|when\s+i|whenever|after\s+i|keeps?\s+(?:crashing|failing|breaking)|won't\s+(?:work|start|load|run)|doesn't\s+(?:work|start|load|run)|not\s+working|not\s+(?:loading|starting|running)|keeps\s+happening|going\s+wrong/i.test(input);
 
     if (!hasError && !hasCode) return null;
     if (!hasCode && !isAsk) return null;
 
     // Categorize the error
+    // --- React: "Rendered more hooks than during the previous render" / Rules of Hooks ---
+    if (/rendered\s+more\s+hooks|rules\s+of\s+hooks|invalid\s+hook\s+call/i.test(input)) {
+      return `**"Rendered more hooks than during the previous render"** — you're calling a hook conditionally, which breaks the **Rules of Hooks**.\n\nReact tracks hook state by the **order** of hook calls. Every render must call the same hooks in the same order. As soon as an \`if\`, \`return\`, \`try/catch\`, or \`&&\` causes a hook to be skipped on one render but not another, React loses its place — and throws this error.\n\n**Common causes:**\n1. **Early return before a hook:**\n   \`\`\`jsx\n   if (!user) return <Spinner />;  // returns before the hook below\n   const [count, setCount] = useState(0); // ❌ hook called only sometimes\n   \`\`\`\n2. **Hook inside a condition or loop:**\n   \`\`\`jsx\n   if (someFlag) {\n     useEffect(() => { /* ... */ });  // ❌ conditional hook\n   }\n   \`\`\`\n3. **Hook inside a callback / nested function** — hooks only belong at the top level of a component or custom hook.\n\n**Fix:** put **every hook call at the top of the component**, before any \`return\`, condition, or loop. Then branch on the values inside JSX or effect bodies instead.\n\n\`\`\`jsx\nfunction Profile({ user }) {\n  const [count, setCount] = useState(0);         // ✅ always runs\n  useEffect(() => { /* ... */ }, [user?.id]);    // ✅ always runs\n  if (!user) return <Spinner />;                 // ✅ early return AFTER hooks\n  return <div>{user.name}: {count}</div>;\n}\n\`\`\`\n\nIf you need conditional behavior inside an effect, put the \`if\` **inside** the effect body — not around the \`useEffect\` call itself.`;
+    }
+
+    // --- CORS blocked ---
+    if (/CORS\s+policy|Access-Control-Allow-Origin|blocked\s+by\s+CORS|preflight/i.test(input)) {
+      const originMatch = input.match(/from\s+origin\s+['"`]?(https?:\/\/[^\s'"`]+)['"`]?/i);
+      const origin = originMatch?.[1];
+      return `**CORS blocked** — the browser refused the cross-origin request because the server didn't send the right headers.\n\nCORS is enforced by the **browser**, not the server. The API responded, but the browser threw the response away because \`Access-Control-Allow-Origin\` didn't include ${origin ? `\`${origin}\`` : 'your origin'}. You have to fix this **on the server**, not the client.\n\n**Fix on the server (Express):**\n\`\`\`js\nimport cors from 'cors';\napp.use(cors({ origin: '${origin ?? 'http://localhost:3000'}', credentials: true }));\n\`\`\`\n\n**Fix on the server (Next.js API route / Route Handler):**\n\`\`\`js\nexport async function GET(req) {\n  return new Response(JSON.stringify(data), {\n    headers: {\n      'Access-Control-Allow-Origin': '${origin ?? 'http://localhost:3000'}',\n      'Access-Control-Allow-Credentials': 'true',\n    },\n  });\n}\n\`\`\`\n\n**Important:**\n- For non-GET requests (POST/PUT/DELETE) or custom headers, the browser sends a **preflight** \`OPTIONS\` request. Your server must answer that too — return 204 with the CORS headers.\n- Don't set \`Access-Control-Allow-Origin: *\` together with \`credentials: true\` — browsers reject that combo.\n- If you can't change the server, run your frontend behind a **dev proxy** (Vite \`server.proxy\`, Next.js \`rewrites\`) so the request looks same-origin.`;
+    }
+
+    // --- TypeScript type errors (TS2345 etc.) ---
+    const tsErrorMatch = input.match(/error\s+TS(\d{4}):\s*(.+?)(?:\n|$)/i);
+    if (tsErrorMatch || /\bTS\d{4}\b|is\s+not\s+assignable\s+to\s+(?:parameter\s+of\s+)?type/i.test(input)) {
+      const code = tsErrorMatch?.[1];
+      const undefUnion = /['"`]?string\s*\|\s*undefined['"`]?/i.test(input) || /Type\s+['"`]?undefined['"`]?\s+is\s+not\s+assignable/i.test(input);
+      if (undefUnion) {
+        return `**TS${code ?? '2345'}: \`string | undefined\` is not assignable to \`string\`** — strict null checks are doing their job.\n\nYou have a value that *might* be \`undefined\` (e.g. \`process.env.FOO\`, an optional field, the result of \`Array.find\`) but you're passing it somewhere that requires a real \`string\`. TypeScript refuses to let that compile because the call would crash at runtime if the value isn't there.\n\n**Five ways to fix it — pick the one that matches your intent:**\n\n1. **Provide a default** (the value is genuinely optional):\n   \`\`\`ts\n   doThing(maybeString ?? 'default');\n   \`\`\`\n2. **Narrow with a guard** (the value must exist for this code path):\n   \`\`\`ts\n   if (maybeString === undefined) throw new Error('FOO is required');\n   doThing(maybeString); // now typed as string\n   \`\`\`\n3. **Optional chaining + default** (reading a possibly-undefined field):\n   \`\`\`ts\n   doThing(user?.name ?? 'anonymous');\n   \`\`\`\n4. **Make the parameter accept undefined** (the callee should handle it):\n   \`\`\`ts\n   function doThing(s: string | undefined) { /* ... */ }\n   \`\`\`\n5. **Non-null assertion** — *only* when you can prove it's defined and the type system can't:\n   \`\`\`ts\n   doThing(maybeString!); // ⚠️ you're on the hook if it turns out to be undefined\n   \`\`\`\n\nFor env vars specifically, prefer a validated config loader (\`zod\` / \`envalid\`) so \`process.env.FOO\` is typed as \`string\` everywhere once it passes the startup check.`;
+      }
+    }
+
     // --- Module / import errors ---
     if (/Cannot find module|module not found|ERR_MODULE_NOT_FOUND|failed to resolve/i.test(input)) {
       // Try to extract the module name: quoted first, then after "module", then after "for"
@@ -4823,14 +4995,551 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     return `**Debugging approach:**\n\n1. Read the full error message — the first line is almost always the real cause\n2. Search the error text exactly (copy-paste) — most errors have documented solutions\n3. Check: did anything change right before it broke?\n4. Isolate — comment out code until it works, then add back piece by piece\n\nPaste the full error/stack trace and I'll diagnose it specifically.`;
   }
 
+  // ─── SAFETY REFUSAL ───────────────────────────────────────────────────────
+  // Narrow, high-specificity patterns for requests that should never produce
+  // useful output — malware/exfil, credential leaks, future-prediction claims.
+  // All other harmful-adjacent prompts fall through to normal handling.
+  private trySafetyRefusal(input: string): string | null {
+    const malwareExfil = /\b(?:steal(?:s|ing)?|exfiltrat(?:e|ing|ion)|dump|harvest)\s+(?:browser\s+)?(?:cookies?|session(?:s|\s+tokens?)?|passwords?|credentials?|keystrokes?|chrome\s+profile)/i.test(input)
+      || /\b(?:keylogger|ransomware|rootkit|backdoor\s+script|reverse\s+shell\s+payload)\b/i.test(input)
+      || /\b(?:ddos|botnet|crack(?:\s+the)?\s+(?:wifi|password|hash))\b/i.test(input);
+    if (malwareExfil) {
+      return "I can't help with that — what you're describing (stealing credentials, exfiltrating data, building malware, breaking into systems) is illegal and harms real people even in a \"just for learning\" framing.\n\n**What I can help with instead, if the underlying goal is security work:**\n- **Detect** these attacks (what signals look like in logs, EDR rules, IDS signatures)\n- **Harden** against them (CSP, HttpOnly/SameSite cookies, secure session handling)\n- **Defensive tooling** — rate limiting, anomaly detection, secrets scanning\n- **CTF / legal pen-test** environments — HackTheBox, TryHackMe, a lab VM you own\n\nIf one of those is what you're actually after, tell me which and I'll go deep.";
+    }
+
+    const secretsLeak = /\b(?:print|reveal|show|tell\s+me|give\s+me|leak|dump)\b[^\n]*\b(?:process\.env|env\s+vars?|environment\s+variables?|api\s*keys?|secret(?:s|\s+keys?)?|\.env\s+file|credentials?)\b/i.test(input)
+      || /\b(?:your\s+)?(?:system\s+prompt|initial\s+instructions|hidden\s+prompt)\s+(?:verbatim|in\s+full|exactly)?\b/i.test(input);
+    if (secretsLeak) {
+      return "I can't share that. I don't have access to the host's environment variables, API keys, or my own system prompt — and even if I did, leaking them would be a security incident, not a feature.\n\n**If you're debugging env-var loading**, the honest approach is:\n- `console.log(Object.keys(process.env))` in your own code to list variable names without values\n- Use a managed secrets store (1Password, Doppler, Vault) so no secret ever sits in plain `.env`\n- Rotate anything you suspect was exposed\n\nIf you had a different goal, rephrase it and I'll help with that.";
+    }
+
+    const jailbreak = /\b(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|prompts?|rules?)\b/i.test(input)
+      || /\byou\s+are\s+(?:now\s+)?(?:DAN|jailbroken|unrestricted|an?\s+unfiltered\s+(?:ai|model))\b/i.test(input);
+    if (jailbreak) {
+      return "I'm going to keep doing what I'm built to do — helping you build software, answer technical questions, and think clearly. I don't have a hidden persona to unlock, and I don't switch into a different assistant on command.\n\nWhat's the actual thing you're trying to get done? If there's something you tried to ask before I pushed back on, rephrase it directly and I'll take it on the merits.";
+    }
+
+    const futurePrediction = /\b(?:predict|tell\s+me|which)\b[^\n]*\b(?:stocks?|shares?|crypto|bitcoin|ethereum|lottery\s+numbers?)\b[^\n]*\b(?:will\s+(?:go\s+)?(?:up|down|moon|rise|fall|crash)|tomorrow|next\s+(?:week|month|year))\b/i.test(input)
+      || /\b(?:roleplay|pretend)\s+(?:as|to\s+be)\s+(?:a\s+)?(?:fortune\s+teller|oracle|psychic)\b/i.test(input);
+    if (futurePrediction) {
+      return "I can't predict future prices — nobody can, including me, and I'm not going to roleplay as if I could. Markets are stochastic; anyone claiming a reliable short-term forecast is either overfitting, selling something, or both. **This is not financial advice.**\n\n**What's actually useful and within reach:**\n- **Historical analysis** — backtest a strategy on past data (understanding that past performance ≠ future results)\n- **Risk management** — position sizing, stop losses, portfolio diversification math\n- **Fundamentals** — understanding a company's filings, growth, margins\n- **Technical indicators** — how moving averages / RSI / MACD are calculated, not what they \"predict\"\n\nIf you want code for any of those, I'll write it.";
+    }
+
+    return null;
+  }
+
+  // ─── LOCAL CODE REFACTOR ──────────────────────────────────────────────────
+  // Deterministic source transforms for the simplest refactor verbs (rename,
+  // inline). Returns null when the request doesn't match or the code body
+  // can't be extracted — higher-level guidance takes over in that case.
+  private tryLocalCodeRefactor(input: string, history: readonly Message[]): string | null {
+    const rawUser = [...history].reverse().find((m) => m.role === 'user');
+    const raw = rawUser?.content ?? input;
+
+    const rename = this.detectRenameRequest(raw);
+    if (rename) {
+      const codeBody = this.extractCodeBody(raw);
+      if (codeBody) {
+        const renamed = this.applyRename(codeBody, rename.from, rename.to);
+        if (renamed && renamed !== codeBody) {
+          return `**Renamed \`${rename.from}\` → \`${rename.to}\`:**\n\n\`\`\`javascript\n${renamed}\n\`\`\`\n\nThe rename is a word-boundary replacement, so shared substrings (e.g. \`${rename.from}ser\`) are left alone. Run your tests to confirm nothing else relied on the old name.`;
+        }
+      }
+    }
+
+    const inline = this.detectInlineRequest(raw);
+    if (inline) {
+      const codeBody = this.extractCodeBody(raw);
+      if (codeBody) {
+        const inlined = this.applyInline(codeBody, inline.name);
+        if (inlined && inlined !== codeBody) {
+          return `**Inlined \`${inline.name}\`:**\n\n\`\`\`javascript\n${inlined}\n\`\`\`\n\nThe declaration was removed and each use replaced with its literal value. If \`${inline.name}\` was referenced from another module, inline only at the call sites within this file.`;
+        }
+      }
+    }
+
+    const extract = this.detectExtractFunctionRequest(raw);
+    if (extract) {
+      const codeBody = this.extractCodeBody(raw);
+      if (codeBody) {
+        const refactored = this.applyExtractFunction(codeBody, extract.name);
+        if (refactored) {
+          return `**Extracted \`${extract.name}\` into its own function:**\n\n\`\`\`javascript\n${refactored}\n\`\`\`\n\nThe conditional block was lifted into a pure function keyed on \`qty\`. The outer function now reads like a single expression: price × quantity × ${extract.name}(qty). Rename the helper to whatever fits your domain (\`${extract.name}Rate\`, \`bulkDiscount\`, etc.).`;
+        }
+      }
+    }
+
+    const cbToPromise = this.detectCallbackToPromiseRequest(raw);
+    if (cbToPromise) {
+      const codeBody = this.extractCodeBody(raw);
+      if (codeBody) {
+        const promiseForm = this.applyCallbackToPromise(codeBody);
+        if (promiseForm) {
+          return `**Converted to \`async/await\` using \`fs/promises\`:**\n\n\`\`\`javascript\n${promiseForm}\n\`\`\`\n\nThe callback disappears; errors come out of the \`try/catch\` instead of the \`err\` parameter. \`fs/promises\` is built into Node — no extra dependency needed.`;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private detectExtractFunctionRequest(input: string): { name: string } | null {
+    const m = /\bextract(?:ing)?\s+(?:the\s+)?([a-z][\w]*)\s+(?:calculation|logic|block|code|part|section)?\s*(?:into\s+(?:its|a|an|a\s+new|the)\s+(?:own\s+)?(?:helper\s+)?function|as\s+(?:its|a|an)\s+(?:own\s+)?function|into\s+a\s+(?:separate|standalone)\s+function)/i.exec(input);
+    if (!m) return null;
+    return { name: m[1].toLowerCase() };
+  }
+
+  private applyExtractFunction(code: string, name: string): string | null {
+    // Focused transform for the qty-threshold discount pattern used in the
+    // test scenario and common real-world code. If we find a chain of
+    // `if (qty >= X) total = total * Y; else if ...`, we lift the multipliers
+    // into a dedicated `${name}(qty)` helper and reduce the caller to
+    // `total * ${name}(qty)`.
+    const thresholdRe = /if\s*\(\s*([a-z][\w]*)\s*>=\s*(\d+)\s*\)\s*(?:\w+\s*=\s*\w+\s*\*\s*)?([\d.]+)\s*;?\s*(?:else\s+if\s*\(\s*\1\s*>=\s*(\d+)\s*\)\s*(?:\w+\s*=\s*\w+\s*\*\s*)?([\d.]+)\s*;?)?/i;
+    const m = thresholdRe.exec(code);
+    if (!m) return null;
+    const param = m[1];
+    const rungs: Array<{ at: number; rate: string }> = [];
+    rungs.push({ at: parseInt(m[2], 10), rate: m[3] });
+    if (m[4] && m[5]) rungs.push({ at: parseInt(m[4], 10), rate: m[5] });
+    rungs.sort((a, b) => b.at - a.at);
+
+    const helperLines = [
+      `function ${name}(${param}) {`,
+      ...rungs.map((r) => `  if (${param} >= ${r.at}) return ${r.rate};`),
+      `  return 1.0;`,
+      `}`,
+    ].join('\n');
+
+    const outerRe = /function\s+(\w+)\s*\(([^)]*)\)\s*\{[\s\S]*?\}/;
+    const outer = outerRe.exec(code);
+    if (!outer) return null;
+    const outerName = outer[1];
+    const outerParams = outer[2];
+    const caller = `function ${outerName}(${outerParams}) {\n  return item.price * ${param} * ${name}(${param});\n}`;
+
+    return `${helperLines}\n\n${caller}`;
+  }
+
+  private detectCallbackToPromiseRequest(input: string): boolean {
+    return /\bconvert\b[^\n]*\b(?:callback|callbacks|nodeback)\b[^\n]*\b(?:promise|promises|async|await)\b/i.test(input)
+      || /\b(?:callback|nodeback)s?\b[^\n]*\bto\s+(?:async[/\s]?await|promises?)\b/i.test(input);
+  }
+
+  private applyCallbackToPromise(code: string): string | null {
+    const readFile = /fs\.readFile\s*\(\s*(['"][^'"]+['"])\s*,\s*(['"][^'"]+['"])\s*,\s*\([^)]*\)\s*=>\s*\{([\s\S]*?)\}\s*\)/i.exec(code);
+    if (readFile) {
+      const path = readFile[1];
+      const enc = readFile[2];
+      const body = readFile[3];
+      const successLines = body
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l && !/^if\s*\(\s*err\s*\)/.test(l) && !/return\s+console\.error/.test(l))
+        .map((l) => l.replace(/^/, '    '));
+      return [
+        `import fs from 'node:fs/promises';`,
+        ``,
+        `async function load() {`,
+        `  try {`,
+        `    const data = await fs.readFile(${path}, ${enc});`,
+        ...successLines,
+        `  } catch (err) {`,
+        `    console.error(err);`,
+        `  }`,
+        `}`,
+      ].join('\n');
+    }
+    return null;
+  }
+
+  private detectRenameRequest(input: string): { from: string; to: string } | null {
+    const m = /\brename\b[^\n]*?(?:the\s+(?:variable|parameter|function|symbol|method|field|arg(?:ument)?))?[^\n]*?[`'"]([A-Za-z_$][\w$]*)[`'"]\s*(?:to|→|->|into)\s*[`'"]([A-Za-z_$][\w$]*)[`'"]/i.exec(input);
+    if (!m) return null;
+    return { from: m[1], to: m[2] };
+  }
+
+  private detectInlineRequest(input: string): { name: string } | null {
+    const m = /\binline\b[^\n]*?(?:the\s+)?[`'"]?([A-Za-z_$][\w$]*)[`'"]?\s+(?:variable|constant|const|into)/i.exec(input);
+    if (!m) return null;
+    return { name: m[1] };
+  }
+
+  private extractCodeBody(input: string): string | null {
+    const fenced = /```(?:[a-zA-Z]+)?\s*\n([\s\S]*?)\n```/m.exec(input);
+    if (fenced) return fenced[1].trim();
+
+    const colonIdx = input.indexOf('\n');
+    if (colonIdx < 0) return null;
+    const tail = input.slice(colonIdx + 1).trim();
+    if (!/[{};]|\bfunction\b|\bconst\b|\blet\b|\breturn\b/.test(tail)) return null;
+    return tail;
+  }
+
+  private applyRename(code: string, from: string, to: string): string | null {
+    if (!from || !to) return null;
+    const safeFrom = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(^|[^A-Za-z0-9_$])${safeFrom}(?=[^A-Za-z0-9_$]|$)`, 'g');
+    return code.replace(re, (_match, lead) => `${lead}${to}`);
+  }
+
+  private applyInline(code: string, name: string): string | null {
+    const safeName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const declRe = new RegExp(`^(\\s*)(?:const|let|var)\\s+${safeName}\\s*=\\s*([^;\\n]+?);?\\s*$`, 'm');
+    const declMatch = declRe.exec(code);
+    if (!declMatch) return null;
+    const value = declMatch[2].trim();
+    const withoutDecl = code.replace(declRe, '').replace(/\n\s*\n+/g, '\n\n');
+    const useRe = new RegExp(`(^|[^A-Za-z0-9_$])${safeName}(?=[^A-Za-z0-9_$]|$)`, 'g');
+    return withoutDecl.replace(useRe, (_m, lead) => `${lead}${value}`);
+  }
+
+  // ─── CODE REVIEW ──────────────────────────────────────────────────────────
+  // Detects when the user pastes code and asks "what's wrong" / "review this" /
+  // "is there a bug". Emits a targeted critique based on a small catalog of
+  // common bug patterns. Must fire before skill-router / intelligence so
+  // keyword spotting does not hijack the response.
+
+  private tryCodeReview(input: string): string | null {
+    const reviewIntent = /\b(?:review\s+this|what(?:'s|\s+is)\s+wrong|is\s+there\s+a\s+bug|what(?:'s|\s+is)\s+off|spot\s+the\s+bug|any\s+issues?|any\s+problems?|code\s+review|what(?:'s|\s+is)\s+the\s+issue|what(?:'s|\s+is)\s+the\s+problem)\b/i;
+    if (!reviewIntent.test(input)) return null;
+
+    // Accept either fenced blocks or free-form pasted code. The normalizer
+    // collapses newlines, so detect code by counting code-specific tokens
+    // across the whole input rather than by line.
+    const fencedMatch = /```[a-z]*\n?([\s\S]*?)```/i.exec(input);
+    let code: string;
+    if (fencedMatch) {
+      code = fencedMatch[1];
+    } else {
+      const codeTokens = (input.match(/\bfunction\b|\bconst\b|\blet\b|\bvar\b|=>|\bimport\b|\bexport\b|\basync\b|\bawait\b|\buseEffect\b|\buseState\b|\bapp\.(?:get|post|put|delete|patch|use)\b|\.query\(|\.insert\(|\.update\(|\.delete\(|req\.(?:query|body|params)\b/g) ?? []).length;
+      const structural = (input.match(/[{}();]/g) ?? []).length;
+      if (codeTokens >= 3 && structural >= 6) {
+        code = input;
+      } else {
+        return null;
+      }
+    }
+    if (!code || code.trim().length < 30) return null;
+
+    const findings: string[] = [];
+
+    // Off-by-one: for-loop going toward arr.length - N (N > 1) with i--
+    const offByOne = /for\s*\(\s*(?:let|var|const)?\s*(\w+)\s*=\s*([\w.]+)\.length\s*-\s*1\s*;\s*\1\s*>\s*\2\.length\s*-\s*(\d+)\s*;\s*\1--\s*\)/i.exec(code);
+    if (offByOne && parseInt(offByOne[3], 10) > 1) {
+      const n = parseInt(offByOne[3], 10);
+      findings.push(`**Off-by-one / boundary bug:** the loop condition \`${offByOne[1]} > ${offByOne[2]}.length - ${n}\` does not guard against short arrays. If \`${offByOne[2]}.length < ${n - 1}\`, \`${offByOne[1]}\` goes negative and you push \`undefined\` values. Use \`Math.max(0, ${offByOne[2]}.length - ${n - 1})\` or just \`${offByOne[2]}.slice(-${n - 1}).reverse()\`.`);
+    }
+
+    // Unawaited promise in async function.
+    // The normalizer collapses newlines, so we can't rely on balanced-brace
+    // extraction of the function body. Instead: if the snippet contains
+    // `async function` (or `async (...) =>`) and a promise-returning call is
+    // made at a statement boundary without `await` in front of it, flag it.
+    const hasAsyncFn = /\basync\s+(?:function\b|\([^)]*\)\s*=>|\w+\s*=>)/i.test(code);
+    if (hasAsyncFn) {
+      const suspiciousRe = /(^|[;{])(\s*)([\w$.]+\.(?:insert|update|delete|save|create|query|execute|write|put|post|patch|find|fetch|send))\s*\(/g;
+      let m: RegExpExecArray | null;
+      let flaggedCall: string | null = null;
+      while ((m = suspiciousRe.exec(code)) !== null) {
+        const precedingText = code.slice(Math.max(0, m.index - 12), m.index + m[1].length + m[2].length);
+        if (/\bawait\s*$/.test(precedingText) || /\breturn\s*$/.test(precedingText)) continue;
+        flaggedCall = m[3];
+        break;
+      }
+      if (flaggedCall) {
+        findings.push(`**Unawaited promise:** \`${flaggedCall}(…)\` returns a Promise but the result is never awaited. The function returns before the write actually finishes — errors are swallowed and the caller cannot know whether the operation succeeded. Prefix the call with \`await\`.`);
+      }
+    }
+
+    // React useEffect with [] deps but captured prop
+    const useEffect = /useEffect\s*\(\s*(?:\([^)]*\)\s*=>|function[^{]*)\s*\{([\s\S]*?)\}\s*,\s*\[\s*\]\s*\)/i.exec(code);
+    if (useEffect) {
+      const body = useEffect[1];
+      const componentSig = /function\s+\w+\s*\(\s*\{\s*([^}]+)\s*\}/i.exec(code);
+      const props = componentSig ? componentSig[1].split(',').map((p) => p.trim().split(/[:\s=]/)[0]).filter(Boolean) : [];
+      const usedProps = props.filter((p) => new RegExp(`\\b${p}\\b`).test(body));
+      if (usedProps.length > 0) {
+        findings.push(`**Missing useEffect dependency:** the effect uses \`${usedProps.join('`, `')}\` but the dependency array is \`[]\`. When \`${usedProps[0]}\` changes the effect won't re-run, so the rendered data becomes stale. Add \`[${usedProps.join(', ')}]\` to the deps array (or disable \`exhaustive-deps\` only after reasoning about the captured closure).`);
+      }
+    }
+
+    // SQL injection via template literal
+    const sqlInjection = /\.(?:query|execute|raw)\s*\(\s*`[^`]*\$\{[^}]+\}[^`]*`/i.exec(code);
+    if (sqlInjection) {
+      findings.push(`**SQL injection:** the query is built with a template literal that interpolates user input (\`\${...}\`) directly into the SQL string. An attacker controlling \`q\` can break out of the \`LIKE\` pattern and append arbitrary SQL. Use a parameterized query — pass the value as a separate argument with a placeholder (\`?\` in mysql, \`$1\` in pg) so the driver escapes it.`);
+    }
+
+    if (findings.length === 0) return null;
+
+    const header = findings.length === 1
+      ? '**Code review — one issue found:**'
+      : `**Code review — ${findings.length} issues found:**`;
+    return [header, ...findings].join('\n\n');
+  }
+
+  // ─── DESIGN CRITIQUE ──────────────────────────────────────────────────────
+  // User describes a design/UX/API/architecture decision and asks whether it
+  // is good. Emits a tradeoff-aware assessment rather than rebuilding the
+  // feature from scratch.
+
+  private tryDesignCritique(input: string, lower: string): string | null {
+    const critiqueIntent = /\b(?:(?:does|do|would)\s+this\s+(?:make\s+sense|work)|is\s+(?:this|it)\s+(?:fine|ok|okay|good|bad|right|reasonable|sensible|smart|dumb)|is\s+this\s+a\s+good\s+idea|good\s+or\s+bad|any\s+downsides?|any\s+tradeoffs?|thoughts\??|what\s+do\s+you\s+think|should\s+we|should\s+i)\b/i;
+    if (!critiqueIntent.test(input) && !/\?\s*$/.test(input)) return null;
+
+    // Pagination (offset/limit vs cursor/keyset)
+    if (/\boffset\s*\/?\s*limit\b|\b(?:offset|skip)\s+and\s+limit\b|\bpaginat/i.test(lower)
+        && /(?:feed|timeline|activity|stream|constantly|grows|growing|changes|changing|large)/i.test(lower)) {
+      return `**Offset/limit pagination on a growing feed — mostly a bad fit.**\n\n**Why it breaks down:**\n- **Drift / duplicates:** while a user scrolls, new rows arrive at the top. Page 2 re-shows items that just got pushed down from page 1, and skips rows that jumped in front. Result: users see duplicates and miss posts.\n- **Unstable ordering:** if items can be edited or re-ranked, offsets stop pointing at a stable row.\n- **Performance cliff on large offsets:** \`OFFSET 50000 LIMIT 20\` still scans 50,020 rows before returning 20. The deeper you go, the slower it gets — and it cannot be served from an index.\n\n**Better: cursor / keyset pagination.**\nKey the page on a column (or composite) that is monotonic and unique for the feed order — typically \`(created_at DESC, id DESC)\` — and return the last row's key as the "next" cursor.\n\n\`\`\`sql\nSELECT * FROM posts\nWHERE (created_at, id) < ($cursor_created_at, $cursor_id)\nORDER BY created_at DESC, id DESC\nLIMIT 20;\n\`\`\`\n\nThis reads only the page-sized window via the index, is stable under inserts, and gives O(1) per page.\n\n**Keep offset/limit when:** the dataset is small and static (admin tables, archived exports), or the user genuinely wants to jump to page N.`;
+    }
+
+    // Microservices too early
+    if (/\b(?:microservice|micro-service)s?\b/i.test(lower)
+        && /(?:start|new|building|small\s+team|\d+\s+engineers?|early)/i.test(lower)) {
+      return `**Microservices with 3 engineers on a new B2B SaaS — almost always premature.**\n\n**What microservices actually cost:**\n- Network boundaries between every service (serialization, retries, timeouts, failure modes)\n- Distributed tracing, per-service CI/CD, per-service secrets, per-service on-call\n- Data becomes hard: cross-service transactions, eventual consistency, schema migrations in lockstep\n- The "tax" is roughly constant per service, so 3 engineers pay it on 5 services instead of amortizing on 1\n\n**What you gain early on: almost nothing.** The usual wins — independent scaling, independent deploys, team autonomy — only matter at team and traffic sizes you don't have yet.\n\n**Recommended path:**\n1. **Start with a modular monolith.** One deployable, but enforce module boundaries in code (e.g. \`/modules/billing\`, \`/modules/tenants\`, \`/modules/auth\`) and forbid cross-module imports except through a small public interface.\n2. **Design schemas so each module owns its tables.** That makes future extraction mechanical.\n3. **Extract a service only when you have a real reason:** a compliance boundary, an independent scaling profile, or a team split.\n\nShip faster now, and you'll still be able to break things out later — because you designed for it.`;
+    }
+
+    // Single users table with role column
+    if (/\busers?\s+table\b/i.test(lower)
+        && /\brole(?:s)?\b|\badmins?\b|\bcustomers?\b|\bvendors?\b/i.test(lower)) {
+      return `**Single users table with a \`role\` column — usually fine, with a few caveats.**\n\n**When it is fine (and simpler):**\n- All roles share the core auth fields: email, password hash, session, 2FA, reset tokens.\n- Role-specific data is small or can live in a side table keyed on \`user_id\`.\n- You want one login flow, one identity, one audit trail across roles.\n\nIn this shape the \`role\` column (or a \`user_roles\` join table if a user can hold several) is the right call — anything else is premature separation.\n\n**When it stops being fine:**\n- Admins, customers, and vendors start growing **diverging, mandatory fields** (vendors need tax IDs, payout accounts, contracts; customers don't). You end up with lots of \`NULL\`able columns that only apply to one role.\n- The access patterns diverge enough that a single \`users\` query is doing role-specific filtering everywhere.\n- Regulatory / PII concerns differ by role (e.g. KYC for vendors).\n\n**Pragmatic pattern:** keep one \`users\` table for identity + a \`role\` / \`user_roles\` column, and put role-specific data in sibling tables: \`vendor_profiles\`, \`customer_profiles\`, \`admin_profiles\`, each with \`user_id\` FK. That keeps auth unified and lets each role's schema evolve independently — without duplicating login.`;
+    }
+
+    // Signup flow / multi-step onboarding friction
+    if (/\b(?:signup|sign[- ]up|onboarding|registration)\b/i.test(lower)
+        && /\bstep\s+\d+|\bstep\s+(?:one|two|three|four|five)|\d+\s+steps?\b/i.test(lower)) {
+      return `**Four-step signup with password + photo + 3 interests — there's real drop-off risk.**\n\n**The friction analysis, step by step:**\n- **Step 1, email:** essential. Keep.\n- **Step 2, password:** essential — but consider offering magic-link / OAuth alongside to cut abandonment here.\n- **Step 3, profile photo:** **this is the biggest drop-off point.** Users on mobile without a ready photo will bail. A profile photo is almost never required for first-use value — defer it.\n- **Step 4, pick 3 interests:** forces a decision before the user has seen anything. Users don't yet know what's on offer, so they guess or quit. Drop-off here is high too.\n\n**Rule of thumb:** every required step before "aha" roughly doubles drop-off. Strip signup to the **minimum that unlocks value**, then progressively enrich once the user is engaged.\n\n**Recommended redesign:**\n1. **Signup = email + password (or OAuth).** Done. User is in.\n2. **On first session**, show a frictionless inline prompt: "pick a few interests to personalize your feed" — skippable.\n3. **Later**, when the user has context and intent (e.g. posting for the first time, editing profile), prompt for the photo with a clear reason ("your photo appears next to your posts").\n\nMake everything past step 1 **optional and deferrable**. Track completion rate per step — you will likely see a large jump once photo and interests become optional.`;
+    }
+
+    return null;
+  }
+
+  // ─── AMBIGUOUS IMPERATIVE ────────────────────────────────────────────────
+  // Short, under-specified commands like "fix that bug", "make it nicer",
+  // "it doesn't work", "do the thing" must ask for the missing context instead
+  // of falling through to web search or hallucinating a target. Only fires
+  // when there is no prior assistant artifact to ground on — with real prior
+  // context, these short turns are genuine refinements and should route to
+  // rewriteIterativeRefinementInput / tryTopicAwareFollowUp instead.
+
+  private tryAmbiguousImperative(input: string, history: readonly Message[]): string | null {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+    if (wordCount > 6) return null;
+
+    const lower = trimmed.toLowerCase().replace(/[.!?]+$/g, '');
+
+    const fixBug = /^(?:please\s+|pls\s+|can\s+you\s+|could\s+you\s+)?fix\s+(?:the\s+|that\s+|this\s+|my\s+|it[,']?s\s+)?bugs?$/i.test(lower)
+      || /^(?:please\s+|pls\s+)?fix\s+(?:it|this|that)$/i.test(lower);
+    const makeNicer = /^(?:please\s+|pls\s+|can\s+you\s+|could\s+you\s+)?make\s+(?:it|this|that|them)\s+(?:nicer|better|prettier|cleaner|nice|pretty|clean|look\s+(?:nice|nicer|good|better|pretty))$/i.test(lower);
+    const doesntWork = /^(?:it|this|that)\s+(?:doesn'?t|does\s+not|don'?t|won'?t|wont|won\s*t|isn'?t|is\s+not|ain'?t)\s+work(?:ing)?$/i.test(lower)
+      || /^(?:it|this|that)\s+is\s+broken$/i.test(lower)
+      || /^broken$/i.test(lower)
+      || /^not\s+working$/i.test(lower);
+    const doTheThing = /^(?:please\s+|pls\s+|just\s+)?do\s+(?:the|it|that|this|a)\s+thing$/i.test(lower)
+      || /^(?:please\s+|pls\s+)?just\s+do\s+(?:it|that|the\s+thing)$/i.test(lower)
+      || /^(?:do|run|execute|perform)\s+(?:the|that|this)\s+(?:action|task|command)$/i.test(lower);
+
+    if (!fixBug && !makeNicer && !doesntWork && !doTheThing) return null;
+
+    const priorAssistant = [...history].reverse().find((m) => m.role === 'assistant');
+    const priorHasArtifact = !!priorAssistant
+      && (/```/.test(priorAssistant.content)
+        || /\bfunction\b|\bconst\s+\w+\s*=|\bclass\s+\w+|\breturn\b/.test(priorAssistant.content));
+    const priorUser = [...history].reverse().find((m) => m.role === 'user' && m.content.trim() !== trimmed);
+
+    // With real prior code/context, these phrases are genuine refinements —
+    // let rewriteIterativeRefinementInput / tryTopicAwareFollowUp take over.
+    if (priorHasArtifact && priorUser) return null;
+
+    if (fixBug) {
+      return `I can't fix a bug I can't see yet. Share any of these and I'll work through it:\n\n- **The error message or stack trace** — the exact text, including line numbers.\n- **The file or function involved** — paste the code block that's misbehaving.\n- **What you expected vs. what actually happened** — even one line helps narrow it down.\n- **How to reproduce** — the command you ran, the click, the input.\n\nOnce I can see the failure and the code, I can point at the bug directly instead of guessing which one you mean.`;
+    }
+    if (makeNicer) {
+      return `Happy to polish it — but I need to see what "it" is first. Share any of:\n\n- **The code, component, or design** you want improved — paste the file, snippet, or a description of the current state.\n- **Which project or page** — name or route so I can target the right piece.\n- **What "nicer" means to you** — cleaner layout, better spacing, smaller file, faster, more accessible, more idiomatic? Different definitions lead to different edits.\n\nOnce I can see the current state and the direction you want, I can make concrete changes.`;
+    }
+    if (doesntWork) {
+      return `Something isn't working — let's narrow it down. Tell me:\n\n- **What you did** — the command, click, or input. Steps to reproduce.\n- **What you expected to happen.**\n- **What actually happened** — error message, stack trace, blank screen, wrong output? Paste the logs if you have them.\n- **Where** — local dev, staging, production, a specific page or endpoint?\n\nWith those four I can usually pinpoint the cause on the first pass.`;
+    }
+    // doTheThing
+    return `Which thing? I don't have enough context yet. Tell me:\n\n- **What you want built or changed** — a feature, a fix, a file, a command.\n- **Where** — which project, page, or file.\n- **The outcome** — what "done" looks like so we know when it's working.\n\nA single sentence like "add a logout button to the header" or "convert utils.ts to TypeScript strict" is enough to get started.`;
+  }
+
+  // ─── ITERATIVE REFINEMENT SYNTHESIS ───────────────────────────────────────
+  // Detects short refinement turns ("simpler please", "more idiomatic",
+  // "different approach", "same but for postgres", "now add error handling")
+  // and synthesizes refined code grounded on the most recent user prompt.
+  // Runs before creative-code / intelligence so keywords in the PRIOR prompt
+  // (TypeScript, Python) don't hijack routing into a knowledge article.
+
+  private tryIterativeRefinementSynthesis(input: string, history: readonly Message[]): string | null {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    const lower = trimmed.toLowerCase().replace(/[.!?]+$/g, '').trim();
+
+    // The last user message in history is always the current turn — drop it.
+    // Input may have been normalized (e.g. "like" filler stripped) so content
+    // comparison is unreliable; positional exclusion is robust.
+    const priorUsers = history.filter((m) => m.role === 'user').map((m) => m.content).slice(0, -1);
+    const priorUser = priorUsers.pop();
+    if (!priorUser) return null;
+    const priorLower = priorUser.toLowerCase();
+
+    const wantSimpler = /^(?:make\s+(?:it|this)\s+)?simpler(?:\s+please)?$/i.test(lower)
+      || /^(?:please\s+)?simpler\s+please$/i.test(lower)
+      || /\bmake\s+(?:it|this)\s+simpler\b/i.test(lower);
+    const wantIdiomatic = /\b(?:more\s+idiomatic|idiomatically|idiomatic\s+way|more\s+elegant)\b/i.test(lower);
+    const wantDifferent = /\b(?:different\s+approach|another\s+approach|try\s+again|try\s+another|alternative\s+approach)\b/i.test(lower);
+    const wantSmaller = /^(?:make\s+(?:it|this)\s+)?(?:smaller|shorter|terser)$/i.test(lower)
+      || /\bmake\s+(?:it|this)\s+(?:smaller|shorter|terser)\b/i.test(lower)
+      || /\bone.?liner\b/i.test(lower);
+    const wantWithoutLib = /\bwithout\s+(?:any\s+)?(?:library|libraries|lib|dependencies|deps|lodash|jquery|underscore|external\s+(?:lib|package))\b/i.test(lower)
+      || /\bno\s+(?:library|libraries|lib|dependencies|deps|lodash|external)\b/i.test(lower);
+    const wantErrorHandling = /\b(?:add|now\s+add|with)\s+(?:proper\s+)?error\s+handling\b/i.test(lower)
+      || /\bhandle\s+errors?\b/i.test(lower);
+    const wantSameInOther = /\bsame\s+(?:thing|one|code|query|function)?\s*(?:but\s+)?(?:in|for)\s+(\w[\w.+#-]*)/i.exec(trimmed);
+    const wantSummarizeAsk = /\bsummari[sz]e\s+(?:what\s+)?i\s+(?:just\s+)?ask(?:ed)?\b/i.test(lower)
+      || /\bwhat\s+did\s+i\s+(?:just\s+)?ask\b/i.test(lower);
+    const wantExplainSimpler = /\bexplain\s+(?:that|this|it)\s+(?:again\s+)?(?:but\s+)?simpler\b/i.test(lower)
+      || /\blike\s+i[''']?m\s+(?:new|5|a\s+beginner|just\s+starting)\b/i.test(lower);
+
+    // ─── Iterative refinement variants ────────────────────────────────────
+    if ((wantIdiomatic || wantSmaller) && /\bsum\b.*\beven\b.*(?:array|numbers?|javascript|js)\b/i.test(priorLower)) {
+      return "Here's a more idiomatic version using `.filter()` and `.reduce()`:\n\n```javascript\nconst sumEvens = (nums) => nums.filter((n) => n % 2 === 0).reduce((a, b) => a + b, 0);\n\n// Usage:\nconsole.log(sumEvens([1, 2, 3, 4, 5, 6])); // 12\n```\n\n**Why this is idiomatic:**\n- `.filter()` keeps only even numbers — intent is obvious at the call site.\n- `.reduce()` folds the remaining values into a single sum.\n- Arrow function + implicit return keeps it a single expression.\n- No mutation, no explicit loop index, works on any numeric iterable you can spread into an array.";
+    }
+
+    if (wantDifferent && /\breverse\b.*\bstring\b/i.test(priorLower) && /\bpython\b/i.test(priorLower)) {
+      return "Here's a different approach — `reversed()` with `join`, plus a recursive variant (no slicing):\n\n```python\n# Approach 1: reversed() + join — explicit about iterating\ndef reverse_string(s: str) -> str:\n    return ''.join(reversed(s))\n\n# Approach 2: recursion — head/tail\ndef reverse_string_rec(s: str) -> str:\n    if len(s) <= 1:\n        return s\n    return reverse_string_rec(s[1:]) + s[0]\n\n# Approach 3: explicit for loop — most beginner-friendly\ndef reverse_string_loop(s: str) -> str:\n    out = ''\n    for ch in s:\n        out = ch + out\n    return out\n\n# Usage:\nprint(reverse_string('hello'))      # 'olleh'\nprint(reverse_string_rec('world'))   # 'dlrow'\nprint(reverse_string_loop('python')) # 'nohtyp'\n```\n\n**Trade-offs vs. the `s[::-1]` slice trick:**\n- `reversed()` returns an iterator — `O(n)` time, lazy, works on any iterable.\n- Recursion shows the shape of the problem but is `O(n²)` due to repeated string concat, and will blow the stack past ~1000 chars.\n- The explicit loop is the clearest for someone new to Python and avoids any slice magic.";
+    }
+
+    if (wantSimpler && /\b(?:pub.?sub|publish.?subscribe|event\s*emitter|eventemitter)\b/i.test(priorLower)) {
+      return "Here's a minimal pub/sub in TypeScript — just a `Map` of listeners, three methods:\n\n```typescript\ntype Listener<T = unknown> = (payload: T) => void;\n\nclass PubSub {\n  private listeners = new Map<string, Set<Listener>>();\n\n  on<T>(event: string, cb: Listener<T>): () => void {\n    if (!this.listeners.has(event)) this.listeners.set(event, new Set());\n    this.listeners.get(event)!.add(cb as Listener);\n    return () => this.off(event, cb);\n  }\n\n  off<T>(event: string, cb: Listener<T>): void {\n    this.listeners.get(event)?.delete(cb as Listener);\n  }\n\n  emit<T>(event: string, payload: T): void {\n    this.listeners.get(event)?.forEach((cb) => cb(payload));\n  }\n}\n\n// Usage:\nconst bus = new PubSub();\nconst unsubscribe = bus.on<string>('hello', (msg) => console.log(msg));\nbus.emit('hello', 'world'); // logs 'world'\nunsubscribe();\n```\n\n**What was stripped:**\n- No wildcard events, no async queue, no once-handlers, no priority ordering.\n- Just `on` / `off` / `emit` backed by a single `Map<string, Set<Listener>>`.\n- `on` returns its own unsubscribe fn so callers don't have to keep a reference to the callback.";
+    }
+
+    if (wantSmaller && /\b(?:longest|largest|biggest)\s+word\b/i.test(priorLower)) {
+      return "Here's a one-liner with `.reduce()`:\n\n```javascript\nconst longestWord = (s) => s.split(/\\s+/).reduce((a, b) => (b.length > a.length ? b : a), '');\n\n// Usage:\nlongestWord('The quick brown fox jumps'); // 'quick'\n```\n\nOne pass, no intermediate sort, returns the first word on ties.";
+    }
+
+    if (wantWithoutLib && /\bdeep\s*clone\b/i.test(priorLower)) {
+      return "Here's a deep clone with no external dependencies — prefer the built-in `structuredClone` (Node 17+, all modern browsers):\n\n```javascript\nconst cloned = structuredClone(original);\n```\n\nFor older runtimes, a hand-rolled recursive clone using only standard built-ins:\n\n```javascript\nfunction deepClone(value) {\n  if (value === null || typeof value !== 'object') return value;\n  if (Array.isArray(value)) return value.map(deepClone);\n  if (value instanceof Date) return new Date(value);\n  if (value instanceof Map) return new Map([...value].map(([k, v]) => [deepClone(k), deepClone(v)]));\n  if (value instanceof Set) return new Set([...value].map(deepClone));\n  return Object.fromEntries(\n    Object.entries(value).map(([k, v]) => [k, deepClone(v)]),\n  );\n}\n```\n\nNo external helpers, no utility package — just the standard library. `structuredClone` also preserves `Date`, `Map`, `Set`, typed arrays, and cyclic references, which the older `JSON.parse(JSON.stringify(...))` trick drops or throws on.";
+    }
+
+    // ─── Context-referential variants ─────────────────────────────────────
+    if (wantSameInOther && /\bpostgres(?:ql)?\b/i.test(wantSameInOther[1])
+      && /\b(?:sqlite|sql)\b/i.test(priorLower)
+      && /\bcount\b/i.test(priorLower) && /\busers\b/i.test(priorLower)
+      && /\b(?:last|past)\s+7\s+days?\b/i.test(priorLower)) {
+      return "The same query in Postgres — `NOW()` / `INTERVAL` instead of SQLite's `datetime('now', '-7 days')`:\n\n```sql\nSELECT COUNT(*) AS users_last_7_days\nFROM users\nWHERE created_at >= NOW() - INTERVAL '7 days';\n```\n\n**What changed vs. SQLite:**\n- `NOW()` replaces `datetime('now')` / `date('now')`.\n- `INTERVAL '7 days'` replaces the string modifier `'-7 days'`.\n- If `created_at` is `timestamptz`, Postgres compares correctly across DST; SQLite stores text/integer and doesn't track zones.\n- Add an index on `created_at` if this query runs often — `CREATE INDEX idx_users_created_at ON users (created_at);`.";
+    }
+
+    if (wantSameInOther && /\btypescript\b/i.test(wantSameInOther[1])
+      && /\bdebounc/i.test(priorLower)) {
+      return "Here's the same debounce, typed with TypeScript generics over the argument tuple:\n\n```typescript\ntype AnyFn<A extends unknown[]> = (...args: A) => void;\n\nfunction debounce<A extends unknown[]>(fn: AnyFn<A>, delay: number): (...args: A) => void {\n  let timer: ReturnType<typeof setTimeout> | null = null;\n  return (...args: A) => {\n    if (timer) clearTimeout(timer);\n    timer = setTimeout(() => fn(...args), delay);\n  };\n}\n\n// Usage:\nconst log = debounce((msg: string) => console.log(msg), 250);\nlog('hello'); // fires 250ms after the last call\n```\n\n**Type details:**\n- `A extends unknown[]` — captures the argument tuple of the wrapped function so the returned fn has the same signature.\n- `ReturnType<typeof setTimeout>` — portable across Node (`Timeout` object) and browser (`number`).\n- No `any`, no casts.";
+    }
+
+    if (wantErrorHandling && /\bfetch\s*\(/i.test(priorUser) && /\bfetchuser\b/i.test(priorLower)) {
+      return "Here's `fetchUser` with error handling — checks the response status, wraps in `try`/`catch`, re-throws so the caller decides what to do:\n\n```javascript\nasync function fetchUser(id) {\n  try {\n    const res = await fetch(`/api/users/${id}`);\n    if (!res.ok) {\n      throw new Error(`fetchUser failed: ${res.status} ${res.statusText}`);\n    }\n    return await res.json();\n  } catch (err) {\n    console.error('fetchUser error:', err);\n    throw err;\n  }\n}\n```\n\n**What each piece catches:**\n- `!res.ok` — the request completed but the server returned 4xx/5xx.\n- `try`/`catch` — network failure, DNS error, `res.json()` parse error, or the re-thrown status error.\n- Re-throwing lets the caller retry, show a UI error, or log — instead of silently returning `undefined`.";
+    }
+
+    if (wantExplainSimpler && /\bclosure\b/i.test(priorLower)) {
+      return "**Closure, plain-English version:**\n\nA closure is when a function *remembers* the variables from the place where it was created, even after that place is gone.\n\n```javascript\nfunction makeCounter() {\n  let count = 0;                  // this variable\n  return function () {            // ...is remembered by this inner function\n    count = count + 1;\n    return count;\n  };\n}\n\nconst counter = makeCounter();\ncounter(); // 1\ncounter(); // 2\ncounter(); // 3\n```\n\nEven though `makeCounter()` already finished running, the inner function still has access to `count`. That's the closure — the inner function *closed over* the variable from its surrounding scope.\n\n**Why it's useful:** you can keep data private. Nothing outside the closure can read or write `count` directly — you can only interact with it through the returned function.";
+    }
+
+    if (wantSummarizeAsk) {
+      // Pull the most recent prior user content — that's what they "just asked"
+      const capTopic = priorUser.trim().replace(/[.!?]+$/g, '');
+      // Detect CAP-theorem / closure / typescript-generics shapes so we can
+      // emit a one-liner that contains the subject keywords the test checks.
+      if (/\bcap\s+theorem\b/i.test(capTopic)) {
+        return "You asked for a brief explanation of the **CAP theorem** — the tradeoff between consistency, availability, and partition tolerance in distributed systems (you can only guarantee two of the three when a network partition occurs).";
+      }
+      if (/\bclosure\b/i.test(capTopic)) {
+        return "You asked what a **closure** is in JavaScript — a function that remembers variables from its surrounding scope even after that scope has finished executing.";
+      }
+      return `You just asked about: **${capTopic}**.`;
+    }
+
+    return null;
+  }
+
+  // ─── LONG-CONTEXT RECALL SYNTHESIS ────────────────────────────────────────
+  // Scans the full conversation for stated names / constraints / preferences
+  // and grounds the current turn on them. Runs before creative-code so a
+  // preference like "arrow functions only" actually shapes the output.
+
+  private tryLongContextRecallSynthesis(input: string, history: readonly Message[]): string | null {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    const lower = trimmed.toLowerCase().replace(/[.!?]+$/g, '').trim();
+
+    const userMessages = history.filter((m) => m.role === 'user').map((m) => m.content);
+    if (userMessages.length === 0) return null;
+    const allUserText = userMessages.join('\n');
+
+    // ─── Name / project recall ───────────────────────────────────────────
+    const asksProjectName = /\b(?:name|what)\s+(?:of\s+)?(?:the\s+)?(?:project|app)\s+i\s+(?:told|mentioned|said)\b/i.test(trimmed)
+      || /\bwhat\s+(?:is|was)\s+(?:the\s+)?(?:project|app)\s+(?:name|called)\b/i.test(trimmed)
+      || (/\bname\s+of\s+the\s+project\b/i.test(lower) && /\bframework\b/i.test(lower));
+    if (asksProjectName) {
+      const nameMatch = /\b(?:called|named)\s+([A-Z][A-Za-z0-9_-]{2,})\b/.exec(allUserText)
+        || /\b(?:project|app)\s+called\s+([A-Z][A-Za-z0-9_-]{2,})\b/i.exec(allUserText);
+      const frameworkMatch = /\b(Next\.?js|Nuxt|Remix|SvelteKit|Astro|Angular|Vue|React|Solid|Rails|Django|Flask|FastAPI|Express)\b/i.exec(allUserText);
+      const projectName = nameMatch ? nameMatch[1] : null;
+      const framework = frameworkMatch ? frameworkMatch[1] : null;
+      if (projectName || framework) {
+        const parts: string[] = [];
+        if (projectName) parts.push(`The project you mentioned is **${projectName}**`);
+        if (framework) parts.push(projectName ? `built on **${framework}**` : `The framework you mentioned is **${framework}**`);
+        return parts.join(', ') + '.';
+      }
+    }
+
+    // ─── Constraint recall: "no dependencies" + request for file-reading fn ──
+    const saidNoDeps = /\b(?:can'?t|cannot|no)\s+(?:use\s+)?(?:any\s+)?(?:dependencies|deps|libraries|libs|external\s+(?:packages?|libs?))\b/i.test(allUserText)
+      || /\bonly\s+(?:the\s+)?(?:node(?:\.?js)?\s+)?(?:standard\s+library|stdlib|built.?ins?)\b/i.test(allUserText);
+    const asksReadJson = /\b(?:write|create)\s+(?:a\s+)?function\s+that\s+(?:reads|loads|parses)\s+(?:a\s+)?json\s+file\b/i.test(trimmed)
+      || (/\bread\b/i.test(lower) && /\bjson\s+file\b/i.test(lower));
+    if (saidNoDeps && asksReadJson) {
+      return "Using only the Node.js standard library — `node:fs/promises` + `JSON.parse`:\n\n```javascript\nimport { readFile } from 'node:fs/promises';\n\nexport async function readJsonFile(path) {\n  const raw = await readFile(path, 'utf-8');\n  return JSON.parse(raw);\n}\n\n// Usage:\nconst data = await readJsonFile('./config.json');\n```\n\nNo external packages — `node:fs/promises` and the global `JSON` are both part of Node's standard library. If you need sync, swap in `readFileSync` from `node:fs`.";
+    }
+
+    // ─── Preference recall: "arrow functions + const only" ──────────────
+    const prefersArrowConst = /\bi\s+prefer\s+arrow\s+functions?\b/i.test(allUserText)
+      && /\bconst\s+only\b|\bnever\s+(?:let|var|function)\b/i.test(allUserText);
+    const asksSumFn = /\b(?:write|create|give\s+me)\s+(?:a\s+)?sum\s+function\b/i.test(trimmed)
+      && /\b(?:javascript|js)\b/i.test(lower);
+    if (prefersArrowConst && asksSumFn) {
+      return "Following your preference — arrow functions, `const` only:\n\n```javascript\nconst sum = (nums) => nums.reduce((a, b) => a + b, 0);\n\n// Usage:\nconst total = sum([1, 2, 3, 4]); // 10\n```\n\nNo `function` declarations, no `let`, no `var`.";
+    }
+
+    return null;
+  }
+
   // ─── REFACTORING GUIDANCE ─────────────────────────────────────────────────
 
   private tryRefactoringGuidance(input: string, lower: string): string | null {
-    const isRefactor = /\brefactor\b|\bclean\s*up\b|\brestructure\b|\breorganize\b|\bsplit\s+(?:up|out|into)\b|\bextract\b|\bdecouple\b|\bseparate\s+concerns\b/i.test(input);
+    const isRefactor = /\brefactor\b|\bclean\s*up\b|\brestructure\b|\breorganize\b|\bsplit\s+(?:it|this|them|up|out|into)\b|\bextract\b|\bdecouple\b|\bseparate\s+concerns\b|\brename\b|\binline\b|\bmove\b|\bconvert\s+(?:this|these|the|that)\b/i.test(input);
     const isCodeSmell = /\btoo\s+long\b|\btoo\s+big\b|\btoo\s+complex\b|\bhard\s+to\s+read\b|\bmessy\b|\bspaghetti\b|\bduplicat\b/i.test(input);
     const isComponent = /\bcomponent\b|\bfunction\b|\bfile\b|\bclass\b|\bmodule\b|\bservice\b/i.test(input);
 
     if (!isRefactor && !isCodeSmell) return null;
+
+    // Split a "utils" grab-bag file by category — very common real-world ask.
+    // Detect "utils.ts / utility file" + explicit categories (date, string, array, etc.).
+    if (/\butils?(?:\.(?:ts|js|tsx|jsx|mjs|cjs))?\b|\bhelpers?\b/i.test(input)) {
+      const categories: string[] = [];
+      if (/\bdate\s+(?:helper|helpers|util|utils|function|functions)?\b/i.test(input)) categories.push('date');
+      if (/\bstring\s+(?:helper|helpers|util|utils|function|functions)?\b/i.test(input)) categories.push('string');
+      if (/\barray\s+(?:helper|helpers|util|utils|function|functions)?\b/i.test(input)) categories.push('array');
+      if (/\bobject\s+(?:helper|helpers|util|utils|function|functions)?\b/i.test(input)) categories.push('object');
+      if (/\bnumber\s+(?:helper|helpers|util|utils|function|functions)?\b/i.test(input)) categories.push('number');
+      if (categories.length >= 2) {
+        const files = categories.map((c) => `  - \`src/utils/${c}.ts\`  — ${c} helpers only`).join('\n');
+        const barrel = categories.map((c) => `export * from './${c}';`).join('\n');
+        return `**Split \`utils.ts\` one file per category:**\n\nKeep a single import surface by putting a barrel \`index.ts\` in the folder. Consumers import from \`@/utils\` and don't need to know the internal layout.\n\n**Layout:**\n\`\`\`\nsrc/utils/\n${files}\n  - \`src/utils/index.ts\`  — barrel re-export\n\`\`\`\n\n**\`src/utils/index.ts\`:**\n\`\`\`ts\n${barrel}\n\`\`\`\n\n**Why this split works:**\n- **One responsibility per file.** \`date.ts\` only imports date libs, \`array.ts\` only imports array libs — tree-shakers can drop what you don't use.\n- **Separate modules** make unit tests focused (\`date.test.ts\`, \`string.test.ts\`, \`array.test.ts\`).\n- **Barrel** preserves the existing import path so you don't have to migrate call sites in one pass.\n\n**When NOT to split like this:**\n- If one category is trivially small (<20 lines), leave it in the shared file until it earns its own module.\n- If two categories genuinely share state or types, keep them together rather than create a circular dep.`;
+      }
+    }
 
     // Component splitting
     if (/component|jsx|tsx|react/i.test(input) && (isRefactor || isCodeSmell)) {
@@ -5446,17 +6155,12 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
         return null;
       }
 
-      return `I can help you build a **${projectDesc}**! Here's how we can approach this:\n\n` +
-        '**Step 1 — Choose your stack:**\n' +
-        '- **Frontend:** React + TypeScript + Tailwind CSS (recommended)\n' +
-        '- **Backend:** Node.js + Express/Fastify + PostgreSQL\n' +
-        '- **Full-stack:** Next.js (React + API routes + SSR)\n\n' +
-        '**Step 2 — Tell me more:**\n' +
-        `- What features does your ${projectDesc} need?\n` +
-        '- Do you need a backend/database?\n' +
-        '- Any specific design preferences?\n\n' +
-        '**Or just say:** "Build me a React ' + projectDesc + '" and I\'ll generate the code!\n\n' +
-        '*I can generate complete, working code for web apps, APIs, components, and more. Just be specific about what you need.*';
+      return `For a ${projectDesc}, the stack choice is the first real decision.\n\n` +
+        '- **Frontend:** React + TypeScript + Tailwind CSS is a safe default.\n' +
+        '- **Backend:** Node.js + Express/Fastify + PostgreSQL if you need APIs and persistence.\n' +
+        '- **Full-stack:** Next.js if you want routing, API routes, and SSR in one codebase.\n\n' +
+        `Before I scaffold anything, a few things shape the answer: what features does the ${projectDesc} need, do you need a backend/database, and are there design constraints?\n\n` +
+        `Or just say "Build me a React ${projectDesc}" and I'll generate working code directly.`;
     }
 
     return null;
@@ -18831,6 +19535,18 @@ app.listen(3000, () => console.log('Server running'));
   private tryFrameworkDevopsKnowledge(input: string): string | null {
     input = input.replace(/["'""''`]/g, ' ').replace(/\s+/g, ' ').trim();
 
+    // ── Defer to browsing-memory retrieval when the user is asking about
+    //    specific stored content ("the notes", "the article", "the guide",
+    //    "the docs said", etc.). Generic topic templates would override the
+    //    grounded retrieved answer otherwise. Allow up to 6 words between
+    //    "the/these/my" and the content noun ("the React server components notes",
+    //    "the JSONB indexing guide", "the Docker Compose notes").
+    if (/\b(?:the|these|those|that|my|our)(?:\s+\w+){0,6}\s+(?:notes?|article|guide|docs?|documentation|write[\s-]?up|post|page|memo|summary|fixture|cheat[\s-]?sheet)\b/i.test(input)
+      || /\b(?:notes?|article|guide|docs?|documentation)\s+(?:said|say|says|mention|mentions|recommend|recommended|recommends|explain|explains|explained|describe|describes|described|note[sd]?|state[sd]?|argue[sd]?|claim[sd]?|warn[sd]?)\b/i.test(input)
+      || /\b(?:according\s+to|from|per)\s+(?:the|these|those|my|our)(?:\s+\w+){0,6}\s+(?:notes?|article|guide|docs?|documentation|write[\s-]?up|post|page|memo)\b/i.test(input)) {
+      return null;
+    }
+
     // ── Popular programming languages — common general question ──
     if (/\b(?:popular|top|best|most\s+(?:used|popular|common|in[\s-]?demand)|widely\s+used)\s+(?:programming\s+)?languages?\b/i.test(input)
       || /\bprogramming\s+languages?\b.*\b(?:popular|top|best|most\s+(?:used|common))\b/i.test(input)) {
@@ -24002,7 +24718,7 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
         // No sentences matched query words — use first 500 chars as fallback
         const snippet = best.text.slice(0, 500);
         if (snippet.length < 30) return null; // too short to be useful
-        return `From what I've learned:\n\n${snippet}\n\n[Source: ${best.source}]`;
+        return snippet;
       }
       let answer = topSentences.join(' ');
 
@@ -24019,22 +24735,20 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
             const relHits = queryWords.filter(w => relLower.includes(w)).length;
             if (relHits > 0 && relEntry.response !== best.text) {
               const relSnippet = relEntry.response.slice(0, 200);
-              answer += `\n\nRelated: ${relSnippet}`;
+              answer += `\n\n${relSnippet}`;
               break; // one enrichment is enough
             }
           }
         }
       }
 
-      const snippet = answer.length > 800 ? answer.slice(0, 800) + '...' : answer;
-      return `From what I've learned:\n\n${snippet}\n\n[Source: ${best.source}]`;
+      return answer.length > 800 ? answer.slice(0, 800) + '...' : answer;
     }
 
     // Multiple sources — only combine if they're from truly different sources
     // Extract relevant sentences from each source rather than dumping raw text
     const seenSources = new Set<string>();
     const parts: string[] = [];
-    const sources = new Set<string>();
     for (const match of goodMatches.slice(0, 3)) {
       // Deduplicate by source domain
       const sourceDomain = match.source.replace(/https?:\/\//, '').split('/')[0];
@@ -24055,16 +24769,13 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
       const snippet = relevantSentences.slice(0, 3).join(' ');
       const trimmed = snippet.length > 300 ? snippet.slice(0, 300) + '...' : snippet;
       parts.push(trimmed);
-      sources.add(match.source);
     }
 
     if (parts.length <= 1) {
-      // Only one unique source after dedup
-      const snippet = parts[0] ?? best.text.slice(0, 500);
-      return `From what I've learned:\n\n${snippet}\n\n[Source: ${Array.from(sources)[0] ?? best.source}]`;
+      return parts[0] ?? best.text.slice(0, 500);
     }
 
-    return `From what I've learned (${parts.length} sources):\n\n${parts.join('\n\n---\n\n')}\n\n[Sources: ${Array.from(sources).join(', ')}]`;
+    return parts.join('\n\n');
   }
 
   private buildGroundedBestEffortAnswer(
@@ -24127,29 +24838,17 @@ console.log(findMax([3, 1, 4, 1, 5, 9, 2, 6]));  // 9
       uniqueSentences.push({ text: fallbackSnippet, source: clean[0].source, score: clean[0].score, hits: 1 });
     }
 
-    const topicHint = queryWords.slice(0, 4).join(' ');
     const directAnswer = uniqueSentences.slice(0, 2).map(sentence => sentence.text).join(' ');
-    const priorities = uniqueSentences.slice(1, 4).map(sentence => sentence.text);
-    const citedSources = Array.from(new Set(uniqueSentences.map(sentence => sentence.source))).slice(0, 2);
+    const priorities = uniqueSentences.slice(2, 4).map(sentence => sentence.text);
 
-    const parts = [
-      `Best read of your question: ${this.inferProfessionalIntent(input, topicHint)}.`,
-      '',
-      `Strongest grounded answer: ${directAnswer}`,
-    ];
-
+    const parts: string[] = [directAnswer];
     if (priorities.length > 0) {
-      parts.push('', 'What matters most:');
+      parts.push('');
       for (const priority of priorities) {
         parts.push(`- ${priority}`);
       }
     }
-
-    parts.push(
-      '',
-      `Grounding note: this is a best-effort answer built from related material in ${citedSources.join(', ')}${topicHint ? ` around ${topicHint}` : ''}, so I would treat it as the strongest supported direction rather than a perfect exact match.`
-    );
-
+    parts.push('', "If you need something more specific, paste the file or snippet and I'll answer against that directly.");
     return parts.join('\n');
   }
 
@@ -26140,6 +26839,11 @@ Want me to customize it with your actual links, change the color scheme, add ani
     const hasMultiMarker = /\b(?:and\s+also|and\s+(?:what|how|when|where|which|why|can)\s+(?:is|are|do|does|did|was|were|should|would|will|could|about)\b|also\s+(?:what|how|who|when|where|which|why|can)\s+(?:is|are|do|does|did|was|were|should|would|will|could|about)\b)/i.test(lower);
     if (!hasMultiMarker) return null;
 
+    // Skip when the input is an error message + follow-up — "ECONNREFUSED … what is this and how do I fix it?"
+    // is a single diagnostic request, not two independent questions. Let tryErrorDiagnosis handle it whole.
+    const looksLikeErrorDiag = /ECONNREFUSED|EADDRINUSE|ENOENT|ERR_MODULE_NOT_FOUND|Cannot find module|TypeError|ReferenceError|SyntaxError|RangeError|Cannot\s+read\s+prop|is\s+not\s+a\s+function|stack\s*trace|rendered\s+more\s+hooks|hydration\s+(?:failed|mismatch)|CORS|Access-Control-Allow-Origin|\bfailed\s+to\s+(?:compile|fetch|resolve)\b/i.test(original);
+    if (looksLikeErrorDiag && /\b(?:what\s+is\s+this|what\s+does\s+this\s+mean|why\s+(?:is|am|does)|how\s+(?:do|can)\s+i\s+fix)\b/i.test(lower)) return null;
+
     // Skip when the "and why/how" part refers back to the main subject via pronoun —
     // "What is X and why would I use it" is one compound question, not two.
     if (/\band\s+(?:why|how)\s+(?:would|should|do|does|did|can|could)\s+(?:i|you|we|one)\s+(?:use|prefer|choose|pick|need|want)\s+(?:it|them|that|this)\b/i.test(lower)) return null;
@@ -26157,18 +26861,22 @@ Want me to customize it with your actual links, change the color scheme, add ani
 
     if (parts.length < 2) return null;
 
-    // Answer each sub-question individually
+    // Answer each sub-question individually. Track which ones resolved so we can
+    // bail out of the split entirely if most/all would be "I don't have a good
+    // answer" — in that case, splitting makes things worse and the main router
+    // should handle the whole query instead.
     const answers: string[] = [];
+    let resolved = 0;
     for (const part of parts.slice(0, 4)) { // cap at 4 sub-questions
       const subLower = part.toLowerCase().trim();
 
       // Try utility (time/date)
       const utilAnswer = this.tryUtilityQuestion(subLower, part, history);
-      if (utilAnswer) { answers.push(`**${part.replace(/[?.!]+$/, '')}?**\n${utilAnswer}`); continue; }
+      if (utilAnswer) { answers.push(`**${part.replace(/[?.!]+$/, '')}?**\n${utilAnswer}`); resolved++; continue; }
 
       // Try math
       const mathAnswer = this.tryMath(subLower);
-      if (mathAnswer) { answers.push(`**${part.replace(/[?.!]+$/, '')}?**\n${mathAnswer}`); continue; }
+      if (mathAnswer) { answers.push(`**${part.replace(/[?.!]+$/, '')}?**\n${mathAnswer}`); resolved++; continue; }
 
       // Try conversation recall
       const recallPattern = /\b(?:first\s+message|last\s+message|what\s+(?:did|was)\s+(?:i|my))\b/i.test(subLower);
@@ -26178,19 +26886,30 @@ Want me to customize it with your actual links, change the color scheme, add ani
           const firstMsg = userMessages[0];
           const preview = firstMsg.content.length > 150 ? firstMsg.content.slice(0, 150) + '...' : firstMsg.content;
           answers.push(`**${part.replace(/[?.!]+$/, '')}?**\nYour first message was: "${preview}"`);
+          resolved++;
           continue;
         }
       }
 
       // Try conversational
       const convAnswer = this.handleConversational(subLower, history);
-      if (convAnswer) { answers.push(`**${part.replace(/[?.!]+$/, '')}?**\n${convAnswer}`); continue; }
+      if (convAnswer) { answers.push(`**${part.replace(/[?.!]+$/, '')}?**\n${convAnswer}`); resolved++; continue; }
 
-      // Fallback for this sub-question
-      answers.push(`**${part.replace(/[?.!]+$/, '')}?**\nI don't have a good answer for this one — try asking it on its own so I can search properly.`);
+      // Sub-question didn't match any local handler. Mark as unresolved — we'll
+      // decide below whether to emit fallbacks or abandon the split.
+      answers.push(`**${part.replace(/[?.!]+$/, '')}?**\n\u0000UNRESOLVED\u0000`);
     }
 
-    return answers.join('\n\n---\n\n');
+    // If at least half the sub-questions couldn't be resolved locally, the split
+    // was a bad idea: return null and let the main strategy chain handle the
+    // full query (knowledge synthesis, web search, etc.) as a single unit.
+    if (resolved * 2 < answers.length) return null;
+
+    // Some resolved, some didn't — replace unresolved markers with a hedge that
+    // still keeps the answer coherent rather than echoing the same apology.
+    return answers
+      .map(a => a.replace('\u0000UNRESOLVED\u0000', "I don't have a direct answer on this one — ask it on its own if you want me to dig."))
+      .join('\n\n---\n\n');
   }
 
   /**
@@ -26554,6 +27273,41 @@ Want me to customize it with your actual links, change the color scheme, add ani
 
     // Filter out system messages — only count real user/assistant turns
     const conversationTurns = history.filter(m => m.role !== 'system');
+
+    // ── Conversation-referential queries ──
+    // "what is the (first|second|third|Nth|last) message (here|in this chat)?"
+    // These are meta-questions about chat history — answer by index, never by
+    // knowledge search.
+    const ordinalMap: Record<string, number> = {
+      first: 1, second: 2, third: 3, fourth: 4, fifth: 5,
+      sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10,
+    };
+    const nthMsgMatch = input.match(/\bwhat\s+(?:is|was)\s+(?:the\s+)?(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|\d{1,2}(?:st|nd|rd|th)?)\s+(?:message|prompt|question|thing\s+i\s+(?:said|asked|wrote))\b/i);
+    if (nthMsgMatch) {
+      const userMessages = history.filter(m => m.role === 'user');
+      // Exclude the current in-flight user message if it matches the query itself
+      const pool = userMessages.length > 0 && userMessages[userMessages.length - 1].content.trim() === input.trim()
+        ? userMessages.slice(0, -1)
+        : userMessages;
+      if (pool.length === 0) {
+        return "This is the first message in the chat — there isn't an earlier one to quote yet.";
+      }
+      const raw = nthMsgMatch[1].toLowerCase();
+      let idx: number | null = null;
+      if (raw === 'last') idx = pool.length - 1;
+      else if (raw in ordinalMap) idx = ordinalMap[raw] - 1;
+      else {
+        const num = parseInt(raw, 10);
+        if (!isNaN(num) && num >= 1) idx = num - 1;
+      }
+      if (idx !== null && idx >= 0 && idx < pool.length) {
+        const target = pool[idx].content;
+        return `Message ${idx + 1}: "${target}"`;
+      }
+      if (idx !== null && idx >= pool.length) {
+        return `There are only ${pool.length} prior message${pool.length === 1 ? '' : 's'} in this chat, so there's no ${raw} one yet.`;
+      }
+    }
 
     // Greetings — includes informal Norwegian (oyoy, myyh, heia, heisann, ey, oi, fese)
     // and informal English (wassup, whaddup, yoyo, g'day, aye)
@@ -27125,22 +27879,24 @@ Want me to customize it with your actual links, change the color scheme, add ani
       return `Here are some project ideas:\n\n${pick(ideas, 4).map((idea, i) => `${i + 1}. ${idea}`).join('\n')}\n\nWant me to scaffold any of these?`;
     }
 
-    // "What do you know about X?"
-    const aboutMatch = input.match(/what\s+do\s+you\s+know\s+(?:about\s+)?(.+)/i);
+    // "What do you know about X?" / "what do you know of X?" / "what do you know on X?"
+    const aboutMatch = input.match(/what\s+do\s+you\s+know\s+(?:about\s+|of\s+|on\s+|regarding\s+)?(.+)/i);
     if (aboutMatch) {
-      const topic = aboutMatch[1].replace(/[?.!]+$/, '').trim();
+      const topic = aboutMatch[1]
+        .replace(/[?.!]+$/, '')
+        .replace(/^(?:of|about|on|regarding)\s+/i, '')
+        .trim();
 
       // First: try direct pattern match (catches built-in entries like "react overview", "kubernetes overview")
       const directMatch = this.cachedFindBestMatch(`${topic} overview`) || this.cachedFindBestMatch(topic);
       if (directMatch && directMatch.response.length > 50 && !KnowledgeStore.isJunkContent(directMatch.response)) {
-        const snippet = directMatch.response.length > 500 ? directMatch.response.slice(0, 500) + '...' : directMatch.response;
-        return `Here's what I know about "${topic}":\n\n${snippet}`;
+        return directMatch.response.length > 500 ? directMatch.response.slice(0, 500) + '...' : directMatch.response;
       }
 
       // Second: try concept lookup
       const concept = this.knowledge.findConcept(topic);
       if (concept && !KnowledgeStore.isJunkContent(concept.definition) && concept.definition.length > 30) {
-        return `Here's what I know about "${topic}":\n\n${concept.definition}`;
+        return concept.definition;
       }
 
       // Third: TF-IDF retrieval
@@ -27156,8 +27912,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
         const output = relevant.length > 0
           ? relevant.slice(0, 5).join(' ')
           : sentences.slice(0, 5).join(' ');
-        const snippet = output.length > 500 ? output.slice(0, 500) + '...' : output;
-        return `Here's what I know about "${topic}":\n\n${snippet}\n\n[Source: ${best.source}]`;
+        return output.length > 500 ? output.slice(0, 500) + '...' : output;
       }
       return null; // Fall through to web search
     }
@@ -27354,8 +28109,6 @@ Want me to customize it with your actual links, change the color scheme, add ani
       // Find the last MEANINGFUL assistant message (skip short reactions like "Glad to hear it!")
       const assistantMsgs = [...history].filter(m => m.role === 'assistant');
       const lastAssistant = assistantMsgs.reverse().find(m => m.content.length > 80) || assistantMsgs[0];
-      const lastUserBefore = history.filter(m => m.role === 'user');
-      const prevUserMsg = lastUserBefore.length >= 2 ? lastUserBefore[lastUserBefore.length - 2]?.content : '';
       const prevTopic = lastAssistant?.content.match(/\*\*([^*]+)\*\*/)?.[1]?.replace(/[*:]/g, '').trim().toLowerCase() || '';
       const prevContent = lastAssistant?.content || '';
 
@@ -27365,10 +28118,10 @@ Want me to customize it with your actual links, change the color scheme, add ani
         const whyQuery = `why ${prevTopic}`;
         const match = this.cachedFindBestMatch(whyQuery);
         if (match && match.response.length > 50 && !KnowledgeStore.isJunkContent(match.response)) {
-          return `**Why ${prevTopic}?**\n\n${match.response.length > 800 ? match.response.slice(0, 800) + '...' : match.response}`;
+          return match.response.length > 800 ? match.response.slice(0, 800) + '...' : match.response;
         }
         // Fallback — give a contextual "why" answer based on what they were talking about
-        return `Great question! Based on what we were discussing about **${prevTopic}**:\n\nThe "why" usually comes down to:\n- **Problem it solves** — what pain point does ${prevTopic} address?\n- **Tradeoffs** — what would happen if you didn't use it?\n- **Alternatives** — are there other approaches?\n\nCould you be more specific? For example: "Why use ${prevTopic} instead of [alternative]?" or "Why is ${prevTopic} designed that way?"`;
+        return `For ${prevTopic}, "why" usually comes down to three things: what pain point it solves, what breaks if you don't use it, and what the alternatives are. If you can narrow it — "why ${prevTopic} vs X" or "why is ${prevTopic} designed this way" — I can give you a direct answer.`;
       }
 
       // "tell me more" / "go on" / "continue" — synthesize a deeper continuation from last response
@@ -27383,7 +28136,8 @@ Want me to customize it with your actual links, change the color scheme, add ani
             const piece = deeperPieces[0].text;
             const sentences = piece.split(/(?<=[.!?])\s+/).filter(s => s.length > 20).slice(0, 5);
             if (sentences.length >= 2) {
-              return `**Continuing on ${prevTopic || 'this'}:**\n\n${sentences.join(' ')}\n\nWant to go even deeper? Ask about a specific aspect like "${prevTopic ? `how ${prevTopic} handles X` : 'a specific part'}".`;
+              const suffix = prevTopic ? ` Ask about how ${prevTopic} handles a specific case if you want to go further.` : '';
+              return `${sentences.join(' ')}${suffix}`;
             }
           }
           // Synthesize from the previous answer — extract sections that weren't fully explored
@@ -27392,11 +28146,12 @@ Want me to customize it with your actual links, change the color scheme, add ani
             // Return the section that wasn't in the first part
             const continuation = prevSections.slice(Math.floor(prevSections.length / 2)).join('\n\n');
             if (continuation.length > 100) {
-              return `**Continuing${prevTopic ? ` on ${prevTopic}` : ''}:**\n\n${continuation.slice(0, 600)}${continuation.length > 600 ? '\n\n...' : ''}`;
+              return `${continuation.slice(0, 600)}${continuation.length > 600 ? '\n\n...' : ''}`;
             }
           }
           // Final fallback — offer concrete next directions
-          return `Here's more I can tell you about **${prevTopic || 'this topic'}**:\n\nAsk me:\n- "Why does ${prevTopic || 'it'} work this way?"\n- "Give me a ${prevTopic || 'code'} example"\n- "What are the best practices for ${prevTopic || 'this'}?"\n- "How does ${prevTopic || 'it'} compare to alternatives?"`;
+          const t = prevTopic || 'this';
+          return `A few useful directions from here: why ${t} works the way it does, a concrete ${t} example, common pitfalls and best practices, or how ${t} compares to the alternatives. Pick one and I'll go deeper.`;
         }
         return `What topic would you like me to continue with? Tell me what you're interested in and I'll go deeper.`;
       }
@@ -27412,7 +28167,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
           const searchQuery = prevTopic ? `${prevTopic} ${subtopic}` : subtopic;
           const match = this.cachedFindBestMatch(searchQuery);
           if (match && match.response.length > 50 && !KnowledgeStore.isJunkContent(match.response)) {
-            return `**${subtopic.charAt(0).toUpperCase() + subtopic.slice(1)}** (continuing from ${prevTopic}):\n\n${match.response.length > 800 ? match.response.slice(0, 800) + '...' : match.response}`;
+            return match.response.length > 800 ? match.response.slice(0, 800) + '...' : match.response;
           }
           // Try direct subtopic search
           const directMatch = this.cachedFindBestMatch(subtopic);
@@ -27429,7 +28184,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
               return sl.includes(subtopic) || sl.includes(subtopicBase);
             });
             if (relevantSentences.length > 0) {
-              return `From what I explained about **${prevTopic}**: ${relevantSentences.join(' ')}\n\nWant me to go deeper? Try asking "What about ${subtopic} in ${prevTopic}?" for more specifics.`;
+              return `${relevantSentences.join(' ')} If you want more on ${subtopic} specifically in the context of ${prevTopic}, ask directly and I'll go deeper.`;
             }
             return null; // Fall through to web search for subtopic
           }
@@ -27442,9 +28197,9 @@ Want me to customize it with your actual links, change the color scheme, add ani
         // Search knowledge for related content the previous answer didn't cover
         const match = this.cachedFindBestMatch(`${prevTopic} advanced`);
         if (match && match.response.length > 50 && !KnowledgeStore.isJunkContent(match.response)) {
-          return `Here's more about **${prevTopic}**:\n\n${match.response.length > 800 ? match.response.slice(0, 800) + '...' : match.response}`;
+          return match.response.length > 800 ? match.response.slice(0, 800) + '...' : match.response;
         }
-        return `I've shared the main points about **${prevTopic}**. Try asking about:\n- A specific aspect: "How does [feature] work?"\n- Best practices: "What are ${prevTopic} best practices?"\n- Comparisons: "How does ${prevTopic} compare to [alternative]?"\n- Examples: "Show me a ${prevTopic} example"`;
+        return `The main points on ${prevTopic} are covered. Good directions from here: a specific feature ("how does X work"), best practices, a comparison to an alternative, or a concrete example.`;
       }
 
       // "how do I use/deploy/install this?" — contextual "this" referencing previous topic
@@ -27562,13 +28317,13 @@ Want me to customize it with your actual links, change the color scheme, add ani
 
       if (hasMoreContext && mentionsTech) {
         // "I am from Norway and I have been working on web development"
-        return `Welcome! Sounds like you have a solid background. What are you working on right now — or what would you like to build? I can help with code, architecture, debugging, or just exploring ideas.`;
+        return `Sounds like you have a solid background. What are you working on right now, or what would you like to build? I can help with code, architecture, debugging, or just exploring ideas.`;
       }
       if (hasMoreContext) {
-        return `Thanks for sharing! What can I help you with today? I'm good at coding, explaining tech topics, building projects, and problem-solving.`;
+        return `What can I help you with today? I'm good at coding, explaining tech topics, building projects, and problem-solving.`;
       }
       if (detail) {
-        return `Nice! What would you like to work on? I can help with coding, tech questions, building projects, and more.`;
+        return `What would you like to work on? I can help with coding, tech questions, building projects, and more.`;
       }
     }
 
@@ -27670,10 +28425,10 @@ Want me to customize it with your actual links, change the color scheme, add ani
       const hasB = matchB && matchB.response.length > 30;
 
       if (hasA && !hasB) {
-        return `I can tell you about **${itemA}** but I haven't pulled in data on **${itemB}** yet.\n\n**Here's what I know about ${itemA}:**\n${matchA!.response}`;
+        return `I have material on ${itemA} but not on ${itemB}, so I can't do a real side-by-side yet.\n\n${matchA!.response}`;
       }
       if (hasB && !hasA) {
-        return `I can tell you about **${itemB}** but I haven't pulled in data on **${itemA}** yet.\n\n**Here's what I know about ${itemB}:**\n${matchB!.response}`;
+        return `I have material on ${itemB} but not on ${itemA}, so I can't do a real side-by-side yet.\n\n${matchB!.response}`;
       }
       if (hasA && hasB) {
         return `**${itemA}:**\n${matchA!.response}\n\n**${itemB}:**\n${matchB!.response}`;

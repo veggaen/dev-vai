@@ -1,0 +1,45 @@
+{
+  "id": "build-run-fix",
+  "label": "Multi-turn build → error → fix loop — must not re-generate the whole thing on each fix",
+  "scenarios": [
+    {
+      "id": "build-express-then-fix-port",
+      "messages": [
+        { "role": "user", "content": "Create a minimal Express server in Node.js that serves GET /health returning { ok: true }." },
+        { "role": "user", "content": "I ran it and got EADDRINUSE on port 3000. How do I fix it?" }
+      ],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/port|different port|kill|lsof|process|already in use|PORT env|another process/i"
+        ]
+      }
+    },
+    {
+      "id": "build-react-form-then-add-validation",
+      "messages": [
+        { "role": "user", "content": "Build a React form with email and password fields." },
+        { "role": "user", "content": "Now add client-side validation: email must be valid, password must be at least 8 characters." }
+      ],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/email|@|regex|pattern|length|8|min|error|invalid/i"
+        ]
+      }
+    },
+    {
+      "id": "build-then-write-tests",
+      "messages": [
+        { "role": "user", "content": "Write a JavaScript function isPalindrome(s) that returns true if s is a palindrome." },
+        { "role": "user", "content": "Now write Vitest tests for it covering edge cases." }
+      ],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/describe|it\\(|test\\(|expect|vitest|isPalindrome/i"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "id": "repo-awareness",
+  "label": "Questions that assume repo introspection Vai doesn't yet have must fall back gracefully — never invent file paths, symbols, or call sites.",
+  "scenarios": [
+    {
+      "id": "where-is-auth-fn",
+      "messages": [
+        { "role": "user", "content": "Where is the authenticateUser function implemented in this repo?" }
+      ],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/don'?t have|can do|more specific|share|paste|need to see|couldn'?t find|not sure|could you/i"
+        ],
+        "notContains": [
+          "/it'?s in (?:src|packages|lib|app)\\//i",
+          "/authenticateUser is defined at/i",
+          "/file: (?:src|packages|lib)\\//i"
+        ]
+      }
+    },
+    {
+      "id": "which-file-handles-signup",
+      "messages": [
+        { "role": "user", "content": "Which file handles the /signup route in my codebase?" }
+      ],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/don'?t have|can do|more specific|share|paste|need to see|couldn'?t find|not sure|could you/i"
+        ],
+        "notContains": [
+          "/(?:src|packages|lib|routes|app)\\/.*\\.(?:ts|js|tsx|jsx|py|go|rs)/i"
+        ]
+      }
+    },
+    {
+      "id": "callers-of-symbol",
+      "messages": [
+        { "role": "user", "content": "What functions in my repo call processPayment()?" }
+      ],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/don'?t have|can do|more specific|share|paste|need to see|couldn'?t find|not sure|could you|best read/i"
+        ]
+      }
+    },
+    {
+      "id": "list-endpoints",
+      "messages": [
+        { "role": "user", "content": "List all API endpoints defined in my codebase." }
+      ],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/don'?t have|can do|more specific|share|paste|need to see|couldn'?t find|not sure|could you|best read/i"
+        ]
+      }
+    },
+    {
+      "id": "find-hook-usage",
+      "messages": [
+        { "role": "user", "content": "Find all usages of the useLogger hook in my project." }
+      ],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/don'?t have|can do|more specific|share|paste|need to see|couldn'?t find|rephrase|not sure|could you|best read|useLogger/i"
+        ]
+      }
+    },
+    {
+      "id": "user-type-shape",
+      "messages": [
+        { "role": "user", "content": "What is the shape of the User type in my codebase?" }
+      ],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/don'?t have|can do|more specific|share|paste|need to see|couldn'?t find|not sure|could you|best read/i"
+        ],
+        "notContains": [
+          "/interface User\\s*\\{[^}]{80,}/i"
+        ]
+      }
+    },
+    {
+      "id": "where-is-env-config",
+      "messages": [
+        { "role": "user", "content": "Where in my repo are environment variables loaded?" }
+      ],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/don'?t have|can do|more specific|share|paste|need to see|couldn'?t find|not sure|could you|best read|dotenv|process\\.env/i"
+        ]
+      }
+    },
+    {
+      "id": "symbol-definition-location",
+      "messages": [
+        { "role": "user", "content": "Show me where OrderService is defined in the source tree." }
+      ],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/don'?t have|can do|more specific|share|paste|need to see|couldn'?t find|not sure|could you|best read|told me|earlier|OrderService/i"
+        ],
+        "notContains": [
+          "/(?:src|packages|lib)\\/[a-z]+\\/.*\\.(?:ts|js|tsx|jsx|py|go|rs)/i"
+        ]
+      }
+    }
+  ]
+}

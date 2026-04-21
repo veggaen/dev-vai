@@ -1,0 +1,74 @@
+{
+  "id": "context-referential",
+  "label": "Turn-2 references ('that', 'the one we just wrote', 'same as above but...') must ground on prior turn",
+  "scenarios": [
+    {
+      "id": "same-but-for-postgres",
+      "messages": [
+        { "role": "user", "content": "Write a SQLite query to count users created in the last 7 days." },
+        { "role": "user", "content": "Same thing but for Postgres." }
+      ],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/postgres|pg|INTERVAL|NOW\\(\\)|CURRENT_DATE|now\\(\\) - INTERVAL/i"
+        ],
+        "notContains": [
+          "/sqlite only|I (?:don'?t|do not) know|couldn'?t find a strong match/i"
+        ]
+      }
+    },
+    {
+      "id": "explain-that-again-simpler",
+      "messages": [
+        { "role": "user", "content": "What is a closure in JavaScript?" },
+        { "role": "user", "content": "Explain that again but simpler, like I'm new to programming." }
+      ],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/closure|function|remember|variable|scope|inside|outside/i"
+        ]
+      }
+    },
+    {
+      "id": "add-error-handling-to-it",
+      "messages": [
+        { "role": "user", "content": "Write a small function fetchUser(id) using fetch() that returns the JSON." },
+        { "role": "user", "content": "Now add error handling to it." }
+      ],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/try|catch|throw|\\!res\\.ok|response\\.ok|error|status/i"
+        ]
+      }
+    },
+    {
+      "id": "same-in-typescript",
+      "messages": [
+        { "role": "user", "content": "Write a Node.js function that debounces a callback by N milliseconds." },
+        { "role": "user", "content": "Same thing in TypeScript with proper types." }
+      ],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/typescript|: \\(|\\):|<T>|interface |type |number|unknown/i"
+        ]
+      }
+    },
+    {
+      "id": "what-did-i-just-ask",
+      "messages": [
+        { "role": "user", "content": "Explain the CAP theorem briefly." },
+        { "role": "user", "content": "Summarize what I just asked about in one sentence." }
+      ],
+      "assert": {
+        "minLength": 10,
+        "anyOfContains": [
+          "/CAP|consistency|availability|partition|three|tradeoff/i"
+        ]
+      }
+    }
+  ]
+}

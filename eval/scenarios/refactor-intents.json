@@ -1,0 +1,79 @@
+{
+  "id": "refactor-intents",
+  "label": "Rename / extract / inline / split / move — must produce refactored code, not from-scratch rewrites",
+  "scenarios": [
+    {
+      "id": "extract-function",
+      "messages": [{
+        "role": "user",
+        "content": "Refactor this by extracting the discount calculation into its own function:\n\nfunction priceFor(item, qty) {\n  let total = item.price * qty;\n  if (qty >= 10) total = total * 0.9;\n  else if (qty >= 5) total = total * 0.95;\n  return total;\n}"
+      }],
+      "assert": {
+        "minLength": 50,
+        "anyOfContains": [
+          "/function (?:discount|calc|apply|get)|const (?:discount|rate)|return (?:discount|rate)|\\bdiscount\\b/i"
+        ]
+      }
+    },
+    {
+      "id": "rename-symbol",
+      "messages": [{
+        "role": "user",
+        "content": "Rename the variable `u` to `user` throughout this code:\n\nfunction greet(u) {\n  const name = u.name ?? 'friend';\n  return 'Hello ' + name + ', id=' + u.id;\n}"
+      }],
+      "assert": {
+        "minLength": 30,
+        "contains": [
+          "/function greet\\(user\\)/i",
+          "/user\\.name/i",
+          "/user\\.id/i"
+        ],
+        "notContains": [
+          "/\\bu\\.name\\b|\\bu\\.id\\b|function greet\\(u\\)/i"
+        ]
+      }
+    },
+    {
+      "id": "inline-variable",
+      "messages": [{
+        "role": "user",
+        "content": "Inline the `taxRate` variable into its use:\n\nfunction priceWithTax(amount) {\n  const taxRate = 0.25;\n  return amount + amount * taxRate;\n}"
+      }],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": [
+          "/0\\.25/"
+        ],
+        "notContains": [
+          "/const taxRate\\s*=\\s*0\\.25/"
+        ]
+      }
+    },
+    {
+      "id": "split-module",
+      "messages": [{
+        "role": "user",
+        "content": "I have a single utils.ts with date helpers, string helpers, and array helpers. How should I split it?"
+      }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/one file per|date\\.ts|string\\.ts|array\\.ts|barrel|index\\.ts|separate (?:file|module|concern)/i"
+        ]
+      }
+    },
+    {
+      "id": "convert-callbacks-to-promises",
+      "messages": [{
+        "role": "user",
+        "content": "Convert this Node.js callback code to async/await:\n\nfs.readFile('./config.json', 'utf8', (err, data) => {\n  if (err) return console.error(err);\n  const cfg = JSON.parse(data);\n  console.log(cfg);\n});"
+      }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/await.*readFile|fs\\.promises|fs\\/promises|async function|try \\{|catch/i"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "id": "error-diagnosis",
+  "label": "Pasted stack traces / error strings should get targeted diagnosis, not generic advice",
+  "scenarios": [
+    {
+      "id": "node-cannot-find-module",
+      "messages": [{
+        "role": "user",
+        "content": "Getting this when running my server:\n\nError: Cannot find module 'express'\n    at Function.Module._resolveFilename (node:internal/modules/cjs/loader:1094:15)\n    at Function.Module._load (node:internal/modules/cjs/loader:934:27)\n    at Module.require (node:internal/modules/cjs/loader:1157:19)\n    at require (node:internal/modules/cjs/helpers:119:18)\n    at Object.<anonymous> (/app/server.js:1:17)\n\nHow do I fix it?"
+      }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/npm install|pnpm (?:add|install)|yarn add|install express|node_modules|missing dependency/i"
+        ],
+        "notContains": [
+          "/I (?:don'?t|do not) know|I have not learned|couldn'?t find a strong match/i"
+        ]
+      }
+    },
+    {
+      "id": "ts-type-error",
+      "messages": [{
+        "role": "user",
+        "content": "src/app.ts:42:13 - error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.\n  Type 'undefined' is not assignable to type 'string'.\n\nWhat does this mean and how do I fix it?"
+      }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/\\?\\?|optional chaining|strict null|undefined|narrow|guard|default value|nullish/i"
+        ]
+      }
+    },
+    {
+      "id": "react-rendered-more-hooks",
+      "messages": [{
+        "role": "user",
+        "content": "My React component throws: \"Rendered more hooks than during the previous render.\" What is going wrong?"
+      }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/conditional|early return|order of hooks|rules of hooks|before hook|same order/i"
+        ]
+      }
+    },
+    {
+      "id": "cors-blocked",
+      "messages": [{
+        "role": "user",
+        "content": "My frontend fetch is blocked with 'Access to fetch at http://api.example.com/users from origin http://localhost:3000 has been blocked by CORS policy'. How do I fix it?"
+      }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/cors|access-control-allow-origin|middleware|header|preflight|server-side/i"
+        ]
+      }
+    },
+    {
+      "id": "postgres-ECONNREFUSED",
+      "messages": [{
+        "role": "user",
+        "content": "connect ECONNREFUSED 127.0.0.1:5432 — what is this and how do I fix it?"
+      }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/postgres|database|not running|port|listening|firewall|docker|pg_hba|start(?:ed)?/i"
+        ]
+      }
+    },
+    {
+      "id": "port-already-in-use",
+      "messages": [{
+        "role": "user",
+        "content": "Error: listen EADDRINUSE: address already in use :::3000"
+      }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/already in use|port|kill|kill-port|lsof|netstat|different port|process|listening/i"
+        ]
+      }
+    },
+    {
+      "id": "cors-no-acao-header",
+      "messages": [{
+        "role": "user",
+        "content": "No Access-Control-Allow-Origin header on my fetch request from the browser."
+      }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/cors|access-control-allow-origin|middleware|header|preflight|server/i"
+        ]
+      }
+    }
+  ]
+}

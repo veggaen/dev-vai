@@ -171,7 +171,8 @@ function normalizeSearchQuery(query: string): string {
 
 function extractPrimarySubject(query: string, entities: readonly string[]): string {
   const stripped = query
-    .replace(/^(?:what\s+(?:is|are|was|were)|what's|define|explain|describe|tell\s+me\s+about|who\s+(?:is|are|was|were)|how\s+(?:does|do)|why\s+(?:does|is|are|would|should)|hva\s+er|forklar|beskriv|fortell\s+meg\s+om|hvordan(?:\s+fungerer)?)\s+/i, '')
+    .replace(/^(?:what\s+(?:is|are|was|were)|what's|what\s+do\s+you\s+know(?:\s+(?:about|of|on|regarding))?|do\s+you\s+know(?:\s+(?:about|of|on|regarding))?|have\s+you\s+heard\s+(?:of|about)|define|explain|describe|tell\s+me\s+about|who\s+(?:is|are|was|were)|how\s+(?:does|do)|why\s+(?:does|is|are|would|should)|hva\s+er|forklar|beskriv|fortell\s+meg\s+om|hvordan(?:\s+fungerer)?)\s+/i, '')
+    .replace(/^(?:of|about|on|regarding)\s+/i, '')
     .trim();
 
   if (/\b(?:current|latest|stable|version|release|lts)\b/i.test(stripped)) {

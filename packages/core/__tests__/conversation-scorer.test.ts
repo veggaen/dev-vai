@@ -350,7 +350,9 @@ describe('Cognitive Alignment scoring', () => {
     const result = score(events);
     const ihFactor = result.cognitiveAlignment.factors.find(f => f.name === 'intellectual-honesty');
     expect(ihFactor).toBeDefined();
-    expect(ihFactor!.raw).toBe(70); // 7 * 10 = 70 (neutral, not penalized)
+    // Neutral baseline under v1.1.0 scorer: acknowledgement 0.7 + recovery 0.8 + proof 0.1
+    // → round((0.7*0.55 + 0.8*0.3 + 0.1*0.15) * 10) = 6, scaled to 60.
+    expect(ihFactor!.raw).toBe(60);
   });
 
   it('explanation depth rewards balanced prose+code', () => {
@@ -462,7 +464,7 @@ describe('Overall scoring', () => {
     expect(result.overallGrade).toBeDefined();
     expect(result.turnPairCount).toBe(2);
     expect(result.totalEvents).toBe(4);
-    expect(result.scorerVersion).toBe('1.0.0');
+    expect(result.scorerVersion).toBe('1.1.0');
     expect(result.sessionId).toBe('test-scorer');
   });
 

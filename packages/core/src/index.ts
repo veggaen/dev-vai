@@ -29,6 +29,10 @@ export { SkillRouter } from './models/skill-router.js';
 export type { DomainId, DomainSkill, SkillMatch } from './models/skill-router.js';
 export type { KnowledgeEntry, VaiEngineOptions, VaiSnapshot, ResponseMeta, VaiDiagnosis } from './models/vai-engine.js';
 export { KnowledgeIntelligence, classifyQuestionCategory } from './models/knowledge-intelligence.js';
+export { ShadowRouter, extractShadowFeatures, contextFromHistory } from './models/shadow-router.js';
+export type { ShadowObservation, ShadowPrediction, ShadowAgreementStats, ShadowSnapshot } from './models/shadow-router.js';
+export { HybridRetriever, scoreHybrid } from './models/hybrid-retrieval.js';
+export type { HybridDocument, HybridScore, HybridIndexStats } from './models/hybrid-retrieval.js';
 export type { AtomicFact, FactType, SubPattern, Connection, DuplicateGroup, HygieneReport, SubQuestion, SubAnswer, CompositeAnswer, QuestionType, QuestionCategory, InterrogativeType, ProceduralType, OperationalType } from './models/knowledge-intelligence.js';
 
 // Chat
