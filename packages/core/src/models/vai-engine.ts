@@ -29,11 +29,11 @@ import { composeBuilderApp } from './builder/compose-builder-app.js';
 import { resolveBuilderIntent } from './builder/resolve-builder-intent.js';
 import { KnowledgeStore, VaiTokenizer, type KnowledgeEntry } from './knowledge-store.js';
 import { KnowledgeIntelligence } from './knowledge-intelligence.js';
-import { SkillRouter, type SkillMatch, type DomainId } from './skill-router.js';
+import { SkillRouter } from './skill-router.js';
 import { TOPIC_STOP_WORDS } from './stop-words.js';
 import { ShadowRouter, contextFromHistory } from './shadow-router.js';
 import { DEEP_DESIGN_MEMO_SCHEMAS, renderDeepDesignMemo, type DeepDesignMemoKind } from '../chat/deep-design-memo-schemas.js';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   SearchPipeline,
@@ -45,7 +45,7 @@ import type { SearchResponse, SearchSnippet } from '../search/types.js';
 import { getSkillRegistry } from '../skills/registry.js';
 import { getSubAgentRouter } from '../skills/sub-agent-router.js';
 import { getTeacherAgent, type TeacherDecision } from '../skills/teacher-agent.js';
-import type { CitedAnswer, EvidenceBlock, LearnedUnit } from '../skills/types.js';
+import type { CitedAnswer, LearnedUnit } from '../skills/types.js';
 import { normalizeInputForUnderstanding, detectRegister } from '../input-normalization.js';
 
 export { KnowledgeStore, VaiTokenizer };
@@ -150,8 +150,6 @@ export class VaiEngine implements ModelAdapter {
   readonly searchPipeline: SearchPipeline;
   readonly skillRouter: SkillRouter;
   private intelligenceDirty = false;
-
-  private systemPrompt = 'You are VeggaAI (VAI), a local-first AI assistant that learns from your data. You are still in early training ��� be honest about what you know and what you are still learning.';
 
   // ��������� PERSISTENCE ���������
   private readonly persistPath: string | null;
@@ -1603,8 +1601,6 @@ export class VaiEngine implements ModelAdapter {
           const lessons = await this.runQualityGate(
             userContent,
             response,
-            strategy,
-            confidence,
             gate,
           );
           if (lessons) {
@@ -1727,8 +1723,6 @@ export class VaiEngine implements ModelAdapter {
   private async runQualityGate(
     userInput: string,
     vaiResponse: string,
-    strategy: string,
-    confidence: number,
     gate: NonNullable<import('../config/types.js').VaiConfig['qualityGate']>,
   ): Promise<{
     score: number;
@@ -2184,8 +2178,6 @@ export class VaiEngine implements ModelAdapter {
       : null;
     if (skillMatch && !this.skillRouter.isExplicitScaffoldRequest(input)) {
       const domainContext = this.skillRouter.buildContext(skillMatch);
-      // Log domain detection for diagnostics
-      const domainTag = `[Skill: ${skillMatch.domain.id} @ ${(skillMatch.confidence * 100).toFixed(0)}%]`;
       // For now, inject domain context into the response — the domain system prompt
       // guides how Vai responds. We don't block here; instead we let the existing
       // strategy chain run but with domain awareness. The domain context is stored
@@ -2779,7 +2771,6 @@ export class VaiEngine implements ModelAdapter {
 
     const priorAssistantMessages = history.filter((message) => message.role === 'assistant');
     if (priorAssistantMessages.length === 0) return null;
-    const priorAssistant = priorAssistantMessages[priorAssistantMessages.length - 1]?.content ?? '';
 
     const previousTrimmed = previousUser.trim().replace(/[.!?]+$/, '');
 
@@ -3158,7 +3149,7 @@ export class VaiEngine implements ModelAdapter {
     return null;
   }
 
-  private tryRustLanguageArm(input: string, lower: string): string | null {
+  private tryRustLanguageArm(_input: string, lower: string): string | null {
     // Display trait impl for Point { x, y }
     if (
       /\bdisplay\b/i.test(lower)
@@ -3185,7 +3176,7 @@ export class VaiEngine implements ModelAdapter {
     return null;
   }
 
-  private tryGoLanguageArm(input: string, lower: string): string | null {
+  private tryGoLanguageArm(_input: string, lower: string): string | null {
     // fmt.Errorf + %w wrapping, errors.Is / errors.As unwrapping
     if (
       /\bwrap\b/i.test(lower)
@@ -3205,7 +3196,7 @@ export class VaiEngine implements ModelAdapter {
     return null;
   }
 
-  private tryShellLanguageArm(input: string, lower: string): string | null {
+  private tryShellLanguageArm(_input: string, lower: string): string | null {
     // bash loop over *.log files printing size
     if (/\bbash\b/i.test(lower) && /\bloop\b/i.test(lower) && /\.log\b/i.test(lower)) {
       return 'Iterate the glob with a `for` loop and print each file\'s size with `stat -c %s` (Linux) or `wc -c`. Using `du -b` gives the same bytes figure in a POSIX-portable way on systems with GNU coreutils.\n\n```bash\n#!/usr/bin/env bash\nset -euo pipefail\n\nfor f in *.log; do\n    [ -f "$f" ] || continue   # handle the "no match" case when the glob is literal\n    size=$(stat -c %s -- "$f")\n    printf \'%s\\t%s bytes\\n\' "$f" "$size"\ndone\n```\n\nIf you prefer a one-liner, `ls -l *.log` or `wc -c *.log` both emit size + filename, and `du -b *.log` gives byte counts. For recursive descent use `find . -name \'*.log\' -printf \'%p\\t%s\\n\'` instead of the shell glob.';
@@ -3229,7 +3220,7 @@ export class VaiEngine implements ModelAdapter {
     return null;
   }
 
-  private trySqlLanguageArm(input: string, lower: string): string | null {
+  private trySqlLanguageArm(_input: string, lower: string): string | null {
     // ROW_NUMBER OVER(PARTITION BY user_id ORDER BY created_at DESC)
     if (/\brow_?number\b/i.test(lower) || (/\bmost\s+recent\b/i.test(lower) && /\bper\s+user\b/i.test(lower))) {
       return 'Window functions compute a value across a set of rows related to the current row. `ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC)` numbers each user\'s orders newest-first; filtering `rn = 1` yields the most recent order per user.\n\n```sql\nWITH ranked AS (\n    SELECT\n        o.*,\n        ROW_NUMBER() OVER (\n            PARTITION BY o.user_id\n            ORDER BY o.created_at DESC\n        ) AS rn\n    FROM orders o\n)\nSELECT id, user_id, created_at, total_cents\nFROM ranked\nWHERE rn = 1;\n```\n\n**Why a CTE?** You can\'t reference the alias `rn` in the same `WHERE` where it was defined — SQL evaluates `WHERE` before the `SELECT` list. The CTE gives the window-function output a name you can filter on. **Alternative** without a CTE uses a correlated subquery or `DISTINCT ON` (Postgres):\n\n```sql\n-- Postgres-only, often faster than ROW_NUMBER\nSELECT DISTINCT ON (user_id) id, user_id, created_at, total_cents\nFROM orders\nORDER BY user_id, created_at DESC;\n```';
@@ -3248,7 +3239,7 @@ export class VaiEngine implements ModelAdapter {
     return null;
   }
 
-  private tryJavaLanguageArm(input: string, lower: string): string | null {
+  private tryJavaLanguageArm(_input: string, lower: string): string | null {
     // Streams API: filter even numbers, collect to list
     if (
       /\bstream/i.test(lower)
@@ -3276,7 +3267,7 @@ export class VaiEngine implements ModelAdapter {
     return null;
   }
 
-  private tryCSharpLanguageArm(input: string, lower: string): string | null {
+  private tryCSharpLanguageArm(_input: string, lower: string): string | null {
     // async Task HttpClient fetch JSON
     if (
       /\basync\b/i.test(lower)
