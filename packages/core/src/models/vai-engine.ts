@@ -46,7 +46,7 @@ import { getSkillRegistry } from '../skills/registry.js';
 import { getSubAgentRouter } from '../skills/sub-agent-router.js';
 import { getTeacherAgent, type TeacherDecision } from '../skills/teacher-agent.js';
 import type { CitedAnswer, EvidenceBlock, LearnedUnit } from '../skills/types.js';
-import { normalizeInputForUnderstanding } from '../input-normalization.js';
+import { normalizeInputForUnderstanding, detectRegister } from '../input-normalization.js';
 
 export { KnowledgeStore, VaiTokenizer };
 export type { KnowledgeEntry };
@@ -73,6 +73,8 @@ export interface ResponseMeta {
   readonly topDocIds?: readonly string[];
   /** The regex or pattern that triggered this strategy (observability) */
   readonly matchedPattern?: string;
+  /** Detected conversational register of the user's input (for tone matching) */
+  readonly register?: 'formal' | 'casual' | 'terse' | 'teach-me' | 'neutral';
 }
 
 /** Full self-diagnostic report ��� what Vai knows about its own capabilities. */
@@ -1368,6 +1370,7 @@ export class VaiEngine implements ModelAdapter {
       retrievalSource: extra?.retrievalSource,
       topDocIds: extra?.topDocIds,
       matchedPattern: extra?.matchedPattern,
+      register: detectRegister(input),
     };
     this._lastMeta = meta;
     this.responseHistory.push(meta);
@@ -2664,6 +2667,15 @@ export class VaiEngine implements ModelAdapter {
 
     const isBuildIntent = /\b(?:build|create|make|scaffold|generate|write|implement|refactor|fix|debug|upgrade|improve|polish|deploy)\b/i.test(lower);
     if (isBuildIntent) return false;
+
+    // Language-specific code question — "how do I X in python using Y", "using Y
+    // in javascript give me Z", etc. These should flow through the local code
+    // dispatchers (algorithm, creative-code, language-snippet) rather than
+    // bouncing to generic web search which routinely returns off-topic pages.
+    const mentionsLanguage = /\b(?:python|javascript|typescript|js|ts|node\.?js|java|c\+\+|c#|csharp|golang|\bgo\b|rust|ruby|php|swift|kotlin|scala|bash|shell|sql|html|css|react|vue|svelte|angular|express|django|fastapi|spring|rails|flask)\b/i.test(normalizedInput);
+    const hasCodeCues = /\b(?:function|method|class|module|library|package|api|endpoint|handler|script|code|snippet|example|async\w*|await\w*|promise|generator|decorator|comprehension|closure|generic|interface|type|trait|struct|enum|hook|component|middleware|aiohttp|requests|axios|fetch|http|url|uri|json|regex|parser|parse|loop|iterator)\b/i.test(normalizedInput);
+    const isLanguageCodeQuestion = mentionsLanguage && hasCodeCues;
+    if (isLanguageCodeQuestion) return false;
 
     const isExplicitSearch = /\b(?:use\s+web\s+search|search\s+(?:the\s+)?web|look\s+up|find\s+online|google\s+it|google\s+.+)\b/i.test(normalizedInput);
     const isFactualQuestion = /\b(?:what\s+is|what\s+are|how\s+does|how\s+do|explain|why\s+does|why\s+is|when\s+did|who\s+(?:is|was|are|were)|what'?s)\b/i.test(normalizedInput);

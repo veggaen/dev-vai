@@ -65,6 +65,71 @@ export interface KnowledgeEntry {
   frequency: number;
   source: string;
   language: 'en' | 'no' | 'code' | 'mixed';
+  updatedAt?: number;
+}
+
+/**
+ * Ranks sources from most to least authoritative. Higher rank wins when two
+ * entries collide on the same pattern. Anything not matched here (web
+ * citations, external corpora, ad-hoc tags) lands at the bottom tier so
+ * curated knowledge is never silently overwritten by scraped noise.
+ */
+export function sourceTier(source: string): number {
+  const s = source.toLowerCase();
+  if (s.includes('bootstrap')) return 5;
+  if (s.includes('user-taught') || s === 'user') return 4;
+  if (s.includes('vcus')) return 3;
+  if (s.includes('auto-learned')) return 2;
+  return 1;
+}
+
+/**
+ * Bidirectional alias groups. Each group shares retrieval candidacy — querying
+ * any member pulls in entries indexed under the others. Kept small and focused
+ * on the terms developers actually mix day-to-day; broad thesaurus expansion
+ * dilutes precision.
+ */
+const SYNONYM_GROUPS: readonly string[][] = [
+  ['js', 'javascript', 'ecmascript'],
+  ['ts', 'typescript'],
+  ['py', 'python'],
+  ['node', 'nodejs', 'node.js'],
+  ['db', 'database'],
+  ['postgres', 'postgresql', 'psql'],
+  ['k8s', 'kubernetes'],
+  ['docker', 'container'],
+  ['func', 'function'],
+  ['arr', 'array', 'list'],
+  ['str', 'string'],
+  ['num', 'number', 'integer', 'int'],
+  ['regex', 'regexp', 'regular-expression'],
+  ['async', 'asynchronous', 'asyncio'],
+  ['http', 'https', 'fetch'],
+  ['ml', 'machine-learning'],
+  ['ai', 'artificial-intelligence'],
+  ['env', 'environment'],
+  ['repo', 'repository'],
+  ['config', 'configuration'],
+];
+
+const SYNONYM_LOOKUP: Map<string, readonly string[]> = (() => {
+  const map = new Map<string, string[]>();
+  for (const group of SYNONYM_GROUPS) {
+    for (const term of group) {
+      const aliases = group.filter((other) => other !== term);
+      map.set(term, aliases);
+    }
+  }
+  return map as Map<string, readonly string[]>;
+})();
+
+export function expandSynonyms(words: readonly string[]): string[] {
+  const out = new Set<string>(words);
+  for (const word of words) {
+    const aliases = SYNONYM_LOOKUP.get(word);
+    if (aliases) for (const alias of aliases) out.add(alias);
+  }
+  return [...out];
 }
 
 class TopicBloomFilter {
@@ -280,10 +345,21 @@ export class KnowledgeStore {
   addEntry(pattern: string, response: string, source: string, language: KnowledgeEntry['language'] = 'en'): void {
     const existing = this.entries.find((entry) => entry.pattern === pattern.toLowerCase());
     if (existing) {
-      if (source.includes('vcus') && !existing.source.includes('vcus')) {
+      const newTier = sourceTier(source);
+      const existingTier = sourceTier(existing.source);
+      const newIsCleaner = !KnowledgeStore.isJunkContent(response);
+      const existingIsJunk = KnowledgeStore.isJunkContent(existing.response);
+      // Strictly higher-tier source always wins (bootstrap > user-taught > vcus > auto-learned > web).
+      // Same tier: replace only when the incoming text is meaningfully longer
+      // and not junk, so we slowly upgrade thin entries without thrashing on noise.
+      const shouldReplace =
+        (newTier > existingTier && newIsCleaner)
+        || (newTier === existingTier && newIsCleaner && (existingIsJunk || response.length > existing.response.length * 1.25));
+      if (shouldReplace) {
         existing.source = source;
         existing.response = response;
         existing.language = language;
+        existing.updatedAt = Date.now();
       }
       existing.frequency++;
       return;
@@ -296,6 +372,7 @@ export class KnowledgeStore {
       frequency: 1,
       source,
       language,
+      updatedAt: Date.now(),
     });
 
     const words = pattern.toLowerCase().split(/\s+/).filter(word => word.length > 1);
@@ -380,7 +457,8 @@ export class KnowledgeStore {
       : null;
 
     const candidateIndices = new Set<number>();
-    for (const word of queryWords) {
+    const expandedWords = expandSynonyms(queryWords);
+    for (const word of expandedWords) {
       const indices = this.entryWordIndex.get(word);
       if (indices) {
         for (const idx of indices) candidateIndices.add(idx);

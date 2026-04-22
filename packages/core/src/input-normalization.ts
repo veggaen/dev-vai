@@ -178,3 +178,35 @@ export function normalizeInputForUnderstanding(input: string): string {
 
   return normalized.replace(/\s+/g, ' ').trim();
 }
+
+export type InputRegister = 'formal' | 'casual' | 'terse' | 'teach-me' | 'neutral';
+
+/**
+ * Heuristic register detection. Surfaces the user's tone so downstream
+ * composers can match it — formal contracts get formal answers, terse pings
+ * get short ones, "teach me" requests get stepwise explanations. Cheap and
+ * regex-based on purpose; does not touch response routing.
+ */
+export function detectRegister(input: string): InputRegister {
+  if (typeof input !== 'string') return 'neutral';
+  const raw = input.trim();
+  if (raw.length === 0) return 'neutral';
+  const lower = raw.toLowerCase();
+  const words = raw.split(/\s+/).filter(Boolean);
+
+  const teachSignals = /\b(?:teach\s+me|explain(?:\s+(?:in\s+detail|step[-\s]?by[-\s]?step|like\s+i['’]?m|to\s+me))|walk\s+me\s+through|break\s+(?:it|this)\s+down|from\s+scratch|step[-\s]?by[-\s]?step|eli5|deep\s+dive)\b/i.test(lower);
+  if (teachSignals) return 'teach-me';
+
+  const formalSignals = /\b(?:kindly|furthermore|moreover|therefore|regarding|per\s+your|with\s+reference\s+to|i\s+would\s+appreciate|could\s+you\s+please|would\s+you\s+be\s+so\s+kind)\b/i.test(lower);
+  const casualSignals = /\b(?:yo|hey|dude|bro|sup|lol|lmao|omg|kinda|gonna|wanna|gotta|tbh|ngl|fr|rn|af|idk|imo|thx|thanks?!?)\b/i.test(lower);
+  const emojis = /[\u{1F300}-\u{1FAFF}\u{1F000}-\u{1F2FF}\u{2600}-\u{27BF}]/u.test(raw);
+
+  if (formalSignals && !casualSignals) return 'formal';
+  if (casualSignals || emojis) return 'casual';
+
+  const wordCount = words.length;
+  const hasPunctuation = /[.?!]/.test(raw);
+  if (wordCount <= 4 && !hasPunctuation) return 'terse';
+
+  return 'neutral';
+}

@@ -11,14 +11,21 @@ function readSnapshot(persistPath: string): { learnedEntries: Array<{ pattern: s
 describe('VaiEngine Learning Flywheel', () => {
   let tmpDir: string;
   let persistPath: string;
+  let originalFetch: typeof globalThis.fetch | undefined;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vai-flywheel-'));
     persistPath = path.join(tmpDir, 'vai-knowledge.json');
+    // Stub network so VaiEngine's web-search / research routes never hit the
+    // live internet. Without this, the research-cited path can burn 5000ms
+    // per test waiting on a socket and cause the whole file to flake.
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => new Response('', { status: 204 })) as typeof globalThis.fetch;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    if (originalFetch) globalThis.fetch = originalFetch;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
