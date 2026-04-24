@@ -1,3 +1,69 @@
+// ── Closed-class words that should never count as "topical content" when
+// ranking retrieval results. Kept inline (rather than imported from
+// stop-words.ts) so input-normalization stays leaf-level — no module cycles.
+const TOPIC_NOISE_WORDS = new Set<string>([
+  // English articles / determiners / conjunctions / pronouns / prepositions
+  'a', 'an', 'the', 'this', 'that', 'these', 'those',
+  'and', 'or', 'but', 'so', 'if', 'because', 'as', 'than',
+  'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did',
+  'will', 'would', 'could', 'should', 'may', 'might', 'shall', 'can',
+  'i', 'me', 'my', 'we', 'us', 'our', 'you', 'your', 'he', 'him',
+  'his', 'she', 'her', 'it', 'its', 'they', 'them', 'their',
+  'what', 'which', 'who', 'whom', 'whose', 'where', 'when', 'why', 'how',
+  'all', 'any', 'few', 'more', 'most', 'other', 'some', 'such',
+  'no', 'not', 'only', 'own', 'same', 'too', 'very', 'just', 'about',
+  'of', 'at', 'by', 'for', 'with', 'against', 'into', 'through', 'during',
+  'before', 'after', 'above', 'below', 'between', 'over', 'under', 'in',
+  'on', 'off', 'to', 'from', 'up', 'down', 'out', 'again', 'further',
+  'then', 'once', 'here', 'there',
+  // Q&A action verbs that are framing, not content
+  'explain', 'describe', 'define', 'compare', 'tell', 'show', 'give', 'list',
+  'know', 'knows', 'knew', 'remember', 'recall', 'understand',
+  // Norwegian closed-class
+  'og', 'eller', 'men', 'om', 'hvis', 'da', 'er', 'var', 'som', 'med',
+  'av', 'til', 'fra', 'på', 'kan', 'vil', 'skal', 'jeg', 'du', 'vi',
+  'hva', 'kva', 'hvor', 'hvordan', 'forklar', 'fortell',
+]);
+
+/**
+ * Returns the lowercased "content tokens" of a topic phrase: tokens with at
+ * least 2 chars that are not closed-class words. Used by retrieval guards to
+ * verify a candidate document actually concerns the asked topic before its
+ * text is surfaced as an answer.
+ *
+ * Example: topicContentTokens("react server components")
+ *          → ["react", "server", "components"]
+ */
+export function topicContentTokens(topic: string): string[] {
+  if (typeof topic !== 'string' || topic.length === 0) return [];
+  return topic
+    .toLowerCase()
+    .split(/[^a-z0-9æøå]+/i)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2 && !TOPIC_NOISE_WORDS.has(t));
+}
+
+/**
+ * TopicGuard: returns true when `text` plausibly concerns `topic`. The
+ * heuristic requires at least one content token from the topic to appear as
+ * a whole-word match in the text (case-insensitive). Returns true vacuously
+ * when the topic has no content tokens (e.g. pure stopwords) so callers
+ * don't accidentally filter everything out.
+ */
+export function textConcernsTopic(text: string, topic: string): boolean {
+  if (typeof text !== 'string' || text.length === 0) return false;
+  const tokens = topicContentTokens(topic);
+  if (tokens.length === 0) return true;
+  const lower = text.toLowerCase();
+  for (const token of tokens) {
+    // Whole-word match — escape regex metachars defensively.
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`\\b${escaped}\\b`, 'i').test(lower)) return true;
+  }
+  return false;
+}
+
 const NORMALIZATION_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bwhats\b/gi, 'what is'],
   [/\bwats\b/gi, 'what is'],
@@ -177,6 +243,110 @@ export function normalizeInputForUnderstanding(input: string): string {
   }
 
   return normalized.replace(/\s+/g, ' ').trim();
+}
+
+// ── Topic extraction ─────────────────────────────────────────────────────
+// Strips conversational/question framing from a user query and returns the
+// bare topic phrase. Used by knowledge lookups so retrieval is not polluted
+// by closed-class words ("of", "about") or interrogative scaffolding
+// ("what do you know", "tell me about", "have you heard of"). Centralized
+// so every entry point that needs a topic uses identical rules.
+
+const QUERY_FRAMING_PATTERNS: ReadonlyArray<RegExp> = [
+  // Multi-word interrogative framings (English) — most specific first.
+  /^what\s+do\s+you\s+know(?:\s+(?:about|of|on|regarding|around|concerning|re))?\s+/i,
+  /^do\s+you\s+know(?:\s+(?:about|of|on|regarding|around|concerning|re))?\s+/i,
+  /^have\s+you\s+(?:ever\s+)?heard(?:\s+(?:about|of|on))?\s+/i,
+  /^(?:can|could)\s+you\s+(?:tell\s+me|explain|describe|define|summari[sz]e)\s+(?:about|of|on|regarding|me\s+about)?\s*/i,
+  /^tell\s+me\s+(?:more\s+)?(?:about|of|regarding|on)\s+/i,
+  /^(?:please\s+)?(?:explain|describe|define|summari[sz]e)\s+(?:to\s+me\s+)?(?:about|how|what|of|on|regarding)?\s*/i,
+  /^(?:i\s+(?:want|need|would\s+like)\s+to\s+(?:know|learn|hear)(?:\s+(?:about|of|on|regarding))?)\s+/i,
+  /^(?:give\s+me\s+(?:a\s+)?(?:brief|overview|summary|rundown|quick\s+intro)\s+(?:of|about|on)?)\s+/i,
+  /^what(?:'s|\s+is|\s+are|\s+was|\s+were)\s+/i,
+  /^who(?:'s|\s+is|\s+are|\s+was|\s+were)\s+/i,
+  /^how\s+(?:does|do|can|should|would|is|are)\s+/i,
+  /^why\s+(?:does|do|is|are|would|should|did|was|were)\s+/i,
+  /^when\s+(?:does|do|is|are|did|was|were|will)\s+/i,
+  /^where\s+(?:does|do|is|are|did|was|were|will)\s+/i,
+  // Norwegian (Bokmål + Nynorsk)
+  /^hva\s+(?:er|var)\s+/i,
+  /^kva\s+(?:er|var)\s+/i,
+  /^fortell\s+meg\s+(?:om|kva)\s+/i,
+  /^hvordan\s+(?:fungerer|virker)\s+/i,
+  /^korleis\s+(?:fungerer|verkar)\s+/i,
+];
+
+// Residual prepositions that survive the framing strip (e.g. user typed
+// "tell me about of redbull" or just "of redbull"). Run repeatedly until
+// no further reduction occurs.
+const RESIDUAL_LEADING_PREPOSITION = /^(?:about|of|on|regarding|around|concerning|re|with|for|against|toward|towards)\s+/i;
+
+const TRAILING_FILLERS = /\s+(?:please|for\s+me|in\s+simple\s+(?:words?|terms?|english)|simply|in\s+a\s+nutshell|tl;?dr|for\s+beginners|like\s+i'?m\s+(?:5|five)|eli5|kort\s+fortalt|med\s+enkle\s+ord)$/i;
+const TRAILING_QUALIFIER = /\s+(?:and\s+(?:why|how|when|where)|right\s+now|today|exactly|btw|by\s+the\s+way)$/i;
+const WRAPPING_NOISE = /^[\s"'`([{<]+|[\s"'`\])}>.?!,:;]+$/g;
+
+/**
+ * Extracts the topic phrase from a conversational query by stripping leading
+ * question framing, residual prepositions, and trailing fillers.
+ *
+ * Examples:
+ *   "what do you know of redbull?"        → "redbull"
+ *   "tell me about of typescript please"  → "typescript"
+ *   "do you know about react hooks?"      → "react hooks"
+ *   "explain docker simply"               → "docker"
+ *   "what is kubernetes"                  → "kubernetes"
+ *   "have you heard of vinext?"           → "vinext"
+ *
+ * Returns an empty string only when the input is empty/whitespace. If the
+ * full input is framing words (e.g. "what do you know"), returns the trimmed
+ * original so callers can fall back gracefully.
+ */
+export function extractTopicFromQuery(query: string): string {
+  if (typeof query !== 'string') return '';
+  const original = query.trim();
+  if (original.length === 0) return '';
+
+  // Strip wrapping quotes/punctuation first so the framing regex anchors (^)
+  // can see the actual leading word ("what do you know …").
+  let topic = original.replace(WRAPPING_NOISE, '').trim();
+  if (topic.length === 0) return '';
+
+  // Strip leading interrogative framing — loop because patterns can chain
+  // ("can you tell me about ..." → "about ..." → "...").
+  let prev = '';
+  while (prev !== topic) {
+    prev = topic;
+    for (const pattern of QUERY_FRAMING_PATTERNS) {
+      const next = topic.replace(pattern, '');
+      if (next !== topic) {
+        topic = next.trimStart();
+        break;
+      }
+    }
+  }
+
+  // Strip residual leading prepositions repeatedly ("tell me about of X").
+  prev = '';
+  while (prev !== topic) {
+    prev = topic;
+    topic = topic.replace(RESIDUAL_LEADING_PREPOSITION, '');
+  }
+
+  // Strip trailing fillers and qualifiers (also looped — they can stack).
+  prev = '';
+  while (prev !== topic) {
+    prev = topic;
+    topic = topic.replace(TRAILING_FILLERS, '').replace(TRAILING_QUALIFIER, '');
+  }
+
+  topic = topic.replace(WRAPPING_NOISE, '').replace(/\s+/g, ' ').trim();
+
+  // If stripping consumed everything, fall back to the trimmed original
+  // minus wrapping punctuation so the caller still has something to work with.
+  if (topic.length === 0) {
+    return original.replace(WRAPPING_NOISE, '').replace(/\s+/g, ' ').trim();
+  }
+  return topic;
 }
 
 export type InputRegister = 'formal' | 'casual' | 'terse' | 'teach-me' | 'neutral';

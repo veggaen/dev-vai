@@ -3,7 +3,10 @@
  * - Dev (Vite on 5173/5174): empty string → requests go through Vite proxy (no CORS)
  * - Tauri / production: direct to localhost:3006
  */
+import { isDevAuthBypassEnabled } from './dev-auth-bypass.js';
+
 const SESSION_TOKEN_KEY = 'vai-platform-session-token';
+const DEV_AUTH_BYPASS_HEADER = 'x-vai-dev-auth-bypass';
 
 function getApiBase(): string {
   if (typeof window === 'undefined') return 'http://localhost:3006';
@@ -39,13 +42,23 @@ export function setApiSessionToken(token: string | null): void {
   window.localStorage.removeItem(SESSION_TOKEN_KEY);
 }
 
-export function apiFetch(input: string, init?: RequestInit): Promise<Response> {
-  const headers = new Headers(init?.headers ?? undefined);
+export function buildApiHeaders(headers?: HeadersInit): Headers {
+  const nextHeaders = new Headers(headers ?? undefined);
   const sessionToken = getApiSessionToken();
 
   if (sessionToken) {
-    headers.set('authorization', `Bearer ${sessionToken}`);
+    nextHeaders.set('authorization', `Bearer ${sessionToken}`);
   }
+
+  if (isDevAuthBypassEnabled()) {
+    nextHeaders.set(DEV_AUTH_BYPASS_HEADER, '1');
+  }
+
+  return nextHeaders;
+}
+
+export function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const headers = buildApiHeaders(init?.headers);
 
   return fetch(`${API_BASE}${input}`, {
     credentials: 'include',

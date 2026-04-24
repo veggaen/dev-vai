@@ -19,6 +19,7 @@ import {
   EvalRunner,
   SearchPipeline,
 } from '@vai/core';
+import type { ChatServiceOptions, VaiConfig } from '@vai/core';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerConversationRoutes } from './routes/conversations.js';
 import { registerModelRoutes } from './routes/models.js';
@@ -48,6 +49,42 @@ import { registerProjectRoutes } from './routes/projects.js';
 export interface ServerOptions {
   port?: number;
   dbPath?: string;
+}
+
+export function getDefaultAllowedOrigins(port: number): string[] {
+  const runtimeOrigins = [
+    `http://localhost:${port}`,
+    `http://127.0.0.1:${port}`,
+    `http://0.0.0.0:${port}`,
+    `http://[::1]:${port}`,
+  ];
+
+  return Array.from(new Set([
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://0.0.0.0:5173',
+    'http://[::1]:5173',
+    ...runtimeOrigins,
+    'http://tauri.localhost',
+    'tauri://localhost',
+    'https://tauri.localhost',
+  ]));
+}
+
+export function buildChatServiceOptions(
+  config: Pick<VaiConfig, 'chatPromptRewrite' | 'fallbackChain'>,
+  vaiEngine: Pick<VaiEngine, 'retrieveRelevant'>,
+  pipeline: Pick<IngestPipeline, 'logRetrievalQuality'>,
+): ChatServiceOptions {
+  return {
+    promptRewrite: config.chatPromptRewrite,
+    retrieveKnowledge: (query: string, limit?: number) => {
+      const results = vaiEngine.retrieveRelevant(query, limit);
+      pipeline.logRetrievalQuality(query, results, 'chat');
+      return results;
+    },
+    vaiFallbackChain: config.fallbackChain.models,
+  };
 }
 
 export async function createServer(options?: ServerOptions) {
@@ -119,14 +156,12 @@ export async function createServer(options?: ServerOptions) {
     `[VAI] Vocab: ${stats.vocabSize} | Knowledge: ${stats.knowledgeEntries} entries | Docs: ${stats.documentsIndexed} | Concepts: ${stats.conceptsExtracted} | N-grams: ${stats.ngramContexts}`,
   );
 
-  const chatService = new ChatService(db, models, adaptiveController, {
-    promptRewrite: config.chatPromptRewrite,
-    retrieveKnowledge: (query: string, limit?: number) => {
-      const results = vaiEngine.retrieveRelevant(query, limit);
-      pipeline.logRetrievalQuality(query, results, 'chat');
-      return results;
-    },
-  });
+  const chatService = new ChatService(
+    db,
+    models,
+    adaptiveController,
+    buildChatServiceOptions(config, vaiEngine, pipeline),
+  );
   const sandboxManager = new SandboxManager();
   const platformAuth = new PlatformAuthService(db, config.platformAuth);
   const projectService = new ProjectService(db);
@@ -136,13 +171,7 @@ export async function createServer(options?: ServerOptions) {
 
   const app = Fastify({ logger: false, bodyLimit: 15 * 1024 * 1024 });
 
-  const allowedOrigins = config.allowedOrigins ?? [
-    'http://localhost:5173',
-    'http://localhost:3006',
-    'http://tauri.localhost',
-    'tauri://localhost',
-    'https://tauri.localhost',
-  ];
+  const allowedOrigins = config.allowedOrigins ?? getDefaultAllowedOrigins(port);
   await app.register(cors, {
     origin: (origin, cb) => {
       if (!origin || allowedOrigins.includes(origin)) {

@@ -1,0 +1,142 @@
+{
+  "verdict": "pass",
+  "passed": 14,
+  "failed": 0,
+  "total": 14,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T04-17-05-134Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T04-17-05-134Z\\report.json",
+  "results": [
+    {
+      "slug": "neon-fitness-landing",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYV993X3ZDKFWCJSQB4KFPR",
+      "sandboxId": "b06db861",
+      "previewUrl": "http://127.0.0.1:4127"
+    },
+    {
+      "slug": "shared-shopping-list",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYV9ZN3SAQVPJ667R9BJHXP",
+      "sandboxId": "624b3928",
+      "previewUrl": "http://127.0.0.1:4128"
+    },
+    {
+      "slug": "photography-portfolio",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYVAQVGDS87CJRDYYV29YXZ",
+      "sandboxId": "c260bfe3",
+      "previewUrl": "http://127.0.0.1:4129"
+    },
+    {
+      "slug": "custom-storefront",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYVBEY2ZEC3W57N38RHH9Q4",
+      "sandboxId": "6a7c2100",
+      "previewUrl": "http://127.0.0.1:4130"
+    },
+    {
+      "slug": "social-blog",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYVC71RM6SGADNWVB73X5XA",
+      "sandboxId": "82aeb7c3",
+      "previewUrl": null
+    },
+    {
+      "slug": "ops-control-center",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYVCSXQNC95KNGYN9WWAHEF",
+      "sandboxId": "7e3aa5a4",
+      "previewUrl": null
+    },
+    {
+      "slug": "saas-workspace",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYVDEBEXPPTHA6JJ2CEJCQ9",
+      "sandboxId": "8739a4f0",
+      "previewUrl": null
+    },
+    {
+      "slug": "analytics-dashboard",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYVE4MXGESZJENBJZPC42WA",
+      "sandboxId": "eeb9f66b",
+      "previewUrl": null
+    },
+    {
+      "slug": "booking-studio",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYVEQNSP6MWR0SCHRRGYZT5",
+      "sandboxId": "6089ff21",
+      "previewUrl": null
+    },
+    {
+      "slug": "fitness-tracker",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "sandbox binding changed after recovery: 6a9584f2 -> ff242e15"
+      ],
+      "conversationId": "01KPYVFBHRWF67V42RH7BTSW7V",
+      "sandboxId": "ff242e15",
+      "previewUrl": null
+    },
+    {
+      "slug": "dating-matcher",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYVG0KYHPRZZGJ0QMDRM876",
+      "sandboxId": "66e55aa7",
+      "previewUrl": null
+    },
+    {
+      "slug": "x-social-feed",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYVGMY6HXHZD7YZ1HR4F2R2",
+      "sandboxId": "1c65a7ca",
+      "previewUrl": null
+    },
+    {
+      "slug": "fastapi-inventory-api",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPYVH7Q92N8YGA49RJ3D5HFT",
+      "sandboxId": "bbc0ded7",
+      "previewUrl": null
+    },
+    {
+      "slug": "rust-incident-cli",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPYVM375C3NQG535NFNVA0K4",
+      "sandboxId": "d6200476",
+      "previewUrl": null
+    }
+  ]
+}

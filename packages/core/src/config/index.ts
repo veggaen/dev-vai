@@ -86,7 +86,7 @@ function buildProvider(id: ProviderId, env: NodeJS.ProcessEnv): ProviderConfig {
         id: 'openai',
         apiKey,
         baseUrl: env.OPENAI_BASE_URL?.trim(),
-        defaultModel: env.OPENAI_MODEL?.trim() || 'gpt-4o',
+        defaultModel: env.OPENAI_MODEL?.trim() || 'gpt-5.4-mini',
         enabled: !!apiKey,
       };
     }
@@ -112,34 +112,37 @@ function buildProvider(id: ProviderId, env: NodeJS.ProcessEnv): ProviderConfig {
   }
 }
 
+function pushUniqueModel(chain: string[], modelId: string): void {
+  if (!chain.includes(modelId)) chain.push(modelId);
+}
+
 // ── Default Routing ──
 
-function buildDefaultModel(providers: Record<ProviderId, ProviderConfig>, env: NodeJS.ProcessEnv): string {
+function buildDefaultModel(_providers: Record<ProviderId, ProviderConfig>, env: NodeJS.ProcessEnv): string {
   // User override
   const explicit = env.VAI_DEFAULT_MODEL?.trim();
   if (explicit) return explicit;
 
-  // Smart default: prefer Anthropic > OpenAI > Google > vai:v0
-  if (providers.anthropic.enabled) {
-    return `anthropic:${providers.anthropic.defaultModel}`;
-  }
-  if (providers.openai.enabled) {
-    return `openai:${providers.openai.defaultModel}`;
-  }
-  if (providers.google.enabled) {
-    return `google:${providers.google.defaultModel}`;
-  }
+  // Product default: Vai should remain the primary intelligence unless the
+  // operator explicitly chooses another model via VAI_DEFAULT_MODEL.
   return 'vai:v0';
 }
 
-function buildFallbackChain(providers: Record<ProviderId, ProviderConfig>): string[] {
+function buildFallbackChain(providers: Record<ProviderId, ProviderConfig>, env: NodeJS.ProcessEnv): string[] {
   const chain: string[] = [];
-  // Add enabled provider defaults in quality order
-  if (providers.anthropic.enabled) chain.push(`anthropic:${providers.anthropic.defaultModel}`);
-  if (providers.openai.enabled) chain.push(`openai:${providers.openai.defaultModel}`);
-  if (providers.google.enabled) chain.push(`google:${providers.google.defaultModel}`);
-  // vai:v0 is always the last resort
-  chain.push('vai:v0');
+  const enableExternalChatFallback = envBool(env, 'VAI_ENABLE_EXTERNAL_CHAT_FALLBACK', false);
+  if (!enableExternalChatFallback) return ['vai:v0'];
+
+  // Optional operator override: let external models take over only when this
+  // explicit flag is enabled. This keeps Vai-first chat semantics by default.
+  if (providers.anthropic.enabled) pushUniqueModel(chain, `anthropic:${providers.anthropic.defaultModel}`);
+  if (providers.openai.enabled) {
+    pushUniqueModel(chain, `openai:${providers.openai.defaultModel}`);
+    pushUniqueModel(chain, 'openai:gpt-5.3-codex');
+    pushUniqueModel(chain, 'openai:gpt-5.4');
+  }
+  if (providers.google.enabled) pushUniqueModel(chain, `google:${providers.google.defaultModel}`);
+  pushUniqueModel(chain, 'vai:v0');
   return chain;
 }
 
@@ -243,7 +246,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): VaiConfig {
 
     // Model Selection
     defaultModelId: buildDefaultModel(providers, env),
-    fallbackChain: { models: buildFallbackChain(providers) },
+    fallbackChain: { models: buildFallbackChain(providers, env) },
     routingRules: [
       // Default routing — can be overridden by VAI_ROUTING_RULES env (future)
       { condition: 'default', modelId: buildDefaultModel(providers, env) },
@@ -285,6 +288,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): VaiConfig {
       provider: (env.VAI_QUALITY_GATE_PROVIDER?.trim() as ProviderId | undefined) || undefined,
       model: env.VAI_QUALITY_GATE_MODEL?.trim() || undefined,
       timeoutMs: envInt(env, 'VAI_QUALITY_GATE_TIMEOUT', 5000),
+      maxRounds: Math.max(1, Math.min(envInt(env, 'VAI_QUALITY_GATE_MAX_ROUNDS', 2), 3)),
+      localHeuristics: envBool(env, 'VAI_QUALITY_GATE_LOCAL_HEURISTICS', true),
+      validateSoftwareResponses: envBool(env, 'VAI_QUALITY_GATE_VALIDATE_SOFTWARE', true),
       skipStrategies: (env.VAI_QUALITY_GATE_SKIP || 'empty,gibberish,keyboard-noise,math,binary,conversational,scaffold,url-request').split(',').map(s => s.trim()),
     },
   };
@@ -325,7 +331,7 @@ export function printConfigDiagnostic(config: VaiConfig): void {
   // Quality Gate
   const qg = config.qualityGate;
   if (qg.enabled) {
-    lines.push(`  quality gate: ON (threshold: ${qg.confidenceThreshold}, timeout: ${qg.timeoutMs}ms${qg.provider ? `, provider: ${qg.provider}` : ', auto-detect'})`);
+    lines.push(`  quality gate: ON (threshold: ${qg.confidenceThreshold}, timeout: ${qg.timeoutMs}ms, rounds: ${qg.maxRounds}${qg.provider ? `, provider: ${qg.provider}` : ', auto-detect'})`);
   } else {
     lines.push('  quality gate: OFF');
   }

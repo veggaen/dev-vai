@@ -3,6 +3,7 @@ import type { ConversationSummary, CreateConversationResponse } from '@vai/api-t
 import { WS_BASE, apiFetch } from '../lib/api.js';
 import { getActiveCapture, startSessionCapture } from '../lib/sessionCapture.js';
 import type { SessionCapture } from '../lib/sessionCapture.js';
+import { mergeProjectUpdateMessage } from '../lib/project-update-message.js';
 import { useLayoutStore, type ChatMode } from './layoutStore.js';
 import { useAuthStore } from './authStore.js';
 import { useSandboxStore } from './sandboxStore.js';
@@ -64,6 +65,14 @@ export interface ChatMessage {
   content: string;
   imageId?: string | null;
   imagePreview?: string;
+  /** Which model actually produced this assistant response. */
+  respondingModelId?: string;
+  /** Present when Vai transparently fell back to another model. */
+  fallback?: {
+    fromModelId: string;
+    toModelId: string;
+    reason: 'low-confidence' | 'no-knowledge';
+  };
   /** Who sent this message (group chat identity) */
   sender?: MessageSender;
   /** Search sources attached to this response */
@@ -144,6 +153,15 @@ function saveBroadcastChats(chats: Record<string, string[]>): void {
       window.localStorage.setItem('vai-broadcast-chats', JSON.stringify(chats));
     }
   } catch { /* silent */ }
+}
+
+async function readApiError(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = await response.json() as { message?: string; error?: string };
+    return payload.message || payload.error || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 /** Active broadcast response poller */
@@ -247,7 +265,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ modelId, mode, sandboxProjectId: resolvedSandboxProjectId }),
     });
+
+    if (!res.ok) {
+      throw new Error(await readApiError(res, 'Unable to create a new chat.'));
+    }
+
     const { id, sandboxProjectId } = (await res.json()) as CreateConversationResponse;
+    if (!id) {
+      throw new Error('Unable to create a new chat: server did not return a conversation id.');
+    }
+
     await get().fetchConversations();
     await get().selectConversation(id);
 
@@ -496,6 +523,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         conversationId: state.activeConversationId,
         content,
       };
+      // Hint the server which model + mode to use if the conversation row is
+      // missing on the backend (race recovery — see `conversation_resolved`).
+      if (modelId) payload.modelId = modelId;
+      const layoutMode = useLayoutStore.getState().mode;
+      if (layoutMode) payload.mode = layoutMode;
       if (image) {
         payload.image = {
           data: image.data,
@@ -537,8 +569,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
         followUps?: string[];
         confidence?: number;
         groundedBrief?: GroundedBuildBriefUI;
+        modelId?: string;
+        fallback?: {
+          fromModelId: string;
+          toModelId: string;
+          reason: 'low-confidence' | 'no-knowledge';
+        };
         error?: string;
+        conversationId?: string;
       };
+
+      // Server auto-created a conversation because our id was unknown — adopt
+      // the new id locally and refresh the list so subsequent turns use it.
+      if (chunk.type === 'conversation_resolved' && chunk.conversationId) {
+        set({ activeConversationId: chunk.conversationId });
+        void get().fetchConversations();
+        return;
+      }
 
       if (chunk.type === 'sources' && chunk.sources) {
         // Attach sources + follow-ups + confidence to the current assistant message
@@ -555,6 +602,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
               followUps: chunk.followUps,
               confidence: chunk.confidence,
               groundedBuildBrief: chunk.groundedBrief,
+              respondingModelId: chunk.modelId ?? target.respondingModelId,
+            };
+          }
+          return { messages: msgs };
+        });
+      } else if (chunk.type === 'fallback_notice' && chunk.fallback) {
+        const fallback = chunk.fallback;
+        set((state) => {
+          const msgs = [...state.messages];
+          const targetIndex = activeStreamingAssistantId
+            ? msgs.findIndex((message) => message.id === activeStreamingAssistantId)
+            : msgs.length - 1;
+          const target = targetIndex >= 0 ? msgs[targetIndex] : null;
+          if (target && target.role === 'assistant') {
+            msgs[targetIndex] = {
+              ...target,
+              fallback,
+              respondingModelId: fallback.toModelId,
             };
           }
           return { messages: msgs };
@@ -574,11 +639,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ? msgs.find((message) => message.id === activeStreamingAssistantId)
             : msgs[msgs.length - 1];
           if (lastMsg?.role === 'assistant' && lastMsg.content) {
-            capture.message('assistant', lastMsg.content, modelId);
+            capture.message('assistant', lastMsg.content, lastMsg.respondingModelId ?? modelId);
           }
           if (reasoningText) {
             capture.thinking(reasoningText, { label: 'Model Reasoning' });
           }
+        }
+        if (chunk.modelId) {
+          set((state) => {
+            const msgs = [...state.messages];
+            const targetIndex = activeStreamingAssistantId
+              ? msgs.findIndex((message) => message.id === activeStreamingAssistantId)
+              : msgs.length - 1;
+            const target = targetIndex >= 0 ? msgs[targetIndex] : null;
+            if (target && target.role === 'assistant') {
+              msgs[targetIndex] = { ...target, respondingModelId: chunk.modelId };
+            }
+            return { messages: msgs };
+          });
         }
         ws.close();
         if (activeWs === ws) activeWs = null;
@@ -653,7 +731,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (isProjectUpdateContent(candidate.content)) break;
 
           if (extractFilesFromMarkdown(candidate.content).length > 0) {
-            msgs[index] = message;
+            msgs[index] = mergeProjectUpdateMessage(candidate, message);
             replaced = true;
             break;
           }

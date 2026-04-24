@@ -1,0 +1,83 @@
+{
+  "at": "2026-04-23T21:31:33.653Z",
+  "results": [
+    {
+      "id": "vai-relevance-best-next",
+      "inputCleared": true,
+      "activeConversationId": "01KPY42GPT5G9V6NRGQJDC8N9R",
+      "messageCount": 2,
+      "latestAssistantPreview": "**Best next task**\nImplement a local context-grounded answer contract as the next engineering task before Vai enters broad retrieval, glossary decomposition, or any fallback path.\n\n**Why this is the highest-leverage fix**\nThe bad behavior is not just weak wording; it is routing drift. Vai sees words like \"context\", \"relevant\", \"external LLM\", and \"accurate\", then retrieves loosely related snippets instead of preserving the user request: improve Vai chat responses against the current conversation.\n\n**First implementation slice**\n- Add a turn classifier that decides: standalone knowledge question, contextual follow-up, software/build request, or product-quality recommendation.\n- Build a compact active-context brief from the latest user turn, recent user intent, selected files/sandbox state when present, and the last useful assistant answer.\n- Gate knowledge retrieval with minimum topic ove",
+      "score": {
+        "missing": [],
+        "badSnippets": false,
+        "concretePatch": true,
+        "uiModeDrift": false,
+        "relatedCount": 1,
+        "duplicateRelated": false,
+        "pass": true
+      }
+    },
+    {
+      "id": "referential-go-deeper-no-external-brain",
+      "inputCleared": true,
+      "activeConversationId": "01KPY42GPT5G9V6NRGQJDC8N9R",
+      "messageCount": 4,
+      "latestAssistantPreview": "**Grounded hardening pass**\nFor **Vai chat context relevance**, harden the response path where context enters the engine.\n\n**Implement next**\n- Add a turn classifier: standalone question vs contextual follow-up vs product-quality recommendation.\n- Extract a compact active-topic brief from recent user context, selected files, and the last assistant answer.\n- Gate fuzzy retrieval with topic overlap so unrelated learned snippets cannot win just because they share loose words.\n- Add an automated teacher loop that replays real-user prompts, scores topic retention/instruction coverage/concrete action, and blocks regressions.\n- Keep external LLMs as optional critics only; Vai still drafts the answer from its local route, context brief, and learned policy.\n\n**Responsiveness win**\nThis is fast because it runs before slow or broad fallback paths. It should reduce off-topic answers and wasted exter",
+      "score": {
+        "missing": [],
+        "badSnippets": false,
+        "concretePatch": true,
+        "uiModeDrift": false,
+        "relatedCount": 2,
+        "duplicateRelated": true,
+        "pass": false
+      }
+    },
+    {
+      "id": "simple-followup",
+      "inputCleared": true,
+      "activeConversationId": "01KPY42GPT5G9V6NRGQJDC8N9R",
+      "messageCount": 6,
+      "latestAssistantPreview": "**Vai chat context relevance, simpler**\nThe important context is: Vai, chat app, user context, response relevance, teacher loop.\n\nPlain version: keep the previous topic as the anchor, then explain only the part the current turn asks about. Do not restart from a generic definition unless the user clearly starts a new topic.\n\nThat is the difference between an answer that merely matches words and an answer that feels like it heard the conversation.\n\n**First patch**\nAdd a high-priority response-quality route that detects Vai/chat relevance prompts before glossary decomposition or broad retrieval. The acceptance test should prove the answer says \"Vai\", keeps the user context, and names one concrete implementation step.",
+      "score": {
+        "missing": [],
+        "badSnippets": false,
+        "concretePatch": true,
+        "uiModeDrift": false,
+        "relatedCount": 2,
+        "duplicateRelated": true,
+        "pass": false
+      }
+    }
+  ],
+  "events": [
+    {
+      "kind": "log",
+      "text": "[VAI] Engine ready: {status: ok, engine: vai:v0, stats: Object, adaptive: Object}"
+    },
+    {
+      "kind": "info",
+      "text": "[auto-sandbox] assistant-complete {messageId: temp-1776979886924-assistant, effectiveMode: chat, layoutMode: chat, activeConversationId: 01KPY42GPT5G9V6NRGQJDC8N9R, sandboxProjectId: null}"
+    },
+    {
+      "kind": "info",
+      "text": "[auto-sandbox] skipping-non-build-mode {effectiveMode: chat, messageId: temp-1776979886924-assistant}"
+    },
+    {
+      "kind": "info",
+      "text": "[auto-sandbox] assistant-complete {messageId: temp-1776979889589-assistant, effectiveMode: chat, layoutMode: chat, activeConversationId: 01KPY42GPT5G9V6NRGQJDC8N9R, sandboxProjectId: null}"
+    },
+    {
+      "kind": "info",
+      "text": "[auto-sandbox] skipping-non-build-mode {effectiveMode: chat, messageId: temp-1776979889589-assistant}"
+    },
+    {
+      "kind": "info",
+      "text": "[auto-sandbox] assistant-complete {messageId: temp-1776979891875-assistant, effectiveMode: chat, layoutMode: chat, activeConversationId: 01KPY42GPT5G9V6NRGQJDC8N9R, sandboxProjectId: null}"
+    },
+    {
+      "kind": "info",
+      "text": "[auto-sandbox] skipping-non-build-mode {effectiveMode: chat, messageId: temp-1776979891875-assistant}"
+    }
+  ]
+}

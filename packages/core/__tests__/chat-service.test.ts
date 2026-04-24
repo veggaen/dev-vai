@@ -29,6 +29,38 @@ class MockAdapter implements ModelAdapter {
   }
 }
 
+class StubStreamAdapter implements ModelAdapter {
+  readonly displayName: string;
+  readonly supportsStreaming = true;
+  readonly supportsToolUse = false;
+  lastStreamRequest?: ChatRequest;
+  streamCalls = 0;
+
+  constructor(
+    readonly id: string,
+    private readonly chunks: readonly ChatChunk[],
+  ) {
+    this.displayName = id;
+  }
+
+  async chat(_request: ChatRequest): Promise<ChatResponse> {
+    return {
+      message: { role: 'assistant', content: 'stub response' },
+      usage: { promptTokens: 1, completionTokens: 1 },
+      finishReason: 'stop',
+      modelId: this.id,
+    };
+  }
+
+  async *chatStream(request: ChatRequest): AsyncIterable<ChatChunk> {
+    this.streamCalls += 1;
+    this.lastStreamRequest = request;
+    for (const chunk of this.chunks) {
+      yield chunk;
+    }
+  }
+}
+
 describe('ChatService', () => {
   let db: VaiDatabase;
   let chatService: ChatService;
@@ -90,6 +122,244 @@ describe('ChatService', () => {
 
     const fullText = textChunks.map((c) => c.textDelta).join('');
     expect(fullText).toBe('Hello from VeggaAI!');
+  });
+
+  it('auto-creates a conversation when sendMessage is called with an unknown id (race recovery)', async () => {
+    const warn = console.warn;
+    const warnings: unknown[] = [];
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    try {
+      const chunks: ChatChunk[] = [];
+      for await (const chunk of chatService.sendMessage(
+        'missing-conversation-id',
+        'Hi',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { fallbackModelId: 'mock:test' },
+      )) {
+        chunks.push(chunk);
+      }
+
+      const resolved = chunks.find((c) => c.type === 'conversation_resolved');
+      expect(resolved).toBeDefined();
+      expect(resolved?.conversationId).toBeTruthy();
+      expect(resolved?.conversationId).not.toBe('missing-conversation-id');
+      expect(warnings.length).toBeGreaterThan(0);
+
+      // The auto-created conversation must contain the user + assistant turn
+      const newId = resolved!.conversationId!;
+      const msgs = chatService.getMessages(newId);
+      expect(msgs).toHaveLength(2);
+      expect(msgs[0].content).toBe('Hi');
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  it('falls back to vai:v0 when no fallbackModelId hint is provided', async () => {
+    // Register a vai:v0 stub adapter so the auto-created conversation can stream.
+    class VaiStub implements ModelAdapter {
+      readonly id = 'vai:v0';
+      readonly displayName = 'Vai stub';
+      readonly supportsStreaming = true;
+      readonly supportsToolUse = false;
+      async chat(): Promise<ChatResponse> {
+        return { message: { role: 'assistant', content: 'ok' }, finishReason: 'stop' };
+      }
+      async *chatStream(): AsyncIterable<ChatChunk> {
+        yield { type: 'text_delta', textDelta: 'ok' };
+        yield { type: 'done' };
+      }
+    }
+    const registry = new ModelRegistry();
+    registry.register(new VaiStub());
+    const svc = new ChatService(createDb(':memory:'), registry);
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      const chunks: ChatChunk[] = [];
+      for await (const chunk of svc.sendMessage('does-not-exist', 'hello')) {
+        chunks.push(chunk);
+      }
+      const resolved = chunks.find((c) => c.type === 'conversation_resolved');
+      expect(resolved?.conversationId).toBeTruthy();
+      expect(svc.getConversation(resolved!.conversationId!)?.modelId).toBe('vai:v0');
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  it('falls back from low-confidence vai:v0 to the configured external adapter', async () => {
+    const registry = new ModelRegistry();
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      { type: 'sources', sources: [], confidence: 0.2 },
+      { type: 'text_delta', textDelta: 'I do not know this one.' },
+      { type: 'done', usage: { promptTokens: 2, completionTokens: 6 }, modelId: 'vai:v0' },
+    ]);
+    const externalAdapter = new StubStreamAdapter('mock:test', [
+      { type: 'text_delta', textDelta: 'External ' },
+      { type: 'text_delta', textDelta: 'answer' },
+      { type: 'done', usage: { promptTokens: 4, completionTokens: 2 }, modelId: 'mock:test' },
+    ]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['vai:v0', 'mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(convId, 'Help me')) {
+      chunks.push(chunk);
+    }
+
+    const fallbackNoticeIndex = chunks.findIndex((chunk) => chunk.type === 'fallback_notice');
+    const sourcesIndex = chunks.findIndex((chunk) => chunk.type === 'sources');
+    expect(sourcesIndex).toBeGreaterThanOrEqual(0);
+    expect(fallbackNoticeIndex).toBeGreaterThan(sourcesIndex);
+
+    const fallbackNotice = chunks[fallbackNoticeIndex];
+    expect(fallbackNotice.fallback).toEqual({
+      fromModelId: 'vai:v0',
+      toModelId: 'mock:test',
+      reason: 'low-confidence',
+    });
+
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(text).toBe('External answer');
+    expect(vaiAdapter.streamCalls).toBe(1);
+    expect(externalAdapter.streamCalls).toBe(1);
+
+    const persisted = svc.getMessages(convId);
+    expect(persisted).toHaveLength(2);
+    expect(persisted[1].content).toBe('External answer');
+    expect(persisted[1].modelId).toBe('mock:test');
+  });
+
+  it('does not replace builder file artifacts with external fallback output', async () => {
+    const registry = new ModelRegistry();
+    const primaryText = [
+      '```json title="package.json"',
+      '{"name":"tailwind-canonical-classes-autofix"}',
+      '```',
+      '',
+      '```ts title="src/extension.ts"',
+      'export const fixOnSave = true;',
+      '```',
+    ].join('\n');
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      { type: 'sources', sources: [], confidence: 0.1 },
+      { type: 'text_delta', textDelta: primaryText },
+      { type: 'done', usage: { promptTokens: 2, completionTokens: 30 }, modelId: 'vai:v0' },
+    ]);
+    const externalAdapter = new StubStreamAdapter('mock:test', [
+      { type: 'text_delta', textDelta: 'External prose should not replace files' },
+      { type: 'done', usage: { promptTokens: 4, completionTokens: 2 }, modelId: 'mock:test' },
+    ]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0', 'Builder', 'builder');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(convId, 'Create a VS Code extension')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.some((chunk) => chunk.type === 'fallback_notice')).toBe(false);
+    expect(externalAdapter.streamCalls).toBe(0);
+    const text = chunks.filter((chunk) => chunk.type === 'text_delta').map((chunk) => chunk.textDelta).join('');
+    expect(text).toContain('title="src/extension.ts"');
+    expect(svc.getMessages(convId)[1].modelId).toBe('vai:v0');
+  });
+
+  it('passes through high-confidence vai:v0 responses without fallback', async () => {
+    const registry = new ModelRegistry();
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      { type: 'sources', sources: [], confidence: 0.9 },
+      { type: 'text_delta', textDelta: 'Known answer' },
+      { type: 'done', usage: { promptTokens: 2, completionTokens: 2 }, modelId: 'vai:v0' },
+    ]);
+    const externalAdapter = new StubStreamAdapter('mock:test', [
+      { type: 'text_delta', textDelta: 'Should not run' },
+      { type: 'done', usage: { promptTokens: 1, completionTokens: 1 }, modelId: 'mock:test' },
+    ]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['vai:v0', 'mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(convId, 'Help me')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.some((chunk) => chunk.type === 'fallback_notice')).toBe(false);
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(text).toBe('Known answer');
+    expect(vaiAdapter.streamCalls).toBe(1);
+    expect(externalAdapter.streamCalls).toBe(0);
+
+    const persisted = svc.getMessages(convId);
+    expect(persisted).toHaveLength(2);
+    expect(persisted[1].content).toBe('Known answer');
+    expect(persisted[1].modelId).toBe('vai:v0');
+  });
+
+  it('short-circuits chat-meta queries without invoking the model adapter', async () => {
+    const convId = chatService.createConversation('mock:test');
+
+    // Seed the conversation with a real first turn.
+    for await (const _ of chatService.sendMessage(convId, 'tell me about redbull')) { /* drain */ }
+    adapter.lastStreamRequest = undefined;
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of chatService.sendMessage(convId, 'what was my first message?')) {
+      chunks.push(chunk);
+    }
+
+    // Adapter must NOT have been touched for the meta turn.
+    expect(adapter.lastStreamRequest).toBeUndefined();
+
+    const text = chunks
+      .filter((c) => c.type === 'text_delta')
+      .map((c) => c.textDelta)
+      .join('');
+    expect(text).toContain('"tell me about redbull"');
+
+    // Persisted assistant message tagged with the meta intent model id.
+    const msgs = chatService.getMessages(convId);
+    const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
+    expect(lastAssistant?.modelId).toBe('chat-meta:first-user');
+    expect(lastAssistant?.content).toContain('"tell me about redbull"');
+  });
+
+  it('counts messages via chat-meta short-circuit', async () => {
+    const convId = chatService.createConversation('mock:test');
+    for await (const _ of chatService.sendMessage(convId, 'first thing')) { /* drain */ }
+    for await (const _ of chatService.sendMessage(convId, 'second thing')) { /* drain */ }
+    adapter.lastStreamRequest = undefined;
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of chatService.sendMessage(convId, 'how many messages have I sent?')) {
+      chunks.push(chunk);
+    }
+    expect(adapter.lastStreamRequest).toBeUndefined();
+    const text = chunks.filter((c) => c.type === 'text_delta').map((c) => c.textDelta).join('');
+    // The asking turn itself is the third user message.
+    expect(text).toMatch(/3 messages from you/);
   });
 
   it('persists user and assistant messages after streaming', async () => {
@@ -368,12 +638,28 @@ describe('ChatService', () => {
     expect(systemText).toMatch(/use exactly these section headings in this order: Inputs, Signals, Prediction loop, Working set, Guardrails, Metrics, Rollout, Failure modes/i);
   });
 
-  it('throws when conversation not found', async () => {
-    await expect(async () => {
-      for await (const _chunk of chatService.sendMessage('nonexistent', 'Hi')) {
-        // consume
+  it('auto-creates and emits conversation_resolved instead of throwing for unknown ids', async () => {
+    // Auto-create now provides race recovery; the only way it can still throw
+    // is if the fallback model adapter itself isn't registered.
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      const chunks: ChatChunk[] = [];
+      for await (const chunk of chatService.sendMessage(
+        'nonexistent',
+        'Hi',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { fallbackModelId: 'mock:test' },
+      )) {
+        chunks.push(chunk);
       }
-    }).rejects.toThrow('Conversation not found');
+      expect(chunks.find((c) => c.type === 'conversation_resolved')).toBeDefined();
+    } finally {
+      console.warn = warn;
+    }
   });
 
   it('deletes a conversation and its messages', async () => {

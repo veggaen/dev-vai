@@ -148,7 +148,7 @@ export interface EditIntent {
 
 const EDIT_STRONG = /\b(fix|change|update|upgrade|improve|modify|edit|rename|refactor|replace|rewrite|patch|correct|adjust|move|delete|remove)\b/i;
 const EDIT_ADD = /\b(add|include|insert|append|implement|support|enable|integrate)\b/i;
-const EDIT_STYLE = /\b(style|design|color|font|layout|size|margin|padding|spacing|theme|dark\s*mode|light\s*mode|responsive)\b/i;
+const EDIT_STYLE = /\b(style|design|color|font|layout|size|margin|padding|spacing|theme|dark\s*mode|light\s*mode|responsive|motions?|animations?|animate|kinetic|transitions?|entrance|reveal|hero|headline|heading)\b/i;
 const EDIT_BUG = /\b(bug|broken|error|crash|failing|doesn'?t\s+work|not\s+working|issue|problem|broke|wrong)\b/i;
 
 /**

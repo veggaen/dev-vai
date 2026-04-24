@@ -158,7 +158,7 @@ describe('SandboxManager', () => {
   });
 
   describe('install()', () => {
-    it('retries pnpm without frozen lockfile when the lockfile is outdated', async () => {
+    it('installs with pnpm without frozen lockfile so AI-edited package manifests can refresh lockfiles', async () => {
       const project = await manager.create('install-retry');
       await manager.writeFiles(project.id, [
         {
@@ -177,30 +177,22 @@ describe('SandboxManager', () => {
         },
       ]);
 
-      spawnMock
-        .mockImplementationOnce(() => {
-          const proc = createMockProcess();
-          setTimeout(() => {
-            proc.stderr.emit('data', Buffer.from('ERR_PNPM_OUTDATED_LOCKFILE Cannot install with "frozen-lockfile" because pnpm-lock.yaml is not up to date'));
-            proc.emit('close', 1);
-          }, 0);
-          return proc;
-        })
-        .mockImplementationOnce(() => {
-          const proc = createMockProcess();
-          setTimeout(() => {
-            proc.stdout.emit('data', Buffer.from('Packages: +1\n'));
-            proc.emit('close', 0);
-          }, 0);
-          return proc;
-        });
+      spawnMock.mockImplementationOnce(() => {
+        const proc = createMockProcess();
+        setTimeout(() => {
+          proc.stdout.emit('data', Buffer.from('Packages: +1\n'));
+          proc.emit('close', 0);
+        }, 0);
+        return proc;
+      });
 
       const result = await manager.install(project.id);
 
       expect(result.success).toBe(true);
-      expect(spawnMock).toHaveBeenCalledTimes(2);
-      expect(spawnMock.mock.calls[0][1]).toContain('--frozen-lockfile');
-      expect(spawnMock.mock.calls[1][1]).toContain('--no-frozen-lockfile');
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      expect(spawnMock.mock.calls[0][0]).toBe('pnpm');
+      expect(spawnMock.mock.calls[0][1]).toContain('--no-frozen-lockfile');
+      expect(spawnMock.mock.calls[0][1]).not.toContain('--frozen-lockfile');
     });
   });
 

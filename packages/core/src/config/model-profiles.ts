@@ -8,7 +8,7 @@
  * These are reference data — they don't create adapters. Adapters use these
  * profiles to advertise their capabilities to the routing layer.
  *
- * Updated: March 2026
+ * Updated: April 2026
  */
 
 import type { ModelProfile } from './types.js';
@@ -155,6 +155,98 @@ const O3: ModelProfile = {
   qualityTier: 'flagship',
 };
 
+const GPT_5_4: ModelProfile = {
+  id: 'openai:gpt-5.4',
+  provider: 'openai',
+  modelName: 'gpt-5.4',
+  displayName: 'GPT-5.4',
+  description: 'OpenAI flagship for complex reasoning, coding, and professional workflows.',
+  contextWindow: 1_050_000,
+  maxOutputTokens: 128_000,
+  capabilities: {
+    streaming: true,
+    toolUse: true,
+    vision: true,
+    extendedThinking: true,
+    embeddings: false,
+    structuredOutput: true,
+    systemPrompts: true,
+    multiTurn: true,
+  },
+  cost: { inputPer1M: 2.5, outputPer1M: 15, cachedInputPer1M: 0.25 },
+  speedTier: 'medium',
+  qualityTier: 'flagship',
+};
+
+const GPT_5_4_MINI: ModelProfile = {
+  id: 'openai:gpt-5.4-mini',
+  provider: 'openai',
+  modelName: 'gpt-5.4-mini',
+  displayName: 'GPT-5.4 mini',
+  description: 'Fast, strong default for high-volume chat, coding, and subagent workloads.',
+  contextWindow: 400_000,
+  maxOutputTokens: 128_000,
+  capabilities: {
+    streaming: true,
+    toolUse: true,
+    vision: true,
+    extendedThinking: true,
+    embeddings: false,
+    structuredOutput: true,
+    systemPrompts: true,
+    multiTurn: true,
+  },
+  cost: { inputPer1M: 0.75, outputPer1M: 4.5, cachedInputPer1M: 0.075 },
+  speedTier: 'fast',
+  qualityTier: 'balanced',
+};
+
+const GPT_5_4_NANO: ModelProfile = {
+  id: 'openai:gpt-5.4-nano',
+  provider: 'openai',
+  modelName: 'gpt-5.4-nano',
+  displayName: 'GPT-5.4 nano',
+  description: 'Cheapest GPT-5.4-class model for simple, latency-sensitive workloads.',
+  contextWindow: 400_000,
+  maxOutputTokens: 128_000,
+  capabilities: {
+    streaming: true,
+    toolUse: true,
+    vision: true,
+    extendedThinking: true,
+    embeddings: false,
+    structuredOutput: true,
+    systemPrompts: true,
+    multiTurn: true,
+  },
+  cost: { inputPer1M: 0.2, outputPer1M: 1.25, cachedInputPer1M: 0.02 },
+  speedTier: 'fast',
+  qualityTier: 'fast',
+};
+
+const GPT_5_3_CODEX: ModelProfile = {
+  id: 'openai:gpt-5.3-codex',
+  provider: 'openai',
+  modelName: 'gpt-5.3-codex',
+  displayName: 'GPT-5.3-Codex',
+  description: 'OpenAI coding-specialized model for long-horizon, agentic coding tasks.',
+  contextWindow: 400_000,
+  maxOutputTokens: 128_000,
+  capabilities: {
+    streaming: true,
+    toolUse: true,
+    vision: true,
+    extendedThinking: true,
+    embeddings: false,
+    structuredOutput: true,
+    systemPrompts: true,
+    multiTurn: true,
+  },
+  cost: { inputPer1M: 1.75, outputPer1M: 14, cachedInputPer1M: 0.175 },
+  speedTier: 'medium',
+  qualityTier: 'flagship',
+};
+
 // ── Google Models ──
 
 const GEMINI_25_PRO: ModelProfile = {
@@ -236,6 +328,10 @@ export const MODEL_PROFILES: ReadonlyMap<string, ModelProfile> = new Map([
   [CLAUDE_SONNET_4.id, CLAUDE_SONNET_4],
   [CLAUDE_HAIKU_35.id, CLAUDE_HAIKU_35],
   // OpenAI
+  [GPT_5_4.id, GPT_5_4],
+  [GPT_5_4_MINI.id, GPT_5_4_MINI],
+  [GPT_5_4_NANO.id, GPT_5_4_NANO],
+  [GPT_5_3_CODEX.id, GPT_5_3_CODEX],
   [GPT_4O.id, GPT_4O],
   [GPT_4O_MINI.id, GPT_4O_MINI],
   [O3.id, O3],

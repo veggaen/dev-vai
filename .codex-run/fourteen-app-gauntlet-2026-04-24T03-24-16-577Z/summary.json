@@ -1,0 +1,53 @@
+{
+  "verdict": "fail",
+  "passed": 0,
+  "failed": 3,
+  "total": 3,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T03-24-16-577Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T03-24-16-577Z\\report.json",
+  "results": [
+    {
+      "slug": "neon-fitness-landing",
+      "status": "error",
+      "failures": [
+        "locator.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /new chat/i }).first()\u001b[22m\n"
+      ],
+      "warnings": [],
+      "conversationId": null,
+      "sandboxId": null,
+      "previewUrl": null
+    },
+    {
+      "slug": "shared-shopping-list",
+      "status": "error",
+      "failures": [
+        "sandbox missing package.json",
+        "sandbox missing src/App.tsx",
+        "sandbox files missing Shared Shopping List",
+        "sandbox files missing Household",
+        "sandbox files missing Activity Chat",
+        "Timed out waiting for sandbox caced72b running"
+      ],
+      "warnings": [],
+      "conversationId": "01KPYR9MTR3X6ZA5MT3Q539VWW",
+      "sandboxId": "caced72b",
+      "previewUrl": null
+    },
+    {
+      "slug": "photography-portfolio",
+      "status": "fail",
+      "failures": [
+        "sandbox missing package.json",
+        "sandbox missing src/App.tsx",
+        "sandbox missing src/styles.css",
+        "sandbox files missing Photography",
+        "sandbox files missing lightbox",
+        "sandbox files missing gallery"
+      ],
+      "warnings": [],
+      "conversationId": "01KPYRFNT33B13WD18SWP37CZS",
+      "sandboxId": "040c170a",
+      "previewUrl": null
+    }
+  ]
+}

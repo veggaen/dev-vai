@@ -238,10 +238,9 @@ export interface VaiConfig {
   readonly enableEval: boolean;
 
   // ── Quality Gate ──
-  /** External LLM quality validation for low-confidence vai:v0 responses.
-   *  When enabled + a provider is available, responses below the confidence
-   *  threshold are sent to the external LLM for scoring. If the score is
-   *  too low, the LLM's improved version replaces the original. */
+  /** External teacher loop for low-confidence or weak vai:v0 responses.
+   *  Vai remains the primary responder. The external model critiques only,
+   *  then Vai learns from that critique and regenerates its own answer. */
   readonly qualityGate: {
     /** Enable the quality gate (default: false) */
     readonly enabled: boolean;
@@ -253,6 +252,12 @@ export interface VaiConfig {
     readonly model?: string;
     /** Maximum latency budget in ms for the validation call (default: 5000) */
     readonly timeoutMs: number;
+    /** Maximum teacher-loop review rounds for a single response (default: 2) */
+    readonly maxRounds: number;
+    /** Enable local heuristics that detect weak answers before/alongside the teacher call */
+    readonly localHeuristics: boolean;
+    /** Review weak software-building/fixing replies even when confidence is not low */
+    readonly validateSoftwareResponses: boolean;
     /** Strategies that are NEVER validated (already high quality or too fast to delay) */
     readonly skipStrategies: readonly string[];
   };

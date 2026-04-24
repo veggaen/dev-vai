@@ -109,6 +109,7 @@ describe('VaiEngine edge cases', () => {
     const response = await engine.chat({ messages: [{ role: 'user', content: huge }] });
     const elapsed = Date.now() - start;
     expect(typeof response.message.content).toBe('string');
+    expect(engine.lastResponseMeta?.strategy).toBe('long-input-fastpath');
     expect(elapsed).toBeLessThan(5000);
   });
 

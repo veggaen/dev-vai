@@ -1,0 +1,100 @@
+{
+  "options": {
+    "appUrl": "http://127.0.0.1:5173/?devAuthBypass=1",
+    "apiUrl": "http://127.0.0.1:3006",
+    "suiteName": "julius",
+    "specFile": "C:\\Users\\v3gga\\Documents\\dev-vai\\scripts\\specs\\julius-blind-rebuilds.json",
+    "outputDirWasExplicit": false,
+    "limitWasExplicit": false,
+    "sourceLeakPattern": {},
+    "limit": 8,
+    "previewLimit": 4,
+    "keepProjects": true,
+    "only": [
+      "tailwind-canonical-vscode-extension"
+    ],
+    "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-39-41-246Z",
+    "timeoutMs": 180000
+  },
+  "results": [
+    {
+      "slug": "tailwind-canonical-vscode-extension",
+      "sourceRepo": "https://github.com/juliusmarminge/tailwind-autofix-canonical-classnames",
+      "prompt": "Create a VS Code extension that auto-fixes Tailwind CSS canonical class suggestions on save. It must listen to Tailwind CSS IntelliSense diagnostics shaped like 'The class ... can be written as ...', replace the class before save, expose a tailwindCanonicalClasses.fixOnSave setting, and include extension package metadata.",
+      "status": "fail",
+      "failures": [
+        "missing file block package.json",
+        "missing file block src/extension.ts",
+        "missing file block README.md",
+        "missing required response text Tailwind",
+        "missing required response text canonical",
+        "missing required response text diagnostics",
+        "missing required response text fixOnSave",
+        "missing required response text VS Code",
+        "missing required response text on save",
+        "sandbox missing package.json",
+        "sandbox missing src/extension.ts",
+        "sandbox missing README.md",
+        "sandbox files missing Tailwind",
+        "sandbox files missing canonical",
+        "sandbox files missing diagnostics",
+        "sandbox files missing fixOnSave",
+        "sandbox files missing VS Code",
+        "sandbox files missing on save",
+        "sandbox files missing VS Code setting contribution",
+        "sandbox files missing diagnostic/save hook"
+      ],
+      "warnings": [
+        "short response for a blind rebuild request",
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPZAA466WFEG9KVE2K4VPWYW",
+      "sandboxId": "ff4d6717",
+      "response": "**Yes** — if you go ahead and change some class names, like making the text extra large, like saying 5xl, or making it underline, as soon as you get back to the browser, you'll be able to see changes instantly thanks to nex.js's hot module replacement. _(source: https://nextjs.org/docs/app/guides/migrating/from-create-react-app)_",
+      "responseQuality": {
+        "paths": [],
+        "failures": [
+          "missing file block package.json",
+          "missing file block src/extension.ts",
+          "missing file block README.md",
+          "missing required response text Tailwind",
+          "missing required response text canonical",
+          "missing required response text diagnostics",
+          "missing required response text fixOnSave",
+          "missing required response text VS Code",
+          "missing required response text on save"
+        ],
+        "warnings": [
+          "short response for a blind rebuild request"
+        ]
+      },
+      "fileQuality": {
+        "failures": [
+          "sandbox missing package.json",
+          "sandbox missing src/extension.ts",
+          "sandbox missing README.md",
+          "sandbox files missing Tailwind",
+          "sandbox files missing canonical",
+          "sandbox files missing diagnostics",
+          "sandbox files missing fixOnSave",
+          "sandbox files missing VS Code",
+          "sandbox files missing on save",
+          "sandbox files missing VS Code setting contribution",
+          "sandbox files missing diagnostic/save hook"
+        ]
+      },
+      "preview": null,
+      "durationMs": 133702,
+      "projectUpdate": null,
+      "fileSnapshot": {
+        "files": [],
+        "contents": {
+          "package.json": null,
+          "src/extension.ts": null,
+          "README.md": null
+        }
+      }
+    }
+  ]
+}

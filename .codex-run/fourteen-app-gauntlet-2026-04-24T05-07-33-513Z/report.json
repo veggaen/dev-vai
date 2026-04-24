@@ -1,0 +1,102 @@
+{
+  "options": {
+    "appUrl": "http://127.0.0.1:5173/?devAuthBypass=1",
+    "apiUrl": "http://127.0.0.1:3006",
+    "limit": 14,
+    "previewLimit": 4,
+    "keepProjects": true,
+    "only": [
+      "fastapi-inventory-api",
+      "rust-incident-cli"
+    ],
+    "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T05-07-33-513Z",
+    "timeoutMs": 180000
+  },
+  "results": [
+    {
+      "slug": "fastapi-inventory-api",
+      "prompt": "Build a Python FastAPI inventory API with health, list, create, update, and delete endpoints. Return complete runnable files.",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYY5RQ2E6258G2Q7CXX7W6F",
+      "sandboxId": "f8ee1114",
+      "response": "Building a Python FastAPI REST API.\n\n```txt title=\"requirements.txt\"\nfastapi>=0.111.0\nuvicorn[standard]>=0.30.0\npydantic>=2.7.0\n```\n\n```python title=\"main.py\"\nfrom fastapi import FastAPI, HTTPException\nfrom fastapi.middleware.cors import CORSMiddleware\nfrom pydantic import BaseModel\nfrom typing import Optional\nimport uuid\n\napp = FastAPI(title=\"Inventory API\", version=\"1.0.0\")\n\napp.add_middleware(\n    CORSMiddleware,\n    allow_origins=[\"*\"],\n    allow_methods=[\"*\"],\n    allow_headers=[\"*\"],\n)\n\n# In-memory store (replace with database)\nitems: dict[str, dict] = {}\n\nclass Item(BaseModel):\n    name: str\n    description: Optional[str] = None\n    price: float\n    in_stock: bool = True\n\nclass ItemUpdate(BaseModel):\n    name: Optional[str] = None\n    description: Optional[str] = None\n    price: Optional[float] = None\n    in_stock: Optional[bool] = None\n\n@app.get(\"/health\")\ndef health():\n    return {\"status\": \"ok\", \"items\": len(items)}\n\n@app.get(\"/items\")\ndef list_items():\n    return {\"items\": list(items.values()), \"total\": len(items)}\n\n@app.get(\"/items/{item_id}\")\ndef get_item(item_id: str):\n    item = items.get(item_id)\n    if not item:\n        raise HTTPException(status_code=404, detail=\"Item not found\")\n    return item\n\n@app.post(\"/items\", status_code=201)\ndef create_item(item: Item):\n    item_id = str(uuid.uuid4())\n    record = {\"id\": item_id, **item.model_dump()}\n    items[item_id] = record\n    return record\n\n@app.put(\"/items/{item_id}\")\n@app.patch(\"/items/{item_id}\")\ndef update_item(item_id: str, update: ItemUpdate):\n    item = items.get(item_id)\n    if not item:\n        raise HTTPException(status_code=404, detail=\"Item not found\")\n    for field, val in update.model_dump(exclude_none=True).items():\n        item[field] = val\n    return item\n\n@app.delete(\"/items/{item_id}\", status_code=204)\ndef delete_item(item_id: str):\n    if item_id not in items:\n        raise HTTPException(status_code=404, detail=\"Item not found\")\n    del items[item_id]\n```\n\n**Run:**\n```bash\npip install -r requirements.txt\nuvicorn main:app --reload --port 8000\n```\n\nInteractive docs available at `http://localhost:8000/docs` (Swagger UI) and `/redoc`.\n\nEndpoints: `GET /health`, `GET /items`, `GET /items/{id}`, `POST /items`, `PUT /items/{id}`, `PATCH /items/{id}`, `DELETE /items/{id}`.",
+      "responseQuality": {
+        "paths": [
+          "requirements.txt",
+          "main.py"
+        ],
+        "failures": [],
+        "warnings": []
+      },
+      "fileQuality": {
+        "failures": []
+      },
+      "preview": null,
+      "durationMs": 10376,
+      "projectUpdate": {
+        "id": "01KPYY628NNBXDSMWWMAXV9506",
+        "conversationId": "01KPYY5RQ2E6258G2Q7CXX7W6F",
+        "role": "assistant",
+        "content": "Project update: Applied 2 files for builder-app.\n\n[vai-artifact]\n{\"kind\":\"update\",\"title\":\"builder-app\",\"status\":\"updated\",\"tone\":\"violet\",\"badge\":\"Project update\",\"fileCount\":2,\"changedFiles\":[\"requirements.txt\",\"main.py\"],\"evidenceTier\":\"low\",\"verificationItems\":[\"Detected a non-preview code file set and skipped browser dev-server repair.\",\"Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.\"],\"packageChanged\":false,\"failureClass\":null,\"nextPrompts\":[\"Add the next feature slice\",\"Tighten this implementation with targeted edits\"]}\n[/vai-artifact]\n\n- Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.\n\nFiles changed:\n- requirements.txt\n- main.py",
+        "imageId": null,
+        "toolCalls": null,
+        "toolCallId": null,
+        "tokenCount": null,
+        "modelId": "vai:v0",
+        "durationMs": null,
+        "feedback": null,
+        "createdAt": "2026-04-24T05:07:46.000Z"
+      },
+      "fileSnapshot": {
+        "files": [
+          "main.py",
+          "requirements.txt"
+        ],
+        "contents": {
+          "requirements.txt": "fastapi>=0.111.0\nuvicorn[standard]>=0.30.0\npydantic>=2.7.0",
+          "main.py": "from fastapi import FastAPI, HTTPException\nfrom fastapi.middleware.cors import CORSMiddleware\nfrom pydantic import BaseModel\nfrom typing import Optional\nimport uuid\n\napp = FastAPI(title=\"Inventory API\", version=\"1.0.0\")\n\napp.add_middleware(\n    CORSMiddleware,\n    allow_origins=[\"*\"],\n    allow_methods=[\"*\"],\n    allow_headers=[\"*\"],\n)\n\n# In-memory store (replace with database)\nitems: dict[str, dict] = {}\n\nclass Item(BaseModel):\n    name: str\n    description: Optional[str] = None\n    price: float\n    in_stock: bool = True\n\nclass ItemUpdate(BaseModel):\n    name: Optional[str] = None\n    description: Optional[str] = None\n    price: Optional[float] = None\n    in_stock: Optional[bool] = None\n\n@app.get(\"/health\")\ndef health():\n    return {\"status\": \"ok\", \"items\": len(items)}\n\n@app.get(\"/items\")\ndef list_items():\n    return {\"items\": list(items.values()), \"total\": len(items)}\n\n@app.get(\"/items/{item_id}\")\ndef get_item(item_id: str):\n    item = items.get(item_id)\n    if not item:\n        raise HTTPException(status_code=404, detail=\"Item not found\")\n    return item\n\n@app.post(\"/items\", status_code=201)\ndef create_item(item: Item):\n    item_id = str(uuid.uuid4())\n    record = {\"id\": item_id, **item.model_dump()}\n    items[item_id] = record\n    return record\n\n@app.put(\"/items/{item_id}\")\n@app.patch(\"/items/{item_id}\")\ndef update_item(item_id: str, update: ItemUpdate):\n    item = items.get(item_id)\n    if not item:\n        raise HTTPException(status_code=404, detail=\"Item not found\")\n    for field, val in update.model_dump(exclude_none=True).items():\n        item[field] = val\n    return item\n\n@app.delete(\"/items/{item_id}\", status_code=204)\ndef delete_item(item_id: str):\n    if item_id not in items:\n        raise HTTPException(status_code=404, detail=\"Item not found\")\n    del items[item_id]"
+        }
+      }
+    },
+    {
+      "slug": "rust-incident-cli",
+      "prompt": "Build a Rust CLI incident triage tool with clap commands. Return Cargo.toml and src/main.rs as separate complete files.",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPYY62VFDEFANENS27271H79",
+      "sandboxId": "7879dcf9",
+      "response": "Building a Rust CLI incident triage tool with Clap commands.\n\n```toml title=\"Cargo.toml\"\n[package]\nname = \"incident-triage\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nclap = { version = \"4\", features = [\"derive\"] }\n```\n\n```rust title=\"src/main.rs\"\nuse clap::{Parser, Subcommand};\n\n#[derive(Parser)]\n#[command(name = \"incident-triage\", about = \"Rust CLI incident triage tool\", version)]\nstruct Cli {\n    #[command(subcommand)]\n    command: Commands,\n}\n\n#[derive(Subcommand)]\nenum Commands {\n    /// List active incidents by severity and owner\n    List,\n    /// Show one incident by id\n    Show { id: u32 },\n    /// Escalate an incident to a new owner\n    Escalate { id: u32, owner: String },\n    /// Print severity counts for the current queue\n    Summary,\n}\n\n#[derive(Clone)]\nstruct Incident {\n    id: u32,\n    title: &'static str,\n    severity: &'static str,\n    owner: &'static str,\n    status: &'static str,\n}\n\nfn seeded_incidents() -> Vec<Incident> {\n    vec![\n        Incident { id: 101, title: \"API latency spike\", severity: \"sev2\", owner: \"platform\", status: \"investigating\" },\n        Incident { id: 102, title: \"Checkout webhooks delayed\", severity: \"sev1\", owner: \"payments\", status: \"escalated\" },\n        Incident { id: 103, title: \"Search index lag\", severity: \"sev3\", owner: \"search\", status: \"monitoring\" },\n    ]\n}\n\nfn main() {\n    let cli = Cli::parse();\n    let incidents = seeded_incidents();\n\n    match cli.command {\n        Commands::List => {\n            println!(\"Rust CLI active incident triage queue:\");\n            for incident in &incidents {\n                println!(\"[{}] {} | severity={} | owner={} | status={}\", incident.id, incident.title, incident.severity, incident.owner, incident.status);\n            }\n        }\n        Commands::Show { id } => {\n            match incidents.iter().find(|incident| incident.id == id) {\n                Some(incident) => println!(\"Incident {}: {}\\nseverity: {}\\nowner: {}\\nstatus: {}\", incident.id, incident.title, incident.severity, incident.owner, incident.status),\n                None => eprintln!(\"No incident found for id {id}\"),\n            }\n        }\n        Commands::Escalate { id, owner } => {\n            match incidents.iter().find(|incident| incident.id == id) {\n                Some(incident) => println!(\"Escalating incident {} ({}) from {} to {}\", incident.id, incident.title, incident.owner, owner),\n                None => eprintln!(\"No incident found for id {id}\"),\n            }\n        }\n        Commands::Summary => {\n            let sev1 = incidents.iter().filter(|incident| incident.severity == \"sev1\").count();\n            let sev2 = incidents.iter().filter(|incident| incident.severity == \"sev2\").count();\n            let sev3 = incidents.iter().filter(|incident| incident.severity == \"sev3\").count();\n            println!(\"Incident summary: sev1={sev1}, sev2={sev2}, sev3={sev3}\");\n        }\n    }\n}\n```\n\n**Run:** `cargo run -- list`, `cargo run -- show 102`, `cargo run -- escalate 102 oncall-lead`, or `cargo run -- summary`\n**What to check:** the CLI prints incident ids, severity, owner, status, and escalation output instead of a generic greeting demo.",
+      "responseQuality": {
+        "paths": [
+          "Cargo.toml",
+          "src/main.rs"
+        ],
+        "failures": [],
+        "warnings": []
+      },
+      "fileQuality": {
+        "failures": []
+      },
+      "preview": null,
+      "durationMs": 14773,
+      "projectUpdate": null,
+      "fileSnapshot": {
+        "files": [
+          ".vite/deps/package.json",
+          ".vite/deps/_metadata.json",
+          "Cargo.toml",
+          "src/main.rs"
+        ],
+        "contents": {
+          "Cargo.toml": "[package]\nname = \"incident-triage\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nclap = { version = \"4\", features = [\"derive\"] }",
+          "src/main.rs": "use clap::{Parser, Subcommand};\n\n#[derive(Parser)]\n#[command(name = \"incident-triage\", about = \"Rust CLI incident triage tool\", version)]\nstruct Cli {\n    #[command(subcommand)]\n    command: Commands,\n}\n\n#[derive(Subcommand)]\nenum Commands {\n    /// List active incidents by severity and owner\n    List,\n    /// Show one incident by id\n    Show { id: u32 },\n    /// Escalate an incident to a new owner\n    Escalate { id: u32, owner: String },\n    /// Print severity counts for the current queue\n    Summary,\n}\n\n#[derive(Clone)]\nstruct Incident {\n    id: u32,\n    title: &'static str,\n    severity: &'static str,\n    owner: &'static str,\n    status: &'static str,\n}\n\nfn seeded_incidents() -> Vec<Incident> {\n    vec![\n        Incident { id: 101, title: \"API latency spike\", severity: \"sev2\", owner: \"platform\", status: \"investigating\" },\n        Incident { id: 102, title: \"Checkout webhooks delayed\", severity: \"sev1\", owner: \"payments\", status: \"escalated\" },\n        Incident { id: 103, title: \"Search index lag\", severity: \"sev3\", owner: \"search\", status: \"monitoring\" },\n    ]\n}\n\nfn main() {\n    let cli = Cli::parse();\n    let incidents = seeded_incidents();\n\n    match cli.command {\n        Commands::List => {\n            println!(\"Rust CLI active incident triage queue:\");\n            for incident in &incidents {\n                println!(\"[{}] {} | severity={} | owner={} | status={}\", incident.id, incident.title, incident.severity, incident.owner, incident.status);\n            }\n        }\n        Commands::Show { id } => {\n            match incidents.iter().find(|incident| incident.id == id) {\n                Some(incident) => println!(\"Incident {}: {}\\nseverity: {}\\nowner: {}\\nstatus: {}\", incident.id, incident.title, incident.severity, incident.owner, incident.status),\n                None => eprintln!(\"No incident found for id {id}\"),\n            }\n        }\n        Commands::Escalate { id, owner } => {\n            match incidents.iter().find(|incident| incident.id == id) {\n "
+        }
+      }
+    }
+  ]
+}

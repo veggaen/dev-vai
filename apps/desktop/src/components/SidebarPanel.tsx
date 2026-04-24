@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Plus, Trash2, Clock, MessageSquare, ChevronLeft,
-  FolderKanban, FolderOpenDot, Shield,
+  Plus, Trash2, ChevronLeft,
+  FolderKanban, FolderOpenDot, Shield, Search,
 } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
@@ -85,24 +85,25 @@ export function SidebarPanel() {
       animate={{ width: 'var(--layout-sidebar-effective-width)', opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
       transition={{ duration: 0.15, ease: 'easeOut' }}
-      className={`flex h-full min-w-0 flex-shrink-0 flex-col overflow-hidden border-r ${
-        isLight ? 'border-zinc-200 bg-white/95' : 'border-zinc-800/70 bg-zinc-950/92'
+      className={`flex h-full min-w-0 flex-shrink-0 flex-col overflow-hidden ${
+        isLight ? 'bg-white/96' : 'bg-zinc-950/92'
       }`}
       style={{ width: 'var(--layout-sidebar-effective-width)', maxWidth: '100%' }}
     >
-      {/* Panel header */}
-      <div className={`flex h-11 items-center justify-between border-b px-3 ${isLight ? 'border-zinc-200' : 'border-zinc-800/50'}`}>
+      {/* Panel header — slim and quiet */}
+      <div className={`flex h-11 flex-shrink-0 items-center justify-between px-4 ${isLight ? 'border-b border-zinc-100' : 'border-b border-zinc-900/70'}`}>
         <div className="min-w-0">
-          <span className={`text-xs font-medium uppercase tracking-[0.18em] ${isLight ? 'text-zinc-500' : 'text-zinc-500'}`}>
-          {PANEL_TITLES[activePanel]}
+          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
+            {PANEL_TITLES[activePanel]}
           </span>
         </div>
         <button
           onClick={toggleSidebar}
-          className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
-            isLight ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900' : 'text-zinc-600 hover:bg-zinc-900 hover:text-zinc-300'
+          className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors ${
+            isLight ? 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900' : 'text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200'
           }`}
           title="Collapse sidebar"
+          aria-label="Collapse sidebar"
         >
           <ChevronLeft className="h-3.5 w-3.5" />
         </button>
@@ -231,37 +232,35 @@ function ChatsPanel() {
 
   return (
     <div className="flex flex-col">
-      <div className={`border-b p-2.5 ${isLight ? 'border-zinc-200' : 'border-zinc-800/60'}`}>
-        <div className="mb-2 flex items-center justify-between gap-2 px-1">
-          <div className="min-w-0">
-            <div className={`text-[11px] font-medium uppercase tracking-[0.18em] ${isLight ? 'text-zinc-500' : 'text-zinc-500'}`}>Threads</div>
-            <div className={`text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-600'}`}>
-              {filteredConversations.length} shown
-              {query.trim() ? ` of ${conversations.length}` : ''}
-            </div>
-          </div>
-        </div>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search chats, projects, models..."
-          className={`mb-2 w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors ${
-            isLight
-              ? 'border-zinc-200 bg-zinc-50 text-zinc-900 placeholder-zinc-400 focus:border-violet-300'
-              : 'border-zinc-800/80 bg-zinc-950/78 text-zinc-100 placeholder-zinc-600 focus:border-violet-500/40'
-          }`}
-        />
+      <div className={`flex-shrink-0 px-3 pb-2 pt-3 ${isLight ? '' : ''}`}>
         <button
           onClick={handleNewChat}
-          className={`flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+          className={`mb-2 flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
             isLight
-              ? 'border-zinc-200 bg-white text-zinc-800 hover:border-violet-200 hover:bg-violet-50'
-              : 'border-zinc-800/80 bg-zinc-950/80 text-zinc-200 hover:border-violet-500/25 hover:bg-zinc-900'
+              ? 'bg-violet-50 text-violet-700 hover:bg-violet-100'
+              : 'bg-violet-500/12 text-violet-200 hover:bg-violet-500/18'
           }`}
         >
           <Plus className="h-3.5 w-3.5" />
           New Chat
         </button>
+        <div className="relative">
+          <Search
+            className={`pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 ${
+              isLight ? 'text-zinc-400' : 'text-zinc-600'
+            }`}
+          />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search conversations"
+            className={`w-full rounded-lg py-1.5 pl-8 pr-3 text-sm outline-none transition-colors ${
+              isLight
+                ? 'bg-zinc-100 text-zinc-900 placeholder-zinc-400 focus:bg-white focus:ring-1 focus:ring-violet-300'
+                : 'bg-zinc-900/70 text-zinc-100 placeholder-zinc-600 focus:bg-zinc-900 focus:ring-1 focus:ring-violet-500/40'
+            }`}
+          />
+        </div>
       </div>
 
       {/* Grouped conversation list */}
@@ -314,58 +313,50 @@ function ChatsPanel() {
                   setDraggedConversationId(null);
                   setDragOverConversationId(null);
                 }}
-                className={`group flex items-start gap-2 rounded-lg border px-2.5 py-2.5 transition-colors ${draggedConversationId === conv.id ? 'cursor-grabbing opacity-80' : 'cursor-grab'} ${conv.id === activeConversationId
+                className={`group relative flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors ${draggedConversationId === conv.id ? 'cursor-grabbing opacity-80' : 'cursor-grab'} ${conv.id === activeConversationId
                   ? isLight
-                    ? 'border-violet-200 bg-violet-50 text-zinc-900'
-                    : 'border-zinc-800/80 bg-zinc-900 text-zinc-100'
+                    ? 'bg-violet-50 text-zinc-900'
+                    : 'bg-zinc-800/60 text-zinc-100'
                   : isLight
-                    ? 'border-transparent text-zinc-500 hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-900'
-                    : 'border-transparent text-zinc-400 hover:border-zinc-800/60 hover:bg-zinc-900/60 hover:text-zinc-200'
-                  } ${dragOverConversationId === conv.id ? (isLight ? 'border-violet-300 bg-violet-50/80' : 'border-violet-500/35 bg-zinc-900') : ''}`}
-                title="Drag to reorder"
+                    ? 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
+                    : 'text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200'
+                  } ${dragOverConversationId === conv.id ? (isLight ? 'bg-violet-100/80' : 'bg-zinc-800/80') : ''}`}
+                title={conv.title}
                 onClick={() => {
                   if (Date.now() < suppressSelectUntilRef.current) return;
                   void selectConversation(conv.id);
                 }}
               >
-                <div className={`mt-0.5 flex h-8 items-start justify-center px-0.5 ${
-                  conv.id === activeConversationId
-                    ? isLight ? 'text-violet-600' : 'text-violet-300'
-                    : isLight ? 'text-zinc-400' : 'text-zinc-600'
-                }`}>
-                  <MessageSquare className="h-3.5 w-3.5" />
-                </div>
+                {conv.id === activeConversationId && (
+                  <span
+                    aria-hidden
+                    className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-r-full bg-violet-500"
+                  />
+                )}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate pr-2 text-sm leading-tight">{conv.title}</div>
-                  <div className={`mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] ${isLight ? 'text-zinc-500' : 'text-zinc-600'}`}>
-                    <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
-                      <Clock className="h-2.5 w-2.5" />
-                      <span>{formatRelative(conv.updatedAt)}</span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{conv.title}</span>
+                    <span className={`flex-shrink-0 text-[10px] tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>
+                      {formatRelative(conv.updatedAt)}
                     </span>
-                    {conv.projectName && (
-                      <span className="inline-flex min-w-0 items-center gap-1 whitespace-nowrap">
-                        <span className={isLight ? 'text-zinc-300' : 'text-zinc-700'}>•</span>
-                        <FolderOpenDot className="h-2.5 w-2.5 shrink-0" />
-                        <span className="max-w-[9rem] truncate">{conv.projectName}</span>
-                      </span>
-                    )}
-                    {conv.mode && conv.mode !== 'chat' && (
-                      <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
-                        <span className={isLight ? 'text-zinc-300' : 'text-zinc-700'}>•</span>
-                        <span className={`rounded-md border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] ${
-                          isLight ? 'border-zinc-200 bg-white text-zinc-500' : 'border-zinc-800 bg-zinc-950/80 text-zinc-500'
+                  </div>
+                  {(conv.projectName || (conv.mode && conv.mode !== 'chat')) && (
+                    <div className={`mt-0.5 flex items-center gap-1.5 text-[10px] ${isLight ? 'text-zinc-500' : 'text-zinc-500'}`}>
+                      {conv.projectName && (
+                        <span className="inline-flex min-w-0 items-center gap-1 truncate">
+                          <FolderOpenDot className="h-2.5 w-2.5 flex-shrink-0 opacity-70" />
+                          <span className="truncate">{conv.projectName}</span>
+                        </span>
+                      )}
+                      {conv.mode && conv.mode !== 'chat' && (
+                        <span className={`flex-shrink-0 rounded px-1 py-px text-[9px] font-medium uppercase tracking-[0.12em] ${
+                          isLight ? 'bg-zinc-100 text-zinc-500' : 'bg-zinc-900 text-zinc-500'
                         }`}>
                           {conv.mode}
                         </span>
-                      </span>
-                    )}
-                    {conv.modelId && (
-                      <span className="inline-flex min-w-0 items-center gap-1 whitespace-nowrap">
-                        <span className={isLight ? 'text-zinc-300' : 'text-zinc-700'}>•</span>
-                        <span className="max-w-[6.5rem] truncate">{conv.modelId.split('/').pop()}</span>
-                      </span>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={(e) => {
@@ -373,8 +364,9 @@ function ChatsPanel() {
                     deleteConversation(conv.id);
                   }}
                   draggable={false}
-                  className={`mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg opacity-0 transition-all group-hover:opacity-100 ${
-                    isLight ? 'text-zinc-400 hover:bg-red-50 hover:text-red-500' : 'text-zinc-700 hover:bg-zinc-900 hover:text-red-400'
+                  aria-label={`Delete ${conv.title}`}
+                  className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded opacity-0 transition-all group-hover:opacity-100 ${
+                    isLight ? 'text-zinc-400 hover:bg-red-50 hover:text-red-500' : 'text-zinc-600 hover:bg-red-500/10 hover:text-red-400'
                   }`}
                 >
                   <Trash2 className="h-3 w-3" />

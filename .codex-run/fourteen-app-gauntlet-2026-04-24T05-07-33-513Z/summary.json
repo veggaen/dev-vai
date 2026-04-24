@@ -1,0 +1,30 @@
+{
+  "verdict": "pass",
+  "passed": 2,
+  "failed": 0,
+  "total": 2,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T05-07-33-513Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T05-07-33-513Z\\report.json",
+  "results": [
+    {
+      "slug": "fastapi-inventory-api",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYY5RQ2E6258G2Q7CXX7W6F",
+      "sandboxId": "f8ee1114",
+      "previewUrl": null
+    },
+    {
+      "slug": "rust-incident-cli",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPYY62VFDEFANENS27271H79",
+      "sandboxId": "7879dcf9",
+      "previewUrl": null
+    }
+  ]
+}

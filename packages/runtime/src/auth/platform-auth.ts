@@ -3,6 +3,7 @@ import { and, eq, gt, lt } from 'drizzle-orm';
 import { WorkOS } from '@workos-inc/node';
 import { schema, type VaiConfig, type VaiDatabase } from '@vai/core';
 import type { FastifyRequest, FastifyReply } from 'fastify';
+import { isLocalDevMutationAllowed } from '../security/request-trust.js';
 
 interface GoogleTokenResponse {
   access_token: string;
@@ -110,6 +111,10 @@ export interface DeviceLinkPollResult {
 const DEVICE_CODE_TTL_MS = 10 * 60 * 1000;
 const DEVICE_POLL_INTERVAL_SECONDS = 2;
 const USER_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const DEV_AUTH_BYPASS_HEADER = 'x-vai-dev-auth-bypass';
+const LOCAL_DEV_USER_ID = '__local_dev_user__';
+const LOCAL_DEV_USER_EMAIL = 'dev@localhost';
+const LOCAL_DEV_USER_NAME = 'Local Dev';
 
 function encodeBase64Url(input: Buffer): string {
   return input.toString('base64url');
@@ -310,6 +315,10 @@ export class PlatformAuthService {
   }
 
   async getViewer(request: FastifyRequest): Promise<PlatformViewer> {
+    if (this.isLocalDevAuthBypassRequested(request)) {
+      return this.getLocalDevViewer(request);
+    }
+
     const session = this.getSessionFromRequest(request);
     if (!session) {
       return { authenticated: false, user: null, companionClient: null };
@@ -336,6 +345,25 @@ export class PlatformAuthService {
         name: row.name,
         avatarUrl: row.avatarUrl,
       },
+      companionClient,
+    };
+  }
+
+  private isLocalDevAuthBypassRequested(request: FastifyRequest): boolean {
+    if (!isLocalDevMutationAllowed(request)) {
+      return false;
+    }
+
+    return this.getSingleHeader(request.headers[DEV_AUTH_BYPASS_HEADER]) === '1';
+  }
+
+  private getLocalDevViewer(request: FastifyRequest): PlatformViewer {
+    const user = this.ensureLocalDevUser();
+    const companionClient = this.upsertCompanionClientFromRequest(request, user.id);
+
+    return {
+      authenticated: true,
+      user,
       companionClient,
     };
   }
@@ -866,6 +894,62 @@ export class PlatformAuthService {
       })
       .run();
     return LOCAL_USER_ID;
+  }
+
+  private ensureLocalDevUser(): NonNullable<PlatformViewer['user']> {
+    const existing = this.db.select({
+      id: schema.platformUsers.id,
+      email: schema.platformUsers.email,
+      name: schema.platformUsers.name,
+      avatarUrl: schema.platformUsers.avatarUrl,
+    })
+      .from(schema.platformUsers)
+      .where(eq(schema.platformUsers.id, LOCAL_DEV_USER_ID))
+      .get();
+
+    const now = new Date();
+    if (existing) {
+      if (
+        existing.email !== LOCAL_DEV_USER_EMAIL
+        || existing.name !== LOCAL_DEV_USER_NAME
+        || existing.avatarUrl !== null
+      ) {
+        this.db.update(schema.platformUsers)
+          .set({
+            email: LOCAL_DEV_USER_EMAIL,
+            name: LOCAL_DEV_USER_NAME,
+            avatarUrl: null,
+            updatedAt: now,
+          })
+          .where(eq(schema.platformUsers.id, LOCAL_DEV_USER_ID))
+          .run();
+      }
+
+      return {
+        id: LOCAL_DEV_USER_ID,
+        email: LOCAL_DEV_USER_EMAIL,
+        name: LOCAL_DEV_USER_NAME,
+        avatarUrl: null,
+      };
+    }
+
+    this.db.insert(schema.platformUsers)
+      .values({
+        id: LOCAL_DEV_USER_ID,
+        email: LOCAL_DEV_USER_EMAIL,
+        name: LOCAL_DEV_USER_NAME,
+        avatarUrl: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+
+    return {
+      id: LOCAL_DEV_USER_ID,
+      email: LOCAL_DEV_USER_EMAIL,
+      name: LOCAL_DEV_USER_NAME,
+      avatarUrl: null,
+    };
   }
 
   private upsertCompanionClientFromDeviceLink(

@@ -1,5 +1,10 @@
 const AUTH_SIGNALS = /\b(?:auth(?:entication)?|login|sign[\s-]?in|sign[\s-]?up|session|middleware|protected|account|user)\b/i;
-const VISUAL_SIGNALS = /\b(?:spacing|typography|font|hero|headline|cta|theme|color|palette|button|layout|landing|page|ui|visual|style|polish|refine)\b/i;
+const VISUAL_SIGNALS = /\b(?:spacing|typography|font|hero|headline|heading|cta|theme|color|palette|button|layout|landing|page|ui|visual|style|polish|refine|motions?|animations?|animate|kinetic|transitions?|entrance|reveal|body)\b/i;
+const FILE_REFERENCE_SIGNALS = /(?:\b[\w./-]+\.(?:tsx|ts|jsx|js|css|scss|sass|json|html|md|py|sh|yml|yaml|toml|sql)\b|`[^`]+\.(?:tsx|ts|jsx|js|css|scss|sass|json|html|md|py|sh|yml|yaml|toml|sql)`)/i;
+const PROJECT_REFERENCE_SIGNALS = /\b(?:this|current|existing|attached|same|active)\s+(?:app|project|preview|page|screen|component|repo|codebase|site|workspace)\b/i;
+const PROJECT_ACTION_SIGNALS = /\b(?:fix|debug|repair|edit|change|update|improve|polish|refactor|restyle|wire|implement|connect|adjust|tweak|add|include|insert|ship|deploy|build|create|scaffold)\b/i;
+const PROJECT_TARGET_SIGNALS = /\b(?:app|project|preview|page|screen|component|route|layout|file|files|code|codebase|repo|ui|ux|style|styles|css|hero|headline|heading|body|motions?|animations?|transitions?|entrance|reveal|auth|login|session|api|server|client|bug|error|issue|preview)\b/i;
+const SANDBOX_REFERENCE_SIGNALS = /\b(?:sandbox|dev\s+server|localhost:\d+|running\s+app|live\s+preview|preview\s+server)\b/i;
 
 const HIGH_PRIORITY_PATTERNS: Array<{ pattern: RegExp; weight: number }> = [
   { pattern: /^package\.json$/i, weight: 140 },
@@ -52,4 +57,14 @@ export function pickSandboxContextPaths(files: string[], userPrompt: string, lim
     .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
     .slice(0, limit)
     .map((entry) => entry.path);
+}
+
+export function shouldAttachSandboxContext(userPrompt: string): boolean {
+  const prompt = userPrompt.trim();
+  if (!prompt) return false;
+  if (FILE_REFERENCE_SIGNALS.test(prompt)) return true;
+  if (PROJECT_REFERENCE_SIGNALS.test(prompt)) return true;
+  if (SANDBOX_REFERENCE_SIGNALS.test(prompt)) return true;
+  if (PROJECT_ACTION_SIGNALS.test(prompt) && PROJECT_TARGET_SIGNALS.test(prompt)) return true;
+  return false;
 }

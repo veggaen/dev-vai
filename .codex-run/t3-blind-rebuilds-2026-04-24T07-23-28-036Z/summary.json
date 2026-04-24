@@ -1,0 +1,82 @@
+{
+  "verdict": "pass",
+  "passed": 7,
+  "failed": 0,
+  "total": 7,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-23-28-036Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-23-28-036Z\\report.json",
+  "results": [
+    {
+      "slug": "meme-coin-idle-game",
+      "sourceRepo": "https://github.com/t3dotgg/dogecoin-simulator",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ5YHZQYB1M29X91P11K1B8",
+      "sandboxId": "7e183372",
+      "previewUrl": "http://127.0.0.1:4193"
+    },
+    {
+      "slug": "client-image-export-tool",
+      "sourceRepo": "https://github.com/t3dotgg/quickpic",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "sandbox binding changed after recovery: 5698b730 -> 84de4fbb"
+      ],
+      "conversationId": "01KPZ5Z58YZS0MN0D5TV4XHQ7E",
+      "sandboxId": "84de4fbb",
+      "previewUrl": "http://127.0.0.1:4194"
+    },
+    {
+      "slug": "full-stack-image-gallery",
+      "sourceRepo": "https://github.com/t3dotgg/t3gallery",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ5ZX6XDPFTREM1QMEPTNSC",
+      "sandboxId": "85f391e7",
+      "previewUrl": "http://127.0.0.1:4195"
+    },
+    {
+      "slug": "stripe-sanity-playbook",
+      "sourceRepo": "https://github.com/t3dotgg/stripe-recommendations",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ60H4R74E5BNFHRYNHVVKE",
+      "sandboxId": "b1d8e98a",
+      "previewUrl": "http://127.0.0.1:4196"
+    },
+    {
+      "slug": "ssr-platform-benchmark",
+      "sourceRepo": "https://github.com/t3dotgg/cf-vs-vercel-bench",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ6157TPX84MYCQAQ3K0DFC",
+      "sandboxId": "08e6c794",
+      "previewUrl": null
+    },
+    {
+      "slug": "one-app-five-stacks",
+      "sourceRepo": "https://github.com/t3dotgg/1app5stacks",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ61QA26G141TXG9512G1A4",
+      "sandboxId": "62587f2f",
+      "previewUrl": null
+    },
+    {
+      "slug": "safe-material-code-theme",
+      "sourceRepo": "https://github.com/t3dotgg/vsc-material-but-i-wont-sue-you",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ6293A8XJZHFN7VEJQMC62",
+      "sandboxId": "4b039c57",
+      "previewUrl": null
+    }
+  ]
+}

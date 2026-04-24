@@ -1,0 +1,90 @@
+{
+  "verdict": "pass",
+  "passed": 7,
+  "failed": 0,
+  "total": 7,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-07-51-379Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-07-51-379Z\\report.json",
+  "results": [
+    {
+      "slug": "meme-coin-idle-game",
+      "sourceRepo": "https://github.com/t3dotgg/dogecoin-simulator",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPZ521D8A10QNAQ2GG80FED6",
+      "sandboxId": "45c1816e",
+      "previewUrl": "http://127.0.0.1:4145"
+    },
+    {
+      "slug": "client-image-export-tool",
+      "sourceRepo": "https://github.com/t3dotgg/quickpic",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPZ5587HK62BYVVDHGYW1H2H",
+      "sandboxId": "0a8267a7",
+      "previewUrl": "http://127.0.0.1:4146"
+    },
+    {
+      "slug": "full-stack-image-gallery",
+      "sourceRepo": "https://github.com/t3dotgg/t3gallery",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPZ589NS10V7RXQ7ZNPD2Z46",
+      "sandboxId": "689e5c27",
+      "previewUrl": "http://127.0.0.1:4177"
+    },
+    {
+      "slug": "stripe-sanity-playbook",
+      "sourceRepo": "https://github.com/t3dotgg/stripe-recommendations",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ5B9QEJ2QBSP8NB7PYJQXM",
+      "sandboxId": "e7612571",
+      "previewUrl": "http://127.0.0.1:4178"
+    },
+    {
+      "slug": "ssr-platform-benchmark",
+      "sourceRepo": "https://github.com/t3dotgg/cf-vs-vercel-bench",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "sandbox binding changed after recovery: 55ecc81f -> 59295b64"
+      ],
+      "conversationId": "01KPZ5BX8Q9PY2E3JNJAM9J49Z",
+      "sandboxId": "59295b64",
+      "previewUrl": null
+    },
+    {
+      "slug": "one-app-five-stacks",
+      "sourceRepo": "https://github.com/t3dotgg/1app5stacks",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ5CEX3X0AE3SG7WBF84SGK",
+      "sandboxId": "b6e57edc",
+      "previewUrl": null
+    },
+    {
+      "slug": "safe-material-code-theme",
+      "sourceRepo": "https://github.com/t3dotgg/vsc-material-but-i-wont-sue-you",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPZ5D0M3J1X93SQV0KQCA038",
+      "sandboxId": "3e7f19fc",
+      "previewUrl": null
+    }
+  ]
+}

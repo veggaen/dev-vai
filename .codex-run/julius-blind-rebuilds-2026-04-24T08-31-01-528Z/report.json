@@ -1,0 +1,84 @@
+{
+  "options": {
+    "appUrl": "http://127.0.0.1:5173/?devAuthBypass=1",
+    "apiUrl": "http://127.0.0.1:3006",
+    "suiteName": "julius",
+    "specFile": "C:\\Users\\v3gga\\Documents\\dev-vai\\scripts\\specs\\julius-blind-rebuilds.json",
+    "outputDirWasExplicit": false,
+    "limitWasExplicit": false,
+    "sourceLeakPattern": {},
+    "limit": 8,
+    "previewLimit": 4,
+    "keepProjects": true,
+    "only": [
+      "typescript-library-monorepo-starter"
+    ],
+    "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-31-01-528Z",
+    "timeoutMs": 180000
+  },
+  "results": [
+    {
+      "slug": "typescript-library-monorepo-starter",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp-lib",
+      "prompt": "Create a complete TypeScript library monorepo starter, not a marketing page. It must include package metadata, workspace setup, a core library entrypoint, strict tsconfig, a build script, tests, changeset/release notes, and a tiny Prisma generator example that shows how generated enums or types can reduce bundle size.",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ9TAKVJTTVQ74HJ9YZHMGE",
+      "sandboxId": "1a4def8b",
+      "response": "Complete TypeScript library monorepo starter with Prisma generator support, vitest tests, and changeset release flow.\n\n```json title=\"package.json\"\n{\n  \"name\": \"acme-corp-lib-starter\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"packageManager\": \"pnpm@9.12.0\",\n  \"scripts\": {\n    \"build\": \"pnpm -r build\",\n    \"test\": \"pnpm -r test\",\n    \"changeset\": \"changeset\",\n    \"version\": \"changeset version\"\n  },\n  \"devDependencies\": {\n    \"@changesets/cli\": \"^2.27.9\",\n    \"typescript\": \"^5.5.3\",\n    \"vitest\": \"^2.1.1\"\n  },\n  \"workspaces\": [\n    \"packages/*\"\n  ]\n}\n```\n\n```yaml title=\"pnpm-workspace.yaml\"\npackages:\n  - 'packages/*'\n```\n\n```json title=\"tsconfig.json\"\n{\n  \"compilerOptions\": {\n    \"target\": \"ES2022\",\n    \"module\": \"NodeNext\",\n    \"moduleResolution\": \"NodeNext\",\n    \"declaration\": true,\n    \"strict\": true,\n    \"skipLibCheck\": true\n  },\n  \"include\": [\n    \"packages/**/*.ts\"\n  ]\n}\n```\n\n```ts title=\"packages/core/src/index.ts\"\nexport type AcmeLibraryOptions = { appName: string; enableTelemetry?: boolean };\n\nexport function createAcmeLibrary(options: AcmeLibraryOptions) {\n  return {\n    kind: \"TypeScript library monorepo\",\n    appName: options.appName,\n    telemetry: options.enableTelemetry === true,\n  } as const;\n}\n\nexport const libraryHealth = { vitest: \"configured\", changeset: \"required\", prisma: \"generator-ready\" } as const;\n```\n\n```ts title=\"packages/prisma-generator/src/index.ts\"\nimport { generatorHandler } from \"@prisma/generator-helper\";\n\ngeneratorHandler({\n  onManifest() {\n    return {\n      defaultOutput: \"./generated\",\n      prettyName: \"Acme enum bundle-size generator\",\n    };\n  },\n  async onGenerate(options) {\n    const enums = options.dmmf.datamodel.enums.map((item) => item.name);\n    const output = `export const prismaEnums = ${JSON.stringify(enums)} as const;\\n`;\n    await options.generator.output?.value && Bun.write(`${options.generator.output.value}/enums.ts`, output);\n  },\n});\n```\n\n```ts title=\"packages/core/src/index.test.ts\"\nimport { describe, expect, it } from 'vitest';\nimport { createAcmeLibrary } from './index';\n\ndescribe('createAcmeLibrary', () => {\n  it('returns typed library metadata', () => {\n    expect(createAcmeLibrary({ appName: 'demo' }).kind).toContain('library monorepo');\n  });\n});\n```\n\n```md title=\".changeset/initial-release.md\"\n---\n\"@acme/core\": patch\n\"@acme/prisma-generator\": patch\n---\n\nInitial TypeScript library monorepo with Prisma generator and vitest coverage.\n```",
+      "responseQuality": {
+        "paths": [
+          "package.json",
+          "pnpm-workspace.yaml",
+          "tsconfig.json",
+          "packages/core/src/index.ts",
+          "packages/prisma-generator/src/index.ts",
+          "packages/core/src/index.test.ts",
+          ".changeset/initial-release.md"
+        ],
+        "failures": [],
+        "warnings": []
+      },
+      "fileQuality": {
+        "failures": []
+      },
+      "preview": null,
+      "durationMs": 4594,
+      "projectUpdate": {
+        "id": "01KPZ9TE603KDS94FHXVYBWJPX",
+        "conversationId": "01KPZ9TAKVJTTVQ74HJ9YZHMGE",
+        "role": "assistant",
+        "content": "Project update: Applied 7 files for acme-corp-lib-starter.\n\n[vai-artifact]\n{\"kind\":\"update\",\"title\":\"acme-corp-lib-starter\",\"status\":\"updated\",\"tone\":\"violet\",\"badge\":\"Project update\",\"fileCount\":7,\"changedFiles\":[\"package.json\",\"pnpm-workspace.yaml\",\"tsconfig.json\",\"packages/core/src/index.ts\",\"packages/prisma-generator/src/index.ts\",\"packages/core/src/index.test.ts\",\".changeset/initial-release.md\"],\"evidenceTier\":\"low\",\"verificationItems\":[\"Detected a non-preview code file set and skipped browser dev-server repair.\",\"Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.\"],\"recoveryLabel\":\"Recovered from a stale sandbox link.\",\"packageChanged\":false,\"failureClass\":null,\"nextPrompts\":[\"Add the next feature slice\",\"Tighten this implementation with targeted edits\"]}\n[/vai-artifact]\n\n- Recovered from a stale sandbox link by creating a fresh sandbox.\n- Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.\n\nFiles changed:\n- package.json\n- pnpm-workspace.yaml\n- tsconfig.json\n- packages/core/src/index.ts\n- packages/prisma-generator/src/index.ts\n- packages/core/src/index.test.ts\n- +1 more file",
+        "imageId": null,
+        "toolCalls": null,
+        "toolCallId": null,
+        "tokenCount": null,
+        "modelId": "vai:v0",
+        "durationMs": null,
+        "feedback": null,
+        "createdAt": "2026-04-24T08:31:07.000Z"
+      },
+      "fileSnapshot": {
+        "files": [
+          ".changeset/initial-release.md",
+          "package.json",
+          "packages/core/src/index.test.ts",
+          "packages/core/src/index.ts",
+          "packages/prisma-generator/src/index.ts",
+          "pnpm-workspace.yaml",
+          "tsconfig.json"
+        ],
+        "contents": {
+          "package.json": "{\n  \"name\": \"acme-corp-lib-starter\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"packageManager\": \"pnpm@9.12.0\",\n  \"scripts\": {\n    \"build\": \"pnpm -r build\",\n    \"test\": \"pnpm -r test\",\n    \"changeset\": \"changeset\",\n    \"version\": \"changeset version\"\n  },\n  \"devDependencies\": {\n    \"@changesets/cli\": \"^2.27.9\",\n    \"typescript\": \"^5.5.3\",\n    \"vitest\": \"^2.1.1\"\n  },\n  \"workspaces\": [\n    \"packages/*\"\n  ]\n}",
+          "pnpm-workspace.yaml": "packages:\n  - 'packages/*'",
+          "packages/core/src/index.ts": "export type AcmeLibraryOptions = { appName: string; enableTelemetry?: boolean };\n\nexport function createAcmeLibrary(options: AcmeLibraryOptions) {\n  return {\n    kind: \"TypeScript library monorepo\",\n    appName: options.appName,\n    telemetry: options.enableTelemetry === true,\n  } as const;\n}\n\nexport const libraryHealth = { vitest: \"configured\", changeset: \"required\", prisma: \"generator-ready\" } as const;",
+          "src/index.ts": null,
+          "tsconfig.json": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2022\",\n    \"module\": \"NodeNext\",\n    \"moduleResolution\": \"NodeNext\",\n    \"declaration\": true,\n    \"strict\": true,\n    \"skipLibCheck\": true\n  },\n  \"include\": [\n    \"packages/**/*.ts\"\n  ]\n}",
+          "packages/prisma-generator/src/index.ts": "import { generatorHandler } from \"@prisma/generator-helper\";\n\ngeneratorHandler({\n  onManifest() {\n    return {\n      defaultOutput: \"./generated\",\n      prettyName: \"Acme enum bundle-size generator\",\n    };\n  },\n  async onGenerate(options) {\n    const enums = options.dmmf.datamodel.enums.map((item) => item.name);\n    const output = `export const prismaEnums = ${JSON.stringify(enums)} as const;\\n`;\n    await options.generator.output?.value && Bun.write(`${options.generator.output.value}/enums.ts`, output);\n  },\n});",
+          "src/prisma-generator.ts": null
+        }
+      }
+    }
+  ]
+}

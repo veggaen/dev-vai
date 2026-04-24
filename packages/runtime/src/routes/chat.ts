@@ -65,6 +65,10 @@ export function registerChatRoutes(
             noLearn = !ownerMayTeach;
           }
 
+          const autoCreateOptions = data.modelId || data.mode
+            ? { fallbackModelId: data.modelId, fallbackMode: data.mode }
+            : undefined;
+
           for await (const chunk of chatService.sendMessage(
             data.conversationId,
             data.content,
@@ -72,7 +76,14 @@ export function registerChatRoutes(
             data.systemPrompt,
             noLearn,
             promptRewriteOverrides,
+            autoCreateOptions,
           )) {
+            if (chunk.type === 'conversation_resolved' && chunk.conversationId) {
+              fastify.log.warn(
+                { requested: data.conversationId, resolved: chunk.conversationId },
+                'chat: auto-created conversation for missing id',
+              );
+            }
             socket.send(JSON.stringify(chunk));
           }
         } catch (err) {

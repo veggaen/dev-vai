@@ -55,6 +55,10 @@ export {
 // Proof-backed builder loop (evidence vocabulary for ledgers / narration)
 export type { EvidenceConfidenceTier, FailureClass, ProofFlags } from './builder-loop/evidence-types.js';
 export { evidenceTierFromProof } from './builder-loop/evidence-types.js';
+export { isFreshBuildRequestForEmptySandbox, routeBuilderRequest } from './models/builder/builder-request-router.js';
+export type { BuilderRequestRoute, BuilderRequestRouteInput, BuilderRequestRouteKind } from './models/builder/builder-request-router.js';
+export { evaluateBuilderPreviewQuality } from './models/builder/preview-quality.js';
+export type { BuilderPreviewQualityInput, BuilderPreviewQualityReport, BuilderPreviewQualityRequirement, BuilderPreviewQualityVerdict } from './models/builder/preview-quality.js';
 export type { ConversationMode } from './chat/modes.js';
 export { resolveChatPromptRewriteConfig, rewriteChatPrompt } from './chat/prompt-rewrite.js';
 export type { ChatPromptRewriteResult } from './chat/prompt-rewrite.js';

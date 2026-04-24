@@ -19,6 +19,8 @@ import { useSandboxStore } from '../stores/sandboxStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { extractDeployActions, extractTemplateActions, stripSandboxActionMarkers } from '../lib/sandbox-actions.js';
 import { extractFilesFromMarkdown, stripFileBlocksFromMarkdown } from '../lib/file-extractor.js';
+import { shouldShowFallbackRecoveryChrome } from '../lib/fallback-recovery-visibility.js';
+import { filterStructuredFollowUps } from '../lib/message-follow-ups.js';
 import {
   buildGroundedBuildBriefExecutionPrompt,
   getGroundedBuildBriefActionLabel,
@@ -40,6 +42,12 @@ interface MessageBubbleProps {
   content: string;
   imageId?: string | null;
   imagePreview?: string;
+  respondingModelId?: string;
+  fallback?: {
+    fromModelId: string;
+    toModelId: string;
+    reason: 'low-confidence' | 'no-knowledge';
+  };
   files?: FileAttachment[];
   fallbackDeploy?: DeployIntent | null;
   recoveryPattern?: RecoveryPattern;
@@ -86,43 +94,6 @@ interface MessageBubbleProps {
 }
 
 const INLINE_TOKEN_REGEX = /(\[[^\]]+\]\([^)]+\)|\[\d+\]|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
-const FOLLOW_UP_STOPWORDS = new Set([
-  'the', 'and', 'that', 'this', 'with', 'from', 'into', 'what', 'when', 'where', 'which',
-  'should', 'would', 'could', 'there', 'their', 'about', 'after', 'before', 'while', 'have',
-  'your', 'you', 'more', 'next', 'then', 'they', 'them', 'just', 'than', 'been', 'make',
-  'like', 'want', 'need', 'show', 'build', 'change', 'same', 'does', 'is', 'are', 'was',
-]);
-
-function tokenizeFollowUpSeed(value: string): string[] {
-  return value
-    .toLowerCase()
-    .replace(/[`*_[\](){}:;,.!?/\\|-]+/g, ' ')
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 2 && !FOLLOW_UP_STOPWORDS.has(token));
-}
-
-function isReasonableFollowUp(question: string, content: string): boolean {
-  const normalized = question.trim();
-  if (normalized.length < 12 || normalized.length > 120) return false;
-  if (!/[?a-z]/i.test(normalized)) return false;
-
-  const prompty = /^(?:what|how|why|which|can|could|would|should|is|are|do|does|make|add|change|turn|show|explain)\b/i.test(normalized);
-  if (!prompty) return false;
-
-  const questionTokens = tokenizeFollowUpSeed(normalized);
-  if (questionTokens.length === 0) return false;
-
-  const contentTokens = new Set(tokenizeFollowUpSeed(content).slice(0, 80));
-  const overlap = questionTokens.filter((token) => contentTokens.has(token)).length;
-
-  // Permit explicit iteration prompts even when overlap is low.
-  if (/^(?:make|add|change|turn|show|explain)\b/i.test(normalized)) {
-    return overlap >= 1 || questionTokens.length <= 5;
-  }
-
-  return overlap >= 2;
-}
 
 function renderInlineWithCitations({
   text,
@@ -520,6 +491,7 @@ export function MessageBubble({
   role, content, imageId, imagePreview, files,
   fallbackDeploy, recoveryPattern = 'silent', allIntents, onIntentAction,
   isLatest = false, isStreaming = false,
+  respondingModelId, fallback,
   sources, followUps, confidence, groundedBuildBrief, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
   isAutoRepair = false, repairAttempt,
   compactResearchChrome = false,
@@ -567,8 +539,14 @@ export function MessageBubble({
       || (/```/.test(normalizedContent) && /(?:package\.json|src\/|app\/|index\.html|tsconfig\.json|vite\.config)/i.test(normalizedContent))
     );
   const projectUpdateBody = isProjectUpdate ? parseProjectUpdateBody(normalizedContent) : null;
+  const allowFallbackRecoveryChrome = shouldShowFallbackRecoveryChrome({
+    isUser,
+    isProjectUpdate,
+    hasAppliedFileBlocks,
+  });
 
-  const useSilentFallback = !hasSandboxAction
+  const useSilentFallback = allowFallbackRecoveryChrome
+    && !hasSandboxAction
     && fallbackDeploy
     && recoveryPattern === 'silent'
     && !isUser;
@@ -586,9 +564,13 @@ export function MessageBubble({
     ? stripFileBlocksFromMarkdown(displayContent)
     : displayContent;
   const hasStructuredSources = !isUser && Boolean(sources?.length);
-  const filteredFollowUps = !isUser
-    ? (followUps ?? []).filter((question) => isReasonableFollowUp(question, summarizedContent))
-    : [];
+  const filteredFollowUps = filterStructuredFollowUps({
+    followUps,
+    content: summarizedContent,
+    isUser,
+    isProjectUpdate,
+    hasAppliedFileBlocks,
+  });
   const hasStructuredFollowUps = !isUser && filteredFollowUps.length > 0;
   const visibleFollowUps = hasStructuredFollowUps ? filteredFollowUps.slice(0, 2) : [];
   const isResearchMessage = !isUser && (hasStructuredSources || Boolean(groundedBuildBrief));
@@ -655,8 +637,8 @@ export function MessageBubble({
   const handleNudgeDismiss = () => { setNudgeDismissed(true); onIntentAction?.(false); };
   const handleClarifyDismiss = () => { setClarifyDismissed(true); onIntentAction?.(false); };
 
-  const showNudge = !isUser && !hasSandboxAction && fallbackDeploy && recoveryPattern === 'nudge' && !nudgeDismissed;
-  const showClarify = !isUser && !hasSandboxAction && !fallbackDeploy && allIntents && allIntents.length > 0 && recoveryPattern === 'clarify' && !clarifyDismissed;
+  const showNudge = allowFallbackRecoveryChrome && !hasSandboxAction && fallbackDeploy && recoveryPattern === 'nudge' && !nudgeDismissed;
+  const showClarify = allowFallbackRecoveryChrome && !hasSandboxAction && !fallbackDeploy && allIntents && allIntents.length > 0 && recoveryPattern === 'clarify' && !clarifyDismissed;
 
   const imageSrc = imagePreview || (imageId ? `${API_BASE}/api/images/${imageId}/raw` : null);
 
@@ -671,7 +653,8 @@ export function MessageBubble({
   const sourceRailConfidenceLabel = confidence !== undefined ? `${Math.round(confidence * 100)}% confidence` : null;
   const showCompactResearchMeta = (compactResearchMode || sourceRailHandlesSources) && hasStructuredSources && Boolean(sources?.length);
   const showExpandedSources = hasStructuredSources && sources && !compactResearchMode && !sourceRailHandlesSources;
-  const showResearchFollowUps = visibleFollowUps.length > 0
+  const showResearchFollowUps = isResearchMessage
+    && visibleFollowUps.length > 0
     && !isStreaming
     && (!compactResearchMode || isLatestResearchMessage || !hasStructuredSources);
   const showPlainFollowUps = visibleFollowUps.length > 0 && !isStreaming && (hasAppliedFileBlocks || !isResearchMessage);
@@ -758,6 +741,21 @@ export function MessageBubble({
             <span>{isUser ? 'You' : isProjectUpdate ? 'Project update' : sender?.name || 'Vai'}</span>
             {sender?.model && !isUser && (
               <span className={`text-[10px] font-normal ${studioChrome ? 'text-zinc-400' : 'text-zinc-700'}`}>· {sender.model}</span>
+            )}
+            {!isUser && !sender?.model && respondingModelId && (
+              <span className={`text-[10px] font-normal ${studioChrome ? 'text-zinc-400' : 'text-zinc-700'}`}>· {respondingModelId}</span>
+            )}
+            {!isUser && fallback && (
+              <span
+                className={`inline-flex items-center rounded-full border px-1.5 py-px text-[9px] font-semibold ${
+                  studioChrome
+                    ? 'border-amber-200 bg-amber-50 text-amber-700'
+                    : 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+                }`}
+                title={`Vai switched from ${fallback.fromModelId} to ${fallback.toModelId} because the response looked ${fallback.reason === 'low-confidence' ? 'low confidence' : 'like a no-knowledge answer'}.`}
+              >
+                {fallback.reason === 'low-confidence' ? 'model handoff' : 'knowledge handoff'}
+              </span>
             )}
             {showHeaderConfidence && (
               <span

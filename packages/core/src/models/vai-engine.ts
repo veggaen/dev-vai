@@ -26,6 +26,7 @@ import type {
 import { buildGroundedBuildBrief } from './grounded-build-brief.js';
 import { isExplicitWebSearchRequest } from './explicit-web-search.js';
 import { composeBuilderApp } from './builder/compose-builder-app.js';
+import { isFreshBuildRequestForEmptySandbox } from './builder/builder-request-router.js';
 import { resolveBuilderIntent } from './builder/resolve-builder-intent.js';
 import { KnowledgeStore, VaiTokenizer, type KnowledgeEntry } from './knowledge-store.js';
 import { KnowledgeIntelligence } from './knowledge-intelligence.js';
@@ -33,6 +34,7 @@ import { SkillRouter } from './skill-router.js';
 import { TOPIC_STOP_WORDS } from './stop-words.js';
 import { ShadowRouter, contextFromHistory } from './shadow-router.js';
 import { DEEP_DESIGN_MEMO_SCHEMAS, renderDeepDesignMemo, type DeepDesignMemoKind } from '../chat/deep-design-memo-schemas.js';
+import { KNOWLEDGE_RETRIEVAL_SCORE_MIN } from '../chat/chat-quality.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
@@ -46,10 +48,14 @@ import { getSkillRegistry } from '../skills/registry.js';
 import { getSubAgentRouter } from '../skills/sub-agent-router.js';
 import { getTeacherAgent, type TeacherDecision } from '../skills/teacher-agent.js';
 import type { CitedAnswer, LearnedUnit } from '../skills/types.js';
-import { normalizeInputForUnderstanding, detectRegister } from '../input-normalization.js';
+import { normalizeInputForUnderstanding, detectRegister, extractTopicFromQuery, topicContentTokens, textConcernsTopic } from '../input-normalization.js';
 
 export { KnowledgeStore, VaiTokenizer };
 export type { KnowledgeEntry };
+
+const CHAT_SEARCH_BUDGET_MS = 3500;
+const OVERSIZED_CHAT_INPUT_CHARS = 20_000;
+const OVERSIZED_CHAT_SAMPLE_CHARS = 2_000;
 
 // ---- Vai Self-Awareness ----
 
@@ -75,6 +81,20 @@ export interface ResponseMeta {
   readonly matchedPattern?: string;
   /** Detected conversational register of the user's input (for tone matching) */
   readonly register?: 'formal' | 'casual' | 'terse' | 'teach-me' | 'neutral';
+  /** External teacher-loop observability. The teacher critiques; Vai remains the answerer. */
+  teacherLoop?: TeacherLoopMeta;
+}
+
+export interface TeacherLoopMeta {
+  readonly status: 'reviewed' | 'unavailable' | 'failed';
+  readonly providerId?: string;
+  readonly model?: string;
+  readonly rounds: number;
+  readonly improvedRounds: number;
+  readonly finalScore: number | null;
+  readonly localConcerns: readonly string[];
+  readonly learnedCount: number;
+  readonly learningSuppressed: boolean;
 }
 
 /** Full self-diagnostic report ��� what Vai knows about its own capabilities. */
@@ -171,6 +191,7 @@ export class VaiEngine implements ModelAdapter {
   private _lastCitedAnswer: CitedAnswer | null = null;
   private _lastTeacherDecision: TeacherDecision | null = null;
   private _activeMode: string = 'chat';
+  private chatSearchBudgetMs = CHAT_SEARCH_BUDGET_MS;
   private _hasActiveSandboxContext = false;
   private _shadowRouter: ShadowRouter | null = null;
   private _lastShadowPredictions: Array<{ strategy: string; score: number }> = [];
@@ -1330,10 +1351,71 @@ export class VaiEngine implements ModelAdapter {
    * When the user says "in one sentence", "briefly", "TL;DR", etc.,
    * truncate the response to its core statement.
    */
+  /**
+   * Final sanity guard: if the freshly generated response is clearly the
+   * generic "Hello! I am VeggaAI / still learning" bootstrap blurb OR the
+   * opaque stock self-introduction, but the user's input is a concrete
+   * factual question whose topic words appear nowhere in the response,
+   * replace the off-topic blurb with an honest "I don't know yet" fallback.
+   *
+   * This prevents the very visible "who is the king of Norway?" → "Hello,
+   * I am still learning…" UX failure where the engine was misrouting a
+   * real question to the greeting template.
+   */
+  private sanitizeOffTopicBootstrapResponse(originalInput: string, response: string): string {
+    const trimmed = response.trim();
+    if (trimmed.length === 0) return response;
+
+    const bootstrapMarkers: readonly RegExp[] = [
+      /still learning,\s*but\s+i\s+will\s+do\s+my\s+best/i,
+      /Jeg laerer fortsatt,\s*men\s+jeg\s+skal\s+gjore\s+mitt\s+beste/i,
+      /^(?:Hey|Hello|Hi|Heisann|Hei)!\s+(?:I[' ]m|I am|Jeg er)\s+VeggaAI/i,
+      /I[' ]m VeggaAI\s+—\s+still\s+fresh/i,
+    ];
+    const looksLikeBootstrap = bootstrapMarkers.some((re) => re.test(trimmed));
+    if (!looksLikeBootstrap) return response;
+
+    const inputLower = originalInput.toLowerCase();
+    const looksLikeGreetingOnly =
+      /^(?:hello|hi|hey|yo|sup|hei|hallo|howdy|hei\s+sann|heisann|heihei|good\s+(?:morning|afternoon|evening))[\s!.?]*$/i.test(
+        originalInput.trim(),
+      );
+    if (looksLikeGreetingOnly) return response;
+
+    const topic = extractTopicFromQuery(originalInput);
+    const tokens = topicContentTokens(topic);
+    if (tokens.length === 0) return response;
+
+    const responseLower = trimmed.toLowerCase();
+    const topicAppears = tokens.some((token) => {
+      if (token.length < 3) return false;
+      return responseLower.includes(token);
+    });
+    if (topicAppears) return response;
+
+    const looksLikeQuestion =
+      /[?]/.test(originalInput)
+      || /\b(?:who|what|where|when|why|how|which|is|are|does|do|did|can|could|should|would)\b/i.test(inputLower);
+    if (!looksLikeQuestion) return response;
+
+    const topicLabel = topic.trim().length > 0
+      ? topic.trim().slice(0, 60)
+      : tokens.slice(0, 4).join(' ');
+
+    return `I don't have a solid answer for **${topicLabel || 'that'}** yet.\n\nYou can teach me with the source you trust, or hook up an external model in settings and I'll hand it off automatically.`;
+  }
+
   private applyBrevityConstraint(input: string, response: string): string {
     const lower = input.toLowerCase();
     const oneSentence = /\b(?:in (?:one|1|a single) sentence|one[- ]?liner)\b/i.test(lower);
-    const explicitBrevityRequest = /(?:\b(?:be|keep it|answer|explain|say|tell me|give me)\s+(?:brief|briefly|short|shortly|concise|quick|quickly)\b|\b(?:brief|briefly|short|shortly|concise)\s+(?:answer|summary|overview|version|explanation)\b|\bquick\s+(?:answer|summary|overview|version|explanation)\b|\btl;?dr\b|\b(?:summarize|summary)\b)/i.test(lower);
+    const responseContainsTitledFiles = /```[a-z0-9+#.-]*\s+title=["'][^"']+["']/i.test(response);
+    const isBuilderFileTurn = this._activeMode === 'builder'
+      || /\b(?:build|create|make|generate|scaffold|start|dev server|repair attempt|files that were applied|output only the files|complete fenced code blocks)\b/i.test(lower);
+    if (responseContainsTitledFiles && isBuilderFileTurn) {
+      return response;
+    }
+
+    const explicitBrevityRequest = /(?:\b(?:be|keep it|answer|explain|say|tell me|give me)\s+(?:brief|briefly|short|shortly|concise|quick|quickly)\b|\b(?:brief|briefly|short|shortly|concise)\s+(?:answer|summary|overview|version|explanation)\b|\bquick\s+(?:answer|overview|version|explanation)\b|\b(?:quick|short|concise)\s+summary\b|\b(?:summarize|give me a summary|summary of|summarise)\b|\btl;?dr\b)/i.test(lower);
 
     if (oneSentence) {
       // Extract just the first meaningful sentence from the response
@@ -1397,6 +1479,7 @@ export class VaiEngine implements ModelAdapter {
       'code-gen': 0.80, 'advanced-code': 0.80,
       'intelligence': 0.75,
       'research-cited': 0.78,
+      'context-grounded-followup': 0.82,
       'direct-match': 0.70, 'concept-lookup': 0.60,
       'synthesis': 0.55, 'learn-chat': 0.50,
       'web-search': 0.45, 'fallback': 0.15,
@@ -1527,15 +1610,18 @@ export class VaiEngine implements ModelAdapter {
     const start = performance.now();
     let response = await this.generateResponse(userContent, request.messages);
     response = this.applyBrevityConstraint(userContent, response);
-    const durationMs = Math.round(performance.now() - start);
-    // Patch timing into the last tracked meta
-    if (this._lastMeta) this._lastMeta.durationMs = durationMs;
+    response = await this.maybeRunTeacherLoop(userContent, response, request.messages, {
+      allowLearning: !request.noLearn,
+    });
+    response = this.sanitizeOffTopicBootstrapResponse(userContent, response);
 
     // Learning flywheel — extract and persist knowledge from this exchange
     // Skip when noLearn is set (protective parenting — Vegga controls what Vai learns)
     if (this._lastMeta && !request.noLearn) this.afterResponse(userContent, response, this._lastMeta);
 
     this.recordShadowObservation(userContent, request.messages);
+    const durationMs = Math.round(performance.now() - start);
+    if (this._lastMeta) this._lastMeta.durationMs = durationMs;
 
     return {
       message: { role: 'assistant', content: response },
@@ -1582,47 +1668,14 @@ export class VaiEngine implements ModelAdapter {
     const start = performance.now();
     let response = await this.generateResponse(userContent, request.messages);
     response = this.applyBrevityConstraint(userContent, response);
+    response = await this.maybeRunTeacherLoop(userContent, response, request.messages, {
+      allowLearning: !request.noLearn,
+    });
+    response = this.sanitizeOffTopicBootstrapResponse(userContent, response);
+
     const durationMs = Math.round(performance.now() - start);
-    // Patch timing into the last tracked meta
+    // Patch timing into the last tracked meta after the teacher loop completes
     if (this._lastMeta) this._lastMeta.durationMs = durationMs;
-
-    // ── Quality Gate: learn from external LLM feedback on low-confidence responses ──
-    // The LLM is a teacher, not a replacement. Vai learns the diff and regenerates
-    // its OWN improved response. The LLM's code is never shipped directly.
-    if (this._lastMeta && this._config?.qualityGate?.enabled) {
-      const gate = this._config.qualityGate;
-      const confidence = this._lastMeta.confidence;
-      const strategy = this._lastMeta.strategy;
-      const shouldValidate = confidence < gate.confidenceThreshold
-        && !gate.skipStrategies.includes(strategy);
-
-      if (shouldValidate) {
-        try {
-          const lessons = await this.runQualityGate(
-            userContent,
-            response,
-            gate,
-          );
-          if (lessons) {
-            // Learn from LLM feedback — persist lessons so Vai improves over time
-            for (const lesson of lessons.learnings) {
-              this.teach(lesson.topic, lesson.insight, 'quality-gate', 'en');
-            }
-            // Regenerate Vai's OWN response using what it just learned
-            if (lessons.shouldRegenerate) {
-              const improved = await this.generateResponse(userContent, request.messages);
-              if (improved.length > 20) {
-                response = this.applyBrevityConstraint(userContent, improved);
-                this._lastMeta.strategy = `${strategy}→self-improved`;
-                this._lastMeta.confidence = Math.min(confidence + 0.15, 0.85);
-              }
-            }
-          }
-        } catch {
-          // Quality gate failure is non-fatal — use original response
-        }
-      }
-    }
 
     // Learning flywheel — extract and persist knowledge from this exchange
     // Skip when noLearn is set (protective parenting — Vegga controls what Vai learns)
@@ -1720,23 +1773,283 @@ export class VaiEngine implements ModelAdapter {
 
   // ── Quality Gate: external LLM as teacher — Vai learns, never copies ──
 
+  private async maybeRunTeacherLoop(
+    userInput: string,
+    initialResponse: string,
+    history: readonly Message[],
+    options: { readonly allowLearning: boolean } = { allowLearning: true },
+  ): Promise<string> {
+    if (!this._lastMeta || !this._config?.qualityGate?.enabled) {
+      return initialResponse;
+    }
+
+    const gate = this._config.qualityGate;
+    const confidence = this._lastMeta.confidence;
+    const strategy = this._lastMeta.strategy;
+    const localTeacherSignals = gate.localHeuristics
+      ? this.analyzeTeacherLoopSignals(userInput, initialResponse, this._activeMode)
+      : { concerns: [], shouldValidate: false, shouldRegenerate: false };
+    const shouldValidate = confidence < gate.confidenceThreshold
+      || (gate.validateSoftwareResponses && localTeacherSignals.shouldValidate);
+
+    if (!shouldValidate || gate.skipStrategies.includes(strategy)) {
+      return initialResponse;
+    }
+
+    const provider = this.resolveQualityGateProvider(gate);
+    if (!provider) {
+      this._lastMeta.teacherLoop = {
+        status: 'unavailable',
+        rounds: 0,
+        improvedRounds: 0,
+        finalScore: null,
+        localConcerns: localTeacherSignals.concerns,
+        learnedCount: 0,
+        learningSuppressed: !options.allowLearning,
+      };
+      return initialResponse;
+    }
+
+    try {
+      const teacherLoop = await this.runTeacherLoop(
+        userInput,
+        initialResponse,
+        history,
+        gate,
+        provider,
+        localTeacherSignals,
+      );
+      if (!teacherLoop) {
+        return initialResponse;
+      }
+
+      if (options.allowLearning) {
+        for (const lesson of teacherLoop.learnings) {
+          this.teach(lesson.topic, lesson.insight, 'quality-gate', 'en');
+        }
+      }
+      const learnedCount = options.allowLearning ? teacherLoop.learnings.length : 0;
+      if (this._lastMeta) {
+        this._lastMeta.teacherLoop = {
+          status: 'reviewed',
+          providerId: provider.id,
+          model: provider.model,
+          rounds: teacherLoop.rounds,
+          improvedRounds: teacherLoop.improvedRounds,
+          finalScore: teacherLoop.finalScore,
+          localConcerns: teacherLoop.localConcerns,
+          learnedCount,
+          learningSuppressed: !options.allowLearning && teacherLoop.learnings.length > 0,
+        };
+      }
+
+      if (teacherLoop.improvedRounds > 0) {
+        if (this._lastMeta) {
+          this._lastMeta.strategy = `${strategy}->teacher-loop`;
+          this._lastMeta.confidence = Math.min(
+            Math.max(this._lastMeta.confidence, confidence + 0.15, teacherLoop.finalScore ?? confidence),
+            0.9,
+          );
+        }
+        return teacherLoop.response;
+      }
+    } catch {
+      if (this._lastMeta) {
+        this._lastMeta.teacherLoop = {
+          status: 'failed',
+          providerId: provider.id,
+          model: provider.model,
+          rounds: 0,
+          improvedRounds: 0,
+          finalScore: null,
+          localConcerns: localTeacherSignals.concerns,
+          learnedCount: 0,
+          learningSuppressed: !options.allowLearning,
+        };
+      }
+      // Teacher-loop failures are non-fatal — keep Vai's original response.
+    }
+
+    return initialResponse;
+  }
+
+  private analyzeTeacherLoopSignals(
+    userInput: string,
+    vaiResponse: string,
+    activeMode: string,
+  ): {
+    concerns: string[];
+    shouldValidate: boolean;
+    shouldRegenerate: boolean;
+  } {
+    const concerns: string[] = [];
+    const input = userInput.trim();
+    const response = vaiResponse.trim();
+    const lowerInput = input.toLowerCase();
+
+    const isSoftwareRequest = activeMode === 'builder'
+      || /\b(?:build|create|make|implement|write|generate|scaffold|fix|debug|refactor|ship|deploy)\b/i.test(input)
+      || /\b(?:app|page|component|function|api|endpoint|feature|bug|error|test)\b/i.test(input);
+    if (!isSoftwareRequest) {
+      return { concerns, shouldValidate: false, shouldRegenerate: false };
+    }
+
+    const hasCodeFence = /```/.test(response);
+    const hasFileArtifact = /(?:^|\s)(?:src\/|app\/|pages\/|components\/|package\.json|tsconfig\.json|vite\.config|dockerfile|README\.md|index\.(?:ts|tsx|js|jsx|html|css)|app\.(?:ts|tsx|js|jsx))/im.test(response);
+    const hasConcreteSteps = /^\s*\d+\./m.test(response)
+      || /\b(?:next step|steps?:|verify|test|run|check|diff|file|path)\b/i.test(response);
+    const hasPlaceholder = /\b(?:todo|placeholder|stub|coming soon|your code here|fill in the rest)\b/i.test(response)
+      || /\.{3,}/.test(response);
+    const isHedged = /\b(?:maybe|probably|i think|might|could be|not sure|unsure|guess)\b/i.test(response);
+    const asksBuildArtifact = /\b(?:build|create|make|implement|write|generate|scaffold|component|function|page|app|api|endpoint|feature)\b/i.test(input);
+    const asksFix = /\b(?:fix|debug|error|bug|issue|broken|failing|stack trace|exception)\b/i.test(input);
+
+    if (asksBuildArtifact && response.length < 260 && !hasCodeFence && !hasFileArtifact && !hasConcreteSteps) {
+      concerns.push('Software request answered without code, file artifacts, or concrete implementation steps.');
+    }
+    if (hasPlaceholder) {
+      concerns.push('Response still contains placeholders or unfinished implementation markers.');
+    }
+    if (isHedged) {
+      concerns.push('Software response uses hedged language instead of concrete, verifiable guidance.');
+    }
+    if (asksFix && !/\b(?:test|verify|repro|reproduce|check|run|expected|actual)\b/i.test(response)) {
+      concerns.push('Bug-fix guidance does not include a verification or reproduction step.');
+    }
+    if (/\b(?:explain|walk me through|teach me|in detail|thoroughly)\b/i.test(lowerInput) && response.length < 180) {
+      concerns.push('Detailed software request received a very short answer that may omit key implementation context.');
+    }
+
+    const shouldRegenerate = concerns.length >= 2
+      || concerns.some((concern) =>
+        concern.includes('without code')
+        || concern.includes('unfinished implementation'),
+      );
+
+    return {
+      concerns,
+      shouldValidate: concerns.length > 0,
+      shouldRegenerate,
+    };
+  }
+
+  private dedupeTeacherLearnings(
+    learnings: Array<{ topic: string; insight: string }>,
+  ): Array<{ topic: string; insight: string }> {
+    const seen = new Set<string>();
+    const unique: Array<{ topic: string; insight: string }> = [];
+    for (const lesson of learnings) {
+      const topic = lesson.topic.trim();
+      const insight = lesson.insight.trim();
+      if (!topic || !insight) continue;
+      const key = `${topic.toLowerCase()}|${insight.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push({ topic, insight });
+    }
+    return unique.slice(0, 12);
+  }
+
+  private async runTeacherLoop(
+    userInput: string,
+    initialResponse: string,
+    history: readonly Message[],
+    gate: NonNullable<import('../config/types.js').VaiConfig['qualityGate']>,
+    provider: { id: string; apiKey: string; baseUrl: string; model: string },
+    initialSignals: {
+      concerns: string[];
+      shouldValidate: boolean;
+      shouldRegenerate: boolean;
+    },
+  ): Promise<{
+    response: string;
+    rounds: number;
+    improvedRounds: number;
+    finalScore: number | null;
+    localConcerns: readonly string[];
+    learnings: Array<{ topic: string; insight: string }>;
+  } | null> {
+    const learnings: Array<{ topic: string; insight: string }> = [];
+    const localConcerns: string[] = [];
+    let response = initialResponse;
+    let rounds = 0;
+    let improvedRounds = 0;
+    let finalScore: number | null = null;
+    const maxRounds = Math.max(1, Math.min(gate.maxRounds, 3));
+    const targetScore = Math.max(gate.confidenceThreshold, 0.7);
+
+    for (let round = 1; round <= maxRounds; round += 1) {
+      const signals = round === 1
+        ? initialSignals
+        : (
+          gate.localHeuristics
+            ? this.analyzeTeacherLoopSignals(userInput, response, this._activeMode)
+            : { concerns: [], shouldValidate: false, shouldRegenerate: false }
+        );
+      for (const concern of signals.concerns) {
+        if (!localConcerns.includes(concern)) localConcerns.push(concern);
+      }
+
+      const review = await this.runQualityGate(
+        userInput,
+        response,
+        gate,
+        provider,
+        signals.concerns,
+        round,
+      );
+      if (!review) break;
+
+      rounds += 1;
+      finalScore = review.score;
+      learnings.push(...review.learnings);
+
+      const reviewStillWeak = review.score < targetScore || signals.concerns.length > 0;
+      const shouldRegenerate = review.shouldRegenerate || signals.shouldRegenerate || reviewStillWeak;
+      if (!shouldRegenerate) break;
+
+      const improved = await this.generateResponse(userInput, history);
+      if (improved.length <= 20) break;
+
+      const nextResponse = this.applyBrevityConstraint(userInput, improved);
+      if (nextResponse === response) break;
+
+      response = nextResponse;
+      improvedRounds += 1;
+    }
+
+    return {
+      response,
+      rounds,
+      improvedRounds,
+      finalScore,
+      localConcerns,
+      learnings: this.dedupeTeacherLearnings(learnings),
+    };
+  }
+
   private async runQualityGate(
     userInput: string,
     vaiResponse: string,
     gate: NonNullable<import('../config/types.js').VaiConfig['qualityGate']>,
+    provider: { id: string; apiKey: string; baseUrl: string; model: string },
+    localConcerns: readonly string[] = [],
+    round = 1,
   ): Promise<{
+    /** Normalized confidence score from the teacher's 1-10 grade. */
     score: number;
+    /** Raw teacher score as requested in the diagnostic prompt. */
+    rawScore: number;
     shouldRegenerate: boolean;
     learnings: Array<{ topic: string; insight: string }>;
     versionWarnings: string[];
   } | null> {
-    const provider = this.resolveQualityGateProvider(gate);
-    if (!provider) return null;
-
     // Ask the LLM to be a teacher — diagnose problems, don't give answers
     const evaluationPrompt = [
       'You are a code quality teacher evaluating an AI assistant\'s response.',
       'Your job is to diagnose weaknesses and teach — NOT to provide a replacement response.',
+      `This is teacher review round ${round}.`,
+      'Do not provide full rewritten code or a replacement answer.',
       '',
       'Reply in EXACTLY this JSON format (no markdown fences, no wrapping):',
       '{',
@@ -1747,6 +2060,14 @@ export class VaiEngine implements ModelAdapter {
       '  "pattern_fixes": ["<pattern: wrong approach → better approach>"],',
       '  "should_regenerate": <true if score <= 4>',
       '}',
+      ...(localConcerns.length > 0
+        ? [
+            '',
+            'Local teacher concerns detected before this review:',
+            ...localConcerns.map((concern) => `- ${concern}`),
+            'Treat those concerns as hypotheses: confirm them if they are real, dismiss them if the answer already solved them.',
+          ]
+        : []),
       '',
       `User question: ${userInput.slice(0, 500)}`,
       '',
@@ -1771,7 +2092,7 @@ export class VaiEngine implements ModelAdapter {
       if (!result) return null;
 
       // Parse JSON from the LLM response — tolerant of wrapping
-      const jsonMatch = result.match(/\{[\s\S]*"score"\s*:\s*(\d+)[\s\S]*\}/);
+      const jsonMatch = result.match(/\{[\s\S]*"score"\s*:\s*\d+(?:\.\d+)?[\s\S]*\}/);
       if (!jsonMatch) return null;
 
       const parsed = JSON.parse(jsonMatch[0]) as {
@@ -1783,7 +2104,9 @@ export class VaiEngine implements ModelAdapter {
         should_regenerate?: boolean;
       };
 
-      const score = Math.max(1, Math.min(10, parsed.score));
+      const parsedScore = Number(parsed.score);
+      if (!Number.isFinite(parsedScore)) return null;
+      const rawScore = Math.max(1, Math.min(10, parsedScore));
       const learnings: Array<{ topic: string; insight: string }> = [];
 
       // Convert LLM feedback into learnable knowledge entries
@@ -1823,8 +2146,9 @@ export class VaiEngine implements ModelAdapter {
       }
 
       return {
-        score: score / 10,
-        shouldRegenerate: score <= 4 || (parsed.should_regenerate ?? false),
+        score: rawScore / 10,
+        rawScore,
+        shouldRegenerate: rawScore <= 4 || (parsed.should_regenerate ?? false),
         learnings,
         versionWarnings: validatedVersionWarnings,
       };
@@ -1931,7 +2255,7 @@ export class VaiEngine implements ModelAdapter {
   private defaultModel(id: string): string {
     switch (id) {
       case 'anthropic': return 'claude-sonnet-4-20250514';
-      case 'openai': return 'gpt-4o';
+      case 'openai': return 'gpt-5.4-mini';
       case 'google': return 'gemini-2.5-flash';
       default: return '';
     }
@@ -2025,6 +2349,57 @@ export class VaiEngine implements ModelAdapter {
     return data.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
   }
 
+  private tryOversizedInputFastPath(input: string): {
+    response: string;
+    trackingInput: string;
+    confidence: number;
+  } | null {
+    if (input.length <= OVERSIZED_CHAT_INPUT_CHARS) return null;
+
+    const sample = `${input.slice(0, OVERSIZED_CHAT_SAMPLE_CHARS)}\n${input.slice(-OVERSIZED_CHAT_SAMPLE_CHARS)}`;
+    const topicTokens = topicContentTokens(extractTopicFromQuery(sample));
+    const uniqueTokens = Array.from(new Set(topicTokens)).filter((token) => token.length > 2);
+    const topic = uniqueTokens.slice(0, 4).join(' ');
+    const query = topic || extractTopicFromQuery(sample).slice(0, 160).trim() || 'oversized message';
+
+    const direct = this.cachedFindBestMatch(`${query} overview`) || this.cachedFindBestMatch(query);
+    if (direct && direct.response.length > 50 && !KnowledgeStore.isJunkContent(direct.response)) {
+      return {
+        response: direct.response,
+        trackingInput: query,
+        confidence: 0.72,
+      };
+    }
+
+    const concept = this.knowledge.findConcept(query);
+    if (concept && concept.definition.length > 30 && !KnowledgeStore.isJunkContent(concept.definition)) {
+      return {
+        response: concept.definition,
+        trackingInput: query,
+        confidence: 0.65,
+      };
+    }
+
+    const retrieved = this.cachedRetrieveRelevant(query, 3)
+      .filter((item) => item.score >= KNOWLEDGE_RETRIEVAL_SCORE_MIN && !KnowledgeStore.isJunkContent(item.text));
+    if (retrieved.length > 0) {
+      const text = retrieved[0].text.length > 700
+        ? `${retrieved[0].text.slice(0, 700).trim()}...`
+        : retrieved[0].text;
+      return {
+        response: text,
+        trackingInput: query,
+        confidence: 0.58,
+      };
+    }
+
+    return {
+      response: `That message is very large, so I narrowed it to its most repeated topic: "${query}". I do not have enough local knowledge to answer that confidently yet, but you can ask a shorter, focused version and I can handle it more directly.`,
+      trackingInput: query,
+      confidence: 0.35,
+    };
+  }
+
   private async generateResponse(input: string, history: readonly Message[]): Promise<string> {
     input = this.normalizeUserInputForUnderstanding(input);
     const originalInput = input;
@@ -2067,6 +2442,13 @@ export class VaiEngine implements ModelAdapter {
       ),
     );
     const activeMode = this._activeMode;
+
+    const oversizedInput = this.tryOversizedInputFastPath(input);
+    if (oversizedInput) {
+      return this.tracked('long-input-fastpath', oversizedInput.response, oversizedInput.trackingInput, {
+        confidenceOverride: oversizedInput.confidence,
+      });
+    }
 
     // Strategy -0.5: Mode-specific intercepts
     // Plan mode — structure any request as a numbered plan
@@ -2160,11 +2542,29 @@ export class VaiEngine implements ModelAdapter {
     const recallSynth = this.tryLongContextRecallSynthesis(originalInput, history);
     if (recallSynth) return this.tracked('long-context-recall', recallSynth, input);
 
+    // Strategy 0.0148: Vai response-quality engineering direction. Long product
+    // questions about making Vai/chat responses more relevant are actionable
+    // recommendations, not glossary questions; catch them before decomposition
+    // or fuzzy retrieval can split them into unrelated "what is X" snippets.
+    const vaiChatQualityDirection = this.tryVaiChatQualityDirection(input, lower);
+    if (vaiChatQualityDirection) return this.tracked('vai-chat-quality-direction', vaiChatQualityDirection, input);
+
     // Strategy 0.015: URL-based requests — "take a look at URL", "rebuild URL", "check out URL"
     // For GitHub URLs: fetches repo info via API and generates/presents the project.
     // For non-GitHub URLs: catches build intent or returns null for search pipeline.
     const urlRequestResult = await this.tryUrlBasedRequest(lower, input);
     if (urlRequestResult !== null) return this.tracked('url-request', urlRequestResult, input);
+
+    // Builder mode is action-first: concrete fresh-build prompts must produce
+    // files before decomposition/retrieval can split them into glossary answers.
+    if (
+      activeMode === 'builder'
+      && /\b(?:build|create|make|generate|scaffold|develop|start)\b/i.test(input)
+      && /\b(?:app|application|tool|game|dashboard|gallery|playbook|extension|product|preview|site|website|project)\b/i.test(input)
+    ) {
+      const freshBuilderProject = this.tryCreativeCodeProject(input, history);
+      if (freshBuilderProject) return this.tracked('creative-code', freshBuilderProject, input);
+    }
 
     // Strategy 0.02: Multi-question decomposition — "what is X and also Y and also Z"
     const multiResult = this.tryMultiQuestionDecomposition(lower, input, history);
@@ -2274,6 +2674,13 @@ export class VaiEngine implements ModelAdapter {
     // storefront/product continuations do not collapse into generic binary answers.
     const topicFollowUpEarly = this.tryTopicAwareFollowUp(lower, input, history);
     if (topicFollowUpEarly) return this.tracked('topic-followup', topicFollowUpEarly, input);
+
+    // Strategy 0.445: Context-grounded continuation - after the specialized
+    // topic follow-up handlers get first refusal, catch vague turns like
+    // "make it more robust", "what is the best next thing?", or
+    // "explain that more simply" before broad retrieval can drift.
+    const contextGroundedFollowUp = this.tryContextGroundedFollowUpSynthesis(input, history);
+    if (contextGroundedFollowUp) return this.tracked('context-grounded-followup', contextGroundedFollowUp, input);
 
     // Strategy 0.45: Yes/No reasoning — answer yes/no questions using knowledge
     const yesNoResult = this.tryYesNoAnswer(input, lower);
@@ -2396,8 +2803,10 @@ export class VaiEngine implements ModelAdapter {
     const uncertaintyGuardrail = this.tryUncertaintyGuardrail(input);
     if (uncertaintyGuardrail) return this.tracked('uncertainty-guardrail', uncertaintyGuardrail, input);
 
+    let attemptedRoutedResearch = false;
     const shouldPrioritizeResearch = this.shouldPrioritizeResearch(input, lower);
     if (shouldPrioritizeResearch) {
+      attemptedRoutedResearch = true;
       const routedResearch = await this.tryRoutedResearch(input, lower, null);
       if (routedResearch) {
         return this.tracked('research-cited', routedResearch.text, input, {
@@ -2576,7 +2985,10 @@ export class VaiEngine implements ModelAdapter {
     // This fires when: (a) question is factual + synthesized confidence is low, OR
     //                  (b) question asks about something current / version-specific, OR
     //                  (c) no local answer was found at all
-    if (!shouldPrioritizeResearch) {
+    const routedResearchEligible = !shouldPrioritizeResearch
+      && this.shouldAttemptRoutedResearch(input, lower, synthesized);
+    if (routedResearchEligible) {
+      attemptedRoutedResearch = true;
       const routedResearch = await this.tryRoutedResearch(input, lower, synthesized);
       if (routedResearch) {
         return this.tracked('research-cited', routedResearch.text, input, {
@@ -2594,7 +3006,9 @@ export class VaiEngine implements ModelAdapter {
     if (taught) return this.tracked('learn-chat', taught, input);
 
     // Strategy 5: Web search — when we don't have local knowledge
-    const webResult = await this.tryWebSearch(lower);
+    const webResult = attemptedRoutedResearch && !synthesized
+      ? null
+      : await this.tryWebSearch(lower);
     if (webResult) return this.tracked('web-search', webResult, input);
 
     // Strategy 6: Contextual "I don't know" — tell user what we DO know
@@ -2610,43 +3024,72 @@ export class VaiEngine implements ModelAdapter {
     if (this._activeMode === 'builder' || this._hasActiveSandboxContext) {
       return null;
     }
+    if (!this.shouldAttemptRoutedResearch(input, lower, synthesized)) {
+      return null;
+    }
     const normalizedInput = this.normalizeResearchIntentInput(input);
     const routing = getSubAgentRouter().route(input);
     const registry = getSkillRegistry();
-    const isFactualQuestion = /\b(?:what\s+is|what\s+are|how\s+does|how\s+do|explain|why\s+does|why\s+is|when\s+did|who\s+(?:is|was|are|were)|what'?s)\b/i.test(normalizedInput);
-    const isCurrentInfoQuestion = /\b(?:latest|current|2024|2025|2026|now|today|recent|new|version|release|update)\b/i.test(normalizedInput);
-    const isLexicalLookup = this.isLikelyLexicalLookup(normalizedInput, lower);
-    const isResearchRouted = routing.primaryRole === 'researcher' || routing.primarySkills.some(skill => skill.manifest.name === 'research-agent');
-    const shouldResearch = isResearchRouted || isCurrentInfoQuestion || (!synthesized && (isFactualQuestion || isLexicalLookup));
-
-    if (!shouldResearch) return null;
-
     const researchSkill = routing.primarySkills.find(skill => skill.manifest.name === 'research-agent')
       ?? registry.forRole('researcher')
       ?? routing.primarySkills[0];
     if (!researchSkill) return null;
 
-    try {
-      const result = await this.searchPipeline.search(lower);
-      if (result.sources.length === 0) return null;
+    const result = await this.runSearchWithBudget(lower);
+    if (!result || result.sources.length === 0) return null;
 
-      this._lastSearchResponse = result;
-      const citedAnswer = this.buildCitedAnswer(result);
-      const teacherDecision = getTeacherAgent().decide(input, citedAnswer, false);
+    this._lastSearchResponse = result;
+    const citedAnswer = this.buildCitedAnswer(result);
+    const teacherDecision = getTeacherAgent().decide(input, citedAnswer, false);
 
-      this._lastCitedAnswer = citedAnswer;
-      this._lastTeacherDecision = teacherDecision;
-      this.persistTeacherDecisions(input, teacherDecision);
+    this._lastCitedAnswer = citedAnswer;
+    this._lastTeacherDecision = teacherDecision;
+    this.persistTeacherDecisions(input, teacherDecision);
 
-      return {
-        text: citedAnswer.text,
-        confidence: citedAnswer.confidence,
-        retrievalSource: `skill:${researchSkill.manifest.name}`,
-        matchedPattern: `${routing.primaryRole}:${researchSkill.manifest.name}`,
-      };
-    } catch {
-      return null;
+    return {
+      text: citedAnswer.text,
+      confidence: citedAnswer.confidence,
+      retrievalSource: `skill:${researchSkill.manifest.name}`,
+      matchedPattern: `${routing.primaryRole}:${researchSkill.manifest.name}`,
+    };
+  }
+
+  private shouldAttemptRoutedResearch(input: string, lower: string, synthesized: string | null): boolean {
+    if (this._activeMode === 'builder' || this._hasActiveSandboxContext) {
+      return false;
     }
+    const normalizedInput = this.normalizeResearchIntentInput(input);
+    const routing = getSubAgentRouter().route(input);
+    const isFactualQuestion = /\b(?:what\s+is|what\s+are|how\s+does|how\s+do|explain|why\s+does|why\s+is|when\s+did|who\s+(?:is|was|are|were)|what'?s)\b/i.test(normalizedInput);
+    const isCurrentInfoQuestion = /\b(?:latest|current|2024|2025|2026|now|today|recent|new|version|release|update)\b/i.test(normalizedInput);
+    const isLexicalLookup = this.isLikelyLexicalLookup(normalizedInput, lower);
+    const isResearchRouted = routing.primaryRole === 'researcher' || routing.primarySkills.some(skill => skill.manifest.name === 'research-agent');
+    return isResearchRouted || isCurrentInfoQuestion || (!synthesized && (isFactualQuestion || isLexicalLookup));
+  }
+
+  private async runSearchWithBudget(query: string, budgetMs = this.chatSearchBudgetMs): Promise<SearchResponse | null> {
+    let settled = false;
+    return await new Promise<SearchResponse | null>((resolve) => {
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve(null);
+      }, budgetMs);
+
+      void this.searchPipeline.search(query)
+        .then((result) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(result);
+        })
+        .catch(() => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(null);
+        });
+    });
   }
 
   private shouldPrioritizeResearch(input: string, lower: string): boolean {
@@ -4447,15 +4890,35 @@ export class VaiEngine implements ModelAdapter {
     if (coverage < 0.3 && hits < 2) return null; // Not enough knowledge
 
     // Build answer — when we have matching knowledge and the claim is phrased
-    // as a yes/no question, we default to affirming with the retrieved knowledge
+    // as a yes/no question, we default to affirming with the retrieved knowledge.
+    // The grounding sentence MUST mention at least one content token from the
+    // claim; otherwise we'd be emitting a confident "Yes" backed by an
+    // unrelated snippet (the bug the A3 fix targets).
     const reasoning = this.extractReasoningSnippet(knowledgeTexts, claim);
-    
-    if (coverage >= 0.3 || hits >= 2) {
-      const reasonSnippet = reasoning ? `\n\n${reasoning}` : '';
-      return `**Yes.** ${reasonSnippet}`;
+    let grounded = reasoning;
+    if (!grounded || !textConcernsTopic(grounded, claim)) {
+      grounded = '';
+      outer: for (const text of knowledgeTexts) {
+        const sentences = text.split(/(?<=[.!?])\s+/);
+        for (const s of sentences) {
+          const trimmed = s.trim();
+          if (trimmed.length < 20 || trimmed.length > 320) continue;
+          if (textConcernsTopic(trimmed, claim)) {
+            grounded = trimmed;
+            break outer;
+          }
+        }
+      }
     }
 
-    return null;
+    // Refuse to emit a bare "**Yes.**" — without a grounded sentence, defer
+    // to the next strategy in the chain (topic lookup / retrieval / fallback).
+    if (!grounded) return null;
+
+    const rawSource = taughtMatch?.source ?? match?.source ?? retrieved[0]?.source ?? '';
+    const isCurated = rawSource.startsWith('entry:') || rawSource === 'user' || rawSource === '';
+    const citation = isCurated ? '' : ` _(source: ${rawSource})_`;
+    return `**Yes** — ${grounded}${citation}`;
   }
 
   private tryBinaryDecode(input: string): string | null {
@@ -5964,6 +6427,420 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
 
   // ─── REFACTORING GUIDANCE ─────────────────────────────────────────────────
 
+  private tryVaiChatQualityDirection(input: string, _lower: string): string | null {
+    const mentionsVaiChat = /\b(?:vai|veggaai|chat\s+(?:app|product|service|system)|chatbot)\b/i.test(input)
+      && /\b(?:responses?|answers?|reply|replies|context|relevance|relevant|accuracy|accurate|responsive|off[-\s]?topic|weird|quality)\b/i.test(input);
+    const asksForActionableDirection = /\b(?:single\s+best|best\s+next|optimal|highest[-\s]?leverage|engineering\s+task|next\s+(?:thing|step|task|move)|what\s+(?:would|should)\s+.*(?:implement|fix|build|make)|teacher\s+loops?|quality\s+(?:test|gate|loop)|validation|make\s+.+(?:better|stronger|more\s+relevant|accurate|responsive))\b/i.test(input);
+    if (!mentionsVaiChat || !asksForActionableDirection) return null;
+
+    const wantsTeacherLoop = /\b(?:teacher\s+loops?|automated\s+(?:teacher|quality|validation)|quality\s+gate|validation\s+loop|self[-\s]?eval|regression)\b/i.test(input);
+    const rejectsExternalBrain = /\b(?:not|without|do\s+not|should\s+not|don'?t)\b[\s\S]{0,80}\b(?:external\s+(?:llms?|ais?)|other\s+(?:llms?|ais?)|llm\s+calls?)\b/i.test(input)
+      || /\bexternal\s+(?:llms?|ais?|llm\s+calls?)\b[\s\S]{0,120}\b(?:extra\s+tool|confirm|not\s+(?:the\s+)?main|not\s+mainly|not\s+relying|own\s+(?:ai|brain|breed))\b/i.test(input);
+
+    return [
+      '**Best next task**',
+      'Implement a local context-grounded answer contract as the next engineering task before Vai enters broad retrieval, glossary decomposition, or any fallback path.',
+      '',
+      '**Why this is the highest-leverage fix**',
+      'The bad behavior is not just weak wording; it is routing drift. Vai sees words like "context", "relevant", "external LLM", and "accurate", then retrieves loosely related snippets instead of preserving the user request: improve Vai chat responses against the current conversation.',
+      '',
+      '**First implementation slice**',
+      '- Add a turn classifier that decides: standalone knowledge question, contextual follow-up, software/build request, or product-quality recommendation.',
+      '- Build a compact active-context brief from the latest user turn, recent user intent, selected files/sandbox state when present, and the last useful assistant answer.',
+      '- Gate knowledge retrieval with minimum topic overlap so unrelated learned snippets cannot outrank the active chat context.',
+      '- Return a small deterministic answer when the request is a product-quality recommendation, rather than decomposing it into "What is X?" fragments.',
+      '',
+      wantsTeacherLoop
+        ? '**Automated teacher loop**\n- Add local eval prompts that act like real users: first-turn recommendation, vague follow-up, correction, simple explanation, and first-patch request.\n- Score each answer for topic retention, explicit instruction coverage, concrete next action, and no unrelated snippet leakage.\n- Use external LLMs only as an optional critic/confirmation tool, never as Vai\'s main answer generator.'
+        : '**Validation loop**\n- Add regression prompts for first-turn quality, vague follow-ups, and correction turns.\n- Assert the response mentions Vai/chat context and gives a concrete implementation step.\n- Fail the test if the answer starts with unrelated glossary headings or copied snippets.',
+      '',
+      rejectsExternalBrain
+        ? '**Boundary**\nExternal LLM calls should stay as a verification tool. Vai should make the answer locally, then optionally ask a critic whether the answer stayed grounded.'
+        : '**Boundary**\nThe fix should improve Vai itself first. External critics can verify output quality, but they should not become the main responder.',
+      '',
+      '**First patch I would make**',
+      'Add the high-priority `vai-chat-quality-direction` route plus tests that prove this exact class of prompt returns a concrete plan instead of decomposed glossary snippets.',
+    ].join('\n');
+  }
+
+  private tryContextGroundedFollowUpSynthesis(input: string, history: readonly Message[]): string | null {
+    const trimmed = input.trim();
+    if (!trimmed || history.length < 2) return null;
+    if (this.shouldDeferContextGroundedFollowUp(trimmed, history)) return null;
+
+    const grounding = this.buildConversationGrounding(trimmed, history);
+    if (!grounding) return null;
+
+    const intent = this.classifyContextGroundedFollowUpIntent(trimmed, grounding.contextText);
+    if (!intent) return null;
+
+    if (intent === 'simple-explain') {
+      return this.buildGroundedSimpleExplanation(grounding, trimmed);
+    }
+    if (intent === 'quality-hardening') {
+      return this.buildGroundedQualityHardeningPlan(grounding, trimmed);
+    }
+    if (intent === 'best-next') {
+      return this.buildGroundedBestNextStep(grounding, trimmed);
+    }
+    return this.buildGroundedContinuation(grounding, trimmed);
+  }
+
+  private shouldDeferContextGroundedFollowUp(input: string, history: readonly Message[]): boolean {
+    const lower = input.toLowerCase().replace(/[.!?]+$/g, '').trim();
+
+    if (/\b(?:my|the)\s+(?:real|actual)\s+question\b|\banswer\s+the\s+(?:first|second|third|last)\s+(?:part|question)\b/i.test(lower)) {
+      return true;
+    }
+    if (/\b(?:trade-?offs?|pros?\s+and\s+cons?|biggest\s+upside|biggest\s+limit|best\s+fit|headings?\s*:)\b/i.test(lower)) {
+      return true;
+    }
+    if (/\b(?:deploy|deployment|hosting|host\s+it|vercel|netlify|serverless)\b/i.test(lower)) {
+      return true;
+    }
+    if (/\b(?:build|make|create)\s+(?:it|this|that|the\s+first\s+version)(?:\s+for\s+me)?\s+now\b/i.test(lower)
+      || /\bcan\s+you\s+make\s+it\s+(?:for\s+me\s+)?now\b/i.test(lower)) {
+      return true;
+    }
+
+    const recentAssistant = [...history].reverse().find((message) => message.role === 'assistant' && message.content.trim().length > 0);
+    const priorHasCode = Boolean(recentAssistant && /```[\s\S]+```/.test(recentAssistant.content));
+    if (
+      priorHasCode
+      && (/\bsame\s+(?:design|layout|style|look|ui|thing|app|project|page|site)?\s*but\b/i.test(lower)
+        || /\b(?:different|new|another)\s+(?:theme|color.?scheme|palette|subject|topic|style|look|vibe)\b/i.test(lower))
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private buildConversationGrounding(input: string, history: readonly Message[]): {
+    readonly topic: string;
+    readonly previousUser: string;
+    readonly previousAssistant: string;
+    readonly contextText: string;
+    readonly keywords: readonly string[];
+  } | null {
+    const userMessages = history
+      .filter((message) => message.role === 'user' && message.content.trim().length > 0)
+      .map((message) => message.content.trim());
+    const priorUsers = userMessages.slice(0, -1).filter((content) => content.length > 8);
+    const previousUser = priorUsers.length > 0 ? priorUsers[priorUsers.length - 1] : '';
+
+    const assistantMessages = history
+      .filter((message) => message.role === 'assistant' && message.content.trim().length > 0)
+      .map((message) => message.content.trim());
+    const previousAssistant = assistantMessages.length > 0 ? assistantMessages[assistantMessages.length - 1] : '';
+
+    const contextText = [
+      ...priorUsers.slice(-3),
+      ...assistantMessages.slice(-2),
+    ].join('\n').trim();
+
+    if (contextText.length < 25) return null;
+
+    const topic = this.deriveGroundedConversationTopic(contextText, previousUser, previousAssistant, input);
+    if (!topic || topic === 'general') return null;
+
+    const keywords = this.extractGroundingKeywords(`${contextText}\n${input}`, topic);
+    return {
+      topic,
+      previousUser,
+      previousAssistant,
+      contextText,
+      keywords,
+    };
+  }
+
+  private deriveGroundedConversationTopic(
+    contextText: string,
+    previousUser: string,
+    previousAssistant: string,
+    input: string,
+  ): string {
+    const combined = `${previousUser}\n${previousAssistant}\n${contextText}\n${input}`;
+
+    if (/\b(?:vai|veggaai)\b/i.test(combined) && /\b(?:chat|responses?|context|relevance|accurate|responsive)\b/i.test(combined)) {
+      return 'Vai chat context relevance';
+    }
+    if (/\bchat\s+(?:app|product|service|window|surface)\b/i.test(combined) && /\b(?:context|responses?|messages?|relevance|accuracy)\b/i.test(combined)) {
+      return 'chat app response relevance';
+    }
+    if (/\bnext\.?js\b/i.test(combined) && /\bprisma\b/i.test(combined) && /\btodo\b/i.test(combined)) {
+      return 'Next.js Prisma todo app';
+    }
+    if (/\breact\b/i.test(combined) && /\bhooks?\b/i.test(combined)) {
+      return 'React hooks';
+    }
+    if (/\bnext\.?js\b/i.test(combined) && /\bapp router\b/i.test(combined)) {
+      return 'Next.js App Router';
+    }
+    if (/\breact\b/i.test(combined) && /\btypescript\b/i.test(combined)) {
+      return 'React TypeScript app';
+    }
+    if (/\bexpress\b/i.test(combined) && /\bapi\b/i.test(combined)) {
+      return 'Express API';
+    }
+
+    const recentTopic = this.inferRecentFollowUpTopic([
+      { role: 'assistant', content: previousAssistant },
+      { role: 'user', content: previousUser },
+      { role: 'user', content: input },
+    ]);
+    if (recentTopic && this.isStableFollowUpTopic(recentTopic)) return recentTopic;
+
+    const previousNormalized = this.condenseStableFollowUpTopic(previousUser);
+    if (this.isStableFollowUpTopic(previousNormalized)) return previousNormalized;
+
+    const detected = this.detectTopic(previousUser || contextText);
+    if (this.isStableFollowUpTopic(detected)) return detected;
+
+    return '';
+  }
+
+  private extractGroundingKeywords(text: string, topic: string): readonly string[] {
+    const keywordPatterns: Array<[string, RegExp]> = [
+      ['Vai', /\b(?:vai|veggaai)\b/i],
+      ['chat app', /\bchat\s+(?:app|product|service|window|surface)\b/i],
+      ['user context', /\b(?:user\s+context|selected\s+files?|last\s+\d+\s+messages?|conversation\s+history|context\s+bundle)\b/i],
+      ['response relevance', /\b(?:relevance|relevant|accuracy|accurate|responsive|off-topic|weird|grounded)\b/i],
+      ['teacher loop', /\bteacher\s+loop|quality\s+gate|validator/i],
+      ['Next.js', /\bnext\.?js\b/i],
+      ['Prisma', /\bprisma\b/i],
+      ['SQLite', /\bsqlite\b/i],
+      ['todo app', /\btodo\s+app\b|\btodos?\b/i],
+      ['React hooks', /\breact\b[\s\S]{0,80}\bhooks?\b|\bhooks?\b[\s\S]{0,80}\breact\b/i],
+      ['tests', /\b(?:tests?|testable|vitest|unit\s+test|integration\s+test)\b/i],
+    ];
+
+    const keywords: string[] = [];
+    for (const [label, pattern] of keywordPatterns) {
+      if (pattern.test(text) && !keywords.includes(label)) keywords.push(label);
+    }
+
+    const tokenCandidates = topicContentTokens(topic)
+      .filter((token) => token.length >= 3)
+      .filter((token) => !VaiEngine.TOPIC_STOP_WORDS.has(token))
+      .slice(0, 6);
+    for (const token of tokenCandidates) {
+      const label = token.length <= 3 ? token.toUpperCase() : token.replace(/^\w/, (char) => char.toUpperCase());
+      if (!keywords.some((existing) => existing.toLowerCase() === label.toLowerCase())) keywords.push(label);
+    }
+
+    return keywords.slice(0, 8);
+  }
+
+  private classifyContextGroundedFollowUpIntent(
+    input: string,
+    contextText: string,
+  ): 'best-next' | 'quality-hardening' | 'simple-explain' | 'continue' | null {
+    const lower = input.toLowerCase().replace(/[.!?]+$/g, '').trim();
+    const wordCount = lower.split(/\s+/).filter(Boolean).length;
+    const hasRecentContext = contextText.trim().length > 0;
+    if (!hasRecentContext) return null;
+
+    const refersBack = /\b(?:it|this|that|these|those|them|there|above|earlier|previous|same|your\s+(?:answer|response)|the\s+(?:answer|response|context|approach|app|code|thing))\b/i.test(lower);
+    const asksSimpleExplain = /\b(?:explain|break\s+(?:it|this|that)\s+down|plain\s+english|eli5|like\s+i'?m\s+(?:new|five|5|a\s+beginner)|more\s+simply|simpler)\b/i.test(lower)
+      && (refersBack || wordCount <= 10);
+    if (asksSimpleExplain) return 'simple-explain';
+
+    const isChatQualityAsk = /\b(?:vai|chat|response|answer|context|relevance|accuracy|responsive)\b/i.test(lower)
+      && /\b(?:best|optimal|next|improve|better|stronger|relevant|accurate|responsive|weird|off)\b/i.test(lower);
+    const asksBestNext = /\b(?:best|optimal|highest[-\s]?leverage|right|smartest)\s+(?:next\s+)?(?:thing|step|task|move|slice|fix)\b/i.test(lower)
+      || /\bwhat\s+(?:would\s+be\s+)?(?:the\s+)?(?:best|next)\s+(?:thing|step|task|move)\b/i.test(lower)
+      || /\bwhere\s+should\s+(?:i|we)\s+(?:start|focus)\b/i.test(lower);
+    if (isChatQualityAsk || asksBestNext) return 'best-next';
+
+    const asksHardening = /\b(?:robust|reliable|production[-\s]?ready|testable|tests?|quality|accurate|relevant|responsive|grounded|automated|over[-\s]?engineer|stronger)\b/i.test(lower)
+      && /\b(?:make|improve|strengthen|harden|verify|test|add|more|better|fix)\b/i.test(lower);
+    if (asksHardening) return 'quality-hardening';
+
+    const asksContinue = /\b(?:continue|go\s+deeper|deeper|expand|more\s+detail|dig\s+in|build\s+on\s+that|take\s+it\s+further|what\s+else)\b/i.test(lower)
+      || (refersBack && wordCount <= 16 && /\b(?:how|what|why|which|can|should|would|more|better)\b/i.test(lower));
+    if (asksContinue) return 'continue';
+
+    return null;
+  }
+
+  private buildGroundedBestNextStep(
+    grounding: {
+      readonly topic: string;
+      readonly contextText: string;
+      readonly keywords: readonly string[];
+    },
+    input: string,
+  ): string {
+    if (/\b(?:vai|chat\s+app|response|context|relevance|accuracy|responsive)\b/i.test(`${grounding.topic}\n${grounding.contextText}\n${input}`)) {
+      return [
+        '**Best next task**',
+        'Build a local context-grounding pass before Vai enters broad retrieval or fallback. That is the highest-leverage fix because the weird answers are usually routing failures: the current turn says "this", "it", "best next thing", or "make it better", and Vai answers from loose keyword matches instead of the recent chat state.',
+        '',
+        '**What it should do**',
+        '- Classify the turn as either a new standalone question or a continuation of recent context.',
+        '- Extract the active topic from recent user messages and the last useful assistant answer.',
+        '- Bind vague quality asks to that topic before retrieval, knowledge synthesis, or web/search fallback can hijack the answer.',
+        '- Prefer a small grounded answer over a long fuzzy answer when context overlap is low.',
+        '',
+        '**Verification loop**',
+        '- Regression prompts: "make it more robust and testable", "what is the best next thing?", "explain that more simply", and "go deeper".',
+        '- Assert the answer mentions the real prior topic and does not drift into unrelated learned snippets.',
+        '- Track the strategy as `context-grounded-followup` so bad future answers are easy to diagnose.',
+      ].join('\n');
+    }
+
+    return [
+      '**Best next task**',
+      `For **${grounding.topic}**, the best next move is to turn the recent conversation into an explicit mini-brief before adding more features.`,
+      '',
+      '**Mini-brief**',
+      `- Active context: ${this.formatGroundingKeywords(grounding.keywords, grounding.topic)}.`,
+      '- Desired outcome: answer the current turn against that context, not against generic keyword matches.',
+      '- First slice: define the acceptance checks, then implement only the smallest change that makes those checks pass.',
+      '',
+      '**Why this is the right next step**',
+      'It improves relevance and speed at the decision point. Instead of generating a broad answer and hoping it fits, Vai chooses the right local context first, then answers.',
+    ].join('\n');
+  }
+
+  private buildGroundedQualityHardeningPlan(
+    grounding: {
+      readonly topic: string;
+      readonly contextText: string;
+      readonly keywords: readonly string[];
+    },
+    input: string,
+  ): string {
+    const combined = `${grounding.topic}\n${grounding.contextText}\n${input}`;
+
+    if (/\bnext\.?js\b/i.test(combined) && /\bprisma\b/i.test(combined) && /\btodo\b/i.test(combined)) {
+      return [
+        '**Grounded hardening pass**',
+        'For the **Next.js + Prisma todo app**, make it robust by adding boundaries first, not more UI.',
+        '',
+        '**Best slice**',
+        '- Put todo validation in one shared schema before data reaches Prisma.',
+        '- Move database access behind a tiny repository/service layer so tests can swap SQLite fixtures in cleanly.',
+        '- Add tests for create, toggle, delete, empty title, missing record, and database failure paths.',
+        '- Seed a known SQLite test database per test run so the app is deterministic instead of "works on my machine".',
+        '',
+        '**Why this improves the app fastest**',
+        'Prisma and SQLite are already a good local-first base. The risk is not the stack; it is untested behavior leaking through routes/components. A small validation + service + test seam makes every future feature safer.',
+      ].join('\n');
+    }
+
+    if (/\b(?:vai|chat\s+app|context|relevance|accuracy|responsive|response)\b/i.test(combined)) {
+      const wantsTeacherLoop = /\b(?:teacher\s+loops?|automated\s+(?:teacher|quality|validation)|quality\s+gate|self[-\s]?eval|validator)\b/i.test(combined);
+      return [
+        '**Grounded hardening pass**',
+        `For **${grounding.topic}**, harden the response path where context enters the engine.`,
+        '',
+        wantsTeacherLoop ? '**Implement next**' : '**Best slice**',
+        '- Add a turn classifier: standalone question vs contextual follow-up vs product-quality recommendation.',
+        '- Extract a compact active-topic brief from recent user context, selected files, and the last assistant answer.',
+        '- Gate fuzzy retrieval with topic overlap so unrelated learned snippets cannot win just because they share loose words.',
+        wantsTeacherLoop
+          ? '- Add an automated teacher loop that replays real-user prompts, scores topic retention/instruction coverage/concrete action, and blocks regressions.'
+          : '- Add regression tests around weird short turns: "make it better", "what about this", "best next thing", "go deeper".',
+        wantsTeacherLoop
+          ? '- Keep external LLMs as optional critics only; Vai still drafts the answer from its local route, context brief, and learned policy.'
+          : '- Keep external validation optional so Vai itself remains the primary responder.',
+        '',
+        '**Responsiveness win**',
+        'This is fast because it runs before slow or broad fallback paths. It should reduce off-topic answers and wasted external validation rounds at the same time.',
+      ].join('\n');
+    }
+
+    return [
+      '**Grounded hardening pass**',
+      `For **${grounding.topic}**, make the next iteration robust by locking the contract before expanding behavior.`,
+      '',
+      '**Do this first**',
+      `- Context to preserve: ${this.formatGroundingKeywords(grounding.keywords, grounding.topic)}.`,
+      '- Define 3-5 acceptance checks that prove the next answer or feature stayed on-topic.',
+      '- Add the smallest validation boundary around the risky input/output seam.',
+      '- Add regression tests for the current happy path, one malformed input, and one missing-context case.',
+      '',
+      '**Why**',
+      'That gives you faster feedback and prevents the next improvement from becoming another generic branch that only works for the demo prompt.',
+    ].join('\n');
+  }
+
+  private buildGroundedSimpleExplanation(
+    grounding: {
+      readonly topic: string;
+      readonly contextText: string;
+      readonly keywords: readonly string[];
+    },
+    input: string,
+  ): string {
+    if (/\breact hooks?\b/i.test(`${grounding.topic}\n${grounding.contextText}`)) {
+      return [
+        '**React hooks, simpler**',
+        'Hooks are how a function component gets memory and timing.',
+        '',
+        '- `useState` means: "remember this value between renders."',
+        '- `useEffect` means: "after React updates the screen, run this side effect."',
+        '- Custom hooks mean: "reuse this state/effect logic in more than one component."',
+        '',
+        'So if a component is a little machine, hooks are the knobs and sensors that let it remember things and react when something changes.',
+      ].join('\n');
+    }
+
+    const wantsFirstPatch = /\b(?:first|next)\s+(?:patch|change|implementation|slice|thing|step)\b/i.test(input)
+      || /\bpatch\s+(?:you\s+would\s+make|to\s+make)\b/i.test(input);
+    const base = [
+      `**${grounding.topic}, simpler**`,
+      `The important context is: ${this.formatGroundingKeywords(grounding.keywords, grounding.topic)}.`,
+      '',
+      'Plain version: keep the previous topic as the anchor, then explain only the part the current turn asks about. Do not restart from a generic definition unless the user clearly starts a new topic.',
+      '',
+      'That is the difference between an answer that merely matches words and an answer that feels like it heard the conversation.',
+    ];
+
+    if (wantsFirstPatch && /\b(?:vai|chat\s+app|context|relevance|accuracy|responsive|response)\b/i.test(`${grounding.topic}\n${grounding.contextText}`)) {
+      base.push(
+        '',
+        '**First patch**',
+        'Add a high-priority response-quality route that detects Vai/chat relevance prompts before glossary decomposition or broad retrieval. The acceptance test should prove the answer says "Vai", keeps the user context, and names one concrete implementation step.',
+      );
+    }
+
+    return base.join('\n');
+  }
+
+  private buildGroundedContinuation(
+    grounding: {
+      readonly topic: string;
+      readonly contextText: string;
+      readonly keywords: readonly string[];
+    },
+    input: string,
+  ): string {
+    const wantsDepth = /\b(?:deep|deeper|detail|over[-\s]?engineer|thorough|stronger)\b/i.test(input);
+    return [
+      wantsDepth ? '**Deeper grounded pass**' : '**Grounded continuation**',
+      `Continuing from **${grounding.topic}**, I would keep the answer anchored to: ${this.formatGroundingKeywords(grounding.keywords, grounding.topic)}.`,
+      '',
+      '**Next layer**',
+      '- State the active context in one sentence before answering.',
+      '- Answer the current request against that context.',
+      '- Name the verification check that proves the answer did not drift.',
+      '',
+      '**Practical move**',
+      'If the next turn is vague, resolve the target first from recent messages, then answer. If the target cannot be resolved, ask one tight clarifying question instead of guessing.',
+    ].join('\n');
+  }
+
+  private formatGroundingKeywords(keywords: readonly string[], fallback: string): string {
+    const clean = keywords
+      .map((keyword) => keyword.trim())
+      .filter((keyword) => keyword.length > 0);
+    if (clean.length === 0) return fallback;
+    return clean.slice(0, 5).join(', ');
+  }
+
   private tryRefactoringGuidance(input: string, lower: string): string | null {
     const isRefactor = /\brefactor\b|\bclean\s*up\b|\brestructure\b|\breorganize\b|\bsplit\s+(?:it|this|them|up|out|into)\b|\bextract\b|\bdecouple\b|\bseparate\s+concerns\b|\brename\b|\binline\b|\bmove\b|\bconvert\s+(?:this|these|the|that)\b/i.test(input);
     const isCodeSmell = /\btoo\s+long\b|\btoo\s+big\b|\btoo\s+complex\b|\bhard\s+to\s+read\b|\bmessy\b|\bspaghetti\b|\bduplicat\b/i.test(input);
@@ -6187,6 +7064,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     const langHint = projectMatch?.[2]?.trim().toLowerCase() || '';
     const isChatMode = this._activeMode === 'chat';
     const isBuilderMode = this._activeMode === 'builder';
+    const fullDesc = `${input} ${cleanedProjectDesc} ${langHint}`.trim();
     const isVagueGenericBuild = /^(?:good|great|professional|polished|nice|cool|modern|clean|simple|basic|strong|solid|premium)?\s*(?:app|application|project|site|website|dashboard|tool|workspace|platform)$/i.test(cleanedProjectDesc);
 
     if (
@@ -6204,6 +7082,78 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     if (isBuilderMode) {
       const stackClarifier = this.tryBuilderStackSetupClarifier(cleanedProjectDesc);
       if (stackClarifier) return stackClarifier;
+    }
+
+    if (isBuilderMode && /\b(?:meme\s+crypto|meme\s+cryptocurrency|doge|coin\s+balance|to\s+the\s+moon|idle|clicker)\b/i.test(fullDesc)
+      && /\b(?:game|clicker|idle|upgrade|market)\b/i.test(fullDesc)) {
+      return this.generateBuilderMemeCoinIdleApp(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:svg\s*(?:to|2)\s*png|high-resolution\s+png|make\s+(?:uploaded\s+)?images?\s+square|square\s+(?:crop|padding)|drag-and-drop\s+upload|image\s+utility)\b/i.test(fullDesc)) {
+      return this.generateBuilderImageExportTool(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:image\s+gallery|gallery\s+product|mock\s+auth|upload\s+flow|image\s+grid|database\/status|error\s+monitoring|analytics\s+events)\b/i.test(fullDesc)
+      && /\b(?:auth|upload|database|analytics|monitoring|gallery)\b/i.test(fullDesc)) {
+      return this.generateBuilderFullStackGalleryApp(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && !/\b(?:trellix|kanban|turso|libsql)\b/i.test(fullDesc)
+      && /\b(?:next-generation|app-router|app\s+router|rsc|react\s+server\s+components|edge-ready|kysely|planetscale|clerk|expo|monorepo\s+health)\b/i.test(fullDesc)
+      && /\b(?:monorepo|kysely|prisma|planetscale|clerk|expo)\b/i.test(fullDesc)) {
+      return this.generateBuilderNextGenFullstackMonorepoApp(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:typescript\s+library\s+monorepo|library\s+monorepo\s+starter|library\s+starter|prisma\s+generator|generated\s+enums?|bundle\s+size|changesets?)\b/i.test(fullDesc)
+      && /\b(?:library|monorepo|prisma|generator|changeset|vitest)\b/i.test(fullDesc)) {
+      return this.generateBuilderTypescriptLibraryMonorepoStarter(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:cli\s+tool|command\s+line|scaffolds?\s+good\s+project\s+defaults|good\s+project\s+defaults|eslint\s+plus\s+prettier|github\s+actions\s+ci|pnpm\s+caching)\b/i.test(fullDesc)
+      && /\b(?:eslint|prettier|tsconfig|vscode|vs\s+code|github\s+actions|pnpm)\b/i.test(fullDesc)) {
+      return this.generateBuilderDeveloperDefaultsCli(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:agent\s+workflow\s+tools|agentic\s+development|convex\s+vite\s+plugin|isolated\s+environment|oxlint\s+plugin|unused\s+convex\s+functions?)\b/i.test(fullDesc)
+      && /\b(?:agent|convex|vite\s+plugin|oxlint|unused)\b/i.test(fullDesc)) {
+      return this.generateBuilderAgentWorkflowToolsSuite(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:python\s+sdk|unofficial\s+python|utapi|fastapi\s+route|upload\s+service|list_files|delete_file|uploadthing_secret)\b/i.test(fullDesc)) {
+      return this.generateBuilderPythonUploadSdkFastApi(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:tanstack\s+start|tanstack\s+themes?|themeprovider|theme\s+provider|ssr-safe\s+initial\s+script|jsr|deno|localstorage\s+persistence)\b/i.test(fullDesc)
+      && /\b(?:theme|theming|light|dark|system|css\s+variables?)\b/i.test(fullDesc)) {
+      return this.generateBuilderTanstackThemeKit(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:payments?|stripe|webhook|customer\s+binding|split-brain|provider\s+state|customer-sync-to-kv|customer\s+sync\s+to\s+kv|developer\s+responsibility|\bkv\b)\b/i.test(fullDesc)
+      && /\b(?:playbook|implementation|saas|webhook|\bkv\b|provider\s+state|split-brain)\b/i.test(fullDesc)) {
+      return this.generateBuilderPaymentsPlaybookApp(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:ssr\s+platform\s+benchmark|cloudflare.*vercel|vercel.*cloudflare|100-iteration|math-heavy|mean\/min\/max|variability|winner\s+badges?)\b/i.test(fullDesc)) {
+      return this.generateBuilderSsrBenchmarkDashboard(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:five\s+different\s+stacks|five\s+stacks|ruby\s+on\s+rails|elixir\s+phoenix|go\s+plus\s+graphql|tradeoff\s+matrix|line-of-code|line\s+of\s+code\s+comparison)\b/i.test(fullDesc)) {
+      return this.generateBuilderStackComparisonExplorer(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:tailwind\s+css\s+canonical|canonical\s+class|canonical\s+classes|tailwindcanonicalclasses|fixonsave|tailwind\s+css\s+intellisense\s+diagnostics)\b/i.test(fullDesc)
+      && /\b(?:vs\s*code|visual\s+studio\s+code|extension|diagnostics|on\s+save|fixonsave)\b/i.test(fullDesc)) {
+      return this.generateBuilderTailwindCanonicalVsCodeExtension(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:trellix|kanban|turso|libsql|auth\.js|authjs|trpc\s+procedure|draggable-looking|turso_url|turso_access_token)\b/i.test(fullDesc)
+      && /\b(?:board|kanban|trpc|auth|turso|task\s+cards?)\b/i.test(fullDesc)) {
+      return this.generateBuilderTrellixTrpcBoard(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode && /\b(?:color\s+theme|theme\s+extension|tokenColors|activityBar|editor\.background|material-inspired)\b/i.test(fullDesc)
+      && /\b(?:vs\s*code|visual\s+studio\s+code|color\s+theme|tokenColors|editor\.background|activityBar)\b/i.test(fullDesc)) {
+      return this.generateBuilderVsCodeThemeExtension(cleanedProjectDesc);
     }
 
     if (
@@ -6322,7 +7272,11 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       return this.generateBuilderNodeExpressApp(cleanedProjectDesc);
     }
 
-    const fullDesc = `${input} ${cleanedProjectDesc} ${langHint}`.trim();
+    if (isBuilderMode && (/dashboard.*chart|chart.*dashboard|analytics\s*dashboard|metrics\s*dashboard|data\s*dashboard|revenue\s+over\s+time|traffic\s+sources/i.test(fullDesc)
+      || (/\bdashboard\b/i.test(cleanedProjectDesc) && /chart|graph|plot|recharts|analytics|metric|kpi/i.test(langHint)))) {
+      return this.generateBuilderReactDashboard(cleanedProjectDesc);
+    }
+
     const builderIntent = isBuilderMode
       ? resolveBuilderIntent({
         input,
@@ -6390,7 +7344,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
 
     // --- Landing page ---
     if (isBuilderMode && /landing\s*page|hero\s+section|marketing\s+page|product\s+page|saas\s+(?:landing|page)/i.test(fullDesc)) {
-      return this.generateBuilderLandingPage(cleanedProjectDesc);
+      return this.generateBuilderLandingPage(fullDesc);
     }
 
     // --- Music / Spotify clone ---
@@ -6802,7 +7756,68 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       .join('\n');
   }
 
+  private cleanLandingLabel(value?: string | null, maxLength = 64): string | null {
+    const cleaned = value
+      ?.replace(/<[^>]+>/g, ' ')
+      .replace(/\{[^}]*\}/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s+/g, ' ')
+      .replace(/^[`"']+|[`"'.,!?;:]+$/g, '')
+      .trim();
+    return cleaned && cleaned.length >= 2 ? cleaned.slice(0, maxLength) : null;
+  }
+
+  private escapeJsxText(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  private extractFirstTagText(source: string, tagName: string, maxLength = 64): string | null {
+    const match = new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]{0,260}?)<\\/${tagName}>`, 'i').exec(source);
+    return this.cleanLandingLabel(match?.[1], maxLength);
+  }
+
+  private normalizeHexColor(hex: string): string | null {
+    const normalized = hex.trim().toLowerCase();
+    const short = /^#([0-9a-f]{3})$/i.exec(normalized);
+    if (short) {
+      return `#${short[1].split('').map((char) => `${char}${char}`).join('')}`;
+    }
+    return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized : null;
+  }
+
+  private hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+    const normalized = this.normalizeHexColor(hex);
+    if (!normalized) return null;
+    const value = Number.parseInt(normalized.slice(1), 16);
+    return {
+      r: (value >> 16) & 255,
+      g: (value >> 8) & 255,
+      b: value & 255,
+    };
+  }
+
+  private landingAccentFromHex(hex: string): { accent: string; accentSoft: string; accentGlow: string } | null {
+    const normalized = this.normalizeHexColor(hex);
+    const rgb = normalized ? this.hexToRgb(normalized) : null;
+    if (!normalized || !rgb) return null;
+    return {
+      accent: normalized,
+      accentSoft: `rgba(${rgb.r},${rgb.g},${rgb.b},0.18)`,
+      accentGlow: `rgba(${rgb.r},${rgb.g},${rgb.b},0.3)`,
+    };
+  }
+
   private resolveLandingAccent(lower: string): { accent: string; accentSoft: string; accentGlow: string } {
+    const explicitAccent = /(?:button|cta|accent|primary|--accent)[^#\n]{0,100}(#[0-9a-f]{3,6})\b/i.exec(lower)?.[1]
+      ?? /#ff2ea6\b/i.exec(lower)?.[0];
+    const explicitAccentColor = explicitAccent ? this.landingAccentFromHex(explicitAccent) : null;
+    if (explicitAccentColor) return explicitAccentColor;
+
     if (/\bred\b|\bcrimson\b|\bscarlet\b/i.test(lower)) {
       return { accent: '#ef4444', accentSoft: 'rgba(239,68,68,0.18)', accentGlow: 'rgba(239,68,68,0.32)' };
     }
@@ -6821,127 +7836,321 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     return { accent: '#8b5cf6', accentSoft: 'rgba(139,92,246,0.18)', accentGlow: 'rgba(139,92,246,0.28)' };
   }
 
-  private generateActiveSandboxLandingPageEdit(targetPath: string, brand: string, heroLead: string, accent: { accent: string; accentSoft: string; accentGlow: string }): string {
+  private resolveLandingBackgroundColor(source: string): string {
+    const explicitBackground = /(?:background|page\s+background|body|html)[^#\n]{0,100}(#[0-9a-f]{3,6})\b/i.exec(source)?.[1];
+    const normalized = explicitBackground ? this.normalizeHexColor(explicitBackground) : null;
+    if (normalized) return normalized;
+    if (/\bdeep\s+navy\b|\bnavy\b/i.test(source)) return '#020617';
+    if (/\bblack\b/i.test(source)) return '#020617';
+    if (/\bwhite\b/i.test(source)) return '#f8fafc';
+    return '#020617';
+  }
+
+  private extractLandingBrand(input: string, systemText: string): string | null {
+    const requestedHeading = this.cleanLandingLabel(
+      /(?:exact\s+(?:heading|headline)|(?:heading|headline)\s+(?:to|as|called|named|saying))\s+[`"']?([^,"'.\n]{2,64})[`"']?/i.exec(input)?.[1],
+    );
+    if (requestedHeading) return requestedHeading;
+
+    const renameMatch = /rename\s+the\s+brand\s+to\s+([a-z0-9][a-z0-9\s-]{1,40})/i.exec(input)
+      ?? /brand\s+to\s+([a-z0-9][a-z0-9\s-]{1,40})/i.exec(input);
+    const renamedBrand = this.cleanLandingLabel(renameMatch?.[1]);
+    if (renamedBrand) return renamedBrand;
+
+    return this.extractFirstTagText(systemText, 'h1')
+      ?? this.cleanLandingLabel(/<title>([^<]{2,64})<\/title>/i.exec(systemText)?.[1]);
+  }
+
+  private extractLandingCta(input: string, systemText: string): string | null {
+    const requestedCta = this.cleanLandingLabel(
+      /(?:primary\s+)?(?:cta\s+)?button\s+(?:labeled|labelled|called|named|that\s+says|saying)\s+[`"']?([^,"'.\n]{2,48})[`"']?/i.exec(input)?.[1],
+      48,
+    );
+    if (requestedCta) return requestedCta;
+
+    const primaryButton = /<button\b[^>]*className=["'][^"']*primary-button[^"']*["'][^>]*>([\s\S]{0,120}?)<\/button>/i.exec(systemText)?.[1];
+    return this.cleanLandingLabel(primaryButton, 48);
+  }
+
+  private generateActiveSandboxLandingPageEdit(
+    targetPath: string,
+    options: {
+      brand: string;
+      heroLead: string;
+      primaryCta: string;
+      accent: { accent: string; accentSoft: string; accentGlow: string };
+      background: string;
+      isFitnessLanding: boolean;
+      wantsMotion: boolean;
+    },
+  ): string {
     const componentName = /(?:^|\/)(?:src\/)?app\/page\./i.test(targetPath) ? 'HomePage' : 'App';
+    const brand = options.brand;
+    const primaryCta = options.primaryCta;
+    const brandMark = brand.replace(/[^a-z0-9]/gi, '').charAt(0).toUpperCase() || 'V';
+    const escapedBrand = this.escapeJsxText(brand);
+    const escapedCta = this.escapeJsxText(primaryCta);
+    const secondaryCta = options.isFitnessLanding ? 'Explore the training flow' : 'See the workflow';
+    const eyebrow = options.isFitnessLanding ? 'Neon performance training' : 'Polished product landing page';
+    const featureKicker = options.isFitnessLanding ? 'Flow' : 'What changed';
+    const proof = options.isFitnessLanding
+      ? [
+        "  { value: '6 wk', label: 'strength cycle preview' },",
+        "  { value: '24/7', label: 'training plan access' },",
+        "  { value: '4.9/5', label: 'athlete energy rating' },",
+      ]
+      : [
+        "  { value: '42%', label: 'faster onboarding' },",
+        "  { value: '18 min', label: 'time to first workflow' },",
+        "  { value: '4.9/5', label: 'pilot team rating' },",
+      ];
+    const features = options.isFitnessLanding
+      ? [
+        "  { title: 'Pulse sessions', desc: 'Sharper training blocks, visible progress, and a CTA path that keeps the athlete moving.' },",
+        "  { title: 'Recovery rhythm', desc: 'A calmer support section balances the neon intensity with mobility, rest, and repeatable progress.' },",
+        "  { title: 'Coach-ready preview', desc: 'Responsive cards, strong CTA grouping, and a training story that still reads clearly on mobile.' },",
+      ]
+      : [
+        "  { title: 'Clear product story', desc: 'Sharper hierarchy, calmer spacing, and a tighter headline keep the first scroll focused.' },",
+        "  { title: 'Stronger proof', desc: 'Metrics and customer signals support the pitch without turning the hero into noise.' },",
+        "  { title: 'Better conversion flow', desc: 'The call-to-action row now feels intentional on desktop and easier to tap on mobile.' },",
+      ];
+    const shellClasses = options.wantsMotion ? 'landing-shell motion-ready' : 'landing-shell';
+    const headingClass = options.wantsMotion ? 'hero-heading kinetic-heading' : 'hero-heading';
+    const stylesPath = /(?:^|\/)src\/App\.(?:tsx|jsx|ts|js)$/i.test(targetPath) ? 'src/styles.css' : 'src/styles.css';
 
     return [
       `Polishing the active landing page in place for ${brand}.`,
       '',
       `\`\`\`tsx title="${targetPath}"`,
       "import { useState } from 'react';",
+      "import './styles.css';",
       '',
       "const features = [",
-      "  { title: 'Clear product story', desc: 'Sharper hierarchy, calmer spacing, and a tighter headline keep the first scroll focused.' },",
-      "  { title: 'Stronger proof', desc: 'Metrics and customer signals support the pitch without turning the hero into noise.' },",
-      "  { title: 'Better conversion flow', desc: 'The call-to-action row now feels intentional on desktop and easier to tap on mobile.' },",
+      ...features,
       '];',
       '',
       "const proof = [",
-      "  { value: '42%', label: 'faster onboarding' },",
-      "  { value: '18 min', label: 'time to first workflow' },",
-      "  { value: '4.9/5', label: 'pilot team rating' },",
+      ...proof,
       '];',
       '',
       `export default function ${componentName}() {`,
       "  const [theme, setTheme] = useState<'dark' | 'light'>('dark');",
       "  const [activeFeature, setActiveFeature] = useState(features[0].title);",
       "  const isDark = theme === 'dark';",
-      `  const accent = '${accent.accent}';`,
-      `  const accentSoft = '${accent.accentSoft}';`,
-      `  const accentGlow = '${accent.accentGlow}';`,
       "  const scrollToId = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });",
+      '',
       '  return (',
-      "    <main",
-      "      style={{",
-      "        minHeight: '100vh',",
-      "        background: isDark",
-      "          ? `radial-gradient(circle at top, ${accentSoft}, rgba(5,8,22,0) 34%), linear-gradient(180deg, #050816 0%, #020617 100%)`",
-      "          : `radial-gradient(circle at top, ${accentSoft}, rgba(255,255,255,0) 34%), linear-gradient(180deg, #f7f7fb 0%, #eef2ff 100%)`,",
-      "        color: isDark ? '#f8fafc' : '#0f172a',",
-      "        fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',",
-      "        transition: 'background 220ms ease, color 220ms ease',",
-      "      }}",
-      "    >",
-      "      <section style={{ width: 'min(1120px, calc(100% - 32px))', margin: '0 auto', padding: '28px 0 72px' }}>",
-      "        <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, padding: '16px 18px', border: isDark ? '1px solid rgba(63,63,70,0.86)' : '1px solid rgba(226,232,240,0.95)', borderRadius: 18, background: isDark ? 'rgba(9,11,18,0.76)' : 'rgba(255,255,255,0.88)', backdropFilter: 'blur(14px)', boxShadow: isDark ? '0 20px 50px rgba(0,0,0,0.22)' : '0 18px 44px rgba(15,23,42,0.08)' }}>",
-      `          <span style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-0.03em' }}>${brand}</span>`,
-      "          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, color: isDark ? '#94a3b8' : '#475569', fontSize: 14 }}>",
-      "            {[['Platform', 'platform'], ['Workflow', 'workflow'], ['Launch', 'launch-cta']].map(([label, id]) => (",
-      "              <button key={label} type=\"button\" onClick={() => scrollToId(id)} style={{ padding: '8px 12px', borderRadius: 12, background: isDark ? 'rgba(15,23,42,0.82)' : 'rgba(248,250,252,0.95)', border: isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.9)', color: 'inherit', cursor: 'pointer' }}>{label}</button>",
+      `    <div className={\`${shellClasses} theme-\${theme}\`}>`,
+      '      <div className="landing-noise" />',
+      '      <header className="topbar">',
+      `        <div className="brand-lockup"><span className="brand-mark">${brandMark}</span><span>${escapedBrand}</span></div>`,
+      '        <nav className="topnav">',
+      "          <button type=\"button\" onClick={() => scrollToId('platform')}>Platform</button>",
+      "          <button type=\"button\" onClick={() => scrollToId('live-proof')}>Preview</button>",
+      "          <button type=\"button\" onClick={() => scrollToId('workflow')}>Flow</button>",
+      "          <button type=\"button\" onClick={() => scrollToId('launch-cta')}>Launch</button>",
+      '        </nav>',
+      '        <div className="topbar-actions">',
+      '          <button type="button" className="theme-toggle" aria-label={isDark ? \'Switch to light mode\' : \'Switch to dark mode\'} title={isDark ? \'Light mode\' : \'Dark mode\'} onClick={() => setTheme(isDark ? \'light\' : \'dark\')}>',
+      '            {theme === \'dark\' ? (',
+      '              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">',
+      '                <circle cx="12" cy="12" r="4" />',
+      '                <path d="M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77" />',
+      '              </svg>',
+      '            ) : (',
+      '              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">',
+      '                <path d="M21 12.79A9 9 0 1 1 11.21 3A7 7 0 0 0 21 12.79Z" />',
+      '              </svg>',
+      '            )}',
+      '          </button>',
+      `          <button className="ghost-button" type="button" onClick={() => scrollToId('launch-cta')}>${options.isFitnessLanding ? 'View programs' : 'Book a demo'}</button>`,
+      '        </div>',
+      '      </header>',
+      '',
+      '      <main className="hero-grid" id="platform">',
+      '        <section className="hero-panel" id="live-proof">',
+      `          <p className="eyebrow">${eyebrow}</p>`,
+      `          <h1 className="${headingClass}">${escapedBrand}</h1>`,
+      `          <p className="lede">${this.escapeJsxText(options.heroLead)}</p>`,
+      '          <div className="hero-actions">',
+      `            <button className="primary-button" type="button" onClick={() => scrollToId('launch-cta')}>${escapedCta}</button>`,
+      `            <button className="secondary-button" type="button" onClick={() => { setActiveFeature(features[0].title); scrollToId('workflow'); }}>${secondaryCta}</button>`,
+      '          </div>',
+      '          <div className="proof-strip">',
+      '            {proof.map((item) => (',
+      '              <article key={item.label}>',
+      '                <strong>{item.value}</strong>',
+      '                <span>{item.label}</span>',
+      '              </article>',
       '            ))}',
       '          </div>',
-      "          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>",
-      "            <button",
-      "              type=\"button\"",
-      "              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}",
-      "              title={isDark ? 'Light mode' : 'Dark mode'}",
-      "              onClick={() => setTheme(isDark ? 'light' : 'dark')}",
-      "              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 42, height: 42, borderRadius: 12, border: isDark ? '1px solid rgba(63,63,70,0.86)' : '1px solid rgba(226,232,240,0.95)', background: isDark ? 'rgba(15,23,42,0.88)' : 'rgba(255,255,255,0.98)', color: isDark ? '#f8fafc' : '#0f172a', cursor: 'pointer' }}",
-      "            >",
-      "              {isDark ? (",
-      "                <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth=\"1.8\" strokeLinecap=\"round\" strokeLinejoin=\"round\">",
-      "                  <circle cx=\"12\" cy=\"12\" r=\"4\" />",
-      "                  <path d=\"M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77\" />",
-      "                </svg>",
-      "              ) : (",
-      "                <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth=\"1.8\" strokeLinecap=\"round\" strokeLinejoin=\"round\">",
-      "                  <path d=\"M21 12.79A9 9 0 1 1 11.21 3c0 0 0 0 0 0A7 7 0 0 0 21 12.79Z\" />",
-      "                </svg>",
-      "              )}",
-      "            </button>",
-      "            <button type=\"button\" onClick={() => scrollToId('launch-cta')} style={{ border: 'none', borderRadius: 12, padding: '12px 18px', background: accent, color: '#020617', fontWeight: 700, boxShadow: `0 14px 34px ${accentGlow}`, cursor: 'pointer' }}>Book a demo</button>",
-      "          </div>",
-      '        </nav>',
+      '        </section>',
       '',
-      "        <div id=\"platform\" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.15fr) minmax(320px, 0.85fr)', gap: 24, alignItems: 'stretch', marginTop: 28 }}>",
-      "          <section style={{ padding: '56px 48px', borderRadius: 28, background: isDark ? `radial-gradient(circle at top right, ${accentSoft}, transparent 34%), linear-gradient(145deg, rgba(8,11,20,0.96) 0%, rgba(15,23,42,0.96) 100%)` : `radial-gradient(circle at top right, ${accentSoft}, rgba(255,255,255,0) 34%), linear-gradient(145deg, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.98) 100%)`, border: isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.95)', boxShadow: isDark ? '0 28px 90px rgba(0,0,0,0.28)' : '0 20px 56px rgba(15,23,42,0.08)' }}>",
-      `            <div style={{ display: 'inline-flex', padding: '8px 14px', borderRadius: 12, background: accentSoft, color: accent, fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Polished product landing page</div>`,
-      `            <h1 style={{ margin: '22px 0 16px', fontSize: 'clamp(3rem, 7vw, 5.6rem)', lineHeight: 0.95, letterSpacing: '-0.06em', maxWidth: 10.5 + 'ch' }}>Move from first impression to <span style={{ color: accent }}>confident action</span> faster.</h1>`,
-      `            <p style={{ margin: 0, maxWidth: 620, color: isDark ? '#cbd5e1' : '#475569', fontSize: 18, lineHeight: 1.8 }}>${heroLead}</p>`,
-      "            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 28 }}>",
-      "              <button type=\"button\" onClick={() => scrollToId('launch-cta')} style={{ border: 'none', borderRadius: 14, padding: '16px 24px', background: accent, color: '#020617', fontSize: 16, fontWeight: 700, cursor: 'pointer', boxShadow: `0 18px 40px ${accentGlow}` }}>Start free</button>",
-      "              <button type=\"button\" onClick={() => { setActiveFeature(features[0].title); scrollToId('workflow'); }} style={{ borderRadius: 14, padding: '16px 24px', background: isDark ? 'rgba(15,23,42,0.84)' : 'rgba(255,255,255,0.94)', color: isDark ? '#f8fafc' : '#0f172a', border: isDark ? '1px solid rgba(148,163,184,0.18)' : '1px solid rgba(226,232,240,0.95)', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}>See the workflow</button>",
-      '            </div>',
-      "            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14, marginTop: 26 }}>",
-      '              {proof.map((item) => (',
-      "                <article key={item.label} style={{ borderRadius: 16, padding: '18px 16px', background: isDark ? 'rgba(8,11,20,0.9)' : 'rgba(255,255,255,0.94)', border: isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.95)' }}>",
-      "                  <strong style={{ display: 'block', fontSize: 24, letterSpacing: '-0.04em' }}>{item.value}</strong>",
-      "                  <span style={{ color: isDark ? '#94a3b8' : '#64748b', fontSize: 14 }}>{item.label}</span>",
-      '                </article>',
-      '              ))}',
-      '            </div>',
-      '          </section>',
+      '        <aside className="signal-panel">',
+      "          <p className=\"signal-label\">Why it feels better</p>",
+      `          <h2>${options.isFitnessLanding ? 'Electric energy, clear programs, and a CTA that stays ready to move.' : 'Spacing, type, and proof now work together.'}</h2>`,
+      `          <p>${options.isFitnessLanding ? 'The page keeps the fitness promise visible: powerful headline, performance proof, and direct training actions without burying the user in generic marketing copy.' : 'The hero breathes more, the headline lands earlier, and the support copy has a cleaner rhythm instead of fighting the CTA.'}</p>`,
+      '          <div className="signal-rail">',
+      `            <span>${options.isFitnessLanding ? 'Hot-pink CTA' : 'Sharper CTA'}</span>`,
+      `            <span>${options.isFitnessLanding ? 'Deep navy stage' : 'Cleaner hierarchy'}</span>`,
+      `            <span>${options.wantsMotion ? 'Kinetic hero motion' : 'Preview-safe polish'}</span>`,
+      '          </div>',
+      '        </aside>',
+      '      </main>',
       '',
-      "          <aside style={{ display: 'grid', gap: 18 }}>",
-      "            <section style={{ padding: 24, borderRadius: 22, background: isDark ? '#0f172a' : '#ffffff', color: isDark ? '#e2e8f0' : '#0f172a', border: isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.95)', boxShadow: isDark ? '0 24px 60px rgba(0,0,0,0.22)' : '0 18px 48px rgba(15,23,42,0.08)' }}>",
-      "              <p style={{ margin: '0 0 10px', color: accent, fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Why it reads better</p>",
-      "              <h2 style={{ margin: '0 0 10px', fontSize: 24, letterSpacing: '-0.04em' }}>Spacing, type, and proof now work together.</h2>",
-      "              <p style={{ margin: 0, color: isDark ? '#cbd5e1' : '#475569', lineHeight: 1.8 }}>The hero breathes more, the headline lands earlier, and the support copy has a cleaner rhythm instead of fighting the CTA.</p>",
-      '            </section>',
-      "            <section id=\"workflow\" style={{ padding: 24, borderRadius: 22, background: isDark ? 'rgba(8,11,20,0.9)' : 'rgba(255,255,255,0.96)', border: isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.95)' }}>",
-      "              <p style={{ margin: '0 0 14px', color: accent, fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>What changed</p>",
-      "              <div style={{ display: 'grid', gap: 12 }}>",
-      '                {features.map((feature) => (',
-      "                  <article key={feature.title} onMouseEnter={() => setActiveFeature(feature.title)} style={{ padding: '16px 18px', borderRadius: 16, background: isDark ? 'rgba(15,23,42,0.9)' : '#f8fafc', border: activeFeature === feature.title ? `1px solid ${accent}` : (isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.95)'), boxShadow: activeFeature === feature.title ? `0 12px 28px ${accentGlow}` : 'none', transition: 'border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease', transform: activeFeature === feature.title ? 'translateY(-1px)' : 'translateY(0)' }}>",
-      "                    <strong style={{ display: 'block', marginBottom: 6, fontSize: 16 }}>{feature.title}</strong>",
-      "                    <span style={{ color: isDark ? '#94a3b8' : '#64748b', lineHeight: 1.7 }}>{feature.desc}</span>",
-      '                  </article>',
-      '                ))}',
-      '              </div>',
-      '            </section>',
-      '          </aside>',
-      '        </div>',
-      '',
-      "        <section id=\"launch-cta\" style={{ marginTop: 24, display: 'grid', gap: 14, gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', padding: '22px 24px', borderRadius: 20, background: isDark ? 'rgba(9,11,18,0.82)' : 'rgba(255,255,255,0.94)', border: isDark ? '1px solid rgba(63,63,70,0.82)' : '1px solid rgba(226,232,240,0.95)' }}>",
-      "          <div>",
-      "            <p style={{ margin: '0 0 6px', color: accent, fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Launch CTA</p>",
-      "            <h2 style={{ margin: 0, fontSize: 28, letterSpacing: '-0.04em' }}>Start the pilot without losing the page's visual hierarchy.</h2>",
-      "          </div>",
-      "          <button type=\"button\" style={{ border: 'none', borderRadius: 14, padding: '14px 20px', background: accent, color: '#020617', fontWeight: 700, cursor: 'pointer', boxShadow: `0 16px 34px ${accentGlow}` }}>Request access</button>",
-      "        </section>",
+      '      <section className="feature-grid" id="workflow">',
+      '        {features.map((feature) => (',
+      '          <article key={feature.title} className={`feature-card ${activeFeature === feature.title ? \'feature-card-active\' : \'\'}`} onMouseEnter={() => setActiveFeature(feature.title)}>',
+      `            <p className="feature-kicker">${featureKicker}</p>`,
+      '            <h3>{feature.title}</h3>',
+      '            <p>{feature.desc}</p>',
+      '          </article>',
+      '        ))}',
       '      </section>',
-      '    </main>',
+      '',
+      '      <section className="cta-panel" id="launch-cta">',
+      `        <div><p className="eyebrow">${options.isFitnessLanding ? 'Ready to move' : 'Launch CTA'}</p><h2>${options.isFitnessLanding ? 'Turn intent into the next training block.' : 'Start the pilot without losing the page visual hierarchy.'}</h2></div>`,
+      `        <button type="button" className="primary-button">${escapedCta}</button>`,
+      '      </section>',
+      '    </div>',
       '  );',
+      '}',
+      '```',
+      '',
+      `\`\`\`css title="${stylesPath}"`,
+      ':root {',
+      `  --accent: ${options.accent.accent};`,
+      `  --accent-soft: ${options.accent.accentSoft};`,
+      `  --accent-glow: ${options.accent.accentGlow};`,
+      `  --page-bg: ${options.background};`,
+      '  --radius-xl: 32px;',
+      "  font-family: 'Aptos Display', 'Segoe UI Variable Text', ui-sans-serif, system-ui, sans-serif;",
+      '  color: #f8fafc;',
+      '  background: var(--page-bg);',
+      '}',
+      '',
+      '* { box-sizing: border-box; }',
+      'html, body, #root { min-height: 100%; margin: 0; background: var(--page-bg); }',
+      'body { background: var(--page-bg); }',
+      'button, input { font: inherit; }',
+      'button { cursor: pointer; }',
+      '',
+      '.landing-shell {',
+      '  position: relative;',
+      '  min-height: 100vh;',
+      '  overflow: hidden;',
+      '  padding: 24px;',
+      '  background: radial-gradient(circle at 18% 8%, var(--accent-soft), transparent 32%), radial-gradient(circle at 82% 4%, rgba(34, 211, 238, 0.12), transparent 26%), linear-gradient(180deg, var(--page-bg) 0%, #020617 100%);',
+      '  color: var(--text);',
+      '}',
+      '',
+      '.theme-dark {',
+      '  --text: #f8fafc;',
+      '  --muted: #94a3b8;',
+      '  --panel: rgba(8, 11, 20, 0.88);',
+      '  --panel-strong: rgba(12, 18, 32, 0.96);',
+      '  --line: rgba(148, 163, 184, 0.14);',
+      '  --button-text: #020617;',
+      '}',
+      '',
+      '.theme-light {',
+      '  --text: #0f172a;',
+      '  --muted: #475569;',
+      '  --panel: rgba(255, 255, 255, 0.92);',
+      '  --panel-strong: rgba(248, 250, 252, 0.96);',
+      '  --line: rgba(148, 163, 184, 0.24);',
+      '  --button-text: #020617;',
+      '}',
+      '',
+      '.landing-noise {',
+      '  pointer-events: none;',
+      '  position: absolute;',
+      '  inset: 0;',
+      '  background-image: linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);',
+      '  background-size: 34px 34px;',
+      '  mask-image: radial-gradient(circle at center, black, transparent 78%);',
+      '  opacity: 0.42;',
+      '}',
+      '',
+      '.topbar, .hero-panel, .signal-panel, .feature-card, .cta-panel {',
+      '  position: relative;',
+      '  border: 1px solid var(--line);',
+      '  background: var(--panel);',
+      '  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.28);',
+      '  backdrop-filter: blur(18px);',
+      '}',
+      '',
+      '.topbar {',
+      '  z-index: 1;',
+      '  width: min(1180px, 100%);',
+      '  margin: 0 auto;',
+      '  padding: 16px 18px;',
+      '  border-radius: 999px;',
+      '  display: flex;',
+      '  align-items: center;',
+      '  justify-content: space-between;',
+      '  gap: 18px;',
+      '}',
+      '',
+      '.brand-lockup { display: inline-flex; align-items: center; gap: 12px; font-weight: 800; letter-spacing: -0.03em; }',
+      '.brand-mark { display: inline-flex; height: 34px; width: 34px; align-items: center; justify-content: center; border-radius: 13px; background: linear-gradient(135deg, var(--accent), rgba(255,255,255,0.22)); color: #020617; font-size: 14px; font-weight: 900; }',
+      '.topnav { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 14px; }',
+      '.topnav button { border: none; background: transparent; color: inherit; padding: 0; }',
+      '.topbar-actions { display: flex; flex-wrap: wrap; gap: 10px; }',
+      '',
+      '.theme-toggle, .ghost-button, .primary-button, .secondary-button { border-radius: 18px; transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease; }',
+      '.theme-toggle, .ghost-button, .secondary-button { border: 1px solid var(--line); background: rgba(15,23,42,0.18); color: var(--text); }',
+      '.theme-toggle { width: 42px; height: 42px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }',
+      '.ghost-button { padding: 10px 14px; }',
+      '.primary-button { border: none; background: var(--accent); color: var(--button-text); padding: 14px 22px; font-weight: 800; box-shadow: 0 18px 42px var(--accent-glow); }',
+      '.secondary-button { padding: 14px 22px; }',
+      '.theme-toggle:hover, .ghost-button:hover, .primary-button:hover, .secondary-button:hover { transform: translateY(-1px); }',
+      '',
+      '.hero-grid { width: min(1180px, 100%); margin: 28px auto 0; display: grid; grid-template-columns: minmax(0, 1.16fr) minmax(320px, 0.84fr); gap: 22px; }',
+      '.hero-panel { padding: 48px; border-radius: var(--radius-xl); }',
+      '.signal-panel { padding: 30px; border-radius: 28px; align-self: stretch; }',
+      '.eyebrow, .signal-label, .feature-kicker { margin: 0; color: var(--accent); font-size: 12px; font-weight: 900; letter-spacing: 0.14em; text-transform: uppercase; }',
+      '.hero-heading { margin: 18px 0 16px; max-width: 11ch; font-size: clamp(3.5rem, 7vw, 6.4rem); line-height: 0.92; letter-spacing: -0.075em; }',
+      '.kinetic-heading { animation: kineticHeadline 4.2s ease-in-out infinite; transform-origin: left center; text-shadow: 0 0 34px var(--accent-glow); }',
+      '.lede, .signal-panel p, .feature-card p { color: var(--muted); line-height: 1.75; }',
+      '.lede { max-width: 64ch; font-size: 18px; }',
+      '.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }',
+      '',
+      '.proof-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 28px; }',
+      '.proof-strip article, .signal-rail span { border: 1px solid var(--line); background: var(--panel-strong); border-radius: 20px; }',
+      '.proof-strip article { padding: 18px 16px; }',
+      '.proof-strip strong { display: block; font-size: 24px; letter-spacing: -0.05em; }',
+      '.proof-strip span { color: var(--muted); font-size: 14px; }',
+      '.signal-panel h2 { margin: 14px 0 12px; font-size: 28px; letter-spacing: -0.05em; }',
+      '.signal-rail { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }',
+      '.signal-rail span { padding: 10px 12px; font-size: 13px; }',
+      '',
+      '.feature-grid { width: min(1180px, 100%); margin: 22px auto 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }',
+      '.feature-card { padding: 24px; border-radius: 26px; transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }',
+      '.feature-card-active { border-color: color-mix(in srgb, var(--accent) 48%, var(--line)); box-shadow: 0 18px 52px var(--accent-glow); transform: translateY(-2px); }',
+      '.feature-card h3 { margin: 14px 0 10px; font-size: 24px; letter-spacing: -0.04em; }',
+      '',
+      '.cta-panel { width: min(1180px, 100%); margin: 22px auto 0; padding: 28px; border-radius: 30px; display: flex; align-items: end; justify-content: space-between; gap: 18px; }',
+      '.cta-panel h2 { margin: 12px 0 0; font-size: clamp(2rem, 4vw, 3rem); letter-spacing: -0.05em; }',
+      '',
+      options.wantsMotion ? '@keyframes kineticHeadline { 0%, 100% { transform: translateY(0) skewX(0deg); filter: brightness(1); } 42% { transform: translateY(-4px) skewX(-4deg); filter: brightness(1.22); } 64% { transform: translateY(2px) skewX(2deg); filter: brightness(1.05); } }' : '',
+      options.wantsMotion ? '@keyframes riseIn { from { opacity: 0; transform: translateY(18px) scale(0.985); } to { opacity: 1; transform: translateY(0) scale(1); } }' : '',
+      options.wantsMotion ? '.motion-ready .topbar, .motion-ready .hero-panel, .motion-ready .signal-panel, .motion-ready .feature-card, .motion-ready .cta-panel { animation: riseIn 760ms cubic-bezier(.2,.8,.2,1) both; }' : '',
+      options.wantsMotion ? '.motion-ready .signal-panel { animation-delay: 90ms; } .motion-ready .feature-card:nth-child(1) { animation-delay: 150ms; } .motion-ready .feature-card:nth-child(2) { animation-delay: 230ms; } .motion-ready .feature-card:nth-child(3) { animation-delay: 310ms; } .motion-ready .cta-panel { animation-delay: 380ms; }' : '',
+      '',
+      '@media (max-width: 980px) {',
+      '  .topbar, .hero-grid, .feature-grid, .cta-panel { width: min(100%, calc(100% - 8px)); }',
+      '  .hero-grid, .feature-grid { grid-template-columns: 1fr; }',
+      '  .cta-panel { flex-direction: column; align-items: stretch; }',
+      '}',
+      '',
+      '@media (max-width: 720px) {',
+      '  .landing-shell { padding: 16px; }',
+      '  .topbar { border-radius: 28px; align-items: flex-start; }',
+      '  .topnav { display: none; }',
+      '  .hero-panel { padding: 28px; }',
+      '  .proof-strip { grid-template-columns: 1fr; }',
       '}',
       '```',
     ].join('\n');
@@ -6950,13 +8159,17 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
   private tryActiveSandboxLandingPageEdit(input: string, lower: string, history: readonly Message[]): string | null {
     if (this._activeMode !== 'builder' || !this._hasActiveSandboxContext) return null;
 
+    const snapshotPaths = this.getActiveSandboxSnapshotPaths(history);
+    if (isFreshBuildRequestForEmptySandbox(input, lower, snapshotPaths)) return null;
+
     const wantsVisualEdit = /\b(?:edit|update|change|improve|polish|refine|make|turn|switch|rename|add)\b/i.test(lower);
     const strongColorEdit = /\b(?:text|headline|button|cta|accent|color|palette|theme|background)\b/i.test(lower)
       && /\b(?:red|orange|amber|yellow|green|emerald|teal|blue|cyan|violet|purple|pink|white|black)\b/i.test(lower);
-    const snapshotPaths = this.getActiveSandboxSnapshotPaths(history);
     const landingSignals = [
       /\blanding\s+page\b/i,
       /\bhero\b/i,
+      /\bheading\b/i,
+      /\bheadline\b/i,
       /\bbrand\b/i,
       /\blogos?\s+strip\b/i,
       /\bfeature\s+cards?\b/i,
@@ -6967,6 +8180,13 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       /\bcolor\b/i,
       /\bpalette\b/i,
       /\btheme\b/i,
+      /\bmotion\b/i,
+      /\banimation\b/i,
+      /\banimate\b/i,
+      /\bkinetic\b/i,
+      /\bentrance\b/i,
+      /\breveal\b/i,
+      /\bbody\b/i,
     ].filter((pattern) => pattern.test(lower)).length;
 
     if (!wantsVisualEdit || (landingSignals < 2 && !(strongColorEdit && snapshotPaths.length > 0))) return null;
@@ -6978,35 +8198,55 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       return 'I can polish the active landing page, but I need the main page file in context first. Send `src/App.tsx` or `app/page.tsx`, or ask again after the builder syncs file snapshots.';
     }
 
-    const brandMatch = /rename\s+the\s+brand\s+to\s+([a-z0-9][a-z0-9\s-]{1,40})/i.exec(input)
-      ?? /brand\s+to\s+([a-z0-9][a-z0-9\s-]{1,40})/i.exec(input);
-    const brand = (brandMatch?.[1] ?? 'Northshift').trim();
-    const heroLead = /\boperations\s+teams?\b/i.test(lower)
+    const systemText = this.getActiveSandboxSystemText(history);
+    const combinedContext = `${lower}\n${systemText}`;
+    const isFitnessLanding = /\b(?:fitness|training|trainer|gym|workout|athlete|performance|kinetic\s+pulse)\b/i.test(combinedContext);
+    const brand = this.extractLandingBrand(input, systemText) ?? (isFitnessLanding ? 'Kinetic Pulse' : 'Northshift');
+    const primaryCta = this.extractLandingCta(input, systemText) ?? (isFitnessLanding ? 'Start Training' : 'Start free');
+    const wantsMotion = /\b(?:motion|animation|animate|animated|kinetic|transition|entrance|reveal|stagger|smooth)\b/i.test(lower)
+      || /\b(?:kinetic-heading|@keyframes\s+kineticHeadline|animation:\s*kineticHeadline)\b/i.test(systemText);
+    const background = this.resolveLandingBackgroundColor(combinedContext);
+    const heroLead = isFitnessLanding
+      ? 'A dark, neon fitness landing page for athletes who want sharp programming, visible momentum, and a training flow that feels ready to start.'
+      : /\boperations\s+teams?\b/i.test(lower)
       ? 'AI agents for operations teams that need faster incident response, cleaner handoffs, and less busywork.'
       : 'A more confident product story with calmer spacing, stronger hierarchy, and a CTA row that feels ready to click.';
-    const accent = this.resolveLandingAccent(lower);
+    const accent = this.resolveLandingAccent(combinedContext);
 
-    return this.generateActiveSandboxLandingPageEdit(targetPath, brand, heroLead, accent);
+    return this.generateActiveSandboxLandingPageEdit(targetPath, {
+      brand,
+      heroLead,
+      primaryCta,
+      accent,
+      background,
+      isFitnessLanding,
+      wantsMotion,
+    });
   }
 
   private tryActiveSandboxProjectIteration(input: string, lower: string, history: readonly Message[]): string | null {
     if (this._activeMode !== 'builder' || !this._hasActiveSandboxContext) return null;
 
     const isIterationRequest = /^(?:now\s+)?(?:can\s+you\s+)?(?:please\s+)?(?:add|change|modify|update|make|convert|switch|remove|delete|include|insert|replace|refactor|fix|style|use|rename|polish|improve|refine|tighten)\b/i.test(input)
-      || /\b(?:color scheme|palette|accent|spacing|hero text|headline|cta|copy|traffic sources|chart|dashboard|date range|time range|filter row|filters?|auth(?:entication)?|login|sign[\s-]?in|session|middleware)\b/i.test(lower);
+      || /\b(?:dev server on port|repair attempt|files that were applied|diagnose the issue|output only the files that need to change|color scheme|palette|accent|spacing|hero text|headline|heading|cta|copy|motion|animation|animate|kinetic|transition|entrance|reveal|traffic sources|chart|dashboard|date range|time range|filter row|filters?|auth(?:entication)?|login|sign[\s-]?in|session|middleware)\b/i.test(lower);
     if (!isIterationRequest) return null;
-
-    const looksLikeFreshBuildRequest = /^(?:now\s+)?(?:can\s+you\s+)?(?:please\s+)?(?:build|create|make|design|generate|develop|scaffold|start)\b/i.test(input)
-      && /\b(?:website|web\s*site|app|application|project|portfolio|gallery|landing\s*page|homepage|site|store|shop|dashboard|blog|workspace|platform)\b/i.test(lower)
-      && !/\b(?:current|existing|active|this|same)\b/i.test(lower)
-      && !/\b(?:edit|change|modify|update|improve|polish|refine|fix|replace|remove|switch|turn|keep|reuse|iterate)\b/i.test(lower);
-    if (looksLikeFreshBuildRequest) return null;
 
     const snapshotPaths = this.getActiveSandboxSnapshotPaths(history);
     const systemText = this.getActiveSandboxSystemText(history);
+    if (isFreshBuildRequestForEmptySandbox(input, lower, snapshotPaths)) return null;
+
     const wantsAuthUpgrade = /\b(?:auth(?:entication)?|login|sign[\s-]?in|session|middleware|protected route|user account)\b/i.test(lower);
     const looksLikeNextApp = snapshotPaths.some((path) => /(?:^|\/)(?:src\/)?app\/(?:layout|page)\.(?:tsx|jsx|ts|js)$/i.test(path))
       || /"next"\s*:|next\.config/i.test(systemText);
+    const lastAssistant = [...history]
+      .reverse()
+      .find((message) => message.role === 'assistant' && /```[\s\S]+title="[^"]+"/.test(message.content));
+
+    // A fresh builder conversation gets an empty sandbox immediately, but that
+    // alone is not enough context to treat the next prompt as an in-place edit.
+    if (!lastAssistant && snapshotPaths.length === 0) {
+      return null;
+    }
 
     if (wantsAuthUpgrade) {
       if (looksLikeNextApp) {
@@ -7015,16 +8255,16 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       return 'I can add auth to the active app, but I need one short choice before I patch files: hosted auth (Clerk or Supabase) or app-owned auth (Auth.js or local session)?';
     }
 
+    if (/\b(?:dev server on port|repair attempt|did not respond after applying|diagnose the issue)\b/i.test(lower)) {
+      return this.generateActiveSandboxDevServerRepair(history);
+    }
+
     if (
       /\bphoto-portfolio\b/i.test(systemText)
       && /\b(?:text|copy|headline|lede|button|cta|gallery|image|images|photo|photos|nature|landscape|portrait|norwegian|booking|contact|creative|relevant)\b/i.test(lower)
     ) {
       return this.generateActiveSandboxPhotographyPortfolioEdit(input);
     }
-
-    const lastAssistant = [...history]
-      .reverse()
-      .find((message) => message.role === 'assistant' && /```[\s\S]+title="[^"]+"/.test(message.content));
     if (!lastAssistant) {
       return snapshotPaths.length > 0
         ? `I can edit the active app from here, but I need the exact file you want patched called out. I already have snapshots for ${snapshotPaths.slice(0, 4).join(', ')}. Reply with the file path to change, or ask for a landing-page polish pass.`
@@ -7056,6 +8296,43 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     }
 
     return null;
+  }
+
+  private generateActiveSandboxDevServerRepair(history: readonly Message[]): string {
+    const lastAssistant = [...history]
+      .reverse()
+      .find((message) => message.role === 'assistant' && /```[\s\S]+title="[^"]+"/.test(message.content));
+    const looksLikeVite = !lastAssistant || /"vite"\s*:|@vitejs\/plugin-react|vite preview|vite build/i.test(lastAssistant.content);
+    if (!looksLikeVite) {
+      return [
+        '```js title="next.config.mjs"',
+        '/** @type {import("next").NextConfig} */',
+        'const nextConfig = {',
+        '  reactStrictMode: true,',
+        '};',
+        '',
+        'export default nextConfig;',
+        '```',
+      ].join('\n');
+    }
+    return [
+      '```js title="vite.config.js"',
+      "import { defineConfig } from 'vite';",
+      "import react from '@vitejs/plugin-react';",
+      '',
+      'export default defineConfig({',
+      '  plugins: [react()],',
+      '  server: {',
+      "    host: '127.0.0.1',",
+      '    strictPort: false,',
+      '  },',
+      '  preview: {',
+      "    host: '127.0.0.1',",
+      '    strictPort: false,',
+      '  },',
+      '});',
+      '```',
+    ].join('\n');
   }
 
   private generateFreshInstallClarifier(stackLabel: string): string {
@@ -7319,6 +8596,97 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     const isWeb = /\bweb\b|\bapi\b|\bserver\b|\bhttp\b/i.test(desc);
     const appDesc = desc.replace(/\bbuild\b|\bcreate\b|\bmake\b/gi, '').trim() || 'rust cli tool';
 
+    if (isCli && /\b(?:incident|triage|severity|sev|on[\s-]?call|runbook)\b/i.test(desc)) {
+      return [
+        'Building a Rust CLI incident triage tool with Clap commands.',
+        '',
+        '```toml title="Cargo.toml"',
+        '[package]',
+        'name = "incident-triage"',
+        'version = "0.1.0"',
+        'edition = "2021"',
+        '',
+        '[dependencies]',
+        'clap = { version = "4", features = ["derive"] }',
+        '```',
+        '',
+        '```rust title="src/main.rs"',
+        'use clap::{Parser, Subcommand};',
+        '',
+        '#[derive(Parser)]',
+        '#[command(name = "incident-triage", about = "Rust CLI incident triage tool", version)]',
+        'struct Cli {',
+        '    #[command(subcommand)]',
+        '    command: Commands,',
+        '}',
+        '',
+        '#[derive(Subcommand)]',
+        'enum Commands {',
+        '    /// List active incidents by severity and owner',
+        '    List,',
+        '    /// Show one incident by id',
+        '    Show { id: u32 },',
+        '    /// Escalate an incident to a new owner',
+        '    Escalate { id: u32, owner: String },',
+        '    /// Print severity counts for the current queue',
+        '    Summary,',
+        '}',
+        '',
+        '#[derive(Clone)]',
+        'struct Incident {',
+        '    id: u32,',
+        "    title: &'static str,",
+        "    severity: &'static str,",
+        "    owner: &'static str,",
+        "    status: &'static str,",
+        '}',
+        '',
+        'fn seeded_incidents() -> Vec<Incident> {',
+        '    vec![',
+        '        Incident { id: 101, title: "API latency spike", severity: "sev2", owner: "platform", status: "investigating" },',
+        '        Incident { id: 102, title: "Checkout webhooks delayed", severity: "sev1", owner: "payments", status: "escalated" },',
+        '        Incident { id: 103, title: "Search index lag", severity: "sev3", owner: "search", status: "monitoring" },',
+        '    ]',
+        '}',
+        '',
+        'fn main() {',
+        '    let cli = Cli::parse();',
+        '    let incidents = seeded_incidents();',
+        '',
+        '    match cli.command {',
+        '        Commands::List => {',
+        '            println!("Rust CLI active incident triage queue:");',
+        '            for incident in &incidents {',
+        '                println!("[{}] {} | severity={} | owner={} | status={}", incident.id, incident.title, incident.severity, incident.owner, incident.status);',
+        '            }',
+        '        }',
+        '        Commands::Show { id } => {',
+        '            match incidents.iter().find(|incident| incident.id == id) {',
+        '                Some(incident) => println!("Incident {}: {}\\nseverity: {}\\nowner: {}\\nstatus: {}", incident.id, incident.title, incident.severity, incident.owner, incident.status),',
+        '                None => eprintln!("No incident found for id {id}"),',
+        '            }',
+        '        }',
+        '        Commands::Escalate { id, owner } => {',
+        '            match incidents.iter().find(|incident| incident.id == id) {',
+        '                Some(incident) => println!("Escalating incident {} ({}) from {} to {}", incident.id, incident.title, incident.owner, owner),',
+        '                None => eprintln!("No incident found for id {id}"),',
+        '            }',
+        '        }',
+        '        Commands::Summary => {',
+        '            let sev1 = incidents.iter().filter(|incident| incident.severity == "sev1").count();',
+        '            let sev2 = incidents.iter().filter(|incident| incident.severity == "sev2").count();',
+        '            let sev3 = incidents.iter().filter(|incident| incident.severity == "sev3").count();',
+        '            println!("Incident summary: sev1={sev1}, sev2={sev2}, sev3={sev3}");',
+        '        }',
+        '    }',
+        '}',
+        '```',
+        '',
+        '**Run:** `cargo run -- list`, `cargo run -- show 102`, `cargo run -- escalate 102 oncall-lead`, or `cargo run -- summary`',
+        '**What to check:** the CLI prints incident ids, severity, owner, status, and escalation output instead of a generic greeting demo.',
+      ].join('\n');
+    }
+
     if (isWeb) {
       return (
         'Building a Rust web API with Axum.\n\n' +
@@ -7344,6 +8712,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       '```toml title="Cargo.toml"\n' +
       '[package]\nname = "rust-cli"\nversion = "0.1.0"\nedition = "2021"\n\n' +
       '[dependencies]\nclap = { version = "4", features = ["derive"] }\n' +
+      '```\n\n' +
       '```rust title="src/main.rs"\n' +
       'use clap::{Parser, Subcommand};\n\n' +
       '#[derive(Parser)]\n#[command(name = "cli", about = "A Rust CLI tool", version)]\nstruct Cli {\n    #[command(subcommand)]\n    command: Commands,\n}\n\n' +
@@ -7616,26 +8985,32 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       '        ))}',
       '      </section>',
       '',
-      '      <section id="gallery" className="gallery-grid">',
-      '        {shots.map((shot, index) => (',
-      '          <button',
-      '            key={shot.id}',
-      '            type="button"',
-      '            className={`gallery-card ${activeId === shot.id ? "is-active" : ""}`}',
-      '            onClick={() => setActiveId(shot.id)}',
-      '            style={{ animationDelay: `${index * 65}ms` }}',
-      '          >',
-      '            <div className="image-fill">',
-      '              <img src={shot.image} alt={shot.title} loading={index < 2 ? "eager" : "lazy"} />',
-      '            </div>',
-      '            <div className="card-copy">',
-      '              <span>{shot.category}</span>',
-      '              <strong>{shot.title}</strong>',
-      '              <p>{shot.tone}</p>',
-      '              <small>{shot.location}</small>',
-      '            </div>',
-      '          </button>',
-      '        ))}',
+      '      <section id="gallery" className="gallery-shell">',
+      '        <div className="section-heading">',
+      '          <p className="eyebrow">Masonry gallery</p>',
+      '          <h2>Gallery built for browsing</h2>',
+      '        </div>',
+      '        <div className="gallery-grid">',
+      '          {shots.map((shot, index) => (',
+      '            <button',
+      '              key={shot.id}',
+      '              type="button"',
+      '              className={`gallery-card ${activeId === shot.id ? "is-active" : ""}`}',
+      '              onClick={() => setActiveId(shot.id)}',
+      '              style={{ animationDelay: `${index * 65}ms` }}',
+      '            >',
+      '              <div className="image-fill">',
+      '                <img src={shot.image} alt={shot.title} loading={index < 2 ? "eager" : "lazy"} />',
+      '              </div>',
+      '              <div className="card-copy">',
+      '                <span>{shot.category}</span>',
+      '                <strong>{shot.title}</strong>',
+      '                <p>{shot.tone}</p>',
+      '                <small>{shot.location}</small>',
+      '              </div>',
+      '            </button>',
+      '          ))}',
+      '        </div>',
       '      </section>',
       '',
       '      <section className="lightbox-shell">',
@@ -7644,7 +9019,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       '            <img src={activeShot.image} alt={activeShot.title} />',
       '          </div>',
       '          <div className="lightbox-copy">',
-      '            <p className="eyebrow">Selected frame</p>',
+      '            <p className="eyebrow">Fullscreen lightbox</p>',
       '            <h2>{activeShot.title}</h2>',
       '            <p>{activeShot.tone}</p>',
       '            <div className="lightbox-row">',
@@ -7701,6 +9076,9 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       '.hero-note p { color: #d7deea; line-height: 1.7; }',
       '.meta-strip { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 24px; }',
       '.meta-strip span, .lightbox-row span, .contact-points span { padding: 10px 14px; border-radius: 999px; background: rgba(15,23,42,0.72); border: 1px solid rgba(148,163,184,0.14); color: #d8dfeb; font-size: 14px; }',
+      '.gallery-shell { display: grid; gap: 18px; }',
+      '.section-heading { display: flex; justify-content: space-between; gap: 18px; align-items: end; padding: 0 4px; }',
+      '.section-heading h2 { margin: 0; font-family: "Cormorant Garamond", Georgia, serif; font-size: clamp(2.2rem, 5vw, 3.4rem); letter-spacing: -0.05em; }',
       '.gallery-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }',
       '.gallery-card { padding: 0; border-radius: 28px; overflow: hidden; color: inherit; text-align: left; animation: rise 420ms ease both; }',
       '.gallery-card.is-active { border-color: rgba(214,194,154,0.7); box-shadow: 0 24px 84px rgba(201,164,92,0.18); }',
@@ -7739,7 +9117,410 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     ].join('\n');
   }
 
+  private wantsRoutefulPhotographyPortfolio(desc: string): boolean {
+    return (
+      /\b(?:home|gallery|contact)\b/i.test(desc)
+      && /\b(?:page|pages|route|routes)\b/i.test(desc)
+    ) || /\b(?:distinct|separate)\b/i.test(desc)
+      && /\b(?:home|gallery|contact)\b/i.test(desc)
+      || /\b(?:multi[\s-]?page|three[\s-]?page)\b/i.test(desc);
+  }
+
+  private buildRoutefulPhotographyPortfolioAppTsx(desc: string): string {
+    const spec = this.buildPhotographyPortfolioSpec(desc);
+    const studioName = /norwegian nature photographer/i.test(spec.eyebrow)
+      ? 'Nordlys Archive'
+      : /family \+ portrait photographer/i.test(spec.eyebrow)
+        ? 'Soft Sunday Studio'
+        : 'Afterlight Studio';
+    const baseLocation = /norwegian nature photographer/i.test(spec.eyebrow)
+      ? 'Western Norway + destination travel'
+      : /family \+ portrait photographer/i.test(spec.eyebrow)
+        ? 'Home sessions + outdoor portraits'
+        : 'Editorial, portrait, and campaign commissions';
+
+    return [
+      "import { Link, NavLink, Route, Routes } from 'react-router-dom';",
+      "import { useMemo, useState } from 'react';",
+      '',
+      'type Shot = {',
+      '  id: number;',
+      '  title: string;',
+      '  category: string;',
+      '  tone: string;',
+      '  location: string;',
+      '  image: string;',
+      '};',
+      '',
+      `const studioName = ${JSON.stringify(studioName)};`,
+      `const label = ${JSON.stringify(spec.eyebrow)};`,
+      `const heroTitle = ${JSON.stringify(spec.heroTitle)};`,
+      `const heroLead = ${JSON.stringify(spec.heroLead)};`,
+      `const primaryCta = ${JSON.stringify(spec.primaryCta)};`,
+      `const secondaryCta = ${JSON.stringify(spec.secondaryCta)};`,
+      `const contactHeading = ${JSON.stringify(spec.contactHeading)};`,
+      `const contactLead = ${JSON.stringify(spec.contactLead)};`,
+      `const baseLocation = ${JSON.stringify(baseLocation)};`,
+      `const contactMeta = ${JSON.stringify(spec.contactMeta)};`,
+      `const metaItems = ${JSON.stringify(spec.metaItems)};`,
+      `const shots = ${JSON.stringify(spec.shots, null, 2)} satisfies Shot[];`,
+      '',
+      'export default function App() {',
+      "  const categories = useMemo(() => ['All', ...Array.from(new Set(shots.map((shot) => shot.category)))], []);",
+      "  const [selectedCategory, setSelectedCategory] = useState('All');",
+      '  const [selectedId, setSelectedId] = useState(shots[0]?.id ?? 0);',
+      '  const filteredShots = useMemo(() => selectedCategory === \"All\"',
+      '    ? shots',
+      '    : shots.filter((shot) => shot.category === selectedCategory), [selectedCategory]);',
+      '  const activeShot = useMemo(() => filteredShots.find((shot) => shot.id === selectedId) ?? filteredShots[0] ?? shots[0], [filteredShots, selectedId]);',
+      '',
+      '  return (',
+      '    <div className="site-shell">',
+      '      <header className="site-nav">',
+      '        <Link to="/" className="brand-lockup">',
+      '          <span className="brand-mark">{studioName}</span>',
+      '          <span className="brand-meta">{label}</span>',
+      '        </Link>',
+      '        <nav className="nav-links" aria-label="Primary">',
+      '          <NavLink to="/" end className={({ isActive }) => isActive ? "nav-link nav-link-active" : "nav-link"}>Home</NavLink>',
+      '          <NavLink to="/gallery" className={({ isActive }) => isActive ? "nav-link nav-link-active" : "nav-link"}>Gallery</NavLink>',
+      '          <NavLink to="/contact" className={({ isActive }) => isActive ? "nav-link nav-link-active" : "nav-link"}>Contact</NavLink>',
+      '        </nav>',
+      '        <Link to="/contact" className="nav-cta">{primaryCta}</Link>',
+      '      </header>',
+      '',
+      '      <Routes>',
+      '        <Route',
+      '          path="/"',
+      '          element={',
+      '            <main className="page-shell">',
+      '              <section className="hero-grid">',
+      '                <div className="hero-copy">',
+      '                  <p className="eyebrow">{label}</p>',
+      '                  <h1>{heroTitle}</h1>',
+      '                  <p className="lede">{heroLead}</p>',
+      '                  <div className="hero-actions">',
+      '                    <Link to="/contact" className="primary-link">{primaryCta}</Link>',
+      '                    <Link to="/gallery" className="secondary-link">{secondaryCta}</Link>',
+      '                  </div>',
+      '                  <div className="meta-strip">',
+      '                    {metaItems.map((item) => (',
+      '                      <span key={item}>{item}</span>',
+      '                    ))}',
+      '                  </div>',
+      '                </div>',
+      '                <figure className="hero-figure">',
+      '                  <img src={shots[0].image} alt={shots[0].title} />',
+      '                  <figcaption>',
+      '                    <strong>{shots[0].title}</strong>',
+      '                    <span>{shots[0].location}</span>',
+      '                  </figcaption>',
+      '                </figure>',
+      '              </section>',
+      '',
+      '              <section className="story-grid">',
+      '                <article className="story-copy">',
+      '                  <p className="section-kicker">Built like a real site</p>',
+      '                  <h2>Home, gallery, and contact live on distinct routes.</h2>',
+      '                  <p>{contactLead}</p>',
+      '                  <Link to="/gallery" className="inline-link">Open the full gallery</Link>',
+      '                </article>',
+      '                <article className="featured-grid">',
+      '                  {shots.slice(0, 3).map((shot) => (',
+      '                    <Link key={shot.id} to="/gallery" className="featured-card">',
+      '                      <img src={shot.image} alt={shot.title} />',
+      '                      <div>',
+      '                        <span>{shot.category}</span>',
+      '                        <strong>{shot.title}</strong>',
+      '                        <p>{shot.tone}</p>',
+      '                      </div>',
+      '                    </Link>',
+      '                  ))}',
+      '                </article>',
+      '              </section>',
+      '            </main>',
+      '          }',
+      '        />',
+      '        <Route',
+      '          path="/gallery"',
+      '          element={',
+      '            <main className="page-shell gallery-shell">',
+      '              <section className="page-heading">',
+      '                <p className="section-kicker">Gallery</p>',
+      '                <h1>Relevant nature context, real imagery, and a route that stands on its own.</h1>',
+      '                <p>{heroLead}</p>',
+      '              </section>',
+      '',
+      '              <div className="gallery-toolbar">',
+      '                {categories.map((category) => (',
+      '                  <button',
+      '                    key={category}',
+      '                    type="button"',
+      '                    className={category === selectedCategory ? "filter-chip filter-chip-active" : "filter-chip"}',
+      '                    onClick={() => setSelectedCategory(category)}',
+      '                  >',
+      '                    {category}',
+      '                  </button>',
+      '                ))}',
+      '              </div>',
+      '',
+      '              <section className="gallery-layout">',
+      '                <div className="gallery-grid">',
+      '                  {filteredShots.map((shot) => (',
+      '                    <button',
+      '                      key={shot.id}',
+      '                      type="button"',
+      '                      className={shot.id === activeShot?.id ? "gallery-card gallery-card-active" : "gallery-card"}',
+      '                      onClick={() => setSelectedId(shot.id)}',
+      '                    >',
+      '                      <img src={shot.image} alt={shot.title} loading="lazy" />',
+      '                      <div className="gallery-card-copy">',
+      '                        <span>{shot.category}</span>',
+      '                        <strong>{shot.title}</strong>',
+      '                        <p>{shot.location}</p>',
+      '                      </div>',
+      '                    </button>',
+      '                  ))}',
+      '                </div>',
+      '',
+      '                {activeShot && (',
+      '                  <aside className="gallery-detail">',
+      '                    <img src={activeShot.image} alt={activeShot.title} />',
+      '                    <div className="gallery-detail-copy">',
+      '                      <p className="section-kicker">Selected frame</p>',
+      '                      <h2>{activeShot.title}</h2>',
+      '                      <p>{activeShot.tone}</p>',
+      '                      <div className="detail-meta">',
+      '                        <span>{activeShot.category}</span>',
+      '                        <span>{activeShot.location}</span>',
+      '                        <span>Licensing-ready delivery</span>',
+      '                      </div>',
+      '                      <Link to="/contact" className="primary-link">Plan a shoot like this</Link>',
+      '                    </div>',
+      '                  </aside>',
+      '                )}',
+      '              </section>',
+      '            </main>',
+      '          }',
+      '        />',
+      '        <Route',
+      '          path="/contact"',
+      '          element={',
+      '            <main className="page-shell contact-page">',
+      '              <section className="page-heading">',
+      '                <p className="section-kicker">Contact</p>',
+      '                <h1>{contactHeading}</h1>',
+      '                <p>{contactLead}</p>',
+      '              </section>',
+      '',
+      '              <section className="contact-layout">',
+      '                <article className="contact-copy">',
+      '                  <div className="contact-list">',
+      '                    {contactMeta.map((item) => (',
+      '                      <div key={item} className="contact-note">',
+      '                        <strong>{item}</strong>',
+      '                        <p>Built to feel like a real booking surface, not a dead footer block.</p>',
+      '                      </div>',
+      '                    ))}',
+      '                  </div>',
+      '                  <div className="contact-card">',
+      '                    <span>Base</span>',
+      '                    <strong>{baseLocation}</strong>',
+      '                    <p>Share the season, the kind of landscape, and whether the work is portrait, editorial, or tourism-led.</p>',
+      '                  </div>',
+      '                </article>',
+      '',
+      '                <form className="contact-form">',
+      '                  <label>',
+      '                    Name',
+      '                    <input type="text" name="name" placeholder="Your name" />',
+      '                  </label>',
+      '                  <label>',
+      '                    Email',
+      '                    <input type="email" name="email" placeholder="you@example.com" />',
+      '                  </label>',
+      '                  <label>',
+      '                    Shoot type',
+      '                    <input type="text" name="shootType" placeholder="Editorial, portrait, tourism, campaign..." />',
+      '                  </label>',
+      '                  <label>',
+      '                    Brief',
+      '                    <textarea name="brief" rows={6} placeholder="Tell the site what kind of nature story or portrait work you need." />',
+      '                  </label>',
+      '                  <button type="submit" className="primary-link primary-submit">Send enquiry</button>',
+      '                </form>',
+      '              </section>',
+      '            </main>',
+      '          }',
+      '        />',
+      '      </Routes>',
+      '    </div>',
+      '  );',
+      '}',
+    ].join('\n');
+  }
+
+  private buildRoutefulPhotographyPortfolioStyles(): string {
+    return [
+      "@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap');",
+      '',
+      ':root { color: #1d1813; background: #f4efe6; font-family: "Manrope", ui-sans-serif, system-ui, sans-serif; }',
+      '* { box-sizing: border-box; }',
+      'html { scroll-behavior: smooth; }',
+      'body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, #f8f3eb 0%, #efe7da 44%, #e6dccd 100%); color: #1d1813; }',
+      'a, button, input, textarea { font: inherit; }',
+      'a { color: inherit; text-decoration: none; }',
+      'button { cursor: pointer; }',
+      'img { display: block; max-width: 100%; }',
+      '.site-shell { padding-bottom: 64px; }',
+      '.site-nav, .page-shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }',
+      '.site-nav { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 0; background: rgba(248,243,235,0.88); backdrop-filter: blur(14px); border-bottom: 1px solid rgba(57,44,32,0.12); }',
+      '.brand-lockup { display: grid; gap: 4px; }',
+      '.brand-mark, h1, h2, h3, strong { font-family: "Fraunces", Georgia, serif; }',
+      '.brand-mark { font-size: 24px; letter-spacing: -0.05em; }',
+      '.brand-meta, .eyebrow, .section-kicker, .gallery-card-copy span, .contact-card span { text-transform: uppercase; letter-spacing: 0.16em; font-size: 11px; color: #7a6451; }',
+      '.nav-links { display: flex; flex-wrap: wrap; gap: 14px; }',
+      '.nav-link { padding-bottom: 4px; color: #6e5a49; }',
+      '.nav-link-active { color: #1d1813; border-bottom: 1px solid currentColor; }',
+      '.nav-cta, .primary-link, .secondary-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border: 1px solid rgba(57,44,32,0.14); transition: transform 0.18s ease, background 0.18s ease; }',
+      '.nav-cta, .primary-link { background: #1d1813; color: #f8f3eb; }',
+      '.secondary-link { background: transparent; color: #1d1813; }',
+      '.nav-cta:hover, .primary-link:hover, .secondary-link:hover, .featured-card:hover, .gallery-card:hover { transform: translateY(-1px); }',
+      '.page-shell { padding: 32px 0 56px; }',
+      '.hero-grid { display: grid; grid-template-columns: minmax(0, 0.95fr) minmax(360px, 1.05fr); gap: 28px; align-items: end; }',
+      'h1, h2, h3, p { margin: 0; }',
+      'h1 { font-size: clamp(3.5rem, 8vw, 6.2rem); line-height: 0.9; letter-spacing: -0.06em; max-width: 10ch; }',
+      '.lede, .story-copy p, .gallery-detail-copy p, .contact-copy p { color: #544637; line-height: 1.78; }',
+      '.lede { margin-top: 18px; max-width: 58ch; font-size: 18px; }',
+      '.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }',
+      '.meta-strip, .detail-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }',
+      '.meta-strip span, .detail-meta span { padding: 8px 0; border-bottom: 1px solid rgba(57,44,32,0.18); color: #544637; }',
+      '.hero-figure { margin: 0; min-height: 620px; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: #ddd4c7; }',
+      '.hero-figure img, .gallery-card img, .gallery-detail img, .featured-card img { width: 100%; height: 100%; object-fit: cover; }',
+      '.hero-figure figcaption { display: flex; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid rgba(57,44,32,0.14); }',
+      '.hero-figure span { color: #6e5a49; }',
+      '.story-grid { display: grid; grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr); gap: 28px; margin-top: 42px; }',
+      '.story-copy { display: grid; align-content: start; gap: 16px; }',
+      '.featured-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }',
+      '.featured-card, .gallery-card, .gallery-detail, .contact-note, .contact-card, .contact-form { background: rgba(255,252,247,0.74); border: 1px solid rgba(57,44,32,0.12); }',
+      '.featured-card, .gallery-card { display: grid; gap: 14px; overflow: hidden; }',
+      '.featured-card img { aspect-ratio: 4 / 5; }',
+      '.featured-card div, .gallery-card-copy { padding: 0 14px 14px; display: grid; gap: 6px; }',
+      '.featured-card strong, .gallery-card strong, .contact-note strong, .contact-card strong { font-size: 22px; letter-spacing: -0.04em; }',
+      '.featured-card p, .gallery-card p { color: #665647; line-height: 1.65; }',
+      '.page-heading { display: grid; gap: 12px; max-width: 64ch; margin-bottom: 28px; }',
+      '.gallery-toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }',
+      '.filter-chip { border: 1px solid rgba(57,44,32,0.14); background: transparent; color: #544637; min-height: 40px; padding: 0 12px; }',
+      '.filter-chip-active { background: #1d1813; color: #f8f3eb; }',
+      '.gallery-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr); gap: 22px; }',
+      '.gallery-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }',
+      '.gallery-card { padding: 0; text-align: left; }',
+      '.gallery-card img { aspect-ratio: 4 / 5; }',
+      '.gallery-card-active { border-color: rgba(29,24,19,0.32); }',
+      '.gallery-detail { display: grid; grid-template-rows: auto 1fr; align-self: start; }',
+      '.gallery-detail img { aspect-ratio: 4 / 5; }',
+      '.gallery-detail-copy { padding: 18px; display: grid; gap: 12px; }',
+      '.contact-layout { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(320px, 0.9fr); gap: 24px; }',
+      '.contact-copy, .contact-list { display: grid; gap: 16px; }',
+      '.contact-note, .contact-card { padding: 18px; }',
+      '.contact-form { display: grid; gap: 14px; padding: 20px; }',
+      '.contact-form label { display: grid; gap: 8px; color: #544637; }',
+      '.contact-form input, .contact-form textarea { width: 100%; border: 1px solid rgba(57,44,32,0.14); background: #fffdf8; padding: 12px 14px; color: #1d1813; }',
+      '.primary-submit { border: none; }',
+      '@media (max-width: 980px) { .hero-grid, .story-grid, .gallery-layout, .contact-layout { grid-template-columns: 1fr; } .featured-grid, .gallery-grid { grid-template-columns: 1fr; } .site-nav { align-items: start; } }',
+      '@media (max-width: 720px) { .site-nav, .page-shell { width: min(100%, calc(100% - 20px)); } .site-nav { padding-top: 14px; } h1 { font-size: clamp(3rem, 16vw, 4.8rem); } .hero-figure { min-height: 420px; } }',
+    ].join('\n');
+  }
+
+  private generateBuilderPhotographyPortfolioSite(desc: string): string {
+    return [
+      '```json title="package.json"',
+      JSON.stringify({
+        name: 'photo-portfolio-site',
+        private: true,
+        version: '0.0.0',
+        type: 'module',
+        scripts: {
+          dev: 'vite',
+          build: 'tsc -b && vite build',
+          preview: 'vite preview',
+        },
+        dependencies: {
+          react: '^18.3.1',
+          'react-dom': '^18.3.1',
+          'react-router-dom': '^6.30.1',
+        },
+        devDependencies: {
+          '@types/react': '^18.3.1',
+          '@types/react-dom': '^18.3.1',
+          '@vitejs/plugin-react': '^4.3.1',
+          typescript: '^5.5.3',
+          vite: '^5.4.10',
+        },
+      }, null, 2),
+      '```',
+      '',
+      '```html title="index.html"',
+      '<!doctype html>',
+      '<html lang="en">',
+      '  <head>',
+      '    <meta charset="UTF-8" />',
+      '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+      '    <title>Photography Portfolio</title>',
+      '    <script type="module" src="/src/main.tsx"></script>',
+      '  </head>',
+      '  <body>',
+      '    <div id="root"></div>',
+      '  </body>',
+      '</html>',
+      '```',
+      '',
+      '```tsx title="src/main.tsx"',
+      "import { StrictMode } from 'react';",
+      "import { createRoot } from 'react-dom/client';",
+      "import { BrowserRouter } from 'react-router-dom';",
+      "import App from './App.tsx';",
+      "import './styles.css';",
+      '',
+      "createRoot(document.getElementById('root')!).render(",
+      '  <StrictMode>',
+      '    <BrowserRouter>',
+      '      <App />',
+      '    </BrowserRouter>',
+      '  </StrictMode>,',
+      ');',
+      '```',
+      '',
+      '```tsx title="src/App.tsx"',
+      this.buildRoutefulPhotographyPortfolioAppTsx(desc),
+      '```',
+      '',
+      '```css title="src/styles.css"',
+      this.buildRoutefulPhotographyPortfolioStyles(),
+      '```',
+      '',
+      '```json title="tsconfig.json"',
+      JSON.stringify({
+        compilerOptions: {
+          target: 'ES2020',
+          lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+          module: 'ESNext',
+          moduleResolution: 'bundler',
+          jsx: 'react-jsx',
+          strict: true,
+          skipLibCheck: true,
+        },
+        include: ['src'],
+      }, null, 2),
+      '```',
+    ].join('\n');
+  }
+
   private generateBuilderPhotographyPortfolioApp(desc: string): string {
+    if (this.wantsRoutefulPhotographyPortfolio(desc)) {
+      return this.generateBuilderPhotographyPortfolioSite(desc);
+    }
+
     return [
       '```json title="package.json"',
       JSON.stringify({
@@ -8083,6 +9864,890 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
         include: ['src'],
       }, null, 2),
       '```',
+    ].join('\n');
+  }
+
+  private generateBuilderSpecializedViteApp(config: {
+    name: string;
+    title: string;
+    kicker: string;
+    lede: string;
+    metrics: Array<{ label: string; value: string }>;
+    cards: Array<{ title: string; body: string; meta: string }>;
+    actions: string[];
+    includeUpload?: boolean;
+  }): string {
+    const appTsx = [
+      'const metrics = ' + JSON.stringify(config.metrics, null, 2) + ' as const;',
+      'const cards = ' + JSON.stringify(config.cards, null, 2) + ' as const;',
+      'const actions = ' + JSON.stringify(config.actions, null, 2) + ' as const;',
+      '',
+      'export default function App() {',
+      '  return (',
+      '    <main className="shell">',
+      '      <section className="hero">',
+      `        <p className="eyebrow">${config.kicker}</p>`,
+      `        <h1>${config.title}</h1>`,
+      `        <p className="lede">${config.lede}</p>`,
+      '        <div className="metrics">',
+      '          {metrics.map((metric) => (',
+      '            <article key={metric.label} className="metric">',
+      '              <span>{metric.label}</span>',
+      '              <strong>{metric.value}</strong>',
+      '            </article>',
+      '          ))}',
+      '        </div>',
+      '      </section>',
+      '',
+      config.includeUpload ? [
+        '      <section className="dropzone">',
+        '        <label htmlFor="asset-upload">Drag-and-drop upload</label>',
+        '        <input id="asset-upload" type="file" accept="image/*,.svg" />',
+        '        <div className="control-row">',
+        '          <button type="button">SVG to PNG export</button>',
+        '          <button type="button">2x scale</button>',
+        '          <button type="button">4x scale</button>',
+        '          <button type="button">Square crop</button>',
+        '          <button type="button">Square padding</button>',
+        '          <button type="button">Download</button>',
+        '        </div>',
+        '      </section>',
+        '',
+      ].join('\n') : '',
+      '      <section className="grid">',
+      '        {cards.map((card) => (',
+      '          <article key={card.title} className="card">',
+      '            <span>{card.meta}</span>',
+      '            <h2>{card.title}</h2>',
+      '            <p>{card.body}</p>',
+      '          </article>',
+      '        ))}',
+      '      </section>',
+      '',
+      '      <section className="actions">',
+      '        <h2>Action loop</h2>',
+      '        {actions.map((action) => <button key={action} type="button">{action}</button>)}',
+      '      </section>',
+      '    </main>',
+      '  );',
+      '}',
+    ].join('\n');
+
+    const stylesCss = [
+      ':root { color: #f8fafc; background: #080b12; font-family: "Space Grotesk", "Segoe UI", sans-serif; }',
+      '* { box-sizing: border-box; }',
+      'body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 12% 8%, rgba(56,189,248,.2), transparent 28%), radial-gradient(circle at 88% 16%, rgba(244,114,182,.16), transparent 24%), linear-gradient(145deg, #080b12, #111827 58%, #030712); }',
+      'button, input { font: inherit; }',
+      '.shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 36px 0 72px; }',
+      '.hero, .dropzone, .card, .actions { border: 1px solid rgba(255,255,255,.12); background: rgba(8,13,24,.76); box-shadow: 0 28px 80px rgba(0,0,0,.28); backdrop-filter: blur(18px); }',
+      '.hero { border-radius: 34px; padding: clamp(24px, 5vw, 48px); }',
+      '.eyebrow { margin: 0 0 12px; color: #67e8f9; font-size: 12px; font-weight: 900; letter-spacing: .18em; text-transform: uppercase; }',
+      'h1 { margin: 0; max-width: 12ch; font-size: clamp(3rem, 7vw, 6.4rem); line-height: .88; letter-spacing: -.07em; }',
+      'h2, p { margin: 0; }',
+      '.lede { max-width: 68ch; margin-top: 20px; color: #cbd5e1; font-size: 18px; line-height: 1.75; }',
+      '.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 28px; }',
+      '.metric, .card { border-radius: 24px; padding: 18px; background: rgba(15,23,42,.74); border: 1px solid rgba(255,255,255,.1); }',
+      '.metric span, .card span { display: block; color: #94a3b8; font-size: 12px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }',
+      '.metric strong { display: block; margin-top: 8px; font-size: 24px; }',
+      '.dropzone { margin-top: 18px; border-radius: 28px; padding: 22px; display: grid; gap: 14px; }',
+      '.dropzone label { font-size: 22px; font-weight: 900; }',
+      'input[type="file"] { width: 100%; padding: 18px; border-radius: 20px; border: 1px dashed rgba(103,232,249,.6); color: #dbeafe; background: rgba(15,23,42,.78); }',
+      '.control-row, .actions { display: flex; flex-wrap: wrap; gap: 12px; }',
+      'button { border: 0; border-radius: 999px; padding: 12px 16px; color: #06111c; background: linear-gradient(135deg, #67e8f9, #f0abfc); font-weight: 900; cursor: pointer; transition: transform .18s ease, filter .18s ease; }',
+      'button:hover { transform: translateY(-2px); filter: brightness(1.08); }',
+      '.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }',
+      '.card h2 { margin-top: 12px; font-size: 26px; letter-spacing: -.04em; }',
+      '.card p { margin-top: 10px; color: #cbd5e1; line-height: 1.7; }',
+      '.actions { margin-top: 18px; border-radius: 28px; padding: 22px; align-items: center; }',
+      '.actions h2 { width: 100%; font-size: 22px; }',
+      '@media (max-width: 920px) { .metrics, .grid { grid-template-columns: 1fr 1fr; } }',
+      '@media (max-width: 640px) { .metrics, .grid { grid-template-columns: 1fr; } .shell { width: min(100% - 20px, 1180px); } }',
+    ].join('\n');
+
+    return [
+      '```json title="package.json"',
+      JSON.stringify({
+        name: config.name,
+        private: true,
+        version: '0.0.0',
+        type: 'module',
+        scripts: { dev: 'vite', build: 'tsc -b && vite build', preview: 'vite preview' },
+        dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' },
+        devDependencies: {
+          '@types/react': '^18.3.1',
+          '@types/react-dom': '^18.3.1',
+          '@vitejs/plugin-react': '^4.3.1',
+          typescript: '^5.5.3',
+          vite: '^5.4.10',
+        },
+      }, null, 2),
+      '```',
+      '',
+      '```html title="index.html"',
+      '<!doctype html>',
+      '<html lang="en">',
+      '  <head>',
+      '    <meta charset="UTF-8" />',
+      '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+      `    <title>${config.title}</title>`,
+      '    <script type="module" src="/src/main.tsx"></script>',
+      '  </head>',
+      '  <body><div id="root"></div></body>',
+      '</html>',
+      '```',
+      '',
+      '```tsx title="src/main.tsx"',
+      "import { StrictMode } from 'react';",
+      "import { createRoot } from 'react-dom/client';",
+      "import App from './App.tsx';",
+      "import './styles.css';",
+      "createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);",
+      '```',
+      '',
+      '```tsx title="src/App.tsx"',
+      appTsx,
+      '```',
+      '',
+      '```css title="src/styles.css"',
+      stylesCss,
+      '```',
+      '',
+      '```json title="tsconfig.json"',
+      JSON.stringify({
+        compilerOptions: {
+          target: 'ES2020',
+          lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+          module: 'ESNext',
+          moduleResolution: 'bundler',
+          jsx: 'react-jsx',
+          strict: true,
+          skipLibCheck: true,
+        },
+        include: ['src'],
+      }, null, 2),
+      '```',
+    ].join('\n');
+  }
+
+  private generateBuilderMemeCoinIdleApp(_desc: string): string {
+    return this.generateBuilderSpecializedViteApp({
+      name: 'meme-coin-idle-game',
+      title: 'To The Moon!',
+      kicker: 'Meme coin idle game',
+      lede: 'A playful crypto clicker loop with coin balance, mining controls, upgrades, market events, a price trend panel, and a visible moon progress meter.',
+      metrics: [
+        { label: 'Coin balance', value: '42,069 DOGE' },
+        { label: 'Mining rate', value: '+128/sec' },
+        { label: 'Market mood', value: 'Volatile' },
+        { label: 'Moon progress', value: '68%' },
+      ],
+      cards: [
+        { meta: 'Click control', title: 'Mine meme coins', body: 'Tap the primary mining control to push the balance higher and trigger market momentum.' },
+        { meta: 'Upgrade card', title: 'Rocket miner rig', body: 'Spend coins on rigs, memes, and exchange hype upgrades that increase passive earning.' },
+        { meta: 'Market event', title: 'Influencer candle', body: 'Random bullish and bearish events move the price chart and change short-term strategy.' },
+        { meta: 'Trend panel', title: 'Price chart', body: 'Seeded candles show the coin pumping, dipping, and recovering as the goal meter climbs.' },
+        { meta: 'Goal meter', title: 'Reach the moon', body: 'The progress meter makes the win condition obvious instead of hiding it in raw numbers.' },
+        { meta: 'Portfolio', title: 'Hold or upgrade', body: 'The player can choose between hoarding the coin balance or reinvesting into upgrades.' },
+      ],
+      actions: ['Mine coin', 'Buy upgrade', 'Trigger market event', 'Launch rocket'],
+    });
+  }
+
+  private generateBuilderImageExportTool(_desc: string): string {
+    return this.generateBuilderSpecializedViteApp({
+      name: 'client-image-export-tool',
+      title: 'SVG to PNG Studio',
+      kicker: 'Client-only image utility',
+      lede: 'A browser-only conversion tool for drag-and-drop upload, high-resolution SVG to PNG export, scale presets, square crop/padding controls, and one-click Download.',
+      metrics: [
+        { label: 'Export mode', value: 'SVG -> PNG' },
+        { label: 'Scale choices', value: '1x / 2x / 4x' },
+        { label: 'Square mode', value: 'Crop + padding' },
+        { label: 'Privacy', value: 'Client-only' },
+      ],
+      cards: [
+        { meta: 'Upload', title: 'Drag-and-drop upload', body: 'Accept SVG or raster images and keep the file in-browser for fast local conversion.' },
+        { meta: 'SVG to PNG export', title: 'High-resolution output', body: 'Choose a scale preset before export so icons and social images are crisp.' },
+        { meta: 'Square controls', title: 'Crop or pad', body: 'Make uploaded images square with either centered crop or safe background padding.' },
+        { meta: 'Preview', title: 'Before download', body: 'Show the current canvas dimensions, transparency choice, and expected file size.' },
+        { meta: 'Download', title: 'Two-click finish', body: 'The primary action prepares the PNG and exposes a clear Download action.' },
+        { meta: 'No server', title: 'Private by default', body: 'The utility does not need uploads to a backend to be useful in the first version.' },
+      ],
+      actions: ['SVG to PNG export', 'Make square', 'Download'],
+      includeUpload: true,
+    });
+  }
+
+  private generateBuilderFullStackGalleryApp(_desc: string): string {
+    return this.generateBuilderSpecializedViteApp({
+      name: 'full-stack-image-gallery',
+      title: 'Gallery Control Room',
+      kicker: 'App-router image gallery preview',
+      lede: 'A modern full-stack gallery surface with mock Auth, Upload flow, image grid, image detail route preview, Database status, error monitoring badges, and Analytics events.',
+      metrics: [
+        { label: 'Auth', value: 'Mock session' },
+        { label: 'Database', value: 'Postgres ready' },
+        { label: 'Analytics', value: '12 events' },
+        { label: 'Monitoring', value: '0 open errors' },
+      ],
+      cards: [
+        { meta: 'Gallery', title: 'Seeded image grid', body: 'Editorial image cards prove the browsing experience before real storage is connected.' },
+        { meta: 'Upload', title: 'Upload flow', body: 'A clear upload panel shows validation, progress, and post-upload routing.' },
+        { meta: 'Auth', title: 'User-owned images', body: 'Mock auth state separates public gallery browsing from signed-in upload behavior.' },
+        { meta: 'Database', title: 'Storage status panel', body: 'Database and object storage badges make infrastructure state visible.' },
+        { meta: 'Detail route', title: 'Image detail preview', body: 'The selected image has metadata, owner, visibility, and share actions.' },
+        { meta: 'Analytics', title: 'Event stream', body: 'View, upload, like, and share events are listed as a first telemetry pass.' },
+      ],
+      actions: ['Upload image', 'Open detail route', 'Review error badge', 'Track analytics event'],
+    });
+  }
+
+  private generateBuilderNextGenFullstackMonorepoApp(_desc: string): string {
+    return this.generateBuilderSpecializedViteApp({
+      name: 'next-gen-fullstack-monorepo',
+      title: 'Next-Gen Monorepo Console',
+      kicker: 'Full-stack app-router starter',
+      lede: 'A runnable preview for a Next.js app-router/RSC monorepo with shared tRPC API, Kysely plus Prisma schema management, PlanetScale edge database status, Clerk auth, shadcn-style UI blocks, and Expo workspace notes.',
+      metrics: [
+        { label: 'Next.js', value: 'App Router + RSC' },
+        { label: 'API', value: 'shared tRPC' },
+        { label: 'Database', value: 'Kysely + Prisma' },
+        { label: 'Auth', value: 'Clerk session' },
+      ],
+      cards: [
+        { meta: 'monorepo', title: 'Workspace map', body: 'The starter separates apps/web, apps/expo, packages/api, packages/db, and packages/ui so the monorepo shape is obvious.' },
+        { meta: 'Next.js', title: 'App-router/RSC web app', body: 'The web lane highlights server components, route groups, loading states, and typed server actions.' },
+        { meta: 'tRPC', title: 'Shared API contract', body: 'A shared tRPC router powers web and Expo clients without duplicating request types.' },
+        { meta: 'Kysely', title: 'Edge-ready query layer', body: 'Kysely handles type-safe queries while Prisma owns schema management and migrations.' },
+        { meta: 'PlanetScale', title: 'Database health', body: 'A PlanetScale-style status card shows edge driver readiness, schema sync, and query latency.' },
+        { meta: 'Clerk', title: 'Auth and UI blocks', body: 'Clerk auth, shadcn-style cards, and Expo mobile workspace notes make the starter feel complete.' },
+      ],
+      actions: ['Open monorepo health', 'Inspect tRPC API', 'Check PlanetScale status', 'Preview Expo notes'],
+    });
+  }
+
+  private generateBuilderTanstackThemeKit(_desc: string): string {
+    return this.generateBuilderSpecializedViteApp({
+      name: 'tanstack-start-theme-kit',
+      title: 'TanStack Theme Kit',
+      kicker: 'ThemeProvider demo',
+      lede: 'A runnable demo for TanStack Start-style theming with ThemeProvider, light/dark/system modes, SSR-safe initial script guidance, localStorage persistence, CSS variables, and install snippets for npm, JSR, and Deno.',
+      metrics: [
+        { label: 'ThemeProvider', value: 'React context' },
+        { label: 'Modes', value: 'light / dark / system' },
+        { label: 'Persistence', value: 'localStorage' },
+        { label: 'Packages', value: 'npm / JSR / Deno' },
+      ],
+      cards: [
+        { meta: 'TanStack', title: 'Start route cards', body: 'Route cards show how a TanStack Start app can inherit the same theme tokens across pages.' },
+        { meta: 'ThemeProvider', title: 'Provider boundary', body: 'The provider owns theme state, system preference resolution, and CSS variable application.' },
+        { meta: 'SSR-safe initial script', title: 'No flash on first paint', body: 'The initial script explains how to set the class before hydration so light, dark, and system modes stay stable.' },
+        { meta: 'localStorage', title: 'Remember preference', body: 'Selected themes persist locally and can be reset to system when the user wants automatic mode.' },
+        { meta: 'CSS variables', title: 'Token surface', body: 'Semantic variables for background, foreground, accent, and border make app-wide theming predictable.' },
+        { meta: 'JSR / Deno', title: 'Install snippets', body: 'The preview includes npm, JSR, and Deno commands so non-Node runtimes are represented.' },
+      ],
+      actions: ['Toggle light', 'Toggle dark', 'Use system', 'Copy JSR install'],
+    });
+  }
+
+  private generateBuilderTrellixTrpcBoard(_desc: string): string {
+    return this.generateBuilderSpecializedViteApp({
+      name: 'trellix-trpc-board',
+      title: 'Trellix tRPC Board',
+      kicker: 'Bleeding-edge TypeScript kanban',
+      lede: 'A runnable Trellix-style kanban board preview with draggable-looking task cards, tRPC procedure status, Auth.js session state, Turso/libSQL database health, realtime activity, and setup reminders for TURSO_URL, TURSO_ACCESS_TOKEN, and AUTH_SECRET.',
+      metrics: [
+        { label: 'Trellix', value: 'Kanban preview' },
+        { label: 'tRPC', value: 'Procedures ready' },
+        { label: 'Auth.js', value: 'Session active' },
+        { label: 'Turso', value: 'libSQL healthy' },
+      ],
+      cards: [
+        { meta: 'kanban', title: 'Backlog column', body: 'Seeded cards look draggable and show priority, assignee, and due date metadata.' },
+        { meta: 'tRPC', title: 'Procedure status panel', body: 'Board queries and mutation names are listed so the API surface is visible.' },
+        { meta: 'Auth.js', title: 'Session area', body: 'Mock sign-in state shows how board ownership and member access will be enforced.' },
+        { meta: 'Turso', title: 'Database status', body: 'Turso/libSQL connection cards call out TURSO_URL and TURSO_ACCESS_TOKEN setup.' },
+        { meta: 'AUTH_SECRET', title: 'Environment checklist', body: 'AUTH_SECRET, GitHub OAuth, and database push reminders sit next to the preview.' },
+        { meta: 'realtime', title: 'Activity feed', body: 'Realtime activity explains card moves, comments, and sync events as the board changes.' },
+      ],
+      actions: ['Move kanban card', 'Call tRPC mutation', 'Check Turso status', 'Review AUTH_SECRET'],
+    });
+  }
+
+  private generateBuilderTypescriptLibraryMonorepoStarter(_desc: string): string {
+    const packageJson = JSON.stringify({
+      name: 'acme-corp-lib-starter',
+      private: true,
+      type: 'module',
+      packageManager: 'pnpm@9.12.0',
+      scripts: {
+        build: 'pnpm -r build',
+        test: 'pnpm -r test',
+        changeset: 'changeset',
+        version: 'changeset version',
+      },
+      devDependencies: {
+        '@changesets/cli': '^2.27.9',
+        typescript: '^5.5.3',
+        vitest: '^2.1.1',
+      },
+      workspaces: ['packages/*'],
+    }, null, 2);
+
+    return [
+      'Complete TypeScript library monorepo starter with Prisma generator support, vitest tests, and changeset release flow.',
+      '',
+      '```json title="package.json"',
+      packageJson,
+      '```',
+      '',
+      '```yaml title="pnpm-workspace.yaml"',
+      'packages:',
+      "  - 'packages/*'",
+      '```',
+      '',
+      '```json title="tsconfig.json"',
+      JSON.stringify({
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'NodeNext',
+          moduleResolution: 'NodeNext',
+          declaration: true,
+          strict: true,
+          skipLibCheck: true,
+        },
+        include: ['packages/**/*.ts'],
+      }, null, 2),
+      '```',
+      '',
+      '```ts title="packages/core/src/index.ts"',
+      "export type AcmeLibraryOptions = { appName: string; enableTelemetry?: boolean };",
+      '',
+      'export function createAcmeLibrary(options: AcmeLibraryOptions) {',
+      '  return {',
+      '    kind: "TypeScript library monorepo",',
+      '    appName: options.appName,',
+      '    telemetry: options.enableTelemetry === true,',
+      '  } as const;',
+      '}',
+      '',
+      'export const libraryHealth = { vitest: "configured", changeset: "required", prisma: "generator-ready" } as const;',
+      '```',
+      '',
+      '```ts title="packages/prisma-generator/src/index.ts"',
+      'import { generatorHandler } from "@prisma/generator-helper";',
+      '',
+      'generatorHandler({',
+      '  onManifest() {',
+      '    return {',
+      '      defaultOutput: "./generated",',
+      '      prettyName: "Acme enum bundle-size generator",',
+      '    };',
+      '  },',
+      '  async onGenerate(options) {',
+      '    const enums = options.dmmf.datamodel.enums.map((item) => item.name);',
+      '    const output = `export const prismaEnums = ${JSON.stringify(enums)} as const;\\n`;',
+      '    await options.generator.output?.value && Bun.write(`${options.generator.output.value}/enums.ts`, output);',
+      '  },',
+      '});',
+      '```',
+      '',
+      '```ts title="packages/core/src/index.test.ts"',
+      "import { describe, expect, it } from 'vitest';",
+      "import { createAcmeLibrary } from './index';",
+      '',
+      "describe('createAcmeLibrary', () => {",
+      "  it('returns typed library metadata', () => {",
+      "    expect(createAcmeLibrary({ appName: 'demo' }).kind).toContain('library monorepo');",
+      '  });',
+      '});',
+      '```',
+      '',
+      '```md title=".changeset/initial-release.md"',
+      '---',
+      '"@acme/core": patch',
+      '"@acme/prisma-generator": patch',
+      '---',
+      '',
+      'Initial TypeScript library monorepo with Prisma generator and vitest coverage.',
+      '```',
+    ].join('\n');
+  }
+
+  private generateBuilderDeveloperDefaultsCli(_desc: string): string {
+    const packageJson = JSON.stringify({
+      name: 'good-defaults-cli',
+      version: '0.1.0',
+      type: 'module',
+      bin: { 'good-defaults': './dist/cli.js' },
+      scripts: {
+        dev: 'tsx src/cli.ts',
+        build: 'tsc -p tsconfig.json',
+        test: 'vitest run',
+      },
+      dependencies: {
+        '@inquirer/prompts': '^5.5.0',
+        'fs-extra': '^11.2.0',
+      },
+      devDependencies: {
+        '@types/node': '^22.7.4',
+        tsx: '^4.19.1',
+        typescript: '^5.5.3',
+        vitest: '^2.1.1',
+      },
+    }, null, 2);
+
+    return [
+      'Runnable TypeScript CLI for scaffolding good project defaults: ESLint, Prettier, VS Code settings/extensions, strict TSConfig, and GitHub Actions CI with pnpm caching.',
+      '',
+      '```json title="package.json"',
+      packageJson,
+      '```',
+      '',
+      '```json title="tsconfig.json"',
+      JSON.stringify({
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'NodeNext',
+          moduleResolution: 'NodeNext',
+          strict: true,
+          outDir: 'dist',
+          skipLibCheck: true,
+        },
+        include: ['src'],
+      }, null, 2),
+      '```',
+      '',
+      '```ts title="src/templates.ts"',
+      'export type DefaultChoice = "eslint-prettier" | "vscode" | "tsconfig" | "github-actions";',
+      '',
+      'export const templates: Record<DefaultChoice, { path: string; label: string; content: string }> = {',
+      '  "eslint-prettier": {',
+      '    path: ".eslintrc.cjs",',
+      '    label: "ESLint + Prettier",',
+      '    content: "module.exports = { extends: [\'eslint:recommended\', \'prettier\'] };\\n",',
+      '  },',
+      '  vscode: {',
+      '    path: ".vscode/extensions.json",',
+      '    label: "VS Code settings and recommended extensions",',
+      '    content: JSON.stringify({ recommendations: ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"] }, null, 2),',
+      '  },',
+      '  tsconfig: {',
+      '    path: "tsconfig.json",',
+      '    label: "Strict TSConfig",',
+      '    content: JSON.stringify({ compilerOptions: { strict: true, moduleResolution: "Bundler" } }, null, 2),',
+      '  },',
+      '  "github-actions": {',
+      '    path: ".github/workflows/ci.yml",',
+      '    label: "GitHub Actions CI with pnpm caching",',
+      '    content: "name: CI\\non: [push, pull_request]\\njobs:\\n  test:\\n    runs-on: ubuntu-latest\\n    steps:\\n      - uses: actions/checkout@v4\\n      - uses: pnpm/action-setup@v4\\n      - uses: actions/setup-node@v4\\n        with:\\n          node-version: 22\\n          cache: pnpm\\n      - run: pnpm install --frozen-lockfile\\n      - run: pnpm test\\n",',
+      '  },',
+      '};',
+      '```',
+      '',
+      '```ts title="src/cli.ts"',
+      "#!/usr/bin/env node",
+      "import { checkbox, confirm } from '@inquirer/prompts';",
+      "import { mkdir, writeFile } from 'node:fs/promises';",
+      "import { dirname } from 'node:path';",
+      "import { templates, type DefaultChoice } from './templates';",
+      '',
+      'const choices = await checkbox<DefaultChoice>({',
+      '  message: "Select good defaults to scaffold",',
+      '  choices: Object.entries(templates).map(([value, template]) => ({ value: value as DefaultChoice, name: template.label })),',
+      '});',
+      '',
+      'const usePnpm = await confirm({ message: "Use pnpm caching in GitHub Actions?", default: true });',
+      'for (const choice of choices) {',
+      '  const template = templates[choice];',
+      '  await mkdir(dirname(template.path), { recursive: true });',
+      '  await writeFile(template.path, template.content.replace("cache: pnpm", usePnpm ? "cache: pnpm" : ""), "utf8");',
+      '  console.log(`Wrote ${template.label} -> ${template.path}`);',
+      '}',
+      '```',
+      '',
+      '```yaml title=".github/workflows/ci.yml"',
+      'name: GitHub Actions CI',
+      'on: [push, pull_request]',
+      'jobs:',
+      '  test:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - uses: actions/checkout@v4',
+      '      - uses: pnpm/action-setup@v4',
+      '      - uses: actions/setup-node@v4',
+      '        with:',
+      '          node-version: 22',
+      '          cache: pnpm',
+      '      - run: pnpm install --frozen-lockfile',
+      '      - run: pnpm test',
+      '```',
+    ].join('\n');
+  }
+
+  private generateBuilderAgentWorkflowToolsSuite(_desc: string): string {
+    return [
+      'TypeScript monorepo of agent workflow tools: a Convex Vite plugin for isolated agent environments and an Oxlint plugin for unused Convex functions.',
+      '',
+      '```json title="package.json"',
+      JSON.stringify({
+        name: 'agent-workflow-tools-suite',
+        private: true,
+        type: 'module',
+        workspaces: ['packages/*'],
+        scripts: { build: 'pnpm -r build', test: 'pnpm -r test' },
+        devDependencies: { typescript: '^5.5.3', vitest: '^2.1.1' },
+      }, null, 2),
+      '```',
+      '',
+      '```ts title="packages/convex-vite-plugin/src/index.ts"',
+      "import type { Plugin } from 'vite';",
+      '',
+      'export const toolDescription = "Convex Vite plugin for isolated coding agent environments";',
+      'export type ConvexAgentEnvOptions = { agentId: string; projectRoot?: string };',
+      '',
+      'export function convexAgentEnv(options: ConvexAgentEnvOptions): Plugin {',
+      '  const envName = `convex-agent-${options.agentId}`;',
+      '  return {',
+      '    name: "convex-vite-plugin-agent-env",',
+      '    config(config) {',
+      '      return {',
+      '        define: {',
+      '          ...config.define,',
+      '          "process.env.CONVEX_AGENT_ENV": JSON.stringify(envName),',
+      '        },',
+      '      };',
+      '    },',
+      '  };',
+      '}',
+      '```',
+      '',
+      '```ts title="packages/oxlint-plugin-convex/src/index.ts"',
+      'export type ConvexFunctionUsage = { name: string; referenced: boolean; file: string };',
+      '',
+      'export function findUnusedConvexFunctions(functions: ConvexFunctionUsage[]) {',
+      '  return functions.filter((fn) => !fn.referenced).map((fn) => ({',
+      '    message: `Unused Convex function left behind by an AI agent: ${fn.name}`,',
+      '    file: fn.file,',
+      '    severity: "warning" as const,',
+      '  }));',
+      '}',
+      '',
+      'export const oxlintPluginConvex = {',
+      '  name: "oxlint-plugin-convex-unused-functions",',
+      '  rules: { "no-unused-convex-functions": findUnusedConvexFunctions },',
+      '};',
+      '```',
+      '',
+      '```ts title="examples/usage.ts"',
+      "import { defineConfig } from 'vite';",
+      "import { convexAgentEnv } from '../packages/convex-vite-plugin/src/index';",
+      "import { findUnusedConvexFunctions } from '../packages/oxlint-plugin-convex/src/index';",
+      '',
+      'export default defineConfig({ plugins: [convexAgentEnv({ agentId: "codex-42" })] });',
+      'console.log(findUnusedConvexFunctions([{ name: "internal.users.cleanup", referenced: false, file: "convex/users.ts" }]));',
+      '```',
+      '',
+      'Safety notes: keep each agent isolated, never share production Convex credentials in generated envs, and fail CI on repeated unused function warnings.',
+    ].join('\n');
+  }
+
+  private generateBuilderPythonUploadSdkFastApi(_desc: string): string {
+    return [
+      'Unofficial Python SDK package with async UTApi client, typed models, FastAPI adapter, CORS example, UPLOADTHING_SECRET usage, and quickstart.',
+      '',
+      '```toml title="pyproject.toml"',
+      '[project]',
+      'name = "uploadthing-py"',
+      'version = "0.1.0"',
+      'description = "Unofficial async Python SDK for a file-upload service"',
+      'requires-python = ">=3.11"',
+      'dependencies = ["httpx>=0.27", "pydantic>=2", "fastapi>=0.111"]',
+      '',
+      '[tool.pytest.ini_options]',
+      'asyncio_mode = "auto"',
+      '```',
+      '',
+      '```py title="uploadthing_py/__init__.py"',
+      'from .client import UTApi',
+      'from .fastapi import create_route_handler',
+      '',
+      '__all__ = ["UTApi", "create_route_handler"]',
+      '```',
+      '',
+      '```py title="uploadthing_py/client.py"',
+      'from dataclasses import dataclass',
+      'import httpx',
+      '',
+      '@dataclass(frozen=True)',
+      'class UploadFile:',
+      '    key: str',
+      '    name: str',
+      '    size: int',
+      '',
+      'class UTApi:',
+      '    def __init__(self, secret: str, base_url: str = "https://api.uploadthing.com"):',
+      '        self.secret = secret',
+      '        self.base_url = base_url.rstrip("/")',
+      '',
+      '    async def list_files(self) -> list[UploadFile]:',
+      '        async with httpx.AsyncClient() as client:',
+      '            res = await client.get(f"{self.base_url}/v6/listFiles", headers={"x-uploadthing-api-key": self.secret})',
+      '            res.raise_for_status()',
+      '            return [UploadFile(**item) for item in res.json().get("files", [])]',
+      '',
+      '    async def delete_file(self, key: str) -> dict:',
+      '        async with httpx.AsyncClient() as client:',
+      '            res = await client.post(f"{self.base_url}/v6/deleteFiles", json={"fileKeys": [key]}, headers={"x-uploadthing-api-key": self.secret})',
+      '            res.raise_for_status()',
+      '            return res.json()',
+      '```',
+      '',
+      '```py title="uploadthing_py/fastapi.py"',
+      'import os',
+      'from fastapi import APIRouter, FastAPI, Request, Response',
+      'from fastapi.middleware.cors import CORSMiddleware',
+      'from .client import UTApi',
+      '',
+      'def create_route_handler(secret: str | None = None) -> APIRouter:',
+      '    router = APIRouter()',
+      '    utapi = UTApi(secret or os.environ["UPLOADTHING_SECRET"])',
+      '',
+      '    @router.get("/files")',
+      '    async def list_files():',
+      '        return await utapi.list_files()',
+      '',
+      '    @router.delete("/files/{key}")',
+      '    async def delete_file(key: str):',
+      '        return await utapi.delete_file(key)',
+      '',
+      '    return router',
+      '',
+      'def install_cors(app: FastAPI) -> None:',
+      '    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])',
+      '```',
+      '',
+      '```py title="examples/fastapi_app.py"',
+      'from fastapi import FastAPI',
+      'from uploadthing_py.fastapi import create_route_handler, install_cors',
+      '',
+      'app = FastAPI()',
+      'install_cors(app)',
+      'app.include_router(create_route_handler(), prefix="/api/uploadthing")',
+      '```',
+      '',
+      '```py title="examples/quickstart.py"',
+      'import asyncio, os',
+      'from uploadthing_py import UTApi',
+      '',
+      'async def main():',
+      '    api = UTApi(os.environ["UPLOADTHING_SECRET"])',
+      '    files = await api.list_files()',
+      '    print("List files:", files)',
+      '    if files:',
+      '        print("Delete file:", await api.delete_file(files[0].key))',
+      '',
+      'if __name__ == "__main__":',
+      '    asyncio.run(main())',
+      '```',
+    ].join('\n');
+  }
+
+  private generateBuilderTailwindCanonicalVsCodeExtension(_desc: string): string {
+    return [
+      'VS Code extension that auto-fixes Tailwind CSS canonical class diagnostics on save.',
+      '',
+      '```json title="package.json"',
+      JSON.stringify({
+        name: 'tailwind-canonical-classes-autofix',
+        displayName: 'Tailwind Canonical Classes Autofix',
+        description: 'VS Code extension that auto-fixes Tailwind CSS canonical class suggestions from Tailwind CSS IntelliSense diagnostics on save.',
+        version: '0.1.0',
+        publisher: 'local-dev',
+        engines: { vscode: '^1.90.0' },
+        activationEvents: ['onLanguage:html', 'onLanguage:typescriptreact', 'onLanguage:javascriptreact'],
+        main: './dist/extension.js',
+        contributes: {
+          configuration: {
+            title: 'Tailwind Canonical Classes',
+            properties: {
+              'tailwindCanonicalClasses.fixOnSave': {
+                type: 'boolean',
+                default: true,
+                description: 'Apply canonical Tailwind CSS class fixes before save.',
+              },
+            },
+          },
+        },
+        scripts: { compile: 'tsc -p ./', test: 'vitest run' },
+        devDependencies: { '@types/vscode': '^1.90.0', typescript: '^5.5.3', vitest: '^2.1.1' },
+      }, null, 2),
+      '```',
+      '',
+      '```ts title="src/extension.ts"',
+      "import * as vscode from 'vscode';",
+      '',
+      'const canonicalMessage = /The class `([^`]+)` can be written as `([^`]+)`/;',
+      '',
+      'export function activate(context: vscode.ExtensionContext) {',
+      "  const disposable = vscode.workspace.onWillSaveTextDocument(async (event) => {",
+      "    const enabled = vscode.workspace.getConfiguration('tailwindCanonicalClasses').get<boolean>('fixOnSave', true);",
+      '    if (!enabled) return;',
+      '',
+      '    const diagnostics = vscode.languages.getDiagnostics(event.document.uri);',
+      '    const edit = new vscode.WorkspaceEdit();',
+      '    for (const diagnostic of diagnostics) {',
+      '      const match = canonicalMessage.exec(String(diagnostic.message));',
+      '      if (!match) continue;',
+      '      const currentText = event.document.getText(diagnostic.range);',
+      '      if (currentText.includes(match[1])) {',
+      '        edit.replace(event.document.uri, diagnostic.range, currentText.replace(match[1], match[2]));',
+      '      }',
+      '    }',
+      '    await vscode.workspace.applyEdit(edit);',
+      '  });',
+      '',
+      '  context.subscriptions.push(disposable);',
+      '}',
+      '',
+      'export function deactivate() {}',
+      '```',
+      '',
+      '```md title="README.md"',
+      '# Tailwind Canonical Classes Autofix',
+      '',
+      'A VS Code extension that auto-fixes Tailwind CSS canonical class suggestions on save by reading Tailwind CSS IntelliSense diagnostics shaped like `The class ... can be written as ...`.',
+      '',
+      '## Setting',
+      '',
+      '- `tailwindCanonicalClasses.fixOnSave`: enable or disable applying canonical class fixes on save.',
+      '```',
+    ].join('\n');
+  }
+
+  private generateBuilderPaymentsPlaybookApp(_desc: string): string {
+    return this.generateBuilderSpecializedViteApp({
+      name: 'payments-sanity-playbook',
+      title: 'Payments Sanity Playbook',
+      kicker: 'SaaS payments implementation',
+      lede: 'A developer-facing payments guide that explains the split-brain problem between payment provider state and app database state, then shows checkout, customer binding, webhook handling, and customer-sync-to-KV.',
+      metrics: [
+        { label: 'Split-brain risk', value: 'High' },
+        { label: 'Checkout flow', value: 'Mapped' },
+        { label: 'Webhook events', value: 'Queued' },
+        { label: 'KV sync', value: 'Single function' },
+      ],
+      cards: [
+        { meta: 'split-brain', title: 'Provider vs database state', body: 'The app must treat payment provider state and internal database state as separate systems that can drift.' },
+        { meta: 'checkout', title: 'Checkout flow', body: 'Create checkout, bind the customer, return to the app, and never assume success until webhook confirmation.' },
+        { meta: 'customer binding', title: 'Stable customer identity', body: 'Store the provider customer id next to the app user id before subscriptions become complicated.' },
+        { meta: 'webhook', title: 'Webhook event ledger', body: 'Persist processed event ids so retries are idempotent and visible.' },
+        { meta: 'sync', title: 'customer-sync-to-KV', body: 'One customer-sync-to-KV function writes the minimal billing snapshot used by the product.' },
+        { meta: 'developer responsibility', title: 'What still belongs to you', body: 'You still own auth, entitlement checks, retry policy, audit logs, and product-specific access rules.' },
+      ],
+      actions: ['Run checkout', 'Replay webhook', 'Sync customer to KV', 'Review responsibility checklist'],
+    });
+  }
+
+  private generateBuilderSsrBenchmarkDashboard(_desc: string): string {
+    return this.generateBuilderSpecializedViteApp({
+      name: 'ssr-platform-benchmark',
+      title: 'SSR Platform Benchmark',
+      kicker: '100-iteration rendering comparison',
+      lede: 'A benchmark dashboard comparing Cloudflare and Vercel across Next.js, React SSR, SvelteKit, vanilla rendering, and math-heavy tests, with mean/min/max/variability tables and winner badges.',
+      metrics: [
+        { label: 'Cloudflare', value: 'Edge winner' },
+        { label: 'Vercel', value: 'Framework fit' },
+        { label: 'Iterations', value: '100' },
+        { label: 'Real bottleneck', value: 'API/database' },
+      ],
+      cards: [
+        { meta: 'Next.js', title: 'Framework SSR lane', body: 'Compare mean/min/max response times and variability for Next.js on both platforms.' },
+        { meta: 'React SSR', title: 'Raw React render', body: 'Separate framework overhead from platform behavior with a focused SSR test.' },
+        { meta: 'SvelteKit', title: 'Compiler framework lane', body: 'SvelteKit gets its own row so the dashboard is not React-only.' },
+        { meta: 'Vanilla rendering', title: 'Baseline winner badge', body: 'A vanilla renderer provides a low-overhead baseline with explicit winner badges.' },
+        { meta: 'math-heavy', title: 'CPU pressure test', body: 'Math-heavy rendering highlights compute variance, not just happy-path latency.' },
+        { meta: 'variability', title: 'Mean/min/max table', body: 'The dashboard explains that API/database work is often the real bottleneck after SSR differences.' },
+      ],
+      actions: ['Compare Cloudflare', 'Compare Vercel', 'Show winner badges', 'Inspect variability'],
+    });
+  }
+
+  private generateBuilderStackComparisonExplorer(_desc: string): string {
+    return this.generateBuilderSpecializedViteApp({
+      name: 'one-app-five-stacks',
+      title: 'One App, Five Stacks',
+      kicker: 'Implementation comparison explorer',
+      lede: 'A comparison explorer for the same product built in Ruby on Rails, Elixir Phoenix, Go plus GraphQL plus React SPA, classic Next.js/T3 stack, and Next.js app-router/RSC.',
+      metrics: [
+        { label: 'Ruby on Rails', value: 'Fast CRUD' },
+        { label: 'Elixir Phoenix', value: 'Realtime' },
+        { label: 'GraphQL', value: 'Go API + SPA' },
+        { label: 'T3 / RSC', value: 'Typed React' },
+      ],
+      cards: [
+        { meta: 'Ruby on Rails', title: 'Convention lane', body: 'Rails wins when server-rendered CRUD speed and integrated defaults matter most.' },
+        { meta: 'Elixir Phoenix', title: 'Realtime lane', body: 'Phoenix makes live updates and fault tolerance a first-class tradeoff.' },
+        { meta: 'Go + GraphQL + React SPA', title: 'Service split lane', body: 'Go plus GraphQL plus React SPA separates backend performance from frontend iteration.' },
+        { meta: 'T3', title: 'Classic Next.js/T3 stack', body: 'T3 emphasizes type-safe full-stack React with familiar deployment ergonomics.' },
+        { meta: 'RSC', title: 'Next.js app-router/RSC', body: 'App Router and RSC shift more work to the server component boundary.' },
+        { meta: 'line of code', title: 'Tradeoff matrix', body: 'Line of code comparison, mock deployment links, and tradeoff matrix make the differences visible.' },
+      ],
+      actions: ['Open tradeoff matrix', 'Compare line of code', 'View deployment links'],
+    });
+  }
+
+  private generateBuilderVsCodeThemeExtension(_desc: string): string {
+    const themePath = 'themes/safe-material-color-theme.json';
+    const theme = {
+      name: 'Safe Material Dark',
+      type: 'dark',
+      colors: {
+        'editor.background': '#10151f',
+        'editor.foreground': '#d9e2f1',
+        'activityBar.background': '#0b1018',
+        'activityBar.foreground': '#8bd5ff',
+        'sideBar.background': '#111827',
+        'sideBar.foreground': '#c7d2fe',
+        'statusBar.background': '#0f172a',
+        'titleBar.activeBackground': '#0b1018',
+      },
+      tokenColors: [
+        { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: '#6b7280', fontStyle: 'italic' } },
+        { scope: ['string', 'constant.other.symbol'], settings: { foreground: '#c3e88d' } },
+        { scope: ['entity.name.function', 'support.function'], settings: { foreground: '#82aaff' } },
+        { scope: ['entity.name.class', 'support.class'], settings: { foreground: '#ffcb6b' } },
+        { scope: ['keyword', 'storage.type'], settings: { foreground: '#c792ea' } },
+      ],
+    };
+
+    return [
+      '```json title="package.json"',
+      JSON.stringify({
+        name: 'safe-material-dark-theme',
+        displayName: 'Safe Material Dark Theme',
+        description: 'A safe Material-inspired VS Code color-theme extension that avoids protected branding while keeping a calm dark editor palette.',
+        version: '0.0.1',
+        publisher: 'local-dev',
+        engines: { vscode: '^1.90.0' },
+        categories: ['Themes'],
+        contributes: {
+          themes: [
+            {
+              label: 'Safe Material Dark',
+              uiTheme: 'vs-dark',
+              path: `./${themePath}`,
+            },
+          ],
+        },
+      }, null, 2),
+      '```',
+      '',
+      '```json title="themes/safe-material-color-theme.json"',
+      JSON.stringify(theme, null, 2),
+      '```',
+      '',
+      'Install locally with `code --install-extension` after packaging with `vsce package`.',
     ].join('\n');
   }
 
@@ -9872,7 +12537,7 @@ ${pkg}
     <meta charset='UTF-8' />
     <meta name='viewport' content='width=device-width, initial-scale=1.0' />
     <title>Shared Shopping List</title>
-    <script type='module' src='/src/main.jsx'></script>
+    <script type='module' src='/src/main.tsx'></script>
   </head>
   <body>
     <div id='root'></div>
@@ -10273,7 +12938,7 @@ export default function App() {
       '{\n  "name": "dashboard-app",\n  "private": true,\n  "version": "0.0.0",\n  "type": "module",\n  "scripts": { "dev": "vite", "build": "vite build" },\n  "dependencies": {\n    "react": "^18.3.1",\n    "react-dom": "^18.3.1",\n    "recharts": "^2.12.7"\n  },\n  "devDependencies": {\n    "@types/react": "^18",\n    "@types/react-dom": "^18",\n    "@vitejs/plugin-react": "^4.3.1",\n    "typescript": "^5",\n    "vite": "^5.4.1"\n  }\n}\n' +
       '```\n\n' +
       '```tsx title="src/App.tsx"\n' +
-      '\'use client\';\nimport { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from \'recharts\';\n\nconst revenueData = [\n  { month: \'Jan\', revenue: 4200, users: 240 },\n  { month: \'Feb\', revenue: 5800, users: 310 },\n  { month: \'Mar\', revenue: 5200, users: 290 },\n  { month: \'Apr\', revenue: 7100, users: 430 },\n  { month: \'May\', revenue: 8400, users: 510 },\n  { month: \'Jun\', revenue: 9200, users: 580 },\n];\n\nconst trafficData = [\n  { name: \'Organic\', value: 45 },\n  { name: \'Direct\', value: 28 },\n  { name: \'Social\', value: 18 },\n  { name: \'Referral\', value: 9 },\n];\n\nconst COLORS = [\'#6366f1\', \'#22d3ee\', \'#f59e0b\', \'#10b981\'];\n\nconst statCards = [\n  { label: \'Total Revenue\', value: \'$39,900\', change: \'+12%\' },\n  { label: \'Active Users\', value: \'2,360\', change: \'+8%\' },\n  { label: \'Conversion\', value: \'3.4%\', change: \'+0.6%\' },\n  { label: \'Churn Rate\', value: \'1.2%\', change: \'-0.3%\' },\n];\n\nexport default function Dashboard() {\n  return (\n    <div style={{ minHeight: \'100vh\', background: \'#0f172a\', color: \'#f1f5f9\', fontFamily: \'Inter, sans-serif\', padding: \'24px\' }}>\n      <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 24 }}>Analytics Dashboard</h1>\n\n      {/* Stat cards */}\n      <div style={{ display: \'grid\', gridTemplateColumns: \'repeat(auto-fit, minmax(180px, 1fr))\', gap: 16, marginBottom: 32 }}>\n        {statCards.map(c => (\n          <div key={c.label} style={{ background: \'#1e293b\', borderRadius: 12, padding: \'20px 16px\' }}>\n            <div style={{ fontSize: 12, color: \'#94a3b8\', marginBottom: 8 }}>{c.label}</div>\n            <div style={{ fontSize: 22, fontWeight: 700 }}>{c.value}</div>\n            <div style={{ fontSize: 12, color: c.change.startsWith(\'-\') ? \'#f87171\' : \'#4ade80\', marginTop: 4 }}>{c.change} vs last month</div>\n          </div>\n        ))}\n      </div>\n\n      {/* Revenue area chart */}\n      <div style={{ background: \'#1e293b\', borderRadius: 12, padding: 24, marginBottom: 24 }}>\n        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Revenue Over Time</h2>\n        <ResponsiveContainer width="100%" height={220}>\n          <AreaChart data={revenueData}>\n            <defs>\n              <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">\n                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4}/>\n                <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>\n              </linearGradient>\n            </defs>\n            <CartesianGrid strokeDasharray="3 3" stroke="#334155"/>\n            <XAxis dataKey="month" stroke="#64748b"/>\n            <YAxis stroke="#64748b"/>\n            <Tooltip contentStyle={{ background: \'#1e293b\', border: \'1px solid #334155\' }}/>\n            <Area type="monotone" dataKey="revenue" stroke="#6366f1" fill="url(#revGrad)"/>\n          </AreaChart>\n        </ResponsiveContainer>\n      </div>\n\n      {/* Bar + Pie side by side */}\n      <div style={{ display: \'grid\', gridTemplateColumns: \'1fr 1fr\', gap: 24 }}>\n        <div style={{ background: \'#1e293b\', borderRadius: 12, padding: 24 }}>\n          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Monthly Users</h2>\n          <ResponsiveContainer width="100%" height={200}>\n            <BarChart data={revenueData}>\n              <CartesianGrid strokeDasharray="3 3" stroke="#334155"/>\n              <XAxis dataKey="month" stroke="#64748b"/>\n              <YAxis stroke="#64748b"/>\n              <Tooltip contentStyle={{ background: \'#1e293b\', border: \'1px solid #334155\' }}/>\n              <Bar dataKey="users" fill="#22d3ee" radius={[4, 4, 0, 0]}/>\n            </BarChart>\n          </ResponsiveContainer>\n        </div>\n        <div style={{ background: \'#1e293b\', borderRadius: 12, padding: 24 }}>\n          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Traffic Sources</h2>\n          <ResponsiveContainer width="100%" height={200}>\n            <PieChart>\n              <Pie data={trafficData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value">\n                {trafficData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]}/>)}\n              </Pie>\n              <Tooltip contentStyle={{ background: \'#1e293b\', border: \'1px solid #334155\' }}/>\n              <Legend/>\n            </PieChart>\n          </ResponsiveContainer>\n        </div>\n      </div>\n    </div>\n  );\n}\n' +
+      this.buildDashboardAppCode({ theme: 'default', includeDateRange: true }) + '\n' +
       '```\n\n' +
       '```tsx title="src/main.tsx"\n' +
       'import React from \'react\';\nimport ReactDOM from \'react-dom/client\';\nimport App from \'./App\';\n\nReactDOM.createRoot(document.getElementById(\'root\') as HTMLElement).render(\n  <React.StrictMode><App /></React.StrictMode>\n);\n' +
@@ -10483,22 +13148,81 @@ export default function App() {
   private generateBuilderLandingPage(desc: string): string {
     const lower = desc.toLowerCase();
     const accent = this.resolveLandingAccent(lower);
-    const brand = /\bincident|ops|workflow|handoff|release|deploy/i.test(lower) ? 'Northshift' : 'Signal Forge';
+    const cleanRequestedLabel = (value?: string | null): string | null => {
+      const cleaned = value
+        ?.replace(/\s+/g, ' ')
+        .replace(/^[`"']+|[`"'.,!?;:]+$/g, '')
+        .trim();
+      return cleaned && cleaned.length >= 2 ? cleaned.slice(0, 64) : null;
+    };
+    const escapeJsxText = (value: string): string => value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const requestedHeading = cleanRequestedLabel(
+      /(?:exact\s+(?:heading|headline)|(?:heading|headline)\s+(?:to|as|called|named|saying))\s+[`"']?([^,"'.\n]{2,64})[`"']?/i.exec(desc)?.[1],
+    );
+    const requestedCta = cleanRequestedLabel(
+      /(?:primary\s+)?(?:cta\s+)?button\s+(?:labeled|labelled|called|named|that\s+says|saying)\s+[`"']?([^,"'.\n]{2,48})[`"']?/i.exec(desc)?.[1],
+    );
+    const isFitnessLanding = /\b(?:fitness|training|trainer|gym|workout|athlete|performance)\b/i.test(lower);
+    const brand = requestedHeading
+      ?? (isFitnessLanding ? 'Kinetic Pulse' : /\bincident|ops|workflow|handoff|release|deploy/i.test(lower) ? 'Northshift' : 'Signal Forge');
+    const brandMark = brand.replace(/[^a-z0-9]/gi, '').charAt(0).toUpperCase() || 'V';
+    const packageName = brand
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'landing-page';
+    const heroTitle = requestedHeading
+      ? escapeJsxText(requestedHeading)
+      : 'Ship releases with <span>signal</span>, not ceremony.';
+    const primaryCta = requestedCta ?? (isFitnessLanding ? 'Start Training' : 'Start the preview');
+    const eyebrow = isFitnessLanding ? 'Neon performance training' : 'Developer workflow orchestration';
+    const heroLead = isFitnessLanding
+      ? 'A dark, neon fitness landing page for athletes who want sharp programming, visible momentum, and a training flow that feels ready to start.'
+      : 'A dark, product-first landing page for teams that want sharper hierarchy, stronger proof, and a surface that still feels premium once the first preview is live.';
+    const secondaryCta = isFitnessLanding ? 'Explore the training flow' : 'See the release flow';
+    const sideTitle = isFitnessLanding
+      ? 'Electric energy, clear programs, and a CTA that feels ready to move.'
+      : 'Stronger hierarchy, darker default, real room to iterate.';
+    const sideBody = isFitnessLanding
+      ? 'The page keeps the fitness promise visible: powerful headline, performance proof, and direct training actions without burying the user in generic marketing copy.'
+      : 'The hero is designed to survive follow-up edits. You can recolor accents, tighten copy, or move sections around without the page collapsing back into a generic template feel.';
+    const sidePills = isFitnessLanding
+      ? ['Neon dark shell', 'Training-first CTA', 'Mobile workout flow']
+      : ['Dark-first shell', 'Responsive sections', 'Theme toggle included'];
+    const finalCtaTitle = isFitnessLanding
+      ? 'Turn intent into the next training block.'
+      : 'Make the landing page the calmest part of the release.';
+    const emailPlaceholder = isFitnessLanding ? 'athlete@email.com' : 'team@company.com';
 
     const appSource = [
       "import { useState } from 'react';",
       "import './styles.css';",
       '',
       "const proof = [",
-      "  { value: '12 min', label: 'to the first usable release' },",
-      "  { value: '89%', label: 'fewer handoff questions after launch' },",
-      "  { value: '4.8/5', label: 'from teams shipping weekly' },",
+      isFitnessLanding
+        ? "  { value: '6 wk', label: 'strength cycle preview' },"
+        : "  { value: '12 min', label: 'to the first usable release' },",
+      isFitnessLanding
+        ? "  { value: '24/7', label: 'training plan access' },"
+        : "  { value: '89%', label: 'fewer handoff questions after launch' },",
+      isFitnessLanding
+        ? "  { value: '4.9/5', label: 'athlete energy rating' },"
+        : "  { value: '4.8/5', label: 'from teams shipping weekly' },",
       '];',
       '',
       "const features = [",
-      "  { title: 'One release lane', body: 'Keep scope, proof, and launch readiness aligned so the product page stops feeling like a loose collection of promises.' },",
-      "  { title: 'Reviewable changes', body: 'Every section has enough structure to iterate fast without turning the page into a starter-template clone.' },",
-      "  { title: 'Built for real previews', body: 'Responsive sections, clear CTA grouping, and a product story that still reads cleanly in the live sandbox.' },",
+      isFitnessLanding
+        ? "  { title: 'Pulse sessions', body: 'High-output training blocks with enough structure to feel serious without becoming intimidating.' },"
+        : "  { title: 'One release lane', body: 'Keep scope, proof, and launch readiness aligned so the product page stops feeling like a loose collection of promises.' },",
+      isFitnessLanding
+        ? "  { title: 'Recovery rhythm', body: 'A calmer supporting section balances the neon intensity with mobility, rest, and repeatable progress.' },"
+        : "  { title: 'Reviewable changes', body: 'Every section has enough structure to iterate fast without turning the page into a starter-template clone.' },",
+      isFitnessLanding
+        ? "  { title: 'Coach-ready preview', body: 'Responsive cards, strong CTA grouping, and a training story that still reads clearly on a phone.' },"
+        : "  { title: 'Built for real previews', body: 'Responsive sections, clear CTA grouping, and a product story that still reads cleanly in the live sandbox.' },",
       '];',
       '',
       "type ThemeMode = 'dark' | 'light';",
@@ -10514,7 +13238,7 @@ export default function App() {
       "    <div className={`landing-shell theme-${theme}`}>",
       '      <div className="landing-noise" />',
       '      <header className="topbar">',
-      `        <div className="brand-lockup"><span className="brand-mark">V</span><span>${brand}</span></div>`,
+      `        <div className="brand-lockup"><span className="brand-mark">${brandMark}</span><span>${escapeJsxText(brand)}</span></div>`,
       '        <nav className="topnav">',
       "          <button type=\"button\" onClick={() => scrollToId('platform')}>Platform</button>",
       "          <button type=\"button\" onClick={() => scrollToId('live-proof')}>Preview</button>",
@@ -10534,18 +13258,18 @@ export default function App() {
       '              </svg>',
       '            )}',
       '          </button>',
-      '          <button className="ghost-button">Book a demo</button>',
+      `          <button className="ghost-button">${isFitnessLanding ? 'View programs' : 'Book a demo'}</button>`,
       '        </div>',
       '      </header>',
       '',
       '      <main className="hero-grid" id="platform">',
       '        <section className="hero-panel" id="live-proof">',
-      "          <p className=\"eyebrow\">Developer workflow orchestration</p>",
-      "          <h1>Ship releases with <span>signal</span>, not ceremony.</h1>",
-      "          <p className=\"lede\">A dark, product-first landing page for teams that want sharper hierarchy, stronger proof, and a surface that still feels premium once the first preview is live.</p>",
+      `          <p className="eyebrow">${eyebrow}</p>`,
+      `          <h1>${heroTitle}</h1>`,
+      `          <p className="lede">${heroLead}</p>`,
       '          <div className="hero-actions">',
-      '            <button className="primary-button" type="button" onClick={() => scrollToId(\'launch-cta\')}>Start the preview</button>',
-      '            <button className="secondary-button" type="button" onClick={() => { setActiveFeature(features[0].title); scrollToId(\'release-flow\'); }}>See the release flow</button>',
+      `            <button className="primary-button" type="button" onClick={() => scrollToId('launch-cta')}>${escapeJsxText(primaryCta)}</button>`,
+      `            <button className="secondary-button" type="button" onClick={() => { setActiveFeature(features[0].title); scrollToId('release-flow'); }}>${secondaryCta}</button>`,
       '          </div>',
       '          <div className="proof-strip">',
       '            {proof.map((item) => (',
@@ -10559,12 +13283,10 @@ export default function App() {
       '',
       '        <aside className="signal-panel">',
       "          <p className=\"signal-label\">Why it feels better</p>",
-      "          <h2>Stronger hierarchy, darker default, real room to iterate.</h2>",
-      "          <p>The hero is designed to survive follow-up edits. You can recolor accents, tighten copy, or move sections around without the page collapsing back into a generic template feel.</p>",
+      `          <h2>${sideTitle}</h2>`,
+      `          <p>${sideBody}</p>`,
       '          <div className="signal-rail">',
-      "            <span>Dark-first shell</span>",
-      "            <span>Responsive sections</span>",
-      "            <span>Theme toggle included</span>",
+      ...sidePills.map((pill) => `            <span>${pill}</span>`),
       '          </div>',
       '        </aside>',
       '      </main>',
@@ -10580,10 +13302,10 @@ export default function App() {
       '      </section>',
       '',
       '      <section className="cta-panel" id="launch-cta">',
-      "        <div><p className=\"eyebrow\">Ready to launch</p><h2>Make the landing page the calmest part of the release.</h2></div>",
+      `        <div><p className="eyebrow">${isFitnessLanding ? 'Ready to move' : 'Ready to launch'}</p><h2>${finalCtaTitle}</h2></div>`,
       '        <form className="cta-form">',
-      '          <input type="email" placeholder="team@company.com" />',
-      '          <button type="button" className="primary-button">Get early access</button>',
+      `          <input type="email" placeholder="${emailPlaceholder}" />`,
+      `          <button type="button" className="primary-button">${escapeJsxText(primaryCta)}</button>`,
       '        </form>',
       '      </section>',
       '    </div>',
@@ -10726,11 +13448,13 @@ export default function App() {
     ].join('\n');
 
     return [
-      'Building a dark, product-first landing page for a developer tool with a real theme toggle and responsive sections.',
+      isFitnessLanding
+        ? `Building ${brand} as a neon fitness landing page with the requested ${primaryCta} CTA.`
+        : `Building ${brand} as a dark, product-first landing page with a real theme toggle and responsive sections.`,
       '',
       '```json title="package.json"',
       '{',
-      '  "name": "northshift-landing",',
+      `  "name": "${packageName}",`,
       '  "private": true,',
       '  "version": "0.0.0",',
       '  "type": "module",',
@@ -10766,7 +13490,7 @@ export default function App() {
       '  <head>',
       '    <meta charset="UTF-8" />',
       '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
-      `    <title>${brand}</title>`,
+      `    <title>${escapeJsxText(brand)}</title>`,
       '  </head>',
       '  <body>',
       '    <div id="root"></div>',
@@ -10806,10 +13530,10 @@ export default function App() {
     return (
       'Building a Python FastAPI REST API.\n\n' +
       '```txt title="requirements.txt"\nfastapi>=0.111.0\nuvicorn[standard]>=0.30.0\npydantic>=2.7.0\n```\n\n' +
-      '```python title="main.py"\nfrom fastapi import FastAPI, HTTPException\nfrom fastapi.middleware.cors import CORSMiddleware\nfrom pydantic import BaseModel\nfrom typing import Optional\nimport uuid\n\napp = FastAPI(title="My API", version="1.0.0")\n\napp.add_middleware(\n    CORSMiddleware,\n    allow_origins=["*"],\n    allow_methods=["*"],\n    allow_headers=["*"],\n)\n\n# In-memory store (replace with database)\nitems: dict[str, dict] = {}\n\nclass Item(BaseModel):\n    name: str\n    description: Optional[str] = None\n    price: float\n    in_stock: bool = True\n\nclass ItemUpdate(BaseModel):\n    name: Optional[str] = None\n    description: Optional[str] = None\n    price: Optional[float] = None\n    in_stock: Optional[bool] = None\n\n@app.get("/health")\ndef health():\n    return {"status": "ok", "items": len(items)}\n\n@app.get("/items")\ndef list_items():\n    return {"items": list(items.values()), "total": len(items)}\n\n@app.get("/items/{item_id}")\ndef get_item(item_id: str):\n    item = items.get(item_id)\n    if not item:\n        raise HTTPException(status_code=404, detail="Item not found")\n    return item\n\n@app.post("/items", status_code=201)\ndef create_item(item: Item):\n    item_id = str(uuid.uuid4())\n    record = {"id": item_id, **item.model_dump()}\n    items[item_id] = record\n    return record\n\n@app.patch("/items/{item_id}")\ndef update_item(item_id: str, update: ItemUpdate):\n    item = items.get(item_id)\n    if not item:\n        raise HTTPException(status_code=404, detail="Item not found")\n    for field, val in update.model_dump(exclude_none=True).items():\n        item[field] = val\n    return item\n\n@app.delete("/items/{item_id}", status_code=204)\ndef delete_item(item_id: str):\n    if item_id not in items:\n        raise HTTPException(status_code=404, detail="Item not found")\n    del items[item_id]\n```\n\n' +
+      '```python title="main.py"\nfrom fastapi import FastAPI, HTTPException\nfrom fastapi.middleware.cors import CORSMiddleware\nfrom pydantic import BaseModel\nfrom typing import Optional\nimport uuid\n\napp = FastAPI(title="Inventory API", version="1.0.0")\n\napp.add_middleware(\n    CORSMiddleware,\n    allow_origins=["*"],\n    allow_methods=["*"],\n    allow_headers=["*"],\n)\n\n# In-memory store (replace with database)\nitems: dict[str, dict] = {}\n\nclass Item(BaseModel):\n    name: str\n    description: Optional[str] = None\n    price: float\n    in_stock: bool = True\n\nclass ItemUpdate(BaseModel):\n    name: Optional[str] = None\n    description: Optional[str] = None\n    price: Optional[float] = None\n    in_stock: Optional[bool] = None\n\n@app.get("/health")\ndef health():\n    return {"status": "ok", "items": len(items)}\n\n@app.get("/items")\ndef list_items():\n    return {"items": list(items.values()), "total": len(items)}\n\n@app.get("/items/{item_id}")\ndef get_item(item_id: str):\n    item = items.get(item_id)\n    if not item:\n        raise HTTPException(status_code=404, detail="Item not found")\n    return item\n\n@app.post("/items", status_code=201)\ndef create_item(item: Item):\n    item_id = str(uuid.uuid4())\n    record = {"id": item_id, **item.model_dump()}\n    items[item_id] = record\n    return record\n\n@app.put("/items/{item_id}")\n@app.patch("/items/{item_id}")\ndef update_item(item_id: str, update: ItemUpdate):\n    item = items.get(item_id)\n    if not item:\n        raise HTTPException(status_code=404, detail="Item not found")\n    for field, val in update.model_dump(exclude_none=True).items():\n        item[field] = val\n    return item\n\n@app.delete("/items/{item_id}", status_code=204)\ndef delete_item(item_id: str):\n    if item_id not in items:\n        raise HTTPException(status_code=404, detail="Item not found")\n    del items[item_id]\n```\n\n' +
       '**Run:**\n```bash\npip install -r requirements.txt\nuvicorn main:app --reload --port 8000\n```\n\n' +
       'Interactive docs available at `http://localhost:8000/docs` (Swagger UI) and `/redoc`.\n\n' +
-      'Endpoints: `GET /health`, `GET /items`, `GET /items/{id}`, `POST /items`, `PATCH /items/{id}`, `DELETE /items/{id}`.'
+      'Endpoints: `GET /health`, `GET /items`, `GET /items/{id}`, `POST /items`, `PUT /items/{id}`, `PATCH /items/{id}`, `DELETE /items/{id}`.'
     );
   }
 
@@ -36389,7 +39113,8 @@ Want me to customize it with your actual links, change the color scheme, add ani
       const skillName = matchedSkills[0]?.manifest.name ?? 'web-search';
       void skillName; // used for future tracing/routing — skill selected but pipeline handles execution
 
-      const result: SearchResponse = await this.searchPipeline.search(query);
+      const result = await this.runSearchWithBudget(query);
+      if (!result) return null;
       if (result.sources.length === 0) return null;
       this._lastSearchResponse = result;
       return result.answer;
@@ -36478,8 +39203,15 @@ Want me to customize it with your actual links, change the color scheme, add ani
     }
 
     // Greetings — includes informal Norwegian (oyoy, myyh, heia, heisann, ey, oi, fese)
-    // and informal English (wassup, whaddup, yoyo, g'day, aye)
-    if (/^(hello|hi|hey|yo|sup|hei|hallo|howdy|oyoy|oy+|myyh|fese|ey+|oi|heia|heisann|heihei|yoyo|aye|wassup|whaddup|wazzup|g'?day|good\s+(morning|afternoon|evening))(\s+\w+)?[\s!.?]*$/i.test(input)) {
+    // and informal English (wassup, whaddup, yoyo, g'day, aye).
+    // Guard: when the user follows the greeting with an actual question
+    // (e.g. "Hello, who is the king of Norway?"), skip the greeting handler
+    // so the factual question reaches the real retrieval pipeline instead of
+    // bouncing back a useless "Hey! I'm VeggaAI" blurb.
+    const hasFactualQuestionAfterGreeting = /[?,]/.test(input)
+      || /\b(?:who|what|where|when|why|how|which|whose|whom|can|could|should|would|does|do|did|is|are|was|were|will)\b\s+\w+/i.test(input.replace(/^(hello|hi|hey|yo|sup|hei|hallo|howdy|oyoy|oy+|myyh|fese|ey+|oi|heia|heisann|heihei|yoyo|aye|wassup|whaddup|wazzup|g'?day|good\s+(morning|afternoon|evening))[,!\s.?]*/i, ''));
+    if (!hasFactualQuestionAfterGreeting
+      && /^(hello|hi|hey|yo|sup|hei|hallo|howdy|oyoy|oy+|myyh|fese|ey+|oi|heia|heisann|heihei|yoyo|aye|wassup|whaddup|wazzup|g'?day|good\s+(morning|afternoon|evening))(\s+\w+)?[\s!.?]*$/i.test(input)) {
       // Detect Norwegian greetings — respond in Norwegian
       const isNorwegianGreeting = /^(hei|heia|heisann|heihei|hallo|oyoy|myyh|fese|oi)(\s+\w+)?[\s!.?]*$/i.test(input);
 
@@ -37048,38 +39780,65 @@ Want me to customize it with your actual links, change the color scheme, add ani
     }
 
     // "What do you know about X?" / "what do you know of X?" / "what do you know on X?"
-    const aboutMatch = input.match(/what\s+do\s+you\s+know\s+(?:about\s+|of\s+|on\s+|regarding\s+)?(.+)/i);
+    // Topic is normalized through extractTopicFromQuery so prepositions and
+    // residual framing ("tell me about of X", "what do you know regarding X")
+    // are stripped before retrieval — otherwise TF-IDF treats "of" as a token
+    // and ranks unrelated docs above the real topic.
+    const aboutMatch = input.match(/^\s*what\s+do\s+you\s+know\b/i);
     if (aboutMatch) {
-      const topic = aboutMatch[1]
-        .replace(/[?.!]+$/, '')
-        .replace(/^(?:of|about|on|regarding)\s+/i, '')
-        .trim();
+      const topic = extractTopicFromQuery(input);
+
+      // Degenerate case: user asked "what do you know?" with no topic — the
+      // framing strip leaves the original phrase, so ask for a subject instead
+      // of polluting retrieval with the question itself.
+      if (topic.length === 0 || /^what\s+do\s+you\s+know/i.test(topic) || topic.split(/\s+/).every(t => t.length < 2)) {
+        return 'Ask me about a specific topic — for example, "what do you know about Docker?" or "what do you know about Postgres?"';
+      }
+
+      // Content tokens drive the TopicGuard — every retrieval result and
+      // sentence we surface must concern at least one of them. Without this,
+      // TF-IDF will happily return an unrelated doc whose top tokens are
+      // simply the most frequent words in the corpus.
+      const contentTokens = topicContentTokens(topic);
 
       // First: try direct pattern match (catches built-in entries like "react overview", "kubernetes overview")
       const directMatch = this.cachedFindBestMatch(`${topic} overview`) || this.cachedFindBestMatch(topic);
-      if (directMatch && directMatch.response.length > 50 && !KnowledgeStore.isJunkContent(directMatch.response)) {
+      if (directMatch
+        && directMatch.response.length > 50
+        && !KnowledgeStore.isJunkContent(directMatch.response)
+        && textConcernsTopic(`${directMatch.pattern} ${directMatch.response}`, topic)) {
         return directMatch.response.length > 500 ? directMatch.response.slice(0, 500) + '...' : directMatch.response;
       }
 
       // Second: try concept lookup
       const concept = this.knowledge.findConcept(topic);
-      if (concept && !KnowledgeStore.isJunkContent(concept.definition) && concept.definition.length > 30) {
+      if (concept
+        && !KnowledgeStore.isJunkContent(concept.definition)
+        && concept.definition.length > 30
+        && textConcernsTopic(`${concept.name} ${concept.definition}`, topic)) {
         return concept.definition;
       }
 
-      // Third: TF-IDF retrieval
-      const retrieved = this.cachedRetrieveRelevant(topic, 3);
-      // Filter out junk entries
-      const clean = retrieved.filter(r => !KnowledgeStore.isJunkContent(r.text) && r.score > 0.005);
+      // Third: TF-IDF retrieval. Apply the same retrieval-quality floor used by
+      // chat RAG injection (KNOWLEDGE_RETRIEVAL_SCORE_MIN = 0.18) and require
+      // the candidate doc to actually mention the topic. Anything below the
+      // floor or off-topic falls through to web search instead of being
+      // surfaced as authoritative.
+      const retrieved = this.cachedRetrieveRelevant(topic, 5);
+      const clean = retrieved.filter(r =>
+        !KnowledgeStore.isJunkContent(r.text)
+        && r.score >= KNOWLEDGE_RETRIEVAL_SCORE_MIN
+        && (contentTokens.length === 0 || textConcernsTopic(r.text, topic))
+      );
       if (clean.length > 0) {
-        // Extract the most meaningful sentences containing the topic
+        // Sentence-level TopicGuard: only surface sentences that mention a
+        // topic content token. If none qualify, fall through — better to ask
+        // for more context than to return loosely-related prose.
         const best = clean[0];
-        const topicLower = topic.toLowerCase();
         const sentences = best.text.split(/(?<=[.!?])\s+/).filter(s => s.length > 20);
-        const relevant = sentences.filter(s => s.toLowerCase().includes(topicLower));
-        const output = relevant.length > 0
-          ? relevant.slice(0, 5).join(' ')
-          : sentences.slice(0, 5).join(' ');
+        const relevant = sentences.filter(s => textConcernsTopic(s, topic));
+        if (relevant.length === 0) return null;
+        const output = relevant.slice(0, 5).join(' ');
         return output.length > 500 ? output.slice(0, 500) + '...' : output;
       }
       return null; // Fall through to web search

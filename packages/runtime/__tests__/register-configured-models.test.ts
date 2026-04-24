@@ -10,12 +10,12 @@ function createConfig(): VaiConfig {
     providers: {
       vai: { id: 'vai', enabled: true },
       anthropic: { id: 'anthropic', enabled: true, apiKey: 'test-key', defaultModel: 'claude-sonnet-4-20250514' },
-      openai: { id: 'openai', enabled: true, apiKey: 'test-key', defaultModel: 'gpt-4o' },
+      openai: { id: 'openai', enabled: true, apiKey: 'test-key', defaultModel: 'gpt-5.4-mini' },
       google: { id: 'google', enabled: false, defaultModel: 'gemini-2.5-flash' },
       local: { id: 'local', enabled: true, baseUrl: 'http://localhost:11434', defaultModel: 'llama3.1' },
     },
     defaultModelId: 'anthropic:claude-sonnet-4-20250514',
-    fallbackChain: { models: ['anthropic:claude-sonnet-4-20250514', 'openai:gpt-4o', 'vai:v0'] },
+    fallbackChain: { models: ['anthropic:claude-sonnet-4-20250514', 'openai:gpt-5.4-mini', 'openai:gpt-5.3-codex', 'openai:gpt-5.4', 'vai:v0'] },
     routingRules: [{ condition: 'default', modelId: 'anthropic:claude-sonnet-4-20250514' }],
     maxMonthlySpend: 0,
     maxTokensPerRequest: 16000,
@@ -73,10 +73,11 @@ describe('registerConfiguredModels', () => {
     const registered = registerConfiguredModels(createConfig(), models);
 
     expect(registered).toContain('anthropic:claude-sonnet-4-20250514');
-    expect(registered).toContain('openai:gpt-4o');
+    expect(registered).toContain('openai:gpt-5.4-mini');
+    expect(registered).toContain('openai:gpt-5.3-codex');
     expect(registered).toContain('local:llama3.1');
     expect(models.listByProvider('anthropic')).toHaveLength(3);
-    expect(models.listByProvider('openai')).toHaveLength(3);
+    expect(models.listByProvider('openai')).toHaveLength(7);
     expect(models.listByProvider('google')).toHaveLength(0);
   });
 });

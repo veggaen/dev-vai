@@ -1,0 +1,207 @@
+{
+  "options": {
+    "appUrl": "http://127.0.0.1:5173/?devAuthBypass=1",
+    "apiUrl": "http://127.0.0.1:3006",
+    "suiteName": "julius",
+    "specFile": "C:\\Users\\v3gga\\Documents\\dev-vai\\scripts\\specs\\julius-blind-rebuilds.json",
+    "outputDirWasExplicit": false,
+    "limitWasExplicit": false,
+    "sourceLeakPattern": {},
+    "limit": 8,
+    "previewLimit": 1,
+    "keepProjects": true,
+    "only": [
+      "next-gen-fullstack-monorepo",
+      "typescript-library-monorepo-starter",
+      "developer-defaults-cli"
+    ],
+    "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-23-03-294Z",
+    "timeoutMs": 180000
+  },
+  "results": [
+    {
+      "slug": "next-gen-fullstack-monorepo",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp",
+      "prompt": "Build the first runnable preview of a next-generation full-stack monorepo starter. Do not ask follow-up questions. The preview must visibly include a Next.js app-router/RSC web app, shared tRPC API, edge-ready database layer using Kysely plus Prisma schema management, PlanetScale-style database status, Clerk-style auth, shadcn-style UI blocks, Expo mobile workspace notes, and a monorepo health panel.",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPZ9BQKTWDNMEJPHRY9YYAHN",
+      "sandboxId": "b8be436d",
+      "response": "```json title=\"package.json\"\n{\n  \"name\": \"next-gen-fullstack-monorepo\",\n  \"private\": true,\n  \"version\": \"0.0.0\",\n  \"type\": \"module\",\n  \"scripts\": {\n    \"dev\": \"vite\",\n    \"build\": \"tsc -b && vite build\",\n    \"preview\": \"vite preview\"\n  },\n  \"dependencies\": {\n    \"react\": \"^18.3.1\",\n    \"react-dom\": \"^18.3.1\"\n  },\n  \"devDependencies\": {\n    \"@types/react\": \"^18.3.1\",\n    \"@types/react-dom\": \"^18.3.1\",\n    \"@vitejs/plugin-react\": \"^4.3.1\",\n    \"typescript\": \"^5.5.3\",\n    \"vite\": \"^5.4.10\"\n  }\n}\n```\n\n```html title=\"index.html\"\n<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <title>Next-Gen Monorepo Console</title>\n    <script type=\"module\" src=\"/src/main.tsx\"></script>\n  </head>\n  <body><div id=\"root\"></div></body>\n</html>\n```\n\n```tsx title=\"src/main.tsx\"\nimport { StrictMode } from 'react';\nimport { createRoot } from 'react-dom/client';\nimport App from './App.tsx';\nimport './styles.css';\ncreateRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);\n```\n\n```tsx title=\"src/App.tsx\"\nconst metrics = [\n  {\n    \"label\": \"Next.js\",\n    \"value\": \"App Router + RSC\"\n  },\n  {\n    \"label\": \"API\",\n    \"value\": \"shared tRPC\"\n  },\n  {\n    \"label\": \"Database\",\n    \"value\": \"Kysely + Prisma\"\n  },\n  {\n    \"label\": \"Auth\",\n    \"value\": \"Clerk session\"\n  }\n] as const;\nconst cards = [\n  {\n    \"meta\": \"monorepo\",\n    \"title\": \"Workspace map\",\n    \"body\": \"The starter separates apps/web, apps/expo, packages/api, packages/db, and packages/ui so the monorepo shape is obvious.\"\n  },\n  {\n    \"meta\": \"Next.js\",\n    \"title\": \"App-router/RSC web app\",\n    \"body\": \"The web lane highlights server components, route groups, loading states, and typed server actions.\"\n  },\n  {\n    \"meta\": \"tRPC\",\n    \"title\": \"Shared API contract\",\n    \"body\": \"A shared tRPC router powers web and Expo clients without duplicating request types.\"\n  },\n  {\n    \"meta\": \"Kysely\",\n    \"title\": \"Edge-ready query layer\",\n    \"body\": \"Kysely handles type-safe queries while Prisma owns schema management and migrations.\"\n  },\n  {\n    \"meta\": \"PlanetScale\",\n    \"title\": \"Database health\",\n    \"body\": \"A PlanetScale-style status card shows edge driver readiness, schema sync, and query latency.\"\n  },\n  {\n    \"meta\": \"Clerk\",\n    \"title\": \"Auth and UI blocks\",\n    \"body\": \"Clerk auth, shadcn-style cards, and Expo mobile workspace notes make the starter feel complete.\"\n  }\n] as const;\nconst actions = [\n  \"Open monorepo health\",\n  \"Inspect tRPC API\",\n  \"Check PlanetScale status\",\n  \"Preview Expo notes\"\n] as const;\n\nexport default function App() {\n  return (\n    <main className=\"shell\">\n      <section className=\"hero\">\n        <p className=\"eyebrow\">Full-stack app-router starter</p>\n        <h1>Next-Gen Monorepo Console</h1>\n        <p className=\"lede\">A runnable preview for a Next.js app-router/RSC monorepo with shared tRPC API, Kysely plus Prisma schema management, PlanetScale edge database status, Clerk auth, shadcn-style UI blocks, and Expo workspace notes.</p>\n        <div className=\"metrics\">\n          {metrics.map((metric) => (\n            <article key={metric.label} className=\"metric\">\n              <span>{metric.label}</span>\n              <strong>{metric.value}</strong>\n            </article>\n          ))}\n        </div>\n      </section>\n\n\n      <section className=\"grid\">\n        {cards.map((card) => (\n          <article key={card.title} className=\"card\">\n            <span>{card.meta}</span>\n            <h2>{card.title}</h2>\n            <p>{card.body}</p>\n          </article>\n        ))}\n      </section>\n\n      <section className=\"actions\">\n        <h2>Action loop</h2>\n        {actions.map((action) => <button key={action} type=\"button\">{action}</button>)}\n      </section>\n    </main>\n  );\n}\n```\n\n```css title=\"src/styles.css\"\n:root { color: #f8fafc; background: #080b12; font-family: \"Space Grotesk\", \"Segoe UI\", sans-serif; }\n* { box-sizing: border-box; }\nbody { margin: 0; min-height: 100vh; background: radial-gradient(circle at 12% 8%, rgba(56,189,248,.2), transparent 28%), radial-gradient(circle at 88% 16%, rgba(244,114,182,.16), transparent 24%), linear-gradient(145deg, #080b12, #111827 58%, #030712); }\nbutton, input { font: inherit; }\n.shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 36px 0 72px; }\n.hero, .dropzone, .card, .actions { border: 1px solid rgba(255,255,255,.12); background: rgba(8,13,24,.76); box-shadow: 0 28px 80px rgba(0,0,0,.28); backdrop-filter: blur(18px); }\n.hero { border-radius: 34px; padding: clamp(24px, 5vw, 48px); }\n.eyebrow { margin: 0 0 12px; color: #67e8f9; font-size: 12px; font-weight: 900; letter-spacing: .18em; text-transform: uppercase; }\nh1 { margin: 0; max-width: 12ch; font-size: clamp(3rem, 7vw, 6.4rem); line-height: .88; letter-spacing: -.07em; }\nh2, p { margin: 0; }\n.lede { max-width: 68ch; margin-top: 20px; color: #cbd5e1; font-size: 18px; line-height: 1.75; }\n.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 28px; }\n.metric, .card { border-radius: 24px; padding: 18px; background: rgba(15,23,42,.74); border: 1px solid rgba(255,255,255,.1); }\n.metric span, .card span { display: block; color: #94a3b8; font-size: 12px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }\n.metric strong { display: block; margin-top: 8px; font-size: 24px; }\n.dropzone { margin-top: 18px; border-radius: 28px; padding: 22px; display: grid; gap: 14px; }\n.dropzone label { font-size: 22px; font-weight: 900; }\ninput[type=\"file\"] { width: 100%; padding: 18px; border-radius: 20px; border: 1px dashed rgba(103,232,249,.6); color: #dbeafe; background: rgba(15,23,42,.78); }\n.control-row, .actions { display: flex; flex-wrap: wrap; gap: 12px; }\nbutton { border: 0; border-radius: 999px; padding: 12px 16px; color: #06111c; background: linear-gradient(135deg, #67e8f9, #f0abfc); font-weight: 900; cursor: pointer; transition: transform .18s ease, filter .18s ease; }\nbutton:hover { transform: translateY(-2px); filter: brightness(1.08); }\n.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }\n.card h2 { margin-top: 12px; font-size: 26px; letter-spacing: -.04em; }\n.card p { margin-top: 10px; color: #cbd5e1; line-height: 1.7; }\n.actions { margin-top: 18px; border-radius: 28px; padding: 22px; align-items: center; }\n.actions h2 { width: 100%; font-size: 22px; }\n@media (max-width: 920px) { .metrics, .grid { grid-template-columns: 1fr 1fr; } }\n@media (max-width: 640px) { .metrics, .grid { grid-template-columns: 1fr; } .shell { width: min(100% - 20px, 1180px); } }\n```\n\n```json title=\"tsconfig.json\"\n{\n  \"compilerOptions\": {\n    \"target\": \"ES2020\",\n    \"lib\": [\n      \"ES2020\",\n      \"DOM\",\n      \"DOM.Iterable\"\n    ],\n    \"module\": \"ESNext\",\n    \"moduleResolution\": \"bundler\",\n    \"jsx\": \"react-jsx\",\n    \"strict\": true,\n    \"skipLibCheck\": true\n  },\n  \"include\": [\n    \"src\"\n  ]\n}\n```",
+      "responseQuality": {
+        "paths": [
+          "package.json",
+          "index.html",
+          "src/main.tsx",
+          "src/App.tsx",
+          "src/styles.css",
+          "tsconfig.json"
+        ],
+        "failures": [],
+        "warnings": []
+      },
+      "fileQuality": {
+        "failures": []
+      },
+      "preview": {
+        "url": "http://127.0.0.1:4192",
+        "screenshotPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-23-03-294Z\\next-gen-fullstack-monorepo-preview.png",
+        "dom": {
+          "title": "Next-Gen Monorepo Console",
+          "text": "FULL-STACK APP-ROUTER STARTER\n\nNext-Gen Monorepo Console\n\nA runnable preview for a Next.js app-router/RSC monorepo with shared tRPC API, Kysely plus Prisma schema management, PlanetScale edge database status, Clerk auth, shadcn-style UI blocks, and Expo workspace notes.\n\nNEXT.JS\nApp Router + RSC\nAPI\nshared tRPC\nDATABASE\nKysely + Prisma\nAUTH\nClerk session\nMONOREPO\nWorkspace map\n\nThe starter separates apps/web, apps/expo, packages/api, packages/db, and packages/ui so the monorepo shape is obvious.\n\nNEXT.JS\nApp-router/RSC web app\n\nThe web lane highlights server components, route groups, loading states, and typed server actions.\n\nTRPC\nShared API contract\n\nA shared tRPC router powers web and Expo clients without duplicating request types.\n\nKYSELY\nEdge-ready query layer\n\nKysely handles type-safe queries while Prisma owns schema management and migrations.\n\nPLANETSCALE\nDatabase health\n\nA PlanetScale-style status card shows edge driver readiness, schema sync, and query latency.\n\nCLERK\nAuth and UI blocks\n\nClerk auth, shadcn-style cards, and Expo mobile workspace notes make the starter feel complete.\n\nAction loop\nOpen monorepo health\nInspect tRPC API\nCheck PlanetScale status\nPreview Expo notes",
+          "regionCount": 14,
+          "buttonCount": 4,
+          "inputCount": 0,
+          "animatedCount": 4
+        },
+        "consoleErrors": [],
+        "failures": []
+      },
+      "durationMs": 107450,
+      "projectUpdate": null,
+      "fileSnapshot": {
+        "files": [
+          "index.html",
+          "package.json",
+          "pnpm-lock.yaml",
+          "src/App.tsx",
+          "src/main.tsx",
+          "src/styles.css",
+          "tsconfig.json",
+          "vite.config.js"
+        ],
+        "contents": {
+          "package.json": "{\n  \"name\": \"next-gen-fullstack-monorepo\",\n  \"private\": true,\n  \"version\": \"0.0.0\",\n  \"type\": \"module\",\n  \"scripts\": {\n    \"dev\": \"vite\",\n    \"build\": \"tsc -b && vite build\",\n    \"preview\": \"vite preview\"\n  },\n  \"dependencies\": {\n    \"react\": \"^18.3.1\",\n    \"react-dom\": \"^18.3.1\"\n  },\n  \"devDependencies\": {\n    \"@types/react\": \"^18.3.1\",\n    \"@types/react-dom\": \"^18.3.1\",\n    \"@vitejs/plugin-react\": \"^4.3.1\",\n    \"typescript\": \"^5.5.3\",\n    \"vite\": \"^5.4.10\"\n  }\n}",
+          "src/App.tsx": "const metrics = [\n  {\n    \"label\": \"Next.js\",\n    \"value\": \"App Router + RSC\"\n  },\n  {\n    \"label\": \"API\",\n    \"value\": \"shared tRPC\"\n  },\n  {\n    \"label\": \"Database\",\n    \"value\": \"Kysely + Prisma\"\n  },\n  {\n    \"label\": \"Auth\",\n    \"value\": \"Clerk session\"\n  }\n] as const;\nconst cards = [\n  {\n    \"meta\": \"monorepo\",\n    \"title\": \"Workspace map\",\n    \"body\": \"The starter separates apps/web, apps/expo, packages/api, packages/db, and packages/ui so the monorepo shape is obvious.\"\n  },\n  {\n    \"meta\": \"Next.js\",\n    \"title\": \"App-router/RSC web app\",\n    \"body\": \"The web lane highlights server components, route groups, loading states, and typed server actions.\"\n  },\n  {\n    \"meta\": \"tRPC\",\n    \"title\": \"Shared API contract\",\n    \"body\": \"A shared tRPC router powers web and Expo clients without duplicating request types.\"\n  },\n  {\n    \"meta\": \"Kysely\",\n    \"title\": \"Edge-ready query layer\",\n    \"body\": \"Kysely handles type-safe queries while Prisma owns schema management and migrations.\"\n  },\n  {\n    \"meta\": \"PlanetScale\",\n    \"title\": \"Database health\",\n    \"body\": \"A PlanetScale-style status card shows edge driver readiness, schema sync, and query latency.\"\n  },\n  {\n    \"meta\": \"Clerk\",\n    \"title\": \"Auth and UI blocks\",\n    \"body\": \"Clerk auth, shadcn-style cards, and Expo mobile workspace notes make the starter feel complete.\"\n  }\n] as const;\nconst actions = [\n  \"Open monorepo health\",\n  \"Inspect tRPC API\",\n  \"Check PlanetScale status\",\n  \"Preview Expo notes\"\n] as const;\n\nexport default function App() {\n  return (\n    <main className=\"shell\">\n      <section className=\"hero\">\n        <p className=\"eyebrow\">Full-stack app-router starter</p>\n        <h1>Next-Gen Monorepo Console</h1>\n        <p className=\"lede\">A runnable preview for a Next.js app-router/RSC monorepo with shared tRPC API, Kysely plus Prisma schema management, PlanetScale edge database status, Clerk auth, shadcn-style UI blocks, and Expo workspace notes.</p>\n        <div className=\"metrics\">\n          {metrics.map((metric) => (\n            <article key={metric.label} className=\"metric\">\n              <span>{metric.label}</span>\n              <strong>{metric.value}</strong>\n            </article>\n          ))}\n        </div>\n      </section>\n\n\n      <section className=\"grid\">\n        {cards.map((card) => (\n          <article key={card.title} className=\"card\">\n            <span>{card.meta}</span>\n            <h2>{card.title}</h2>\n            <p>{card.body}</p>\n          </article>\n        ))}\n      </section>\n\n      <section className=\"actions\">\n        <h2>Action loop</h2>\n        {actions.map",
+          "src/App.jsx": null,
+          "src/styles.css": ":root { color: #f8fafc; background: #080b12; font-family: \"Space Grotesk\", \"Segoe UI\", sans-serif; }\n* { box-sizing: border-box; }\nbody { margin: 0; min-height: 100vh; background: radial-gradient(circle at 12% 8%, rgba(56,189,248,.2), transparent 28%), radial-gradient(circle at 88% 16%, rgba(244,114,182,.16), transparent 24%), linear-gradient(145deg, #080b12, #111827 58%, #030712); }\nbutton, input { font: inherit; }\n.shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 36px 0 72px; }\n.hero, .dropzone, .card, .actions { border: 1px solid rgba(255,255,255,.12); background: rgba(8,13,24,.76); box-shadow: 0 28px 80px rgba(0,0,0,.28); backdrop-filter: blur(18px); }\n.hero { border-radius: 34px; padding: clamp(24px, 5vw, 48px); }\n.eyebrow { margin: 0 0 12px; color: #67e8f9; font-size: 12px; font-weight: 900; letter-spacing: .18em; text-transform: uppercase; }\nh1 { margin: 0; max-width: 12ch; font-size: clamp(3rem, 7vw, 6.4rem); line-height: .88; letter-spacing: -.07em; }\nh2, p { margin: 0; }\n.lede { max-width: 68ch; margin-top: 20px; color: #cbd5e1; font-size: 18px; line-height: 1.75; }\n.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 28px; }\n.metric, .card { border-radius: 24px; padding: 18px; background: rgba(15,23,42,.74); border: 1px solid rgba(255,255,255,.1); }\n.metric span, .card span { display: block; color: #94a3b8; font-size: 12px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }\n.metric strong { display: block; margin-top: 8px; font-size: 24px; }\n.dropzone { margin-top: 18px; border-radius: 28px; padding: 22px; display: grid; gap: 14px; }\n.dropzone label { font-size: 22px; font-weight: 900; }\ninput[type=\"file\"] { width: 100%; padding: 18px; border-radius: 20px; border: 1px dashed rgba(103,232,249,.6); color: #dbeafe; background: rgba(15,23,42,.78); }\n.control-row, .actions { display: flex; flex-wrap: wrap; gap: 12px; }\nbutton { border: 0; border-radius: 999px; padding: 12px 16px; color: #06111c; background: linear-gradient(135deg, #67e8f9, #f0abfc); font-weight: 900; cursor: pointer; transition: transform .18s ease, filter .18s ease; }\nbutton:hover { transform: translateY(-2px); filter: brightness(1.08); }\n.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }\n.card h2 { margin-top: 12px; font-size: 26px; letter-spacing: -.04em; }\n.card p { margin-top: 10px; color: #cbd5e1; line-height: 1.7; }\n.actions { margin-top: 18px; border-radius: 28px; padding: 22px; align-items: center; }\n.actions h2 { width: 100%; font-si"
+        }
+      }
+    },
+    {
+      "slug": "typescript-library-monorepo-starter",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp-lib",
+      "prompt": "Create a complete TypeScript library monorepo starter, not a marketing page. It must include package metadata, workspace setup, a core library entrypoint, strict tsconfig, a build script, tests, changeset/release notes, and a tiny Prisma generator example that shows how generated enums or types can reduce bundle size.",
+      "status": "fail",
+      "failures": [
+        "sandbox missing package.json",
+        "sandbox missing pnpm-workspace.yaml",
+        "sandbox missing packages/core/src/index.ts or src/index.ts",
+        "sandbox missing tsconfig.json",
+        "sandbox missing packages/prisma-generator/src/index.ts or src/prisma-generator.ts",
+        "sandbox files missing monorepo",
+        "sandbox files missing TypeScript",
+        "sandbox files missing library",
+        "sandbox files missing Prisma",
+        "sandbox files missing generator",
+        "sandbox files missing changeset",
+        "sandbox files missing vitest",
+        "sandbox files missing workspace package metadata",
+        "sandbox files missing library exports"
+      ],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPZ9F0HNQPKKA1QF39MB81ZW",
+      "sandboxId": "546bf52f",
+      "response": "Complete TypeScript library monorepo starter with Prisma generator support, vitest tests, and changeset release flow.\n\n```json title=\"package.json\"\n{\n  \"name\": \"acme-corp-lib-starter\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"packageManager\": \"pnpm@9.12.0\",\n  \"scripts\": {\n    \"build\": \"pnpm -r build\",\n    \"test\": \"pnpm -r test\",\n    \"changeset\": \"changeset\",\n    \"version\": \"changeset version\"\n  },\n  \"devDependencies\": {\n    \"@changesets/cli\": \"^2.27.9\",\n    \"typescript\": \"^5.5.3\",\n    \"vitest\": \"^2.1.1\"\n  },\n  \"workspaces\": [\n    \"packages/*\"\n  ]\n}\n```\n\n```yaml title=\"pnpm-workspace.yaml\"\npackages:\n  - 'packages/*'\n```\n\n```json title=\"tsconfig.json\"\n{\n  \"compilerOptions\": {\n    \"target\": \"ES2022\",\n    \"module\": \"NodeNext\",\n    \"moduleResolution\": \"NodeNext\",\n    \"declaration\": true,\n    \"strict\": true,\n    \"skipLibCheck\": true\n  },\n  \"include\": [\n    \"packages/**/*.ts\"\n  ]\n}\n```\n\n```ts title=\"packages/core/src/index.ts\"\nexport type AcmeLibraryOptions = { appName: string; enableTelemetry?: boolean };\n\nexport function createAcmeLibrary(options: AcmeLibraryOptions) {\n  return {\n    kind: \"TypeScript library monorepo\",\n    appName: options.appName,\n    telemetry: options.enableTelemetry === true,\n  } as const;\n}\n\nexport const libraryHealth = { vitest: \"configured\", changeset: \"required\", prisma: \"generator-ready\" } as const;\n```\n\n```ts title=\"packages/prisma-generator/src/index.ts\"\nimport { generatorHandler } from \"@prisma/generator-helper\";\n\ngeneratorHandler({\n  onManifest() {\n    return {\n      defaultOutput: \"./generated\",\n      prettyName: \"Acme enum bundle-size generator\",\n    };\n  },\n  async onGenerate(options) {\n    const enums = options.dmmf.datamodel.enums.map((item) => item.name);\n    const output = `export const prismaEnums = ${JSON.stringify(enums)} as const;\\n`;\n    await options.generator.output?.value && Bun.write(`${options.generator.output.value}/enums.ts`, output);\n  },\n});\n```\n\n```ts title=\"packages/core/src/index.test.ts\"\nimport { describe, expect, it } from 'vitest';\nimport { createAcmeLibrary } from './index';\n\ndescribe('createAcmeLibrary', () => {\n  it('returns typed library metadata', () => {\n    expect(createAcmeLibrary({ appName: 'demo' }).kind).toContain('library monorepo');\n  });\n});\n```\n\n```md title=\".changeset/initial-release.md\"\n---\n\"@acme/core\": patch\n\"@acme/prisma-generator\": patch\n---\n\nInitial TypeScript library monorepo with Prisma generator and vitest coverage.\n```",
+      "responseQuality": {
+        "paths": [
+          "package.json",
+          "pnpm-workspace.yaml",
+          "tsconfig.json",
+          "packages/core/src/index.ts",
+          "packages/prisma-generator/src/index.ts",
+          "packages/core/src/index.test.ts",
+          ".changeset/initial-release.md"
+        ],
+        "failures": [],
+        "warnings": []
+      },
+      "fileQuality": {
+        "failures": [
+          "sandbox missing package.json",
+          "sandbox missing pnpm-workspace.yaml",
+          "sandbox missing packages/core/src/index.ts or src/index.ts",
+          "sandbox missing tsconfig.json",
+          "sandbox missing packages/prisma-generator/src/index.ts or src/prisma-generator.ts",
+          "sandbox files missing monorepo",
+          "sandbox files missing TypeScript",
+          "sandbox files missing library",
+          "sandbox files missing Prisma",
+          "sandbox files missing generator",
+          "sandbox files missing changeset",
+          "sandbox files missing vitest",
+          "sandbox files missing workspace package metadata",
+          "sandbox files missing library exports"
+        ]
+      },
+      "preview": null,
+      "durationMs": 133702,
+      "projectUpdate": null,
+      "fileSnapshot": {
+        "files": [],
+        "contents": {
+          "package.json": null,
+          "pnpm-workspace.yaml": null,
+          "packages/core/src/index.ts": null,
+          "src/index.ts": null,
+          "tsconfig.json": null,
+          "packages/prisma-generator/src/index.ts": null,
+          "src/prisma-generator.ts": null
+        }
+      }
+    },
+    {
+      "slug": "developer-defaults-cli",
+      "sourceRepo": "https://github.com/juliusmarminge/good-defaults",
+      "prompt": "Create a runnable TypeScript CLI tool that scaffolds good project defaults. It should use an interactive prompt, let users select ESLint plus Prettier, VS Code settings and recommended extensions, strict TSConfig, and GitHub Actions CI with pnpm caching. Include the bin entry, CLI source, template writers, and an example generated workflow.",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPZ9K33SKVTDNP56S5WPZ5C2",
+      "sandboxId": "fec4df1a",
+      "response": "Runnable TypeScript CLI for scaffolding good project defaults: ESLint, Prettier, VS Code settings/extensions, strict TSConfig, and GitHub Actions CI with pnpm caching.\n\n```json title=\"package.json\"\n{\n  \"name\": \"good-defaults-cli\",\n  \"version\": \"0.1.0\",\n  \"type\": \"module\",\n  \"bin\": {\n    \"good-defaults\": \"./dist/cli.js\"\n  },\n  \"scripts\": {\n    \"dev\": \"tsx src/cli.ts\",\n    \"build\": \"tsc -p tsconfig.json\",\n    \"test\": \"vitest run\"\n  },\n  \"dependencies\": {\n    \"@inquirer/prompts\": \"^5.5.0\",\n    \"fs-extra\": \"^11.2.0\"\n  },\n  \"devDependencies\": {\n    \"@types/node\": \"^22.7.4\",\n    \"tsx\": \"^4.19.1\",\n    \"typescript\": \"^5.5.3\",\n    \"vitest\": \"^2.1.1\"\n  }\n}\n```\n\n```json title=\"tsconfig.json\"\n{\n  \"compilerOptions\": {\n    \"target\": \"ES2022\",\n    \"module\": \"NodeNext\",\n    \"moduleResolution\": \"NodeNext\",\n    \"strict\": true,\n    \"outDir\": \"dist\",\n    \"skipLibCheck\": true\n  },\n  \"include\": [\n    \"src\"\n  ]\n}\n```\n\n```ts title=\"src/templates.ts\"\nexport type DefaultChoice = \"eslint-prettier\" | \"vscode\" | \"tsconfig\" | \"github-actions\";\n\nexport const templates: Record<DefaultChoice, { path: string; label: string; content: string }> = {\n  \"eslint-prettier\": {\n    path: \".eslintrc.cjs\",\n    label: \"ESLint + Prettier\",\n    content: \"module.exports = { extends: ['eslint:recommended', 'prettier'] };\\n\",\n  },\n  vscode: {\n    path: \".vscode/extensions.json\",\n    label: \"VS Code settings and recommended extensions\",\n    content: JSON.stringify({ recommendations: [\"dbaeumer.vscode-eslint\", \"esbenp.prettier-vscode\"] }, null, 2),\n  },\n  tsconfig: {\n    path: \"tsconfig.json\",\n    label: \"Strict TSConfig\",\n    content: JSON.stringify({ compilerOptions: { strict: true, moduleResolution: \"Bundler\" } }, null, 2),\n  },\n  \"github-actions\": {\n    path: \".github/workflows/ci.yml\",\n    label: \"GitHub Actions CI with pnpm caching\",\n    content: \"name: CI\\non: [push, pull_request]\\njobs:\\n  test:\\n    runs-on: ubuntu-latest\\n    steps:\\n      - uses: actions/checkout@v4\\n      - uses: pnpm/action-setup@v4\\n      - uses: actions/setup-node@v4\\n        with:\\n          node-version: 22\\n          cache: pnpm\\n      - run: pnpm install --frozen-lockfile\\n      - run: pnpm test\\n\",\n  },\n};\n```\n\n```ts title=\"src/cli.ts\"\n#!/usr/bin/env node\nimport { checkbox, confirm } from '@inquirer/prompts';\nimport { mkdir, writeFile } from 'node:fs/promises';\nimport { dirname } from 'node:path';\nimport { templates, type DefaultChoice } from './templates';\n\nconst choices = await checkbox<DefaultChoice>({\n  message: \"Select good defaults to scaffold\",\n  choices: Object.entries(templates).map(([value, template]) => ({ value: value as DefaultChoice, name: template.label })),\n});\n\nconst usePnpm = await confirm({ message: \"Use pnpm caching in GitHub Actions?\", default: true });\nfor (const choice of choices) {\n  const template = templates[choice];\n  await mkdir(dirname(template.path), { recursive: true });\n  await writeFile(template.path, template.content.replace(\"cache: pnpm\", usePnpm ? \"cache: pnpm\" : \"\"), \"utf8\");\n  console.log(`Wrote ${template.label} -> ${template.path}`);\n}\n```\n\n```yaml title=\".github/workflows/ci.yml\"\nname: GitHub Actions CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: pnpm/action-setup@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n          cache: pnpm\n      - run: pnpm install --frozen-lockfile\n      - run: pnpm test\n```",
+      "responseQuality": {
+        "paths": [
+          "package.json",
+          "tsconfig.json",
+          "src/templates.ts",
+          "src/cli.ts",
+          ".github/workflows/ci.yml"
+        ],
+        "failures": [],
+        "warnings": []
+      },
+      "fileQuality": {
+        "failures": []
+      },
+      "preview": null,
+      "durationMs": 118060,
+      "projectUpdate": null,
+      "fileSnapshot": {
+        "files": [
+          ".github/workflows/ci.yml",
+          "package.json",
+          "src/cli.ts",
+          "src/templates.ts",
+          "tsconfig.json"
+        ],
+        "contents": {
+          "package.json": "{\n  \"name\": \"good-defaults-cli\",\n  \"version\": \"0.1.0\",\n  \"type\": \"module\",\n  \"bin\": {\n    \"good-defaults\": \"./dist/cli.js\"\n  },\n  \"scripts\": {\n    \"dev\": \"tsx src/cli.ts\",\n    \"build\": \"tsc -p tsconfig.json\",\n    \"test\": \"vitest run\"\n  },\n  \"dependencies\": {\n    \"@inquirer/prompts\": \"^5.5.0\",\n    \"fs-extra\": \"^11.2.0\"\n  },\n  \"devDependencies\": {\n    \"@types/node\": \"^22.7.4\",\n    \"tsx\": \"^4.19.1\",\n    \"typescript\": \"^5.5.3\",\n    \"vitest\": \"^2.1.1\"\n  }\n}",
+          "src/cli.ts": "#!/usr/bin/env node\nimport { checkbox, confirm } from '@inquirer/prompts';\nimport { mkdir, writeFile } from 'node:fs/promises';\nimport { dirname } from 'node:path';\nimport { templates, type DefaultChoice } from './templates';\n\nconst choices = await checkbox<DefaultChoice>({\n  message: \"Select good defaults to scaffold\",\n  choices: Object.entries(templates).map(([value, template]) => ({ value: value as DefaultChoice, name: template.label })),\n});\n\nconst usePnpm = await confirm({ message: \"Use pnpm caching in GitHub Actions?\", default: true });\nfor (const choice of choices) {\n  const template = templates[choice];\n  await mkdir(dirname(template.path), { recursive: true });\n  await writeFile(template.path, template.content.replace(\"cache: pnpm\", usePnpm ? \"cache: pnpm\" : \"\"), \"utf8\");\n  console.log(`Wrote ${template.label} -> ${template.path}`);\n}",
+          "src/index.ts": null,
+          "src/templates.ts": "export type DefaultChoice = \"eslint-prettier\" | \"vscode\" | \"tsconfig\" | \"github-actions\";\n\nexport const templates: Record<DefaultChoice, { path: string; label: string; content: string }> = {\n  \"eslint-prettier\": {\n    path: \".eslintrc.cjs\",\n    label: \"ESLint + Prettier\",\n    content: \"module.exports = { extends: ['eslint:recommended', 'prettier'] };\\n\",\n  },\n  vscode: {\n    path: \".vscode/extensions.json\",\n    label: \"VS Code settings and recommended extensions\",\n    content: JSON.stringify({ recommendations: [\"dbaeumer.vscode-eslint\", \"esbenp.prettier-vscode\"] }, null, 2),\n  },\n  tsconfig: {\n    path: \"tsconfig.json\",\n    label: \"Strict TSConfig\",\n    content: JSON.stringify({ compilerOptions: { strict: true, moduleResolution: \"Bundler\" } }, null, 2),\n  },\n  \"github-actions\": {\n    path: \".github/workflows/ci.yml\",\n    label: \"GitHub Actions CI with pnpm caching\",\n    content: \"name: CI\\non: [push, pull_request]\\njobs:\\n  test:\\n    runs-on: ubuntu-latest\\n    steps:\\n      - uses: actions/checkout@v4\\n      - uses: pnpm/action-setup@v4\\n      - uses: actions/setup-node@v4\\n        with:\\n          node-version: 22\\n          cache: pnpm\\n      - run: pnpm install --frozen-lockfile\\n      - run: pnpm test\\n\",\n  },\n};",
+          "src/templates/index.ts": null,
+          ".github/workflows/ci.yml": "name: GitHub Actions CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: pnpm/action-setup@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n          cache: pnpm\n      - run: pnpm install --frozen-lockfile\n      - run: pnpm test"
+        }
+      }
+    }
+  ]
+}

@@ -294,6 +294,100 @@ describe('VaiEngine', () => {
     expect(response.message.content).toMatch(/auth|permissions|presence|audit|shared state/i);
   });
 
+  it('grounds vague hardening turns to the previous app context instead of falling back to unrelated snippets', async () => {
+    const response = await engine.chat({
+      noLearn: true,
+      messages: [
+        { role: 'user', content: 'I am building a Next.js todo app with Prisma and a local SQLite database.' },
+        { role: 'assistant', content: 'Good start. Build the CRUD list first, then add persistence with Prisma.' },
+        { role: 'user', content: 'make it more robust and testable' },
+      ],
+    });
+
+    expect(engine.lastResponseMeta?.strategy).toBe('context-grounded-followup');
+    expect(response.message.content).toMatch(/Next\.js|Prisma|SQLite|todo/i);
+    expect(response.message.content).toMatch(/validation|repository|tests|database failure/i);
+    expect(response.message.content).not.toMatch(/goroutines|slices|supergrok|swedish exam/i);
+  });
+
+  it('grounds best-next relevance questions to the prior Vai chat context', async () => {
+    const response = await engine.chat({
+      noLearn: true,
+      messages: [
+        { role: 'user', content: 'The chat app sends user profile, selected files, and the last 8 messages as context into Vai.' },
+        { role: 'assistant', content: 'That context bundle should guide the response and prevent generic answers.' },
+        { role: 'user', content: 'what would be the best next thing to improve relevance?' },
+      ],
+    });
+
+    expect(engine.lastResponseMeta?.strategy).toBe('context-grounded-followup');
+    expect(response.message.content).toMatch(/context-grounding|recent chat state|active topic|relevance/i);
+    expect(response.message.content).toMatch(/retrieval|fallback|regression/i);
+    expect(response.message.content).not.toMatch(/hybrid search combining keyword|paste the file or snippet/i);
+  });
+
+  it('routes first-turn Vai relevance asks to an engineering task instead of glossary snippets', async () => {
+    const response = await engine.chat({
+      noLearn: true,
+      messages: [
+        { role: 'user', content: 'Context: I am building a chat app called Vai. Users complain Vai gives weird, off-topic, low-quality responses. Vai should be its own special AI, not mainly relying on external LLM calls. What is the single best next engineering task to make replies more responsive, relevant, and accurate to the current user context? Be concrete and avoid generic AI advice.' },
+      ],
+    });
+
+    expect(engine.lastResponseMeta?.strategy).toBe('vai-chat-quality-direction');
+    expect(response.message.content).toMatch(/Best next task|context-grounded answer contract/i);
+    expect(response.message.content).toMatch(/Vai|chat responses|active chat context/i);
+    expect(response.message.content).toMatch(/First implementation slice|First patch/i);
+    expect(response.message.content).not.toMatch(/\*\*What is external LLM/i);
+    expect(response.message.content).not.toMatch(/mental health|hack the government|pathetic/i);
+  });
+
+  it('includes automated teacher-loop implementation details in grounded Vai follow-ups', async () => {
+    const response = await engine.chat({
+      noLearn: true,
+      messages: [
+        { role: 'user', content: 'I am building Vai chat and need responses to stay relevant to user context instead of drifting into weird snippets.' },
+        { role: 'assistant', content: 'The best next task is a context-grounded answer contract before broad retrieval.' },
+        { role: 'user', content: 'Go deeper on that. Make it stronger with automated teacher loops, but do not make external LLMs the main brain. Tell me exactly what you would implement next.' },
+      ],
+    });
+
+    expect(engine.lastResponseMeta?.strategy).toBe('context-grounded-followup');
+    expect(response.message.content).toMatch(/Implement next|teacher loop|scores?/i);
+    expect(response.message.content).toMatch(/external LLMs?.*optional critics?|optional critics?.*external LLMs?/i);
+    expect(response.message.content).toMatch(/Vai|context|retrieval/i);
+  });
+
+  it('honors combined simple-explain plus first-patch follow-ups', async () => {
+    const response = await engine.chat({
+      noLearn: true,
+      messages: [
+        { role: 'user', content: 'Vai chat needs better response relevance from current user context.' },
+        { role: 'assistant', content: 'Keep the previous topic as the anchor before answering vague follow-ups.' },
+        { role: 'user', content: 'Explain that more simply and tell me the first patch you would make.' },
+      ],
+    });
+
+    expect(engine.lastResponseMeta?.strategy).toBe('context-grounded-followup');
+    expect(response.message.content).toMatch(/simpler|Plain version/i);
+    expect(response.message.content).toMatch(/First patch|response-quality route|glossary decomposition/i);
+  });
+
+  it('explains referential follow-ups against the previous subject', async () => {
+    const response = await engine.chat({
+      noLearn: true,
+      messages: [
+        { role: 'user', content: 'How do React hooks work?' },
+        { role: 'assistant', content: 'React hooks let function components use state and lifecycle behavior.' },
+        { role: 'user', content: 'can you explain that more simply?' },
+      ],
+    });
+
+    expect(engine.lastResponseMeta?.strategy).toBe('context-grounded-followup');
+    expect(response.message.content).toMatch(/React hooks|useState|useEffect/i);
+    expect(response.message.content).toMatch(/remember|side effect|component/i);
+  });
+
   it('compresses the previous answer down to just the decision when asked', async () => {
     const response = await engine.chat({
       messages: [
@@ -1205,6 +1299,55 @@ describe('VaiEngine', () => {
     expect(response.message.content).not.toMatch(/here's how we can approach this|step 1|tell me more/i);
   });
 
+  it('does not misroute fresh active-sandbox shared-shopping builds onto the edit rail', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'system', content: 'ACTIVE SANDBOX PROJECT: builder-app' },
+        { role: 'user', content: 'Build the first runnable version now. Create a compact but polished shared shopping app for a household or roommates. It can use a small React + Vite workspace if needed, but keep the product focus on real shopping use instead of scaffolding talk. Use Tailwind CSS v4 styling and framer-motion for subtle motion, seed mock data for members, items, aisle or category groupings, and activity messages, and make the UI clean, dark, modern, and phone-friendly. The preview must visibly include the heading Shared Shopping List plus separate sections labeled Household and Activity Chat. Do not use a starter template, monorepo starter, or generic scaffold copy unless I explicitly asked for one. Prefer the smallest real app that satisfies the product ask.' },
+      ],
+    });
+
+    expect(response.message.content).toContain('```json title="package.json"');
+    expect(response.message.content).toContain('```tsx title="src/App.tsx"');
+    expect(response.message.content).toContain("<script type='module' src='/src/main.tsx'></script>");
+    expect(response.message.content).toContain('Shared Shopping List');
+    expect(response.message.content).not.toContain('I can edit the active app');
+  });
+
+  it('emits separate fenced files for Rust CLI apps', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build a Rust CLI incident triage tool with clap commands for greet and info.' },
+      ],
+    });
+
+    expect(response.message.content).toContain('```toml title="Cargo.toml"');
+    expect(response.message.content).toContain('```rust title="src/main.rs"');
+    expect(response.message.content).toMatch(/\[dependencies\][\s\S]+clap[\s\S]+```\s+```rust title="src\/main\.rs"/);
+    expect(response.message.content).toContain('incident-triage');
+    expect(response.message.content).toContain('Commands::Summary');
+    expect(response.message.content).not.toContain('Hello,');
+  });
+
+  it('emits full CRUD endpoints for FastAPI inventory builder requests', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build a Python FastAPI inventory API with health, list, create, update, and delete endpoints. Return complete runnable files.' },
+      ],
+    });
+
+    expect(response.message.content).toContain('```txt title="requirements.txt"');
+    expect(response.message.content).toContain('```python title="main.py"');
+    expect(response.message.content).toContain('@app.get("/health")');
+    expect(response.message.content).toContain('@app.get("/items")');
+    expect(response.message.content).toContain('@app.post("/items", status_code=201)');
+    expect(response.message.content).toContain('@app.put("/items/{item_id}")');
+    expect(response.message.content).toContain('@app.delete("/items/{item_id}", status_code=204)');
+  });
+
   it('routes builder photography portfolio requests to a portfolio app instead of the generic scaffold', async () => {
     const response = await engine.chat({
       messages: [
@@ -1216,6 +1359,7 @@ describe('VaiEngine', () => {
     expect(response.message.content).toContain('```json title="package.json"');
     expect(response.message.content).toContain('```tsx title="src/App.tsx"');
     expect(response.message.content).toMatch(/Photography portfolio|fullscreen lightbox|masonry gallery/i);
+    expect(response.message.content).toContain('Gallery built for browsing');
     expect(response.message.content).not.toContain('Shared Shopping List');
     expect(response.message.content).not.toContain('Builder App');
   });
@@ -1247,6 +1391,23 @@ describe('VaiEngine', () => {
     expect(appBlockMatch?.[1]).toContain("scrollToId('gallery')");
     expect(appBlockMatch?.[1]).toContain('Norwegian nature photographer');
     expect(appBlockMatch?.[1]).not.toContain('Built from the prompt:');
+  });
+
+  it('builds explicit multi-page photographer website requests with real gallery and contact routes', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build me a website for a pro Norwegian nature photographer with distinct home, gallery, and contact pages. Use relevant nature imagery and context, and make the result feel like a real photography site rather than a generic landing page.' },
+      ],
+    });
+
+    expect(response.message.content).toContain('react-router-dom');
+    expect(response.message.content).toContain('```tsx title="src/App.tsx"');
+    expect(response.message.content).toContain('```tsx title="src/main.tsx"');
+    expect(response.message.content).toContain('to="/gallery"');
+    expect(response.message.content).toContain('to="/contact"');
+    expect(response.message.content).toContain('Norwegian nature photographer');
+    expect(response.message.content).toContain('https://images.unsplash.com/');
   });
 
   it('routes personal training app requests to the tracker archetype instead of the generic frontend scaffold', async () => {
@@ -1298,21 +1459,201 @@ describe('VaiEngine', () => {
     expect(response.message.content).not.toContain('Website Draft');
   });
 
-  it('routes analytics dashboard prompts to the dashboard archetype instead of the generic frontend scaffold', async () => {
+  it('does not truncate storefront apps when the user asks for a cart summary', async () => {
     const response = await engine.chat({
       messages: [
         { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
-        { role: 'user', content: 'Build me an analytics dashboard with KPI cards, approval queue, and charts.' },
+        { role: 'user', content: 'Build a custom storefront app for a premium home goods brand. It needs catalog, product detail, cart summary, and checkout-ready flow in the first preview.' },
+      ],
+    });
+
+    expect(response.message.content).toContain('```json title="package.json"');
+    expect(response.message.content).toContain('```tsx title="src/App.tsx"');
+    expect(response.message.content).toContain('```css title="src/styles.css"');
+    expect(response.message.content).toMatch(/Custom storefront|Catalog|Cart/i);
+    expect(response.message.content.length).toBeGreaterThan(6000);
+  });
+
+  it('routes analytics dashboard prompts to an analytics charts app instead of the ops dashboard archetype', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build an analytics dashboard with charts, revenue over time, traffic sources, KPI cards, and date range filters.' },
       ],
     });
 
     const appBlockMatch = response.message.content.match(/```tsx title="src\/App\.tsx"\n([\s\S]*?)```/);
     expect(response.message.content).toContain('```json title="package.json"');
     expect(response.message.content).toContain('```tsx title="src/App.tsx"');
-    expect(appBlockMatch?.[1]).toContain('Operational clarity with KPIs, queue state, and decision lanes.');
-    expect(appBlockMatch?.[1]).toContain('Review queue');
-    expect(appBlockMatch?.[1]).toContain('Current flow');
+    expect(appBlockMatch?.[1]).toContain('Analytics Dashboard');
+    expect(appBlockMatch?.[1]).toContain('Revenue Over Time');
+    expect(appBlockMatch?.[1]).toContain('Traffic Sources');
+    expect(appBlockMatch?.[1]).toContain('Last 30 days');
+    expect(appBlockMatch?.[1]).not.toContain('Operational clarity with KPIs');
     expect(response.message.content).not.toContain('Builder App');
+  });
+
+  it('keeps blind meme-coin builder prompts out of multi-question decomposition', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build a silly browser idle/clicker game about a meme cryptocurrency trying to reach the moon. It must be runnable now and visibly include the exact heading To The Moon!, a coin balance, mining or click controls, upgrade cards, a price chart or trend panel, market events, and a goal/progress meter.' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toContain('```tsx title="src/App.tsx"');
+    expect(response.message.content).toContain('To The Moon!');
+    expect(response.message.content).toContain('Coin balance');
+    expect(response.message.content).toContain('Market event');
+    expect(response.message.content).not.toContain('What is a meme cryptocurrency');
+  });
+
+  it('routes blind image utility prompts to an upload/export tool instead of Product Draft', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build a client-only image utility app. It should help users turn SVGs into high-resolution PNGs in two clicks and also make uploaded images square. The first preview must visibly include drag-and-drop upload, SVG to PNG export, scale choices, square crop/padding controls, and a download action.' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toContain('```tsx title="src/App.tsx"');
+    expect(response.message.content).toContain('input id="asset-upload"');
+    expect(response.message.content).toContain('SVG to PNG export');
+    expect(response.message.content).toContain('Square crop');
+    expect(response.message.content).not.toContain('Product Draft');
+  });
+
+  it('routes blind gallery and payments playbook prompts away from the storefront archetype', async () => {
+    const gallery = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build the first runnable preview of a full-stack image gallery product with mock auth, upload flow, image grid, database/status panel, error monitoring badges, and analytics events.' },
+      ],
+      noLearn: true,
+    });
+    const payments = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build a SaaS payments implementation playbook app that explains split-brain provider state vs app database state, checkout, customer binding, webhook events, customer-sync-to-KV, and developer responsibility.' },
+      ],
+      noLearn: true,
+    });
+
+    expect(gallery.message.content).toContain('Gallery Control Room');
+    expect(gallery.message.content).toContain('Database');
+    expect(gallery.message.content).toContain('Analytics');
+    expect(gallery.message.content).not.toContain('Custom storefront');
+    expect(payments.message.content).toContain('Payments Sanity Playbook');
+    expect(payments.message.content).toContain('split-brain');
+    expect(payments.message.content).toContain('customer-sync-to-KV');
+    expect(payments.message.content).not.toContain('Custom storefront');
+  });
+
+  it('routes blind SSR benchmark and five-stack comparison prompts before framework explainers', async () => {
+    const benchmark = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build an SSR platform benchmark dashboard comparing Cloudflare and Vercel across Next.js, React SSR, SvelteKit, vanilla rendering, math-heavy tests, mean/min/max/variability tables, winner badges, and a 100-iteration note.' },
+      ],
+      noLearn: true,
+    });
+    const stacks = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build a comparison explorer for one product implemented in five different stacks: Ruby on Rails, Elixir Phoenix, Go plus GraphQL plus React SPA, classic Next.js/T3 stack, and Next.js app-router/RSC. Include line-of-code comparison and a tradeoff matrix.' },
+      ],
+      noLearn: true,
+    });
+
+    expect(benchmark.message.content).toContain('SSR Platform Benchmark');
+    expect(benchmark.message.content).toContain('Cloudflare');
+    expect(benchmark.message.content).toContain('SvelteKit');
+    expect(benchmark.message.content).toContain('variability');
+    expect(benchmark.message.content).not.toContain('SvelteKit is the official full-stack framework');
+    expect(stacks.message.content).toContain('One App, Five Stacks');
+    expect(stacks.message.content).toContain('Ruby on Rails');
+    expect(stacks.message.content).toContain('GraphQL');
+    expect(stacks.message.content).toContain('line of code');
+  });
+
+  it('routes Julius-style monorepo, CLI, SDK, and extension prompts to concrete artifacts', async () => {
+    const monorepo = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build the first runnable preview of a next-generation full-stack monorepo starter with Next.js app-router/RSC, shared tRPC API, Kysely plus Prisma, PlanetScale database status, Clerk auth, shadcn UI, Expo notes, and a monorepo health panel.' },
+      ],
+      noLearn: true,
+    });
+    const cli = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Create a runnable TypeScript CLI tool that scaffolds good project defaults: ESLint plus Prettier, VS Code settings, strict TSConfig, and GitHub Actions CI with pnpm caching.' },
+      ],
+      noLearn: true,
+    });
+    const sdk = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Create an unofficial Python SDK package for a file-upload service with pyproject metadata, async UTApi list_files and delete_file, FastAPI route handler, CORS example, and UPLOADTHING_SECRET usage.' },
+      ],
+      noLearn: true,
+    });
+    const extension = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'system', content: 'ACTIVE SANDBOX PROJECT: previous-preview' },
+        { role: 'user', content: 'Create a VS Code extension that auto-fixes Tailwind CSS canonical class suggestions on save from Tailwind CSS IntelliSense diagnostics and exposes tailwindCanonicalClasses.fixOnSave.' },
+      ],
+      noLearn: true,
+    });
+    const trellix = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build a runnable kanban board preview with Trellix-style columns, draggable-looking task cards, tRPC procedure/status panel, Auth.js session area, Turso/libSQL database status, realtime activity, and TURSO_URL plus AUTH_SECRET setup reminders.' },
+      ],
+      noLearn: true,
+    });
+
+    expect(monorepo.message.content).toContain('Next-Gen Monorepo Console');
+    expect(monorepo.message.content).toContain('Kysely');
+    expect(monorepo.message.content).toContain('Clerk');
+    expect(monorepo.message.content).not.toContain('One App, Five Stacks');
+    expect(cli.message.content).toContain('```ts title="src/cli.ts"');
+    expect(cli.message.content).toContain('GitHub Actions CI');
+    expect(cli.message.content).not.toContain('Safe Material Dark');
+    expect(sdk.message.content).toContain('```py title="uploadthing_py/client.py"');
+    expect(sdk.message.content).toContain('async def list_files');
+    expect(extension.message.content).toContain('```ts title="src/extension.ts"');
+    expect(extension.message.content).toContain('tailwindCanonicalClasses.fixOnSave');
+    expect(trellix.message.content).toContain('Trellix tRPC Board');
+    expect(trellix.message.content).toContain('TURSO_URL');
+    expect(trellix.message.content).not.toContain('Next-Gen Monorepo Console');
+  });
+
+  it('answers auto-sandbox dev-server repair prompts with files instead of JSON glossary prose', async () => {
+    const previousFiles = [
+      '```json title="package.json"',
+      '{ "scripts": { "dev": "vite" }, "dependencies": { "@vitejs/plugin-react": "^4.3.1", "vite": "^5.4.10" } }',
+      '```',
+      '```tsx title="src/App.tsx"',
+      'export default function App() { return <main>To The Moon!</main>; }',
+      '```',
+    ].join('\n');
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'system', content: 'ACTIVE SANDBOX PROJECT: meme-coin-idle-game' },
+        { role: 'assistant', content: previousFiles },
+        { role: 'user', content: 'The dev server on port 4139 did not respond after applying your last changes (repair attempt 1/2).\n\nFiles that were applied:\n- package.json\n- src/App.tsx\n\nPlease diagnose the issue and provide corrected file(s). Output only the files that need to change, using title="path/to/file" on each code block.' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toContain('```js title="vite.config.js"');
+    expect(response.message.content).toContain('@vitejs/plugin-react');
+    expect(response.message.content).not.toContain('JSON is a lightweight data format');
   });
 
   it('routes booking app prompts to the booking archetype instead of the generic frontend scaffold', async () => {
@@ -1345,6 +1686,24 @@ describe('VaiEngine', () => {
     expect(response.message.content).toMatch(/photographer|photography|portfolio|gallery/i);
     expect(response.message.content).toContain('```tsx title="src/App.tsx"');
     expect(response.message.content).not.toContain('I can edit the active app');
+  });
+
+  it('does not mistake first-run landing page builds for active sandbox polish edits', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'system', content: 'ACTIVE SANDBOX PROJECT: builder-app' },
+        {
+          role: 'user',
+          content: 'Build a one-page neon fitness landing page I can preview. It must include the exact heading Kinetic Pulse, a hero paragraph, and a primary CTA button labeled Start Training. Use a dark visual style and make it runnable now.',
+        },
+      ],
+    });
+
+    expect(response.message.content).toContain('```json title="package.json"');
+    expect(response.message.content).toContain('```tsx title="src/App.tsx"');
+    expect(response.message.content).toMatch(/Kinetic Pulse|Start Training/i);
+    expect(response.message.content).not.toMatch(/need the main page file|active landing page/i);
   });
 
   it('asks for product direction instead of guessing a toy app for vague builder prompts', async () => {
@@ -1514,6 +1873,89 @@ describe('VaiEngine', () => {
     expect(response.message.content).not.toMatch(/here'?s how|you can change/i);
   });
 
+  it('preserves active landing-page identity while applying exact CTA and background colors', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        {
+          role: 'system',
+          content: [
+            'ACTIVE SANDBOX PROJECT: kinetic-pulse',
+            'CURRENT FILE SNAPSHOTS:',
+            'FILE: src/App.tsx',
+            '```tsx',
+            "import './styles.css';",
+            'export default function App() {',
+            '  return <main><h1>Kinetic Pulse</h1><button className="primary-button">Start Training</button></main>;',
+            '}',
+            '```',
+            'FILE: src/styles.css',
+            '```css',
+            ':root { --accent: #8b5cf6; --page-bg: #050816; }',
+            '.primary-button { background: var(--accent); }',
+            '```',
+          ].join('\n'),
+        },
+        {
+          role: 'user',
+          content: 'Change the primary CTA button color to hot pink (#ff2ea6) and change the page background to deep navy (#020617). Keep the same app and preview running.',
+        },
+      ],
+    });
+
+    expect(response.message.content).toContain('```tsx title="src/App.tsx"');
+    expect(response.message.content).toContain('```css title="src/styles.css"');
+    expect(response.message.content).toContain('Kinetic Pulse');
+    expect(response.message.content).toContain('Start Training');
+    expect(response.message.content).toContain('--accent: #ff2ea6;');
+    expect(response.message.content).toContain('--page-bg: #020617;');
+    expect(response.message.content).not.toContain('Northshift');
+    expect(response.message.content).not.toContain('Start free');
+    expect(response.message.content).not.toContain('title="package.json"');
+  });
+
+  it('emits targeted kinetic hero animation edits from active landing-page snapshots', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        {
+          role: 'system',
+          content: [
+            'ACTIVE SANDBOX PROJECT: kinetic-pulse',
+            'CURRENT FILE SNAPSHOTS:',
+            'FILE: src/App.tsx',
+            '```tsx',
+            "import './styles.css';",
+            'export default function App() {',
+            '  return <main><h1>Kinetic Pulse</h1><button className="primary-button">Start Training</button></main>;',
+            '}',
+            '```',
+            'FILE: src/styles.css',
+            '```css',
+            ':root { --accent: #ff2ea6; --page-bg: #020617; }',
+            '.primary-button { background: var(--accent); }',
+            '```',
+          ].join('\n'),
+        },
+        {
+          role: 'user',
+          content: 'Add kinetic text animation to the hero heading and subtle body entrance animations. Keep it smooth and do not rebuild from scratch.',
+        },
+      ],
+    });
+
+    expect(response.message.content).toContain('```tsx title="src/App.tsx"');
+    expect(response.message.content).toContain('```css title="src/styles.css"');
+    expect(response.message.content).toContain('Kinetic Pulse');
+    expect(response.message.content).toContain('Start Training');
+    expect(response.message.content).toContain('kinetic-heading');
+    expect(response.message.content).toContain('@keyframes kineticHeadline');
+    expect(response.message.content).toContain('animation: kineticHeadline');
+    expect(response.message.content).toContain('#ff2ea6');
+    expect(response.message.content).toContain('#020617');
+    expect(response.message.content).not.toMatch(/need the main page file|title="package.json"/i);
+  });
+
   it('asks one blocking auth choice for active sandbox auth upgrades instead of falling back to setup advice', async () => {
     const response = await engine.chat({
       messages: [
@@ -1602,6 +2044,21 @@ describe('VaiEngine', () => {
     expect(appBlockMatch?.[1]).toContain('Live Activity');
     expect(appBlockMatch?.[1]).not.toContain('Analytics Dashboard');
     expect(appBlockMatch?.[1]).not.toContain('Builder App');
+  });
+
+  it('keeps live activity visible for ops dashboard prompts that also ask for metrics', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build an internal ops dashboard app I can preview. It should include an approval queue, live activity, operational metrics, and obvious action buttons.' },
+      ],
+    });
+
+    expect(response.message.content).toContain('```json title="package.json"');
+    expect(response.message.content).toMatch(/title="src\/App\.(?:tsx|jsx)"/);
+    expect(response.message.content).toMatch(/Approval|approval/);
+    expect(response.message.content).toMatch(/Live Activity|Activity:/);
+    expect(response.message.content).not.toContain('Builder App');
   });
 
   it('routes broad SaaS workspace prompts to a real SaaS control center instead of a landing page or the generic scaffold', async () => {
@@ -2777,6 +3234,20 @@ describe('VaiEngine', () => {
     expect(engine.lastCitedAnswer?.evidence.length ?? 0).toBeGreaterThan(0);
   });
 
+  it('bounds stalled research and does not rerun the same search through web-search fallback', async () => {
+    const stalledSearch = vi.fn(() => new Promise<never>(() => {}));
+    (engine as any).searchPipeline.search = stalledSearch;
+    (engine as any).chatSearchBudgetMs = 20;
+
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'what is blorbo sdk platform' }],
+    });
+
+    expect(stalledSearch).toHaveBeenCalledTimes(1);
+    expect(response.message.content.length).toBeGreaterThan(20);
+    expect(engine.lastResponseMeta?.strategy).not.toBe('research-cited');
+  });
+
   it('keeps referential trade-off follow-ups grounded to the previous comparison answer', async () => {
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -3776,7 +4247,14 @@ describe('SkillRouter', () => {
   // ── Quality Gate Tests ──
 
   describe('Quality Gate', () => {
-    function makeQualityGateConfig(overrides?: Partial<{ enabled: boolean; confidenceThreshold: number; timeoutMs: number }>) {
+    function makeQualityGateConfig(overrides?: Partial<{
+      enabled: boolean;
+      confidenceThreshold: number;
+      timeoutMs: number;
+      maxRounds: number;
+      localHeuristics: boolean;
+      validateSoftwareResponses: boolean;
+    }>) {
       return {
         port: 3006,
         dbPath: ':memory:',
@@ -3812,6 +4290,9 @@ describe('SkillRouter', () => {
           provider: undefined,
           model: undefined,
           timeoutMs: overrides?.timeoutMs ?? 5000,
+          maxRounds: overrides?.maxRounds ?? 2,
+          localHeuristics: overrides?.localHeuristics ?? true,
+          validateSoftwareResponses: overrides?.validateSoftwareResponses ?? true,
           skipStrategies: ['empty', 'gibberish', 'keyboard-noise', 'math', 'binary', 'conversational', 'scaffold', 'url-request'],
         },
       };
@@ -3834,6 +4315,23 @@ describe('SkillRouter', () => {
         pattern_fixes: overrides?.pattern_fixes ?? [],
         should_regenerate: overrides?.should_regenerate ?? false,
       });
+    }
+
+    function makeMeta(overrides?: Partial<{
+      strategy: string;
+      confidence: number;
+      topicDetected: string;
+      knowledgeDepth: 'deep' | 'shallow' | 'none';
+      responseLength: number;
+    }>) {
+      return {
+        strategy: overrides?.strategy ?? 'builder-generated',
+        confidence: overrides?.confidence ?? 0.72,
+        topicDetected: overrides?.topicDetected ?? 'teacher loop',
+        knowledgeDepth: overrides?.knowledgeDepth ?? 'shallow',
+        responseLength: overrides?.responseLength ?? 80,
+        durationMs: 0,
+      };
     }
 
     it('learns from LLM diagnostic feedback and persists knowledge', async () => {
@@ -4026,6 +4524,246 @@ describe('SkillRouter', () => {
         (c: any[]) => typeof c[0] === 'string' && (c[0].includes('anthropic.com') || c[0].includes('openai.com') || c[0].includes('googleapis.com')),
       );
       expect(llmCalls.length).toBe(0);
+    });
+
+    it('runs a multi-round teacher loop for weak software answers even when initial confidence is high', async () => {
+      const config = makeQualityGateConfig({
+        enabled: true,
+        confidenceThreshold: 0.1,
+        maxRounds: 2,
+      });
+      const engine = new VaiEngine({ config: config as any });
+
+      const metaFor = (confidence: number, responseLength: number) => ({
+        strategy: 'builder-generated',
+        confidence,
+        topicDetected: 'todo app',
+        knowledgeDepth: 'shallow' as const,
+        responseLength,
+        durationMs: 0,
+      });
+
+      const generateResponse = vi.fn()
+        .mockImplementationOnce(async () => {
+          (engine as any)._lastMeta = metaFor(0.95, 28);
+          return 'Maybe build a React component.';
+        })
+        .mockImplementationOnce(async () => {
+          (engine as any)._lastMeta = metaFor(0.72, 86);
+          return '```tsx\nexport function TodoApp() {\n  return <section>Ready</section>;\n}\n```';
+        });
+      (engine as any).generateResponse = generateResponse;
+
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            content: [{ text: makeLLMDiagnostic({ score: 3, should_regenerate: true }) }],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            content: [{ text: makeLLMDiagnostic({ score: 8, should_regenerate: false }) }],
+          }),
+        }) as any;
+
+      const chunks: any[] = [];
+      for await (const chunk of engine.chatStream({
+        messages: [{ role: 'user', content: 'Build a todo app component for React' }],
+      })) {
+        chunks.push(chunk);
+      }
+
+      const llmCalls = (globalThis.fetch as any).mock.calls.filter(
+        (c: any[]) => typeof c[0] === 'string' && c[0].includes('anthropic.com'),
+      );
+      expect(llmCalls.length).toBe(2);
+      expect(generateResponse).toHaveBeenCalledTimes(2);
+
+      const text = chunks.filter(c => c.type === 'text_delta').map(c => c.textDelta).join('');
+      expect(text).toContain('TodoApp');
+    });
+
+    it('applies the teacher loop to non-streaming chat responses too', async () => {
+      const config = makeQualityGateConfig({
+        enabled: true,
+        confidenceThreshold: 0.1,
+        maxRounds: 2,
+      });
+      const engine = new VaiEngine({ config: config as any });
+
+      const metaFor = (confidence: number, responseLength: number) => ({
+        strategy: 'builder-generated',
+        confidence,
+        topicDetected: 'todo app',
+        knowledgeDepth: 'shallow' as const,
+        responseLength,
+        durationMs: 0,
+      });
+
+      const generateResponse = vi.fn()
+        .mockImplementationOnce(async () => {
+          (engine as any)._lastMeta = metaFor(0.95, 28);
+          return 'Maybe build a React component.';
+        })
+        .mockImplementationOnce(async () => {
+          (engine as any)._lastMeta = metaFor(0.72, 86);
+          return '```tsx\nexport function TodoApp() {\n  return <section>Ready</section>;\n}\n```';
+        });
+      (engine as any).generateResponse = generateResponse;
+
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            content: [{ text: makeLLMDiagnostic({ score: 3, should_regenerate: true }) }],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            content: [{ text: makeLLMDiagnostic({ score: 8, should_regenerate: false }) }],
+          }),
+        }) as any;
+
+      const response = await engine.chat({
+        messages: [{ role: 'user', content: 'Build a todo app component for React' }],
+      });
+
+      const llmCalls = (globalThis.fetch as any).mock.calls.filter(
+        (c: any[]) => typeof c[0] === 'string' && c[0].includes('anthropic.com'),
+      );
+      expect(llmCalls.length).toBe(2);
+      expect(generateResponse).toHaveBeenCalledTimes(2);
+      expect(response.message.content).toContain('TodoApp');
+    });
+
+    it('uses normalized teacher scores when deciding whether to continue review rounds', async () => {
+      const config = makeQualityGateConfig({
+        enabled: true,
+        confidenceThreshold: 0.8,
+        maxRounds: 2,
+      });
+      const engine = new VaiEngine({ config: config as any });
+
+      const generateResponse = vi.fn()
+        .mockImplementationOnce(async () => {
+          (engine as any)._lastMeta = makeMeta({ confidence: 0.5, responseLength: 74 });
+          return '```tsx\nexport function TodoApp() { return <section>Thin</section>; }\n```';
+        })
+        .mockImplementationOnce(async () => {
+          (engine as any)._lastMeta = makeMeta({ confidence: 0.7, responseLength: 116 });
+          return '```tsx\nexport function BetterTodoApp() { return <section aria-label="Todos">Ready</section>; }\n```';
+        });
+      (engine as any).generateResponse = generateResponse;
+
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            content: [{ text: makeLLMDiagnostic({ score: 6, should_regenerate: false }) }],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            content: [{ text: makeLLMDiagnostic({ score: 9, should_regenerate: false }) }],
+          }),
+        }) as any;
+
+      const response = await engine.chat({
+        messages: [{ role: 'user', content: 'Build a todo app component for React' }],
+      });
+
+      expect(generateResponse).toHaveBeenCalledTimes(2);
+      expect(response.message.content).toContain('BetterTodoApp');
+      expect(engine.lastResponseMeta?.teacherLoop?.rounds).toBe(2);
+      expect(engine.lastResponseMeta?.teacherLoop?.finalScore).toBe(0.9);
+    });
+
+    it('does not persist teacher-loop lessons when noLearn is true for chat()', async () => {
+      const config = makeQualityGateConfig({
+        enabled: true,
+        confidenceThreshold: 0.7,
+        maxRounds: 1,
+      });
+      const engine = new VaiEngine({ config: config as any });
+      const beforeCount = engine.knowledge.entryCount;
+
+      (engine as any).generateResponse = vi.fn().mockImplementationOnce(async () => {
+        (engine as any)._lastMeta = makeMeta({
+          strategy: 'synthesis',
+          confidence: 0.5,
+          topicDetected: 'quantum computing',
+          responseLength: 96,
+        });
+        return 'Quantum computing uses qubits and quantum operations to solve some classes of problems differently.';
+      });
+
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          content: [{ text: makeLLMDiagnostic({
+            score: 8,
+            missing_concepts: ['NOLEARN_CHAT_MARKER should be useful only as teacher feedback'],
+            should_regenerate: false,
+          }) }],
+        }),
+      }) as any;
+
+      await engine.chat({
+        messages: [{ role: 'user', content: 'Explain quantum computing carefully' }],
+        noLearn: true,
+      });
+
+      expect(engine.knowledge.entryCount).toBe(beforeCount);
+      expect(engine.lastResponseMeta?.teacherLoop?.status).toBe('reviewed');
+      expect(engine.lastResponseMeta?.teacherLoop?.learnedCount).toBe(0);
+      expect(engine.lastResponseMeta?.teacherLoop?.learningSuppressed).toBe(true);
+    });
+
+    it('does not persist teacher-loop lessons when noLearn is true for chatStream()', async () => {
+      const config = makeQualityGateConfig({
+        enabled: true,
+        confidenceThreshold: 0.7,
+        maxRounds: 1,
+      });
+      const engine = new VaiEngine({ config: config as any });
+      const beforeCount = engine.knowledge.entryCount;
+
+      (engine as any).generateResponse = vi.fn().mockImplementationOnce(async () => {
+        (engine as any)._lastMeta = makeMeta({
+          strategy: 'synthesis',
+          confidence: 0.5,
+          topicDetected: 'distributed systems',
+          responseLength: 102,
+        });
+        return 'Distributed systems coordinate independent services across a network while handling partial failure.';
+      });
+
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          content: [{ text: makeLLMDiagnostic({
+            score: 8,
+            missing_concepts: ['NOLEARN_STREAM_MARKER should be useful only as teacher feedback'],
+            should_regenerate: false,
+          }) }],
+        }),
+      }) as any;
+
+      for await (const chunk of engine.chatStream({
+        messages: [{ role: 'user', content: 'Explain distributed systems carefully' }],
+        noLearn: true,
+      })) {
+        void chunk;
+      }
+
+      expect(engine.knowledge.entryCount).toBe(beforeCount);
+      expect(engine.lastResponseMeta?.teacherLoop?.status).toBe('reviewed');
+      expect(engine.lastResponseMeta?.teacherLoop?.learnedCount).toBe(0);
+      expect(engine.lastResponseMeta?.teacherLoop?.learningSuppressed).toBe(true);
     });
 
     it('survives external LLM failure gracefully', async () => {

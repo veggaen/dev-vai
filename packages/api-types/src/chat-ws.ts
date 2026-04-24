@@ -23,6 +23,10 @@ const imageInputSchema = z
 /**
  * Inbound WebSocket payload for /api/chat stream.
  * Strict: unknown keys rejected (explicit contracts).
+ *
+ * `modelId` / `mode` are *hints*: only consulted by the server when
+ * `conversationId` resolves to a missing row and the chat service has to
+ * auto-create one (race recovery). Ignored on the happy path.
  */
 export const chatWebSocketInboundSchema = z
   .object({
@@ -31,6 +35,8 @@ export const chatWebSocketInboundSchema = z
     image: imageInputSchema.optional(),
     systemPrompt: z.string().optional(),
     allowLearn: z.boolean().optional(),
+    modelId: z.string().min(1).optional(),
+    mode: z.enum(['chat', 'agent', 'builder', 'plan', 'debate']).optional(),
   })
   .merge(promptRewriteOverrideSchema)
   .strict();

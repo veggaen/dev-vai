@@ -1,0 +1,146 @@
+{
+  "verdict": "fail",
+  "passed": 13,
+  "failed": 1,
+  "total": 14,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T05-10-59-496Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T05-10-59-496Z\\report.json",
+  "results": [
+    {
+      "slug": "neon-fitness-landing",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYYC01QMGSE372DGHHAA8W1",
+      "sandboxId": "0871cbd1",
+      "previewUrl": "http://127.0.0.1:4148"
+    },
+    {
+      "slug": "shared-shopping-list",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYYCP73R6AFG0AWA8NJPR9R",
+      "sandboxId": "36395a3e",
+      "previewUrl": "http://127.0.0.1:4149"
+    },
+    {
+      "slug": "photography-portfolio",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYYDEKTAJWEDV85AT3VTVX1",
+      "sandboxId": "edfb58bf",
+      "previewUrl": "http://127.0.0.1:4150"
+    },
+    {
+      "slug": "custom-storefront",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYYE7SJCXACEZ8ATH1A63P3",
+      "sandboxId": "8eb63c38",
+      "previewUrl": "http://127.0.0.1:4151"
+    },
+    {
+      "slug": "social-blog",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYYEYVZ4QR91FF0H1X581HG",
+      "sandboxId": "35d8357c",
+      "previewUrl": null
+    },
+    {
+      "slug": "ops-control-center",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYYFHGRWQHA3CTW9ZHDWFS7",
+      "sandboxId": "6b52cb25",
+      "previewUrl": null
+    },
+    {
+      "slug": "saas-workspace",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYYG5X54MT1PSRW3A9X2S9D",
+      "sandboxId": "87824e2e",
+      "previewUrl": null
+    },
+    {
+      "slug": "analytics-dashboard",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYYGW9WANFFJ16BED487XGC",
+      "sandboxId": "b4f6355e",
+      "previewUrl": null
+    },
+    {
+      "slug": "booking-studio",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "sandbox binding changed after recovery: 17c6caaa -> 9701f8b7"
+      ],
+      "conversationId": "01KPYYHG8QBNSTQSFTMM84CRCF",
+      "sandboxId": "9701f8b7",
+      "previewUrl": null
+    },
+    {
+      "slug": "fitness-tracker",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "sandbox binding changed after recovery: 9e0453d9 -> 222262c2"
+      ],
+      "conversationId": "01KPYYJ41S83959A3TM03D0QHT",
+      "sandboxId": "222262c2",
+      "previewUrl": null
+    },
+    {
+      "slug": "dating-matcher",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYYJR9M9JF8RJ52GMPYWJGC",
+      "sandboxId": "6bc6d6e3",
+      "previewUrl": null
+    },
+    {
+      "slug": "x-social-feed",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYYKDYBXVXP4R9A9SHH77SQ",
+      "sandboxId": "eae2eef8",
+      "previewUrl": null
+    },
+    {
+      "slug": "fastapi-inventory-api",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYYM0Y2VZRT7F9PQS0AZKB6",
+      "sandboxId": "bb842029",
+      "previewUrl": null
+    },
+    {
+      "slug": "rust-incident-cli",
+      "status": "fail",
+      "failures": [
+        "missing file block Cargo.toml",
+        "missing file block src/main.rs",
+        "missing required response text Rust CLI",
+        "missing required response text clap",
+        "missing required response text Commands"
+      ],
+      "warnings": [],
+      "conversationId": "01KPYYM3QRQKY5MEP45YNNQDJH",
+      "sandboxId": "78a68bba",
+      "previewUrl": null
+    }
+  ]
+}

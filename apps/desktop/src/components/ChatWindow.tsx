@@ -54,7 +54,7 @@ import {
   type IdeMentionItem,
 } from '../lib/ideMentions.js';
 import { IdeMentionMenu } from './IdeMentionMenu.js';
-import { pickSandboxContextPaths } from '../lib/sandbox-context.js';
+import { pickSandboxContextPaths, shouldAttachSandboxContext } from '../lib/sandbox-context.js';
 
 /** Fallback chat apps when the extension hasn't reported yet */
 const FALLBACK_CHAT_APPS: { id: string; label: string }[] = [
@@ -119,9 +119,13 @@ function detectFileExtension(text: string): string {
   return 'md';
 }
 
-function truncateSnapshotContent(content: string, limit = 1600): string {
+function truncateSnapshotContent(content: string, limit = 1000): string {
   if (content.length <= limit) return content;
   return `${content.slice(0, limit).trimEnd()}\n/* truncated for prompt context */`;
+}
+
+function describeSendFailure(error: unknown, fallback = 'Unable to send message. Check the local runtime and try again.'): string {
+  return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
 
 interface PastedImage {
@@ -696,11 +700,23 @@ export function ChatWindow() {
     let convId = activeConversationId;
     if (!convId) {
       const modelId = selectedModelId ?? 'vai:v0';
-      convId = await createConversation(modelId, nextConversationMode, {
-        sandboxProjectId: sandboxProjectId ?? null,
-      });
+      try {
+        convId = await createConversation(modelId, nextConversationMode, {
+          sandboxProjectId: sandboxProjectId ?? null,
+        });
+      } catch (error) {
+        console.error('[VAI] Failed to create conversation', error);
+        toast.error(describeSendFailure(error, 'Unable to create a new chat.'));
+        return;
+      }
     } else if (nextConversationMode !== mode) {
-      await updateConversationMode(convId, nextConversationMode);
+      try {
+        await updateConversationMode(convId, nextConversationMode);
+      } catch (error) {
+        console.error('[VAI] Failed to update conversation mode', error);
+        toast.error(describeSendFailure(error, 'Unable to switch chat mode.'));
+        return;
+      }
     }
     if (!convId) return;
 
@@ -781,8 +797,11 @@ export function ChatWindow() {
     // Hash the file list to avoid re-sending the same blob on every message.
     const sandboxContextPrompt = await (async () => {
       if (!sandboxProjectId || (sandboxStatus !== 'running' && sandboxStatus !== 'writing' && sandboxStatus !== 'idle')) return undefined;
+      if (!shouldAttachSandboxContext(text)) return undefined;
 
-      const fileListKey = sandboxFiles.slice(0, 40).join('|');
+      const summaryPaths = pickSandboxContextPaths(sandboxFiles, text, 6);
+      const snapshotPaths = pickSandboxContextPaths(sandboxFiles, text, 3);
+      const fileListKey = summaryPaths.join('|');
       const contextHash = `${sandboxProjectId}:${sandboxDevPort ?? 'none'}:${fileListKey}`;
       const fileTreeUnchanged = lastSandboxContextHashRef.current === contextHash;
       lastSandboxContextHashRef.current = contextHash;
@@ -795,15 +814,14 @@ export function ChatWindow() {
       } else {
         lines.push('Dev server is NOT running yet.');
       }
-      // Only include the full file tree when it has changed since the last message.
-      if (!fileTreeUnchanged && sandboxFiles.length > 0) {
-        const fileList = sandboxFiles.slice(0, 40).join('\n  ');
-        lines.push(`Current file tree (${sandboxFiles.length} files):\n  ${fileList}${sandboxFiles.length > 40 ? `\n  ... and ${sandboxFiles.length - 40} more` : ''}`);
-      } else if (fileTreeUnchanged && sandboxFiles.length > 0) {
-        lines.push(`File tree unchanged (${sandboxFiles.length} files — omitted to save context).`);
+      if (summaryPaths.length > 0) {
+        if (!fileTreeUnchanged) {
+          lines.push(`Most relevant project files (${summaryPaths.length}/${sandboxFiles.length} shown):\n  ${summaryPaths.join('\n  ')}`);
+        } else {
+          lines.push(`Relevant project files unchanged (${summaryPaths.length} focused files retained, list omitted to save context).`);
+        }
       }
 
-      const snapshotPaths = pickSandboxContextPaths(sandboxFiles, text);
       const snapshots = (await Promise.all(snapshotPaths.map(async (path) => {
         try {
           const res = await apiFetch(`/api/sandbox/${sandboxProjectId}/file?path=${encodeURIComponent(path)}`);
@@ -832,6 +850,7 @@ export function ChatWindow() {
 
       lines.push('');
       lines.push('EDITING RULES: Since a project is active, prefer targeted edits over full re-scaffolds.');
+      lines.push('Keep the answer tied to the active project only because this turn explicitly references that project context.');
       lines.push('Output only the files that need to change, using title="path/to/file" on each code block.');
       lines.push('Never re-emit files that are unchanged.');
       return lines.join('\n');
@@ -951,14 +970,21 @@ export function ChatWindow() {
     return items.slice(0, 3);
   }, [activeDeployStep, buildStatus.message, buildStatus.step, deployPhase, isStreaming, mode]);
   const showProjectContextStrip = Boolean(sandboxProjectId);
+  const draftWouldAttachProjectContext = Boolean(sandboxProjectId && shouldAttachSandboxContext(input));
+  const draftContextPaths = useMemo(
+    () => (draftWouldAttachProjectContext ? pickSandboxContextPaths(sandboxFiles, input, 4) : []),
+    [draftWouldAttachProjectContext, input, sandboxFiles],
+  );
   const shellModeLabel = `${mode.charAt(0).toUpperCase()}${mode.slice(1)}`;
   const headerTitle = hasMessages ? 'Workspace' : 'Vai';
   const composerAssistText = pastedImage
     ? 'Describe the screenshot and ask the exact question you want answered.'
     : deliveryRoute === 'broadcast'
       ? 'Send one prompt to connected IDEs and compare the answers in this thread.'
-      : showProjectContextStrip
-        ? 'Ask for edits, debugging, or polish using the attached project context.'
+      : showProjectContextStrip && draftWouldAttachProjectContext
+        ? `This turn will include the live preview and ${draftContextPaths.length || 1} focused project file${draftContextPaths.length === 1 ? '' : 's'}.`
+        : showProjectContextStrip
+          ? 'General questions stay detached from the active project until you reference the app, preview, or files.'
         : hasMessages
           ? 'Use a sharper follow-up to keep the thread moving.'
           : 'Start with the outcome you want, then add files or screenshots if needed.';
@@ -989,7 +1015,11 @@ export function ChatWindow() {
     if (showProjectContextStrip) {
       chips.push({
         key: 'project',
-        label: persistentProjectId ? 'Synced project' : 'Project attached',
+        label: draftWouldAttachProjectContext
+          ? `Context ${draftContextPaths.length || 1} file${draftContextPaths.length === 1 ? '' : 's'}`
+          : persistentProjectId
+            ? 'Synced project idle'
+            : 'Project attached idle',
         tone: 'blue',
       });
     }
@@ -1017,6 +1047,8 @@ export function ChatWindow() {
     persistentProjectId,
     roundtablePeers.length,
     shellModeLabel,
+    draftContextPaths.length,
+    draftWouldAttachProjectContext,
     showProjectContextStrip,
   ]);
   const composerHintChips = useMemo(() => {
@@ -1339,6 +1371,8 @@ export function ChatWindow() {
                         content={msg.content}
                         imageId={msg.imageId}
                         imagePreview={msg.imagePreview}
+                        respondingModelId={msg.respondingModelId}
+                        fallback={msg.fallback}
                         studioChrome={studioBuilderChrome}
                         fallbackDeploy={fb?.intent ?? null}
                         recoveryPattern={fb?.recovery ?? 'none'}

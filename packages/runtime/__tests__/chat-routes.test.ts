@@ -125,6 +125,63 @@ describe('Chat Routes', () => {
     expect(systemText).toMatch(/Respond with a deeper design memo/i);
   });
 
+  it('auto-creates a conversation and emits conversation_resolved when the id is unknown', async () => {
+    const wsUrl = `${baseUrl.replace('http://', 'ws://')}/api/chat`;
+    const result = await new Promise<{ resolvedId?: string; fullText: string }>((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      let response = '';
+      let resolvedId: string | undefined;
+      const timeout = setTimeout(() => {
+        ws.close();
+        reject(new Error('Timed out'));
+      }, 5_000);
+
+      ws.addEventListener('open', () => {
+        ws.send(JSON.stringify({
+          conversationId: 'this-id-does-not-exist',
+          content: 'hello',
+          modelId: 'test:mock',
+        }));
+      });
+
+      ws.addEventListener('message', (event) => {
+        const chunk = JSON.parse(String(event.data)) as
+          | { type: 'conversation_resolved'; conversationId?: string }
+          | { type: 'text_delta'; textDelta?: string }
+          | { type: 'done' }
+          | { type: 'error'; error: string };
+
+        if (chunk.type === 'conversation_resolved') {
+          resolvedId = chunk.conversationId;
+        }
+        if (chunk.type === 'text_delta' && chunk.textDelta) {
+          response += chunk.textDelta;
+        }
+        if (chunk.type === 'error') {
+          clearTimeout(timeout);
+          ws.close();
+          reject(new Error(chunk.error));
+        }
+        if (chunk.type === 'done') {
+          clearTimeout(timeout);
+          ws.close();
+          resolve({ resolvedId, fullText: response });
+        }
+      });
+
+      ws.addEventListener('error', () => {
+        clearTimeout(timeout);
+        reject(new Error('WebSocket error'));
+      });
+    });
+
+    expect(result.resolvedId).toBeTruthy();
+    expect(result.resolvedId).not.toBe('this-id-does-not-exist');
+    expect(result.fullText).toBe('Hello world');
+    // The resolved id is now a real conversation in the DB.
+    expect(chatService.getConversation(result.resolvedId!)?.modelId).toBe('test:mock');
+  });
+
   it('returns validation error for strict-schema violations over websocket', async () => {
     const conversationId = chatService.createConversation('test:mock');
     const wsUrl = `${baseUrl.replace('http://', 'ws://')}/api/chat`;

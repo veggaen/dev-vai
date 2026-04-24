@@ -73,7 +73,7 @@ describe('Eval Routes', () => {
     const tracksBody = tracksRes.json() as { tracks: Array<{ track: string; taskCount: number }> };
     expect(tracksBody.tracks).toEqual(expect.arrayContaining([
       { track: 'comprehension', taskCount: 12 },
-      { track: 'casual', taskCount: 3 },
+      { track: 'casual', taskCount: 5 },
       { track: 'creative', taskCount: 3 },
       { track: 'complex', taskCount: 4 },
     ]));
@@ -84,6 +84,12 @@ describe('Eval Routes', () => {
     const tasksBody = tasksRes.json() as { tasks: Array<{ id: string }> };
     expect(tasksBody.tasks.some((task) => task.id === 'math-basic-add')).toBe(true);
     expect(new Set(tasksBody.tasks.map((task) => task.id)).size).toBe(tasksBody.tasks.length);
+
+    const casualTasksRes = await app.inject({ method: 'GET', url: '/api/eval/tracks/casual/tasks' });
+    expect(casualTasksRes.statusCode).toBe(200);
+    const casualTasksBody = casualTasksRes.json() as { tasks: Array<{ id: string }> };
+    expect(casualTasksBody.tasks).toHaveLength(5);
+    expect(new Set(casualTasksBody.tasks.map((task) => task.id)).size).toBe(casualTasksBody.tasks.length);
   });
 
   it('runs a filtered creative eval track and returns structured results', async () => {

@@ -21,12 +21,13 @@ import { evidenceTierFromProof, type FailureClass, type ProofFlags } from '@vai/
 import { useChatStore } from '../stores/chatStore.js';
 import { useSandboxStore } from '../stores/sandboxStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
-import { API_BASE } from '../lib/api.js';
+import { API_BASE, buildApiHeaders } from '../lib/api.js';
 import { getActiveCapture, type SessionCapture } from '../lib/sessionCapture.js';
 import {
   extractFilesFromMarkdown,
   hasPackageJson,
   extractProjectName,
+  ensureViteReactEntrypoint,
   type ExtractedFile,
 } from '../lib/file-extractor.js';
 import { selectNextAutoSandboxMessage } from '../lib/auto-sandbox-message-selection.js';
@@ -44,7 +45,7 @@ import { toast } from 'sonner';
 const MAX_REPAIR_ATTEMPTS = 2;
 
 /** How long to wait for the dev server to respond (ms) */
-const VERIFY_TIMEOUT_MS = 20_000;
+const VERIFY_TIMEOUT_MS = 75_000;
 
 function formatChangedFiles(files: ExtractedFile[], limit = 6): string[] {
   const visible = files.slice(0, limit).map((file) => `- ${file.path}`);
@@ -53,6 +54,58 @@ function formatChangedFiles(files: ExtractedFile[], limit = 6): string[] {
     visible.push(`- +${remaining} more file${remaining === 1 ? '' : 's'}`);
   }
   return visible;
+}
+
+function isNonPreviewableCodeFileSet(files: ExtractedFile[]): boolean {
+  const paths = new Set(files.map((file) => file.path.replace(/\\/g, '/').toLowerCase()));
+  const packageJson = files.find((file) => file.path.replace(/\\/g, '/').toLowerCase() === 'package.json')?.content ?? '';
+  const hasThemeJson = [...paths].some((filePath) => /^themes\/.+\.json$/.test(filePath));
+  const isVsCodeThemeExtension = hasThemeJson
+    && /"contributes"\s*:\s*{[\s\S]*"themes"\s*:/i.test(packageJson);
+  if (isVsCodeThemeExtension) return true;
+
+  const hasBrowserPreviewEntrypoint = [...paths].some((filePath) => (
+    filePath === 'index.html'
+    || /^src\/app\.(?:tsx|jsx|ts|js|svelte)$/.test(filePath)
+    || /^src\/main\.(?:tsx|jsx|ts|js|svelte)$/.test(filePath)
+    || filePath.endsWith('.html')
+    || filePath.endsWith('.tsx')
+    || filePath.endsWith('.jsx')
+    || filePath.endsWith('.svelte')
+  ));
+  const isPackageBasedCodeArtifact = Boolean(packageJson)
+    && !hasBrowserPreviewEntrypoint
+    && (
+      /"bin"\s*:/i.test(packageJson)
+      || /"workspaces"\s*:/i.test(packageJson)
+      || /"contributes"\s*:/i.test(packageJson)
+      || /"engines"\s*:\s*{[\s\S]*"vscode"/i.test(packageJson)
+      || [...paths].some((filePath) => filePath.startsWith('packages/'))
+    );
+  if (isPackageBasedCodeArtifact) return true;
+
+  const hasWebEntrypoint = [...paths].some((filePath) => (
+    filePath === 'package.json'
+    || filePath === 'index.html'
+    || /^src\/app\.(?:tsx|jsx|ts|js|svelte)$/.test(filePath)
+    || /^src\/main\.(?:tsx|jsx|ts|js|svelte)$/.test(filePath)
+    || filePath.endsWith('.html')
+    || filePath.endsWith('.tsx')
+    || filePath.endsWith('.jsx')
+    || filePath.endsWith('.svelte')
+  ));
+  if (hasWebEntrypoint) return false;
+
+  return [...paths].some((filePath) => (
+    filePath === 'cargo.toml'
+    || filePath.endsWith('.rs')
+    || filePath === 'requirements.txt'
+    || filePath === 'pyproject.toml'
+    || filePath.endsWith('.py')
+    || filePath.endsWith('.go')
+    || filePath.endsWith('.csproj')
+    || filePath.endsWith('.cs')
+  ));
 }
 
 function buildProjectUpdateMessage(summary: string, details: string[], files: ExtractedFile[] = [], artifact?: ProjectUpdateArtifact): string {
@@ -207,7 +260,11 @@ async function fetchSandboxStatus(projectId: string, apiBase: string): Promise<{
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 3000);
-    const res = await fetch(`${apiBase}/api/sandbox/${projectId}`, { signal: ctrl.signal });
+    const res = await fetch(`${apiBase}/api/sandbox/${projectId}`, {
+      signal: ctrl.signal,
+      credentials: 'include',
+      headers: buildApiHeaders(),
+    });
     clearTimeout(timer);
     if (!res.ok) return { alive: true, stderr: [] };
     const data = await res.json() as SandboxStatusResponse;
@@ -630,6 +687,7 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
   }, [setBuildStatus, triggerRepair, withCapture]);
 
   const processFiles = useCallback(async (files: ExtractedFile[], forceFreshProject = false) => {
+    files = ensureViteReactEntrypoint(files);
     let installError: string | undefined;
     let linkedSandboxUnavailable = false;
     let createdSandboxName: string | null = null;
@@ -642,6 +700,7 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
     const verificationItems: string[] = [];
     const proofFlags: { buildOk?: boolean; typecheckOk?: boolean; screenshotOk?: boolean; testsOk?: boolean; reasoningOnly?: boolean } = {};
     const filePaths = files.map((file) => file.path);
+    const nonPreviewableCodeFileSet = isNonPreviewableCodeFileSet(files);
     const initialPreviewLoadCount = useSandboxStore.getState().previewLoadCount;
 
     try {
@@ -770,7 +829,7 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
       });
 
       // If package.json is among the files, reinstall + restart
-      if (hasPackageJson(files)) {
+      if (hasPackageJson(files) && !nonPreviewableCodeFileSet) {
         reinstalledDependencies = true;
         // Stop running dev server if any
         const currentState = useSandboxStore.getState();
@@ -863,6 +922,18 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
           triggerRepair(0, files, installError, 'dev server failed to start', stderrLines);
           return;
         }
+      } else if (nonPreviewableCodeFileSet) {
+        setBuildStatus({ step: 'ready', message: 'Code files written. No browser preview required.' });
+        proofFlags.reasoningOnly = true;
+        previewSummary = 'Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.';
+        verificationItems.push('Detected a non-preview code file set and skipped browser dev-server repair.');
+        withCapture((capture) => {
+          capture.verification('Skipped browser preview for non-preview code files', {
+            target: 'preview-runtime',
+            status: 'skipped',
+            evidence: filePaths,
+          });
+        });
       } else {
         // Files written without package.json change — if dev server already running, it
         // should hot-reload. If not running yet, start it.

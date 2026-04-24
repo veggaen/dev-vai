@@ -74,7 +74,14 @@ export interface GroundedBuildBrief {
 }
 
 export interface ChatChunk {
-  readonly type: 'text_delta' | 'reasoning_delta' | 'tool_call_delta' | 'sources' | 'done';
+  readonly type:
+    | 'text_delta'
+    | 'reasoning_delta'
+    | 'tool_call_delta'
+    | 'sources'
+    | 'done'
+    | 'conversation_resolved'
+    | 'fallback_notice';
   readonly textDelta?: string;
   readonly reasoningDelta?: string;
   readonly toolCallDelta?: { readonly id: string; readonly name: string; readonly argumentsDelta: string };
@@ -90,6 +97,23 @@ export interface ChatChunk {
   readonly durationMs?: number;
   /** Which specific model handled this request */
   readonly modelId?: string;
+  /**
+   * Set on `conversation_resolved` chunks when the chat service auto-created
+   * a conversation for an unknown id (race recovery). Clients should swap
+   * their local `activeConversationId` to this value before further turns.
+   */
+  readonly conversationId?: string;
+  /**
+   * Populated on `fallback_notice` chunks when the chat service transparently
+   * promotes a low-confidence vai:v0 turn to an external provider. The UI
+   * surfaces a small badge ("Answered by gpt-4o-mini") so the user knows
+   * which model produced the streamed text that follows.
+   */
+  readonly fallback?: {
+    readonly fromModelId: string;
+    readonly toModelId: string;
+    readonly reason: 'low-confidence' | 'no-knowledge';
+  };
 }
 
 // ── Model Adapter Interface ──

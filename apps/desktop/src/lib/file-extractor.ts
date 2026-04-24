@@ -125,3 +125,28 @@ export function extractProjectName(files: ExtractedFile[]): string | null {
     return null;
   }
 }
+
+export function ensureViteReactEntrypoint(files: ExtractedFile[]): ExtractedFile[] {
+  const hasMainTsx = files.some((file) => normalizeExtractedPath(file.path) === 'src/main.tsx');
+  if (hasMainTsx) {
+    return files;
+  }
+
+  const jsxEntrypoint = files.find((file) => {
+    const path = normalizeExtractedPath(file.path);
+    return path === 'src/main.jsx' || path === 'src/main.js';
+  });
+
+  if (!jsxEntrypoint) {
+    return files;
+  }
+
+  return [
+    ...files,
+    {
+      path: 'src/main.tsx',
+      content: jsxEntrypoint.content,
+      language: 'tsx',
+    },
+  ];
+}

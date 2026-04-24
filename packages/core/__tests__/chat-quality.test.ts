@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildChatTurnQualitySystemHint,
+  detectInstructionConstraint,
   resolveTemporaryTurnMode,
   shouldInjectChatStructureHint,
 } from '../src/chat/chat-quality.js';
@@ -69,5 +70,43 @@ describe('buildChatTurnQualitySystemHint', () => {
 
     expect(hint).toMatch(/Freshness matters/i);
     expect(hint).toMatch(/latest official source/i);
+  });
+
+  it('injects a strict minimal-output contract for instruction-constrained turns', () => {
+    const hint = buildChatTurnQualitySystemHint(
+      'chat',
+      'Please only reply with the name of the leader of NATO, no more.',
+      [],
+    );
+
+    expect(hint).toMatch(/STRICT CONSTRAINT/i);
+    expect(hint).toMatch(/Output ONLY the requested value/i);
+  });
+
+  it('still emits the quality contract for short instruction-constrained turns', () => {
+    const hint = buildChatTurnQualitySystemHint(
+      'chat',
+      'Just the name please.',
+      [],
+    );
+
+    expect(hint).not.toBeNull();
+    expect(hint).toMatch(/STRICT CONSTRAINT/i);
+  });
+});
+
+describe('detectInstructionConstraint', () => {
+  it('detects explicit "only reply with" phrasing', () => {
+    expect(detectInstructionConstraint('please only reply with the name of the leader of nato')).toBe(true);
+    expect(detectInstructionConstraint('Just reply with the year, nothing else.')).toBe(true);
+    expect(detectInstructionConstraint('answer in one word')).toBe(true);
+    expect(detectInstructionConstraint('one-word answer please')).toBe(true);
+    expect(detectInstructionConstraint('give me the number, no preamble')).toBe(true);
+  });
+
+  it('does not fire on regular factual questions', () => {
+    expect(detectInstructionConstraint('who is the king of Norway?')).toBe(false);
+    expect(detectInstructionConstraint('explain how React hooks work')).toBe(false);
+    expect(detectInstructionConstraint('')).toBe(false);
   });
 });

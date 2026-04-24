@@ -1,0 +1,90 @@
+{
+  "verdict": "pass",
+  "passed": 8,
+  "failed": 0,
+  "total": 8,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T09-02-58-740Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T09-02-58-740Z\\report.json",
+  "results": [
+    {
+      "slug": "next-gen-fullstack-monorepo",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZBMRSX5VN07YD49WPPR3BH",
+      "sandboxId": "c91078f6",
+      "previewUrl": "http://127.0.0.1:4223"
+    },
+    {
+      "slug": "typescript-library-monorepo-starter",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp-lib",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZBND86C1HC9S2869GMZ20V",
+      "sandboxId": "e8196b26",
+      "previewUrl": null
+    },
+    {
+      "slug": "developer-defaults-cli",
+      "sourceRepo": "https://github.com/juliusmarminge/good-defaults",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZBNGGFD6WTBHV1YPXY2BWH",
+      "sandboxId": "30039330",
+      "previewUrl": null
+    },
+    {
+      "slug": "agent-workflow-tools-suite",
+      "sourceRepo": "https://github.com/juliusmarminge/agent-tools",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZBNMERAEY0FKX2YR3KTEMP",
+      "sandboxId": "9b003e1a",
+      "previewUrl": null
+    },
+    {
+      "slug": "python-upload-sdk-fastapi",
+      "sourceRepo": "https://github.com/juliusmarminge/uploadthing-py",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZBNQNSDGJWZ71ND3EQ64W7",
+      "sandboxId": "79a6e11a",
+      "previewUrl": null
+    },
+    {
+      "slug": "tanstack-start-theme-kit",
+      "sourceRepo": "https://github.com/juliusmarminge/tanstack-themes",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZBNVEY1T9DB9W3Z86TQQ9S",
+      "sandboxId": "29184ed5",
+      "previewUrl": "http://127.0.0.1:4224"
+    },
+    {
+      "slug": "tailwind-canonical-vscode-extension",
+      "sourceRepo": "https://github.com/juliusmarminge/tailwind-autofix-canonical-classnames",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZBPFNPJ0EKC7SPJ2KRBQEX",
+      "sandboxId": "55db1f77",
+      "previewUrl": null
+    },
+    {
+      "slug": "trellix-trpc-board",
+      "sourceRepo": "https://github.com/juliusmarminge/trellix-trpc",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZBPKMWQCNPTBFFT8H4CHDM",
+      "sandboxId": "91e8fe77",
+      "previewUrl": "http://127.0.0.1:4225"
+    }
+  ]
+}

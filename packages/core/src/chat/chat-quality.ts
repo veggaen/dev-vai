@@ -50,6 +50,42 @@ const VAGUE_BROAD_PATTERN =
 const CONTEXTUAL_FOLLOWUP_PATTERN =
   /^(?:and |also |but |what about |how about |can (?:you|it) also|now |ok |okay |so |then |what if )\b|\b(?:the (?:one|thing|part|issue|error|code) (?:you|above|before|earlier|we)|you (?:just |mentioned|said|showed))\b/i;
 
+/**
+ * Instruction constraint — the user is explicitly asking for a minimal,
+ * literal answer shape ("only reply with the name", "one-word answer",
+ * "no preamble", "just say X", "in one sentence").
+ *
+ * Hitting any of these means we need to strip the usual rambling and
+ * respond with only what was asked for.
+ */
+const INSTRUCTION_CONSTRAINT_PATTERN = new RegExp(
+  [
+    // "reply with only ...", "answer with only ...", "respond with only ..."
+    "\\b(?:please\\s+)?(?:only\\s+)?(?:reply|respond|answer|say|write|output|return|give\\s+me)\\s+(?:me\\s+)?(?:with\\s+|using\\s+|in\\s+)?only\\b",
+    // "just reply with ...", "just say ...", "just give ..."
+    "\\bjust\\s+(?:reply|respond|answer|say|write|give|tell\\s+me|output)\\b",
+    // "only reply with the name / number / year"
+    "\\bonly\\s+(?:reply|respond|answer|say|write|give|output|provide|tell\\s+me)\\b",
+    // "one-word answer", "single word", "one word answer"
+    "\\b(?:one[-\\s]?word|single\\s+word|single\\s+sentence|one\\s+sentence|one[-\\s]?line)\\s+(?:answer|reply|response)\\b",
+    // "in one sentence", "in one word", "in one line"
+    "\\bin\\s+(?:one|a\\s+single)\\s+(?:word|sentence|line)\\b",
+    // "no more", "nothing else", "nothing more", "no preamble", "no explanation"
+    "\\b(?:no\\s+(?:more|preamble|explanation|filler|fluff|intro|introduction|context|details?|commentary)|nothing\\s+(?:else|more|extra))\\b",
+    // "reply with the name/number/year/date of X"
+    "\\breply\\s+with\\s+(?:the|a|an)\\s+(?:name|number|year|date|value|answer|word|letter|digit)\\b",
+    // "what's the name", "just the name", "only the name"
+    "\\b(?:just|only)\\s+(?:the|a|an)\\s+(?:name|number|year|date|answer|word|value|letter|digit)\\b",
+  ].join('|'),
+  'i',
+);
+
+export function detectInstructionConstraint(userContent: string): boolean {
+  const trimmed = userContent.trim();
+  if (trimmed.length === 0) return false;
+  return INSTRUCTION_CONSTRAINT_PATTERN.test(trimmed);
+}
+
 const MULTI_QUESTION_PATTERN = /\?[\s\S]{0,800}\?/;
 
 const STRUCTURE_KEYWORDS_PATTERN =
@@ -122,7 +158,9 @@ export function buildChatTurnQualitySystemHint(
   if (mode !== 'chat') return null;
 
   const trimmed = userContent.trim();
-  if (trimmed.length < 18) return null;
+  const isInstructionConstrainedEarly = detectInstructionConstraint(trimmed);
+  // Instruction-constrained turns always get the contract even when short.
+  if (trimmed.length < 18 && !isInstructionConstrainedEarly) return null;
 
   const hasPriorAssistantTurn = history.some((message) => message.role === 'assistant');
   const isCorrectiveTurn = hasPriorAssistantTurn && CORRECTIVE_TURN_PATTERN.test(trimmed);
@@ -137,6 +175,7 @@ export function buildChatTurnQualitySystemHint(
   const isExplanation = EXPLAIN_PATTERN.test(trimmed);
   const isVagueBroad = VAGUE_BROAD_PATTERN.test(trimmed);
   const isContextualFollowup = hasPriorAssistantTurn && CONTEXTUAL_FOLLOWUP_PATTERN.test(trimmed);
+  const isInstructionConstrained = isInstructionConstrainedEarly;
 
   const lines = [
     'Turn quality contract for this answer:',
@@ -144,6 +183,15 @@ export function buildChatTurnQualitySystemHint(
     '- Never pad with filler phrases like "Great question!", "Sure!", "Absolutely!", "That\'s a great point." — just answer.',
     '- Match response length to question complexity: simple question = short answer; complex question = structured answer.',
   ];
+
+  if (isInstructionConstrained) {
+    lines.push(
+      '- STRICT CONSTRAINT: the user demanded a minimal literal answer (e.g. "only reply with the name", "one-word answer", "no preamble").',
+    );
+    lines.push(
+      '- Output ONLY the requested value — no greeting, no restatement of the question, no source trail, no follow-up questions. If you do not know the precise value, say exactly: "I do not know." Nothing else.',
+    );
+  }
 
   if (isCorrectiveTurn) {
     lines.push('- The user is correcting or refining the previous answer. Absorb the new constraint immediately and do not repeat the old overview.');

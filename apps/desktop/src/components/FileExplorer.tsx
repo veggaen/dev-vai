@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSandboxStore } from '../stores/sandboxStore.js';
-import { API_BASE } from '../lib/api.js';
+import { API_BASE, buildApiHeaders } from '../lib/api.js';
 import {
   FolderTree, File, FolderOpen, Folder, ChevronRight, ChevronDown,
   RefreshCw, Trash2, Plus, Copy, Download, Search, X, Loader2,
@@ -156,7 +156,10 @@ function FileViewer({ filePath }: { filePath: string }) {
   useEffect(() => {
     if (!projectId || !filePath) return;
     setLoading(true);
-    fetch(`${API_BASE}/api/sandbox/${projectId}/file?path=${encodeURIComponent(filePath)}`)
+    fetch(`${API_BASE}/api/sandbox/${projectId}/file?path=${encodeURIComponent(filePath)}`, {
+      credentials: 'include',
+      headers: buildApiHeaders(),
+    })
       .then((r) => r.json())
       .then((data: { content: string }) => setContent(data.content))
       .catch(() => setContent('// Failed to load file'))

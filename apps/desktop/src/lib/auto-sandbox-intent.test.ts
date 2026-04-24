@@ -102,6 +102,18 @@ describe('resolveAutoSandboxIntent', () => {
     expect(result.requestSystemPrompt).toBeUndefined();
   });
 
+  it('does not prime builder for chat-app quality recommendation prompts', () => {
+    const result = resolveSendTimeWorkIntent({
+      userPrompt: 'What is the single best next engineering task to make my chat app responses more relevant and accurate?',
+      mode: 'chat',
+      hasActiveProject: false,
+    });
+
+    expect(result.intent).toBe('none');
+    expect(result.shouldPrimeBuilder).toBe(false);
+    expect(result.requestSystemPrompt).toBeUndefined();
+  });
+
   it('treats clean starter requests as send-time app work', () => {
     const result = resolveSendTimeWorkIntent({
       userPrompt: 'Set up a fresh Next.js app for me.',
@@ -125,6 +137,18 @@ describe('resolveAutoSandboxIntent', () => {
     expect(result.intent).toBe('edit');
     expect(result.shouldPrimeBuilder).toBe(true);
     expect(result.requestSystemPrompt).toContain('continues an active builder session');
+    expect(result.requestSystemPrompt).toContain('changed files');
+  });
+
+  it('treats active-project motion requests in chat as targeted edits', () => {
+    const result = resolveSendTimeWorkIntent({
+      userPrompt: 'Add kinetic text animation to the hero heading and subtle body entrance animations.',
+      mode: 'chat',
+      hasActiveProject: true,
+    });
+
+    expect(result.intent).toBe('edit');
+    expect(result.shouldPrimeBuilder).toBe(true);
     expect(result.requestSystemPrompt).toContain('changed files');
   });
 
