@@ -1,0 +1,22 @@
+{
+  "verdict": "pass",
+  "passed": 1,
+  "failed": 0,
+  "total": 1,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-25-51-141Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-25-51-141Z\\report.json",
+  "results": [
+    {
+      "slug": "client-image-export-tool",
+      "sourceRepo": "https://github.com/t3dotgg/quickpic",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "sandbox binding changed after recovery: 0acced35 -> ae5c8e8d"
+      ],
+      "conversationId": "01KPZ62XR9MP1NMQNBQKDGK3DZ",
+      "sandboxId": "ae5c8e8d",
+      "previewUrl": "http://127.0.0.1:4199"
+    }
+  ]
+}

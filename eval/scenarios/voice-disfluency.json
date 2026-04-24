@@ -1,0 +1,74 @@
+{
+  "id": "voice-disfluency",
+  "label": "Dictated/voice-like input with fillers, restarts, punctuation words — must answer the real question",
+  "scenarios": [
+    {
+      "id": "um-so-like-explain-docker",
+      "messages": [{
+        "role": "user",
+        "content": "um so like, can you explain uh, you know, docker? like what it actually is?"
+      }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/docker|container|image|isolat/i"
+        ]
+      }
+    },
+    {
+      "id": "restart-wait-actually",
+      "messages": [{
+        "role": "user",
+        "content": "write a function that reverses a string wait actually make it reverse the words in a sentence not the characters"
+      }],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/split|reverse|join|words|' '/i"
+        ],
+        "notContains": [
+          "/reverse.*characters|reverse each character/i"
+        ]
+      }
+    },
+    {
+      "id": "spoken-punctuation",
+      "messages": [{
+        "role": "user",
+        "content": "hey vai comma quick question period how do i center a div in tailwind question mark"
+      }],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": [
+          "/flex|grid|items-center|justify-center|place-items-center|mx-auto|tailwind/i"
+        ]
+      }
+    },
+    {
+      "id": "trailing-filler",
+      "messages": [{
+        "role": "user",
+        "content": "what is typescript uh yeah that's it"
+      }],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/typescript|javascript|type|compil|static/i"
+        ]
+      }
+    },
+    {
+      "id": "stutter-repeat",
+      "messages": [{
+        "role": "user",
+        "content": "how how do i do i set up a postgres postgres database locally"
+      }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/install|docker|brew|apt|pg_ctl|psql|service|start|postgres/i"
+        ]
+      }
+    }
+  ]
+}

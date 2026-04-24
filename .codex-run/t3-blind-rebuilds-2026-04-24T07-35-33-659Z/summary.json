@@ -1,0 +1,92 @@
+{
+  "verdict": "pass",
+  "passed": 7,
+  "failed": 0,
+  "total": 7,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-35-33-659Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-35-33-659Z\\report.json",
+  "results": [
+    {
+      "slug": "meme-coin-idle-game",
+      "sourceRepo": "https://github.com/t3dotgg/dogecoin-simulator",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPZ6MRR0V29DZCCG8FG1E725",
+      "sandboxId": "d6c13985",
+      "previewUrl": "http://127.0.0.1:4181"
+    },
+    {
+      "slug": "client-image-export-tool",
+      "sourceRepo": "https://github.com/t3dotgg/quickpic",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "sandbox binding changed after recovery: 70d08b4e -> 378911ac"
+      ],
+      "conversationId": "01KPZ6R0MCA3VQHEQVY40KEVB4",
+      "sandboxId": "378911ac",
+      "previewUrl": "http://127.0.0.1:4191"
+    },
+    {
+      "slug": "full-stack-image-gallery",
+      "sourceRepo": "https://github.com/t3dotgg/t3gallery",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "sandbox binding changed after recovery: bd4b4d5a -> 0454dcf5"
+      ],
+      "conversationId": "01KPZ6V36QNZJ5G7PMSGNZCARM",
+      "sandboxId": "0454dcf5",
+      "previewUrl": "http://127.0.0.1:4192"
+    },
+    {
+      "slug": "stripe-sanity-playbook",
+      "sourceRepo": "https://github.com/t3dotgg/stripe-recommendations",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPZ6Y329KEJ2N2P078PWMN1G",
+      "sandboxId": "1f948944",
+      "previewUrl": "http://127.0.0.1:4207"
+    },
+    {
+      "slug": "ssr-platform-benchmark",
+      "sourceRepo": "https://github.com/t3dotgg/cf-vs-vercel-bench",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ7139E2ET19E5GVNPW7AX9",
+      "sandboxId": "ddfb1ab0",
+      "previewUrl": null
+    },
+    {
+      "slug": "one-app-five-stacks",
+      "sourceRepo": "https://github.com/t3dotgg/1app5stacks",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "sandbox binding changed after recovery: fad7e4d2 -> 3b581217"
+      ],
+      "conversationId": "01KPZ722TYNB6ZP52W2YTCY7RV",
+      "sandboxId": "3b581217",
+      "previewUrl": null
+    },
+    {
+      "slug": "safe-material-code-theme",
+      "sourceRepo": "https://github.com/t3dotgg/vsc-material-but-i-wont-sue-you",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ72MXAT7FGT6AC7VEYSYHV",
+      "sandboxId": "d041bfc1",
+      "previewUrl": null
+    }
+  ]
+}

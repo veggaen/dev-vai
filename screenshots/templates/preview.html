@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Vinext Templates — Visual Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 2rem; }
+  h1 { text-align: center; font-size: 2rem; margin-bottom: 0.5rem; background: linear-gradient(135deg, #6366f1, #a855f7, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .subtitle { text-align: center; color: #737373; margin-bottom: 2rem; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; max-width: 1600px; margin: 0 auto; }
+  .card { background: #171717; border-radius: 1rem; overflow: hidden; border: 1px solid #262626; }
+  .card:hover { border-color: #404040; }
+  .card img { width: 100%; display: block; }
+  .card-info { padding: 1rem 1.25rem; }
+  .card-title { font-size: 1.1rem; font-weight: 600; }
+  .card-desc { color: #a3a3a3; font-size: 0.85rem; margin-top: 0.25rem; }
+  .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 9999px; font-size: 0.7rem; font-weight: 600; margin-left: 0.5rem; }
+  .badge-aurora { background: #312e81; color: #a5b4fc; }
+  .badge-fjord { background: #422006; color: #fdba74; }
+  .badge-tundra { background: #042f2e; color: #5eead4; }
+  .badge-solstice { background: #4c1d95; color: #c4b5fd; }
+  .status { display: inline-block; margin-left: 0.5rem; font-size: 0.7rem; color: #22c55e; }
+</style>
+</head>
+<body>
+  <h1>Vinext Templates</h1>
+  <p class="subtitle">4 Premium SaaS Products — Built on Vinext (Next.js on Vite by Cloudflare)</p>
+  <div class="grid">
+    <div class="card">
+      <img src="01-vinext-basic.png" alt="Aurora">
+      <div class="card-info">
+        <span class="card-title">Aurora</span>
+        <span class="badge badge-aurora">AI Analytics</span>
+        <span class="status">✓ PASS</span>
+        <p class="card-desc">AI Analytics Command Center — Northern lights palette, glass morphism dashboards, KPI cards, real-time insights engine.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="02-vinext-solid.png" alt="Fjord">
+      <div class="card-info">
+        <span class="card-title">Fjord</span>
+        <span class="badge badge-fjord">Creative Studio</span>
+        <span class="status">✓ PASS</span>
+        <p class="card-desc">Creative Studio & Portfolio — Scandinavian minimalist design, bento grid, warm neutrals with coral accents.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="03-vinext-battle-tested.png" alt="Tundra">
+      <div class="card-info">
+        <span class="card-title">Tundra</span>
+        <span class="badge badge-tundra">Infrastructure</span>
+        <span class="status">✓ PASS</span>
+        <p class="card-desc">Infrastructure Monitoring Console — Dark terminal aesthetic, monospace typography, service health grids, deploy pipeline.</p>
+      </div>
+    </div>
+    <div class="card">
+      <img src="04-vinext-vai.png" alt="Solstice">
+      <div class="card-info">
+        <span class="card-title">Solstice</span>
+        <span class="badge badge-solstice">Commerce</span>
+        <span class="status">✓ PASS</span>
+        <p class="card-desc">Subscription Commerce Platform — Warm modern SaaS, pricing cards with toggle, feature comparison, testimonials.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

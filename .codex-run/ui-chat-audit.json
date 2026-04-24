@@ -1,0 +1,154 @@
+{
+  "at": "2026-04-23T21:20:49.291Z",
+  "url": "http://127.0.0.1:5173/?devAuthBypass=1",
+  "results": [
+    {
+      "id": "vai-relevance-best-next",
+      "prompt": "Context: I am building a chat app called Vai. Users complain Vai gives weird, off-topic, low-quality responses. Vai should be its own special AI, not mainly relying on external LLM calls. What is the single best next engineering task to make replies more responsive, relevant, and accurate to the current user context? Be concrete and avoid generic AI advice.",
+      "inputBeforeSendLength": 359,
+      "inputAfterSend": "",
+      "activeConversationId": "01KPY3ET0KPW0SSVWYERAFYP3H",
+      "messageCount": 2,
+      "latestAssistant": {
+        "role": "assistant",
+        "content": "**What is external LLM calls. What is the single best next engineering task to make replies more responsive?**\nit about mental health in the models 40, which is very bad at mental health stuff, or you're asking it about how to hack the government and you're asking 5.3, which is a really good hacker. they'll redirect your request to a model that is more likely to respond in a safe way. this api layer is super important as a method for securing the llm and changing behavior to make the model safer when unsaf...\n\n**What is relevant?**\ncontext window is the maximum input size an llm can process (measured in tokens). gpt-4 turbo: 128k tokens. claude 3.5: 200k tokens. gemini 1.5: up to 2m tokens. management strategies: sliding window (keep last tokens), rag (retrieve relevant chunks), summarization (compress old context), hierarchical (summary recent detail). for code assistants: file-level context project-level context workspace-...\n\n**What is accurate to the current user context? Be concrete?**\ngithub copilot uses context sources for code completion: (1) current file content, (2) open editor tabs (neighboring tabs heuristic), (3) imports and dependencies, (4) lsp symbols (function signatures, types), (5) repository structure, (6) recent edits, (7) conversation history (in chat mode). copilot prioritizes the cursor's surrounding code, then expands to related files. context is sent as prom...\n\n**What is avoid generic AI advice?**\na lot of selfish reasons and business reasons he would want this too. but i do genuinely believe that he thought this was the right thing for anthropic and for the industry as a whole. but the way he went about it is [ __ ] pathetic. and a lot of these statements are really, really, really stupid. and i did as much as calling it out here. i appreciate how real this response feels, specifically tha...",
+        "confidence": 0.75,
+        "sources": 0,
+        "followUps": 3
+      },
+      "score": {
+        "missing": [
+          "Vai"
+        ],
+        "hasGenericDeflection": false,
+        "lengthOk": true,
+        "concretePatch": true,
+        "noExternalBrainViolation": true,
+        "mentionsCurrentSubject": true,
+        "pass": false
+      },
+      "bodyTail": "ey'll redirect your request to a model that is more likely to respond in a safe way. this api layer is super important as a method for securing the llm and changing behavior to make the model safer when unsaf...\n\nWhat is relevant?\ncontext window is the maximum input size an llm can process (measured in tokens). gpt-4 turbo: 128k tokens. claude 3.5: 200k tokens. gemini 1.5: up to 2m tokens. management strategies: sliding window (keep last tokens), rag (retrieve relevant chunks), summarization (compress old context), hierarchical (summary recent detail). for code assistants: file-level context project-level context workspace-...\n\nWhat is accurate to the current user context? Be concrete?\ngithub copilot uses context sources for code completion: (1) current file content, (2) open editor tabs (neighboring tabs heuristic), (3) imports and dependencies, (4) lsp symbols (function signatures, types), (5) repository structure, (6) recent edits, (7) conversation history (in chat mode). copilot prioritizes the cursor's surrounding code, then expands to related files. context is sent as prom...\n\nWhat is avoid generic AI advice?\na lot of selfish reasons and business reasons he would want this too. but i do genuinely believe that he thought this was the right thing for anthropic and for the industry as a whole. but the way he went about it is [ __ ] pathetic. and a lot of these statements are really, really, really stupid. and i did as much as calling it out here. i appreciate how real this response feels, specifically tha...\n\nRELATED\nHow should I structure context am building chat app called vai users complain gives in a real project?\nWhat is the fastest production-ready path for context am building chat app called vai users complain gives?\nRELATED\nHow should I structure context am building chat app called vai users complain gives in a real project?\nWhat is the fastest production-ready path for context am building chat app called vai users complain gives?\n\nCreate a runnable Next.js Vai baseline now?\n\nCreate baseline\nSkip\nCopy\nBuilder mode\nSynced project idle\nGeneral questions stay detached from the active project until you reference the app, preview, or files.\nEnter sends\nShift+Enter newline\nBuilder\nIDE\n\nVai can make mistakes. Verify important information.\n\nPreview\nStarting preview...\nLIVE PREVIEW HANDOFF\nPREVIEW HANDOFF\nStarting preview\n\nReply ended early. Preview is unchanged until files land.\n\nPreparing live preview...\nConsole\n— builder-app\nidle\n\nWaiting for build..."
+    },
+    {
+      "id": "referential-go-deeper-no-external-brain",
+      "prompt": "Go deeper on that. Make it stronger with automated teacher loops, but do not make external LLMs the main brain. Tell me exactly what you would implement next.",
+      "inputBeforeSendLength": 158,
+      "inputAfterSend": "",
+      "activeConversationId": "01KPY3ET0KPW0SSVWYERAFYP3H",
+      "messageCount": 4,
+      "latestAssistant": {
+        "role": "assistant",
+        "content": "**Grounded hardening pass**\nFor **Vai chat context relevance**, harden the response path where context enters the engine.\n\n**Best slice**\n- Add a turn classifier: standalone question vs contextual follow-up.\n- Extract a compact active-topic brief from recent user context, selected files, and the last assistant answer.\n- Gate fuzzy retrieval with topic overlap so unrelated learned snippets cannot win just because they share loose words.\n- Add regression tests around weird short turns: \"make it better\", \"what about this\", \"best next thing\", \"go deeper\".\n\n**Responsiveness win**\nThis is fast because it runs before slow or broad fallback paths. It should reduce off-topic answers and wasted external validation rounds at the same time.",
+        "confidence": 0.82,
+        "sources": 0,
+        "followUps": 3
+      },
+      "score": {
+        "missing": [
+          "teacher",
+          "loop",
+          "implement"
+        ],
+        "hasGenericDeflection": false,
+        "lengthOk": true,
+        "concretePatch": true,
+        "noExternalBrainViolation": true,
+        "mentionsCurrentSubject": true,
+        "pass": false
+      },
+      "bodyTail": "hought this was the right thing for anthropic and for the industry as a whole. but the way he went about it is [ __ ] pathetic. and a lot of these statements are really, really, really stupid. and i did as much as calling it out here. i appreciate how real this response feels, specifically tha...\n\nRELATED\nHow should I structure context am building chat app called vai users complain gives in a real project?\nWhat is the fastest production-ready path for context am building chat app called vai users complain gives?\nRELATED\nHow should I structure context am building chat app called vai users complain gives in a real project?\nWhat is the fastest production-ready path for context am building chat app called vai users complain gives?\n\nCreate a runnable Next.js Vai baseline now?\n\nCreate baseline\nSkip\nCopy\nYou\n\nGo deeper on that. Make it stronger with automated teacher loops, but do not make external LLMs the main brain. Tell me exactly what you would implement next.\n\nVai\n\nGrounded hardening pass\nFor Vai chat context relevance, harden the response path where context enters the engine.\n\nBest slice\n\nAdd a turn classifier: standalone question vs contextual follow-up.\nExtract a compact active-topic brief from recent user context, selected files, and the last assistant answer.\nGate fuzzy retrieval with topic overlap so unrelated learned snippets cannot win just because they share loose words.\nAdd regression tests around weird short turns: \"make it better\", \"what about this\", \"best next thing\", \"go deeper\".\n\nResponsiveness win\nThis is fast because it runs before slow or broad fallback paths. It should reduce off-topic answers and wasted external validation rounds at the same time.\n\nRELATED\nWhat usually breaks when setting up context building chat?\nHow should I structure context building chat in a real project?\nRELATED\nWhat usually breaks when setting up context building chat?\nHow should I structure context building chat in a real project?\n\nCreate a runnable Next.js Basic baseline now?\n\nCreate baseline\nSkip\nCopy\nBuilder mode\nSynced project idle\nGeneral questions stay detached from the active project until you reference the app, preview, or files.\nEnter sends\nShift+Enter newline\nBuilder\nIDE\n\nVai can make mistakes. Verify important information.\n\nPreview\nStarting preview...\nLIVE PREVIEW HANDOFF\nPREVIEW HANDOFF\nStarting preview\n\nPreview unchanged. The last Builder reply did not apply code changes yet.\n\nPreparing live preview...\nConsole\n— builder-app\nidle\n\nWaiting for build..."
+    },
+    {
+      "id": "simple-followup",
+      "prompt": "Explain that more simply and tell me the first patch you would make.",
+      "inputBeforeSendLength": 68,
+      "inputAfterSend": "",
+      "activeConversationId": "01KPY3ET0KPW0SSVWYERAFYP3H",
+      "messageCount": 6,
+      "latestAssistant": {
+        "role": "assistant",
+        "content": "**Vai chat context relevance, simpler**\nThe important context is: Vai, chat app, user context, response relevance, teacher loop.\n\nPlain version: keep the previous topic as the anchor, then explain only the part the current turn asks about. Do not restart from a generic definition unless the user clearly starts a new topic.\n\nThat is the difference between an answer that merely matches words and an answer that feels like it heard the conversation.",
+        "confidence": 0.82,
+        "sources": 0,
+        "followUps": 3
+      },
+      "score": {
+        "missing": [
+          "patch",
+          "first"
+        ],
+        "hasGenericDeflection": false,
+        "lengthOk": true,
+        "concretePatch": false,
+        "noExternalBrainViolation": true,
+        "mentionsCurrentSubject": true,
+        "pass": false
+      },
+      "bodyTail": "ould I structure context am building chat app called vai users complain gives in a real project?\nWhat is the fastest production-ready path for context am building chat app called vai users complain gives?\n\nCreate a runnable Next.js Vai baseline now?\n\nCreate baseline\nSkip\nCopy\nYou\n\nGo deeper on that. Make it stronger with automated teacher loops, but do not make external LLMs the main brain. Tell me exactly what you would implement next.\n\nVai\n\nGrounded hardening pass\nFor Vai chat context relevance, harden the response path where context enters the engine.\n\nBest slice\n\nAdd a turn classifier: standalone question vs contextual follow-up.\nExtract a compact active-topic brief from recent user context, selected files, and the last assistant answer.\nGate fuzzy retrieval with topic overlap so unrelated learned snippets cannot win just because they share loose words.\nAdd regression tests around weird short turns: \"make it better\", \"what about this\", \"best next thing\", \"go deeper\".\n\nResponsiveness win\nThis is fast because it runs before slow or broad fallback paths. It should reduce off-topic answers and wasted external validation rounds at the same time.\n\nRELATED\nWhat usually breaks when setting up context building chat?\nHow should I structure context building chat in a real project?\nRELATED\nWhat usually breaks when setting up context building chat?\nHow should I structure context building chat in a real project?\n\nCreate a runnable Next.js Basic baseline now?\n\nCreate baseline\nSkip\nCopy\nYou\n\nExplain that more simply and tell me the first patch you would make.\n\nVai\n\nVai chat context relevance, simpler\nThe important context is: Vai, chat app, user context, response relevance, teacher loop.\n\nPlain version: keep the previous topic as the anchor, then explain only the part the current turn asks about. Do not restart from a generic definition unless the user clearly starts a new topic.\n\nThat is the difference between an answer that merely matches words and an answer that feels like it heard the conversation.\n\nCopy\nBuilder mode\nSynced project idle\nGeneral questions stay detached from the active project until you reference the app, preview, or files.\nEnter sends\nShift+Enter newline\nBuilder\nIDE\n\nVai can make mistakes. Verify important information.\n\nPreview\nStarting preview...\nLIVE PREVIEW HANDOFF\nPREVIEW HANDOFF\nStarting preview\n\nPreview unchanged. The last Builder reply did not apply code changes yet.\n\nPreparing live preview...\nConsole\n— builder-app\nidle\n\nWaiting for build..."
+    }
+  ],
+  "events": [
+    {
+      "kind": "console",
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "kind": "console",
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "kind": "console",
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    },
+    {
+      "kind": "console",
+      "type": "log",
+      "text": "[VAI] Starting engine poll... {API_BASE: }"
+    },
+    {
+      "kind": "console",
+      "type": "log",
+      "text": "[VAI] Engine ready: {status: ok, engine: vai:v0, stats: Object, adaptive: Object}"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "kind": "console",
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    },
+    {
+      "kind": "http",
+      "status": 401,
+      "url": "http://127.0.0.1:5173/api/projects/10bab323-bb1a-4373-998f-e5f6ec5eab86/peers",
+      "body": "{\"error\":\"Sign in to view project peers\"}"
+    },
+    {
+      "kind": "http",
+      "status": 401,
+      "url": "http://127.0.0.1:5173/api/projects/10bab323-bb1a-4373-998f-e5f6ec5eab86/audits",
+      "body": "{\"error\":\"Sign in to view audits\"}"
+    },
+    {
+      "kind": "console",
+      "type": "info",
+      "text": "[auto-sandbox] assistant-complete {messageId: temp-1776979241384-assistant, effectiveMode: builder, layoutMode: builder, activeConversationId: 01KPY3ET0KPW0SSVWYERAFYP3H, sandboxProjectId: b3ee796e}"
+    },
+    {
+      "kind": "console",
+      "type": "info",
+      "text": "[auto-sandbox] assistant-complete {messageId: temp-1776979245646-assistant, effectiveMode: builder, layoutMode: builder, activeConversationId: 01KPY3ET0KPW0SSVWYERAFYP3H, sandboxProjectId: b3ee796e}"
+    },
+    {
+      "kind": "console",
+      "type": "info",
+      "text": "[auto-sandbox] assistant-complete {messageId: temp-1776979247497-assistant, effectiveMode: builder, layoutMode: builder, activeConversationId: 01KPY3ET0KPW0SSVWYERAFYP3H, sandboxProjectId: b3ee796e}"
+    }
+  ]
+}

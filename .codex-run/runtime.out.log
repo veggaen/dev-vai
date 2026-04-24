@@ -1,0 +1,29 @@
+[VAI] Configuration:
+  vai        ✓ enabled
+  anthropic  ✗ disabled
+  openai     ✗ disabled
+  google     ✗ disabled
+  local      ✗ disabled
+  default model: vai:v0
+  fallback chain: vai:v0
+  tool calling: ON (max 10 iterations)
+  usage tracking: ON
+  chat prompt rewrite: ON (standard, standard, chat, agent, builder, plan, debate)
+  auth: OFF (local-only)
+  owner gate: VAI_OWNER_EMAIL (set in env; default if unset)
+  platform auth: ON (google, workos)
+  quality gate: OFF
+[VaiEngine] Loaded 23 persisted entries from C:\Users\v3gga\Documents\dev-vai\vai-knowledge.json
+[VAI] Registered models: vai:v0
+[VAI] Default model: vai:v0
+[VAI] Hydrated: 19 sources, 72 chunks, 0 images loaded into engine
+[VAI] VeggaAI engine initialized
+[VAI] Vocab: 5831 | Knowledge: 244 entries | Docs: 426 | Concepts: 163 | N-grams: 28720
+[VAI] Auth: disabled (no API keys configured) — all requests allowed
+[VAI] Port 3006 busy — killing stale process and retrying (attempt 1)...
+[VAI] Killing stale process on port 3006 (PID 32920)
+[store-warmer] warming pnpm store for nextjs-16...
+VAI runtime listening on http://localhost:3006
+[store-warmer] nextjs-16 warmed in 14.7s — subsequent installs will use hard-links
+[store-warmer] warming pnpm store for react-vite-8...
+[store-warmer] react-vite-8 warmed in 4.2s — subsequent installs will use hard-links

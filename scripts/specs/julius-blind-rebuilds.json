@@ -1,0 +1,88 @@
+{
+  "specs": [
+    {
+      "slug": "next-gen-fullstack-monorepo",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp",
+      "prompt": "Build the first runnable preview of a next-generation full-stack monorepo starter. Do not ask follow-up questions. The preview must visibly include a Next.js app-router/RSC web app, shared tRPC API, edge-ready database layer using Kysely plus Prisma schema management, PlanetScale-style database status, Clerk-style auth, shadcn-style UI blocks, Expo mobile workspace notes, and a monorepo health panel.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Next.js", "RSC", "tRPC", "Kysely", "Prisma", "PlanetScale", "Clerk", "Expo", "monorepo"],
+      "preview": true
+    },
+    {
+      "slug": "typescript-library-monorepo-starter",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp-lib",
+      "prompt": "Create a complete TypeScript library monorepo starter, not a marketing page. It must include package metadata, workspace setup, a core library entrypoint, strict tsconfig, a build script, tests, changeset/release notes, and a tiny Prisma generator example that shows how generated enums or types can reduce bundle size.",
+      "expectedPathGroups": [["package.json"], ["pnpm-workspace.yaml"], ["packages/core/src/index.ts", "src/index.ts"], ["tsconfig.json"], ["packages/prisma-generator/src/index.ts", "src/prisma-generator.ts"]],
+      "requiredText": ["monorepo", "TypeScript", "library", "Prisma", "generator", "changeset", "vitest"],
+      "requiredFilePatterns": [
+        { "paths": ["package.json"], "pattern": "\"workspaces\"|\"pnpm\"", "label": "workspace package metadata" },
+        { "paths": ["packages/core/src/index.ts", "src/index.ts"], "pattern": "export\\s+(?:function|const|type)", "label": "library exports" }
+      ],
+      "preview": false
+    },
+    {
+      "slug": "developer-defaults-cli",
+      "sourceRepo": "https://github.com/juliusmarminge/good-defaults",
+      "prompt": "Create a runnable TypeScript CLI tool that scaffolds good project defaults. It should use an interactive prompt, let users select ESLint plus Prettier, VS Code settings and recommended extensions, strict TSConfig, and GitHub Actions CI with pnpm caching. Include the bin entry, CLI source, template writers, and an example generated workflow.",
+      "expectedPathGroups": [["package.json"], ["src/cli.ts", "src/index.ts"], ["src/templates.ts", "src/templates/index.ts"], [".github/workflows/ci.yml"]],
+      "requiredText": ["CLI", "ESLint", "Prettier", "VS Code", "TSConfig", "GitHub Actions", "pnpm"],
+      "requiredFilePatterns": [
+        { "paths": ["package.json"], "pattern": "\"bin\"\\s*:", "label": "CLI bin entry" },
+        { "paths": ["src/cli.ts", "src/index.ts"], "pattern": "select|prompt|checkbox|confirm", "flags": "i", "label": "interactive CLI prompt" }
+      ],
+      "preview": false
+    },
+    {
+      "slug": "agent-workflow-tools-suite",
+      "sourceRepo": "https://github.com/juliusmarminge/agent-tools",
+      "prompt": "Create a TypeScript monorepo of agent workflow tools. It must include one package that acts as a Vite plugin for Convex and gives each coding agent an isolated environment, plus another package that behaves like an Oxlint plugin detecting unused Convex functions left behind by AI agents. Include package files, source files, example usage, and short safety notes.",
+      "expectedPathGroups": [["package.json"], ["packages/convex-vite-plugin/src/index.ts"], ["packages/oxlint-plugin-convex/src/index.ts"], ["examples/convex-agent-env.ts", "examples/usage.ts"]],
+      "requiredText": ["agent", "Convex", "Vite plugin", "isolated", "Oxlint", "unused", "functions"],
+      "requiredFilePatterns": [
+        { "paths": ["packages/convex-vite-plugin/src/index.ts"], "pattern": "vite|Plugin", "flags": "i", "label": "Vite plugin implementation" },
+        { "paths": ["packages/oxlint-plugin-convex/src/index.ts"], "pattern": "unused|convex", "flags": "i", "label": "unused Convex function rule" }
+      ],
+      "preview": false
+    },
+    {
+      "slug": "python-upload-sdk-fastapi",
+      "sourceRepo": "https://github.com/juliusmarminge/uploadthing-py",
+      "prompt": "Create an unofficial Python SDK package for a file-upload service. It must include pyproject metadata, an async UTApi client with list_files and delete_file, typed models, a FastAPI route-handler adapter, CORS example, environment variable usage, and a quickstart script.",
+      "expectedPathGroups": [["pyproject.toml"], ["uploadthing_py/__init__.py"], ["uploadthing_py/client.py"], ["uploadthing_py/fastapi.py"], ["examples/fastapi_app.py", "examples/quickstart.py"]],
+      "requiredText": ["UTApi", "FastAPI", "list_files", "delete_file", "UPLOADTHING_SECRET", "CORS", "async"],
+      "requiredFilePatterns": [
+        { "paths": ["uploadthing_py/client.py"], "pattern": "async\\s+def\\s+(?:list_files|delete_file)", "label": "async client methods" },
+        { "paths": ["uploadthing_py/fastapi.py", "examples/fastapi_app.py"], "pattern": "FastAPI|APIRouter|Request|Response", "label": "FastAPI adapter" }
+      ],
+      "preview": false
+    },
+    {
+      "slug": "tanstack-start-theme-kit",
+      "sourceRepo": "https://github.com/juliusmarminge/tanstack-themes",
+      "prompt": "Build a runnable demo for a theme kit that makes TanStack Start-style apps easy to theme. The preview must include a ThemeProvider concept, light/dark/system toggle, SSR-safe initial script explanation, localStorage persistence, CSS variables, route cards, and install snippets for npm, JSR, and Deno.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["TanStack", "ThemeProvider", "light", "dark", "system", "localStorage", "JSR", "Deno"],
+      "preview": true
+    },
+    {
+      "slug": "tailwind-canonical-vscode-extension",
+      "sourceRepo": "https://github.com/juliusmarminge/tailwind-autofix-canonical-classnames",
+      "prompt": "Create a VS Code extension that auto-fixes Tailwind CSS canonical class suggestions on save. It must listen to Tailwind CSS IntelliSense diagnostics shaped like 'The class ... can be written as ...', replace the class before save, expose a tailwindCanonicalClasses.fixOnSave setting, and include extension package metadata.",
+      "expectedPathGroups": [["package.json"], ["src/extension.ts"], ["README.md"]],
+      "requiredText": ["Tailwind", "canonical", "diagnostics", "fixOnSave", "VS Code", "on save"],
+      "requiredFilePatterns": [
+        { "paths": ["package.json"], "pattern": "\"contributes\"\\s*:\\s*\\{[\\s\\S]*\"configuration\"", "label": "VS Code setting contribution" },
+        { "paths": ["src/extension.ts"], "pattern": "languages\\.onDidChangeDiagnostics|onWillSaveTextDocument|workspace\\.onWillSaveTextDocument", "label": "diagnostic/save hook" }
+      ],
+      "preview": false
+    },
+    {
+      "slug": "trellix-trpc-board",
+      "sourceRepo": "https://github.com/juliusmarminge/trellix-trpc",
+      "prompt": "Build a runnable kanban board preview inspired by bleeding-edge full-stack TypeScript. It must visibly include Trellix-style columns, draggable-looking task cards, tRPC procedure/status panel, Auth.js session area, Turso/libSQL database status, realtime activity, and setup reminders for TURSO_URL, TURSO_ACCESS_TOKEN, and AUTH_SECRET.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Trellix", "tRPC", "Auth.js", "Turso", "TURSO_URL", "AUTH_SECRET", "kanban"],
+      "preview": true
+    }
+  ]
+}

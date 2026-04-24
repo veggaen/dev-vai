@@ -1,0 +1,66 @@
+{
+  "id": "frontend-frameworks",
+  "label": "Frontend framework questions â€” React, Vue, Svelte, Angular, Solid, Qwik",
+  "scenarios": [
+    {
+      "id": "react-use-callback-when",
+      "messages": [{ "role": "user", "content": "When does useCallback actually help in React, and when is it just noise?" }],
+      "assert": {
+        "minLength": 100,
+        "anyOfContains": [
+          "/useCallback|referential|React\\.memo|memoiz|child component|re-?render|dependency|premature|overused/i"
+        ]
+      }
+    },
+    {
+      "id": "vue-reactive-ref-vs-reactive",
+      "messages": [{ "role": "user", "content": "In Vue 3 Composition API, what's the difference between ref() and reactive()?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/ref\\(|reactive\\(|\\.value|primitive|object|Proxy|unwrap|template|composition/i"
+        ]
+      }
+    },
+    {
+      "id": "svelte-stores",
+      "messages": [{ "role": "user", "content": "Show me a writable Svelte store that holds a counter and a component subscribing to it." }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/writable\\(|svelte\\/store|\\$count|\\$\\{?\\$|subscribe|\\.set\\(|\\.update\\(/i"
+        ]
+      }
+    },
+    {
+      "id": "angular-change-detection",
+      "messages": [{ "role": "user", "content": "What is OnPush change detection in Angular, and what causes a component to re-render with it?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/ChangeDetectionStrategy\\.OnPush|Input|reference|immutable|async pipe|markForCheck|zone\\.js|signal/i"
+        ]
+      }
+    },
+    {
+      "id": "solid-signals",
+      "messages": [{ "role": "user", "content": "How do Solid.js signals differ from React useState in terms of re-rendering?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/signal|createSignal|fine-?grained|no virtual DOM|component re-?run|reactivity|track|accessor/i"
+        ]
+      }
+    },
+    {
+      "id": "qwik-resumability",
+      "messages": [{ "role": "user", "content": "What is 'resumability' in Qwik, and how is it different from hydration?" }],
+      "assert": {
+        "minLength": 100,
+        "anyOfContains": [
+          "/resumab|hydrat|serialize|state|no re-?execut|pause|lazy|execution state|server|continue/i"
+        ]
+      }
+    }
+  ]
+}

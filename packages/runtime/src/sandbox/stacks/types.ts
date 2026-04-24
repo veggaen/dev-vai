@@ -7,7 +7,7 @@
  */
 
 /** Built-in stack IDs */
-export type BuiltinStackId = 'pern' | 'mern' | 'nextjs' | 't3';
+export type BuiltinStackId = 'pern' | 'mern' | 'nextjs' | 't3' | 'vinext' | 'game';
 
 /** All stack IDs (built-in + custom) — custom stacks use `custom-{slug}` format */
 export type StackId = BuiltinStackId | `custom-${string}`;
@@ -49,22 +49,22 @@ export const TIER_META: Record<TierId, { name: string; label: string; descriptio
   basic: {
     name: 'Basic Templates',
     label: 'Starter',
-    description: 'Minimal starter — get running in seconds',
+    description: 'Clean MVP — zero config, works instantly',
   },
   solid: {
     name: 'Solid Templates',
-    label: 'Recommended',
-    description: 'Production patterns — auth, validation, ORM',
+    label: 'With Auth',
+    description: 'Auth + validation + ORM — production patterns',
   },
   'battle-tested': {
     name: 'Battle-Tested Templates',
-    label: 'Production',
-    description: 'Deployment ready — Docker, tests, CI/CD',
+    label: 'Social Platform',
+    description: 'Auth + social features + admin dashboard + Docker + CI/CD',
   },
   vai: {
     name: 'Vai Templates',
     label: 'Premium',
-    description: "VeggaAI's curated collection — Vegga's patterns & tooling",
+    description: 'Glass UI, BYOK, monitoring, key sharing — feels like a $100M product',
   },
 };
 

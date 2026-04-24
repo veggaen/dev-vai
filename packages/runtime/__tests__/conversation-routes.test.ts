@@ -12,6 +12,9 @@
  *   5. Assert status codes and response bodies
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createDb, ChatService, ModelRegistry } from '@vai/core';
 import type { ModelAdapter, ChatRequest, ChatResponse, ChatChunk, VaiDatabase } from '@vai/core';
@@ -23,6 +26,7 @@ class TestAdapter implements ModelAdapter {
   readonly displayName = 'Test Mock';
   readonly supportsStreaming = true;
   readonly supportsToolUse = false;
+  lastStreamRequest?: ChatRequest;
 
   async chat(_request: ChatRequest): Promise<ChatResponse> {
     return {
@@ -32,7 +36,8 @@ class TestAdapter implements ModelAdapter {
     };
   }
 
-  async *chatStream(_request: ChatRequest): AsyncIterable<ChatChunk> {
+  async *chatStream(request: ChatRequest): AsyncIterable<ChatChunk> {
+    this.lastStreamRequest = request;
     yield { type: 'text_delta', textDelta: 'Hello ' };
     yield { type: 'text_delta', textDelta: 'world' };
     yield { type: 'done', usage: { promptTokens: 5, completionTokens: 2 } };
@@ -43,21 +48,87 @@ describe('Conversation Routes', () => {
   let app: FastifyInstance;
   let db: VaiDatabase;
   let chatService: ChatService;
+  let adapter: TestAdapter;
+  let mockSandbox: {
+    create: (name: string) => Promise<{
+      id: string;
+      name: string;
+      rootDir: string;
+      ownerUserId: null;
+      files: Record<string, string>;
+      devProcess: null;
+      devPort: null;
+      logs: never[];
+      status: 'idle';
+      createdAt: Date;
+    }>;
+    get?: (id: string) => unknown;
+    rehydrate?: (project: { id: string; name: string; rootDir: string; ownerUserId: string | null; status?: string }) => unknown;
+  };
+  let mockProjects: {
+    syncSandboxProject: () => null;
+    removeProjectForSandbox: () => void;
+    getProjectBySandboxId?: (sandboxProjectId: string) => {
+      id: string;
+      sandboxProjectId: string;
+      name: string;
+      rootDir: string;
+      ownerUserId: string | null;
+    } | null;
+  };
+  const tempDirs: string[] = [];
 
   beforeEach(async () => {
     // Arrange: fresh DB + adapter + Fastify instance for each test
     db = createDb(':memory:');
     const registry = new ModelRegistry();
-    registry.register(new TestAdapter());
+    adapter = new TestAdapter();
+    registry.register(adapter);
     chatService = new ChatService(db, registry);
 
     app = Fastify({ logger: false });
-    registerConversationRoutes(app, chatService);
+
+    // Mock dependencies for the updated route signature
+    const mockAuth = {
+      getViewer: async () => ({ authenticated: false, user: null }),
+    } as unknown as import('../src/auth/platform-auth.js').PlatformAuthService;
+
+    mockSandbox = {
+      create: async (name: string) => ({
+        id: 'mock-sandbox-' + Date.now(),
+        name,
+        rootDir: '/tmp/mock',
+        ownerUserId: null,
+        files: {},
+        devProcess: null,
+        devPort: null,
+        logs: [],
+        status: 'idle' as const,
+        createdAt: new Date(),
+      }),
+    };
+
+    mockProjects = {
+      syncSandboxProject: () => null,
+      removeProjectForSandbox: () => {},
+    };
+
+    registerConversationRoutes(
+      app,
+      chatService,
+      'test:mock',
+      mockAuth,
+      mockSandbox as unknown as import('../src/sandbox/manager.js').SandboxManager,
+      mockProjects as unknown as import('../src/projects/service.js').ProjectService,
+    );
     await app.ready();
   });
 
   afterEach(async () => {
     await app.close();
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   describe('POST /api/conversations', () => {
@@ -65,24 +136,45 @@ describe('Conversation Routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/conversations',
-        payload: { modelId: 'test:mock', title: 'My Chat' },
+        payload: { modelId: 'test:mock', title: 'My Chat', mode: 'plan' },
       });
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.id).toBeTruthy();
       expect(typeof body.id).toBe('string');
+
+      const listRes = await app.inject({
+        method: 'GET',
+        url: '/api/conversations',
+      });
+      const conversations = listRes.json();
+      expect(conversations[0].mode).toBe('plan');
     });
 
-    it('fails with 500 when modelId is missing', async () => {
+    it('uses the runtime default model when modelId is missing', async () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/conversations',
         payload: {},
       });
 
-      // The DB constraint will fail because modelId is NOT NULL
-      expect(res.statusCode).toBe(500);
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.id).toBeTruthy();
+    });
+
+    it('returns 400 with code validation when the body has unknown keys', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/conversations',
+        payload: { modelId: 'test:mock', unexpectedField: true },
+      });
+
+      expect(res.statusCode).toBe(400);
+      const body = res.json();
+      expect(body.code).toBe('validation');
+      expect(body.error).toMatch(/Invalid request body/i);
     });
   });
 
@@ -120,6 +212,90 @@ describe('Conversation Routes', () => {
     });
   });
 
+  describe('PATCH /api/conversations/:id', () => {
+    it('updates the persisted conversation mode', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/conversations',
+        payload: { modelId: 'test:mock', mode: 'chat' },
+      });
+      const { id } = createRes.json();
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/conversations/${id}`,
+        payload: { mode: 'builder' },
+      });
+
+      expect(patchRes.statusCode).toBe(200);
+      expect(patchRes.json().mode).toBe('builder');
+    });
+
+    it('updates the linked sandbox project', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/conversations',
+        payload: { modelId: 'test:mock', mode: 'chat' },
+      });
+      const { id } = createRes.json();
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/conversations/${id}`,
+        payload: { sandboxProjectId: 'sandbox-123' },
+      });
+
+      expect(patchRes.statusCode).toBe(200);
+      expect(patchRes.json().sandboxProjectId).toBe('sandbox-123');
+    });
+
+    it('rehydrates a persisted sandbox before linking it to the conversation', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/conversations',
+        payload: { modelId: 'test:mock', mode: 'chat' },
+      });
+      const { id } = createRes.json();
+
+      const sandboxRoot = mkdtempSync(join(tmpdir(), 'vai-conv-route-'));
+      tempDirs.push(sandboxRoot);
+
+      mockSandbox.get = () => undefined;
+      mockSandbox.rehydrate = (project) => ({
+        id: project.id,
+        name: project.name,
+        rootDir: project.rootDir,
+        ownerUserId: project.ownerUserId,
+        files: {},
+        devProcess: null,
+        devPort: null,
+        logs: [],
+        status: 'idle' as const,
+        createdAt: new Date(),
+      });
+      mockProjects.getProjectBySandboxId = (sandboxProjectId) => (
+        sandboxProjectId === 'sandbox-persisted'
+          ? {
+              id: 'project-1',
+              sandboxProjectId,
+              name: 'Persisted project',
+              rootDir: sandboxRoot,
+              ownerUserId: null,
+            }
+          : null
+      );
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/conversations/${id}`,
+        payload: { sandboxProjectId: 'sandbox-persisted' },
+      });
+
+      expect(patchRes.statusCode).toBe(200);
+      expect(patchRes.json().sandboxProjectId).toBe('sandbox-persisted');
+    });
+  });
+
   describe('POST /api/conversations/:id/messages', () => {
     it('sends a message and receives a response', async () => {
       // Create conversation
@@ -142,6 +318,35 @@ describe('Conversation Routes', () => {
       expect(body.role).toBe('assistant');
       expect(body.content).toBe('Hello world');
       expect(body.usage.promptTokens).toBe(5);
+    });
+
+    it('forwards request-level prompt-hardening overrides', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/conversations',
+        payload: { modelId: 'test:mock' },
+      });
+      const { id } = createRes.json();
+
+      const msgRes = await app.inject({
+        method: 'POST',
+        url: `/api/conversations/${id}/messages`,
+        payload: {
+          content: 'Design a repo-native answer engine for a large monorepo. Explain signals, guardrails, metrics, and rollout.',
+          profile: 'strict',
+          responseDepth: 'deep-design-memo',
+        },
+      });
+
+      expect(msgRes.statusCode).toBe(200);
+      const systemText = adapter.lastStreamRequest?.messages
+        .filter((message) => message.role === 'system')
+        .map((message) => message.content)
+        .join('\n\n') ?? '';
+
+      expect(systemText).toMatch(/Hardening profile: strict/i);
+      expect(systemText).toMatch(/Requested response depth: deep-design-memo/i);
+      expect(systemText).toMatch(/Respond with a deeper design memo/i);
     });
   });
 

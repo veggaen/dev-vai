@@ -12,7 +12,7 @@
 import { ulid } from 'ulid';
 import { eq } from 'drizzle-orm';
 import type { VaiDatabase } from '../db/client.js';
-import { sources, chunks, images } from '../db/schema.js';
+import { sources, chunks, images, retrievalQualityLog } from '../db/schema.js';
 import type { VaiEngine } from '../models/vai-engine.js';
 import type { KnowledgeEntry } from '../models/vai-engine.js';
 
@@ -31,6 +31,11 @@ export interface RawCapture {
   content: string;
   language?: 'en' | 'no' | 'code' | 'mixed';
   meta?: Record<string, unknown>;
+}
+
+interface SourceMetaEnvelope extends Record<string, unknown> {
+  updateCount?: number;
+  lastIngestedAt?: string;
 }
 
 export class IngestPipeline {
@@ -115,18 +120,31 @@ export class IngestPipeline {
 
     if (existing) {
       sourceId = existing.id;
+      const previousMeta = this.parseSourceMeta(existing.meta);
+      const updateCount = (typeof previousMeta.updateCount === 'number' ? previousMeta.updateCount : 0) + 1;
+      const mergedMeta: SourceMetaEnvelope = {
+        ...previousMeta,
+        ...(capture.meta ?? {}),
+        updateCount,
+        lastIngestedAt: now.toISOString(),
+      };
 
       // Update the existing source record
       this.db.update(sources).set({
         title: capture.title,
         capturedAt: now,
-        meta: capture.meta ? JSON.stringify(capture.meta) : existing.meta,
+        meta: JSON.stringify(mergedMeta),
       }).where(eq(sources.id, sourceId)).run();
 
       // Delete old chunks — they'll be recreated below
       this.db.delete(chunks).where(eq(chunks.sourceId, sourceId)).run();
     } else {
       sourceId = ulid();
+      const mergedMeta: SourceMetaEnvelope = {
+        ...(capture.meta ?? {}),
+        updateCount: 0,
+        lastIngestedAt: now.toISOString(),
+      };
 
       // Store new source record
       this.db.insert(sources).values({
@@ -136,7 +154,7 @@ export class IngestPipeline {
         url: capture.url,
         title: capture.title,
         capturedAt: now,
-        meta: capture.meta ? JSON.stringify(capture.meta) : null,
+        meta: JSON.stringify(mergedMeta),
       }).run();
     }
 
@@ -236,6 +254,140 @@ export class IngestPipeline {
    */
   listSources() {
     return this.db.select().from(sources).all();
+  }
+
+  /**
+   * Delete a source and all its associated chunks from the DB.
+   * Returns true if found and deleted, false if not found.
+   */
+  deleteSource(sourceId: string): boolean {
+    const src = this.db.select().from(sources).where(eq(sources.id, sourceId)).all()[0];
+    if (!src) return false;
+    this.db.delete(chunks).where(eq(chunks.sourceId, sourceId)).run();
+    this.db.delete(sources).where(eq(sources.id, sourceId)).run();
+    return true;
+  }
+
+  /**
+   * Persist a retrieval quality event to SQLite.
+   * Called after each retrieval so the confidence trend survives restarts.
+   */
+  logRetrievalQuality(
+    query: string,
+    results: Array<{ score: number }>,
+    source: 'chat' | 'search' | 'eval' = 'chat',
+  ): void {
+    const topScore = results[0]?.score ?? 0;
+    const avgScore = results.length > 0
+      ? results.reduce((sum, r) => sum + r.score, 0) / results.length
+      : 0;
+    try {
+      this.db.insert(retrievalQualityLog).values({
+        id: ulid(),
+        query: query.slice(0, 500),
+        resultCount: results.length,
+        topScore,
+        avgScore,
+        isHit: topScore >= 0.5,
+        source,
+        createdAt: new Date(),
+      }).run();
+    } catch {
+      // Non-fatal — logging failure must never break retrieval
+    }
+  }
+
+  /**
+   * Return persisted retrieval quality trend (last N days, daily buckets).
+   * Used by getDashboardMetrics to show a sparkline that survives restarts.
+   */
+  getRetrievalQualityTrend(days = 14): Array<{ date: string; queries: number; hitRate: number; avgTopScore: number }> {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    try {
+      // Filter in JS: created_at is stored as unix ms integer epoch
+      const rows = this.db.select().from(retrievalQualityLog)
+        .all()
+        .filter((r) => {
+          const ts = r.createdAt instanceof Date ? r.createdAt.getTime() : (r.createdAt as unknown as number);
+          return ts >= cutoff.getTime();
+        });
+
+      // Group by UTC date string (YYYY-MM-DD)
+      const byDay = new Map<string, { queries: number; hits: number; scoreSum: number }>();
+      for (const row of rows) {
+        const ts = row.createdAt instanceof Date ? row.createdAt.getTime() : (row.createdAt as unknown as number);
+        const day = new Date(ts).toISOString().slice(0, 10);
+        const bucket = byDay.get(day) ?? { queries: 0, hits: 0, scoreSum: 0 };
+        bucket.queries += 1;
+        bucket.hits += row.isHit ? 1 : 0;
+        bucket.scoreSum += row.topScore;
+        byDay.set(day, bucket);
+      }
+
+      return Array.from(byDay.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, bucket]) => ({
+          date,
+          queries: bucket.queries,
+          hitRate: bucket.queries > 0 ? bucket.hits / bucket.queries : 0,
+          avgTopScore: bucket.queries > 0 ? bucket.scoreSum / bucket.queries : 0,
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  getDashboardMetrics() {
+    const allSources = this.listSources();
+    const now = Date.now();
+    const last24h = now - 24 * 60 * 60 * 1000;
+
+    const ingestEvents = allSources.map((source) => {
+      const meta = this.parseSourceMeta(source.meta);
+      const updateCount = typeof meta.updateCount === 'number' ? meta.updateCount : 0;
+      let domain = 'unknown';
+      try {
+        domain = source.url ? new URL(source.url).hostname.replace(/^www\./, '') : 'unknown';
+      } catch {
+        domain = 'unknown';
+      }
+
+      return {
+        id: source.id,
+        title: source.title,
+        sourceType: source.sourceType,
+        capturedAt: source.capturedAt,
+        domain,
+        updateCount,
+      };
+    });
+
+    const totalUpdateCount = ingestEvents.reduce((sum, event) => sum + event.updateCount, 0);
+    const totalIngestEvents = ingestEvents.length + totalUpdateCount;
+    const domainHotspots = new Map<string, number>();
+    for (const event of ingestEvents) {
+      domainHotspots.set(event.domain, (domainHotspots.get(event.domain) ?? 0) + 1);
+    }
+
+    return {
+      ingest: {
+        totalSources: ingestEvents.length,
+        ingestedLast24h: ingestEvents.filter((event) => new Date(event.capturedAt).getTime() >= last24h).length,
+        updatedSources: ingestEvents.filter((event) => event.updateCount > 0).length,
+        duplicateUpdateCount: totalUpdateCount,
+        duplicateRate: totalIngestEvents > 0 ? totalUpdateCount / totalIngestEvents : 0,
+        domainHotspots: Array.from(domainHotspots.entries())
+          .map(([domain, count]) => ({ domain, count }))
+          .sort((left, right) => right.count - left.count)
+          .slice(0, 5),
+        recentSources: ingestEvents
+          .slice()
+          .sort((left, right) => new Date(right.capturedAt).getTime() - new Date(left.capturedAt).getTime())
+          .slice(0, 5),
+      },
+      retrieval: this.engine.knowledge.getRetrievalDiagnostics(),
+      retrievalTrend: this.getRetrievalQualityTrend(14),
+    };
   }
 
   /**
@@ -577,5 +729,15 @@ export class IngestPipeline {
     if (codeRatio > 0.05) return 'code';
     if (noRatio > 0.02 || noChars > 0) return 'no';
     return 'en';
+  }
+
+  private parseSourceMeta(raw: string | null): SourceMetaEnvelope {
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed as SourceMetaEnvelope : {};
+    } catch {
+      return {};
+    }
   }
 }

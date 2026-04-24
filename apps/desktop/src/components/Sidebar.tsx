@@ -5,7 +5,7 @@ import { useEngineStore } from '../stores/engineStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { BuildStatusBadge } from './BuildStatusBadge.js';
 import { SidebarSearch } from './SidebarSearch.js';
-import { Search, Brain, PanelLeftClose } from 'lucide-react';
+import { Search, Brain, ChevronLeft } from 'lucide-react';
 
 export function Sidebar() {
   const {
@@ -14,6 +14,7 @@ export function Sidebar() {
     fetchConversations,
     selectConversation,
     deleteConversation,
+    startNewChat,
   } = useChatStore();
 
   const { models, selectedModelId, setSelectedModelId, fetchModels } =
@@ -40,7 +41,7 @@ export function Sidebar() {
   }, []);
 
   const handleNewChat = () => {
-    useChatStore.setState({ activeConversationId: null, messages: [] });
+    startNewChat();
   };
 
   const handleSelectConversation = (id: string) => {
@@ -48,19 +49,12 @@ export function Sidebar() {
   };
 
   return (
-    <div className="flex h-full w-64 flex-col border-r border-zinc-800 bg-zinc-950">
+    <div className="group/sidebar flex h-full w-64 flex-col border-r border-zinc-800 bg-zinc-950">
       {/* Header + Engine Status */}
       <div className="border-b border-zinc-800 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-bold text-zinc-100">VeggaAI</h1>
-            <button
-              onClick={toggleSidebar}
-              className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
-              title="Hide sidebar"
-            >
-              <PanelLeftClose className="h-3.5 w-3.5" />
-            </button>
           </div>
           <div className="flex items-center gap-2">
             <BuildStatusBadge />
@@ -83,6 +77,14 @@ export function Sidebar() {
                  engineStatus === 'error' ? 'Error' : 'Idle'}
               </span>
             </div>
+            {/* Close sidebar button — prominent on hover */}
+            <button
+              onClick={toggleSidebar}
+              className="ml-1 flex h-6 w-6 items-center justify-center rounded-md text-zinc-700 transition-all hover:bg-zinc-800 hover:text-zinc-300 group-hover/sidebar:text-zinc-500"
+              title="Close sidebar (Ctrl+S)"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
           </div>
         </div>
         {engineStatus === 'ready' && stats && (

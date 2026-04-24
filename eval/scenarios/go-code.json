@@ -1,0 +1,56 @@
+{
+  "id": "go-code",
+  "label": "Go-specific code tasks â€” goroutines, channels, error handling, interfaces, generics",
+  "scenarios": [
+    {
+      "id": "goroutine-channel-basic",
+      "messages": [{ "role": "user", "content": "Write a Go program that spawns 5 goroutines, each sending its index to a channel, and the main function collects them." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/go\\s+func|chan\\s+int|make\\(chan|<-|wg\\.Wait|sync\\.WaitGroup|goroutine|channel/i"
+        ]
+      }
+    },
+    {
+      "id": "error-wrapping-fmt",
+      "messages": [{ "role": "user", "content": "In Go, what's the idiomatic way to wrap an error with context, and how do I unwrap it later?" }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/fmt\\.Errorf.*%w|errors\\.(?:Is|As|Unwrap)|wrap|%w|sentinel/i"
+        ]
+      }
+    },
+    {
+      "id": "interface-satisfy-implicit",
+      "messages": [{ "role": "user", "content": "Explain how interface satisfaction works in Go and show a small example with a Shape interface and Circle struct." }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/type\\s+Shape\\s+interface|type\\s+Circle\\s+struct|func\\s+\\(c\\s+Circle\\)|implicit|satisfies|duck/i"
+        ]
+      }
+    },
+    {
+      "id": "generics-constraint",
+      "messages": [{ "role": "user", "content": "Write a generic Go function Max that returns the larger of two values using the constraints.Ordered constraint." }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/func\\s+Max\\[.*\\]|constraints\\.Ordered|any\\]|\\[T\\s|type parameter|generic/i"
+        ]
+      }
+    },
+    {
+      "id": "context-cancellation",
+      "messages": [{ "role": "user", "content": "How do I pass a cancellation context through a Go HTTP handler into a downstream database call?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/context\\.Context|r\\.Context\\(\\)|ctx,\\s*cancel|WithTimeout|WithCancel|QueryContext|<-ctx\\.Done/i"
+        ]
+      }
+    }
+  ]
+}

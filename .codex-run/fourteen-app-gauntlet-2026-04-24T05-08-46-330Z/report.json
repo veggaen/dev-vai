@@ -1,0 +1,63 @@
+{
+  "options": {
+    "appUrl": "http://127.0.0.1:5173/?devAuthBypass=1",
+    "apiUrl": "http://127.0.0.1:3006",
+    "limit": 14,
+    "previewLimit": 4,
+    "keepProjects": true,
+    "only": [
+      "rust-incident-cli"
+    ],
+    "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T05-08-46-330Z",
+    "timeoutMs": 180000
+  },
+  "results": [
+    {
+      "slug": "rust-incident-cli",
+      "prompt": "Build a Rust CLI incident triage tool with clap commands. Return Cargo.toml and src/main.rs as separate complete files.",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYY7Y474ERVBD9XGV1TT5BS",
+      "sandboxId": "dee11304",
+      "response": "Building a Rust CLI incident triage tool with Clap commands.\n\n```toml title=\"Cargo.toml\"\n[package]\nname = \"incident-triage\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nclap = { version = \"4\", features = [\"derive\"] }\n```\n\n```rust title=\"src/main.rs\"\nuse clap::{Parser, Subcommand};\n\n#[derive(Parser)]\n#[command(name = \"incident-triage\", about = \"Rust CLI incident triage tool\", version)]\nstruct Cli {\n    #[command(subcommand)]\n    command: Commands,\n}\n\n#[derive(Subcommand)]\nenum Commands {\n    /// List active incidents by severity and owner\n    List,\n    /// Show one incident by id\n    Show { id: u32 },\n    /// Escalate an incident to a new owner\n    Escalate { id: u32, owner: String },\n    /// Print severity counts for the current queue\n    Summary,\n}\n\n#[derive(Clone)]\nstruct Incident {\n    id: u32,\n    title: &'static str,\n    severity: &'static str,\n    owner: &'static str,\n    status: &'static str,\n}\n\nfn seeded_incidents() -> Vec<Incident> {\n    vec![\n        Incident { id: 101, title: \"API latency spike\", severity: \"sev2\", owner: \"platform\", status: \"investigating\" },\n        Incident { id: 102, title: \"Checkout webhooks delayed\", severity: \"sev1\", owner: \"payments\", status: \"escalated\" },\n        Incident { id: 103, title: \"Search index lag\", severity: \"sev3\", owner: \"search\", status: \"monitoring\" },\n    ]\n}\n\nfn main() {\n    let cli = Cli::parse();\n    let incidents = seeded_incidents();\n\n    match cli.command {\n        Commands::List => {\n            println!(\"Rust CLI active incident triage queue:\");\n            for incident in &incidents {\n                println!(\"[{}] {} | severity={} | owner={} | status={}\", incident.id, incident.title, incident.severity, incident.owner, incident.status);\n            }\n        }\n        Commands::Show { id } => {\n            match incidents.iter().find(|incident| incident.id == id) {\n                Some(incident) => println!(\"Incident {}: {}\\nseverity: {}\\nowner: {}\\nstatus: {}\", incident.id, incident.title, incident.severity, incident.owner, incident.status),\n                None => eprintln!(\"No incident found for id {id}\"),\n            }\n        }\n        Commands::Escalate { id, owner } => {\n            match incidents.iter().find(|incident| incident.id == id) {\n                Some(incident) => println!(\"Escalating incident {} ({}) from {} to {}\", incident.id, incident.title, incident.owner, owner),\n                None => eprintln!(\"No incident found for id {id}\"),\n            }\n        }\n        Commands::Summary => {\n            let sev1 = incidents.iter().filter(|incident| incident.severity == \"sev1\").count();\n            let sev2 = incidents.iter().filter(|incident| incident.severity == \"sev2\").count();\n            let sev3 = incidents.iter().filter(|incident| incident.severity == \"sev3\").count();\n            println!(\"Incident summary: sev1={sev1}, sev2={sev2}, sev3={sev3}\");\n        }\n    }\n}\n```\n\n**Run:** `cargo run -- list`, `cargo run -- show 102`, `cargo run -- escalate 102 oncall-lead`, or `cargo run -- summary`\n**What to check:** the CLI prints incident ids, severity, owner, status, and escalation output instead of a generic greeting demo.",
+      "responseQuality": {
+        "paths": [
+          "Cargo.toml",
+          "src/main.rs"
+        ],
+        "failures": [],
+        "warnings": []
+      },
+      "fileQuality": {
+        "failures": []
+      },
+      "preview": null,
+      "durationMs": 5706,
+      "projectUpdate": {
+        "id": "01KPYY82KSBKJMDHFCWA3BSZ2W",
+        "conversationId": "01KPYY7Y474ERVBD9XGV1TT5BS",
+        "role": "assistant",
+        "content": "Project update: Applied 2 files for builder-app.\n\n[vai-artifact]\n{\"kind\":\"update\",\"title\":\"builder-app\",\"status\":\"updated\",\"tone\":\"violet\",\"badge\":\"Project update\",\"fileCount\":2,\"changedFiles\":[\"Cargo.toml\",\"src/main.rs\"],\"evidenceTier\":\"low\",\"verificationItems\":[\"Detected a non-preview code file set and skipped browser dev-server repair.\",\"Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.\"],\"packageChanged\":false,\"failureClass\":null,\"nextPrompts\":[\"Add the next feature slice\",\"Tighten this implementation with targeted edits\"]}\n[/vai-artifact]\n\n- Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.\n\nFiles changed:\n- Cargo.toml\n- src/main.rs",
+        "imageId": null,
+        "toolCalls": null,
+        "toolCallId": null,
+        "tokenCount": null,
+        "modelId": "vai:v0",
+        "durationMs": null,
+        "feedback": null,
+        "createdAt": "2026-04-24T05:08:51.000Z"
+      },
+      "fileSnapshot": {
+        "files": [
+          "Cargo.toml",
+          "src/main.rs"
+        ],
+        "contents": {
+          "Cargo.toml": "[package]\nname = \"incident-triage\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nclap = { version = \"4\", features = [\"derive\"] }",
+          "src/main.rs": "use clap::{Parser, Subcommand};\n\n#[derive(Parser)]\n#[command(name = \"incident-triage\", about = \"Rust CLI incident triage tool\", version)]\nstruct Cli {\n    #[command(subcommand)]\n    command: Commands,\n}\n\n#[derive(Subcommand)]\nenum Commands {\n    /// List active incidents by severity and owner\n    List,\n    /// Show one incident by id\n    Show { id: u32 },\n    /// Escalate an incident to a new owner\n    Escalate { id: u32, owner: String },\n    /// Print severity counts for the current queue\n    Summary,\n}\n\n#[derive(Clone)]\nstruct Incident {\n    id: u32,\n    title: &'static str,\n    severity: &'static str,\n    owner: &'static str,\n    status: &'static str,\n}\n\nfn seeded_incidents() -> Vec<Incident> {\n    vec![\n        Incident { id: 101, title: \"API latency spike\", severity: \"sev2\", owner: \"platform\", status: \"investigating\" },\n        Incident { id: 102, title: \"Checkout webhooks delayed\", severity: \"sev1\", owner: \"payments\", status: \"escalated\" },\n        Incident { id: 103, title: \"Search index lag\", severity: \"sev3\", owner: \"search\", status: \"monitoring\" },\n    ]\n}\n\nfn main() {\n    let cli = Cli::parse();\n    let incidents = seeded_incidents();\n\n    match cli.command {\n        Commands::List => {\n            println!(\"Rust CLI active incident triage queue:\");\n            for incident in &incidents {\n                println!(\"[{}] {} | severity={} | owner={} | status={}\", incident.id, incident.title, incident.severity, incident.owner, incident.status);\n            }\n        }\n        Commands::Show { id } => {\n            match incidents.iter().find(|incident| incident.id == id) {\n                Some(incident) => println!(\"Incident {}: {}\\nseverity: {}\\nowner: {}\\nstatus: {}\", incident.id, incident.title, incident.severity, incident.owner, incident.status),\n                None => eprintln!(\"No incident found for id {id}\"),\n            }\n        }\n        Commands::Escalate { id, owner } => {\n            match incidents.iter().find(|incident| incident.id == id) {\n "
+        }
+      }
+    }
+  ]
+}

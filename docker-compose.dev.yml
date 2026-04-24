@@ -1,0 +1,30 @@
+# ═══════════════════════════════════════════════════════════════
+# VeggaAI — Docker Compose (Development Override)
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# This mounts source code as volumes for hot-reload during dev.
+# Only the runtime runs in Docker; desktop uses Vite's dev server.
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  runtime:
+    build:
+      context: .
+      target: deps
+    command: pnpm --filter @vai/runtime dev
+    volumes:
+      - ./packages/runtime/src:/app/packages/runtime/src
+      - ./packages/core/src:/app/packages/core/src
+      - vai-data:/app/data
+      - vai-sandboxes:/app/sandboxes
+    environment:
+      - NODE_ENV=development
+      - VAI_PORT=3006
+      - VAI_DB_PATH=/app/data/vai.db
+
+  # Desktop runs natively (Vite HMR) — not in Docker during dev
+  desktop:
+    profiles:
+      - never  # Disabled in dev — use `pnpm dev:desktop` natively

@@ -1,0 +1,75 @@
+{
+  "options": {
+    "appUrl": "http://127.0.0.1:5173/?devAuthBypass=1",
+    "apiUrl": "http://127.0.0.1:3006",
+    "limit": 7,
+    "previewLimit": 4,
+    "keepProjects": true,
+    "only": [
+      "safe-material-code-theme"
+    ],
+    "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-21-53-913Z",
+    "timeoutMs": 180000
+  },
+  "results": [
+    {
+      "slug": "safe-material-code-theme",
+      "sourceRepo": "https://github.com/t3dotgg/vsc-material-but-i-wont-sue-you",
+      "prompt": "Create a complete VS Code color theme extension for a safe Material-inspired dark theme that avoids copying protected branding. Return package.json plus a theme JSON file. It needs editor foreground/background colors, activity bar/sidebar colors, token colors for strings/functions/classes/comments, and marketplace metadata.",
+      "status": "fail",
+      "failures": [
+        "missing file block package.json",
+        "missing file block themes/safe-material-color-theme.json or themes/material-safe-color-theme.json or safe-material-color-theme.json",
+        "missing required response text tokenColors",
+        "missing required response text activityBar",
+        "missing required response text editor.background"
+      ],
+      "warnings": [],
+      "conversationId": "01KPZ5VP7WNX5VWTDZ048RMCZD",
+      "sandboxId": "b39424bd",
+      "response": "Project update: Applied 2 files for builder-app.\n\n[vai-artifact]\n{\"kind\":\"update\",\"title\":\"builder-app\",\"status\":\"updated\",\"tone\":\"violet\",\"badge\":\"Project update\",\"fileCount\":2,\"changedFiles\":[\"package.json\",\"themes/safe-material-color-theme.json\"],\"evidenceTier\":\"low\",\"verificationItems\":[\"Detected a non-preview code file set and skipped browser dev-server repair.\",\"Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.\"],\"packageChanged\":false,\"failureClass\":null,\"nextPrompts\":[\"Add the next feature slice\",\"Tighten this implementation with targeted edits\"]}\n[/vai-artifact]\n\n- Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.\n\nFiles changed:\n- package.json\n- themes/safe-material-color-theme.json",
+      "responseQuality": {
+        "paths": [],
+        "failures": [
+          "missing file block package.json",
+          "missing file block themes/safe-material-color-theme.json or themes/material-safe-color-theme.json or safe-material-color-theme.json",
+          "missing required response text tokenColors",
+          "missing required response text activityBar",
+          "missing required response text editor.background"
+        ],
+        "warnings": []
+      },
+      "fileQuality": {
+        "failures": []
+      },
+      "preview": null,
+      "durationMs": 4542,
+      "projectUpdate": {
+        "id": "01KPZ5VTAE546M8SXVZ262N88M",
+        "conversationId": "01KPZ5VP7WNX5VWTDZ048RMCZD",
+        "role": "assistant",
+        "content": "Project update: Applied 2 files for builder-app.\n\n[vai-artifact]\n{\"kind\":\"update\",\"title\":\"builder-app\",\"status\":\"updated\",\"tone\":\"violet\",\"badge\":\"Project update\",\"fileCount\":2,\"changedFiles\":[\"package.json\",\"themes/safe-material-color-theme.json\"],\"evidenceTier\":\"low\",\"verificationItems\":[\"Detected a non-preview code file set and skipped browser dev-server repair.\",\"Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.\"],\"packageChanged\":false,\"failureClass\":null,\"nextPrompts\":[\"Add the next feature slice\",\"Tighten this implementation with targeted edits\"]}\n[/vai-artifact]\n\n- Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.\n\nFiles changed:\n- package.json\n- themes/safe-material-color-theme.json",
+        "imageId": null,
+        "toolCalls": null,
+        "toolCallId": null,
+        "tokenCount": null,
+        "modelId": "vai:v0",
+        "durationMs": null,
+        "feedback": null,
+        "createdAt": "2026-04-24T07:21:58.000Z"
+      },
+      "fileSnapshot": {
+        "files": [
+          "package.json",
+          "themes/safe-material-color-theme.json"
+        ],
+        "contents": {
+          "package.json": "{\n  \"name\": \"safe-material-dark-theme\",\n  \"displayName\": \"Safe Material Dark Theme\",\n  \"description\": \"A safe Material-inspired VS Code color-theme extension that avoids protected branding while keeping a calm dark editor palette.\",\n  \"version\": \"0.0.1\",\n  \"publisher\": \"local-dev\",\n  \"engines\": {\n    \"vscode\": \"^1.90.0\"\n  },\n  \"categories\": [\n    \"Themes\"\n  ],\n  \"contributes\": {\n    \"themes\": [\n      {\n        \"label\": \"Safe Material Dark\",\n        \"uiTheme\": \"vs-dark\",\n        \"path\": \"./themes/safe-material-color-theme.json\"\n      }\n    ]\n  }\n}",
+          "themes/safe-material-color-theme.json": "{\n  \"name\": \"Safe Material Dark\",\n  \"type\": \"dark\",\n  \"colors\": {\n    \"editor.background\": \"#10151f\",\n    \"editor.foreground\": \"#d9e2f1\",\n    \"activityBar.background\": \"#0b1018\",\n    \"activityBar.foreground\": \"#8bd5ff\",\n    \"sideBar.background\": \"#111827\",\n    \"sideBar.foreground\": \"#c7d2fe\",\n    \"statusBar.background\": \"#0f172a\",\n    \"titleBar.activeBackground\": \"#0b1018\"\n  },\n  \"tokenColors\": [\n    {\n      \"scope\": [\n        \"comment\",\n        \"punctuation.definition.comment\"\n      ],\n      \"settings\": {\n        \"foreground\": \"#6b7280\",\n        \"fontStyle\": \"italic\"\n      }\n    },\n    {\n      \"scope\": [\n        \"string\",\n        \"constant.other.symbol\"\n      ],\n      \"settings\": {\n        \"foreground\": \"#c3e88d\"\n      }\n    },\n    {\n      \"scope\": [\n        \"entity.name.function\",\n        \"support.function\"\n      ],\n      \"settings\": {\n        \"foreground\": \"#82aaff\"\n      }\n    },\n    {\n      \"scope\": [\n        \"entity.name.class\",\n        \"support.class\"\n      ],\n      \"settings\": {\n        \"foreground\": \"#ffcb6b\"\n      }\n    },\n    {\n      \"scope\": [\n        \"keyword\",\n        \"storage.type\"\n      ],\n      \"settings\": {\n        \"foreground\": \"#c792ea\"\n      }\n    }\n  ]\n}",
+          "themes/material-safe-color-theme.json": null,
+          "safe-material-color-theme.json": null
+        }
+      }
+    }
+  ]
+}

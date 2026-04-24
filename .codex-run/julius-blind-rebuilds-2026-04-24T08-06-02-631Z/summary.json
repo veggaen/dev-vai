@@ -1,0 +1,113 @@
+{
+  "verdict": "fail",
+  "passed": 0,
+  "failed": 3,
+  "total": 3,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-06-02-631Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-06-02-631Z\\report.json",
+  "results": [
+    {
+      "slug": "next-gen-fullstack-monorepo",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp",
+      "status": "fail",
+      "failures": [
+        "missing required response text tRPC",
+        "missing required response text Kysely",
+        "missing required response text Prisma",
+        "missing required response text PlanetScale",
+        "missing required response text Clerk",
+        "missing required response text monorepo",
+        "sandbox files missing tRPC",
+        "sandbox files missing Kysely",
+        "sandbox files missing Prisma",
+        "sandbox files missing PlanetScale",
+        "sandbox files missing Clerk",
+        "sandbox files missing monorepo",
+        "preview missing tRPC",
+        "preview missing Kysely",
+        "preview missing Prisma",
+        "preview missing PlanetScale",
+        "preview missing Clerk",
+        "preview missing Expo",
+        "preview missing monorepo"
+      ],
+      "warnings": [
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPZ8CK389778XD8NRWYKY8YV",
+      "sandboxId": "5f1f345f",
+      "previewUrl": "http://127.0.0.1:4218"
+    },
+    {
+      "slug": "typescript-library-monorepo-starter",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp-lib",
+      "status": "fail",
+      "failures": [
+        "missing file block pnpm-workspace.yaml",
+        "missing file block packages/core/src/index.ts or src/index.ts",
+        "missing file block tsconfig.json",
+        "missing file block packages/prisma-generator/src/index.ts or src/prisma-generator.ts",
+        "missing required response text monorepo",
+        "missing required response text TypeScript",
+        "missing required response text library",
+        "missing required response text Prisma",
+        "missing required response text generator",
+        "missing required response text changeset",
+        "missing required response text vitest",
+        "sandbox missing pnpm-workspace.yaml",
+        "sandbox missing packages/core/src/index.ts or src/index.ts",
+        "sandbox missing tsconfig.json",
+        "sandbox missing packages/prisma-generator/src/index.ts or src/prisma-generator.ts",
+        "sandbox files missing monorepo",
+        "sandbox files missing TypeScript",
+        "sandbox files missing library",
+        "sandbox files missing Prisma",
+        "sandbox files missing generator",
+        "sandbox files missing changeset",
+        "sandbox files missing vitest",
+        "sandbox files missing workspace package metadata",
+        "sandbox files missing library exports"
+      ],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPZ8GWK34730172RCDB2PA7N",
+      "sandboxId": "349bc1ed",
+      "previewUrl": null
+    },
+    {
+      "slug": "developer-defaults-cli",
+      "sourceRepo": "https://github.com/juliusmarminge/good-defaults",
+      "status": "fail",
+      "failures": [
+        "missing file block src/cli.ts or src/index.ts",
+        "missing file block src/templates.ts or src/templates/index.ts",
+        "missing file block .github/workflows/ci.yml",
+        "missing required response text CLI",
+        "missing required response text ESLint",
+        "missing required response text Prettier",
+        "missing required response text TSConfig",
+        "missing required response text GitHub Actions",
+        "missing required response text pnpm",
+        "sandbox missing src/cli.ts or src/index.ts",
+        "sandbox missing src/templates.ts or src/templates/index.ts",
+        "sandbox missing .github/workflows/ci.yml",
+        "sandbox files missing CLI",
+        "sandbox files missing ESLint",
+        "sandbox files missing Prettier",
+        "sandbox files missing TSConfig",
+        "sandbox files missing GitHub Actions",
+        "sandbox files missing pnpm",
+        "sandbox files missing CLI bin entry",
+        "sandbox files missing interactive CLI prompt"
+      ],
+      "warnings": [
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPZ8N5QJRAQZW7RBB71P13C2",
+      "sandboxId": "9c5e1194",
+      "previewUrl": null
+    }
+  ]
+}

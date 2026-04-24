@@ -9,6 +9,10 @@ export type {
   ThinkingMeta,
   PlanningMeta,
   ContextGatherMeta,
+  CheckpointMeta,
+  VerificationMeta,
+  RecoveryMeta,
+  ArtifactMeta,
   FileCreateMeta,
   FileEditMeta,
   FileReadMeta,
@@ -22,5 +26,11 @@ export type {
   ToolCallMeta,
   SummaryMeta,
   NoteMeta,
+  PinnedNote,
+  PinnedNoteCategory,
+  ContextSummary,
+  SearchResult,
 } from './types.js';
-export { createSessionId, createEventId, EVENT_TYPE_CONFIG } from './types.js';
+export { createSessionId, createEventId, createPinnedNoteId, EVENT_TYPE_CONFIG } from './types.js';
+export { SessionAnalyzer, getSessionAnalyzer } from './analyzer.js';
+export type { SessionAnalysis, SessionOutcome, FailurePattern, SessionInsightsAggregate } from './analyzer.js';

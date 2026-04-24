@@ -1,0 +1,22 @@
+{
+  "verdict": "pass",
+  "passed": 1,
+  "failed": 0,
+  "total": 1,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-19-33-132Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-19-33-132Z\\report.json",
+  "results": [
+    {
+      "slug": "safe-material-code-theme",
+      "sourceRepo": "https://github.com/t3dotgg/vsc-material-but-i-wont-sue-you",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPZ5QCHGPWWWTXF6S92K3WX7",
+      "sandboxId": "3ec955a0",
+      "previewUrl": null
+    }
+  ]
+}

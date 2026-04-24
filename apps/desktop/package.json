@@ -4,12 +4,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
-    "build:tauri": "cargo tauri build",
+    "dev:tauri": "tauri dev",
+    "build": "node ../../scripts/build-desktop.mjs",
+    "build:tauri": "node ../../scripts/build-tauri-desktop.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
+    "@vai/api-types": "workspace:*",
     "@vai/ui": "workspace:*",
     "cmdk": "^1.1.1",
     "framer-motion": "^12.34.3",
@@ -23,6 +26,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",

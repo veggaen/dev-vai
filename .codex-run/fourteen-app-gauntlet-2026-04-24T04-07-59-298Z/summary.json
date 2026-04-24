@@ -1,0 +1,74 @@
+{
+  "verdict": "fail",
+  "passed": 5,
+  "failed": 1,
+  "total": 6,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T04-07-59-298Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T04-07-59-298Z\\report.json",
+  "results": [
+    {
+      "slug": "photography-portfolio",
+      "status": "error",
+      "failures": [
+        "sandbox missing package.json",
+        "sandbox missing src/App.tsx or src/App.jsx",
+        "sandbox missing src/styles.css",
+        "sandbox files missing Photography",
+        "sandbox files missing lightbox",
+        "sandbox files missing gallery",
+        "Timed out waiting for sandbox d0892ff8 running"
+      ],
+      "warnings": [
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPYTRPJGPY63P7561H5RT0T2",
+      "sandboxId": "d0892ff8",
+      "previewUrl": null
+    },
+    {
+      "slug": "custom-storefront",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYV2QHBE14X5DHEJ06681ZR",
+      "sandboxId": "3c5adee3",
+      "previewUrl": "http://127.0.0.1:4121"
+    },
+    {
+      "slug": "social-blog",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYV3ED26KSPF1CZRWS96S37",
+      "sandboxId": "46fffc19",
+      "previewUrl": "http://127.0.0.1:4122"
+    },
+    {
+      "slug": "ops-control-center",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYV42RS0ZM0DZZAM95RBTSX",
+      "sandboxId": "019d3ea9",
+      "previewUrl": "http://127.0.0.1:4123"
+    },
+    {
+      "slug": "saas-workspace",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYV4RQ66W76A1NEJ6RWKAWC",
+      "sandboxId": "759f9871",
+      "previewUrl": null
+    },
+    {
+      "slug": "analytics-dashboard",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYV5F102N8QJACPX702FHB4",
+      "sandboxId": "06076a4a",
+      "previewUrl": null
+    }
+  ]
+}

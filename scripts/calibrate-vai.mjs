@@ -105,7 +105,7 @@ async function main() {
     let status;
     if (hasFallback) status = 'FALLBACK';
     else if (isHelloWorld && cq.domain !== 'language') status = 'WRONG-PATTERN';
-    else if (hasCodeBlock && !['framework', 'devops', 'language', 'css-framework'].includes(cq.domain)) status = 'CODE-MISFIRE';
+    else if (hasCodeBlock && !['framework', 'devops', 'language', 'css-framework', 'architecture', 'design-system', 'rust', 'golang'].includes(cq.domain)) status = 'CODE-MISFIRE';
     else if (hasSubstance) status = 'ANSWERED';
     else status = 'WEAK';
 

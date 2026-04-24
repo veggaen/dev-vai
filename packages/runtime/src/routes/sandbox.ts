@@ -1,4 +1,6 @@
-import type { FastifyInstance } from 'fastify';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { SandboxManager, FileWrite } from '../sandbox/manager.js';
 import {
   getAllStacks,
@@ -11,8 +13,84 @@ import {
 } from '../sandbox/stacks/index.js';
 import type { CustomStackConfig } from '../sandbox/stacks/index.js';
 import { deployStack, type DeployEvent } from '../sandbox/deploy.js';
+import { PlatformAuthService } from '../auth/platform-auth.js';
+import { ProjectService } from '../projects/service.js';
+import {
+  sandboxCreateBodySchema,
+  sandboxDeployBodySchema,
+  sandboxFromTemplateBodySchema,
+  sandboxWriteFilesBodySchema,
+} from '@vai/api-types/sandbox';
+import { invalidRequestBody } from '../validation/http-validation.js';
 
-export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxManager) {
+async function getViewerUserId(auth: PlatformAuthService, request: FastifyRequest): Promise<string | null> {
+  const viewer = await auth.getViewer(request);
+  return viewer.user?.id ?? null;
+}
+
+function getOrRestoreProject(
+  projects: ProjectService,
+  sandbox: SandboxManager,
+  projectId: string,
+) {
+  const liveProject = sandbox.get(projectId);
+  if (liveProject) {
+    return liveProject;
+  }
+
+  const persistedProject = projects.getProjectBySandboxId(projectId);
+  if (
+    !persistedProject
+    || !persistedProject.rootDir
+    || !existsSync(persistedProject.rootDir)
+  ) {
+    return null;
+  }
+
+  return sandbox.rehydrate({
+    id: persistedProject.sandboxProjectId,
+    name: persistedProject.name,
+    rootDir: persistedProject.rootDir,
+    ownerUserId: persistedProject.ownerUserId,
+    status: 'idle',
+  });
+}
+
+async function getAuthorizedProject(
+  auth: PlatformAuthService,
+  projects: ProjectService,
+  sandbox: SandboxManager,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  projectId: string,
+  access: 'read' | 'write',
+) {
+  const project = getOrRestoreProject(projects, sandbox, projectId);
+  if (!project) {
+    reply.status(404);
+    return { error: 'Project not found' };
+  }
+
+  const viewer = await auth.getViewer(request);
+  const viewerId = viewer.user?.id ?? null;
+  const allowed = access === 'write'
+    ? projects.canWriteSandbox(projectId, viewerId)
+    : projects.canReadSandbox(projectId, viewerId);
+
+  if (allowed) {
+    return project;
+  }
+
+  if (!viewer.authenticated || !viewer.user) {
+    reply.status(401);
+    return { error: `Sign in to ${access} this sandbox project` };
+  }
+
+  reply.status(403);
+  return { error: `You do not have permission to ${access} this sandbox project` };
+}
+
+export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxManager, auth: PlatformAuthService, projects: ProjectService) {
   /* ── Stack-based template system ── */
 
   /** List all available stacks with their tiers */
@@ -66,7 +144,12 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
   app.post<{ Body: { stackId: string; tier: string; name?: string } }>(
     '/api/sandbox/deploy',
     async (request, reply) => {
-      const { stackId, tier, name } = request.body;
+      const parsed = sandboxDeployBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      const { stackId, tier, name } = parsed.data;
+      const ownerUserId = await getViewerUserId(auth, request);
 
       // Validate template exists
       const template = getStackTemplate(stackId, tier);
@@ -93,7 +176,13 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
         }
       };
 
-      await deployStack(sandbox, stackId, tier, name, emit);
+      const result = await deployStack(sandbox, stackId, tier, name, emit, ownerUserId);
+      if (result) {
+        const deployedProject = sandbox.get(result.projectId);
+        if (deployedProject) {
+          projects.syncSandboxProject(deployedProject);
+        }
+      }
 
       reply.raw.end();
     },
@@ -115,17 +204,26 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
   /** Create project from template */
   app.post<{ Body: { templateId: string; name?: string } }>(
     '/api/sandbox/from-template',
-    async (request) => {
+    async (request, reply) => {
+      const parsed = sandboxFromTemplateBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      const ownerUserId = await getViewerUserId(auth, request);
       const project = await sandbox.createFromTemplate(
-        request.body.templateId,
-        request.body.name,
+        parsed.data.templateId,
+        parsed.data.name,
+        ownerUserId,
       );
+      // CLI-scaffolded projects (e.g. create-next-app) already have deps installed
+      const cliScaffolded = project.logs.some((l: string) => /Scaffolded via.*real CLI/i.test(l));
       return {
         id: project.id,
         name: project.name,
         rootDir: project.rootDir,
         status: project.status,
         files: Object.keys(project.files),
+        depsInstalled: cliScaffolded,
       };
     },
   );
@@ -133,8 +231,13 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
   /** Create a new sandbox project */
   app.post<{ Body: { name: string } }>(
     '/api/sandbox',
-    async (request) => {
-      const project = await sandbox.create(request.body.name);
+    async (request, reply) => {
+      const parsed = sandboxCreateBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      const ownerUserId = await getViewerUserId(auth, request);
+      const project = await sandbox.create(parsed.data.name, ownerUserId);
       return {
         id: project.id,
         name: project.name,
@@ -145,32 +248,49 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
   );
 
   /** List all sandbox projects */
-  app.get('/api/sandbox', async () => {
-    return sandbox.list().map((p) => ({
+  app.get('/api/sandbox', async (request) => {
+    const ownerUserId = await getViewerUserId(auth, request);
+    return sandbox.list().filter((project) => projects.canReadSandbox(project.id, ownerUserId)).map((p) => ({
       id: p.id,
       name: p.name,
       status: p.status,
       devPort: p.devPort,
       createdAt: p.createdAt,
+      owned: Boolean(p.ownerUserId),
     }));
   });
 
   /** Get sandbox project details */
   app.get<{ Params: { id: string } }>(
     '/api/sandbox/:id',
-    async (request) => {
-      const project = sandbox.get(request.params.id);
-      if (!project) {
-        return { error: 'Project not found' };
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'read');
+      if ('error' in project) {
+        return project;
       }
+      const viewer = await auth.getViewer(request);
+      const persistedProject = projects.syncSandboxProject(project);
+      const role = persistedProject
+        ? projects.getProjectRole(persistedProject.id, viewer.user?.id ?? null)
+        : null;
+
+      // Always scan disk for the full file list — in-memory map may be stale or partial after rehydration
+      const fileList = await sandbox.listFiles(request.params.id).catch(() => Object.keys(project.files));
+
+      const hasNodeModules = existsSync(join(project.rootDir, 'node_modules'));
+
       return {
         id: project.id,
         name: project.name,
         rootDir: project.rootDir,
-        files: Object.keys(project.files),
+        files: fileList,
         status: project.status,
         devPort: project.devPort,
+        hasNodeModules,
         logs: project.logs.slice(-30),
+        devStderr: project.devStderr.slice(-20),
+        persistentProjectId: persistedProject?.id ?? null,
+        role,
       };
     },
   );
@@ -178,16 +298,29 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
   /** Write files to a sandbox project */
   app.post<{ Params: { id: string }; Body: { files: FileWrite[] } }>(
     '/api/sandbox/:id/files',
-    async (request) => {
-      await sandbox.writeFiles(request.params.id, request.body.files);
-      return { ok: true, filesWritten: request.body.files.length };
+    async (request, reply) => {
+      const parsed = sandboxWriteFilesBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'write');
+      if ('error' in project) {
+        return project;
+      }
+      await sandbox.writeFiles(request.params.id, parsed.data.files);
+      projects.syncSandboxProject(sandbox.get(request.params.id)!);
+      return { ok: true, filesWritten: parsed.data.files.length };
     },
   );
 
   /** List files in a sandbox project */
   app.get<{ Params: { id: string } }>(
     '/api/sandbox/:id/files',
-    async (request) => {
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'read');
+      if ('error' in project) {
+        return project;
+      }
       const files = await sandbox.listFiles(request.params.id);
       return { files };
     },
@@ -196,7 +329,11 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
   /** Read a specific file */
   app.get<{ Params: { id: string }; Querystring: { path: string } }>(
     '/api/sandbox/:id/file',
-    async (request) => {
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'read');
+      if ('error' in project) {
+        return project;
+      }
       const content = await sandbox.readFile(request.params.id, request.query.path);
       return { path: request.query.path, content };
     },
@@ -205,8 +342,14 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
   /** Install dependencies */
   app.post<{ Params: { id: string } }>(
     '/api/sandbox/:id/install',
-    async (request) => {
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'write');
+      if ('error' in project) {
+        return project;
+      }
       const result = await sandbox.install(request.params.id);
+      const updated = sandbox.get(request.params.id);
+      if (updated) projects.syncSandboxProject(updated);
       return result;
     },
   );
@@ -214,8 +357,14 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
   /** Start dev server */
   app.post<{ Params: { id: string } }>(
     '/api/sandbox/:id/start',
-    async (request) => {
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'write');
+      if ('error' in project) {
+        return project;
+      }
       const { port } = await sandbox.startDev(request.params.id);
+      const updated = sandbox.get(request.params.id);
+      if (updated) projects.syncSandboxProject(updated);
       return { ok: true, port };
     },
   );
@@ -223,8 +372,14 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
   /** Stop dev server */
   app.post<{ Params: { id: string } }>(
     '/api/sandbox/:id/stop',
-    async (request) => {
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'write');
+      if ('error' in project) {
+        return project;
+      }
       sandbox.stopDev(request.params.id);
+      const updated = sandbox.get(request.params.id);
+      if (updated) projects.syncSandboxProject(updated);
       return { ok: true };
     },
   );
@@ -232,17 +387,56 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
   /** Get project logs */
   app.get<{ Params: { id: string } }>(
     '/api/sandbox/:id/logs',
-    async (request) => {
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'read');
+      if ('error' in project) {
+        return project;
+      }
       const logs = sandbox.getLogs(request.params.id);
       return { logs };
+    },
+  );
+
+  /** Get handoff metadata for local desktop/VS Code flows */
+  app.get<{ Params: { id: string } }>(
+    '/api/sandbox/:id/handoff',
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'read');
+      if ('error' in project) {
+        return project;
+      }
+
+      const viewer = await auth.getViewer(request);
+      const persistedProject = projects.getProjectForSandboxWithRole(project.id, viewer.user?.id ?? null);
+
+      return {
+        id: project.id,
+        persistentProjectId: persistedProject?.id ?? null,
+        name: project.name,
+        rootDir: project.rootDir,
+        devPort: project.devPort,
+        devUrl: project.devPort ? `http://localhost:${project.devPort}` : null,
+        fileCount: Object.keys(project.files).length,
+        owned: Boolean(project.ownerUserId),
+        role: persistedProject?.role ?? null,
+        targets: {
+          desktop: true,
+          vscode: true,
+        },
+      };
     },
   );
 
   /** Delete a sandbox project */
   app.delete<{ Params: { id: string } }>(
     '/api/sandbox/:id',
-    async (request) => {
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'write');
+      if ('error' in project) {
+        return project;
+      }
       await sandbox.destroy(request.params.id);
+      projects.removeProjectForSandbox(request.params.id);
       return { ok: true };
     },
   );

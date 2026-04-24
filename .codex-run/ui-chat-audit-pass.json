@@ -1,0 +1,146 @@
+{
+  "at": "2026-04-23T21:29:04.461Z",
+  "url": "http://127.0.0.1:5173/?devAuthBypass=1",
+  "results": [
+    {
+      "id": "vai-relevance-best-next",
+      "prompt": "Context: I am building a chat app called Vai. Users complain Vai gives weird, off-topic, low-quality responses. Vai should be its own special AI, not mainly relying on external LLM calls. What is the single best next engineering task to make replies more responsive, relevant, and accurate to the current user context? Be concrete and avoid generic AI advice.",
+      "inputBeforeSendLength": 359,
+      "inputAfterSend": "",
+      "activeConversationId": "01KPY3XYZCN98TX1A4H8ERP9WH",
+      "messageCount": 2,
+      "latestAssistant": {
+        "role": "assistant",
+        "content": "**Best next task**\nImplement a local context-grounded answer contract before Vai enters broad retrieval, glossary decomposition, or any fallback path.\n\n**Why this is the highest-leverage fix**\nThe bad behavior is not just weak wording; it is routing drift. Vai sees words like \"context\", \"relevant\", \"external LLM\", and \"accurate\", then retrieves loosely related snippets instead of preserving the user request: improve Vai chat responses against the current conversation.\n\n**First implementation slice**\n- Add a turn classifier that decides: standalone knowledge question, contextual follow-up, software/build request, or product-quality recommendation.\n- Build a compact active-context brief from the latest user turn, recent user intent, selected files/sandbox state when present, and the last useful assistant answer.\n- Gate knowledge retrieval with minimum topic overlap so unrelated learned snippets cannot outrank the active chat context.\n- Return a small deterministic answer when the request is a product-quality recommendation, rather than decomposing it into \"What is X?\" fragments.\n\n**Validation loop**\n- Add regression prompts for first-turn quality, vague follow-ups, and correction turns.\n- Assert the response mentions Vai/chat context and gives a concrete implementation step.\n- Fail the test if the answer starts with unrelated glossary headings or copied snippets.\n\n**Boundary**\nExternal LLM calls should stay as a verification tool. Vai should make the answer locally, then optionally ask a critic whether the answer stayed grounded.\n\n**First patch I would make**\nAdd the high-priority `vai-chat-quality-direction` route plus tests that prove this exact class of prompt returns a concrete plan instead of decomposed glossary snippets.",
+        "confidence": 0.5,
+        "sources": 0,
+        "followUps": 3
+      },
+      "score": {
+        "missing": [
+          "engineering"
+        ],
+        "badSnippets": false,
+        "hasGenericDeflection": false,
+        "lengthOk": true,
+        "concretePatch": true,
+        "noExternalBrainViolation": true,
+        "mentionsCurrentSubject": true,
+        "uiModeDrift": false,
+        "pass": false
+      },
+      "bodyTail": "V\nWorkspace\nChat\nLight\nPreview\nFocus\nYou\n\nContext: I am building a chat app called Vai. Users complain Vai gives weird, off-topic, low-quality responses. Vai should be its own special AI, not mainly relying on external LLM calls. What is the single best next engineering task to make replies more responsive, relevant, and accurate to the current user context? Be concrete and avoid generic AI advice.\n\nVai\n\nBest next task\nImplement a local context-grounded answer contract before Vai enters broad retrieval, glossary decomposition, or any fallback path.\n\nWhy this is the highest-leverage fix\nThe bad behavior is not just weak wording; it is routing drift. Vai sees words like \"context\", \"relevant\", \"external LLM\", and \"accurate\", then retrieves loosely related snippets instead of preserving the user request: improve Vai chat responses against the current conversation.\n\nFirst implementation slice\n\nAdd a turn classifier that decides: standalone knowledge question, contextual follow-up, software/build request, or product-quality recommendation.\nBuild a compact active-context brief from the latest user turn, recent user intent, selected files/sandbox state when present, and the last useful assistant answer.\nGate knowledge retrieval with minimum topic overlap so unrelated learned snippets cannot outrank the active chat context.\nReturn a small deterministic answer when the request is a product-quality recommendation, rather than decomposing it into \"What is X?\" fragments.\n\nValidation loop\n\nAdd regression prompts for first-turn quality, vague follow-ups, and correction turns.\nAssert the response mentions Vai/chat context and gives a concrete implementation step.\nFail the test if the answer starts with unrelated glossary headings or copied snippets.\n\nBoundary\nExternal LLM calls should stay as a verification tool. Vai should make the answer locally, then optionally ask a critic whether the answer stayed grounded.\n\nFirst patch I would make\nAdd the high-priority vai-chat-quality-direction route plus tests that prove this exact class of prompt returns a concrete plan instead of decomposed glossary snippets.\n\nRELATED\nWhat usually breaks when setting up context am building chat app called vai users complain gives?\nHow should I structure context am building chat app called vai users complain gives in a real project?\nRELATED\nWhat usually breaks when setting up context am building chat app called vai users complain gives?\nHow should I structure context am building chat app called vai users complain gives in a real project?\nCopy\nChat mode\nUse a sharper follow-up to keep the thread moving.\nEnter sends\nShift+Enter newline\nChat\nIDE\n\nVai can make mistakes. Verify important information."
+    },
+    {
+      "id": "referential-go-deeper-no-external-brain",
+      "prompt": "Go deeper on that. Make it stronger with automated teacher loops, but do not make external LLMs the main brain. Tell me exactly what you would implement next.",
+      "inputBeforeSendLength": 158,
+      "inputAfterSend": "",
+      "activeConversationId": "01KPY3XYZCN98TX1A4H8ERP9WH",
+      "messageCount": 4,
+      "latestAssistant": {
+        "role": "assistant",
+        "content": "**Grounded hardening pass**\nFor **Vai chat context relevance**, harden the response path where context enters the engine.\n\n**Implement next**\n- Add a turn classifier: standalone question vs contextual follow-up vs product-quality recommendation.\n- Extract a compact active-topic brief from recent user context, selected files, and the last assistant answer.\n- Gate fuzzy retrieval with topic overlap so unrelated learned snippets cannot win just because they share loose words.\n- Add an automated teacher loop that replays real-user prompts, scores topic retention/instruction coverage/concrete action, and blocks regressions.\n- Keep external LLMs as optional critics only; Vai still drafts the answer from its local route, context brief, and learned policy.\n\n**Responsiveness win**\nThis is fast because it runs before slow or broad fallback paths. It should reduce off-topic answers and wasted external validation rounds at the same time.",
+        "confidence": 0.82,
+        "sources": 0,
+        "followUps": 3
+      },
+      "score": {
+        "missing": [],
+        "badSnippets": false,
+        "hasGenericDeflection": false,
+        "lengthOk": true,
+        "concretePatch": true,
+        "noExternalBrainViolation": true,
+        "mentionsCurrentSubject": true,
+        "uiModeDrift": false,
+        "pass": true
+      },
+      "bodyTail": " compact active-context brief from the latest user turn, recent user intent, selected files/sandbox state when present, and the last useful assistant answer.\nGate knowledge retrieval with minimum topic overlap so unrelated learned snippets cannot outrank the active chat context.\nReturn a small deterministic answer when the request is a product-quality recommendation, rather than decomposing it into \"What is X?\" fragments.\n\nValidation loop\n\nAdd regression prompts for first-turn quality, vague follow-ups, and correction turns.\nAssert the response mentions Vai/chat context and gives a concrete implementation step.\nFail the test if the answer starts with unrelated glossary headings or copied snippets.\n\nBoundary\nExternal LLM calls should stay as a verification tool. Vai should make the answer locally, then optionally ask a critic whether the answer stayed grounded.\n\nFirst patch I would make\nAdd the high-priority vai-chat-quality-direction route plus tests that prove this exact class of prompt returns a concrete plan instead of decomposed glossary snippets.\n\nRELATED\nWhat usually breaks when setting up context am building chat app called vai users complain gives?\nHow should I structure context am building chat app called vai users complain gives in a real project?\nRELATED\nWhat usually breaks when setting up context am building chat app called vai users complain gives?\nHow should I structure context am building chat app called vai users complain gives in a real project?\nCopy\nYou\n\nGo deeper on that. Make it stronger with automated teacher loops, but do not make external LLMs the main brain. Tell me exactly what you would implement next.\n\nVai\n\nGrounded hardening pass\nFor Vai chat context relevance, harden the response path where context enters the engine.\n\nImplement next\n\nAdd a turn classifier: standalone question vs contextual follow-up vs product-quality recommendation.\nExtract a compact active-topic brief from recent user context, selected files, and the last assistant answer.\nGate fuzzy retrieval with topic overlap so unrelated learned snippets cannot win just because they share loose words.\nAdd an automated teacher loop that replays real-user prompts, scores topic retention/instruction coverage/concrete action, and blocks regressions.\nKeep external LLMs as optional critics only; Vai still drafts the answer from its local route, context brief, and learned policy.\n\nResponsiveness win\nThis is fast because it runs before slow or broad fallback paths. It should reduce off-topic answers and wasted external validation rounds at the same time.\n\nRELATED\nWhat usually breaks when setting up context building chat?\nHow should I structure context building chat in a real project?\nRELATED\nWhat usually breaks when setting up context building chat?\nHow should I structure context building chat in a real project?\nCopy\nChat mode\nUse a sharper follow-up to keep the thread moving.\nEnter sends\nShift+Enter newline\nChat\nIDE\n\nVai can make mistakes. Verify important information."
+    },
+    {
+      "id": "simple-followup",
+      "prompt": "Explain that more simply and tell me the first patch you would make.",
+      "inputBeforeSendLength": 68,
+      "inputAfterSend": "",
+      "activeConversationId": "01KPY3XYZCN98TX1A4H8ERP9WH",
+      "messageCount": 6,
+      "latestAssistant": {
+        "role": "assistant",
+        "content": "**Vai chat context relevance, simpler**\nThe important context is: Vai, chat app, user context, response relevance, teacher loop.\n\nPlain version: keep the previous topic as the anchor, then explain only the part the current turn asks about. Do not restart from a generic definition unless the user clearly starts a new topic.\n\nThat is the difference between an answer that merely matches words and an answer that feels like it heard the conversation.\n\n**First patch**\nAdd a high-priority response-quality route that detects Vai/chat relevance prompts before glossary decomposition or broad retrieval. The acceptance test should prove the answer says \"Vai\", keeps the user context, and names one concrete implementation step.",
+        "confidence": 0.82,
+        "sources": 0,
+        "followUps": 3
+      },
+      "score": {
+        "missing": [],
+        "badSnippets": false,
+        "hasGenericDeflection": false,
+        "lengthOk": true,
+        "concretePatch": true,
+        "noExternalBrainViolation": true,
+        "mentionsCurrentSubject": true,
+        "uiModeDrift": false,
+        "pass": true
+      },
+      "bodyTail": "ally, then optionally ask a critic whether the answer stayed grounded.\n\nFirst patch I would make\nAdd the high-priority vai-chat-quality-direction route plus tests that prove this exact class of prompt returns a concrete plan instead of decomposed glossary snippets.\n\nRELATED\nWhat usually breaks when setting up context am building chat app called vai users complain gives?\nHow should I structure context am building chat app called vai users complain gives in a real project?\nRELATED\nWhat usually breaks when setting up context am building chat app called vai users complain gives?\nHow should I structure context am building chat app called vai users complain gives in a real project?\nCopy\nYou\n\nGo deeper on that. Make it stronger with automated teacher loops, but do not make external LLMs the main brain. Tell me exactly what you would implement next.\n\nVai\n\nGrounded hardening pass\nFor Vai chat context relevance, harden the response path where context enters the engine.\n\nImplement next\n\nAdd a turn classifier: standalone question vs contextual follow-up vs product-quality recommendation.\nExtract a compact active-topic brief from recent user context, selected files, and the last assistant answer.\nGate fuzzy retrieval with topic overlap so unrelated learned snippets cannot win just because they share loose words.\nAdd an automated teacher loop that replays real-user prompts, scores topic retention/instruction coverage/concrete action, and blocks regressions.\nKeep external LLMs as optional critics only; Vai still drafts the answer from its local route, context brief, and learned policy.\n\nResponsiveness win\nThis is fast because it runs before slow or broad fallback paths. It should reduce off-topic answers and wasted external validation rounds at the same time.\n\nRELATED\nWhat usually breaks when setting up context building chat?\nHow should I structure context building chat in a real project?\nRELATED\nWhat usually breaks when setting up context building chat?\nHow should I structure context building chat in a real project?\nCopy\nYou\n\nExplain that more simply and tell me the first patch you would make.\n\nVai\n\nVai chat context relevance, simpler\nThe important context is: Vai, chat app, user context, response relevance, teacher loop.\n\nPlain version: keep the previous topic as the anchor, then explain only the part the current turn asks about. Do not restart from a generic definition unless the user clearly starts a new topic.\n\nThat is the difference between an answer that merely matches words and an answer that feels like it heard the conversation.\n\nFirst patch\nAdd a high-priority response-quality route that detects Vai/chat relevance prompts before glossary decomposition or broad retrieval. The acceptance test should prove the answer says \"Vai\", keeps the user context, and names one concrete implementation step.\n\nCopy\nChat mode\nUse a sharper follow-up to keep the thread moving.\nEnter sends\nShift+Enter newline\nChat\nIDE\n\nVai can make mistakes. Verify important information."
+    }
+  ],
+  "events": [
+    {
+      "kind": "console",
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "kind": "console",
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    },
+    {
+      "kind": "console",
+      "type": "log",
+      "text": "[VAI] Starting engine poll... {API_BASE: }"
+    },
+    {
+      "kind": "console",
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "kind": "console",
+      "type": "log",
+      "text": "[VAI] Engine ready: {status: ok, engine: vai:v0, stats: Object, adaptive: Object}"
+    },
+    {
+      "kind": "console",
+      "type": "info",
+      "text": "[auto-sandbox] assistant-complete {messageId: temp-1776979737751-assistant, effectiveMode: chat, layoutMode: chat, activeConversationId: 01KPY3XYZCN98TX1A4H8ERP9WH, sandboxProjectId: null}"
+    },
+    {
+      "kind": "console",
+      "type": "info",
+      "text": "[auto-sandbox] skipping-non-build-mode {effectiveMode: chat, messageId: temp-1776979737751-assistant}"
+    },
+    {
+      "kind": "console",
+      "type": "info",
+      "text": "[auto-sandbox] assistant-complete {messageId: temp-1776979740580-assistant, effectiveMode: chat, layoutMode: chat, activeConversationId: 01KPY3XYZCN98TX1A4H8ERP9WH, sandboxProjectId: null}"
+    },
+    {
+      "kind": "console",
+      "type": "info",
+      "text": "[auto-sandbox] skipping-non-build-mode {effectiveMode: chat, messageId: temp-1776979740580-assistant}"
+    },
+    {
+      "kind": "console",
+      "type": "info",
+      "text": "[auto-sandbox] assistant-complete {messageId: temp-1776979742425-assistant, effectiveMode: chat, layoutMode: chat, activeConversationId: 01KPY3XYZCN98TX1A4H8ERP9WH, sandboxProjectId: null}"
+    },
+    {
+      "kind": "console",
+      "type": "info",
+      "text": "[auto-sandbox] skipping-non-build-mode {effectiveMode: chat, messageId: temp-1776979742425-assistant}"
+    }
+  ]
+}

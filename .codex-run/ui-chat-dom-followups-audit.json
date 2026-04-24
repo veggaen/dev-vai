@@ -1,0 +1,23 @@
+{
+  "at": "2026-04-23T21:32:24.990Z",
+  "results": [
+    {
+      "preview": "Vai\n\nBest next task\nImplement a local context-grounded answer contract as the next engineering task before Vai enters broad retrieval, glossary decomposition, or any fallback path.\n\nWhy this is the highest-leverage fix\nThe bad behavior is not just weak wording; it is routing drift. Vai sees words like \"context\", \"relevant\", \"external LLM\", and \"accurate\", then retrieves loosely related snippets instead of preserving the user request: improve Vai chat responses against the current conversation.\n\n",
+      "relatedCountInLatest": 1,
+      "chatMode": false,
+      "builderDrift": false
+    },
+    {
+      "preview": "Vai\n\nGrounded hardening pass\nFor Vai chat context relevance, harden the response path where context enters the engine.\n\nImplement next\n\nAdd a turn classifier: standalone question vs contextual follow-up vs product-quality recommendation.\nExtract a compact active-topic brief from recent user context, selected files, and the last assistant answer.\nGate fuzzy retrieval with topic overlap so unrelated learned snippets cannot win just because they share loose words.\nAdd an automated teacher loop that",
+      "relatedCountInLatest": 1,
+      "chatMode": false,
+      "builderDrift": false
+    },
+    {
+      "preview": "Vai\n\nVai chat context relevance, simpler\nThe important context is: Vai, chat app, user context, response relevance, teacher loop.\n\nPlain version: keep the previous topic as the anchor, then explain only the part the current turn asks about. Do not restart from a generic definition unless the user clearly starts a new topic.\n\nThat is the difference between an answer that merely matches words and an answer that feels like it heard the conversation.\n\nFirst patch\nAdd a high-priority response-quality",
+      "relatedCountInLatest": 0,
+      "chatMode": false,
+      "builderDrift": false
+    }
+  ]
+}

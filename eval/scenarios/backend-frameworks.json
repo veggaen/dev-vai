@@ -1,0 +1,56 @@
+{
+  "id": "backend-frameworks",
+  "label": "Backend framework-specific questions â€” Express/Fastify, Django, FastAPI, Spring, Rails",
+  "scenarios": [
+    {
+      "id": "express-middleware-order",
+      "messages": [{ "role": "user", "content": "In Express, why does middleware order matter? Show a body-parser before a route example." }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/app\\.use|express\\.json|middleware|order|before|next\\(\\)|request lifecycle|body/i"
+        ]
+      }
+    },
+    {
+      "id": "django-queryset-lazy",
+      "messages": [{ "role": "user", "content": "How are Django querysets lazy, and when do they actually hit the database?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/queryset|lazy|evaluat|iter|cached|hit the database|\\.all\\(\\)|\\.filter\\(|__iter__|\\.count\\(\\)/i"
+        ]
+      }
+    },
+    {
+      "id": "fastapi-dependency-injection",
+      "messages": [{ "role": "user", "content": "Show a FastAPI dependency that provides a database session and is injected into a route handler." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/Depends\\(|def\\s+get_db|yield\\s+db|FastAPI|@app\\.(?:get|post)|session|Session\\s*=\\s*Depends/i"
+        ]
+      }
+    },
+    {
+      "id": "spring-boot-rest-controller",
+      "messages": [{ "role": "user", "content": "Write a minimal Spring Boot @RestController that exposes GET /health returning a simple JSON object." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/@RestController|@GetMapping|\\/health|ResponseEntity|@SpringBootApplication|@RequestMapping/i"
+        ]
+      }
+    },
+    {
+      "id": "rails-strong-parameters",
+      "messages": [{ "role": "user", "content": "Why do Rails controllers use strong parameters, and how do I permit nested attributes?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/strong param|params\\.require|\\.permit|mass assignment|nested attributes|accepts_nested_attributes_for/i"
+        ]
+      }
+    }
+  ]
+}

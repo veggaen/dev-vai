@@ -1,0 +1,26 @@
+{
+  "verdict": "fail",
+  "passed": 0,
+  "failed": 1,
+  "total": 1,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-20-40-302Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-20-40-302Z\\report.json",
+  "results": [
+    {
+      "slug": "safe-material-code-theme",
+      "sourceRepo": "https://github.com/t3dotgg/vsc-material-but-i-wont-sue-you",
+      "status": "fail",
+      "failures": [
+        "missing file block package.json",
+        "missing file block themes/safe-material-color-theme.json or themes/material-safe-color-theme.json or safe-material-color-theme.json",
+        "missing required response text tokenColors",
+        "missing required response text activityBar",
+        "missing required response text editor.background"
+      ],
+      "warnings": [],
+      "conversationId": "01KPZ5SE7P0PF194SDD7XWK6VN",
+      "sandboxId": "8f75c045",
+      "previewUrl": null
+    }
+  ]
+}

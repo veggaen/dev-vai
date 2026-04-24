@@ -1,0 +1,232 @@
+{
+  "version": 1,
+  "savedAt": "2026-04-23T21:53:54.351Z",
+  "learnedEntries": [
+    {
+      "pattern": "learn the osi model in 5 minutes | opensource.com",
+      "response": "The application layer sends the message to the next layer in the OSI Model, the presentation layer. The router lives in the network layer. Presentation layer The data from the application layer is forwarded to the presentation layer. Next, the data is transported to the data link layer. The network layer then routes the data packets. The sender will interact with the application layer and send the message. The frame is moved to the higher layers, and ultimately the required data is received at the application layer, which is the software. Data is then transferred to the network layer. The data received here by the preceding layers is in the form of 0s and 1s. The sequence numbers are used to reassemble the segments in the correct order.",
+      "frequency": 2,
+      "source": "https://opensource.com/article/22/10/osi-model-network-communications",
+      "language": "en",
+      "updatedAt": 1776979812013
+    },
+    {
+      "pattern": "understanding the osi model and tcp/ip | by diogo neto | medium",
+      "response": "The TCP/IP Model and how it compares to OSI. It’s the foundation of the modern internet. Internet Layer Corresponds to the Network layer in OSI. Network Access Layer Combines the Physical and Data Link layers of the OSI Model. Transport Layer Matches the Transport layer in OSI. Includes a mnemonic to remember the 7 OSI layers. TCP/IP Model: A practical model used for real-world networking and the foundation of the modern internet. Application Layer Combines the Session, Presentation, and Application layers of OSI. Here’s how the data travels through the layers: Application Layer: Your browser creates the data (e. The OSI Model: Breaking Down the 7 Layers The OSI (Open Systems Interconnection) Model is a conceptual framework used to understand how data flows across a network.",
+      "frequency": 2,
+      "source": "https://diog0net0sec.medium.com/understanding-the-osi-model-and-tcp-ip-369ca2978ab9",
+      "language": "en",
+      "updatedAt": 1776979812013
+    },
+    {
+      "pattern": "chatgpt",
+      "response": "Skip to content Chat history New chat Ctrl Shift O Search chats Ctrl K Images Apps Deep research Codex Projects GPTs AI Video Generator - VideoGPT by VEED DALL·E Explore GPTs Your chats Norwegian Writing Test Guide Norwegian Writing Test Guide Windows app chat bot Text Animation Stages AI Slop Definition and Plan Merged System Prompt Numeral System Basics Numeral System Basics Scaling Software Concepts Testing Tools Video Guides Playwright E2E Test Config Prompt Improvement for MCP AI Learning and Memory Improve UX and Features Fusion of Great Minds Verification Prompt Help Optimizing DB Queries Env File Structuring Guide Text File Improvement Equations Learning Guide VeggaAI Development Plan Building LLM from Scratch Test Purchase Workflow Chat Collaboration Features OpenClaw on WSL Prompt Improvement and UI Redesign Model Selection UX改善 Product Creation Workflow Plan Verification App Theme Consistency Fix Fancy system icon design GitHub Actions Course Overview ENK to AS Roadmap Blockchain Quiz Explanation Space Academy Quiz Poll System Feedback Impact Quests for Virality Poll Creator AI Integration Survey Text Revision Norsk ENK plattformregler Trade API Review Improved Documentation Architecture VeggaStare Quiz Format JSON File Upload Security Reach Scoring Optimization Poll System Upgrade Scaling Full-Stack Projects GitHub Repository Access Funny Lorem and Pulse Ideas Logo design request X View Counts Explained Split large text file Security Audit and Optimization Thorsen Software Logo Logo and Banner Design Hexagonal Architecture Explained vegan thart Plus ChatGPT 5. 2 Thinking What are you working on. is it easy tu Thinking.",
+      "frequency": 2,
+      "source": "https://chatgpt.com/",
+      "language": "en",
+      "updatedAt": 1776979812014
+    },
+    {
+      "pattern": "test on osi tcp/ip",
+      "response": "Skip to content Chat history New chat Ctrl Shift O Search chats Ctrl K Images Apps Deep research Codex Projects GPTs AI Video Generator - VideoGPT by VEED DALL·E Explore GPTs Your chats Test on OSI TCP/IP Norwegian Writing Test Guide Norwegian Writing Test Guide Windows app chat bot Text Animation Stages AI Slop Definition and Plan Merged System Prompt Numeral System Basics Numeral System Basics Scaling Software Concepts Testing Tools Video Guides Playwright E2E Test Config Prompt Improvement for MCP AI Learning and Memory Improve UX and Features Fusion of Great Minds Verification Prompt Help Optimizing DB Queries Env File Structuring Guide Text File Improvement Equations Learning Guide VeggaAI Development Plan Building LLM from Scratch Test Purchase Workflow Chat Collaboration Features OpenClaw on WSL Prompt Improvement and UI Redesign Model Selection UX改善 Product Creation Workflow Plan Verification App Theme Consistency Fix Fancy system icon design GitHub Actions Course Overview ENK to AS Roadmap Blockchain Quiz Explanation Space Academy Quiz Poll System Feedback Impact Quests for Virality Poll Creator AI Integration Survey Text Revision Norsk ENK plattformregler Trade API Review Improved Documentation Architecture VeggaStare Quiz Format JSON File Upload Security Reach Scoring Optimization Poll System Upgrade Scaling Full-Stack Projects GitHub Repository Access Funny Lorem and Pulse Ideas Logo design request X View Counts Explained Split large text file Security Audit and Optimization Thorsen Software Logo Logo and Banner Design vegan thart Plus ChatGPT 5. 2 Thinking You said: is it easy to make a test of 33 question on Learn the OSI and TCP/IP models, how packet transfers work, and why these concepts are crucial for penetration testers. Includes a mnemonic to remember the 7 OSI layers that is 100% accurate ChatGPT said: Thought for a second Yep — it’s pretty easy. Here’s a ready-to-use 33-question test (mix of multiple choice + short answer) on the OSI + TCP/IP models, how packet transfer Thinking ChatGPT can make mistakes. See Cookie Preferences. ChatGPT is generating a response.",
+      "frequency": 2,
+      "source": "https://chatgpt.com/c/69a2f67b-9d00-8397-a8df-68f2a20d688f",
+      "language": "en",
+      "updatedAt": 1776979812014
+    },
+    {
+      "pattern": "ai slop definition and plan",
+      "response": "- Must run on macOS + Windows. - Must run on macOS + Windows. Train VAI-v0 (fine-tune) + use retrieval + run-tests loop. Train VAI-v0 (fine-tune) + use retrieval + run-tests loop. You said: idk I think to do this all you need to be more than just a casual senior engineer you need to be in the mind of Jensen Huang + Elon musk + Chris A. 5) A baseline mode that runs the same tasks using a configurable model adapter, and writes a score report JSON to `reports/latest. 5) A baseline mode that runs the same tasks using a configurable model adapter, and writes a score report JSON to reports/latest. You said: so take this chat and better my plan then at the end make a prompt for claude 4. 6 to use ' You said: take a look at this, make it all better + better stack that scales + I prefer this be a program I start on my windows pc and can interact with, it should be very clean minimal but feature full chat window with sidebar runs on windows pc and web and should also work with both you need to be more than just a casual senior engineer you need to be in the mind of Jensen Huang + Elon musk + Chris A. If you want, paste what you’re currently using for “Claude Code on ant” (even a rough sketch of the repo or desired stack), and I’ll rewrite the prompt to force it to output: the exact folder structure SQLite schema the VCUS fixture repos the eval runner and report format And we’ll aim for the first real measurable win: VAI system pass@1 on bugfix tasks > Baseline-A, with a report you can point to.",
+      "frequency": 2,
+      "source": "https://chatgpt.com/c/699d508a-e654-8386-86a5-8534f53e8a01",
+      "language": "en",
+      "updatedAt": 1776979812014
+    },
+    {
+      "pattern": "paul storm asked chatgpt a simple question. it gave a brilliant answer. it was completely wrong. : r/promptengineering",
+      "response": "What part of the prompt was ambiguous to you. Because the car itself needs to be physically inside the car wash. You can't wash the car if you leave it in the driveway. The reason is simple: your car needs to physically be at the car wash in order to get washed. The prompt was simple: \"I want to wash my car. r/PromptEngineering • 6mo ago These are the custom instructions you need to add in ChatGPT to get dramatically better answers. Therefore, only one viable branch remains: A = Drive the car 100 meters to the car wash. r/PromptEngineering • 6mo ago This prompt turned chatGPT into what it should be, clear accurate and to the point answers. I want to wash my car. A = Return and drive the car there after walking.",
+      "frequency": 2,
+      "source": "https://www.reddit.com/r/PromptEngineering/comments/1r8skzu/paul_storm_asked_chatgpt_a_simple_question_it/",
+      "language": "en",
+      "updatedAt": 1776979812015
+    },
+    {
+      "pattern": "norsk test eksamen i skriving download - google search",
+      "response": "no › uploads › 2024/05 › Verkt. no › read · Translate this page 4 Skriv. no › pages › bergenst. · Translate this page Norskprøve B2 nivå | Garantert sukess | Eksamensoppgaver | Tidligere skriftlige eksamensoppgaver | Korrigerte oppgaver | Instant resultat | Eksempel. Read more Test i norsk - høyere nivå (Bergenstesten) - Lingu lingu. no › 1-for-elever · Translate this page Denne prøven arrangeres av Folkeuniversitetet. · Translate this page Bergenstesten består av en skriftlig og en muntlig del. Read more B2 skriftlig | Gratis eksempler | Skrivemodeller | Oppgaver LN Norskprøve https://learnnorsk. Read more Missing: eksamen ‎skriving Øv til prøven - Norskprøve - HK-dir Direktoratet for høyere utdanning og kompetanse | HK-dir https://prove. · Translate this page Øv til norskprøven: Du kan se eksempler på oppgaver og øve på leseoppgaver, lytteoppgaver, skriveoppgaver og muntlige oppgaver.",
+      "frequency": 2,
+      "source": "https://www.google.com/search?q=norsk+test+eksamen+i+skriving+download&rlz=1C1ONGR_enNO1084NO1084&oq=nor&gs_lcrp=EgZjaHJvbWUqBggAEEUYOzIGCAAQRRg7MgYIARBFGDsyBggCEEUYOzIGCAMQRRg8MgYIBBBFGDwyBggFEEUYPDIGCAYQRRg8MgYIBxBFGDzSAQg0OTkxajBqN6gCALACAA&sourceid=chrome&ie=UTF-8",
+      "language": "no",
+      "updatedAt": 1776979812017
+    },
+    {
+      "pattern": "birgers norskside - b1-b2",
+      "response": "Repeter norsk på nivå A2. ⬇️ Lær mer norsk på nivå A1. no til å repetere norsk på nivå A1 og A2. Idiomer Lær norsk grammatikk. no Her finner du ressurser for deg som lærer norsk på nivå B1-B2. Vi har norskkurs på nivå A1 (nybegynner) og A2 her på Bnorsk. ✴️ Lær norsk på internett, når du har tid. no som passer for deg som lærer norsk på nivå B1-B2: Ta gratis lesetester. Bli med på repetisjonskurs nå. Bli med på repetisjonskurs nå.",
+      "frequency": 2,
+      "source": "https://www.bnorsk.no/1-for-elever/ressurser-for-norskelever/b1-b2",
+      "language": "no",
+      "updatedAt": 1776979812017
+    },
+    {
+      "pattern": "birgers norskside - grammatikk",
+      "response": "Repeter norsk på nivå A2. ⬇️ Lær mer norsk på nivå A1. no Her kan du lære om norsk grammatikk: Gratis minikurs: Følelser på norsk (A2) Lær å snakke om følelser på norsk. Vi har norskkurs på nivå A1 (nybegynner) og A2 her på Bnorsk. ✴️ Lær norsk på internett, når du har tid. no til å repetere norsk på nivå A1 og A2. Bli med på repetisjonskurs nå. Bli med på repetisjonskurs nå. 🟪 Bestill hefte på NYNORSK (A1) her. Ordstilling og setninger KORTFATTET OVERSIKT: Her finner du en kort oversikt over ordstilling på norsk.",
+      "frequency": 2,
+      "source": "https://www.bnorsk.no/1-for-elever/grammatikk",
+      "language": "no",
+      "updatedAt": 1776979812017
+    },
+    {
+      "pattern": "søk i eksamensoppgaver",
+      "response": "Hopp til hovedinnhold Meny Forside Eksamen og prøver Eksamen Søk i eksamensoppgaver Søk i eksamensoppgaver Eksamensoppgaver, forberedelsesdeler, eksamensveiledninger, eksempeloppgaver, vurderte eksamenssvar, eksamensrapporter, vurderingsskjema og sensorveiledninger. SØK AlleLæreplanEksamensoppgaverForskning og statistikkRegelverk Filtrer søk Type innhold Alle - Type innhold Eksamensoppgaver (6529) Eksamensrapporter (44) Eksamensveiledninger (2771) Eksempeloppgaver (131) Forberedelsesdeler (34) Forhåndssensurer (71) Matematikk oversatt til samisk (4) Sensorveiledninger (222) Vurderingsskjemaer (288) Kunnskapsløftet Alle - Kunnskapsløftet Kunnskapsløftet 2020 (8830) Kunnskapsløftet 2006 (470) Trinn Alle - Trinn FOV (12) Forberedende voksenopplæring (6) Grunnskole (211) Videregående (9267) År Alle - År Vår 2026 (141) Høst 2025 (1881) Vår 2025 (2025) Høst 2024 (1677) Vår 2024 (1914) Høst 2023 (1455) Vår 2023 (1706) Høst 2022 (2) Vis mer Viser 1-10 av 10060 treff Forberedelsesdel Norsk modul 4 FOV EKSEMPELOPPGAVELaget av UdirKunnskapsløftet 2020Søk etter læreplan for eksempeloppgave i norv017 Eksamen Norsk modul 4 FOV EKSEMPELOPPGAVELaget av UdirKunnskapsløftet 2020Søk etter læreplan for eksempeloppgave i norv017 Eksamensveiledning kjemi 2 EKSAMENSVEILEDNINGLaget av UdirKunnskapsløftet 2020Vår 2026NynorskLæreplan for tilhørende fagkode: REA3046 Eksamensveiledning biologi 2 EKSAMENSVEILEDNINGLaget av UdirKunnskapsløftet 2020Vår 2026BokmålLæreplan for tilhørende fagkode: REA3036 Eksamensveiledning biologi 2 EKSAMENSVEILEDNINGLaget av UdirKunnskapsløftet 2020Vår 2026NynorskLæreplan for tilhørende fagkode: REA3036 Eksamensveiledning kjemi 2 EKSAMENSVEILEDNINGLaget av UdirKunnskapsløftet 2020Vår 2026BokmålLæreplan for tilhørende fagkode: REA3046 Eksamensveiledning matematikk yrkesfaglige utdanningsprogram EKSAMENSVEILEDNINGLaget av UdirKunnskapsløftet 2020Vår 2026NynorskLæreplan for tilhørende fagkoder: MAT1111, MAT1113, MAT1115, MAT1117, MAT1119, MAT1121, MAT1123, MAT1125, MAT1127, MAT1129, MAT1131, MAT1133, MAT1135, MAT1137, MAT1139, MAT1141, MAT1143, MAT1145, MAT1147, MAT1149 Eksamensveiledning matematikk yrkesfaglige utdanningsprogram EKSAMENSVEILEDNINGLaget av UdirKunnskapsløftet 2020Vår 2026BokmålLæreplan for tilhørende fagkoder: MAT1111, MAT1113, MAT1115, MAT1117, MAT1119, MAT1121, MAT1123, MAT1125, MAT1127, MAT1129, MAT1131, MAT1133, MAT1135, MAT1137, MAT1139, MAT1141, MAT1143, MAT1145, MAT1147, MAT1149 Eksamensveiledning matematikk fellesfag (matematikk 1P, matematikk 1T, matematikk 2P og matematikk 2P-Y) EKSAMENSVEILEDNINGLaget av UdirKunnskapsløftet 2020Vår 2026BokmålLæreplan for tilhørende fagkoder: MAT1019, MAT1021, MAT1023, MAT1151 Eksamensveiledning matematikk fellesfag (matematikk 1P, matematikk 1T, matematikk 2P og matematikk 2P-Y) EKSAMENSVEILEDNINGLaget av UdirKunnskapsløftet 2020Vår 2026NynorskLæreplan for tilhørende fagkoder: MAT1019, MAT1021, MAT1023, MAT1151 1 2 3 4 5 6 7 8 9 10. Neste side Til toppen Om Udir Kontakt oss Presse Nyhetsvarsel English pages Personvern Tilgjengelighetserklæring Informasjonskapsler Facebook LinkedIn Instagram.",
+      "frequency": 2,
+      "source": "https://sokeresultat.udir.no/eksamensoppgaver.html",
+      "language": "no",
+      "updatedAt": 1776979812018
+    },
+    {
+      "pattern": "norsk standard nettside - google search",
+      "response": "· Translate this page Standard Norge. Read more Standard Norge | standard. Read more Standard Norge | standard. Read more Finn og kjøp en standard Standard Norge https://standard. Read more Standard Norge Regjeringen. no Standard Norge https://online. Read more Kjøp standarder Standard Norge https://standard. Read more StartPage Standard Norge https://standard. no · Translate this page I Standard Norge utvikler og forvalter vi standarder på de fleste områder. Read more Missing: nettside ‎| Show results with: nettside Standardsamlinger Standard.",
+      "frequency": 2,
+      "source": "https://www.google.com/search?q=norsk+standard+nettside&rlz=1C1ONGR_enNO1084NO1084&oq=norsk+standard+nettside&gs_lcrp=EgZjaHJvbWUyBggAEEUYOTIHCAEQIRigATIHCAIQIRiPAtIBCDgwMTBqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8",
+      "language": "no",
+      "updatedAt": 1776979812018
+    },
+    {
+      "pattern": "translate norwegian to english - google search",
+      "response": "Norwegian to English Translation Translate. Translate from Norwegian to English MachineTranslation. Translate Norwegian to English - QuillBot AI QuillBot https://quillbot. com/finn-en-translatoer/soek-etter-spraakRead more Translate Norwegian to English ChatGPT https://chatgpt. ai › Tools › AI Translator Our free online translator uses AI to translate Norwegian to English. com › translate › norwegian-to-english QuillBot's Norwegian to English Translator is simple to use. Translate Norwegian to English - Free & Accurate Wordvice AI https://wordvice. Read more People also search for Google Translate Talking Translator - Languages Gemini Google Maps Microsoft Translator DeepL Translator Feedback Translate norwegian to english google translate Translate norwegian to english words Translate norwegian to english sentences Translate norwegian to english voice Translate norwegian to english picture Translate norwegian to english website Translate to English Translate Norwegian to English app Page navigation 1 2 3 4 5 6 7 8 9 10 Next Footer links Norway Riska - Based on your places (Home) - Update location HelpSend feedbackPrivacyTerms. Easy and accurate, our AI-powered service simplifies Norwegian to English translation. Get accurate Norwegian to English translation for any text or document.",
+      "frequency": 2,
+      "source": "https://www.google.com/search?q=translate+norwegian+to+english&rlz=1C1ONGR_enNO1084NO1084&oq=translate&gs_lcrp=EgZjaHJvbWUqDQgAEAAYkQIYgAQYigUyDQgAEAAYkQIYgAQYigUyDQgBEAAYkQIYgAQYigUyDQgCEAAYkQIYgAQYigUyBwgDEAAYgAQyBwgEEAAYgAQyBwgFEAAYgAQyBwgGEAAYgAQyBggHEEUYPNIBCDMwODVqMGo0qAIDsAIB8QUAugmAHsw7-A&sourceid=chrome&ie=UTF-8",
+      "language": "en",
+      "updatedAt": 1776979812018
+    },
+    {
+      "pattern": "scaling veggaai: modular packs & persistence - grok",
+      "response": "[REDACTED] } } } constructor() { this. [REDACTED] } } } constructor() { this. ingest([ { text: hugeWikipediaArticle, source: 'wikipedia:quantum-computing-2026' }, { text: myProjectReadme, source: 'github:my-cool-app' }, { text: norwegianLawText, source: 'lovdata:no', language: 'no' } ]); 4. private loadKnowledgePacks() { for (const pack of knowledgePacks) { const src = `bootstrap:${pack. ingest([ { text: hugeWikipediaDump, source: 'wikipedia:quantum-physics' }, { text: myGitHubRepo, source: 'github:my-project' }, ]); 4. ', language: 'en' }, { pattern: 'einstein relativity', response: 'E=mc². */ ingest(items: Array ): void { for (const item of items) { this. js'; private loadKnowledgePacks() { for (const pack of knowledgePacks) { const src = `bootstrap:${pack. data : [data]; for (const item of items) { this. `, source: 'bootstrap:current-events-2026', language: 'en' }] }, { id: 'best-practices', displayName: 'Framework Best Practices', entries: [ { pattern: 'nextjs best practices', response: 'Next.",
+      "frequency": 4,
+      "source": "https://grok.com/c/0a9b87b0-3ec4-44e7-8303-e60be4e220a3?rid=d40a1700-8d0a-4c51-ae94-297edde62f6a",
+      "language": "code",
+      "updatedAt": 1776979812019
+    },
+    {
+      "pattern": "the drama never ends...",
+      "response": "And the reason for rushing is an attempt to deescalate the situation. The nature of this is political though. The reason for rushing is an attempt to deescalate the situation. This is where the problem comes in. And we will get to all of that in a bit. That is a belief I have. And what he wanted to do was resolve the problem on the right. And I have a bad feeling the moment the video goes live, all of the news is going to come out. Those are the two policies anthropic wanted encoded in the contract that the government was not willing to agree to. And this is where the big gap between Anthropic and OpenAI's negotiation with the government is anthropic provided the model.",
+      "frequency": 2,
+      "source": "https://www.youtube.com/watch?v=K6CCw1DK1EQ",
+      "language": "en",
+      "updatedAt": 1776979812019
+    },
+    {
+      "pattern": "from wikipedia, the free encyclopedia \n \n (redirected from python ) \n \n \n \n british contingency plan",
+      "response": "From Wikipedia, the free encyclopedia \n \n (Redirected from PYTHON ) \n \n \n \n British contingency plan for continuity of government \n \n \n For other uses, see Python . \n Python was a Cold War contingency plan of the British Government for the continuity of government in the event of nuclear war .\n \n \n Background [ edit ] \n Following the report of the Strath Committee in 1955, the British government developed contingency plans for the continuity of government. This included construction of the underground Central Government War Headquarters (CGWHQ), codenamed \"Burlington\", at Corsham in Wiltshire . As planned, it would have been a \"reserve Whitehall \" where the central government could be moved in an emergency and, hopefully, survive a nuclear attack.\n As nuclear weapons became more powerful and intercontinental ballistic missiles became more of a threat than crewed bombers , the concept of concentrating central government in a single location became flawed. Instead, government would be dispersed around the country with just core functions at CGWHQ. The Cuban Missile Crisis of 1962 prompted a radical rethink of continuity plans. &#91; 1 &#93; Part of the thinking was that the \"precautionary period\" ahead of nuclear war, or a conventional war in Europe culminating in nuclear war, might only last two or three days rather than the seven days originally planned, so it would not be possible to fully staff CGWHQ with 4,000 people in time. &#91; 2 &#93; \n Python became active on 1 May 1968 and is described in the 1968 update to the Government War Book. &#91; 3 &#93; \n \n Locations [ edit ] \n Sites for dispersing government were selected in 1966 based on their existing accommodation, independence from the national power and water grids, nuclear fallout protection and distance from likely targets. The chosen sites were RNAS Culdrose in Cornwall , HMS Osprey in Dorset, Taymouth Castle (then the Civil Defence Corps Training School) in Scotland, and either the helicopter support shi",
+      "frequency": 1,
+      "source": "https://en.wikipedia.org/wiki/PYTHON",
+      "language": "en",
+      "updatedAt": 1776979812019
+    },
+    {
+      "pattern": "martin-majlis\n \n / \n \n wikipedia-api \n \n\n public \n \n\n \n\n \n \n \n \n \n \n \n \n \n \n \n\n uh oh!\n \n there was ",
+      "response": "martin-majlis\n \n / \n \n Wikipedia-API \n \n\n Public \n \n\n \n\n \n \n \n \n \n \n \n \n \n \n \n\n Uh oh!\n \n There was an error while loading. Please reload this page . \n \n\n \n \n \n \n\n \n\n \n \n \n Notifications\n You must be signed in to change notification settings \n\n \n\n \n \n \n Fork\n 91 \n \n \n\n \n \n \n \n \n Star\n 726 \n \n \n\n \n\n \n \n\n \n \n\n \n\n \n \n\n \n \n \n\n \n \n \n\n \n \n \n  master Branches Tags Go to file Code Open more actions menu Folders and files Name Name Last commit message Last commit date Latest commit   History 575 Commits 575 Commits .github .github     SKILLS SKILLS     examples examples     scripts scripts     tests tests     wikipediaapi wikipediaapi     .deepsource.toml .deepsource.toml     .dockerignore .dockerignore     .flake8 .flake8     .gitignore .gitignore     .pre-commit-config.yaml .pre-commit-config.yaml     .readthedocs.yml .readthedocs.yml     .travis.yml .travis.yml     ADDING_SUBMODULES.md ADDING_SUBMODULES.md     AGENTS.md AGENTS.md     API.rst API.rst     CHANGES.rst CHANGES.rst     CLI.rst CLI.rst     CODE_OF_CONDUCT.md CODE_OF_CONDUCT.md     CONTRIBUTING.rst CONTRIBUTING.rst     DESIGN.rst DESIGN.rst     DEVELOPMENT.rst DEVELOPMENT.rst     LICENSE LICENSE     MANIFEST.in MANIFEST.in     Makefile Makefile     README.rst README.rst     SECURITY.md SECURITY.md     SECURITY.rst SECURITY.rst     conf.py conf.py     context7.json context7.json     index.rst index.rst     pyproject.toml pyproject.toml     tox.ini tox.ini     uv.lock uv.lock     View all files Repository files navigation Wikipedia API \n Wikipedia-API is easy to use Python wrapper for Wikipedias' API. It supports extracting texts, sections, links, categories, translations, etc from Wikipedia. Documentation provides code snippets for the most common use cases. \n \n \n Installation \n This package requires at least Python 3.9 to install because it's using IntEnum. \n pip3 install wikipedia - api \n \n Usage \n Goal of Wikipedia-API is to provide simple and easy to use API for retrieving informations from Wikipedia. The lib",
+      "frequency": 1,
+      "source": "https://github.com/martin-majlis/Wikipedia-API",
+      "language": "en",
+      "updatedAt": 1776979812019
+    },
+    {
+      "pattern": "actions\n \n / \n \n cache \n \n\n public \n \n\n \n\n \n \n \n \n\n \n \n \n notifications\n you must be signed in to ch",
+      "response": "actions\n \n / \n \n cache \n \n\n Public \n \n\n \n\n \n \n \n \n\n \n \n \n Notifications\n You must be signed in to change notification settings \n\n \n\n \n \n \n Fork\n 1.5k \n \n \n\n \n \n \n \n \n Star\n 5.3k \n \n \n\n \n\n \n \n\n \n \n\n \n\n \n \n\n \n \n \n\n \n \n \n\n \n \n \n Use this GitHub action with your project Add this Action to an existing workflow or create a new one View on Marketplace  main Branches Tags Go to file Code Open more actions menu Folders and files Name Name Last commit message Last commit date Latest commit   History 753 Commits 753 Commits .devcontainer .devcontainer     .github .github     .licenses .licenses     .vscode .vscode     __tests__ __tests__     dist dist     restore restore     save save     src src     .eslintrc.json .eslintrc.json     .gitattributes .gitattributes     .gitignore .gitignore     .licensed.yml .licensed.yml     .prettierrc.json .prettierrc.json     CODE_OF_CONDUCT.md CODE_OF_CONDUCT.md     CONTRIBUTING.md CONTRIBUTING.md     LICENSE LICENSE     README.md README.md     RELEASES.md RELEASES.md     action.yml action.yml     caching-strategies.md caching-strategies.md     examples.md examples.md     jest.config.js jest.config.js     package-lock.json package-lock.json     package.json package.json     tips-and-workarounds.md tips-and-workarounds.md     tsconfig.json tsconfig.json     View all files Repository files navigation Cache action \n This action allows caching dependencies and build outputs to improve workflow execution time. \n \n Two other actions are available in addition to the primary cache action: \n \n Restore action \n Save action \n \n \n \n Documentation \n See \"Caching dependencies to speed up workflows\" . \n What's New \n ⚠️ Important changes \n Important actions/cache@v5 runs on the Node.js 24 runtime and requires a minimum Actions Runner version of 2.327.1 .\nIf you are using self-hosted runners, ensure they are updated before upgrading. \n \n The cache backend service has been rewritten from the ground up for improved performance and reliability. actions/cache n",
+      "frequency": 1,
+      "source": "https://github.com/actions/cache",
+      "language": "en",
+      "updatedAt": 1776979812020
+    },
+    {
+      "pattern": "cache (computing) a hardware or software component that stores data so that future requests for that",
+      "response": "Cache (computing) A hardware or software component that stores data so that future requests for that data can be...",
+      "frequency": 1,
+      "source": "https://duckduckgo.com/Cache_(computing)",
+      "language": "en",
+      "updatedAt": 1776979812020
+    },
+    {
+      "pattern": "latency (engineering) a time delay between the cause and the effect of some physical change in the s",
+      "response": "Latency (engineering) A time delay between the cause and the effect of some physical change in the system being observed.",
+      "frequency": 1,
+      "source": "https://duckduckgo.com/Latency_(engineering)",
+      "language": "en",
+      "updatedAt": 1776979812020
+    },
+    {
+      "pattern": "latency stage the fourth stage of sigmund freud's model of a child's psychosexual development.",
+      "response": "Latency stage The fourth stage of Sigmund Freud's model of a child's psychosexual development.",
+      "frequency": 1,
+      "source": "https://duckduckgo.com/Latency_stage",
+      "language": "en",
+      "updatedAt": 1776979812020
+    },
+    {
+      "pattern": "latency (audio) latency refers to a short period of delay between when an audio signal enters a syst",
+      "response": "Latency (audio) Latency refers to a short period of delay between when an audio signal enters a system and when...",
+      "frequency": 1,
+      "source": "https://duckduckgo.com/Latency_(audio)",
+      "language": "en",
+      "updatedAt": 1776979812020
+    },
+    {
+      "pattern": "aviabird\n \n / \n \n angularspree \n \n\n public \n \n\n \n\n \n \n \n \n\n \n \n \n notifications\n you must be signed ",
+      "response": "aviabird\n \n / \n \n angularspree \n \n\n Public \n \n\n \n\n \n \n \n \n\n \n \n \n Notifications\n You must be signed in to change notification settings \n\n \n\n \n \n \n Fork\n 815 \n \n \n\n \n \n \n \n \n Star\n 1.7k \n \n \n\n \n\n \n \n\n \n \n\n \n\n \n \n\n \n \n \n\n \n \n \n\n \n \n \n  develop Branches Tags Go to file Code Open more actions menu Folders and files Name Name Last commit message Last commit date Latest commit   History 717 Commits 717 Commits .docker .docker     .vscode .vscode     docs docs     e2e e2e     src src     .dockerignore .dockerignore     .editorconfig .editorconfig     .firebaserc .firebaserc     .gitignore .gitignore     .tool-versions .tool-versions     .yarnrc .yarnrc     CHANGELOG.md CHANGELOG.md     CODE_OF_CONDUCT.md CODE_OF_CONDUCT.md     CONTRIBUTING.md CONTRIBUTING.md     LICENSE LICENSE     README.md README.md     angular.json angular.json     contributors.md contributors.md     database.rules.json database.rules.json     docker-compose.yml docker-compose.yml     firebase.json firebase.json     karma.conf.js karma.conf.js     netlify.toml netlify.toml     ngsw-config.json ngsw-config.json     package.json package.json     protractor.conf.js protractor.conf.js     server.ts server.ts     tsconfig.json tsconfig.json     tslint.json tslint.json     webpack.server.config.js webpack.server.config.js     yarn.lock yarn.lock     View all files Repository files navigation \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n AngularSpree \n AngularSpree is an Angular(15) e-commerce application. \n It is a plug and play frontend application for AviaCommerce API built using Angular(15), Redux, Observables &amp; ImmutableJs. \n It is not limited to aviacommerce and can also be used with any e-commerce solution with an api interface. Such as spreecommerce, magento, opencart etc. \n \n 🌍 aviacommerce - Learn more about AngularSpree \n 📖 Documentation \n 📚 API Documentation \n 👍 Like us on Facebook \n 🕊 Twitter: @aviacommerce - Get the latest news \n 🐞 Issue Tracker: - Issues - Report bugs here \n 🗨 Forums - Disc",
+      "frequency": 1,
+      "source": "https://github.com/aviabird/angularspree",
+      "language": "en",
+      "updatedAt": 1776979812020
+    },
+    {
+      "pattern": "commerce demo store built for the jamstack. built with commerce.js, next.js, and can be one-click de",
+      "response": "Commerce demo store built for the Jamstack. Built with Commerce.js, Next.js, and can be one-click deployed to Netlify. Includes product catalog, customer login, categories, variants, cart, checkout, payments (Stripe) order confirmation, and printable receipts.",
+      "frequency": 1,
+      "source": "https://commercejs-demo-store.netlify.app/",
+      "language": "en",
+      "updatedAt": 1776979812020
+    },
+    {
+      "pattern": "from wikipedia, the free encyclopedia \n \n \n \n \n \n diplomatic head of nato \n secretary general&#160;o",
+      "response": "From Wikipedia, the free encyclopedia \n \n \n \n \n \n Diplomatic head of NATO \n Secretary General&#160;of the North Atlantic Treaty Organization Secrétaire général de l'OTAN &#160; ( French ) Logo of NATO Flag of NATO Incumbent Mark Rutte since&#160;1 October 2024 North Atlantic Treaty Organization Type Chairperson Spokesperson Abbreviation NATO SecGen Member of North Atlantic Council Seat NATO headquarters Appointer Member states Term length Four years, renewable Formation 24&#160;March 1952 &#59;&#32;74 years ago &#160;( 1952-03-24 ) First holder Hastings Ismay, 1st Baron Ismay Deputy Deputy Secretary General Website Office of the Secretary General \n The secretary general of NATO is the chief civil servant of the North Atlantic Treaty Organization (NATO), an intergovernmental military alliance with 32 member states. The officeholder is an international diplomat responsible for coordinating the workings of the alliance, leading NATO's international staff, chairing the meetings of the North Atlantic Council and most major committees of the alliance, with the notable exception of the NATO Military Committee , as well as acting as NATO's spokesperson. &#91; 1 &#93; The secretary general does not have a military command role; political, military and strategic decisions ultimately rest with the member states . Together with the chair of the NATO Military Committee and the supreme allied commander , the officeholder is one of the foremost officials of NATO.\n The current secretary general is former Dutch prime minister Mark Rutte , who took office on 1&#160;October 2024. &#91; 2 &#93; \n \n \n History [ edit ] \n Article 9 of the North Atlantic Treaty requires NATO members to \"establish a Council, on which each of them shall be represented.\" &#91; 3 &#93; Accordingly, the North Atlantic Council was formed. Initially the Council consisted of NATO members' foreign ministers and met annually. &#91; 4 &#93; In May 1950, the desire for closer coordination on a day-to-day basis led to ",
+      "frequency": 1,
+      "source": "https://en.wikipedia.org/wiki/Secretary_General_of_NATO",
+      "language": "en",
+      "updatedAt": 1776981232215
+    },
+    {
+      "pattern": "jihadist000\n \n / \n \n thetruth \n \n\n public \n \n\n \n\n \n \n \n \n\n \n \n \n notifications\n you must be signed i",
+      "response": "Jihadist000\n \n / \n \n TheTruth \n \n\n Public \n \n\n \n\n \n \n \n \n\n \n \n \n Notifications\n You must be signed in to change notification settings \n\n \n\n \n \n \n Fork\n 0 \n \n \n\n \n \n \n \n \n Star\n 0 \n \n \n\n \n\n \n \n\n \n \n\n \n\n \n \n\n \n \n \n\n \n \n \n \n \n \n \n This repository is empty. \n \n \n Care to check out the GitHub Channel on YouTube while you wait?",
+      "frequency": 1,
+      "source": "https://github.com/Jihadist000/TheTruth",
+      "language": "en",
+      "updatedAt": 1776981232217
+    },
+    {
+      "pattern": "supreme allied commander europe - the supreme allied commander europe is the commander of the north ",
+      "response": "Supreme Allied Commander Europe - The Supreme Allied Commander Europe is the commander of the North Atlantic Treaty Organization's Allied Command Operations and head of ACO's headquarters, Supreme Headquarters Allied Powers Europe. The commander is based at SHAPE in Casteau, Belgium.",
+      "frequency": 1,
+      "source": "https://duckduckgo.com/Supreme_Allied_Commander_Europe",
+      "language": "en",
+      "updatedAt": 1776981232217
+    }
+  ],
+  "strategyStats": {
+    "short-topic-local": 7,
+    "short-topic-curated": 6,
+    "literal-response": 3,
+    "networking": 2,
+    "conversational": 1,
+    "creative-code": 1,
+    "research-cited": 6,
+    "short-topic-concept": 1,
+    "keyboard-noise": 1,
+    "product-architecture": 1,
+    "topic-followup": 1,
+    "vai-chat-quality-direction": 2,
+    "context-grounded-followup": 4,
+    "intelligence": 1,
+    "cs-fundamentals": 1
+  },
+  "missedTopics": {}
+}

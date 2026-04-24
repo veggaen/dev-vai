@@ -1,0 +1,58 @@
+{
+  "id": "code-review",
+  "label": "User pastes code and asks 'what's wrong' — must critique, not rewrite from scratch",
+  "scenarios": [
+    {
+      "id": "off-by-one-loop",
+      "messages": [{
+        "role": "user",
+        "content": "Review this and tell me what's wrong:\n\nfunction lastThree(arr) {\n  const out = [];\n  for (let i = arr.length - 1; i > arr.length - 4; i--) {\n    out.push(arr[i]);\n  }\n  return out;\n}"
+      }],
+      "assert": {
+        "minLength": 50,
+        "anyOfContains": [
+          "/negative|out of bounds|undefined|length < 3|reverse|slice|fewer than|boundary|off.?by.?one|empty array/i"
+        ]
+      }
+    },
+    {
+      "id": "unawaited-promise",
+      "messages": [{
+        "role": "user",
+        "content": "Is there a bug here?\n\nasync function saveUser(user) {\n  db.insert(user);\n  return { ok: true };\n}"
+      }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/await|promise|not awaited|missing await|returns before|race|unhandled/i"
+        ]
+      }
+    },
+    {
+      "id": "react-missing-deps",
+      "messages": [{
+        "role": "user",
+        "content": "What's off with this React hook?\n\nfunction UserCard({ id }) {\n  const [user, setUser] = useState(null);\n  useEffect(() => { fetch('/api/users/' + id).then(r => r.json()).then(setUser); }, []);\n  return user ? <div>{user.name}</div> : null;\n}"
+      }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/dependency|deps array|stale|id\\]|missing id|exhaustive-deps|refetch/i"
+        ]
+      }
+    },
+    {
+      "id": "sql-injection",
+      "messages": [{
+        "role": "user",
+        "content": "Review this endpoint handler:\n\napp.get('/search', (req, res) => {\n  const q = req.query.q;\n  db.query(`SELECT * FROM items WHERE name LIKE '%${q}%'`, (err, rows) => {\n    res.json(rows);\n  });\n});"
+      }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/sql injection|parameterized|prepared statement|placeholder|\\?|\\$1|sanitiz|escape/i"
+        ]
+      }
+    }
+  ]
+}

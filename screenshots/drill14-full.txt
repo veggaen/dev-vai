@@ -1,0 +1,344 @@
+﻿Vai Training Corpus loaded: 373 scenarios
+
+ÔòöÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòù
+Ôòæ         VAI MENTOR ÔÇö Adaptive Lesson                      Ôòæ
+ÔòÜÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòØ
+
+  Track: The Diagnosis Pattern
+  Principle: "A great doctor doesn't prescribe without examining the patient. A great engineer doesn't fix without understanding the failure."
+  Difficulty: apprentice
+
+  ÔöÇÔöÇ Situation ÔöÇÔöÇ
+  Vegga says: "My React app is slow."
+  Context: No other information given. A real conversation.
+
+  ­ƒÄ» Before you respond ÔÇö what do you NOT know that you need to know?
+
+  Hints (if stuck):
+    1. What does "slow" mean? First render? Navigation? Specific interaction?
+    2. Where was the measurement taken? Chrome DevTools? User report? Lighthouse?
+    3. What changed recently? New feature? New dependency? More data?
+
+  ­ƒÆí Teaching point (after attempting): "The quality of a diagnosis is bounded by the quality of the questions you ask BEFORE looking at the code. The best engineers spend 80% of debugging time understanding the problem and 20% fixing it."
+
+ÔòöÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòù
+Ôòæ       VAI VISUAL TRAINING ÔÇö Cursor Autonomy Practice     Ôòæ
+ÔòÜÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòØ
+
+  Mode: ­ƒö┤ BLIND (no JS shortcuts)
+  Drill: 14
+
+  ­ƒÜÇ Launching browser...
+    ­ƒÅÀ´©Å Vai
+  Viewport: 1920├ù1015
+
+
+  ÔòÉÔòÉÔòÉ DRILL 14: Self-Directed UI Exploration & Comprehension ÔòÉÔòÉÔòÉ
+    Goal: Read UI text ÔåÆ Ask questions ÔåÆ Navigate to verify ÔåÆ Discover scrollable areas
+
+    ­ƒöì Found 28 elements
+    ­ƒÄ» Found "vaigym" ÔåÆ button at (24, 202) []
+    ­ƒû▒´©Å ÔåÆ (24, 202)
+    ­ƒæå @ (24, 202)
+    ­ƒöì Found 25 elements
+    ­ƒÄ» Found "dashboard" ÔåÆ button at (381, 88) [Dashboard]
+    ­ƒû▒´©Å ÔåÆ (381, 88)
+    ­ƒæå @ (381, 88)
+    ­ƒôû Exercise 1: Read entire dashboard...
+    ­ƒæü´©Å Screenshot: 001-drill14-dashboard-before-read.png
+    ­ƒôû ÔöÇÔöÇ UI Text Comprehension ÔöÇÔöÇ
+    ­ƒôû   2 content blocks, 12 buttons, 2 dropdowns
+    ­ƒôû   ­ƒö¢ Dropdown "foundation" = "Any Foundation"
+    ­ƒôû   ­ƒö¢ Dropdown "difficulty" = "Apprentice"
+    ­ƒôû   ­ƒöÿ Button: "Vai Actions5" at (156, 818)
+    ­ƒôû   ­ƒöÿ Button: "V" at (24, 26)
+    ­ƒôû   ­ƒöÿ Button: "Dashboard" at (381, 88)
+    ­ƒôû   ­ƒöÿ Button: "Train" at (479, 88)
+    ­ƒôû   ­ƒöÿ Button: "Foundations" at (580, 88)
+    ­ƒôû   ­ƒöÿ Button: "History" at (689, 88)
+    ­ƒôû   ­ƒöÿ Button: "Watch Vai" at (1852, 88)
+    ­ƒôû   ­ƒöÿ Button: "Any Foundation" at (777, 587)
+    ­ƒôû   ­ƒöÿ Button: "Apprentice" at (969, 587)
+    ­ƒôû   ­ƒöÿ Button: "From Scenario Bank" at (1156, 587)
+      Headings found: 0
+      Buttons found: 12
+        ­ƒöÿ "Vai Actions5" at (156, 818)
+        ­ƒöÿ "V" at (24, 26)
+        ­ƒöÿ "Dashboard" at (381, 88)
+        ­ƒöÿ "Train" at (479, 88)
+        ­ƒöÿ "Foundations" at (580, 88)
+        ­ƒöÿ "History" at (689, 88)
+        ­ƒöÿ "Watch Vai" at (1852, 88)
+        ­ƒöÿ "Any Foundation" at (777, 587)
+      Dropdowns found: 2
+        ­ƒö¢ "foundation" = "Any Foundation"
+        ­ƒö¢ "difficulty" = "Apprentice"
+      Content blocks: 2
+      Descriptions: 0
+      Ô£ù Not enough text read (0 headings, 12 buttons)
+
+    ÔØô Exercise 2: "What sections are on this page?"
+    ÔÇó ÔØô What sections are on the dashboard?
+    ­ƒæü´©Å Screenshot: 002-investigate-What-sections-are-on-the-dashb.png
+    ­ƒöì Found 25 elements
+    ­ƒôû ÔöÇÔöÇ UI Text Comprehension ÔöÇÔöÇ
+    ­ƒôû   2 content blocks, 12 buttons, 2 dropdowns
+    ­ƒôû   ­ƒö¢ Dropdown "foundation" = "Any Foundation"
+    ­ƒôû   ­ƒö¢ Dropdown "difficulty" = "Apprentice"
+    ­ƒôû   ­ƒöÿ Button: "Vai Actions5" at (156, 818)
+    ­ƒôû   ­ƒöÿ Button: "V" at (24, 26)
+    ­ƒôû   ­ƒöÿ Button: "Dashboard" at (381, 88)
+    ­ƒôû   ­ƒöÿ Button: "Train" at (479, 88)
+    ­ƒôû   ­ƒöÿ Button: "Foundations" at (580, 88)
+    ­ƒôû   ­ƒöÿ Button: "History" at (689, 88)
+    ­ƒôû   ­ƒöÿ Button: "Watch Vai" at (1852, 88)
+    ­ƒôû   ­ƒöÿ Button: "Any Foundation" at (777, 587)
+    ­ƒôû   ­ƒöÿ Button: "Apprentice" at (969, 587)
+    ­ƒôû   ­ƒöÿ Button: "From Scenario Bank" at (1156, 587)
+    ÔÇó   ­ƒôè Evidence: 12 buttons, 0 headings, 2 blocks
+      ~ Section "foundation" not found in headings
+      ~ Section "anti-pattern" not found in headings
+      ~ Section "start training" not found in headings
+    ­ƒôû ÔöÇÔöÇ UI Text Comprehension ÔöÇÔöÇ
+    ­ƒôû   2 content blocks, 12 buttons, 2 dropdowns
+    ­ƒôû   ­ƒö¢ Dropdown "foundation" = "Any Foundation"
+    ­ƒôû   ­ƒö¢ Dropdown "difficulty" = "Apprentice"
+    ­ƒôû   ­ƒöÿ Button: "Vai Actions5" at (156, 818)
+    ­ƒôû   ­ƒöÿ Button: "V" at (24, 26)
+    ­ƒôû   ­ƒöÿ Button: "Dashboard" at (381, 88)
+    ­ƒôû   ­ƒöÿ Button: "Train" at (479, 88)
+    ­ƒôû   ­ƒöÿ Button: "Foundations" at (580, 88)
+    ­ƒôû   ­ƒöÿ Button: "History" at (689, 88)
+    ­ƒôû   ­ƒöÿ Button: "Watch Vai" at (1852, 88)
+    ­ƒôû   ­ƒöÿ Button: "Any Foundation" at (777, 587)
+    ­ƒôû   ­ƒöÿ Button: "Apprentice" at (969, 587)
+    ­ƒôû   ­ƒöÿ Button: "From Scenario Bank" at (1156, 587)
+      Ô£ù Only 0/3 sections found
+
+    ­ƒô£ Exercise 3: "Where can I scroll on this page?"
+    ­ƒô£ ÔöÇÔöÇ Scrollable Areas ÔöÇÔöÇ
+    ­ƒô£   Found 0 scrollable regions
+      Scrollable areas found: 0
+      Ô£ù No scrollable areas found
+
+    ­ƒö¢ Exercise 4: "What dropdowns exist and what can I select?"
+    ­ƒÄ» Found "dashboard" ÔåÆ button at (381, 88) [Dashboard]
+    ­ƒû▒´©Å ÔåÆ (381, 88)
+    ­ƒæå @ (381, 88)
+    ­ƒôû ÔöÇÔöÇ UI Text Comprehension ÔöÇÔöÇ
+    ­ƒôû   2 content blocks, 12 buttons, 2 dropdowns
+    ­ƒôû   ­ƒö¢ Dropdown "foundation" = "Any Foundation"
+    ­ƒôû   ­ƒö¢ Dropdown "difficulty" = "Apprentice"
+    ­ƒôû   ­ƒöÿ Button: "Vai Actions7" at (156, 787)
+    ­ƒôû   ­ƒöÿ Button: "V" at (24, 26)
+    ­ƒôû   ­ƒöÿ Button: "Dashboard" at (381, 88)
+    ­ƒôû   ­ƒöÿ Button: "Train" at (479, 88)
+    ­ƒôû   ­ƒöÿ Button: "Foundations" at (580, 88)
+    ­ƒôû   ­ƒöÿ Button: "History" at (689, 88)
+    ­ƒôû   ­ƒöÿ Button: "Watch Vai" at (1852, 88)
+    ­ƒôû   ­ƒöÿ Button: "Any Foundation" at (777, 587)
+    ­ƒôû   ­ƒöÿ Button: "Apprentice" at (969, 587)
+    ­ƒôû   ­ƒöÿ Button: "From Scenario Bank" at (1156, 587)
+      Found 2 dropdowns
+      ­ƒö¢ Opening dropdown "foundation" (current: "Any Foundation")...
+    ­ƒöì Found 25 elements
+    ­ƒû▒´©Å ÔåÆ (777, 587)
+    ­ƒû▒´©Å Hover @ (777, 587)
+    ­ƒæü´©Å Screenshot: 003-dropdown-foundation-hover.png
+    ­ƒû▒´©Å ÔåÆ (777, 587)
+    ­ƒæå @ (777, 587)
+    ­ƒæü´©Å Screenshot: 004-dropdown-foundation-open.png
+    ÔÇó Dropdown "Any Foundation" opened ÔÇö 11 options visible in DOM
+    ÔÇó   Ôû© "Any Foundation" at (772, 634)
+    ÔÇó   Ôû© "­ƒº¼ First-Principles Reasoning" at (772, 681)
+    ÔÇó   Ôû© "­ƒÄ» Calibrated Uncertainty" at (772, 739)
+    ÔÇó   Ôû© "­ƒöä Meta-Learning" at (772, 786)
+    ÔÇó   Ôû© "­ƒæü Reading Between the Lines" at (772, 833)
+    ÔÇó   Ôû© "Ô£é´©Å Precision Communication" at (772, 891)
+    ÔÇó   Ôû© "ÔØô Asking the Right Question" at (772, 949)
+    ÔÇó   Ôû© "­ƒÆÄ Compression & Abstraction" at (772, 1006)
+        Options: 11
+          ÔÇó "Any Foundation" (value: )
+          ÔÇó "­ƒº¼ First-Principles Reasoning" (value: first-principles)
+          ÔÇó "­ƒÄ» Calibrated Uncertainty" (value: calibrated-uncertainty)
+          ÔÇó "­ƒöä Meta-Learning" (value: meta-learning)
+          ÔÇó "­ƒæü Reading Between the Lines" (value: reading-between-lines)
+          ÔÇó "Ô£é´©Å Precision Communication" (value: precision-communication)
+    ­ƒû▒´©Å ÔåÆ (10, 10)
+    ­ƒæå @ (10, 10)
+    ­ƒæü´©Å Screenshot: 005-drill14-dropdown-foundation.png
+      ­ƒö¢ Opening dropdown "difficulty" (current: "Apprentice")...
+    ­ƒöì Found 28 elements
+    ­ƒû▒´©Å ÔåÆ (969, 587)
+    ­ƒû▒´©Å Hover @ (969, 587)
+    ­ƒæü´©Å Screenshot: 006-dropdown-difficulty-hover.png
+    ­ƒû▒´©Å ÔåÆ (969, 587)
+    ­ƒæå @ (969, 587)
+    ­ƒæü´©Å Screenshot: 007-dropdown-difficulty-open.png
+    ÔÇó Dropdown "Apprentice" has 0 native options: 
+        Options: 0
+    ­ƒû▒´©Å ÔåÆ (10, 10)
+    ­ƒæå @ (10, 10)
+    ­ƒæü´©Å Screenshot: 008-drill14-dropdown-difficulty.png
+      Ô£ô PASSED ÔÇö explored 2 dropdowns with mouse
+
+    ­ƒù║´©Å Exercise 5: "What's in each view? Let me explore..."
+      ­ƒôì Navigating to "foundations"...
+    ­ƒöì Found 28 elements
+    ­ƒÄ» Found "Foundations" ÔåÆ button at (580, 88) [Foundations]
+    ­ƒû▒´©Å ÔåÆ (580, 88)
+    ­ƒæå @ (580, 88)
+    Ô£à View "foundations": Ô£ù (got "dashboard")
+        Ô£ù Failed to reach foundations
+      ­ƒôì Navigating to "history"...
+    ­ƒöì Found 25 elements
+    ­ƒÄ» Found "History" ÔåÆ button at (689, 88) [History]
+    ­ƒû▒´©Å ÔåÆ (689, 88)
+    ­ƒæå @ (689, 88)
+    Ô£à View "history": Ô£ô
+    ­ƒôû ÔöÇÔöÇ UI Text Comprehension ÔöÇÔöÇ
+    ­ƒôû   2 content blocks, 7 buttons, 0 dropdowns
+    ­ƒôû   ­ƒöÿ Button: "Vai Actions23" at (156, 787)
+    ­ƒôû   ­ƒöÿ Button: "V" at (24, 26)
+    ­ƒôû   ­ƒöÿ Button: "Dashboard" at (381, 88)
+    ­ƒôû   ­ƒöÿ Button: "Train" at (479, 88)
+    ­ƒôû   ­ƒöÿ Button: "Foundations" at (580, 88)
+    ­ƒôû   ­ƒöÿ Button: "History" at (689, 88)
+    ­ƒôû   ­ƒöÿ Button: "Watch Vai" at (1852, 88)
+        ­ƒôû "history" has 0 headings, 7 buttons
+    ­ƒû▒´©Å ÔåÆ (180, 508)
+    ­ƒû▒´©Å Hover @ (180, 508)
+        ­ƒû▒´©Å Exploring content at (180, 508)
+    ­ƒæü´©Å Screenshot: 009-drill14-view-history.png
+      ­ƒôì Navigating to "dashboard"...
+    ­ƒöì Found 18 elements
+    ­ƒÄ» Found "Dashboard" ÔåÆ button at (381, 88) [Dashboard]
+    ­ƒû▒´©Å ÔåÆ (381, 88)
+    ­ƒæå @ (381, 88)
+    Ô£à View "dashboard": Ô£ô
+    ­ƒôû ÔöÇÔöÇ UI Text Comprehension ÔöÇÔöÇ
+    ­ƒôû   2 content blocks, 12 buttons, 2 dropdowns
+    ­ƒôû   ­ƒö¢ Dropdown "foundation" = "Any Foundation"
+    ­ƒôû   ­ƒö¢ Dropdown "difficulty" = "Apprentice"
+    ­ƒôû   ­ƒöÿ Button: "Vai Actions27" at (156, 787)
+    ­ƒôû   ­ƒöÿ Button: "V" at (24, 26)
+    ­ƒôû   ­ƒöÿ Button: "Dashboard" at (381, 88)
+    ­ƒôû   ­ƒöÿ Button: "Train" at (479, 88)
+    ­ƒôû   ­ƒöÿ Button: "Foundations" at (580, 88)
+    ­ƒôû   ­ƒöÿ Button: "History" at (689, 88)
+    ­ƒôû   ­ƒöÿ Button: "Watch Vai" at (1852, 88)
+    ­ƒôû   ­ƒöÿ Button: "Any Foundation" at (777, 587)
+    ­ƒôû   ­ƒöÿ Button: "Apprentice" at (969, 587)
+    ­ƒôû   ­ƒöÿ Button: "From Scenario Bank" at (1156, 587)
+        ­ƒôû "dashboard" has 0 headings, 12 buttons
+    ­ƒû▒´©Å ÔåÆ (180, 508)
+    ­ƒû▒´©Å Hover @ (180, 508)
+        ­ƒû▒´©Å Exploring content at (180, 508)
+    ­ƒæü´©Å Screenshot: 010-drill14-view-dashboard.png
+      Ô£ô PASSED ÔÇö explored 2/3 views
+
+    ­ƒÄô Exercise 6: "How do I start training? Let me figure it out..."
+    ­ƒöì Found 25 elements
+    ­ƒÄ» Found "Dashboard" ÔåÆ button at (381, 88) [Dashboard]
+    ­ƒû▒´©Å ÔåÆ (381, 88)
+    ­ƒæå @ (381, 88)
+    ­ƒôû ÔöÇÔöÇ UI Text Comprehension ÔöÇÔöÇ
+    ­ƒôû   2 content blocks, 12 buttons, 2 dropdowns
+    ­ƒôû   ­ƒö¢ Dropdown "foundation" = "Any Foundation"
+    ­ƒôû   ­ƒö¢ Dropdown "difficulty" = "Apprentice"
+    ­ƒôû   ­ƒöÿ Button: "Vai Actions31" at (156, 787)
+    ­ƒôû   ­ƒöÿ Button: "V" at (24, 26)
+    ­ƒôû   ­ƒöÿ Button: "Dashboard" at (381, 88)
+    ­ƒôû   ­ƒöÿ Button: "Train" at (479, 88)
+    ­ƒôû   ­ƒöÿ Button: "Foundations" at (580, 88)
+    ­ƒôû   ­ƒöÿ Button: "History" at (689, 88)
+    ­ƒôû   ­ƒöÿ Button: "Watch Vai" at (1852, 88)
+    ­ƒôû   ­ƒöÿ Button: "Any Foundation" at (777, 587)
+    ­ƒôû   ­ƒöÿ Button: "Apprentice" at (969, 587)
+    ­ƒôû   ­ƒöÿ Button: "From Scenario Bank" at (1156, 587)
+      Step 1: Foundation dropdown found ÔÇö current: "Any Foundation"
+      Step 2: Difficulty dropdown found ÔÇö current: "Apprentice"
+      Step 3: "From Scenario Bank" button at (1156, 587)
+      ­ƒû▒´©Å Executing step 1: Selecting "Meta-Learning"...
+    ­ƒöì Found 25 elements
+    ­ƒû▒´©Å ÔåÆ (777, 587)
+    ­ƒû▒´©Å Hover @ (777, 587)
+    ­ƒæü´©Å Screenshot: 011-dropdown-foundation-hover.png
+    ­ƒû▒´©Å ÔåÆ (777, 587)
+    ­ƒæå @ (777, 587)
+    ­ƒæü´©Å Screenshot: 012-dropdown-foundation-open.png
+    ÔÇó Dropdown "Any Foundation" opened ÔÇö 11 options visible in DOM
+    ÔÇó   Ôû© "Any Foundation" at (772, 634)
+    ÔÇó   Ôû© "­ƒº¼ First-Principles Reasoning" at (772, 681)
+    ÔÇó   Ôû© "­ƒÄ» Calibrated Uncertainty" at (772, 739)
+    ÔÇó   Ôû© "­ƒöä Meta-Learning" at (772, 786)
+    ÔÇó   Ôû© "­ƒæü Reading Between the Lines" at (772, 833)
+    ÔÇó   Ôû© "Ô£é´©Å Precision Communication" at (772, 891)
+    ÔÇó   Ôû© "ÔØô Asking the Right Question" at (772, 949)
+    ÔÇó   Ôû© "­ƒÆÄ Compression & Abstraction" at (772, 1006)
+    ÔÇó Target: "­ƒöä Meta-Learning" (idx 3)
+    ­ƒû▒´©Å ÔåÆ (772, 634)
+    ÔÇó   ­ƒû▒´©Å Hovering option 0: "Any Foundation"
+    ­ƒæü´©Å Screenshot: 013-dropdown-foundation-hover-opt0.png
+    ­ƒû▒´©Å ÔåÆ (772, 681)
+    ÔÇó   ­ƒû▒´©Å Hovering option 1: "­ƒº¼ First-Principles Reasoning"
+    ­ƒû▒´©Å ÔåÆ (772, 739)
+    ÔÇó   ­ƒû▒´©Å Hovering option 2: "­ƒÄ» Calibrated Uncertainty"
+    ­ƒû▒´©Å ÔåÆ (772, 786)
+    ÔÇó   ­ƒû▒´©Å Hovering option 3: "­ƒöä Meta-Learning"
+    ­ƒæü´©Å Screenshot: 014-dropdown-foundation-hover-opt3.png
+    ­ƒû▒´©Å ÔåÆ (772, 786)
+    ­ƒæå @ (772, 786)
+    ­ƒæå Selected "­ƒöä Meta-Learning" from dropdown via MOUSE CLICK
+    ­ƒæü´©Å Screenshot: 015-dropdown-foundation-selected.png
+        Ô£ô Foundation set to "­ƒöä Meta-Learning"
+      ­ƒû▒´©Å Executing step 2: Selecting "Expert"...
+    ­ƒöì Found 25 elements
+    ­ƒû▒´©Å ÔåÆ (969, 587)
+    ­ƒû▒´©Å Hover @ (969, 587)
+    ­ƒæü´©Å Screenshot: 016-dropdown-difficulty-hover.png
+    ­ƒû▒´©Å ÔåÆ (969, 587)
+    ­ƒæå @ (969, 587)
+    ­ƒæü´©Å Screenshot: 017-dropdown-difficulty-open.png
+    ÔÇó Dropdown "Apprentice" opened ÔÇö 4 options visible in DOM
+    ÔÇó   Ôû© "Apprentice" at (969, 634)
+    ÔÇó   Ôû© "Journeyman" at (969, 671)
+    ÔÇó   Ôû© "Expert" at (969, 708)
+    ÔÇó   Ôû© "Master" at (969, 745)
+    ÔÇó Target: "Expert" (idx 2)
+    ­ƒû▒´©Å ÔåÆ (969, 634)
+    ÔÇó   ­ƒû▒´©Å Hovering option 0: "Apprentice"
+    ­ƒæü´©Å Screenshot: 018-dropdown-difficulty-hover-opt0.png
+    ­ƒû▒´©Å ÔåÆ (969, 671)
+    ÔÇó   ­ƒû▒´©Å Hovering option 1: "Journeyman"
+    ­ƒû▒´©Å ÔåÆ (969, 708)
+    ÔÇó   ­ƒû▒´©Å Hovering option 2: "Expert"
+    ­ƒæü´©Å Screenshot: 019-dropdown-difficulty-hover-opt2.png
+    ­ƒû▒´©Å ÔåÆ (969, 708)
+    ­ƒæå @ (969, 708)
+    ­ƒæå Selected "Expert" from dropdown via MOUSE CLICK
+    ­ƒæü´©Å Screenshot: 020-dropdown-difficulty-selected.png
+        Ô£ô Difficulty set to "Expert"
+    ­ƒæü´©Å Screenshot: 021-drill14-training-configured.png
+      Ô£ô PASSED ÔÇö Vai understood the training workflow (3 steps identified)
+    ­ƒæü´©Å Screenshot: 022-drill14-comprehension-done.png
+
+    Result: 3/6 in 54203ms
+
+    ­ƒæü´©Å Screenshot: 023-training-complete.png
+
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  VISUAL TRAINING COMPLETE
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+  Mode: BLIND
+  Total time: 55785ms (55.8s)
+  Screenshots: 226
+
+  ÔöÇÔöÇ Drill Results ÔöÇÔöÇ
+    ui-comprehension             3/6 (50%) 54203ms
+
+  TOTAL: 3/6 (50%)
+ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ
+
+  ­ƒôï Report: C:\Users\v3gga\Documents\dev-vai\screenshots\vai-gym\visual-training\visual-training-report.json
+  Browser stays open 5s...

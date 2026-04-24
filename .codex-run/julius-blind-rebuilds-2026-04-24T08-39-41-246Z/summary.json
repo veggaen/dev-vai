@@ -1,0 +1,45 @@
+{
+  "verdict": "fail",
+  "passed": 0,
+  "failed": 1,
+  "total": 1,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-39-41-246Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-39-41-246Z\\report.json",
+  "results": [
+    {
+      "slug": "tailwind-canonical-vscode-extension",
+      "sourceRepo": "https://github.com/juliusmarminge/tailwind-autofix-canonical-classnames",
+      "status": "fail",
+      "failures": [
+        "missing file block package.json",
+        "missing file block src/extension.ts",
+        "missing file block README.md",
+        "missing required response text Tailwind",
+        "missing required response text canonical",
+        "missing required response text diagnostics",
+        "missing required response text fixOnSave",
+        "missing required response text VS Code",
+        "missing required response text on save",
+        "sandbox missing package.json",
+        "sandbox missing src/extension.ts",
+        "sandbox missing README.md",
+        "sandbox files missing Tailwind",
+        "sandbox files missing canonical",
+        "sandbox files missing diagnostics",
+        "sandbox files missing fixOnSave",
+        "sandbox files missing VS Code",
+        "sandbox files missing on save",
+        "sandbox files missing VS Code setting contribution",
+        "sandbox files missing diagnostic/save hook"
+      ],
+      "warnings": [
+        "short response for a blind rebuild request",
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPZAA466WFEG9KVE2K4VPWYW",
+      "sandboxId": "ff4d6717",
+      "previewUrl": null
+    }
+  ]
+}

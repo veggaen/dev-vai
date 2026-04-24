@@ -1,0 +1,54 @@
+{
+  "id": "long-context-recall",
+  "label": "Turn-N references facts from early turns — must recall them accurately",
+  "scenarios": [
+    {
+      "id": "name-recall-after-noise",
+      "messages": [
+        { "role": "user", "content": "My name is Alex and I'm working on a Next.js app called Lunaflow." },
+        { "role": "user", "content": "What is a closure in JavaScript?" },
+        { "role": "user", "content": "Explain TypeScript generics briefly." },
+        { "role": "user", "content": "What is the name of the project I told you about, and what framework does it use?" }
+      ],
+      "assert": {
+        "minLength": 10,
+        "contains": [
+          "/Lunaflow/i",
+          "/Next\\.?js/i"
+        ]
+      }
+    },
+    {
+      "id": "constraint-recall",
+      "messages": [
+        { "role": "user", "content": "I can't use any dependencies except the Node.js standard library." },
+        { "role": "user", "content": "Write a function that reads a JSON file and returns parsed contents." }
+      ],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/fs|readFile|JSON\\.parse|node:fs/i"
+        ],
+        "notContains": [
+          "/require\\('fs-extra'\\)|import .* from 'fs-extra'|lodash/i"
+        ]
+      }
+    },
+    {
+      "id": "preference-recall-style",
+      "messages": [
+        { "role": "user", "content": "I prefer arrow functions and const only, never let or function declarations." },
+        { "role": "user", "content": "Write a sum function in JavaScript." }
+      ],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": [
+          "/const\\s+sum\\s*=\\s*\\(|=>/i"
+        ],
+        "notContains": [
+          "/^function\\s+sum\\b|\\blet\\s+/im"
+        ]
+      }
+    }
+  ]
+}

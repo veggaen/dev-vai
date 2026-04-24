@@ -1,0 +1,46 @@
+{
+  "id": "ruby-code",
+  "label": "Ruby tasks â€” blocks, Rails/ActiveRecord idioms, pattern matching",
+  "scenarios": [
+    {
+      "id": "block-each-map",
+      "messages": [{ "role": "user", "content": "In Ruby, use a block to double every number in [1, 2, 3, 4] and return a new array." }],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": [
+          "/\\.map\\s*\\{|\\.collect\\s*\\{|\\|n\\||\\*\\s*2|\\.each\\s*do|yield|block/i"
+        ]
+      }
+    },
+    {
+      "id": "active-record-scope",
+      "messages": [{ "role": "user", "content": "Add an ActiveRecord scope to the Post model that returns posts created in the last 7 days." }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/scope\\s+:|where\\(|created_at\\s*>|7\\.days\\.ago|lambda|->\\s*\\{|Post\\.where/i"
+        ]
+      }
+    },
+    {
+      "id": "symbol-vs-string",
+      "messages": [{ "role": "user", "content": "When should I use a symbol instead of a string as a hash key in Ruby?" }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/symbol|:\\w+|immutable|garbage|interned|identity|hash|key|memory|frozen_string/i"
+        ]
+      }
+    },
+    {
+      "id": "pattern-matching-case-in",
+      "messages": [{ "role": "user", "content": "Show me Ruby 3 pattern matching with 'case/in' on a hash like { role: :admin, active: true }." }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/case\\s+\\w+\\s+in|in\\s*\\{|\\{\\s*role:|pattern matching|deconstruct|=>\\s*\\w+/i"
+        ]
+      }
+    }
+  ]
+}

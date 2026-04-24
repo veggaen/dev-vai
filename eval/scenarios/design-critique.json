@@ -1,0 +1,58 @@
+{
+  "id": "design-critique",
+  "label": "UX / API / architecture critique — must assess tradeoffs, not produce a build",
+  "scenarios": [
+    {
+      "id": "ux-4-step-signup",
+      "messages": [{
+        "role": "user",
+        "content": "Our signup flow is: step 1 email, step 2 password, step 3 profile photo, step 4 pick 3 interests. Does this make sense UX-wise?"
+      }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/friction|drop.?off|abandon|optional|later|progressive|minimum|essential|defer/i"
+        ]
+      }
+    },
+    {
+      "id": "api-pagination",
+      "messages": [{
+        "role": "user",
+        "content": "We use offset/limit pagination for a feed that grows constantly. Good or bad?"
+      }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/cursor|keyset|duplicat|skip|drift|performance|index|unstable|large offset/i"
+        ]
+      }
+    },
+    {
+      "id": "architecture-microservices-early",
+      "messages": [{
+        "role": "user",
+        "content": "We are 3 engineers building a new B2B SaaS. Should we start with microservices?"
+      }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/monolith|later|premature|complexity|overhead|small team|boundaries|extract|modular/i"
+        ]
+      }
+    },
+    {
+      "id": "schema-single-users-table",
+      "messages": [{
+        "role": "user",
+        "content": "Is it fine to keep admins, customers, and vendors in one users table with a 'role' column?"
+      }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/depends|simple|shared fields|diverge|per-role|separate table|polymorphic|role column|auth/i"
+        ]
+      }
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+I#!/usr/bin/env node
 /**
  * VAI MEGA TEST — 200+ Questions from 60+ Project Contexts
  * ═══════════════════════════════════════════════════════════

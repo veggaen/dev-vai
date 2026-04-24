@@ -1,0 +1,439 @@
+{
+  "timestamp": "2026-03-05T03:51:40.924Z",
+  "mode": "BLIND",
+  "viewport": {
+    "w": 1920,
+    "h": 1015
+  },
+  "totalMs": 49630,
+  "drills": [
+    {
+      "drill": "mouse-keyboard-mastery",
+      "passed": 6,
+      "total": 6,
+      "timeMs": 49490
+    }
+  ],
+  "score": {
+    "passed": 6,
+    "total": 6,
+    "pct": 100
+  },
+  "actionLog": {
+    "mode": "BLIND",
+    "totalActions": 82,
+    "totalScreenshots": 12,
+    "actions": [
+      {
+        "type": "label",
+        "msg": "Vai",
+        "time": 1772682649445
+      },
+      {
+        "type": "scan",
+        "msg": "Found 28 elements",
+        "time": 1772682649815
+      },
+      {
+        "type": "move",
+        "msg": "→ (156, 945)",
+        "time": 1772682651285
+      },
+      {
+        "type": "move",
+        "msg": "→ (156, 945)",
+        "time": 1772682652185
+      },
+      {
+        "type": "move",
+        "msg": "Hover @ (156, 945)",
+        "time": 1772682652248
+      },
+      {
+        "type": "see",
+        "msg": "Screenshot: 001-drill15-hover-Vai-Actions1.png",
+        "time": 1772682653243
+      },
+      {
+        "type": "move",
+        "msg": "→ (24, 26)",
+        "time": 1772682654957
+      },
+      {
+        "type": "move",
+        "msg": "→ (24, 26)",
+        "time": 1772682655854
+      },
+      {
+        "type": "move",
+        "msg": "Hover @ (24, 26)",
+        "time": 1772682655916
+      },
+      {
+        "type": "see",
+        "msg": "Screenshot: 002-drill15-hover-V.png",
+        "time": 1772682656985
+      },
+      {
+        "type": "move",
+        "msg": "→ (1879, 22)",
+        "time": 1772682658702
+      },
+      {
+        "type": "move",
+        "msg": "→ (1879, 22)",
+        "time": 1772682659598
+      },
+      {
+        "type": "move",
+        "msg": "Hover @ (1879, 22)",
+        "time": 1772682659676
+      },
+      {
+        "type": "see",
+        "msg": "Screenshot: 003-drill15-hover-Preview.png",
+        "time": 1772682660672
+      },
+      {
+        "type": "scan",
+        "msg": "Found 28 elements",
+        "time": 1772682661044
+      },
+      {
+        "type": "scroll",
+        "msg": "── Scrollable Areas ──",
+        "time": 1772682661075
+      },
+      {
+        "type": "scroll",
+        "msg": "  Found 1 scrollable regions",
+        "time": 1772682661075
+      },
+      {
+        "type": "scroll",
+        "msg": "  📜 \"w-72\" (288×200) ↕129px hidden  — 1 children",
+        "time": 1772682661075
+      },
+      {
+        "type": "move",
+        "msg": "→ (156, 903)",
+        "time": 1772682662433
+      },
+      {
+        "type": "scroll",
+        "msg": "Scroll at (156, 903) by 200px",
+        "time": 1772682662882
+      },
+      {
+        "type": "see",
+        "msg": "Screenshot: 004-drill15-scroll-w-72.png",
+        "time": 1772682663627
+      },
+      {
+        "type": "scroll",
+        "msg": "Scroll at (156, 903) by -200px",
+        "time": 1772682663782
+      },
+      {
+        "type": "scan",
+        "msg": "Found 28 elements",
+        "time": 1772682664433
+      },
+      {
+        "type": "key",
+        "msg": "Tab",
+        "time": 1772682664618
+      },
+      {
+        "type": "key",
+        "msg": "Escape",
+        "time": 1772682665190
+      },
+      {
+        "type": "key",
+        "msg": "Enter",
+        "time": 1772682665703
+      },
+      {
+        "type": "key",
+        "msg": "ArrowUp",
+        "time": 1772682666436
+      },
+      {
+        "type": "key",
+        "msg": "ArrowDown",
+        "time": 1772682666868
+      },
+      {
+        "type": "key",
+        "msg": "ArrowLeft",
+        "time": 1772682667208
+      },
+      {
+        "type": "key",
+        "msg": "ArrowRight",
+        "time": 1772682667518
+      },
+      {
+        "type": "see",
+        "msg": "Screenshot: 005-drill15-keyboard-singles.png",
+        "time": 1772682668123
+      },
+      {
+        "type": "key",
+        "msg": "⌨ Ctrl+A",
+        "time": 1772682668495
+      },
+      {
+        "type": "see",
+        "msg": "Screenshot: 006-drill15-combo-ctrl-a.png",
+        "time": 1772682670630
+      },
+      {
+        "type": "key",
+        "msg": "⌨ Ctrl+C",
+        "time": 1772682671001
+      },
+      {
+        "type": "key",
+        "msg": "⌨ Shift+Tab",
+        "time": 1772682671917
+      },
+      {
+        "type": "see",
+        "msg": "Screenshot: 007-drill15-combo-shift-tab.png",
+        "time": 1772682672987
+      },
+      {
+        "type": "key",
+        "msg": "⌨ Ctrl+Shift+P",
+        "time": 1772682673407
+      },
+      {
+        "type": "see",
+        "msg": "Screenshot: 008-drill15-combo-done.png",
+        "time": 1772682674570
+      },
+      {
+        "type": "scan",
+        "msg": "Found 28 elements",
+        "time": 1772682674600
+      },
+      {
+        "type": "move",
+        "msg": "→ (984, 910)",
+        "time": 1772682675978
+      },
+      {
+        "type": "click",
+        "msg": "@ (984, 910)",
+        "time": 1772682676117
+      },
+      {
+        "type": "key",
+        "msg": "⌨ Ctrl+A",
+        "time": 1772682676982
+      },
+      {
+        "type": "scan",
+        "msg": "Found 28 elements",
+        "time": 1772682677614
+      },
+      {
+        "type": "find",
+        "msg": "Textarea at (984, 910) 734×56",
+        "time": 1772682677615
+      },
+      {
+        "type": "move",
+        "msg": "→ (984, 910)",
+        "time": 1772682678187
+      },
+      {
+        "type": "click",
+        "msg": "@ (984, 910)",
+        "time": 1772682678324
+      },
+      {
+        "type": "type",
+        "msg": "37 chars typed, 0 received (✗)",
+        "time": 1772682684176
+      },
+      {
+        "type": "see",
+        "msg": "Screenshot: 009-drill15-combined-done.png",
+        "time": 1772682684641
+      },
+      {
+        "type": "read",
+        "msg": "── UI Text Comprehension ──",
+        "time": 1772682684671
+      },
+      {
+        "type": "read",
+        "msg": "  2 content blocks, 11 buttons, 0 dropdowns",
+        "time": 1772682684672
+      },
+      {
+        "type": "read",
+        "msg": "  📌 \"What shall we think through?\" at y=252",
+        "time": 1772682684672
+      },
+      {
+        "type": "read",
+        "msg": "  🔘 Button: \"Vai Actions33\" at (156, 787)",
+        "time": 1772682684672
+      },
+      {
+        "type": "read",
+        "msg": "  🔘 Button: \"V\" at (24, 26)",
+        "time": 1772682684672
+      },
+      {
+        "type": "read",
+        "msg": "  🔘 Button: \"Preview\" at (1879, 22)",
+        "time": 1772682684672
+      },
+      {
+        "type": "read",
+        "msg": "  🔘 Button: \"Scaffold a Next.js appBuild\" at (984, 357)",
+        "time": 1772682684672
+      },
+      {
+        "type": "read",
+        "msg": "  🔘 Button: \"Create a REST APIBuild\" at (984, 421)",
+        "time": 1772682684672
+      },
+      {
+        "type": "read",
+        "msg": "  🔘 Button: \"Build a landing pageBuild\" at (984, 485)",
+        "time": 1772682684672
+      },
+      {
+        "type": "read",
+        "msg": "  🔘 Button: \"Deploy from a templateDeploy\" at (984, 549)",
+        "time": 1772682684672
+      },
+      {
+        "type": "read",
+        "msg": "  🔘 Button: \"Explain React 19 featuresLearn\" at (984, 613)",
+        "time": 1772682684672
+      },
+      {
+        "type": "read",
+        "msg": "  🔘 Button: \"Compare Prisma vs DrizzleExplore\" at (984, 677)",
+        "time": 1772682684672
+      },
+      {
+        "type": "read",
+        "msg": "  🔘 Button: \"Chat\" at (702, 954)",
+        "time": 1772682684672
+      },
+      {
+        "type": "move",
+        "msg": "→ (156, 787)",
+        "time": 1772682686030
+      },
+      {
+        "type": "move",
+        "msg": "→ (156, 787)",
+        "time": 1772682686943
+      },
+      {
+        "type": "move",
+        "msg": "Hover @ (156, 787)",
+        "time": 1772682687020
+      },
+      {
+        "type": "move",
+        "msg": "→ (156, 787)",
+        "time": 1772682688306
+      },
+      {
+        "type": "click",
+        "msg": "@ (156, 787)",
+        "time": 1772682688446
+      },
+      {
+        "type": "key",
+        "msg": "Escape",
+        "time": 1772682689082
+      },
+      {
+        "type": "move",
+        "msg": "→ (1879, 22)",
+        "time": 1772682690868
+      },
+      {
+        "type": "move",
+        "msg": "→ (1879, 22)",
+        "time": 1772682691764
+      },
+      {
+        "type": "move",
+        "msg": "Hover @ (1879, 22)",
+        "time": 1772682691825
+      },
+      {
+        "type": "move",
+        "msg": "→ (1879, 22)",
+        "time": 1772682693114
+      },
+      {
+        "type": "click",
+        "msg": "@ (1879, 22)",
+        "time": 1772682693269
+      },
+      {
+        "type": "key",
+        "msg": "Escape",
+        "time": 1772682693902
+      },
+      {
+        "type": "move",
+        "msg": "→ (984, 357)",
+        "time": 1772682695677
+      },
+      {
+        "type": "move",
+        "msg": "→ (984, 357)",
+        "time": 1772682696575
+      },
+      {
+        "type": "move",
+        "msg": "Hover @ (984, 357)",
+        "time": 1772682696639
+      },
+      {
+        "type": "move",
+        "msg": "→ (984, 357)",
+        "time": 1772682697916
+      },
+      {
+        "type": "click",
+        "msg": "@ (984, 357)",
+        "time": 1772682698039
+      },
+      {
+        "type": "key",
+        "msg": "Escape",
+        "time": 1772682698689
+      },
+      {
+        "type": "see",
+        "msg": "Screenshot: 010-drill15-self-nav-done.png",
+        "time": 1772682699276
+      },
+      {
+        "type": "see",
+        "msg": "Screenshot: 011-drill15-mastery-done.png",
+        "time": 1772682699415
+      },
+      {
+        "type": "see",
+        "msg": "Screenshot: 012-training-complete.png",
+        "time": 1772682700924
+      }
+    ]
+  }
+}

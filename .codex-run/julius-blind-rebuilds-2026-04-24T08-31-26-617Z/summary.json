@@ -1,0 +1,143 @@
+{
+  "verdict": "fail",
+  "passed": 5,
+  "failed": 3,
+  "total": 8,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-31-26-617Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-31-26-617Z\\report.json",
+  "results": [
+    {
+      "slug": "next-gen-fullstack-monorepo",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ9V11RGMBSWWRHE6DKV3Q5",
+      "sandboxId": "82b19ca6",
+      "previewUrl": "http://127.0.0.1:4220"
+    },
+    {
+      "slug": "typescript-library-monorepo-starter",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp-lib",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ9VNRQEF0YKJYF4NP5HAH6",
+      "sandboxId": "27cceb63",
+      "previewUrl": null
+    },
+    {
+      "slug": "developer-defaults-cli",
+      "sourceRepo": "https://github.com/juliusmarminge/good-defaults",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "sandbox binding changed after recovery: f2599155 -> 00922533"
+      ],
+      "conversationId": "01KPZ9VSY8QRDRJ7GQEBC2WH32",
+      "sandboxId": "00922533",
+      "previewUrl": null
+    },
+    {
+      "slug": "agent-workflow-tools-suite",
+      "sourceRepo": "https://github.com/juliusmarminge/agent-tools",
+      "status": "fail",
+      "failures": [
+        "sandbox files missing Vite plugin",
+        "sandbox files missing isolated"
+      ],
+      "warnings": [
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPZ9VYGQYZAES46QRC3AC5TH",
+      "sandboxId": "18528241",
+      "previewUrl": null
+    },
+    {
+      "slug": "python-upload-sdk-fastapi",
+      "sourceRepo": "https://github.com/juliusmarminge/uploadthing-py",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ9ZQB4AMWPMHM93AJYBAQ3",
+      "sandboxId": "78a858d5",
+      "previewUrl": null
+    },
+    {
+      "slug": "tanstack-start-theme-kit",
+      "sourceRepo": "https://github.com/juliusmarminge/tanstack-themes",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ9ZTD17A41BVDXMEJGSV43",
+      "sandboxId": "a148179d",
+      "previewUrl": "http://127.0.0.1:4221"
+    },
+    {
+      "slug": "tailwind-canonical-vscode-extension",
+      "sourceRepo": "https://github.com/juliusmarminge/tailwind-autofix-canonical-classnames",
+      "status": "fail",
+      "failures": [
+        "missing file block package.json",
+        "missing file block src/extension.ts",
+        "missing file block README.md",
+        "missing required response text Tailwind",
+        "missing required response text canonical",
+        "missing required response text diagnostics",
+        "missing required response text fixOnSave",
+        "missing required response text VS Code",
+        "missing required response text on save",
+        "sandbox missing package.json",
+        "sandbox missing src/extension.ts",
+        "sandbox missing README.md",
+        "sandbox files missing Tailwind",
+        "sandbox files missing canonical",
+        "sandbox files missing diagnostics",
+        "sandbox files missing fixOnSave",
+        "sandbox files missing VS Code",
+        "sandbox files missing on save",
+        "sandbox files missing VS Code setting contribution",
+        "sandbox files missing diagnostic/save hook"
+      ],
+      "warnings": [
+        "short response for a blind rebuild request",
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPZA0DTDDQS6K9VF5A1PJQ4Y",
+      "sandboxId": "b3a0779b",
+      "previewUrl": null
+    },
+    {
+      "slug": "trellix-trpc-board",
+      "sourceRepo": "https://github.com/juliusmarminge/trellix-trpc",
+      "status": "fail",
+      "failures": [
+        "missing required response text Trellix",
+        "missing required response text Auth.js",
+        "missing required response text Turso",
+        "missing required response text TURSO_URL",
+        "missing required response text AUTH_SECRET",
+        "missing required response text kanban",
+        "sandbox files missing Trellix",
+        "sandbox files missing Auth.js",
+        "sandbox files missing Turso",
+        "sandbox files missing TURSO_URL",
+        "sandbox files missing AUTH_SECRET",
+        "sandbox files missing kanban",
+        "preview missing Trellix",
+        "preview missing Auth.js",
+        "preview missing Turso",
+        "preview missing TURSO_URL",
+        "preview missing AUTH_SECRET",
+        "preview missing kanban"
+      ],
+      "warnings": [
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPZA4FZVRKC1X7BFW90F5K8A",
+      "sandboxId": "d12adb88",
+      "previewUrl": "http://127.0.0.1:4222"
+    }
+  ]
+}

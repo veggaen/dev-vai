@@ -1,0 +1,3511 @@
+[2m01:07:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:07:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:07:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:07:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:03[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:03[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:05[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:08[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:08[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:13[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:13[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:15[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:08:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:19:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:19:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:19:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:19:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:19:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:19:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:19:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:19:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/platform/bootstrap[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:19:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/platform/bootstrap[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:19:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/auth/me[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:19:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/auth/me[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/sandbox/88358e37/logs[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/sandbox/88358e37/logs[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:03[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:05[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:07[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:07[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:11[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:13[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:15[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:17[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m01:20:17[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:27[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:35[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:43[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:10:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:43[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:47[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:55[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:17:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:18:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:18:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:18:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:18:03[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:18:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:17[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/platform/bootstrap[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/platform/bootstrap[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/auth/me[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/auth/me[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:23[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:25[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:27[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:33[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:35[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:37[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m02:58:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:11[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:13[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:17[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:25[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:33[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:04:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/sandbox/4f69f27c/logs[39m
+AggregateError [ETIMEDOUT]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:40[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ETIMEDOUT]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:40[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:40[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:40[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:45[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:47[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:47[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:47[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/platform/bootstrap[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:47[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:47[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/platform/bootstrap[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:47[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/auth/me[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:47[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/auth/me[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:52[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:53[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:53[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:55[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:55[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:57[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:57[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:57[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:17:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:25:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m03:25:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:25:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:25:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:25:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:25:53[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:25:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:25:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:25:57[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:25:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:25:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:26:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:26:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:26:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:26:05[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:26:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:45[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:53[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:57[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:28:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:29:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:29:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:29:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:29:03[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:29:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:29:05[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:29:05[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:29:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:29:07[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:29:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:29:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:29:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:05[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:08[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:11[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:13[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:17[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:32:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m03:51:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:11[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:40[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:48[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:52[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:05:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:08[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:11[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:20[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:28[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:32[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:40[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:48[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:52[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:06:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:08[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:11[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:20[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:28[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:32[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:40[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:48[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:52[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:07:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:08[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:11[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:20[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:28[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:32[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:40[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:48[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:52[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:08:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:08[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:11[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:20[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/platform/bootstrap[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/platform/bootstrap[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/auth/me[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/auth/me[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:28[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:28[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:32[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:32[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:40[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:40[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:48[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:48[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:52[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:52[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:09:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:08[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:11[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:20[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:28[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m04:10:32[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:05:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:38:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m06:56:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:43[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m07:05:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:45:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:45:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:45:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:45:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:45:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:45:53[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:45:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:45:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:45:56[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:45:58[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:45:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:46:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:46:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:46:03[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m08:46:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:01[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:03[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:06[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:11[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:13[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:02:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:09[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:11[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:13[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:23[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m09:32:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:43[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:53[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:18:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:33[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:43[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:51[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:53[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:53[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:44:54[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:14[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:15[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:16[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:18[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:21[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:25[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:35[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:35[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:52:37[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:22[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:24[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:29[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /health[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:36[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:38[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:39[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:41[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:42[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/projects/handoff/poll-consume[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)
+[2m10:59:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/thorsen/pulse[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1134:18)
+    at afterConnectMultiple (node:net:1715:7)

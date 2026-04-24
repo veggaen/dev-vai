@@ -1,0 +1,62 @@
+{
+  "verdict": "fail",
+  "passed": 2,
+  "failed": 1,
+  "total": 3,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-23-03-294Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-23-03-294Z\\report.json",
+  "results": [
+    {
+      "slug": "next-gen-fullstack-monorepo",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPZ9BQKTWDNMEJPHRY9YYAHN",
+      "sandboxId": "b8be436d",
+      "previewUrl": "http://127.0.0.1:4192"
+    },
+    {
+      "slug": "typescript-library-monorepo-starter",
+      "sourceRepo": "https://github.com/juliusmarminge/acme-corp-lib",
+      "status": "fail",
+      "failures": [
+        "sandbox missing package.json",
+        "sandbox missing pnpm-workspace.yaml",
+        "sandbox missing packages/core/src/index.ts or src/index.ts",
+        "sandbox missing tsconfig.json",
+        "sandbox missing packages/prisma-generator/src/index.ts or src/prisma-generator.ts",
+        "sandbox files missing monorepo",
+        "sandbox files missing TypeScript",
+        "sandbox files missing library",
+        "sandbox files missing Prisma",
+        "sandbox files missing generator",
+        "sandbox files missing changeset",
+        "sandbox files missing vitest",
+        "sandbox files missing workspace package metadata",
+        "sandbox files missing library exports"
+      ],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPZ9F0HNQPKKA1QF39MB81ZW",
+      "sandboxId": "546bf52f",
+      "previewUrl": null
+    },
+    {
+      "slug": "developer-defaults-cli",
+      "sourceRepo": "https://github.com/juliusmarminge/good-defaults",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPZ9K33SKVTDNP56S5WPZ5C2",
+      "sandboxId": "fec4df1a",
+      "previewUrl": null
+    }
+  ]
+}

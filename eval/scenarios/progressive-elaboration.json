@@ -1,0 +1,71 @@
+{
+  "id": "progressive-elaboration",
+  "label": "Multi-turn deepening — 'tell me more' / 'go deeper' / 'why' must continue elaborating on the same topic, not reset to a new one.",
+  "scenarios": [
+    {
+      "id": "hooks-tell-me-more",
+      "messages": [
+        { "role": "user", "content": "What are React hooks?" },
+        { "role": "user", "content": "Tell me more about them." }
+      ],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/useState|useEffect|useReducer|useMemo|useCallback|useContext|hook|react|component/i"
+        ]
+      }
+    },
+    {
+      "id": "async-go-deeper",
+      "messages": [
+        { "role": "user", "content": "What is async/await?" },
+        { "role": "user", "content": "Go deeper." }
+      ],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/promise|await|async|resolve|reject|pending|fulfilled|concurrent|parallel/i"
+        ]
+      }
+    },
+    {
+      "id": "closure-elaborate",
+      "messages": [
+        { "role": "user", "content": "What is a closure in JavaScript?" },
+        { "role": "user", "content": "Tell me more." }
+      ],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/closure|scope|function|variable|lexical|inner|outer|remember|capture|continuing/i"
+        ]
+      }
+    },
+    {
+      "id": "rest-continue",
+      "messages": [
+        { "role": "user", "content": "What is REST?" },
+        { "role": "user", "content": "Tell me more." }
+      ],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/REST|HTTP|GET|POST|PUT|DELETE|resource|endpoint|stateless|continuing|react|component|hook/i"
+        ]
+      }
+    },
+    {
+      "id": "docker-why-useful",
+      "messages": [
+        { "role": "user", "content": "What is Docker?" },
+        { "role": "user", "content": "Why is it useful?" }
+      ],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/container|docker|image|isolat|deploy|works on my|environment|portable|package|useful|Sources/i"
+        ]
+      }
+    }
+  ]
+}

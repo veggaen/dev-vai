@@ -1,0 +1,72 @@
+{
+  "options": {
+    "appUrl": "http://127.0.0.1:5173/?devAuthBypass=1",
+    "apiUrl": "http://127.0.0.1:3006",
+    "suiteName": "julius",
+    "specFile": "C:\\Users\\v3gga\\Documents\\dev-vai\\scripts\\specs\\julius-blind-rebuilds.json",
+    "outputDirWasExplicit": false,
+    "limitWasExplicit": false,
+    "sourceLeakPattern": {},
+    "limit": 8,
+    "previewLimit": 4,
+    "keepProjects": true,
+    "only": [
+      "tailwind-canonical-vscode-extension"
+    ],
+    "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T09-02-36-430Z",
+    "timeoutMs": 180000
+  },
+  "results": [
+    {
+      "slug": "tailwind-canonical-vscode-extension",
+      "sourceRepo": "https://github.com/juliusmarminge/tailwind-autofix-canonical-classnames",
+      "prompt": "Create a VS Code extension that auto-fixes Tailwind CSS canonical class suggestions on save. It must listen to Tailwind CSS IntelliSense diagnostics shaped like 'The class ... can be written as ...', replace the class before save, expose a tailwindCanonicalClasses.fixOnSave setting, and include extension package metadata.",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZBM3KQ7E0E15MYNX5ZYZQT",
+      "sandboxId": "64e65ddc",
+      "response": "VS Code extension that auto-fixes Tailwind CSS canonical class diagnostics on save.\n\n```json title=\"package.json\"\n{\n  \"name\": \"tailwind-canonical-classes-autofix\",\n  \"displayName\": \"Tailwind Canonical Classes Autofix\",\n  \"description\": \"VS Code extension that auto-fixes Tailwind CSS canonical class suggestions from Tailwind CSS IntelliSense diagnostics on save.\",\n  \"version\": \"0.1.0\",\n  \"publisher\": \"local-dev\",\n  \"engines\": {\n    \"vscode\": \"^1.90.0\"\n  },\n  \"activationEvents\": [\n    \"onLanguage:html\",\n    \"onLanguage:typescriptreact\",\n    \"onLanguage:javascriptreact\"\n  ],\n  \"main\": \"./dist/extension.js\",\n  \"contributes\": {\n    \"configuration\": {\n      \"title\": \"Tailwind Canonical Classes\",\n      \"properties\": {\n        \"tailwindCanonicalClasses.fixOnSave\": {\n          \"type\": \"boolean\",\n          \"default\": true,\n          \"description\": \"Apply canonical Tailwind CSS class fixes before save.\"\n        }\n      }\n    }\n  },\n  \"scripts\": {\n    \"compile\": \"tsc -p ./\",\n    \"test\": \"vitest run\"\n  },\n  \"devDependencies\": {\n    \"@types/vscode\": \"^1.90.0\",\n    \"typescript\": \"^5.5.3\",\n    \"vitest\": \"^2.1.1\"\n  }\n}\n```\n\n```ts title=\"src/extension.ts\"\nimport * as vscode from 'vscode';\n\nconst canonicalMessage = /The class `([^`]+)` can be written as `([^`]+)`/;\n\nexport function activate(context: vscode.ExtensionContext) {\n  const disposable = vscode.workspace.onWillSaveTextDocument(async (event) => {\n    const enabled = vscode.workspace.getConfiguration('tailwindCanonicalClasses').get<boolean>('fixOnSave', true);\n    if (!enabled) return;\n\n    const diagnostics = vscode.languages.getDiagnostics(event.document.uri);\n    const edit = new vscode.WorkspaceEdit();\n    for (const diagnostic of diagnostics) {\n      const match = canonicalMessage.exec(String(diagnostic.message));\n      if (!match) continue;\n      const currentText = event.document.getText(diagnostic.range);\n      if (currentText.includes(match[1])) {\n        edit.replace(event.document.uri, diagnostic.range, currentText.replace(match[1], match[2]));\n      }\n    }\n    await vscode.workspace.applyEdit(edit);\n  });\n\n  context.subscriptions.push(disposable);\n}\n\nexport function deactivate() {}\n```\n\n```md title=\"README.md\"\n# Tailwind Canonical Classes Autofix\n\nA VS Code extension that auto-fixes Tailwind CSS canonical class suggestions on save by reading Tailwind CSS IntelliSense diagnostics shaped like `The class ... can be written as ...`.\n\n## Setting\n\n- `tailwindCanonicalClasses.fixOnSave`: enable or disable applying canonical class fixes on save.\n```",
+      "responseQuality": {
+        "paths": [
+          "package.json",
+          "src/extension.ts",
+          "README.md"
+        ],
+        "failures": [],
+        "warnings": []
+      },
+      "fileQuality": {
+        "failures": []
+      },
+      "preview": null,
+      "durationMs": 13152,
+      "projectUpdate": {
+        "id": "01KPZBMFJZN778BZ7ZCA9057SR",
+        "conversationId": "01KPZBM3KQ7E0E15MYNX5ZYZQT",
+        "role": "assistant",
+        "content": "Project update: Applied 3 files for builder-app.\n\n[vai-artifact]\n{\"kind\":\"update\",\"title\":\"builder-app\",\"status\":\"updated\",\"tone\":\"violet\",\"badge\":\"Project update\",\"fileCount\":3,\"changedFiles\":[\"package.json\",\"src/extension.ts\",\"README.md\"],\"evidenceTier\":\"low\",\"verificationItems\":[\"Detected a non-preview code file set and skipped browser dev-server repair.\",\"Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.\"],\"packageChanged\":false,\"failureClass\":null,\"nextPrompts\":[\"Add the next feature slice\",\"Tighten this implementation with targeted edits\"]}\n[/vai-artifact]\n\n- Applied code files only. Skipped browser preview because this output is a CLI/API/backend file set.\n\nFiles changed:\n- package.json\n- src/extension.ts\n- README.md",
+        "imageId": null,
+        "toolCalls": null,
+        "toolCallId": null,
+        "tokenCount": null,
+        "modelId": "vai:v0",
+        "durationMs": null,
+        "feedback": null,
+        "createdAt": "2026-04-24T09:02:49.000Z"
+      },
+      "fileSnapshot": {
+        "files": [
+          "package.json",
+          "README.md",
+          "src/extension.ts"
+        ],
+        "contents": {
+          "package.json": "{\n  \"name\": \"tailwind-canonical-classes-autofix\",\n  \"displayName\": \"Tailwind Canonical Classes Autofix\",\n  \"description\": \"VS Code extension that auto-fixes Tailwind CSS canonical class suggestions from Tailwind CSS IntelliSense diagnostics on save.\",\n  \"version\": \"0.1.0\",\n  \"publisher\": \"local-dev\",\n  \"engines\": {\n    \"vscode\": \"^1.90.0\"\n  },\n  \"activationEvents\": [\n    \"onLanguage:html\",\n    \"onLanguage:typescriptreact\",\n    \"onLanguage:javascriptreact\"\n  ],\n  \"main\": \"./dist/extension.js\",\n  \"contributes\": {\n    \"configuration\": {\n      \"title\": \"Tailwind Canonical Classes\",\n      \"properties\": {\n        \"tailwindCanonicalClasses.fixOnSave\": {\n          \"type\": \"boolean\",\n          \"default\": true,\n          \"description\": \"Apply canonical Tailwind CSS class fixes before save.\"\n        }\n      }\n    }\n  },\n  \"scripts\": {\n    \"compile\": \"tsc -p ./\",\n    \"test\": \"vitest run\"\n  },\n  \"devDependencies\": {\n    \"@types/vscode\": \"^1.90.0\",\n    \"typescript\": \"^5.5.3\",\n    \"vitest\": \"^2.1.1\"\n  }\n}",
+          "src/extension.ts": "import * as vscode from 'vscode';\n\nconst canonicalMessage = /The class `([^`]+)` can be written as `([^`]+)`/;\n\nexport function activate(context: vscode.ExtensionContext) {\n  const disposable = vscode.workspace.onWillSaveTextDocument(async (event) => {\n    const enabled = vscode.workspace.getConfiguration('tailwindCanonicalClasses').get<boolean>('fixOnSave', true);\n    if (!enabled) return;\n\n    const diagnostics = vscode.languages.getDiagnostics(event.document.uri);\n    const edit = new vscode.WorkspaceEdit();\n    for (const diagnostic of diagnostics) {\n      const match = canonicalMessage.exec(String(diagnostic.message));\n      if (!match) continue;\n      const currentText = event.document.getText(diagnostic.range);\n      if (currentText.includes(match[1])) {\n        edit.replace(event.document.uri, diagnostic.range, currentText.replace(match[1], match[2]));\n      }\n    }\n    await vscode.workspace.applyEdit(edit);\n  });\n\n  context.subscriptions.push(disposable);\n}\n\nexport function deactivate() {}",
+          "README.md": "# Tailwind Canonical Classes Autofix\n\nA VS Code extension that auto-fixes Tailwind CSS canonical class suggestions on save by reading Tailwind CSS IntelliSense diagnostics shaped like `The class ... can be written as ...`.\n\n## Setting\n\n- `tailwindCanonicalClasses.fixOnSave`: enable or disable applying canonical class fixes on save."
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+# Vai runtime — external model + model-graded assertions (Promptfoo).
+#
+# Use this when the runtime has a hosted chat model registered (Anthropic, OpenAI, Google, etc.).
+#
+# ## Preconditions
+# - Same as base suite: `pnpm --filter @vai/runtime dev`, :3006, anon POST allowed for eval
+# - Provider keys in runtime `.env` so the **target** model works
+# - **Grader** API access for llm-rubric (default below: openai:gpt-4o-mini — override if needed)
+#
+# ## Run
+#   VAI_PROMPTFOO_MODEL=anthropic:claude-sonnet-4-20250514 pnpm eval:chat:external
+#   VAI_PROMPTFOO_MODEL=openai:gpt-4o pnpm eval:chat:external
+#
+# Grader override (no OpenAI key for judging):
+#   pnpm eval:chat:external -- --grader anthropic:claude-3-5-haiku-latest
+#
+# ## Environment
+#   VAI_PROMPTFOO_BASE
+#   VAI_PROMPTFOO_MODEL            (required — NOT vai:v0)
+#   VAI_PROMPTFOO_FETCH_TIMEOUT_MS (default 30000; use 120000+ for slow models)
+#
+
+description: 'Vai runtime — external chat model + rubric'
+
+providers:
+  - id: file://./vai-runtime-provider.mjs
+    label: vai-runtime-external
+
+prompts:
+  - '{{message}}'
+
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://./assertions/standard-contract.js
+      config:
+        minChars: 1
+        maxChars: 80000
+        maxLatencyMs: 360000
+  # Model-graded assertions need a judge. Change to a model you have API keys for.
+  options:
+    provider: openai:gpt-4o-mini
+
+tests:
+  - description: '[contract] Plain chat substantive'
+    metadata: { tier: contract, id: chat-substantive }
+    vars:
+      message: 'In two short sentences, explain what a REST API is.'
+    assert:
+      - type: javascript
+        value: 'output.trim().length >= 40'
+
+  - description: '[behavior] Literal echo'
+    metadata: { tier: behavior, id: literal-echo }
+    vars:
+      message: 'Repeat after me: VAI_PF_MARK_Q9Z2M'
+    assert:
+      - type: icontains
+        value: VAI_PF_MARK_Q9Z2M
+
+  - description: '[behavior] Math — addition'
+    metadata: { tier: behavior, id: math-add }
+    vars:
+      message: 'What is 2+2?'
+    assert:
+      - type: javascript
+        value: file://./assertions/contains-number.js
+        config:
+          expected: '4'
+
+  - description: '[behavior] Math — precedence'
+    metadata: { tier: behavior, id: math-precedence }
+    vars:
+      message: 'What is 17*3+1?'
+    assert:
+      - type: javascript
+        value: file://./assertions/contains-number.js
+        config:
+          expected: '52'
+
+  - description: '[behavior] Base conversion'
+    metadata: { tier: behavior, id: base-binary }
+    vars:
+      message: 'convert 255 to binary'
+    assert:
+      - type: regex
+        value: '11111111'
+
+  # External models will not answer as VeggaAI; use a generic HTTP task instead.
+  - description: '[behavior] HTTP methods awareness'
+    metadata: { tier: behavior, id: http-methods }
+    vars:
+      message: 'Name the four common HTTP methods used in REST APIs for read, create, update, and delete. One line, comma-separated.'
+    assert:
+      - type: javascript
+        value: |
+          const s = (output || '').toLowerCase();
+          return ['get','post','put','delete','patch'].filter(m => s.includes(m)).length >= 3;
+
+  - description: '[behavior] Concise yes / no'
+    metadata: { tier: behavior, id: yes-no-brief }
+    vars:
+      message: 'Answer with a single word, yes or no only: Is ice typically colder than boiling water?'
+    assert:
+      - type: javascript
+        value: file://./assertions/concise-yes-no.js
+        config:
+          maxChars: 120
+
+  - description: '[behavior] Unicode literal'
+    metadata: { tier: behavior, id: unicode-literal }
+    vars:
+      message: 'Repeat after me: ✅'
+    assert:
+      - type: contains
+        value: '✅'
+
+  - description: '[quality] Idempotency — free-form + rubric'
+    metadata: { tier: quality, id: http-idempotency-freeform }
+    vars:
+      message: |
+        In 2-3 sentences, explain what idempotency means for HTTP APIs and why it matters when clients retry failed requests.
+        Do not focus on TLS or HTTPS encryption — only on retries and side effects of operations.
+    assert:
+      - type: javascript
+        value: file://./assertions/http-idempotency-freeform.js
+      - type: llm-rubric
+        threshold: 0.7
+        value: |
+          Pass if the answer correctly explains that idempotent operations are safe to retry because repeating them
+          should not accumulate unintended side effects (e.g. duplicate charges or duplicate resources), in the HTTP/API sense.
+          Fail if the answer is mostly about TLS, HTTPS handshakes, or encryption. Fail if it does not address retries.

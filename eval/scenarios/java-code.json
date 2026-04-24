@@ -1,0 +1,56 @@
+{
+  "id": "java-code",
+  "label": "Java-specific tasks â€” streams, concurrency, records, generics, Optional",
+  "scenarios": [
+    {
+      "id": "streams-filter-collect",
+      "messages": [{ "role": "user", "content": "In Java, using the Streams API, filter a List<Integer> to even numbers and collect them into a new list." }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/\\.stream\\(\\)|\\.filter\\(|Collectors\\.toList|\\.toList\\(\\)|%\\s*2\\s*==\\s*0|lambda/i"
+        ]
+      }
+    },
+    {
+      "id": "completable-future-chain",
+      "messages": [{ "role": "user", "content": "How do I compose two CompletableFutures in Java so the second runs when the first completes successfully?" }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/CompletableFuture|thenApply|thenCompose|thenAccept|supplyAsync|runAsync/i"
+        ]
+      }
+    },
+    {
+      "id": "record-vs-class",
+      "messages": [{ "role": "user", "content": "When should I use a Java record instead of a regular class? Show a tiny example of a Coordinate record." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/record\\s+Coordinate|immutable|value|equals|hashCode|toString|boilerplate|canonical/i"
+        ]
+      }
+    },
+    {
+      "id": "generics-bounded",
+      "messages": [{ "role": "user", "content": "Write a Java generic method <T extends Comparable<T>> max(List<T> items) that returns the largest item." }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/<T\\s+extends\\s+Comparable|items\\.stream|Collections\\.max|compareTo|type parameter|bounded/i"
+        ]
+      }
+    },
+    {
+      "id": "optional-map-orelse",
+      "messages": [{ "role": "user", "content": "How do I safely get a User's email from a Optional<User> in Java, defaulting to 'unknown@example.com' if absent?" }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/Optional|\\.map\\(|\\.orElse|getEmail|ifPresent|flatMap/i"
+        ]
+      }
+    }
+  ]
+}

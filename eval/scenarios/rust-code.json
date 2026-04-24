@@ -1,0 +1,56 @@
+{
+  "id": "rust-code",
+  "label": "Rust-specific code tasks â€” ownership, traits, error handling, async, iterators",
+  "scenarios": [
+    {
+      "id": "ownership-move-vs-borrow",
+      "messages": [{ "role": "user", "content": "Explain the difference between moving and borrowing in Rust with a short String example." }],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": [
+          "/&\\s*String|&str|move|borrow|ownership|let\\s+\\w+\\s*=|fn\\s+\\w+\\(\\w+:\\s*&|shared reference|mutable reference/i"
+        ]
+      }
+    },
+    {
+      "id": "trait-impl-display",
+      "messages": [{ "role": "user", "content": "How do I implement the Display trait for a custom Rust struct called Point with x and y fields?" }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/impl\\s+.*Display\\s+for\\s+Point|fn\\s+fmt|fmt::Formatter|write!\\s*\\(|std::fmt/i"
+        ]
+      }
+    },
+    {
+      "id": "result-question-mark",
+      "messages": [{ "role": "user", "content": "Show me how to use the ? operator in Rust to propagate errors from a function that reads a file and parses it as JSON." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/Result<|-> Result|serde_json|fs::read|\\?;|Box<dyn Error>|propagate|error type/i"
+        ]
+      }
+    },
+    {
+      "id": "tokio-async-spawn",
+      "messages": [{ "role": "user", "content": "Write a small async Rust example using tokio that spawns two tasks and joins their results." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/#\\[tokio::main\\]|tokio::spawn|async\\s+fn|\\.await|try_join|join!|JoinHandle/i"
+        ]
+      }
+    },
+    {
+      "id": "iterator-collect-map",
+      "messages": [{ "role": "user", "content": "Using Rust iterators, convert a Vec<i32> into a Vec<String> where each number is prefixed with 'num:'." }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/\\.iter\\(\\)|\\.map\\(|\\.collect|format!|to_string|Vec<String>|into_iter/i"
+        ]
+      }
+    }
+  ]
+}

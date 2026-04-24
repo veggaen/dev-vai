@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSandboxStore } from '../stores/sandboxStore.js';
-import { API_BASE } from '../lib/api.js';
+import { API_BASE, buildApiHeaders } from '../lib/api.js';
 import {
   FolderTree, File, FolderOpen, Folder, ChevronRight, ChevronDown,
-  RefreshCw, Trash2, Plus,
+  RefreshCw, Trash2, Plus, Copy, Download, Search, X, Loader2,
 } from 'lucide-react';
 
 /* ── Tree node type ── */
@@ -16,8 +16,6 @@ interface TreeNode {
 
 /**
  * Build a tree structure from flat file paths.
- * Input: ['src/App.tsx', 'src/index.css', 'package.json']
- * Output: nested TreeNode[]
  */
 function buildTree(paths: string[]): TreeNode[] {
   const root: TreeNode = { name: '', path: '', isDir: true, children: [] };
@@ -33,19 +31,13 @@ function buildTree(paths: string[]): TreeNode[] {
 
       let child = current.children.find((c) => c.name === part);
       if (!child) {
-        child = {
-          name: part,
-          path: currentPath,
-          isDir: !isLast,
-          children: [],
-        };
+        child = { name: part, path: currentPath, isDir: !isLast, children: [] };
         current.children.push(child);
       }
       current = child;
     }
   }
 
-  // Sort: folders first, then alphabetical
   const sortChildren = (node: TreeNode) => {
     node.children.sort((a, b) => {
       if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
@@ -54,27 +46,20 @@ function buildTree(paths: string[]): TreeNode[] {
     node.children.forEach(sortChildren);
   };
   sortChildren(root);
-
   return root.children;
 }
 
 /* ── File icon color map ── */
 const EXT_COLORS: Record<string, string> = {
-  tsx: 'text-blue-400',
-  ts: 'text-blue-400',
-  jsx: 'text-yellow-400',
-  js: 'text-yellow-400',
-  css: 'text-purple-400',
-  html: 'text-orange-400',
-  json: 'text-green-400',
-  md: 'text-zinc-400',
-  py: 'text-green-400',
-  toml: 'text-orange-300',
-  yaml: 'text-rose-300',
-  yml: 'text-rose-300',
-  env: 'text-zinc-500',
-  sh: 'text-zinc-400',
-  sql: 'text-cyan-400',
+  tsx: 'text-blue-400', ts: 'text-blue-400',
+  jsx: 'text-yellow-400', js: 'text-yellow-400',
+  css: 'text-purple-400', html: 'text-orange-400',
+  json: 'text-green-400', md: 'text-zinc-400',
+  py: 'text-green-400', toml: 'text-orange-300',
+  yaml: 'text-rose-300', yml: 'text-rose-300',
+  env: 'text-zinc-500', sh: 'text-zinc-400',
+  sql: 'text-cyan-400', svg: 'text-pink-400',
+  png: 'text-pink-300', jpg: 'text-pink-300',
 };
 
 function getFileColor(name: string): string {
@@ -82,20 +67,27 @@ function getFileColor(name: string): string {
   return EXT_COLORS[ext] || 'text-zinc-500';
 }
 
+/* ── Line-level syntax coloring ── */
+function getLineClass(line: string): string {
+  if (/^\s*(import|export|from)\b/.test(line)) return 'text-violet-400';
+  if (/^\s*(const|let|var|function|class|interface|type)\b/.test(line)) return 'text-blue-400';
+  if (/^\s*\/\//.test(line)) return 'text-zinc-600';
+  if (/^\s*return\b/.test(line)) return 'text-amber-400';
+  if (/['"`]/.test(line)) return 'text-emerald-400';
+  if (/^\s*</.test(line)) return 'text-orange-300';
+  return 'text-zinc-300';
+}
+
 /* ── Tree node component ── */
 function TreeItem({
-  node,
-  depth,
-  selectedPath,
-  onSelect,
+  node, depth, selectedPath, onSelect,
 }: {
   node: TreeNode;
   depth: number;
   selectedPath: string | null;
   onSelect: (path: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(depth < 2); // auto-expand top 2 levels
-
+  const [expanded, setExpanded] = useState(depth < 2);
   const isSelected = selectedPath === node.path;
 
   const handleClick = () => {
@@ -112,7 +104,7 @@ function TreeItem({
         onClick={handleClick}
         className={`flex w-full items-center gap-1 rounded px-1 py-[3px] text-left text-xs transition-colors ${
           isSelected
-            ? 'bg-blue-500/15 text-blue-300'
+            ? 'bg-violet-500/15 text-violet-300'
             : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
         }`}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
@@ -137,6 +129,9 @@ function TreeItem({
           </>
         )}
         <span className="truncate">{node.name}</span>
+        {node.isDir && node.children.length > 0 && (
+          <span className="ml-auto text-[9px] text-zinc-700">{node.children.length}</span>
+        )}
       </button>
       {node.isDir && expanded && node.children.map((child) => (
         <TreeItem
@@ -151,26 +146,49 @@ function TreeItem({
   );
 }
 
-/* ── File content viewer ── */
+/* ── Syntax-highlighted file content viewer ── */
 function FileViewer({ filePath }: { filePath: string }) {
   const { projectId } = useSandboxStore();
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!projectId || !filePath) return;
     setLoading(true);
-    fetch(`${API_BASE}/api/sandbox/${projectId}/file?path=${encodeURIComponent(filePath)}`)
+    fetch(`${API_BASE}/api/sandbox/${projectId}/file?path=${encodeURIComponent(filePath)}`, {
+      credentials: 'include',
+      headers: buildApiHeaders(),
+    })
       .then((r) => r.json())
       .then((data: { content: string }) => setContent(data.content))
       .catch(() => setContent('// Failed to load file'))
       .finally(() => setLoading(false));
   }, [projectId, filePath]);
 
+  const handleCopy = () => {
+    if (content) {
+      navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleDownload = () => {
+    if (!content) return;
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filePath.split('/').pop() || 'file.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-xs text-zinc-600">
-        Loading...
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-4 w-4 animate-spin text-zinc-600" />
       </div>
     );
   }
@@ -183,10 +201,45 @@ function FileViewer({ filePath }: { filePath: string }) {
     );
   }
 
+  const lines = content.split('\n');
+
   return (
-    <pre className="h-full overflow-auto p-2 text-[11px] leading-relaxed text-zinc-300 font-mono">
-      {content}
-    </pre>
+    <div className="flex h-full flex-col">
+      {/* Viewer header */}
+      <div className="flex items-center justify-between border-b border-zinc-800/40 px-2 py-1">
+        <span className="truncate text-[10px] text-zinc-500">{filePath}</span>
+        <div className="flex items-center gap-0.5">
+          <span className="text-[9px] text-zinc-700">{lines.length} lines</span>
+          <button onClick={handleCopy}
+            className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
+            <Copy className="h-2.5 w-2.5" />
+            {copied ? 'Copied!' : ''}
+          </button>
+          <button onClick={handleDownload}
+            className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300" title="Download">
+            <Download className="h-2.5 w-2.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Syntax-highlighted code */}
+      <div className="flex flex-1 overflow-auto bg-zinc-950 text-[11px] leading-5 font-mono">
+        {/* Line numbers */}
+        <div className="sticky left-0 flex flex-col items-end border-r border-zinc-800/40 bg-zinc-950 px-1.5 py-1 text-zinc-700 select-none">
+          {lines.map((_, i) => (
+            <span key={i}>{i + 1}</span>
+          ))}
+        </div>
+        {/* Code */}
+        <pre className="flex-1 overflow-x-auto px-2 py-1">
+          {lines.map((line, i) => (
+            <div key={i} className={`${getLineClass(line)} hover:bg-zinc-800/20`}>
+              {line || ' '}
+            </div>
+          ))}
+        </pre>
+      </div>
+    </div>
   );
 }
 
@@ -195,8 +248,25 @@ export function FileExplorer() {
   const { projectId, projectName, files, status, fetchFiles, destroyProject } = useSandboxStore();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [showViewer, setShowViewer] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
 
   const tree = useMemo(() => buildTree(files), [files]);
+
+  // Filter tree by search
+  const filteredTree = useMemo(() => {
+    if (!searchQuery.trim()) return tree;
+    const q = searchQuery.toLowerCase();
+    const filterNode = (node: TreeNode): TreeNode | null => {
+      if (!node.isDir) {
+        return node.name.toLowerCase().includes(q) ? node : null;
+      }
+      const filteredChildren = node.children.map(filterNode).filter(Boolean) as TreeNode[];
+      if (filteredChildren.length === 0) return null;
+      return { ...node, children: filteredChildren };
+    };
+    return tree.map(filterNode).filter(Boolean) as TreeNode[];
+  }, [tree, searchQuery]);
 
   // Refresh file list when project changes or status updates
   useEffect(() => {
@@ -237,6 +307,13 @@ export function FileExplorer() {
         </div>
         <div className="flex items-center gap-0.5">
           <button
+            onClick={() => { setShowSearch((v) => !v); if (showSearch) setSearchQuery(''); }}
+            className={`rounded p-1 transition-colors ${showSearch ? 'text-violet-400' : 'text-zinc-600'} hover:bg-zinc-800`}
+            title="Search files"
+          >
+            <Search className="h-3 w-3" />
+          </button>
+          <button
             onClick={() => fetchFiles()}
             className="rounded p-1 text-zinc-600 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
             title="Refresh files"
@@ -253,19 +330,44 @@ export function FileExplorer() {
         </div>
       </div>
 
+      {/* Search bar */}
+      {showSearch && (
+        <div className="flex items-center gap-1.5 border-b border-zinc-800/60 bg-zinc-900/40 px-3 py-1">
+          <Search className="h-3 w-3 text-zinc-600" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Filter files..."
+            className="flex-1 bg-transparent text-xs text-zinc-300 placeholder-zinc-600 outline-none"
+            autoFocus
+          />
+          {searchQuery && (
+            <span className="text-[9px] text-zinc-500">
+              {filteredTree.reduce((acc, n) => acc + (n.isDir ? n.children.length : 1), 0)} matches
+            </span>
+          )}
+          <button onClick={() => { setSearchQuery(''); setShowSearch(false); }}
+            className="rounded p-0.5 text-zinc-600 hover:text-zinc-300">
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
       {/* File tree + optional viewer */}
       <div className="flex flex-1 min-h-0">
         {/* Tree pane */}
-        <div className={`overflow-y-auto overflow-x-hidden py-1 ${showViewer ? 'w-[45%] border-r border-zinc-800' : 'flex-1'}`}>
-          {tree.length === 0 ? (
+        <div className={`overflow-y-auto overflow-x-hidden py-1 ${showViewer ? 'w-[40%] border-r border-zinc-800' : 'flex-1'}`}>
+          {filteredTree.length === 0 ? (
             <div className="px-3 py-4 text-xs text-zinc-600">
-              {status === 'installing' ? 'Installing dependencies...' :
+              {searchQuery ? 'No matching files' :
+               status === 'installing' ? 'Installing dependencies...' :
                status === 'creating' ? 'Creating project...' :
                status === 'writing' ? 'Writing files...' :
                'No files yet'}
             </div>
           ) : (
-            tree.map((node) => (
+            filteredTree.map((node) => (
               <TreeItem
                 key={node.path}
                 node={node}
@@ -277,22 +379,18 @@ export function FileExplorer() {
           )}
         </div>
 
-        {/* File viewer pane */}
+        {/* Syntax-highlighted file viewer pane */}
         {showViewer && selectedFile && (
           <div className="flex flex-1 flex-col min-w-0">
-            <div className="flex items-center justify-between border-b border-zinc-800 px-2 py-1">
-              <span className="truncate text-[10px] text-zinc-500">{selectedFile}</span>
-              <button
-                onClick={() => { setShowViewer(false); setSelectedFile(null); }}
-                className="rounded p-0.5 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
-                title="Close viewer"
-              >
-                <Plus className="h-3 w-3 rotate-45" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto bg-zinc-900/50">
-              <FileViewer filePath={selectedFile} />
-            </div>
+            <FileViewer filePath={selectedFile} />
+            {/* Close button overlay */}
+            <button
+              onClick={() => { setShowViewer(false); setSelectedFile(null); }}
+              className="absolute right-1 top-1 rounded p-0.5 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300"
+              title="Close viewer"
+            >
+              <Plus className="h-3 w-3 rotate-45" />
+            </button>
           </div>
         )}
       </div>

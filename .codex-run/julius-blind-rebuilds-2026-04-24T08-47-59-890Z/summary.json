@@ -1,0 +1,65 @@
+{
+  "verdict": "fail",
+  "passed": 2,
+  "failed": 1,
+  "total": 3,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-47-59-890Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\julius-blind-rebuilds-2026-04-24T08-47-59-890Z\\report.json",
+  "results": [
+    {
+      "slug": "agent-workflow-tools-suite",
+      "sourceRepo": "https://github.com/juliusmarminge/agent-tools",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZASD8V09BW0R18BM8YPZGB",
+      "sandboxId": "e5a10c3a",
+      "previewUrl": null
+    },
+    {
+      "slug": "tailwind-canonical-vscode-extension",
+      "sourceRepo": "https://github.com/juliusmarminge/tailwind-autofix-canonical-classnames",
+      "status": "fail",
+      "failures": [
+        "missing file block package.json",
+        "missing file block src/extension.ts",
+        "missing file block README.md",
+        "missing required response text Tailwind",
+        "missing required response text canonical",
+        "missing required response text diagnostics",
+        "missing required response text fixOnSave",
+        "missing required response text VS Code",
+        "missing required response text on save",
+        "sandbox missing package.json",
+        "sandbox missing src/extension.ts",
+        "sandbox missing README.md",
+        "sandbox files missing Tailwind",
+        "sandbox files missing canonical",
+        "sandbox files missing diagnostics",
+        "sandbox files missing fixOnSave",
+        "sandbox files missing VS Code",
+        "sandbox files missing on save",
+        "sandbox files missing VS Code setting contribution",
+        "sandbox files missing diagnostic/save hook"
+      ],
+      "warnings": [
+        "short response for a blind rebuild request",
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPZASQ51AYX1YJG62R45H0HG",
+      "sandboxId": "ee4e4b0a",
+      "previewUrl": null
+    },
+    {
+      "slug": "trellix-trpc-board",
+      "sourceRepo": "https://github.com/juliusmarminge/trellix-trpc",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZAXSH0AHTJNC5XWRBBBXS4",
+      "sandboxId": "9558b7c2",
+      "previewUrl": "http://127.0.0.1:4207"
+    }
+  ]
+}

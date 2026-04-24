@@ -1,0 +1,37 @@
+{
+  "verdict": "pass",
+  "passed": 3,
+  "failed": 0,
+  "total": 3,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T03-31-44-750Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T03-31-44-750Z\\report.json",
+  "results": [
+    {
+      "slug": "neon-fitness-landing",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYRP8XBMR6Q3J4RB0ZFHTX0",
+      "sandboxId": "06a5ad65",
+      "previewUrl": "http://127.0.0.1:4104"
+    },
+    {
+      "slug": "shared-shopping-list",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYRPZADQRH5S1CZ5V39CE0V",
+      "sandboxId": "4e93ae24",
+      "previewUrl": null
+    },
+    {
+      "slug": "photography-portfolio",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPYRQNZBAZ6KWC5J5AYMVNAG",
+      "sandboxId": "30369c4c",
+      "previewUrl": null
+    }
+  ]
+}

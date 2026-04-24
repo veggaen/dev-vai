@@ -1,0 +1,40 @@
+{
+  "verdict": "fail",
+  "passed": 0,
+  "failed": 2,
+  "total": 2,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T04-28-08-334Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T04-28-08-334Z\\report.json",
+  "results": [
+    {
+      "slug": "fastapi-inventory-api",
+      "status": "fail",
+      "failures": [
+        "sandbox files missing POST /items endpoint",
+        "sandbox files missing PUT /items/{item_id} endpoint",
+        "sandbox files missing DELETE /items/{item_id} endpoint"
+      ],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPYVXGZ91FXMY2S3TAHFDSWF",
+      "sandboxId": "91ac8c99",
+      "previewUrl": null
+    },
+    {
+      "slug": "rust-incident-cli",
+      "status": "fail",
+      "failures": [
+        "sandbox files missing incident triage domain commands"
+      ],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPYW42A1BRVP8BTHMA7SDEXR",
+      "sandboxId": "e01b6e07",
+      "previewUrl": null
+    }
+  ]
+}

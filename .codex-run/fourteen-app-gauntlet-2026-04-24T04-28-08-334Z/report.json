@@ -1,0 +1,107 @@
+{
+  "options": {
+    "appUrl": "http://127.0.0.1:5173/?devAuthBypass=1",
+    "apiUrl": "http://127.0.0.1:3006",
+    "limit": 14,
+    "previewLimit": 4,
+    "keepProjects": true,
+    "only": [
+      "fastapi-inventory-api",
+      "rust-incident-cli"
+    ],
+    "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T04-28-08-334Z",
+    "timeoutMs": 180000
+  },
+  "results": [
+    {
+      "slug": "fastapi-inventory-api",
+      "prompt": "Build a Python FastAPI inventory API with health, list, create, update, and delete endpoints. Return complete runnable files.",
+      "status": "fail",
+      "failures": [
+        "sandbox files missing POST /items endpoint",
+        "sandbox files missing PUT /items/{item_id} endpoint",
+        "sandbox files missing DELETE /items/{item_id} endpoint"
+      ],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPYVXGZ91FXMY2S3TAHFDSWF",
+      "sandboxId": "91ac8c99",
+      "response": "Building a Python FastAPI REST API.\n\n```txt title=\"requirements.txt\"\nfastapi>=0.111.0\nuvicorn[standard]>=0.30.0\npydantic>=2.7.0\n```\n\n```python title=\"main.py\"\nfrom fastapi import FastAPI, HTTPException\nfrom fastapi.middleware.cors import CORSMiddleware\nfrom pydantic import BaseModel\nfrom typing import Optional\nimport uuid\n\napp = FastAPI(title=\"My API\", version=\"1.0.0\")\n\napp.add_middleware(\n    CORSMiddleware,\n    allow_origins=[\"*\"],\n    allow_methods=[\"*\"],\n    allow_headers=[\"*\"],\n)\n\n# In-memory store (replace with database)\nitems: dict[str, dict] = {}\n\nclass Item(BaseModel):\n    name: str\n    description: Optional[str] = None\n    price: float\n    in_stock: bool = True\n\nclass ItemUpdate(BaseModel):\n    name: Optional[str] = None\n    description: Optional[str] = None\n    price: Optional[float] = None\n    in_stock: Optional[bool] = None\n\n@app.get(\"/health\")\ndef health():\n    return {\"status\": \"ok\", \"items\": len(items)}\n\n@app.get(\"/items\")\ndef list_items():\n    return {\"items\": list(items.values()), \"total\": len(items)}\n\n@app.get(\"/items/{item_id}\")\ndef get_item(item_id: str):\n    item = items.get(item_id)\n    if not item:\n        raise HTTPException(status_code=404, detail=\"Item not found\")\n    return item\n\n@app.post(\"/items\", status_code=201)\ndef create_item(item: Item):\n    item_id = str(uuid.uuid4())\n    record = {\"id\": item_id, **item.model_dump()}\n    items[item_id] = record\n    return record\n\n@app.patch(\"/items/{item_id}\")\ndef update_item(item_id: str, update: ItemUpdate):\n    item = items.get(item_id)\n    if not item:\n        raise HTTPException(status_code=404, detail=\"Item not found\")\n    for field, val in update.model_dump(exclude_none=True).items():\n        item[field] = val\n    return item\n\n@app.delete(\"/items/{item_id}\", status_code=204)\ndef delete_item(item_id: str):\n    if item_id not in items:\n        raise HTTPException(status_code=404, detail=\"Item not found\")\n    del items[item_id]\n```\n\n**Run:**\n```bash\npip install -r requirements.txt\nuvicorn main:app --reload --port 8000\n```\n\nInteractive docs available at `http://localhost:8000/docs` (Swagger UI) and `/redoc`.\n\nEndpoints: `GET /health`, `GET /items`, `GET /items/{id}`, `POST /items`, `PATCH /items/{id}`, `DELETE /items/{id}`.",
+      "responseQuality": {
+        "paths": [
+          "requirements.txt",
+          "main.py"
+        ],
+        "failures": [],
+        "warnings": []
+      },
+      "fileQuality": {
+        "failures": [
+          "sandbox files missing POST /items endpoint",
+          "sandbox files missing PUT /items/{item_id} endpoint",
+          "sandbox files missing DELETE /items/{item_id} endpoint"
+        ]
+      },
+      "preview": null,
+      "durationMs": 214365,
+      "projectUpdate": null,
+      "fileSnapshot": {
+        "files": [
+          ".vite/deps/package.json",
+          ".vite/deps/_metadata.json",
+          "main.py",
+          "requirements.txt"
+        ],
+        "contents": {
+          "requirements.txt": "fastapi>=0.111.0\nuvicorn[standard]>=0.30.0\npydantic>=2.7.0",
+          "main.py": "from fastapi import FastAPI, HTTPException\nfrom fastapi.middleware.cors import CORSMiddleware\nfrom pydantic import BaseModel\nfrom typing import Optional\nimport uuid\n\napp = FastAPI(title=\"My API\", version=\"1.0.0\")\n\napp.add_middleware(\n    CORSMiddleware,\n    allow_origins=[\"*\"],\n    allow_methods=[\"*\"],\n    allow_headers=[\"*\"],\n)\n\n# In-memory store (replace with database)\nitems: dict[str, dict] = {}\n\nclass Item(BaseModel):\n    name: str\n    description: Optional[str] = None\n    price: float\n    in_stock: bool = True\n\nclass ItemUpdate(BaseModel):\n    name: Optional[str] = None\n    description: Optional[str] = None\n    price: Optional[float] = None\n    in_stock: Optional[bool] = None\n\n@app.get(\"/health\")\ndef health():\n    return {\"status\": \"ok\", \"items\": len(items)}\n\n@app.get(\"/items\")\ndef list_items():\n    return {\"items\": list(items.values()), \"total\": len(items)}\n\n@app.get(\"/items/{item_id}\")\ndef get_item(item_id: str):\n    item = items.get(item_id)\n    if not item:\n        raise HTTPException(status_code=404, detail=\"Item not found\")\n    return item\n\n@app.post(\"/items\", status_code=201)\ndef create_item(item: Item):\n    item_id = str(uuid.uuid4())\n    record = {\"id\": item_id, **item.model_dump()}\n    items[item_id] = record\n    return record\n\n@app.patch(\"/items/{item_id}\")\ndef update_item(item_id: str, update: ItemUpdate):\n    item = items.get(item_id)\n    if not item:\n        raise HTTPException(status_code=404, detail=\"Item not found\")\n    for field, val in update.model_dump(exclude_none=True).items():\n        item[field] = val\n    return item\n\n@app.delete(\"/items/{item_id}\", status_code=204)\ndef delete_item(item_id: str):\n    if item_id not in items:\n        raise HTTPException(status_code=404, detail=\"Item not found\")\n    del items[item_id]"
+        }
+      }
+    },
+    {
+      "slug": "rust-incident-cli",
+      "prompt": "Build a Rust CLI incident triage tool with clap commands. Return Cargo.toml and src/main.rs as separate complete files.",
+      "status": "fail",
+      "failures": [
+        "sandbox files missing incident triage domain commands"
+      ],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPYW42A1BRVP8BTHMA7SDEXR",
+      "sandboxId": "e01b6e07",
+      "response": "Building a Rust CLI — rust cli incident triage tool with clap commands. return cargo.toml and src/main.rs as separate complete files..\n\n```toml title=\"Cargo.toml\"\n[package]\nname = \"rust-cli\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nclap = { version = \"4\", features = [\"derive\"] }\n```\n\n```rust title=\"src/main.rs\"\nuse clap::{Parser, Subcommand};\n\n#[derive(Parser)]\n#[command(name = \"cli\", about = \"A Rust CLI tool\", version)]\nstruct Cli {\n    #[command(subcommand)]\n    command: Commands,\n}\n\n#[derive(Subcommand)]\nenum Commands {\n    /// Greet someone\n    Greet {\n        /// Name to greet\n        name: String,\n        /// Greet loudly\n        #[arg(short, long)]\n        loud: bool,\n    },\n    /// Show version info\n    Info,\n}\n\nfn main() {\n    let cli = Cli::parse();\n    match cli.command {\n        Commands::Greet { name, loud } => {\n            let msg = format!(\"Hello, {}!\", name);\n            println!(\"{}\", if loud { msg.to_uppercase() } else { msg });\n        }\n        Commands::Info => println!(\"rust-cli v0.1.0 — built with Clap 4\"),\n    }\n}\n```\n\n**Run:** `cargo run -- greet World` or `cargo run -- greet World --loud`\n**What to check:** prints a normal or uppercase greeting, and `cargo run -- info` prints the version banner.",
+      "responseQuality": {
+        "paths": [
+          "Cargo.toml",
+          "src/main.rs"
+        ],
+        "failures": [],
+        "warnings": []
+      },
+      "fileQuality": {
+        "failures": [
+          "sandbox files missing incident triage domain commands"
+        ]
+      },
+      "preview": null,
+      "durationMs": 213093,
+      "projectUpdate": null,
+      "fileSnapshot": {
+        "files": [
+          ".vite/deps/package.json",
+          ".vite/deps/_metadata.json",
+          "Cargo.toml",
+          "src/main.rs"
+        ],
+        "contents": {
+          "Cargo.toml": "[package]\nname = \"rust-cli\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nclap = { version = \"4\", features = [\"derive\"] }",
+          "src/main.rs": "use clap::{Parser, Subcommand};\n\n#[derive(Parser)]\n#[command(name = \"cli\", about = \"A Rust CLI tool\", version)]\nstruct Cli {\n    #[command(subcommand)]\n    command: Commands,\n}\n\n#[derive(Subcommand)]\nenum Commands {\n    /// Greet someone\n    Greet {\n        /// Name to greet\n        name: String,\n        /// Greet loudly\n        #[arg(short, long)]\n        loud: bool,\n    },\n    /// Show version info\n    Info,\n}\n\nfn main() {\n    let cli = Cli::parse();\n    match cli.command {\n        Commands::Greet { name, loud } => {\n            let msg = format!(\"Hello, {}!\", name);\n            println!(\"{}\", if loud { msg.to_uppercase() } else { msg });\n        }\n        Commands::Info => println!(\"rust-cli v0.1.0 — built with Clap 4\"),\n    }\n}"
+        }
+      }
+    }
+  ]
+}

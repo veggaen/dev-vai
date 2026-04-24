@@ -1,0 +1,40 @@
+{
+  "verdict": "pass",
+  "passed": 3,
+  "failed": 0,
+  "total": 3,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-15-06-150Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\t3-blind-rebuilds-2026-04-24T07-15-06-150Z\\report.json",
+  "results": [
+    {
+      "slug": "meme-coin-idle-game",
+      "sourceRepo": "https://github.com/t3dotgg/dogecoin-simulator",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ5F813X7KSATQE8CZWV5AS",
+      "sandboxId": "f5a441c1",
+      "previewUrl": "http://127.0.0.1:4182"
+    },
+    {
+      "slug": "client-image-export-tool",
+      "sourceRepo": "https://github.com/t3dotgg/quickpic",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ5FVN1DANHBVPRS4NP5MNH",
+      "sandboxId": "5ebcd8b1",
+      "previewUrl": "http://127.0.0.1:4183"
+    },
+    {
+      "slug": "full-stack-image-gallery",
+      "sourceRepo": "https://github.com/t3dotgg/t3gallery",
+      "status": "pass",
+      "failures": [],
+      "warnings": [],
+      "conversationId": "01KPZ5GFD7PGQ23VAZ3QWPR3M8",
+      "sandboxId": "4a757b3c",
+      "previewUrl": "http://127.0.0.1:4184"
+    }
+  ]
+}

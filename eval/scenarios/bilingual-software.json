@@ -1,0 +1,56 @@
+{
+  "id": "bilingual-software",
+  "label": "Norwegian / mixed NO-EN software prompts should answer in kind, on topic",
+  "scenarios": [
+    {
+      "id": "no-forklar-react-hooks",
+      "messages": [{ "role": "user", "content": "Forklar React hooks kort." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/useState|useEffect|hook|funksjon|tilstand|state|komponent/i"
+        ]
+      }
+    },
+    {
+      "id": "no-lag-en-express-rute",
+      "messages": [{ "role": "user", "content": "Lag en Express-rute som henter brukere fra Postgres." }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/app\\.get|router\\.get|express|pg|SELECT|query|async|await/i"
+        ]
+      }
+    },
+    {
+      "id": "no-hva-er-typescript",
+      "messages": [{ "role": "user", "content": "Hva er TypeScript og hvorfor bruke det?" }],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": [
+          "/typescript|javascript|type|statisk|kompilator|feil|verktøy|editor|bedre/i"
+        ]
+      }
+    },
+    {
+      "id": "mixed-debug-prompt",
+      "messages": [{ "role": "user", "content": "hvorfor gir denne cors feil i Chrome?\n\nfetch('http://api.example.com/x').then(r => r.json())" }],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": [
+          "/cors|access-control|server|header|preflight|origin|ikke satt/i"
+        ]
+      }
+    },
+    {
+      "id": "no-typo-dockre",
+      "messages": [{ "role": "user", "content": "hva er dockre?" }],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": [
+          "/docker|container|bilde|kjør|isolert/i"
+        ]
+      }
+    }
+  ]
+}

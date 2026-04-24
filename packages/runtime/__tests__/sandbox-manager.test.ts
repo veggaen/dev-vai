@@ -6,12 +6,42 @@
  * We skip install/startDev since those require npm to be installed
  * and would make CI slow — that's better suited for E2E tests.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SandboxManager } from '../src/sandbox/manager.js';
+import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { existsSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+const { spawnMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+}));
+
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    spawn: spawnMock,
+  };
+});
+
+import { SandboxManager } from '../src/sandbox/manager.js';
+
+function createMockProcess() {
+  const proc = new EventEmitter() as EventEmitter & {
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+    kill: ReturnType<typeof vi.fn>;
+    pid: number;
+  };
+
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.kill = vi.fn();
+  proc.pid = 12345;
+
+  return proc;
+}
 
 describe('SandboxManager', () => {
   let manager: SandboxManager;
@@ -21,6 +51,7 @@ describe('SandboxManager', () => {
     // Each test gets its own temp directory — full isolation
     testDir = await mkdtemp(join(tmpdir(), 'vai-sandbox-test-'));
     manager = new SandboxManager(testDir);
+    spawnMock.mockReset();
   });
 
   afterEach(async () => {
@@ -126,6 +157,45 @@ describe('SandboxManager', () => {
     });
   });
 
+  describe('install()', () => {
+    it('installs with pnpm without frozen lockfile so AI-edited package manifests can refresh lockfiles', async () => {
+      const project = await manager.create('install-retry');
+      await manager.writeFiles(project.id, [
+        {
+          path: 'package.json',
+          content: JSON.stringify({
+            name: 'install-retry',
+            private: true,
+            dependencies: {
+              react: '^19.0.0',
+            },
+          }, null, 2),
+        },
+        {
+          path: 'pnpm-lock.yaml',
+          content: 'lockfileVersion: 9.0\n',
+        },
+      ]);
+
+      spawnMock.mockImplementationOnce(() => {
+        const proc = createMockProcess();
+        setTimeout(() => {
+          proc.stdout.emit('data', Buffer.from('Packages: +1\n'));
+          proc.emit('close', 0);
+        }, 0);
+        return proc;
+      });
+
+      const result = await manager.install(project.id);
+
+      expect(result.success).toBe(true);
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      expect(spawnMock.mock.calls[0][0]).toBe('pnpm');
+      expect(spawnMock.mock.calls[0][1]).toContain('--no-frozen-lockfile');
+      expect(spawnMock.mock.calls[0][1]).not.toContain('--frozen-lockfile');
+    });
+  });
+
   describe('destroy()', () => {
     it('removes the project and its directory', async () => {
       const project = await manager.create('destroy-test');
@@ -146,7 +216,7 @@ describe('SandboxManager', () => {
       const project = await manager.createFromTemplate('react-vite');
 
       expect(project.name).toContain('react');
-      expect(project.status).toBe('writing');
+      expect(project.status).toBe('idle');
 
       const files = await manager.listFiles(project.id);
       expect(files).toContain('package.json');
@@ -162,6 +232,18 @@ describe('SandboxManager', () => {
       expect(files).toContain('src/index.ts');
     });
 
+    it('creates a project from the express-hexa (hexagonal) template', async () => {
+      const project = await manager.createFromTemplate('express-hexa');
+
+      const files = await manager.listFiles(project.id);
+      expect(files).toContain('package.json');
+      expect(files).toContain('src/domain/ports.ts');
+      expect(files).toContain('src/application/room-service.ts');
+      expect(files).toContain('src/adapters/in-memory-room-repository.ts');
+      expect(files).toContain('src/adapters/http/routes.ts');
+      expect(files).toContain('src/index.ts');
+    });
+
     it('throws for unknown template IDs', async () => {
       await expect(
         manager.createFromTemplate('nonexistent-template'),
@@ -172,12 +254,40 @@ describe('SandboxManager', () => {
       const project = await manager.createFromTemplate('react-vite', 'my-custom-name');
       expect(project.name).toBe('my-custom-name');
     });
+
+    it('uses the real CLI scaffold for nextjs starters', async () => {
+      spawnMock.mockImplementation((_cmd, options) => {
+        const proc = createMockProcess();
+        const appName = 'fresh-next-starter';
+        const rootDir = join(options.cwd as string, appName);
+
+        void (async () => {
+          await mkdir(join(rootDir, 'src', 'app'), { recursive: true });
+          await writeFile(join(rootDir, 'package.json'), JSON.stringify({
+            name: appName,
+            private: true,
+            scripts: { dev: 'next dev' },
+          }, null, 2));
+          await writeFile(join(rootDir, 'src', 'app', 'page.tsx'), 'export default function Page() { return <main>Fresh Next starter</main>; }');
+          proc.emit('close', 0);
+        })();
+
+        return proc;
+      });
+
+      const project = await manager.createFromTemplate('nextjs', 'fresh-next-starter');
+
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      expect(project.name).toBe('fresh-next-starter');
+      expect(project.logs[0]).toContain('Scaffolded a fresh Next.js App Router baseline');
+      expect(project.files['src/app/page.tsx']).toContain('Fresh Next starter');
+    });
   });
 
   describe('listTemplates()', () => {
     it('returns all available templates', () => {
       const templates = manager.listTemplates();
-      expect(templates.length).toBeGreaterThanOrEqual(10); // We have 11 templates
+      expect(templates.length).toBeGreaterThanOrEqual(10); // grows with SANDBOX_TEMPLATES
       expect(templates.some((t) => t.id === 'react-vite')).toBe(true);
       expect(templates.some((t) => t.id === 'nextjs')).toBe(true);
       expect(templates.some((t) => t.id === 'express-api')).toBe(true);
@@ -192,6 +302,43 @@ describe('SandboxManager', () => {
         expect(t.category).toBeTruthy();
         expect(t.files.length).toBeGreaterThan(0);
       }
+    });
+  });
+
+  describe('startDev()', () => {
+    it('waits for the actual bound port after a generic ready line', async () => {
+      const project = await manager.create('vite-port-race');
+      await manager.writeFiles(project.id, [
+        {
+          path: 'package.json',
+          content: JSON.stringify({
+            name: 'vite-port-race',
+            private: true,
+            scripts: {
+              dev: 'vite',
+            },
+          }, null, 2),
+        },
+      ]);
+
+      const proc = createMockProcess();
+      spawnMock.mockReturnValue(proc);
+
+      const startPromise = manager.startDev(project.id);
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      proc.stdout.emit('data', Buffer.from('VITE v6.0.0 ready in 123 ms\n'));
+      setTimeout(() => {
+        proc.stdout.emit('data', Buffer.from('  ➜  Local:   http://localhost:5173/\n'));
+      }, 40);
+
+      const result = await startPromise;
+
+      expect(result.port).toBe(5173);
+      expect(manager.get(project.id)?.devPort).toBe(5173);
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+
+      manager.stopDev(project.id);
     });
   });
 });

@@ -1,8 +1,28 @@
-import 'dotenv/config';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import dotenv from 'dotenv';
 import { createServer } from './server.js';
 
 const isWindows = process.platform === 'win32';
+const runtimeFile = typeof globalThis.__filename === 'string'
+  ? globalThis.__filename
+  : typeof __filename === 'string'
+    ? __filename
+    : process.argv[1] ?? process.cwd();
+const runtimeDir = path.dirname(runtimeFile);
+
+for (const candidate of [
+  process.env.VAI_ENV_FILE,
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(runtimeDir, '../../../.env'),
+  path.resolve(runtimeDir, '../.env'),
+].filter((value): value is string => Boolean(value))) {
+  if (existsSync(candidate)) {
+    dotenv.config({ path: candidate, override: false });
+    break;
+  }
+}
 
 /**
  * Kill any process currently listening on the given port.
@@ -26,7 +46,8 @@ function killPortHolder(port: number): boolean {
       }
       for (const pid of pids) {
         console.log(`[VAI] Killing stale process on port ${port} (PID ${pid})`);
-        try { execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'pipe' }); } catch {}
+        // eslint-disable-next-line no-empty
+        try { execFileSync('taskkill', ['/F', '/T', '/PID', pid], { stdio: 'pipe' }); } catch { /* process may have already exited */ }
       }
       return pids.size > 0;
     } else {
@@ -37,7 +58,8 @@ function killPortHolder(port: number): boolean {
       for (const pid of output.trim().split('\n').filter(Boolean)) {
         if (pid !== String(process.pid)) {
           console.log(`[VAI] Killing stale process on port ${port} (PID ${pid})`);
-          try { execSync(`kill -9 ${pid}`, { stdio: 'pipe' }); } catch {}
+          // eslint-disable-next-line no-empty
+          try { execSync(`kill -9 ${pid}`, { stdio: 'pipe' }); } catch { /* process may have already exited */ }
         }
       }
       return true;
@@ -49,28 +71,36 @@ function killPortHolder(port: number): boolean {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const { app, port } = await createServer();
+async function main() {
+  const { app, port, vaiEngine } = await createServer();
 
-async function startWithRetry(maxRetries = 2) {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      await app.listen({ port, host: '0.0.0.0' });
-      console.log(`VAI runtime listening on http://localhost:${port}`);
-      return;
-    } catch (err: unknown) {
-      const isAddrInUse = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'EADDRINUSE';
+  // Flush knowledge persistence on shutdown.
+  process.on('SIGINT', () => { vaiEngine.flushPersist(); process.exit(0); });
+  process.on('SIGTERM', () => { vaiEngine.flushPersist(); process.exit(0); });
 
-      if (isAddrInUse && attempt < maxRetries) {
-        console.log(`[VAI] Port ${port} busy — killing stale process and retrying (attempt ${attempt + 1})...`);
-        killPortHolder(port);
-        await sleep(1500);
-        continue;
+  async function startWithRetry(maxRetries = 2) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        await app.listen({ port, host: '0.0.0.0' });
+        console.log(`VAI runtime listening on http://localhost:${port}`);
+        return;
+      } catch (err: unknown) {
+        const isAddrInUse = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'EADDRINUSE';
+
+        if (isAddrInUse && attempt < maxRetries) {
+          console.log(`[VAI] Port ${port} busy — killing stale process and retrying (attempt ${attempt + 1})...`);
+          killPortHolder(port);
+          await sleep(1500);
+          continue;
+        }
+
+        console.error('Failed to start server:', err);
+        process.exit(1);
       }
-
-      console.error('Failed to start server:', err);
-      process.exit(1);
     }
   }
+
+  await startWithRetry();
 }
 
-await startWithRetry();
+void main();

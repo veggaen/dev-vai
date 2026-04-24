@@ -1,0 +1,77 @@
+﻿node : node:internal
+/modules/esm/load:18
+4
+At line:1 char:1
++ node scripts/vai-p
+robe.mjs 2>&1 | 
+Out-File -FilePath 
+.\.probe-out.txt ...
++ ~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~
+    + CategoryInfo  
+            : NotS  
+  pecified: (node   
+ :internal/modul    
+es/esm/load:184    
+:String) [], Re    
+moteException
+    + FullyQualifie 
+   dErrorId : Nati  
+  veCommandError
+ 
+    throw new ERR_UN
+SUPPORTED_ESM_URL_SC
+HEME(parsed, 
+schemes);
+          ^
+
+Error [ERR_UNSUPPORT
+ED_ESM_URL_SCHEME]: 
+Only URLs with a 
+scheme in: file, 
+data, and node are 
+supported by the 
+default ESM loader. 
+On Windows, 
+absolute paths must 
+be valid file:// 
+URLs. Received 
+protocol 'c:'
+    at throwIfUnsupp
+ortedURLScheme (node
+:internal/modules/es
+m/load:184:11)
+    at defaultLoad (
+node:internal/module
+s/esm/load:82:3)
+    at 
+ModuleLoader.load (n
+ode:internal/modules
+/esm/loader:801:12)
+    at ModuleLoader.
+loadAndTranslate (no
+de:internal/modules/
+esm/loader:586:43)
+    at 
+#createModuleJob (no
+de:internal/modules/
+esm/loader:610:36)
+    at #getJobFromRe
+solveResult (node:in
+ternal/modules/esm/l
+oader:341:34)
+    at ModuleLoader.
+getModuleJobForImpor
+t (node:internal/mod
+ules/esm/loader:309:
+41)
+    at async onImpor
+t.tracePromise.__pro
+to__ (node:internal/
+modules/esm/loader:6
+50:25) {
+  code: 'ERR_UNSUPPO
+RTED_ESM_URL_SCHEME'
+}
+
+Node.js v22.19.0

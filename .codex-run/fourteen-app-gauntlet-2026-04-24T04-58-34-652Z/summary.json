@@ -1,0 +1,43 @@
+{
+  "verdict": "fail",
+  "passed": 1,
+  "failed": 1,
+  "total": 2,
+  "outputDir": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T04-58-34-652Z",
+  "reportPath": "C:\\Users\\v3gga\\Documents\\dev-vai\\.codex-run\\fourteen-app-gauntlet-2026-04-24T04-58-34-652Z\\report.json",
+  "results": [
+    {
+      "slug": "fastapi-inventory-api",
+      "status": "pass",
+      "failures": [],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact"
+      ],
+      "conversationId": "01KPYXNAD8TCBNW4EHTJBRQEBT",
+      "sandboxId": "db5a80d6",
+      "previewUrl": null
+    },
+    {
+      "slug": "rust-incident-cli",
+      "status": "fail",
+      "failures": [
+        "sandbox missing Cargo.toml",
+        "sandbox missing src/main.rs",
+        "sandbox files missing Rust CLI",
+        "sandbox files missing clap",
+        "sandbox files missing Commands",
+        "sandbox files missing Cargo package metadata",
+        "sandbox files missing clap dependency",
+        "sandbox files missing clap command parser",
+        "sandbox files missing incident triage domain commands"
+      ],
+      "warnings": [
+        "project update artifact not observed before file polling: Timed out waiting for project update artifact",
+        "timed out waiting for sandbox files to match the requested app"
+      ],
+      "conversationId": "01KPYXNX7M9EKDR1V93JDYYGNZ",
+      "sandboxId": "b68a3b4e",
+      "previewUrl": null
+    }
+  ]
+}

@@ -83,13 +83,13 @@ And is there any otherway to fill the text box from the original page
 
 === TEACHING ===
 
-ÔöÇÔöÇ You: VeggaAI is a local-first AI built by Vetle (v3gga) from Norway
+ÔöÇÔöÇ You: VeggaAI is a local-first AI built by Vegga (v3gga) from Norway
 << VAI:
 Got it! I've learned that "veggaai" is "a local-first ai built by vetle (v3gga) from norway". I'll remember this.
 
 ÔöÇÔöÇ You: Who built VeggaAI?
 << VAI:
-Based on what you told me earlier: "VeggaAI is a local-first AI built by Vetle (v3gga) from Norway"
+Based on what you told me earlier: "VeggaAI is a local-first AI built by Vegga (v3gga) from Norway"
   Ô£ô Knows who built VeggaAI
 
 === CODE PATTERNS ===
