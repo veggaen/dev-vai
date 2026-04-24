@@ -51,6 +51,23 @@ export {
   KNOWLEDGE_RETRIEVAL_SCORE_MIN,
   shouldInjectChatStructureHint,
 } from './chat/chat-quality.js';
+export {
+  buildConversationGrounding,
+  classifyContextGroundedFollowUpIntent,
+  shouldDeferContextGroundedFollowUp,
+} from './chat/conversation-grounding.js';
+export type {
+  ConversationGrounding,
+  ConversationGroundingDependencies,
+  ContextGroundedFollowUpIntent,
+} from './chat/conversation-grounding.js';
+export { evaluateChatAnswerQuality } from './chat/chat-answer-quality.js';
+export type {
+  ChatAnswerQualityInput,
+  ChatAnswerQualityReport,
+  ChatAnswerQualityRequirement,
+  ChatAnswerQualityVerdict,
+} from './chat/chat-answer-quality.js';
 
 // Proof-backed builder loop (evidence vocabulary for ledgers / narration)
 export type { EvidenceConfidenceTier, FailureClass, ProofFlags } from './builder-loop/evidence-types.js';

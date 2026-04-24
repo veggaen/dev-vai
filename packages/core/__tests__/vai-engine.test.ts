@@ -321,6 +321,7 @@ describe('VaiEngine', () => {
     });
 
     expect(engine.lastResponseMeta?.strategy).toBe('context-grounded-followup');
+    expect(engine.lastResponseMeta?.chatQuality?.verdict).toBe('pass');
     expect(response.message.content).toMatch(/context-grounding|recent chat state|active topic|relevance/i);
     expect(response.message.content).toMatch(/retrieval|fallback|regression/i);
     expect(response.message.content).not.toMatch(/hybrid search combining keyword|paste the file or snippet/i);
@@ -335,6 +336,7 @@ describe('VaiEngine', () => {
     });
 
     expect(engine.lastResponseMeta?.strategy).toBe('vai-chat-quality-direction');
+  expect(engine.lastResponseMeta?.chatQuality?.verdict).toBe('pass');
     expect(response.message.content).toMatch(/Best next task|context-grounded answer contract/i);
     expect(response.message.content).toMatch(/Vai|chat responses|active chat context/i);
     expect(response.message.content).toMatch(/First implementation slice|First patch/i);
@@ -353,6 +355,7 @@ describe('VaiEngine', () => {
     });
 
     expect(engine.lastResponseMeta?.strategy).toBe('context-grounded-followup');
+    expect(engine.lastResponseMeta?.chatQuality?.verdict).toBe('pass');
     expect(response.message.content).toMatch(/Implement next|teacher loop|scores?/i);
     expect(response.message.content).toMatch(/external LLMs?.*optional critics?|optional critics?.*external LLMs?/i);
     expect(response.message.content).toMatch(/Vai|context|retrieval/i);

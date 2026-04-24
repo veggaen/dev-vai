@@ -74,8 +74,10 @@ Vai may help others only when Vegga explicitly allows it.
 ```text
 Vegga (Human, architect, final authority)
   └── Vai (Apprentice, learns from interactions)
-        ├── GPT-5.4 (mentor model, added by Vegga only)
+        ├── Opus 4.7 (mentor model)
         ├── Opus 4.6 (mentor model)
+        ├── GPT-5.5 (mentor model, added by Vegga only)
+        ├── GPT-5.4 (mentor model, added by Vegga only)
         ├── Composer 1.5 (mentor model, added by Vegga only)
         ├── Future models (added by Vegga only)
         └── SubVai workers (scoped task workers, disposable)

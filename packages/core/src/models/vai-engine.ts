@@ -34,6 +34,14 @@ import { SkillRouter } from './skill-router.js';
 import { TOPIC_STOP_WORDS } from './stop-words.js';
 import { ShadowRouter, contextFromHistory } from './shadow-router.js';
 import { DEEP_DESIGN_MEMO_SCHEMAS, renderDeepDesignMemo, type DeepDesignMemoKind } from '../chat/deep-design-memo-schemas.js';
+import {
+  buildConversationGrounding,
+  classifyContextGroundedFollowUpIntent,
+  shouldDeferContextGroundedFollowUp,
+  type ConversationGrounding,
+  type ConversationGroundingDependencies,
+} from '../chat/conversation-grounding.js';
+import { evaluateChatAnswerQuality, type ChatAnswerQualityReport } from '../chat/chat-answer-quality.js';
 import { KNOWLEDGE_RETRIEVAL_SCORE_MIN } from '../chat/chat-quality.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -83,6 +91,8 @@ export interface ResponseMeta {
   readonly register?: 'formal' | 'casual' | 'terse' | 'teach-me' | 'neutral';
   /** External teacher-loop observability. The teacher critiques; Vai remains the answerer. */
   teacherLoop?: TeacherLoopMeta;
+  /** Deterministic chat answer quality report for grounded chat routes. */
+  chatQuality?: ChatAnswerQualityReport;
 }
 
 export interface TeacherLoopMeta {
@@ -1614,6 +1624,7 @@ export class VaiEngine implements ModelAdapter {
       allowLearning: !request.noLearn,
     });
     response = this.sanitizeOffTopicBootstrapResponse(userContent, response);
+    this.updateLastChatQualityMeta(userContent, request.messages, response);
 
     // Learning flywheel — extract and persist knowledge from this exchange
     // Skip when noLearn is set (protective parenting — Vegga controls what Vai learns)
@@ -1672,6 +1683,7 @@ export class VaiEngine implements ModelAdapter {
       allowLearning: !request.noLearn,
     });
     response = this.sanitizeOffTopicBootstrapResponse(userContent, response);
+    this.updateLastChatQualityMeta(userContent, request.messages, response);
 
     const durationMs = Math.round(performance.now() - start);
     // Patch timing into the last tracked meta after the teacher loop completes
@@ -6466,12 +6478,12 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
   private tryContextGroundedFollowUpSynthesis(input: string, history: readonly Message[]): string | null {
     const trimmed = input.trim();
     if (!trimmed || history.length < 2) return null;
-    if (this.shouldDeferContextGroundedFollowUp(trimmed, history)) return null;
+    if (shouldDeferContextGroundedFollowUp(trimmed, history)) return null;
 
-    const grounding = this.buildConversationGrounding(trimmed, history);
+    const grounding = buildConversationGrounding(trimmed, history, this.conversationGroundingDependencies());
     if (!grounding) return null;
 
-    const intent = this.classifyContextGroundedFollowUpIntent(trimmed, grounding.contextText);
+    const intent = classifyContextGroundedFollowUpIntent(trimmed, grounding.contextText);
     if (!intent) return null;
 
     if (intent === 'simple-explain') {
@@ -6486,190 +6498,31 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     return this.buildGroundedContinuation(grounding, trimmed);
   }
 
-  private shouldDeferContextGroundedFollowUp(input: string, history: readonly Message[]): boolean {
-    const lower = input.toLowerCase().replace(/[.!?]+$/g, '').trim();
-
-    if (/\b(?:my|the)\s+(?:real|actual)\s+question\b|\banswer\s+the\s+(?:first|second|third|last)\s+(?:part|question)\b/i.test(lower)) {
-      return true;
-    }
-    if (/\b(?:trade-?offs?|pros?\s+and\s+cons?|biggest\s+upside|biggest\s+limit|best\s+fit|headings?\s*:)\b/i.test(lower)) {
-      return true;
-    }
-    if (/\b(?:deploy|deployment|hosting|host\s+it|vercel|netlify|serverless)\b/i.test(lower)) {
-      return true;
-    }
-    if (/\b(?:build|make|create)\s+(?:it|this|that|the\s+first\s+version)(?:\s+for\s+me)?\s+now\b/i.test(lower)
-      || /\bcan\s+you\s+make\s+it\s+(?:for\s+me\s+)?now\b/i.test(lower)) {
-      return true;
-    }
-
-    const recentAssistant = [...history].reverse().find((message) => message.role === 'assistant' && message.content.trim().length > 0);
-    const priorHasCode = Boolean(recentAssistant && /```[\s\S]+```/.test(recentAssistant.content));
-    if (
-      priorHasCode
-      && (/\bsame\s+(?:design|layout|style|look|ui|thing|app|project|page|site)?\s*but\b/i.test(lower)
-        || /\b(?:different|new|another)\s+(?:theme|color.?scheme|palette|subject|topic|style|look|vibe)\b/i.test(lower))
-    ) {
-      return true;
-    }
-
-    return false;
-  }
-
-  private buildConversationGrounding(input: string, history: readonly Message[]): {
-    readonly topic: string;
-    readonly previousUser: string;
-    readonly previousAssistant: string;
-    readonly contextText: string;
-    readonly keywords: readonly string[];
-  } | null {
-    const userMessages = history
-      .filter((message) => message.role === 'user' && message.content.trim().length > 0)
-      .map((message) => message.content.trim());
-    const priorUsers = userMessages.slice(0, -1).filter((content) => content.length > 8);
-    const previousUser = priorUsers.length > 0 ? priorUsers[priorUsers.length - 1] : '';
-
-    const assistantMessages = history
-      .filter((message) => message.role === 'assistant' && message.content.trim().length > 0)
-      .map((message) => message.content.trim());
-    const previousAssistant = assistantMessages.length > 0 ? assistantMessages[assistantMessages.length - 1] : '';
-
-    const contextText = [
-      ...priorUsers.slice(-3),
-      ...assistantMessages.slice(-2),
-    ].join('\n').trim();
-
-    if (contextText.length < 25) return null;
-
-    const topic = this.deriveGroundedConversationTopic(contextText, previousUser, previousAssistant, input);
-    if (!topic || topic === 'general') return null;
-
-    const keywords = this.extractGroundingKeywords(`${contextText}\n${input}`, topic);
+  private conversationGroundingDependencies(): ConversationGroundingDependencies {
     return {
-      topic,
-      previousUser,
-      previousAssistant,
-      contextText,
-      keywords,
+      inferRecentFollowUpTopic: (history) => this.inferRecentFollowUpTopic(history),
+      isStableFollowUpTopic: (topic) => this.isStableFollowUpTopic(topic),
+      condenseStableFollowUpTopic: (text) => this.condenseStableFollowUpTopic(text),
+      detectTopic: (text) => this.detectTopic(text),
+      topicStopWords: VaiEngine.TOPIC_STOP_WORDS,
     };
   }
 
-  private deriveGroundedConversationTopic(
-    contextText: string,
-    previousUser: string,
-    previousAssistant: string,
-    input: string,
-  ): string {
-    const combined = `${previousUser}\n${previousAssistant}\n${contextText}\n${input}`;
+  private updateLastChatQualityMeta(userInput: string, history: readonly Message[], response: string): void {
+    if (!this._lastMeta) return;
+    if (!['context-grounded-followup', 'vai-chat-quality-direction'].includes(this._lastMeta.strategy)) return;
 
-    if (/\b(?:vai|veggaai)\b/i.test(combined) && /\b(?:chat|responses?|context|relevance|accurate|responsive)\b/i.test(combined)) {
-      return 'Vai chat context relevance';
-    }
-    if (/\bchat\s+(?:app|product|service|window|surface)\b/i.test(combined) && /\b(?:context|responses?|messages?|relevance|accuracy)\b/i.test(combined)) {
-      return 'chat app response relevance';
-    }
-    if (/\bnext\.?js\b/i.test(combined) && /\bprisma\b/i.test(combined) && /\btodo\b/i.test(combined)) {
-      return 'Next.js Prisma todo app';
-    }
-    if (/\breact\b/i.test(combined) && /\bhooks?\b/i.test(combined)) {
-      return 'React hooks';
-    }
-    if (/\bnext\.?js\b/i.test(combined) && /\bapp router\b/i.test(combined)) {
-      return 'Next.js App Router';
-    }
-    if (/\breact\b/i.test(combined) && /\btypescript\b/i.test(combined)) {
-      return 'React TypeScript app';
-    }
-    if (/\bexpress\b/i.test(combined) && /\bapi\b/i.test(combined)) {
-      return 'Express API';
-    }
-
-    const recentTopic = this.inferRecentFollowUpTopic([
-      { role: 'assistant', content: previousAssistant },
-      { role: 'user', content: previousUser },
-      { role: 'user', content: input },
-    ]);
-    if (recentTopic && this.isStableFollowUpTopic(recentTopic)) return recentTopic;
-
-    const previousNormalized = this.condenseStableFollowUpTopic(previousUser);
-    if (this.isStableFollowUpTopic(previousNormalized)) return previousNormalized;
-
-    const detected = this.detectTopic(previousUser || contextText);
-    if (this.isStableFollowUpTopic(detected)) return detected;
-
-    return '';
-  }
-
-  private extractGroundingKeywords(text: string, topic: string): readonly string[] {
-    const keywordPatterns: Array<[string, RegExp]> = [
-      ['Vai', /\b(?:vai|veggaai)\b/i],
-      ['chat app', /\bchat\s+(?:app|product|service|window|surface)\b/i],
-      ['user context', /\b(?:user\s+context|selected\s+files?|last\s+\d+\s+messages?|conversation\s+history|context\s+bundle)\b/i],
-      ['response relevance', /\b(?:relevance|relevant|accuracy|accurate|responsive|off-topic|weird|grounded)\b/i],
-      ['teacher loop', /\bteacher\s+loop|quality\s+gate|validator/i],
-      ['Next.js', /\bnext\.?js\b/i],
-      ['Prisma', /\bprisma\b/i],
-      ['SQLite', /\bsqlite\b/i],
-      ['todo app', /\btodo\s+app\b|\btodos?\b/i],
-      ['React hooks', /\breact\b[\s\S]{0,80}\bhooks?\b|\bhooks?\b[\s\S]{0,80}\breact\b/i],
-      ['tests', /\b(?:tests?|testable|vitest|unit\s+test|integration\s+test)\b/i],
-    ];
-
-    const keywords: string[] = [];
-    for (const [label, pattern] of keywordPatterns) {
-      if (pattern.test(text) && !keywords.includes(label)) keywords.push(label);
-    }
-
-    const tokenCandidates = topicContentTokens(topic)
-      .filter((token) => token.length >= 3)
-      .filter((token) => !VaiEngine.TOPIC_STOP_WORDS.has(token))
-      .slice(0, 6);
-    for (const token of tokenCandidates) {
-      const label = token.length <= 3 ? token.toUpperCase() : token.replace(/^\w/, (char) => char.toUpperCase());
-      if (!keywords.some((existing) => existing.toLowerCase() === label.toLowerCase())) keywords.push(label);
-    }
-
-    return keywords.slice(0, 8);
-  }
-
-  private classifyContextGroundedFollowUpIntent(
-    input: string,
-    contextText: string,
-  ): 'best-next' | 'quality-hardening' | 'simple-explain' | 'continue' | null {
-    const lower = input.toLowerCase().replace(/[.!?]+$/g, '').trim();
-    const wordCount = lower.split(/\s+/).filter(Boolean).length;
-    const hasRecentContext = contextText.trim().length > 0;
-    if (!hasRecentContext) return null;
-
-    const refersBack = /\b(?:it|this|that|these|those|them|there|above|earlier|previous|same|your\s+(?:answer|response)|the\s+(?:answer|response|context|approach|app|code|thing))\b/i.test(lower);
-    const asksSimpleExplain = /\b(?:explain|break\s+(?:it|this|that)\s+down|plain\s+english|eli5|like\s+i'?m\s+(?:new|five|5|a\s+beginner)|more\s+simply|simpler)\b/i.test(lower)
-      && (refersBack || wordCount <= 10);
-    if (asksSimpleExplain) return 'simple-explain';
-
-    const isChatQualityAsk = /\b(?:vai|chat|response|answer|context|relevance|accuracy|responsive)\b/i.test(lower)
-      && /\b(?:best|optimal|next|improve|better|stronger|relevant|accurate|responsive|weird|off)\b/i.test(lower);
-    const asksBestNext = /\b(?:best|optimal|highest[-\s]?leverage|right|smartest)\s+(?:next\s+)?(?:thing|step|task|move|slice|fix)\b/i.test(lower)
-      || /\bwhat\s+(?:would\s+be\s+)?(?:the\s+)?(?:best|next)\s+(?:thing|step|task|move)\b/i.test(lower)
-      || /\bwhere\s+should\s+(?:i|we)\s+(?:start|focus)\b/i.test(lower);
-    if (isChatQualityAsk || asksBestNext) return 'best-next';
-
-    const asksHardening = /\b(?:robust|reliable|production[-\s]?ready|testable|tests?|quality|accurate|relevant|responsive|grounded|automated|over[-\s]?engineer|stronger)\b/i.test(lower)
-      && /\b(?:make|improve|strengthen|harden|verify|test|add|more|better|fix)\b/i.test(lower);
-    if (asksHardening) return 'quality-hardening';
-
-    const asksContinue = /\b(?:continue|go\s+deeper|deeper|expand|more\s+detail|dig\s+in|build\s+on\s+that|take\s+it\s+further|what\s+else)\b/i.test(lower)
-      || (refersBack && wordCount <= 16 && /\b(?:how|what|why|which|can|should|would|more|better)\b/i.test(lower));
-    if (asksContinue) return 'continue';
-
-    return null;
+    const grounding = buildConversationGrounding(userInput, history, this.conversationGroundingDependencies());
+    this._lastMeta.chatQuality = evaluateChatAnswerQuality({
+      prompt: userInput,
+      response,
+      grounding,
+      strategy: this._lastMeta.strategy,
+    });
   }
 
   private buildGroundedBestNextStep(
-    grounding: {
-      readonly topic: string;
-      readonly contextText: string;
-      readonly keywords: readonly string[];
-    },
+    grounding: ConversationGrounding,
     input: string,
   ): string {
     if (/\b(?:vai|chat\s+app|response|context|relevance|accuracy|responsive)\b/i.test(`${grounding.topic}\n${grounding.contextText}\n${input}`)) {
@@ -6678,6 +6531,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
         'Build a local context-grounding pass before Vai enters broad retrieval or fallback. That is the highest-leverage fix because the weird answers are usually routing failures: the current turn says "this", "it", "best next thing", or "make it better", and Vai answers from loose keyword matches instead of the recent chat state.',
         '',
         '**What it should do**',
+        ...this.buildGroundingBriefLines(grounding),
         '- Classify the turn as either a new standalone question or a continuation of recent context.',
         '- Extract the active topic from recent user messages and the last useful assistant answer.',
         '- Bind vague quality asks to that topic before retrieval, knowledge synthesis, or web/search fallback can hijack the answer.',
@@ -6696,6 +6550,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       '',
       '**Mini-brief**',
       `- Active context: ${this.formatGroundingKeywords(grounding.keywords, grounding.topic)}.`,
+      ...this.buildGroundingBriefLines(grounding),
       '- Desired outcome: answer the current turn against that context, not against generic keyword matches.',
       '- First slice: define the acceptance checks, then implement only the smallest change that makes those checks pass.',
       '',
@@ -6705,11 +6560,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
   }
 
   private buildGroundedQualityHardeningPlan(
-    grounding: {
-      readonly topic: string;
-      readonly contextText: string;
-      readonly keywords: readonly string[];
-    },
+    grounding: ConversationGrounding,
     input: string,
   ): string {
     const combined = `${grounding.topic}\n${grounding.contextText}\n${input}`;
@@ -6737,6 +6588,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
         `For **${grounding.topic}**, harden the response path where context enters the engine.`,
         '',
         wantsTeacherLoop ? '**Implement next**' : '**Best slice**',
+        ...this.buildGroundingBriefLines(grounding),
         '- Add a turn classifier: standalone question vs contextual follow-up vs product-quality recommendation.',
         '- Extract a compact active-topic brief from recent user context, selected files, and the last assistant answer.',
         '- Gate fuzzy retrieval with topic overlap so unrelated learned snippets cannot win just because they share loose words.',
@@ -6758,6 +6610,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       '',
       '**Do this first**',
       `- Context to preserve: ${this.formatGroundingKeywords(grounding.keywords, grounding.topic)}.`,
+      ...this.buildGroundingBriefLines(grounding),
       '- Define 3-5 acceptance checks that prove the next answer or feature stayed on-topic.',
       '- Add the smallest validation boundary around the risky input/output seam.',
       '- Add regression tests for the current happy path, one malformed input, and one missing-context case.',
@@ -6768,11 +6621,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
   }
 
   private buildGroundedSimpleExplanation(
-    grounding: {
-      readonly topic: string;
-      readonly contextText: string;
-      readonly keywords: readonly string[];
-    },
+    grounding: ConversationGrounding,
     input: string,
   ): string {
     if (/\breact hooks?\b/i.test(`${grounding.topic}\n${grounding.contextText}`)) {
@@ -6793,6 +6642,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     const base = [
       `**${grounding.topic}, simpler**`,
       `The important context is: ${this.formatGroundingKeywords(grounding.keywords, grounding.topic)}.`,
+      ...this.buildGroundingBriefLines(grounding),
       '',
       'Plain version: keep the previous topic as the anchor, then explain only the part the current turn asks about. Do not restart from a generic definition unless the user clearly starts a new topic.',
       '',
@@ -6811,17 +6661,14 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
   }
 
   private buildGroundedContinuation(
-    grounding: {
-      readonly topic: string;
-      readonly contextText: string;
-      readonly keywords: readonly string[];
-    },
+    grounding: ConversationGrounding,
     input: string,
   ): string {
     const wantsDepth = /\b(?:deep|deeper|detail|over[-\s]?engineer|thorough|stronger)\b/i.test(input);
     return [
       wantsDepth ? '**Deeper grounded pass**' : '**Grounded continuation**',
       `Continuing from **${grounding.topic}**, I would keep the answer anchored to: ${this.formatGroundingKeywords(grounding.keywords, grounding.topic)}.`,
+      ...this.buildGroundingBriefLines(grounding),
       '',
       '**Next layer**',
       '- State the active context in one sentence before answering.',
@@ -6839,6 +6686,17 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       .filter((keyword) => keyword.length > 0);
     if (clean.length === 0) return fallback;
     return clean.slice(0, 5).join(', ');
+  }
+
+  private buildGroundingBriefLines(grounding: ConversationGrounding): string[] {
+    const lines: string[] = [];
+    if (grounding.requestedOutcome) {
+      lines.push(`- Requested outcome: ${grounding.requestedOutcome}.`);
+    }
+    if (grounding.constraints.length > 0) {
+      lines.push(`- Constraints to preserve: ${grounding.constraints.join('; ')}.`);
+    }
+    return lines;
   }
 
   private tryRefactoringGuidance(input: string, lower: string): string | null {
