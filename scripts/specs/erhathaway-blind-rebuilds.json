@@ -1,0 +1,46 @@
+{
+  "specs": [
+    {
+      "slug": "browser-child-logger-package",
+      "sourceRepo": "https://github.com/erhathaway/beano",
+      "prompt": "Create a browser logger package inspired by structured backend loggers. Return package metadata, the logger source, and a README. It must support child loggers, console group nesting, scoped module logging for packages, and options like collapse plus groupByMessage.",
+      "expectedPathGroups": [["package.json"], ["src/index.ts", "src/index.js"], ["README.md"]],
+      "requiredText": ["logger", "browser", "child", "console", "group", "collapse", "groupByMessage"],
+      "requiredFilePatterns": [
+        { "paths": ["src/index.ts", "src/index.js"], "pattern": "child|groupByMessage|collapse|console\\.group", "flags": "i", "label": "child logger implementation" }
+      ],
+      "preview": false
+    },
+    {
+      "slug": "framework-agnostic-router-library",
+      "sourceRepo": "https://github.com/erhathaway/router-primitives",
+      "prompt": "Create a framework agnostic application router library. Return package metadata, the core router source, and a README. It must emphasize declarative routing by way of layout primitives, include a Manager concept, router declarations, route state, scene or stack primitives, and template support.",
+      "expectedPathGroups": [["package.json"], ["src/index.ts", "src/index.js"], ["README.md"]],
+      "requiredText": ["framework agnostic", "router", "layout primitives", "Manager", "route", "template", "scene"],
+      "requiredFilePatterns": [
+        { "paths": ["src/index.ts", "src/index.js"], "pattern": "Manager|route|template|scene|layout", "flags": "i", "label": "router primitive implementation" }
+      ],
+      "preview": false
+    },
+    {
+      "slug": "kinetic-animation-showcase",
+      "sourceRepo": "https://github.com/erhathaway/kinetic-components",
+      "prompt": "Build the first runnable preview of a state-based animation showcase for React. It must visibly include readable animation states, a method switcher for different animation approaches, an orchestration panel, state-driven component cards, and copy that says the system is sane and readable rather than flashy for its own sake.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["animation", "state", "orchestration", "sane", "readable", "method", "React"],
+      "preview": true
+    },
+    {
+      "slug": "ink-list-paginator-package",
+      "sourceRepo": "https://github.com/erhathaway/ink-list-paginator",
+      "prompt": "Create a React Ink list pagination component package for terminal UIs. Return package metadata, the paginator source, and a README. It must work with list-style output, mention ink-table compatibility, expose page or cursor controls, and keep dependencies limited to React and React Ink peer dependencies.",
+      "expectedPathGroups": [["package.json"], ["src/index.tsx", "src/index.ts"], ["README.md"]],
+      "requiredText": ["Ink", "pagination", "list", "ink-table", "React Ink", "page", "cursor"],
+      "requiredFilePatterns": [
+        { "paths": ["package.json"], "pattern": "\"peerDependencies\"\\s*:\\s*\\{[\\s\\S]*react[\\s\\S]*ink", "label": "React and Ink peer dependencies" },
+        { "paths": ["src/index.tsx", "src/index.ts"], "pattern": "page|cursor|next|previous|pagination", "flags": "i", "label": "pagination controls" }
+      ],
+      "preview": false
+    }
+  ]
+}

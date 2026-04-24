@@ -1,0 +1,60 @@
+{
+  "specs": [
+    {
+      "slug": "editorial-engineering-blog",
+      "sourceRepo": "https://github.com/gaearon/overreacted.io",
+      "prompt": "Build the first runnable preview of a personal engineering blog for long-form essays. It should feel editorial rather than startup-ish, and the page must visibly include a featured essay, reading time labels, newsletter signup, quote pullout styling, recent essays, an archive view, and a quiet author note section.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["essay", "reading time", "newsletter", "archive", "author", "recent"],
+      "preview": true
+    },
+    {
+      "slug": "frontend-term-glossary",
+      "sourceRepo": "https://github.com/gaearon/whatthefuck.is",
+      "prompt": "Build a runnable glossary site of computer science terms for front-end developers. It must visibly include a glossary search, alphabetical navigation, opinionated definition cards, front-end developer framing, a vote or request definitions panel, and contributor notes that improvements to the website are welcome even if new definitions are not accepted directly.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["glossary", "front-end developers", "opinionated", "definition", "vote", "request"],
+      "preview": true
+    },
+    {
+      "slug": "react-fatigue-flowchart",
+      "sourceRepo": "https://github.com/gaearon/react-makes-you-sad",
+      "prompt": "Build a runnable troubleshooting flowchart for developers overwhelmed by the React ecosystem. The preview must visibly include a big flowchart or diagram area, yes/no decision nodes, advice about learning vanilla React before extra state libraries, bundler confusion guidance, and an Open in new tab action for the chart.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["flowchart", "React", "yes", "no", "vanilla React", "Open in new tab"],
+      "preview": true
+    },
+    {
+      "slug": "rsc-protocol-explorer",
+      "sourceRepo": "https://github.com/gaearon/rscexplorer",
+      "prompt": "Build the first runnable preview of a tool for exploring the React Server Components protocol. It must visibly include a streamed row inspector, server and client panes, a React tree view, step-by-step stream playback, example presets like hello, async, counter, form action, and pagination, plus a short note that both server and client behavior are approximated in the browser.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["React Server Components", "stream", "server", "client", "hello", "counter", "pagination"],
+      "preview": true
+    },
+    {
+      "slug": "minimal-js-vscode-theme",
+      "sourceRepo": "https://github.com/gaearon/subliminal",
+      "prompt": "Create a complete VS Code theme extension for a minimalistic, opinionated editor theme focused mostly on JavaScript. Return package.json plus a theme JSON file and a short README. It must include a hidden-status-bar minimalist philosophy, JavaScript-focused token colors, and settings suggestions like hiding line numbers, activity bar, minimap, and status bar.",
+      "expectedPathGroups": [["package.json"], ["themes/minimal-js-theme.json", "themes/subliminal-theme.json"], ["README.md"]],
+      "requiredText": ["VS Code", "minimalistic", "JavaScript", "status bar", "activity bar", "minimap"],
+      "requiredFilePatterns": [
+        { "paths": ["package.json"], "pattern": "\"contributes\"\\s*:\\s*\\{[\\s\\S]*\"themes\"", "label": "VS Code theme contribution" },
+        { "paths": ["themes/minimal-js-theme.json", "themes/subliminal-theme.json"], "pattern": "\"tokenColors\"\\s*:\\s*\\[", "label": "token color array" }
+      ],
+      "preview": false
+    },
+    {
+      "slug": "react-lag-radar-package",
+      "sourceRepo": "https://github.com/gaearon/react-lag-radar",
+      "prompt": "Create a small React package that wraps a lag radar performance widget for development use. Return package metadata, the React component source, and a README. The package must expose props for frames, speed, size, and inset, explain that it helps detect dropped frames or responsiveness issues, and show a minimal usage example with a self-closing component.",
+      "expectedPathGroups": [["package.json"], ["src/index.tsx", "src/index.jsx"], ["README.md"]],
+      "requiredText": ["React", "lag radar", "frames", "speed", "size", "inset", "dropped frames"],
+      "requiredFilePatterns": [
+        { "paths": ["src/index.tsx", "src/index.jsx"], "pattern": "frames|speed|size|inset", "label": "lag radar props" },
+        { "paths": ["README.md"], "pattern": "<LagRadar\\s*/>|frames=|speed=|size=|inset=", "label": "usage example" }
+      ],
+      "preview": false
+    }
+  ]
+}

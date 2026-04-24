@@ -20,6 +20,7 @@ export function resolveBuilderIntent(input: BuilderIntentInput): BuilderIntent |
   if (
     /\b(?:photographer|photography|photo\s+gallery|lightbox|masonry|editorial|portrait|wedding)\b/i.test(text)
     && /\b(?:portfolio|gallery|site|website|app|page)\b/i.test(text)
+    && !/\b(?:blog|essay|essays|newsletter|archive|author\s+note|reading\s+time)\b/i.test(text)
   ) {
     return {
       archetype: 'portfolio',

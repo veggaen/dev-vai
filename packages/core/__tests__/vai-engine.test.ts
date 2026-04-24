@@ -1635,6 +1635,87 @@ describe('VaiEngine', () => {
     expect(trellix.message.content).not.toContain('Next-Gen Monorepo Console');
   });
 
+  it('routes Gaearon-style editorial engineering blog prompts away from the photography portfolio archetype', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Build the first runnable preview of a personal engineering blog for long-form essays. It should feel editorial rather than startup-ish, and the page must visibly include a featured essay, reading time labels, newsletter signup, quote pullout styling, recent essays, an archive view, and a quiet author note section.' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toContain('Editorial Engineering Blog');
+    expect(response.message.content).toContain('featured essay');
+    expect(response.message.content).toContain('reading time');
+    expect(response.message.content).toContain('newsletter');
+    expect(response.message.content).toContain('archive');
+    expect(response.message.content).toContain('author note');
+    expect(response.message.content).not.toContain('Photography Portfolio');
+  });
+
+  it('routes Gaearon-style VS Code theme and React package prompts to code artifacts instead of generic app scaffolds', async () => {
+    const theme = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Create a complete VS Code theme extension for a minimalistic, opinionated editor theme focused mostly on JavaScript. Return package.json plus a theme JSON file and a short README. It must include a hidden-status-bar minimalist philosophy, JavaScript-focused token colors, and settings suggestions like hiding line numbers, activity bar, minimap, and status bar.' },
+      ],
+      noLearn: true,
+    });
+    const radar = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Create a small React package that wraps a lag radar performance widget for development use. Return package metadata, the React component source, and a README. The package must expose props for frames, speed, size, and inset, explain that it helps detect dropped frames or responsiveness issues, and show a minimal usage example with a self-closing component.' },
+      ],
+      noLearn: true,
+    });
+
+    expect(theme.message.content).toContain('```json title="themes/minimal-js-theme.json"');
+    expect(theme.message.content).toContain('```md title="README.md"');
+    expect(theme.message.content).toContain('minimalistic');
+    expect(theme.message.content).toContain('JavaScript');
+    expect(theme.message.content).toContain('status bar');
+    expect(theme.message.content).toContain('activity bar');
+    expect(theme.message.content).toContain('minimap');
+    expect(radar.message.content).toContain('```tsx title="src/index.tsx"');
+    expect(radar.message.content).toContain('```md title="README.md"');
+    expect(radar.message.content).toContain('LagRadar');
+    expect(radar.message.content).toContain('frames');
+    expect(radar.message.content).toContain('speed');
+    expect(radar.message.content).toContain('size');
+    expect(radar.message.content).toContain('inset');
+    expect(radar.message.content).toContain('dropped frames');
+    expect(radar.message.content).not.toContain('Product Draft');
+  });
+
+  it('routes Er Hathaway style library prompts to package artifacts instead of server or app scaffolds', async () => {
+    const logger = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Create a browser logger package inspired by structured backend loggers. Return package metadata, the logger source, and a README. It must support child loggers, console group nesting, scoped module logging for packages, and options like collapse plus groupByMessage.' },
+      ],
+      noLearn: true,
+    });
+    const router = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.builder },
+        { role: 'user', content: 'Create a framework agnostic application router library. Return package metadata, the core router source, and a README. It must emphasize declarative routing by way of layout primitives, include a Manager concept, router declarations, route state, scene or stack primitives, and template support.' },
+      ],
+      noLearn: true,
+    });
+
+    expect(logger.message.content).toContain('```ts title="src/index.ts"');
+    expect(logger.message.content).toContain('child');
+    expect(logger.message.content).toContain('groupByMessage');
+    expect(logger.message.content).toContain('collapse');
+    expect(logger.message.content).not.toContain('Node.js REST API');
+    expect(router.message.content).toContain('```ts title="src/index.ts"');
+    expect(router.message.content).toContain('framework agnostic');
+    expect(router.message.content).toContain('layout primitives');
+    expect(router.message.content).toContain('Manager');
+    expect(router.message.content).toContain('template');
+    expect(router.message.content).not.toContain('Node.js REST API');
+  });
+
   it('answers auto-sandbox dev-server repair prompts with files instead of JSON glossary prose', async () => {
     const previousFiles = [
       '```json title="package.json"',

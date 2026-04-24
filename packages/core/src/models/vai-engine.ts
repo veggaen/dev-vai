@@ -7009,9 +7009,34 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       return this.generateBuilderTrellixTrpcBoard(cleanedProjectDesc);
     }
 
+    if (isBuilderMode
+      && /\b(?:minimalistic|minimalist|opinionated|javascript-focused|java\s*script-focused|hidden-status-bar|status\s+bar|activity\s+bar|minimap|line\s+numbers)\b/i.test(fullDesc)
+      && /\b(?:vs\s*code|visual\s+studio\s+code|theme|theme\s+extension|editor\s+theme)\b/i.test(fullDesc)) {
+      return this.generateBuilderMinimalJsVsCodeThemeExtension(cleanedProjectDesc);
+    }
+
     if (isBuilderMode && /\b(?:color\s+theme|theme\s+extension|tokenColors|activityBar|editor\.background|material-inspired)\b/i.test(fullDesc)
       && /\b(?:vs\s*code|visual\s+studio\s+code|color\s+theme|tokenColors|editor\.background|activityBar)\b/i.test(fullDesc)) {
       return this.generateBuilderVsCodeThemeExtension(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode
+      && /\b(?:lag\s+radar|dropped\s+frames|responsiveness\s+issues?)\b/i.test(fullDesc)
+      && /\b(?:react|component|widget|package|library)\b/i.test(fullDesc)) {
+      return this.generateBuilderReactLagRadarPackage(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode
+      && /\b(?:browser\s+logger|child\s+loggers?|groupByMessage|console\s+group(?:ing)?|scoped\s+module\s+logging)\b/i.test(fullDesc)
+      && /\b(?:package|library)\b/i.test(fullDesc)) {
+      return this.generateBuilderBrowserLoggerPackage(cleanedProjectDesc);
+    }
+
+    if (isBuilderMode
+      && /\b(?:framework\s+agnostic|layout\s+primitives|router\s+declarations?|route\s+state|scene\s+primitives|template\s+support)\b/i.test(fullDesc)
+      && /\b(?:router|routing)\b/i.test(fullDesc)
+      && /\b(?:package|library)\b/i.test(fullDesc)) {
+      return this.generateBuilderFrameworkAgnosticRouterLibrary(cleanedProjectDesc);
     }
 
     if (
@@ -7232,8 +7257,18 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       isBuilderMode
       && /\b(?:notes?|note-taking|note\s+taking|notepad|notebook|journal)\b/i.test(fullDesc)
       && /\b(?:app|dashboard|workspace|board|manager|preview|tool)\b/i.test(fullDesc)
+      && !/\bauthor\s+note\b/i.test(fullDesc)
     ) {
       return this.generateBuilderNotesDashboardApp(cleanedProjectDesc);
+    }
+
+    if (
+      isBuilderMode
+      && /\b(?:blog|essays?|long-form|longform|editorial|newsletter|archive|author\s+note|reading\s+time)\b/i.test(fullDesc)
+      && /\b(?:blog|site|website|page|preview|essays?|newsletter|archive)\b/i.test(fullDesc)
+      && !/\b(?:photographer|photography|photo\s+gallery|portrait|wedding|lightbox|masonry)\b/i.test(fullDesc)
+    ) {
+      return this.generateBuilderEditorialBlogApp(cleanedProjectDesc);
     }
 
     if (
@@ -10555,6 +10590,84 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     });
   }
 
+  private generateBuilderMinimalJsVsCodeThemeExtension(_desc: string): string {
+    const themePath = 'themes/minimal-js-theme.json';
+    const theme = {
+      name: 'Minimal JS Theme',
+      type: 'dark',
+      colors: {
+        'editor.background': '#111318',
+        'editor.foreground': '#dde3ee',
+        'activityBar.background': '#111318',
+        'activityBar.foreground': '#111318',
+        'sideBar.background': '#161a22',
+        'sideBar.foreground': '#c4ccd9',
+        'statusBar.background': '#111318',
+        'statusBar.foreground': '#111318',
+        'titleBar.activeBackground': '#111318',
+        'titleBar.activeForeground': '#d7deea',
+      },
+      tokenColors: [
+        { scope: ['keyword', 'storage.type'], settings: { foreground: '#d2a8ff' } },
+        { scope: ['entity.name.function', 'support.function'], settings: { foreground: '#8cc8ff' } },
+        { scope: ['entity.name.class', 'support.class'], settings: { foreground: '#ffd58a' } },
+        { scope: ['string'], settings: { foreground: '#b8e28a' } },
+        { scope: ['variable', 'meta.object-literal.key'], settings: { foreground: '#f2f5fa' } },
+        { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: '#6e7785', fontStyle: 'italic' } },
+      ],
+    };
+
+    return [
+      '```json title="package.json"',
+      JSON.stringify({
+        name: 'minimal-js-theme',
+        displayName: 'Minimal JS Theme',
+        description: 'A minimalistic, opinionated VS Code theme focused mostly on JavaScript with a hidden-status-bar philosophy.',
+        version: '0.0.1',
+        publisher: 'local-dev',
+        engines: { vscode: '^1.90.0' },
+        categories: ['Themes'],
+        contributes: {
+          themes: [
+            {
+              label: 'Minimal JS Theme',
+              uiTheme: 'vs-dark',
+              path: `./${themePath}`,
+            },
+          ],
+        },
+      }, null, 2),
+      '```',
+      '',
+      '```json title="themes/minimal-js-theme.json"',
+      JSON.stringify(theme, null, 2),
+      '```',
+      '',
+      '```md title="README.md"',
+      '# Minimal JS Theme',
+      '',
+      'A minimalistic, opinionated VS Code theme focused mostly on JavaScript. The philosophy is simple: keep the editor quiet, keep JavaScript token colors legible, and hide chrome that distracts from the code.',
+      '',
+      '## Philosophy',
+      '',
+      '- Minimalistic surface with a hidden status bar and dim activity bar so the editor stays visually calm.',
+      '- JavaScript-focused token colors: keywords, functions, classes, strings, and object keys are easy to scan at a glance.',
+      '- Opinionated on purpose: this theme works best when the interface chrome fades into the background.',
+      '',
+      '## Suggested settings',
+      '',
+      'Recommended settings JSON:',
+      '  {',
+      '    "editor.lineNumbers": "off",',
+      '    "workbench.activityBar.visible": false,',
+      '    "editor.minimap.enabled": false,',
+      '    "workbench.statusBar.visible": false',
+      '  }',
+      'That combination hides line numbers, the activity bar, the minimap, and the status bar to match the intended reading experience.',
+      '```',
+    ].join('\n');
+  }
+
   private generateBuilderVsCodeThemeExtension(_desc: string): string {
     const themePath = 'themes/safe-material-color-theme.json';
     const theme = {
@@ -10606,6 +10719,267 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       '```',
       '',
       'Install locally with `code --install-extension` after packaging with `vsce package`.',
+    ].join('\n');
+  }
+
+  private generateBuilderReactLagRadarPackage(_desc: string): string {
+    return [
+      '```json title="package.json"',
+      JSON.stringify({
+        name: 'react-lag-radar-lite',
+        version: '0.1.0',
+        private: false,
+        type: 'module',
+        main: './dist/index.js',
+        module: './dist/index.js',
+        types: './dist/index.d.ts',
+        scripts: {
+          build: 'tsc -p tsconfig.json',
+        },
+        peerDependencies: {
+          react: '^18.3.1 || ^19.0.0',
+          'react-dom': '^18.3.1 || ^19.0.0',
+        },
+        devDependencies: {
+          '@types/react': '^18.3.1',
+          '@types/react-dom': '^18.3.1',
+          typescript: '^5.5.3',
+        },
+      }, null, 2),
+      '```',
+      '',
+      '```tsx title="src/index.tsx"',
+      "import { useEffect, useRef } from 'react';",
+      '',
+      'export type LagRadarProps = {',
+      '  frames?: number;',
+      '  speed?: number;',
+      '  size?: number;',
+      '  inset?: number;',
+      '};',
+      '',
+      'export function LagRadar({ frames = 60, speed = 0.15, size = 120, inset = 24 }: LagRadarProps) {',
+      '  const canvasRef = useRef<HTMLCanvasElement | null>(null);',
+      '',
+      '  useEffect(() => {',
+      '    const canvas = canvasRef.current;',
+      '    if (!canvas) return;',
+      '    const context = canvas.getContext("2d");',
+      '    if (!context) return;',
+      '',
+      '    let raf = 0;',
+      '    let ticks = 0;',
+      '    let last = performance.now();',
+      '    let lag = 0;',
+      '',
+      '    const draw = (now: number) => {',
+      '      const delta = now - last;',
+      '      last = now;',
+      '      const budget = 1000 / frames;',
+      '      lag = Math.max(0, lag * (1 - speed) + Math.max(0, delta - budget) * speed);',
+      '      ticks += 1;',
+      '',
+      '      context.clearRect(0, 0, size, size);',
+      '      context.beginPath();',
+      '      context.arc(size / 2, size / 2, size / 2 - 10, 0, Math.PI * 2);',
+      '      context.strokeStyle = "rgba(255,255,255,0.12)";',
+      '      context.lineWidth = 8;',
+      '      context.stroke();',
+      '',
+      '      context.beginPath();',
+      '      context.arc(size / 2, size / 2, size / 2 - 10, -Math.PI / 2, -Math.PI / 2 + Math.min(1, lag / 32) * Math.PI * 2);',
+      '      context.strokeStyle = lag > 12 ? "#ff7a59" : "#7ee787";',
+      '      context.lineWidth = 8;',
+      '      context.stroke();',
+      '',
+      '      context.fillStyle = "#e6edf3";',
+      '      context.font = "600 12px system-ui";',
+      '      context.textAlign = "center";',
+      '      context.fillText(`lag radar`, size / 2, size / 2 - 6);',
+      '      context.fillText(`${Math.round(lag)}ms`, size / 2, size / 2 + 14);',
+      '',
+      '      raf = requestAnimationFrame(draw);',
+      '    };',
+      '',
+      '    raf = requestAnimationFrame(draw);',
+      '    return () => cancelAnimationFrame(raf);',
+      '  }, [frames, speed, size]);',
+      '',
+      '  return (',
+      '    <canvas',
+      '      ref={canvasRef}',
+      '      width={size}',
+      '      height={size}',
+      '      style={{ position: "fixed", right: inset, bottom: inset, width: size, height: size, pointerEvents: "none", zIndex: 9999 }}',
+      '      aria-label="lag radar"',
+      '    />',
+      '  );',
+      '}',
+      '```',
+      '',
+      '```md title="README.md"',
+      '# React Lag Radar Lite',
+      '',
+      'A small React package that wraps a lag radar performance widget for development use. It helps detect dropped frames and responsiveness issues by showing a live radar when frame timing drifts above budget.',
+      '',
+      '## Props',
+      '',
+      '- `frames`: expected frame budget, usually `60`.',
+      '- `speed`: smoothing factor for how quickly the radar responds.',
+      '- `size`: rendered widget size in pixels.',
+      '- `inset`: distance from the viewport edge.',
+      '',
+      '## Usage',
+      '',
+      "Import `LagRadar` from `react-lag-radar-lite` and render `<LagRadar frames={60} speed={0.2} size={120} inset={20} />` in your app root.",
+      'The component is meant for development-only overlays while profiling dropped frames and general UI responsiveness.',
+      '```',
+    ].join('\n');
+  }
+
+  private generateBuilderBrowserLoggerPackage(_desc: string): string {
+    return [
+      '```json title="package.json"',
+      JSON.stringify({
+        name: 'browser-child-logger',
+        version: '0.1.0',
+        private: false,
+        type: 'module',
+        exports: {
+          '.': './src/index.ts',
+        },
+      }, null, 2),
+      '```',
+      '',
+      '```ts title="src/index.ts"',
+      'export type LoggerOptions = {',
+      '  collapse?: boolean;',
+      '  groupByMessage?: boolean;',
+      '};',
+      '',
+      'export type LogLevel = "debug" | "info" | "warn" | "error";',
+      '',
+      'export type BrowserLogger = {',
+      '  child(scope: string, options?: LoggerOptions): BrowserLogger;',
+      '  debug(message: string, meta?: Record<string, unknown>): void;',
+      '  info(message: string, meta?: Record<string, unknown>): void;',
+      '  warn(message: string, meta?: Record<string, unknown>): void;',
+      '  error(message: string, meta?: Record<string, unknown>): void;',
+      '};',
+      '',
+      'function write(level: LogLevel, scopes: string[], message: string, meta: Record<string, unknown> | undefined, options: LoggerOptions) {',
+      '  const openGroup = options.collapse ? console.groupCollapsed : console.group;',
+      '  const closeGroup = console.groupEnd;',
+      '  for (const scope of scopes) openGroup(scope);',
+      '  if (options.groupByMessage && message) openGroup(message);',
+      '  console[level](message, meta ?? {});',
+      '  if (options.groupByMessage && message) closeGroup();',
+      '  for (let index = scopes.length - 1; index >= 0; index -= 1) closeGroup();',
+      '}',
+      '',
+      'export function createLogger(baseOptions: LoggerOptions = {}, scopes: string[] = []): BrowserLogger {',
+      '  const logger = (level: LogLevel) => (message: string, meta?: Record<string, unknown>) => {',
+      '    write(level, scopes, message, meta, baseOptions);',
+      '  };',
+      '',
+      '  return {',
+      '    child(scope: string, options?: LoggerOptions) {',
+      '      return createLogger({ ...baseOptions, ...options }, [...scopes, scope]);',
+      '    },',
+      '    debug: logger("debug"),',
+      '    info: logger("info"),',
+      '    warn: logger("warn"),',
+      '    error: logger("error"),',
+      '  };',
+      '}',
+      '',
+      'const logger = createLogger();',
+      'export default logger;',
+      '```',
+      '',
+      '```md title="README.md"',
+      '# Browser Child Logger',
+      '',
+      'A browser logger package inspired by structured backend loggers. It keeps browser logging readable with child loggers, console group nesting, and scoped module logging for packages or apps.',
+      '',
+      '## Features',
+      '',
+      '- Child loggers for nested scopes.',
+      '- Console group rendering with either `console.group` or collapsed groups.',
+      '- `collapse` and `groupByMessage` options for shaping output.',
+      '- Works well when a package wants to expose an optional logger prop to consumers.',
+      '',
+      '## Example',
+      '',
+      'Create a logger, then call `child("my_module", { collapse: true, groupByMessage: true })` to scope browser output.',
+      '```',
+    ].join('\n');
+  }
+
+  private generateBuilderFrameworkAgnosticRouterLibrary(_desc: string): string {
+    return [
+      '```json title="package.json"',
+      JSON.stringify({
+        name: 'router-primitives-lite',
+        version: '0.1.0',
+        private: false,
+        type: 'module',
+        exports: {
+          '.': './src/index.ts',
+        },
+      }, null, 2),
+      '```',
+      '',
+      '```ts title="src/index.ts"',
+      'export type RouteState = { path: string; params?: Record<string, string>; query?: Record<string, string> };',
+      'export type LayoutPrimitive = { id: string; kind: "stack" | "scene" | "slot"; children?: LayoutPrimitive[] };',
+      'export type RouteTemplate = (state: RouteState) => LayoutPrimitive;',
+      'export type RouterDeclaration = Record<string, RouteTemplate>;',
+      '',
+      'export class Manager {',
+      '  constructor(private readonly declaration: RouterDeclaration) {}',
+      '',
+      '  resolve(path: string): LayoutPrimitive | null {',
+      '    const template = this.declaration[path];',
+      '    if (!template) return null;',
+      '    return template({ path });',
+      '  }',
+      '',
+      '  listRoutes(): string[] {',
+      '    return Object.keys(this.declaration);',
+      '  }',
+      '}',
+      '',
+      'export function scene(id: string, children: LayoutPrimitive[] = []): LayoutPrimitive {',
+      '  return { id, kind: "scene", children };',
+      '}',
+      '',
+      'export function stack(id: string, children: LayoutPrimitive[] = []): LayoutPrimitive {',
+      '  return { id, kind: "stack", children };',
+      '}',
+      '',
+      'export function slot(id: string): LayoutPrimitive {',
+      '  return { id, kind: "slot" };',
+      '}',
+      '',
+      'export const routerDeclaration: RouterDeclaration = {',
+      '  "/": () => stack("root", [scene("home", [slot("content")])]),',
+      '  "/settings": () => stack("root", [scene("settings", [slot("tabs"), slot("panel")])]),',
+      '};',
+      '```',
+      '',
+      '```md title="README.md"',
+      '# Router Primitives Lite',
+      '',
+      'A framework agnostic application router library. Declarative routing by way of layout primitives keeps route state portable across frameworks while still giving you a Manager, router declarations, scene or stack primitives, and template support.',
+      '',
+      '## Core ideas',
+      '',
+      '- Framework agnostic: route state is plain data.',
+      '- Layout primitives: compose scenes, stacks, and slots instead of hard-coding a renderer.',
+      '- Manager: resolves a router declaration into a concrete layout tree.',
+      '- Template support: each route can provide a template that maps route state into primitives.',
+      '```',
     ].join('\n');
   }
 
@@ -11362,6 +11736,381 @@ h1 {
   .shelf,
   .agenda {
     border-radius: 24px;
+  }
+}
+\`\`\``;
+  }
+
+  private generateBuilderEditorialBlogApp(desc: string): string {
+    const pkg = JSON.stringify({
+      name: 'editorial-engineering-blog',
+      private: true,
+      version: '0.0.0',
+      type: 'module',
+      scripts: {
+        dev: 'vite',
+        build: 'vite build',
+        preview: 'vite preview',
+      },
+      dependencies: {
+        react: '^18.3.1',
+        'react-dom': '^18.3.1',
+      },
+      devDependencies: {
+        '@vitejs/plugin-react': '^4.3.1',
+        vite: '^5.4.10',
+      },
+    }, null, 2);
+
+    return `\`\`\`json title="package.json"
+${pkg}
+\`\`\`
+
+\`\`\`html title="index.html"
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Editorial Engineering Blog</title>
+    <script type="module" src="/src/main.jsx"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
+\`\`\`
+
+\`\`\`jsx title="src/main.jsx"
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+import './styles.css';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
+\`\`\`
+
+\`\`\`jsx title="src/App.jsx"
+import React from 'react';
+
+const promptLabel = ${JSON.stringify(desc)};
+
+const featuredEssay = {
+  title: 'The Slow Shape of Reliable Frontend Systems',
+  readingTime: '11 min reading time',
+  dek: 'An essay about making software feel calm, understandable, and durable when the stack keeps changing underneath it.',
+};
+
+const recentEssays = [
+  { title: 'Shipping less JavaScript on purpose', readingTime: '7 min reading time', tag: 'Recent essay' },
+  { title: 'Designing APIs for future maintainers', readingTime: '9 min reading time', tag: 'Recent essay' },
+  { title: 'When a rewrite is really an archive problem', readingTime: '6 min reading time', tag: 'Recent essay' },
+];
+
+const archive = [
+  'April 2026 — interface reliability',
+  'March 2026 — React architecture notes',
+  'February 2026 — product systems and pacing',
+  'January 2026 — archive of engineering essays',
+];
+
+export default function App() {
+  return (
+    <main className="editorial-shell">
+      <header className="masthead">
+        <div>
+          <p className="eyebrow">{promptLabel}</p>
+          <h1>Editorial Engineering Blog</h1>
+          <p className="lede">
+            Long-form essays about frontend systems, product taste, and the small decisions that make software either humane or exhausting.
+          </p>
+        </div>
+        <form className="newsletter-card">
+          <span className="section-label">Newsletter</span>
+          <h2>Join the quiet newsletter</h2>
+          <p>One thoughtful essay at a time. No launch spam, just writing worth saving.</p>
+          <label className="sr-only" htmlFor="newsletter-email">Email</label>
+          <input id="newsletter-email" type="email" placeholder="Email for newsletter updates" />
+          <button type="button">Subscribe to newsletter</button>
+        </form>
+      </header>
+
+      <section className="feature-grid">
+        <article className="feature-story">
+          <span className="section-label">Featured essay</span>
+          <h2>{featuredEssay.title}</h2>
+          <p className="reading-time">{featuredEssay.readingTime}</p>
+          <p>{featuredEssay.dek}</p>
+          <blockquote>
+            The work is rarely just shipping a page. The work is deciding what should stay simple six months from now.
+          </blockquote>
+          <a href="#recent-essays">Read the featured essay</a>
+        </article>
+
+        <aside className="author-note">
+          <span className="section-label">Author note</span>
+          <h2>Writing with an editorial pace</h2>
+          <p>
+            This author note section explains the tone of the site: essays over hot takes, references over noise, and a clear archive that respects the reader’s time.
+          </p>
+          <p className="author-signoff">Written by an engineer who still likes careful paragraphs.</p>
+        </aside>
+      </section>
+
+      <section id="recent-essays" className="content-grid">
+        <section className="recent-column">
+          <div className="section-heading">
+            <span className="section-label">Recent</span>
+            <h2>Recent essays</h2>
+          </div>
+          <div className="essay-list">
+            {recentEssays.map((essay) => (
+              <article key={essay.title} className="essay-card">
+                <span>{essay.tag}</span>
+                <h3>{essay.title}</h3>
+                <p>{essay.readingTime}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <aside className="archive-column">
+          <div className="section-heading">
+            <span className="section-label">Archive</span>
+            <h2>Archive view</h2>
+          </div>
+          <ul>
+            {archive.map((entry) => (
+              <li key={entry}>{entry}</li>
+            ))}
+          </ul>
+        </aside>
+      </section>
+    </main>
+  );
+}
+\`\`\`
+
+\`\`\`css title="src/styles.css"
+:root {
+  color: #f5efe3;
+  background: #111111;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(196, 148, 85, 0.12), transparent 28%),
+    linear-gradient(180deg, #191714 0%, #111111 42%, #0b0b0b 100%);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.editorial-shell {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 40px 20px 64px;
+}
+
+.masthead,
+.feature-grid,
+.content-grid {
+  display: grid;
+  gap: 20px;
+}
+
+.masthead {
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.9fr);
+  align-items: start;
+  margin-bottom: 24px;
+}
+
+.eyebrow,
+.section-label {
+  margin: 0 0 10px;
+  font-size: 0.73rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #d4b07a;
+}
+
+h1,
+h2,
+h3,
+p,
+blockquote,
+li {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 16px;
+  font-size: clamp(3rem, 6vw, 5.6rem);
+  line-height: 0.94;
+  letter-spacing: -0.04em;
+}
+
+.lede {
+  max-width: 62ch;
+  color: #ded5c6;
+  font-size: 1.1rem;
+  line-height: 1.8;
+}
+
+.newsletter-card,
+.feature-story,
+.author-note,
+.essay-card,
+.archive-column {
+  border: 1px solid rgba(212, 176, 122, 0.2);
+  background: rgba(19, 17, 15, 0.78);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+}
+
+.newsletter-card,
+.feature-story,
+.author-note,
+.archive-column {
+  border-radius: 28px;
+  padding: 24px;
+}
+
+.newsletter-card p,
+.feature-story p,
+.author-note p,
+.essay-card p,
+.archive-column li {
+  color: #ddd3c3;
+  line-height: 1.75;
+}
+
+.newsletter-card input {
+  width: 100%;
+  margin: 14px 0 12px;
+  padding: 0.92rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+}
+
+.newsletter-card button,
+.feature-story a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  padding: 0.82rem 1.1rem;
+  border-radius: 999px;
+  border: 0;
+  background: #e2bf8c;
+  color: #16120f;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.feature-grid,
+.content-grid {
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.8fr);
+  margin-bottom: 24px;
+}
+
+.feature-story h2 {
+  margin-bottom: 10px;
+  font-size: clamp(2rem, 3.7vw, 3.3rem);
+  line-height: 1;
+}
+
+.reading-time {
+  color: #d4b07a;
+  font-size: 0.95rem;
+}
+
+blockquote {
+  margin: 24px 0;
+  padding: 22px 24px;
+  border-left: 4px solid #d4b07a;
+  font-size: 1.28rem;
+  line-height: 1.6;
+  color: #f5efe3;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.author-signoff {
+  color: #d4b07a;
+  font-style: italic;
+}
+
+.section-heading {
+  margin-bottom: 12px;
+}
+
+.essay-list {
+  display: grid;
+  gap: 16px;
+}
+
+.essay-card {
+  border-radius: 22px;
+  padding: 20px;
+}
+
+.essay-card span {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: #d4b07a;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+.essay-card h3 {
+  margin-bottom: 10px;
+  font-size: 1.5rem;
+}
+
+.archive-column ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.archive-column li + li {
+  margin-top: 12px;
+}
+
+@media (max-width: 960px) {
+  .masthead,
+  .feature-grid,
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .editorial-shell {
+    padding: 24px 14px 40px;
   }
 }
 \`\`\``;
