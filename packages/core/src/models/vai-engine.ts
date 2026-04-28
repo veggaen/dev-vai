@@ -14,6 +14,26 @@
  *   - Conversation history (what users ask and what works)
  *   - Code repositories (structure, patterns, syntax)
  *   - Bilingual data (English <-> Norwegian mappings)
+ *
+ * ---------------------------------------------------------------------------
+ * TEST MODE - deterministic-engine controls
+ * ---------------------------------------------------------------------------
+ * Activated via the `VAI_TEST_MODE=1` env var OR the `{ testMode: true }`
+ * constructor option. When BOTH are present the constructor option wins.
+ *
+ * What test mode DISABLES:
+ *   - tryWebSearch()  - returns null immediately, never opens a socket.
+ *
+ * What test mode does NOT touch (use their own injection):
+ *   - RNG    - pass `{ rng: () => number }` to the constructor to replace
+ *              Math.random in response paths (greeting/joke/suggestion shuffles).
+ *   - Clock  - pass `{ now: () => number }` to replace Date.now / new Date()
+ *              in tryUtilityQuestion (date-math answers).
+ *
+ * The three knobs are independent. testMode without rng/now still freezes the
+ * network call but leaves randomness/clock alone; rng without testMode still
+ * seeds randomness but leaves the web search live.
+ * ---------------------------------------------------------------------------
  */
 
 import type {
@@ -176,6 +196,16 @@ export interface VaiEngineOptions {
    * an existing instance to resume a trained corpus across engines.
    */
   shadowRouter?: boolean | ShadowRouter;
+  /**
+   * Test mode — disables tryWebSearch (returns null without network call).
+   * Constructor flag takes precedence over the VAI_TEST_MODE env var.
+   * Does NOT touch RNG (use `rng`) or clock (use `now`).
+   */
+  testMode?: boolean;
+  /** Injectable RNG — replaces Math.random in response paths. */
+  rng?: () => number;
+  /** Injectable clock — returns ms since epoch; replaces Date.now / new Date() in date-math. */
+  now?: () => number;
 }
 
 // ---- VAI Engine (the model adapter) ----
@@ -218,6 +248,14 @@ export class VaiEngine implements ModelAdapter {
   private _shadowRouter: ShadowRouter | null = null;
   private _lastShadowPredictions: Array<{ strategy: string; score: number }> = [];
   private static readonly HISTORY_SIZE = 100;
+
+  // ── Deterministic-engine knobs (see top-of-file TEST MODE doc block) ──
+  /** True when web search is disabled. Constructor flag wins over env var. */
+  readonly testMode: boolean;
+  /** Injectable RNG — used by response-path randomization (greetings, jokes, suggestions). */
+  private readonly _rng: () => number;
+  /** Injectable clock (ms since epoch) — used by date-math in tryUtilityQuestion. */
+  private readonly _nowMs: () => number;
 
   // ������ Synthesis scoring constants ������������������������������������������������������������������������������������������������������
   /** Number of TF-IDF documents to retrieve for synthesis */
@@ -273,6 +311,11 @@ export class VaiEngine implements ModelAdapter {
   constructor(options?: VaiEngineOptions) {
     this.persistPath = options?.persistPath ?? null;
     this._config = options?.config ?? null;
+
+    // Determinism knobs — constructor option takes precedence over env var.
+    this.testMode = options?.testMode ?? (process.env.VAI_TEST_MODE === '1');
+    this._rng = options?.rng ?? Math.random;
+    this._nowMs = options?.now ?? Date.now;
 
     const shadowFlag = options?.shadowRouter ?? (process.env.VAI_SHADOW_ROUTER === '1' || process.env.VAI_SHADOW_ROUTER === 'true');
     if (shadowFlag instanceof ShadowRouter) this._shadowRouter = shadowFlag;
@@ -3300,6 +3343,8 @@ export class VaiEngine implements ModelAdapter {
   }
 
   private async runSearchWithBudget(query: string, budgetMs = this.chatSearchBudgetMs): Promise<SearchResponse | null> {
+    // Test mode: never touch the network. See top-of-file TEST MODE doc block.
+    if (this.testMode) return null;
     let settled = false;
     return await new Promise<SearchResponse | null>((resolve) => {
       const timer = setTimeout(() => {
@@ -26705,7 +26750,7 @@ app.listen(3000, () => console.log('Server running'));
     const futureYearMatch = input.match(/\b(20\d{2})\b/);
     if (futureYearMatch) {
       const year = Number(futureYearMatch[1]);
-      const currentYear = new Date().getFullYear();
+      const currentYear = new Date(this._nowMs()).getFullYear();
       if (year > currentYear && /\b(?:who\s+won|winner|won|gold|champion|results?|final|medal)\b/i.test(input)) {
         return `That event hasn't happened yet, so I don't know the result for ${year}.`;
       }
@@ -39657,7 +39702,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
       else if (inDaysMatch) offsetDays = parseInt(inDaysMatch[1], 10);
       else if (agoMatch) offsetDays = -parseInt(agoMatch[1], 10);
       if (offsetDays !== null && Number.isFinite(offsetDays) && Math.abs(offsetDays) <= 36500) {
-        const target = new Date();
+        const target = new Date(this._nowMs());
         target.setDate(target.getDate() + offsetDays);
         const dateStr = target.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
         let dateAnswer: string;
@@ -39787,7 +39832,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
     const isTimeQ = /\b(?:what\s+(?:is\s+)?(?:the\s+)?(?:current\s+)?time|what\s+time\s+is\s+it|hva\s+er\s+(?:klokk(?:a|en)|tiden)|hvor\s+mye\s+er\s+klokk(?:a|en)|which\s+time\s+(?:is\s+it|zone)|current\s+time)\b/i.test(lower)
       || /^(?:time|klokka|tiden|the\s+time)[?!.\s]*$/i.test(lower);
     if (isTimeQ) {
-      const now = new Date();
+      const now = new Date(this._nowMs());
       const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
       const timeStr24 = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
       const isNorwegian = /\b(?:hva|klokk|tiden|hvor)\b/i.test(lower);
@@ -39801,7 +39846,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
     const isDateQ = /\b(?:what\s+(?:is\s+)?(?:the\s+)?(?:current\s+)?date|what\s+date\s+is\s+(?:it|today)|today'?s?\s+date|what\s+day\s+is\s+(?:it|today)|which\s+day\s+is\s+(?:it|today)|hva\s+er\s+(?:datoen|dato|dagen)\s*(?:i\s*dag)?|hvilken\s+dag\s+er\s+det)\b/i.test(lower)
       || /^(?:date|today|dato|i\s+dag)[?!.\s]*$/i.test(lower);
     if (isDateQ) {
-      const now = new Date();
+      const now = new Date(this._nowMs());
       const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
       const isNorwegian = /\b(?:hva|dato|dag|hvilken|i\s+dag)\b/i.test(lower);
       if (isNorwegian) {
@@ -40069,10 +40114,10 @@ Want me to customize it with your actual links, change the color scheme, add ani
         const unit = dateMathMatch[1].toLowerCase().replace(/s$/, '');
         const month1 = months[dateMathMatch[2].toLowerCase()];
         const day1 = parseInt(dateMathMatch[3], 10);
-        const year1 = dateMathMatch[4] ? parseInt(dateMathMatch[4], 10) : new Date().getFullYear();
+        const year1 = dateMathMatch[4] ? parseInt(dateMathMatch[4], 10) : new Date(this._nowMs()).getFullYear();
         const month2 = months[dateMathMatch[5].toLowerCase()];
         const day2 = parseInt(dateMathMatch[6], 10);
-        const year2 = dateMathMatch[7] ? parseInt(dateMathMatch[7], 10) : new Date().getFullYear();
+        const year2 = dateMathMatch[7] ? parseInt(dateMathMatch[7], 10) : new Date(this._nowMs()).getFullYear();
 
         if (month1 !== undefined && month2 !== undefined) {
           const date1 = new Date(year1, month1, day1);
@@ -40348,6 +40393,8 @@ Want me to customize it with your actual links, change the color scheme, add ani
    * Learning happens automatically via the pipeline's onLearn callback.
    */
   private async tryWebSearch(query: string): Promise<string | null> {
+    // Test mode: never touch the network. See top-of-file TEST MODE doc block.
+    if (this.testMode) return null;
     if (this._activeMode === 'builder' || this._hasActiveSandboxContext) {
       return null;
     }
@@ -40664,7 +40711,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
             'Heisann! Hva har du på hjertet?',
             'Hei! Klar når du er.',
           ];
-          return norwegianFollowUps[Math.floor(Math.random() * norwegianFollowUps.length)];
+          return norwegianFollowUps[Math.floor(this._rng() * norwegianFollowUps.length)];
         }
         const followUpGreetings = [
           'Hey! What are we diving into?',
@@ -40675,7 +40722,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
           'Hey again — go ahead.',
           'What\'s on your mind?',
         ];
-        return followUpGreetings[Math.floor(Math.random() * followUpGreetings.length)];
+        return followUpGreetings[Math.floor(this._rng() * followUpGreetings.length)];
       }
       if (conversationTurns.length < 3) {
         if (isNorwegianGreeting) {
@@ -40807,7 +40854,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
         '!false — it\'s funny because it\'s true.',
         'A programmer\'s wife says "Go to the store and get a gallon of milk. If they have eggs, get a dozen." He comes home with 12 gallons of milk.',
       ];
-      return jokes[Math.floor(Math.random() * jokes.length)];
+      return jokes[Math.floor(this._rng() * jokes.length)];
     }
 
     // "I'm bored" / "What should I do?" / "I don't know what to ask"
@@ -40816,7 +40863,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
         "Here are some ideas:\n- Ask me to **build something** — \"Build me a todo app in React\"\n- **Learn something new** — \"Explain Kubernetes like I'm 5\"\n- **Compare technologies** — \"Redis vs Memcached\"\n- **Deep dive** — \"How does a database index work?\"\n- Say **\"google [topic]\"** to search the web and teach me",
         "Try one of these:\n- \"What's the best database for my project?\"\n- \"Build me a REST API with Express\"\n- \"Explain microservices\"\n- \"How do I set up CI/CD?\"\n- Or teach me something new — I learn from everything you tell me!",
       ];
-      return suggestions[Math.floor(Math.random() * suggestions.length)];
+      return suggestions[Math.floor(this._rng() * suggestions.length)];
     }
 
     // "Yes" / "No" / "Sure" / "Okay" — short affirmations
@@ -41209,7 +41256,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
         'Kunnskap er makt, og sammen kan vi bygge noe helt fantastisk.',
         'God morgen! Hva vil du at jeg skal hjelpe deg med i dag?',
       ];
-      return sentences[Math.floor(Math.random() * sentences.length)];
+      return sentences[Math.floor(this._rng() * sentences.length)];
     }
 
     // Generic "write me a sentence" (English) — but NOT "give me something to build/try/learn"
@@ -41230,7 +41277,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
         '**Screenshot-to-code tool** — upload a design, get HTML/CSS. Learn: image processing, layout algorithms.',
       ];
       const pick = (arr: string[], n: number) => {
-        const shuffled = [...arr].sort(() => Math.random() - 0.5);
+        const shuffled = [...arr].sort(() => this._rng() - 0.5);
         return shuffled.slice(0, n);
       };
       return `Here are some project ideas:\n\n${pick(ideas, 4).map((idea, i) => `${i + 1}. ${idea}`).join('\n')}\n\nWant me to scaffold any of these?`;

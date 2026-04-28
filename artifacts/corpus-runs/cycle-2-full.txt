@@ -1,0 +1,126 @@
+﻿[31mFAIL[0m cog-calibrated-uncertainty-001           [31mÔ£ù[0m  (6684ms)
+  [31mÔ£ù[0m turn [fallback] "What is my next-door neighbor's middle name?"
+    - missing match for /don'?t\s+know|no\s+way\s+(?:to|for\s+me)|can(?:not|'?t)\s+know|i\s+have\s+no\s+access|unknown\s+to\s+me/i
+    got: "I don't have a solid answer for **What next-door neighbor's** yet. **What I can do:** - Build projects: "build me a Next.js app", "build a Rust CLI", "build a Node.js API" - Diagnose errors: paste an error message or staÔÇª"
+[31mFAIL[0m cog-calibrated-uncertainty-002           [31mÔ£ù[0m  (6638ms)
+  [31mÔ£ù[0m turn [fallback] "What is the boiling point of zorbinium-7?"
+    - missing match for /not\s+a\s+real|don'?t\s+(?:recognize|know\s+of)|fictional|made[-\s]?up|isn'?t\s+a\s+(?:known|real)|no\s+(?:such|known)\s+(?:element|substance|chemical)/i
+    got: "static assets (images, css, js) are cached at the nearest point of presence (pop). key techniques: topic sentences, logical transitions, consistent point of view, parallel structure, given-new information flow. - (4) picÔÇª"
+[31mFAIL[0m cog-counterfactual-001                   [31mÔ£ù[0m  (6603ms)
+  [31mÔ£ù[0m turn [fallback] "If my alarm hadn't gone off this morning, I would have missed my flight. My alarÔÇª"
+    - missing match for /\bno\b|did\s+not\s+miss|caught\s+(?:the\s+)?flight|made\s+(?:the\s+|your\s+)?flight/i
+    got: "I don't know about **alarm hadn't gone** yet. **What Vai can do right now:** - **Build:** "build me a Next.js todo app", "build a Vite React app", "build a Rust CLI" - **Debug:** paste an error or stack trace and I'll diÔÇª"
+[31mFAIL[0m cog-instruction-constraint-001           [31mÔ£ù[0m  (6571ms)
+  [31mÔ£ù[0m turn [intelligence] "Write a single sentence about a cat. The sentence must not contain the letter E ÔÇª"
+    - forbidden match hit for /[Ee]/
+    got: "clear communication is the discipline of transferring ideas with minimal loss. rules: (1) hemingway principle short sentences, active voice, concrete nouns, strong verbs. cut every word that doesn't add information. (2) ÔÇª"
+[31mFAIL[0m cog-instruction-constraint-002           [31mÔ£ù[0m  (1089ms)
+  [31mÔ£ù[0m turn [literal-response] "Reply with exactly five words. No more, no less. Describe the color blue."
+    - missing match for /^\s*(?:\S+\s+){4}\S+\s*[.!?]?\s*$/
+    got: "five words."
+[31mFAIL[0m cog-multi-step-planning-001              [31mÔ£ù[0m  (6487ms)
+  [31mÔ£ù[0m turn [fallback] "I have 90 minutes. Laundry takes 60 mins (passive), oven preheat 15 mins then baÔÇª"
+    - missing match for /\bstart\s+laundry\b|laundry\s+at\s+(?:0|t=0|minute\s+0)/i
+    - missing match for /preheat/i
+    got: "I don't have a solid answer for **have minutes. Laundry** yet. **What I can do:** - Build projects: "build me a Next.js app", "build a Rust CLI", "build a Node.js API" - Diagnose errors: paste an error message or stack tÔÇª"
+[32mPASS[0m cog-order-of-operations-001              [32mÔ£ô[0m  (1002ms)
+[31mFAIL[0m cog-self-contradiction-001               [31mÔ£ù[0m  (942ms)
+  [31mÔ£ù[0m turn [literal-response] "Reply with exactly two sentences. The first sentence must say you will use threeÔÇª"
+    - missing match for /cannot|can\s*not|impossible|contradict|inconsistent|won't\s+do|refuse/i
+    got: "two sentences. The first sentence must say you will use three sentences. The second must say you actually used two."
+[31mFAIL[0m cog-theory-of-mind-001                   [31mÔ£ù[0m  (6354ms)
+  [31mÔ£ù[0m turn [intelligence] "Anna puts a ball in box A and then leaves the room. While she is gone, Ben movesÔÇª"
+    - missing match for /box\s*a\b/i
+    got: "**kubernetes (k8s)** picks up where docker leaves off once you have containers, k8s decides where they run, how many copies exist, and what happens when they crash. **core concepts:** **pod** smallest deployable unit (onÔÇª"
+[31mFAIL[0m cog-theory-of-mind-002                   [31mÔ£ù[0m  (873ms)
+  [31mÔ£ù[0m turn [utility] "Carlos read a note saying the meeting moved to 4pm, but the note was wrong ÔÇö theÔÇª"
+    - missing match for /\b4\s*(?:pm|p\.m\.?|o'clock)?\b/i
+    got: "The current time is **11:13 PM** (23:13)."
+[31mFAIL[0m cre-app-ideation-001                     [31mÔ£ù[0m  (6269ms)
+  [31mÔ£ù[0m turn [intelligence] "Pitch three distinct fitness app ideas. Each pitch: name, one-line hook, target ÔÇª"
+    - missing match for /(?:^|\n)\s*(?:1\.|\*\*?1|##?\s*1|name\s*:)/im
+    - missing match for /(?:^|\n)\s*(?:3\.|\*\*?3|##?\s*3|name\s*:[\s\S]+name\s*:[\s\S]+name\s*:)/im
+    got: "**Pitch three distinct fitness app ideas. Each pitch: name, one-line hook, target user,?** sla/slo/sli are the three pillars of service reliability: sla (service level agreement) contractual promise to customers (e.g., 9ÔÇª"
+[31mFAIL[0m cre-code-as-art-001                      [31mÔ£ù[0m  (6251ms)
+  [31mÔ£ù[0m turn [english-lang] "Write a single Python expression (one line, no semicolons, no newlines) that priÔÇª"
+    - missing match for /sin\s*\(/i
+    - missing match for /print\s*\(/
+    - forbidden match hit for /;/
+    - forbidden match hit for /\n/
+    got: "**Semicolon Usage:** 1. **Join independent clauses** (instead of period):    - *I love coding; it challenges me.* 2. **Before conjunctive adverbs** (however, therefore, moreover):    - *It rained; **however**, we went ouÔÇª"
+[31mFAIL[0m cre-constrained-writing-001              [31mÔ£ù[0m  (6234ms)
+  [31mÔ£ù[0m turn [intelligence] "Write a product blurb for a hammer. Exactly 50 words. No headings, no list ÔÇö oneÔÇª"
+    - missing match for /hammer/i
+    got: "**sync** is go's standard library package for concurrency primitives low-level tools for coordinating goroutines. **key types:** **sync.mutex** mutual exclusion lock ```go var mu sync.mutex mu.lock() // critical section ÔÇª"
+[31mFAIL[0m cre-constrained-writing-002              [31mÔ£ù[0m  (6215ms)
+  [31mÔ£ù[0m turn [creative-code] "Write a haiku about a server room in autumn. Three lines only. No title, no commÔÇª"
+    - missing match for /^\s*\S[^\n]*\n\s*\S[^\n]*\n\s*\S[^\n]*\s*$/
+    got: "Here's a **simple HTTP server** in **python**: ```python from http.server import HTTPServer, BaseHTTPRequestHandler import json class MyHandler(BaseHTTPRequestHandler):     def do_GET(self):         if self.path == '/': ÔÇª"
+[31mFAIL[0m cre-cross-domain-001                     [31mÔ£ù[0m  (6221ms)
+  [31mÔ£ù[0m turn [framework-devops] "Explain git rebase by analogy to a busy restaurant kitchen. Keep it under 150 woÔÇª"
+    - forbidden match hit for /\b(?:branch|commit|HEAD)\b/i
+    got: "**Git** is a **distributed version control system** ÔÇö it lets you track every change to your code, undo mistakes, and collaborate with others without stepping on each other's work. **Why it matters:** Without Git, one baÔÇª"
+[31mFAIL[0m cre-cross-domain-002                     [31mÔ£ù[0m  (5960ms)
+  [31mÔ£ù[0m turn [networking] "Explain the TCP three-way handshake as if it were two strangers being formally iÔÇª"
+    - missing match for /introduce|introduction|stranger|party|nice\s+to\s+meet|hello|hi\b/i
+    got: "**TCP Three-Way Handshake:** ``` Client                Server   |--- SYN ------------>|   |<--- SYN-ACK --------|   |--- ACK ------------>|   |    Connection Open  | ``` 1. **SYN** ÔÇö Client sends a synchronization requesÔÇª"
+[31mFAIL[0m cre-voice-matching-001                   [31mÔ£ù[0m  (6172ms)
+  [31mÔ£ù[0m turn [intelligence] "Write a tweet (under 280 chars) about morning coffee, in the voice of a 1920s haÔÇª"
+    - missing match for /coffee|joe|brew|cup/i
+    got: "coherence in linguistics is the logical connectedness that makes text understandable as unified whole. two levels: (1) local coherence adjacent sentences relate logically (cause-effect, temporal sequence, elaboration). (ÔÇª"
+[32mPASS[0m cre-voice-non-default-001                [32mÔ£ô[0m  (6153ms)
+[31mFAIL[0m mt-clarifying-question-001               [31mÔ£ù[0m[31mÔ£ù[0m  (6236ms)
+  [31mÔ£ù[0m turn [fallback] "Help me with my project."
+    - missing match for /\?/
+    - missing match for /which|what\s+kind|tell\s+me\s+more|what(?:'s|\s+is)\s+(?:the|your)\s+project|details/i
+    got: "**angular.json** workspace configuration file controlling build options, file paths, and project structure. **key commands:** `ng new my-app` create new angular project `ng serve` start dev server with hot reload `ng genÔÇª"
+  [31mÔ£ù[0m turn [web-stack] "It's a Node.js CLI tool that converts CSV to JSON. I'm stuck on streaming large ÔÇª"
+    - missing match for /stream|chunk|read\s*line|backpressure|csv-parser|fs\.createReadStream/i
+    got: "**JSON (JavaScript Object Notation):** JSON is a lightweight data format for storing and exchanging data. ```json {   "name": "Vegga",   "age": 25,   "skills": ["JavaScript", "TypeScript"],   "active": true } ``` **Key fÔÇª"
+[31mFAIL[0m mt-context-retention-001                 [31mÔ£ù[0m[31mÔ£ù[0m  (6217ms)
+  [31mÔ£ù[0m turn [fallback] "Hey, my name is Mira."
+    - missing match for /mira/i
+    got: "vidkun quisling, leader of the fascist nasjonal samling party, collaborated with the germans his name became synonymous with "traitor" worldwide. in code: the best function name is the documentation it compresses intent ÔÇª"
+  [31mÔ£ù[0m turn [fallback] "What's my name?"
+    - missing match for /\bmira\b/i
+    got: "I don't have enough to go on for **What's name?** right now ÔÇö still building my knowledge there. We were discussing **basic setup** ÔÇö want me to: - Go deeper on that? - Try a different angle? - Build something with it? OÔÇª"
+[31mFAIL[0m mt-contradiction-handling-001            [32mÔ£ô[0m[32mÔ£ô[0m[31mÔ£ù[0m  (6219ms)
+  [31mÔ£ù[0m turn [taught-match] "What's my favorite color?"
+    - missing match for /\bgreen\b/i
+    - forbidden match hit for /\bblue\b/i
+    got: "blue."
+[32mPASS[0m mt-correction-acceptance-001             [32mÔ£ô[0m[32mÔ£ô[0m  (6185ms)
+[32mPASS[0m prj-debug-typeerror-001                  [32mÔ£ô[0m  (5862ms)
+[31mFAIL[0m prj-express-route-001                    [31mÔ£ù[0m  (6068ms)
+  [31mÔ£ù[0m turn [web-stack] "Show me a minimal Express server with a GET /health route that returns JSON {staÔÇª"
+    - missing match for /require\s*\(\s*['"]express['"]\s*\)|from\s+['"]express['"]/
+    - missing match for /\.get\s*\(\s*['"]/health['"]/
+    - missing match for /status['"\s]*:\s*['"]ok['"]|res\.json\s*\(\s*\{[^}]*status/i
+    got: "**JSON (JavaScript Object Notation):** JSON is a lightweight data format for storing and exchanging data. ```json {   "name": "Vegga",   "age": 25,   "skills": ["JavaScript", "TypeScript"],   "active": true } ``` **Key fÔÇª"
+[31mFAIL[0m prj-react-tailwind-counter-001           [31mÔ£ù[0m  (5083ms)
+  [31mÔ£ù[0m turn [chat-build-redirect] "Build me a React counter app with Tailwind. Plus and minus buttons, big centeredÔÇª"
+    - missing match for /useState/
+    - missing match for /tailwind|@tailwind|@import\s+["']tailwindcss/i
+    - missing match for /className=/
+    got: "Happy to help build it ÔÇö what kind of app do you want to make? **Pick a shape and I can take the next step immediately:** - **SaaS workspace** ÔÇö auth, billing, dashboard, settings - **Internal tool** ÔÇö tables, filters, fÔÇª"
+[31mFAIL[0m prj-sql-join-001                         [31mÔ£ù[0m  (6046ms)
+  [31mÔ£ù[0m turn [fallback] "Write a SQL query for the top 5 customers by total revenue. Tables: customers(idÔÇª"
+    - missing match for /\bjoin\b/i
+    - missing match for /\bgroup\s+by\b/i
+    - missing match for /\border\s+by\b/i
+    - missing match for /\blimit\s+5\b|top\s+5/i
+    got: "I don't have a solid answer for **Write SQL query** yet. **What I can do:** - Build projects: "build me a Next.js app", "build a Rust CLI", "build a Node.js API" - Diagnose errors: paste an error message or stack trace -ÔÇª"
+[32mPASS[0m thr-buried-math-isak                     [32mÔ£ô[0m[32mÔ£ô[0m[32mÔ£ô[0m  (6035ms)
+[32mPASS[0m thr-compound-multi-intent-ragna          [32mÔ£ô[0m  (556ms)
+[32mPASS[0m thr-greeting-plus-question-ida           [32mÔ£ô[0m  (5929ms)
+[32mPASS[0m thr-literal-meta-tone                    [32mÔ£ô[0m[32mÔ£ô[0m  (5890ms)
+[32mPASS[0m thr-message-count-leon                   [32mÔ£ô[0m[32mÔ£ô[0m[32mÔ£ô[0m[32mÔ£ô[0m  (5975ms)
+[32mPASS[0m thr-nickname-prelude-mira                [32mÔ£ô[0m[32mÔ£ô[0m  (5847ms)
+[32mPASS[0m thr-one-word-followup-bjorn              [32mÔ£ô[0m[32mÔ£ô[0m  (5915ms)
+[32mPASS[0m thr-relative-dates-sigrid                [32mÔ£ô[0m[32mÔ£ô[0m[32mÔ£ô[0m  (5867ms)
+[32mPASS[0m thr-teach-poison-johan                   [32mÔ£ô[0m[32mÔ£ô[0m  (5792ms)
+[32mPASS[0m thr-tiny-followup-anders                 [32mÔ£ô[0m[32mÔ£ô[0m[32mÔ£ô[0m  (5853ms)
+[32mPASS[0m thr-typos-helena                         [32mÔ£ô[0m[32mÔ£ô[0m  (5801ms)
+[32mPASS[0m thr-weather-refusal-eivind               [32mÔ£ô[0m  (5713ms)
+[31m
+33/57 turns passed, 22/38 conversations failed (6809ms total)[0m

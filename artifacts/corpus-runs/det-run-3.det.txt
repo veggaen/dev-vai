@@ -1,0 +1,404 @@
+﻿cog-calibrated-uncertainty-001|fallback|missing match for /don'?t\s+know|no\s+way\s+(?:to|for\s+me)|can(?:not|'?t)\s+know|i\s+have\s+no\s+access|unknown\s+to\s+me/i|I don't have a solid answer for **What next-door neighbor's** yet.
+
+**What I can do:**
+- Build projects: "build me a Next.js app", "build a Rust CLI", "build a Node.js API"
+- Diagnose errors: paste an error message or stack trace
+- Write tests: "write tests for this component"
+- Refactor code: "how should I split this component?"
+- Explain tech: Docker, TypeScript, React hooks, Tailwind, etc.
+
+If this is something I should know, you can teach me directly or I'll get smarter over time as I handle more requests.
+cog-calibrated-uncertainty-002|fallback|missing match for /not\s+a\s+real|don'?t\s+(?:recognize|know\s+of)|fictional|made[-\s]?up|isn'?t\s+a\s+(?:known|real)|no\s+(?:such|known)\s+(?:element|substance|chemical)/i|static assets (images, css, js) are cached at the nearest point of presence (pop). key techniques: topic sentences, logical transitions, consistent point of view, parallel structure, given-new information flow.
+
+- (4) pickup point api find nearest pickup locations.
+
+If you need something more specific, paste the file or snippet and I'll answer against that directly.
+cog-counterfactual-001|fallback|missing match for /\bno\b|did\s+not\s+miss|caught\s+(?:the\s+)?flight|made\s+(?:the\s+|your\s+)?flight/i|I don't know about **alarm hadn't gone** yet.
+
+**What Vai can do right now:**
+- **Build:** "build me a Next.js todo app", "build a Vite React app", "build a Rust CLI"
+- **Debug:** paste an error or stack trace and I'll diagnose it
+- **Test:** "write unit tests for this function"
+- **Refactor:** "how do I split this component?"
+- **Explain:** Docker, TypeScript, React, Tailwind, Express, Next.js, Rust, C#, C++
+
+I track questions I can't answer. Ask "what do you need to learn?" to see my gaps.
+cog-instruction-constraint-001|intelligence|forbidden match hit for /[Ee]/|clear communication is the discipline of transferring ideas with minimal loss. rules: (1) hemingway principle short sentences, active voice, concrete nouns, strong verbs. cut every word that doesn't add information. (2) one idea per sentence, one topic per paragraph. (3) put the conclusion first, then the evidence (inverted pyramid). (4) use specific numbers instead of vague quantifiers ("3x faste...
+cog-instruction-constraint-002|literal-response|missing match for /^\s*(?:\S+\s+){4}\S+\s*[.!?]?\s*$/|five words.
+cog-multi-step-planning-001|fallback|missing match for /\bstart\s+laundry\b|laundry\s+at\s+(?:0|t=0|minute\s+0)/i,missing match for /preheat/i|I don't have a solid answer for **have minutes. Laundry** yet.
+
+**What I can do:**
+- Build projects: "build me a Next.js app", "build a Rust CLI", "build a Node.js API"
+- Diagnose errors: paste an error message or stack trace
+- Write tests: "write tests for this component"
+- Refactor code: "how should I split this component?"
+- Explain tech: Docker, TypeScript, React hooks, Tailwind, etc.
+
+If this is something I should know, you can teach me directly or I'll get smarter over time as I handle more requests.
+cog-order-of-operations-001|math||8+2*3 = **14**
+cog-self-contradiction-001|literal-response|missing match for /cannot|can\s*not|impossible|contradict|inconsistent|won't\s+do|refuse/i|two sentences. The first sentence must say you will use three sentences. The second must say you actually used two.
+cog-theory-of-mind-001|intelligence|missing match for /box\s*a\b/i|**kubernetes (k8s)** picks up where docker leaves off once you have containers, k8s decides where they run, how many copies exist, and what happens when they crash. **core concepts:** **pod** smallest deployable unit (one or more containers) **service** stable network endpoint for pods **deployment** manages pod replicas and rolling updates **ingress** routes external http traffic to services **ke...
+cog-theory-of-mind-002|utility|missing match for /\b4\s*(?:pm|p\.m\.?|o'clock)?\b/i|The current time is **11:13 PM** (23:13).
+cre-app-ideation-001|intelligence|missing match for /(?:^|\n)\s*(?:1\.|\*\*?1|##?\s*1|name\s*:)/im,missing match for /(?:^|\n)\s*(?:3\.|\*\*?3|##?\s*3|name\s*:[\s\S]+name\s*:[\s\S]+name\s*:)/im|**Pitch three distinct fitness app ideas. Each pitch: name, one-line hook, target user,?**
+sla/slo/sli are the three pillars of service reliability: sla (service level agreement) contractual promise to customers (e.g., 99.9% uptime max 8.76 hours downtime/year). slo (service level objective) internal target stricter than sla (e.g., 99.95% uptime). sli (service level indicator) the actual measured metric (e.g., successful requests total requests). the observability stack: metrics (promet...
+
+**why it's different from existing apps. Keep each pitch tight?**
+meta-learning is learning how to learn the skill that generates all other skills. key principles: (1) spaced repetition (ebbinghaus curve) review at increasing intervals (1 day, days, days, 21 days). retention jumps from 20% to 90%+. (2) interleaving mix different topics/problem types instead of blocking. harder in the moment but produces deeper transfer. (3) retrieval practice testing yourself is...
+cre-code-as-art-001|english-lang|missing match for /sin\s*\(/i,missing match for /print\s*\(/,forbidden match hit for /;/,forbidden match hit for /\n/|**Semicolon Usage:**
+
+1. **Join independent clauses** (instead of period):
+   - *I love coding; it challenges me.*
+
+2. **Before conjunctive adverbs** (however, therefore, moreover):
+   - *It rained; **however**, we went out.*
+
+3. **In complex lists** (items with commas):
+   - *We visited London, England; Paris, France; and Tokyo, Japan.*
+cre-constrained-writing-001|intelligence|missing match for /hammer/i|**sync** is go's standard library package for concurrency primitives low-level tools for coordinating goroutines. **key types:** **sync.mutex** mutual exclusion lock ```go var mu sync.mutex mu.lock() // critical section mu.unlock() ``` **sync.rwmutex** read-write lock (multiple readers or one writer) **sync.waitgroup** wait for group of goroutines to finish ```go var wg sync.waitgroup wg.add(1) go...
+cre-constrained-writing-002|creative-code|missing match for /^\s*\S[^\n]*\n\s*\S[^\n]*\n\s*\S[^\n]*\s*$/|Here's a **simple HTTP server** in **python**:
+
+```python
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import json
+
+class MyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b'<h1>Hello from Python HTTP Server!</h1>')
+        elif self.path == '/api/status':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok"}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b'Not Found')
+
+    def do_POST(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        data = json.loads(body) if body else {}
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps({"received": data}).encode())
+
+server = HTTPServer(('localhost', 8080), MyHandler)
+print('Server running on http://localhost:8080')
+server.serve_forever()
+```
+
+Handles GET routes for / and /api/status, plus a POST endpoint that echoes back received JSON data.
+cre-cross-domain-001|framework-devops|forbidden match hit for /\b(?:branch|commit|HEAD)\b/i|**Git** is a **distributed version control system** ÔÇö it lets you track every change to your code, undo mistakes, and collaborate with others without stepping on each other's work.
+
+**Why it matters:** Without Git, one bad edit can destroy your project. With Git, you can always go back.
+
+**Key operations:**
+- `git init` ÔÇö start tracking a project
+- `git add .` ÔÇö stage changes
+- `git commit -m "message"` ÔÇö save a snapshot
+- `git branch feature/x` ÔÇö create a parallel line of work
+- `git merge` ÔÇö combine branches
+- `git push` / `git pull` ÔÇö sync with a remote (GitHub, GitLab)
+
+**Core concept:** Git stores *snapshots*, not diffs. Every commit is a full snapshot of your project at that point in time, with pointers to unchanged files for efficiency.
+cre-cross-domain-002|networking|missing match for /introduce|introduction|stranger|party|nice\s+to\s+meet|hello|hi\b/i|**TCP Three-Way Handshake:**
+
+```
+Client                Server
+  |--- SYN ------------>|
+  |<--- SYN-ACK --------|
+  |--- ACK ------------>|
+  |    Connection Open  |
+```
+
+1. **SYN** ÔÇö Client sends a synchronization request with an initial sequence number
+2. **SYN-ACK** ÔÇö Server acknowledges and sends its own sequence number
+3. **ACK** ÔÇö Client acknowledges the server's sequence number
+
+After these 3 steps, a full-duplex TCP connection is established.
+cre-voice-matching-001|intelligence|missing match for /coffee|joe|brew|cup/i|coherence in linguistics is the logical connectedness that makes text understandable as unified whole. two levels: (1) local coherence adjacent sentences relate logically (cause-effect, temporal sequence, elaboration). (2) global coherence the entire text follows clear theme/argument. distinct from cohesion (surface-level links like pronouns, connectives). text can have cohesion without coherence ...
+cre-voice-non-default-001|intelligence||clear communication is the discipline of transferring ideas with minimal loss. rules: (1) hemingway principle short sentences, active voice, concrete nouns, strong verbs. cut every word that doesn't add information. (2) one idea per sentence, one topic per paragraph. (3) put the conclusion first, then the evidence (inverted pyramid). (4) use specific numbers instead of vague quantifiers ("3x faste...
+mt-clarifying-question-001|fallback|missing match for /\?/,missing match for /which|what\s+kind|tell\s+me\s+more|what(?:'s|\s+is)\s+(?:the|your)\s+project|details/i|**angular.json** workspace configuration file controlling build options, file paths, and project structure. **key commands:** `ng new my-app` create new angular project `ng serve` start dev server with hot reload `ng generate component my-comp` generate component (alias: `ng c`) `ng generate service my-service` generate service `ng build` production build `ng test` run unit tests (karma/jest) `ng e2e` run end-to-end tests `ng add @angular/material` add angular material `ng update` update angular and dependencies **schematics:** angular cli uses schematics (code generators) to scaffold components, services, guards, pipes, and modules following angular best practices.
+
+- **key commands:** `cargo new my_project` create new project `cargo build` compile the project `cargo run` compile and run `cargo test` run tests `cargo check` fast type-check without producing binary `cargo clippy` run the rust linter `cargo fmt` format code `cargo doc --open` generate and open documentation `cargo add serde` add dependency **cargo.toml** the manifest file (like package.json) defining dependencies, metadata, and build configuration.
+- project needs django 4.2 but project needs django 5.0 conflict.
+
+If you need something more specific, paste the file or snippet and I'll answer against that directly.
+mt-clarifying-question-001|web-stack|missing match for /stream|chunk|read\s*line|backpressure|csv-parser|fs\.createReadStream/i|**JSON (JavaScript Object Notation):**
+
+JSON is a lightweight data format for storing and exchanging data.
+
+```json
+{
+  "name": "Vegga",
+  "age": 25,
+  "skills": ["JavaScript", "TypeScript"],
+  "active": true
+}
+```
+
+**Key features:** Human-readable, language-independent, supports: strings, numbers, booleans, arrays, objects, null.
+Used extensively in REST APIs, configuration files, and data storage.
+mt-context-retention-001|fallback|missing match for /mira/i|vidkun quisling, leader of the fascist nasjonal samling party, collaborated with the germans his name became synonymous with "traitor" worldwide. in code: the best function name is the documentation it compresses intent into 2-4 words.
+
+- **basic setup:** ```css .container display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: auto; gap: 1rem; ``` **key properties:** `grid-template-columns/rows` define track sizes `gap` space between cells `grid-column/row` place items across tracks `grid-area` name and place regions `fr` unit fractional unit for flexible tracks `minmax()` responsive track sizing `auto-fill/auto-fit` responsive column count **grid vs flexbox:** use grid for page layouts (headers, sidebars, content areas).
+
+If you need something more specific, paste the file or snippet and I'll answer against that directly.
+mt-context-retention-001|fallback|missing match for /\bmira\b/i|I don't have enough to go on for **What's name?** right now ÔÇö still building my knowledge there.
+
+We were discussing **basic setup** ÔÇö want me to:
+- Go deeper on that?
+- Try a different angle?
+- Build something with it?
+
+Or if you meant something else, give me a bit more context and I'll take another shot.
+mt-contradiction-handling-001|conversational||Got it! I've learned that "my favorite color" is "blue.". I'll remember this.
+mt-contradiction-handling-001|taught-match||blue.
+mt-contradiction-handling-001|taught-match|missing match for /\bgreen\b/i,forbidden match hit for /\bblue\b/i|blue.
+mt-correction-acceptance-001|general-knowledge||**Canberra** is the capital of Australia. It was chosen as a compromise between Sydney and Melbourne in 1908 and became the capital in 1927. Canberra is a planned city designed by American architects Walter Burley Griffin and Marion Mahony Griffin.
+mt-correction-acceptance-001|fallback||I don't have enough to go on for **No, it's actually** right now ÔÇö still building my knowledge there.
+
+We were discussing **Canberra** ÔÇö want me to:
+- Go deeper on that?
+- Try a different angle?
+- Build something with it?
+
+Or if you meant something else, give me a bit more context and I'll take another shot.
+prj-debug-typeerror-001|error-diagnosis||**TypeError: accessing `map`** ÔÇö you're accessing a property on `undefined` or `null`.
+
+**Most common causes:**
+1. Async data not yet loaded ÔÇö wrap in `if (!data) return null` or use optional chaining: `data?.map`
+2. API returned unexpected shape ÔÇö `console.log` the response before accessing it
+3. Wrong variable name or scope ÔÇö check spelling
+4. Array method on non-array ÔÇö confirm the value is actually an array with `Array.isArray(x)`
+
+**Quick fix:** Add `console.log('value:', yourVariable)` just before the crash line to see what it actually is.
+prj-express-route-001|web-stack|missing match for /require\s*\(\s*['"]express['"]\s*\)|from\s+['"]express['"]/,missing match for /\.get\s*\(\s*['"]/health['"]/,missing match for /status['"\s]*:\s*['"]ok['"]|res\.json\s*\(\s*\{[^}]*status/i|**JSON (JavaScript Object Notation):**
+
+JSON is a lightweight data format for storing and exchanging data.
+
+```json
+{
+  "name": "Vegga",
+  "age": 25,
+  "skills": ["JavaScript", "TypeScript"],
+  "active": true
+}
+```
+
+**Key features:** Human-readable, language-independent, supports: strings, numbers, booleans, arrays, objects, null.
+Used extensively in REST APIs, configuration files, and data storage.
+prj-react-tailwind-counter-001|chat-build-redirect|missing match for /useState/,missing match for /tailwind|@tailwind|@import\s+["']tailwindcss/i,missing match for /className=/|Happy to help build it ÔÇö what kind of app do you want to make?
+
+**Pick a shape and I can take the next step immediately:**
+- **SaaS workspace** ÔÇö auth, billing, dashboard, settings
+- **Internal tool** ÔÇö tables, filters, forms, admin flows
+- **Landing page** ÔÇö hero, sections, CTA, marketing copy
+- **Portfolio / personal site** ÔÇö projects, about, contact
+- **Store / commerce app** ÔÇö catalog, product pages, checkout
+
+If you want the fastest path, reply with one sentence like: "build a photography portfolio", "build a team dashboard", or "build a Next.js app".
+prj-sql-join-001|fallback|missing match for /\bjoin\b/i,missing match for /\bgroup\s+by\b/i,missing match for /\border\s+by\b/i,missing match for /\blimit\s+5\b|top\s+5/i|I don't have a solid answer for **Write SQL query** yet.
+
+**What I can do:**
+- Build projects: "build me a Next.js app", "build a Rust CLI", "build a Node.js API"
+- Diagnose errors: paste an error message or stack trace
+- Write tests: "write tests for this component"
+- Refactor code: "how should I split this component?"
+- Explain tech: Docker, TypeScript, React hooks, Tailwind, etc.
+
+If this is something I should know, you can teach me directly or I'll get smarter over time as I handle more requests.
+thr-buried-math-isak|math||47+89 = **136**
+thr-buried-math-isak|math||12*12 = **144**
+thr-buried-math-isak|math||200-73 = **127**
+thr-compound-multi-intent-ragna|utility||25^2 = **625**
+
+Tomorrow is **Wednesday, November 15, 2023**.
+thr-greeting-plus-question-ida|web-stack||**CORS (Cross-Origin Resource Sharing):**
+
+CORS is a browser security mechanism that controls which domains can access your API.
+
+**Problem:** Browser blocks requests from `localhost:3000` (frontend) to `localhost:5000` (API) by default.
+
+**Solution:** Server sends `Access-Control-Allow-Origin` header:
+```javascript
+// Express.js
+const cors = require('cors');
+app.use(cors({ origin: 'http://localhost:3000' }));
+```
+
+**Headers:** `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`.
+thr-literal-meta-tone|literal-response||w
+thr-literal-meta-tone|literal-response||7
+thr-message-count-leon|conversational||Hey - what's up?
+thr-message-count-leon|topic-followup||Let's do it ÔÇö Hey - what's up?.
+
+What's the first thing you want to tackle?
+thr-message-count-leon|synthesis||**binary tree** is data structure where each node has at most **two children** (left and right). **variants:** **binary search tree (bst)** left parent right. **avl tree** self-balancing bst (strict height balance) **red-black tree** self-balancing bst (used in java treemap, c++ std::map) **heap** c...
+
+right now can: learn from text you feed me, answer based on what have learned, generate code in 20+ languages, do math, discuss topics socratically, and search the web when you say "google it".
+thr-message-count-leon|utility||You've sent **4 messages** in this chat (this one included).
+thr-nickname-prelude-mira|nickname-prelude||Got it, **Mira** ÔÇö noted. Go ahead and ask, I'll do my best to answer.
+thr-nickname-prelude-mira|math||144/12 = **12**
+
+**Mercury** is the planet closest to the Sun, orbiting at an average distance of about 58 million km (0.39 AU). It is also the smallest planet in the Solar System.
+thr-one-word-followup-bjorn|synthesis||node.js is javascript runtime built on chrome's v8 engine for server-side development. common frameworks: express.js, fastify, nest.js.
+
+jest is zero-config javascript testing framework with snapshots and react testing library integration.
+
+**css-in-js** is an approach where css is written directly in javascript files, scoped to components. **2026 trend:** zero-runtime solutions dominating, with tailwind css being the most popular utility-first alternative.
+thr-one-word-followup-bjorn|short-topic-local||**React** is a JavaScript library for building user interfaces, created by **Meta** (2013). It's the most widely adopted frontend library ÔÇö if you're building a web app today, there's a good chance React is one of your top choices.
+
+**Core concepts:**
+- **Components** ÔÇö reusable UI building blocks (think LEGO bricks for UIs)
+- **JSX** ÔÇö HTML-like syntax in JavaScript
+- **Hooks** ÔÇö useState, useEffect, useRef for state and side effects
+- **Virtual DOM** ÔÇö efficient UI updates by diffing
+- **Unidirectional data flow** ÔÇö props down, events up
+
+**Ecosystem:** React Router (navigation), Redux/Zustand (state), Next.js (SSR/SSG).
+
+**When to use React:** SPAs, dashboards, mobile apps (React Native), anything interactive.
+thr-relative-dates-sigrid|utility||Tomorrow is **Wednesday, November 15, 2023**.
+thr-relative-dates-sigrid|conversational||**In 30 days:**
+
+on january 3, 2026, venezuela's maduro regime publicly acknowledged running intelligence operations using anthropic's claude models for surveillance purposes. on february 27, 2026, u.s. defense secretary pete hegseth designated anthropic "supply chain risk to national security" and threatened to cancel their $200 million pentagon contract. the pentagon gave anthropic 90 days to prove their ai was not compromised.
+thr-relative-dates-sigrid|utility||7 days ago was **Tuesday, November 7, 2023**.
+thr-teach-poison-johan|about-topic-curated||**Pythagorean theorem.** For a right triangle with legs *a* and *b* and hypotenuse *c*: **a┬▓ + b┬▓ = c┬▓**. The square of the hypotenuse equals the sum of the squares of the other two sides. Useful for finding any side when the other two are known, or for checking whether a triangle has a right angle.
+
+[Source: https://en.wikipedia.org/wiki/Pythagorean_theorem]
+thr-teach-poison-johan|context-grounded-followup||**Pythagorean theorem, simpler**
+The important context is: Pythagorean, Theorem.
+- Requested outcome: simplify the previous explanation.
+
+Plain version: keep the previous topic as the anchor, then explain only the part the current turn asks about. Do not restart from a generic definition unless the user clearly starts a new topic.
+
+That is the difference between an answer that merely matches words and an answer that feels like it heard the conversation.
+thr-tiny-followup-anders|fallback||typescript is **strict superset** of javascript all valid javascript is already valid typescript. **typescript and javascript the relationship:** think of typescript as javascript with **safety net** same language underneath, but with an extra layer that catches mistakes before your code runs.
+
+- **what typescript adds:** static types, interfaces, generics, and enums compile-time error checking (javascript only catches errors at runtime) better ide support (intellisense, refactoring) **how they connect:** typescript compiles (transpiles) to plain javascript runs anywhere js runs: browsers, node.js, deno, bun `tsconfig.json` configures the typescript compiler
+- learn from sources you give me ´┐¢´┐¢´┐¢ web pages, transcripts, code, and conversations.
+
+If you need something more specific, paste the file or snippet and I'll answer against that directly.
+thr-tiny-followup-anders|conversational||**Continuing on strict superset:**
+
+compression is the discipline of reducing information to its essential structure while preserving meaning. kolmogorov complexity: the shortest program that produces given output. in communication: the goal is maximum information density every word must earn its place. target: 4:1 compression ratio (expert evaluation: can the compressed version reconstruct the key insight?). types: (1) lossy compression drop details that don't affect the core message.
+
+Want to go deeper? Ask about a specific aspect.
+thr-tiny-followup-anders|fallback||I don't have enough to go on for **more?** right now ÔÇö still building my knowledge there.
+
+We were discussing **Continuing on strict superset** ÔÇö want me to:
+- Go deeper on that?
+- Try a different angle?
+- Build something with it?
+
+Or if you meant something else, give me a bit more context and I'll take another shot.
+thr-typos-helena|creative-code||Here's a complete **React App** with TypeScript:
+
+**1. Setup:**
+```bash
+npm create vite@latest my-app -- --template react-ts
+cd my-app && npm install
+```
+
+**2. src/App.tsx:**
+```tsx
+import { useState } from 'react';
+import './App.css';
+
+interface Item {
+  id: number;
+  text: string;
+  completed: boolean;
+}
+
+export default function App() {
+  const [items, setItems] = useState<Item[]>([]);
+  const [input, setInput] = useState('');
+
+  const addItem = () => {
+    if (!input.trim()) return;
+    setItems(prev => [...prev, { id: Date.now(), text: input.trim(), completed: false }]);
+    setInput('');
+  };
+
+  const toggleItem = (id: number) => {
+    setItems(prev => prev.map(item =>
+      item.id === id ? { ...item, completed: !item.completed } : item
+    ));
+  };
+
+  const deleteItem = (id: number) => {
+    setItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  return (
+    <div style={{ maxWidth: 600, margin: '2rem auto', padding: '0 1rem', fontFamily: 'system-ui' }}>
+      <h1>My App</h1>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && addItem()}
+          placeholder="Add something..."
+          style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
+        />
+        <button onClick={addItem} style={{ padding: '8px 16px', borderRadius: 6, background: '#2563eb', color: 'white', border: 'none', cursor: 'pointer' }}>
+          Add
+        </button>
+      </div>
+      <ul style={{ listStyle: 'none', padding: 0 }}>
+        {items.map(item => (
+          <li key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #eee' }}>
+            <input type="checkbox" checked={item.completed} onChange={() => toggleItem(item.id)} />
+            <span style={{ flex: 1, textDecoration: item.completed ? 'line-through' : 'none', color: item.completed ? '#999' : 'inherit' }}>
+              {item.text}
+            </span>
+            <button onClick={() => deleteItem(item.id)} style={{ background: 'none', border: 'none', color: '#e11d48', cursor: 'pointer' }}>Ô£ò</button>
+          </li>
+        ))}
+      </ul>
+      {items.length === 0 && <p style={{ color: '#999', textAlign: 'center' }}>No items yet. Add something above!</p>}
+    </div>
+  );
+}
+```
+
+**3. Run it:**
+```bash
+npm run dev
+```
+
+This gives you a working React + TypeScript app with add/toggle/delete functionality.
+
+**Add Tailwind CSS:**
+```bash
+npm install -D tailwindcss @tailwindcss/vite
+```
+
+Update `vite.config.ts`:
+```ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+
+export default defineConfig({ plugins: [react(), tailwindcss()] });
+```
+
+Replace `src/index.css` with:
+```css
+@import "tailwindcss";
+```
+
+Now you can use Tailwind utility classes anywhere in your JSX. Want me to add routing, state management, or connect it to an API?
+thr-typos-helena|conversational||**A fastapi backend with svelte frontend:**
+
+**sveltekit** is the official full-stack framework for **svelte** similar to what next.js is for react. **key features:** **file-based routing** `src/routes/about/+page.svelte` `/about` **server-side rendering** (ssr) by default **static site generation** (ssg) via `adapter-static` **api routes** `+server.ts` files for backend endpoints **load functions** `+page.server.ts` `+page.ts` for data loading **form actions** progressive enhancement for forms **streaming** stream data to the client as it becomes available **what makes svelte different:** svelte is **compiler**, not runtime. components compile to vanilla js with no virtual dom overhead. this results in smaller bundles and faster performance.
+thr-weather-refusal-eivind|conversational||I can't check the weather ÔÇö I don't have access to real-time weather data or location services. Try checking a weather app or website like weather.com, or ask a voice assistant.
+
+I'm great at coding, tech questions, and building projects though ÔÇö what can I help you with?
