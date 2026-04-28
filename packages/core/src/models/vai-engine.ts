@@ -42,7 +42,7 @@ import {
   type ConversationGroundingDependencies,
 } from '../chat/conversation-grounding.js';
 import { evaluateChatAnswerQuality, type ChatAnswerQualityReport } from '../chat/chat-answer-quality.js';
-import { KNOWLEDGE_RETRIEVAL_SCORE_MIN } from '../chat/chat-quality.js';
+import { KNOWLEDGE_RETRIEVAL_SCORE_MIN, detectInstructionConstraint } from '../chat/chat-quality.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
@@ -93,6 +93,18 @@ export interface ResponseMeta {
   teacherLoop?: TeacherLoopMeta;
   /** Deterministic chat answer quality report for grounded chat routes. */
   chatQuality?: ChatAnswerQualityReport;
+  /**
+   * Data-quality firewall badge — provenance of the answer for the UI to surface.
+   *  - 'local-curated': came from Vai's curated local knowledge / deterministic arms
+   *  - 'official-docs': cited an official-domain source
+   *  - 'web-mixed':     cited mixed-trust web sources
+   *  - 'web-untrusted': cited only low-trust web sources
+   *  - 'fallback':      no grounded answer (helpful 'I don't know' or stub)
+   *  - 'computed':      math / utility / time / binary — deterministic compute
+   */
+  trustBadge?: 'local-curated' | 'official-docs' | 'web-mixed' | 'web-untrusted' | 'fallback' | 'computed';
+  /** Whether the brevity firewall trimmed the response to honor a user scope constraint. */
+  brevityEnforced?: boolean;
 }
 
 export interface TeacherLoopMeta {
@@ -1425,6 +1437,19 @@ export class VaiEngine implements ModelAdapter {
       return response;
     }
 
+    // A1 — Scope/brevity firewall.
+    // When the user signals a strict literal-output constraint ("only the name",
+    // "one-word answer", "no preamble", "just the year"), the system hint asks
+    // the upstream answer to comply but does not always trim a verbose result
+    // produced by an earlier deterministic strategy. This block enforces it.
+    if (detectInstructionConstraint(input)) {
+      const trimmed = this.enforceInstructionConstraint(input, response);
+      if (trimmed !== response) {
+        if (this._lastMeta) this._lastMeta.brevityEnforced = true;
+        return trimmed;
+      }
+    }
+
     const explicitBrevityRequest = /(?:\b(?:be|keep it|answer|explain|say|tell me|give me)\s+(?:brief|briefly|short|shortly|concise|quick|quickly)\b|\b(?:brief|briefly|short|shortly|concise)\s+(?:answer|summary|overview|version|explanation)\b|\bquick\s+(?:answer|overview|version|explanation)\b|\b(?:quick|short|concise)\s+summary\b|\b(?:summarize|give me a summary|summary of|summarise)\b|\btl;?dr\b)/i.test(lower);
 
     if (oneSentence) {
@@ -1433,6 +1458,7 @@ export class VaiEngine implements ModelAdapter {
       const cleaned = response.replace(/\*\*/g, ''); // strip all bold markers
       const sentences = cleaned.split(/(?<=[.!?])\s+/).filter(s => s.length > 10);
       if (sentences.length > 0) {
+        if (this._lastMeta) this._lastMeta.brevityEnforced = true;
         return sentences[0];
       }
     }
@@ -1441,11 +1467,110 @@ export class VaiEngine implements ModelAdapter {
       // Take the opening section (before first heading or double newline)
       const sections = response.split(/\n\n|\n(?=\*\*[^*]+\*\*:?\s)/);
       if (sections.length > 1 && sections[0].length > 30) {
+        if (this._lastMeta) this._lastMeta.brevityEnforced = true;
         return sections[0];
       }
     }
 
     return response;
+  }
+
+  /**
+   * A1 helper — enforce a strict literal-output constraint by returning a
+   * minimal extract of `response`. Conservative: returns the original
+   * response unchanged when no clean minimal extract is available so we
+   * never produce a worse answer than what we started with.
+   */
+  private enforceInstructionConstraint(input: string, response: string): string {
+    if (!response || response.length === 0) return response;
+    // Builder file turns are out-of-scope (already short-circuited above).
+
+    // Hypothetical / conditional context guard. Phrases like
+    // "If I just say make me a Node app" trip the broad detector but are
+    // NOT directives to be terse — they are setup for a builder/policy turn.
+    // We bail in those cases to avoid trimming legitimate longer answers.
+    const lowerInput = input.toLowerCase();
+    if (/\b(?:if\s+i\s+(?:just\s+)?say|what\s+if|suppose|imagine|let'?s\s+say|hypothetically)\b/i.test(lowerInput)) {
+      return response;
+    }
+    // Builder / generative intent overrides brevity — never trim a scaffold answer.
+    if (/\b(?:build|make|create|scaffold|generate|spin\s+up|bootstrap|ship|deploy)\s+(?:me\s+)?(?:an?\s+|the\s+)?(?:app|api|site|website|page|landing|dashboard|component|server|backend|frontend|project)\b/i.test(lowerInput)) {
+      return response;
+    }
+    // If the response already contains fenced code blocks, never collapse it.
+    if (/```/.test(response)) return response;
+
+    // Strip markdown bold and any leading filler so we can read the bare value.
+    let body = response.replace(/\*\*/g, '').trim();
+
+    // Drop common preamble openers like "Sure!", "Of course," etc.
+    body = body.replace(/^(?:sure[!,.]?\s+|of course[!,.]?\s+|absolutely[!,.]?\s+|certainly[!,.]?\s+|great question[!,.]?\s+)/i, '').trim();
+
+    // "One-word answer" / "in one word" — take the first non-trivial token.
+    const oneWord = /\b(?:one[-\s]?word|in\s+one\s+word|single\s+word)\b/i.test(input);
+    if (oneWord) {
+      const m = body.match(/[A-Za-z\u00C0-\u024F][A-Za-z0-9\u00C0-\u024F'\-]{1,40}/);
+      if (m) return m[0];
+    }
+
+    // "Just the name / number / year / value / answer / word / letter / digit / date"
+    // — try to extract the most likely literal value.
+    const askYear = /\b(?:the\s+year|what\s+year|in\s+(?:what|which)\s+year)\b/i.test(input);
+    if (askYear) {
+      const m = body.match(/\b(1\d{3}|20\d{2}|21\d{2})\b/);
+      if (m) return m[1];
+    }
+    const askNumber = /\bjust\s+(?:the|a)\s+number\b|\bonly\s+(?:the|a)\s+number\b|\bone\s+number\b/i.test(input);
+    if (askNumber) {
+      const m = body.match(/-?\d[\d,.]*/);
+      if (m) return m[0].replace(/[.,]$/, '');
+    }
+
+    // Default — take the first sentence (or first line). Strip a trailing
+    // markdown source trail like "[Source: https://...]".
+    body = body.replace(/\s*\[Source:[^\]]+\]\s*$/i, '').trim();
+    const firstLine = body.split(/\r?\n/)[0].trim();
+    const firstSentence = firstLine.split(/(?<=[.!?])\s+/)[0]?.trim() ?? firstLine;
+    // Reject empty or pathological extracts.
+    if (firstSentence.length === 0) return response;
+    if (firstSentence.length > 280) return response;
+    return firstSentence;
+  }
+
+  /**
+   * A5 \u2014 data-quality firewall: classify the provenance of the last response
+   * so the UI can show a trust badge. Local curated knowledge wins by default;
+   * web-cited results are tiered by source trust; deterministic strategies are
+   * marked 'computed'.
+   */
+  private computeTrustBadge(meta: ResponseMeta): NonNullable<ResponseMeta['trustBadge']> {
+    const strategy = meta.strategy.split('->')[0]; // strip teacher-loop suffix
+    const computedSet = new Set([
+      'math', 'utility', 'binary', 'code-task', 'algorithm',
+      'literal-response', 'benchmark-eval', 'terminal-harness',
+      'empty', 'gibberish', 'keyboard-noise',
+    ]);
+    if (computedSet.has(strategy)) return 'computed';
+    if (strategy === 'fallback') return 'fallback';
+
+    if (strategy === 'research-cited' || strategy === 'web-search' || strategy === 'google-search') {
+      const sources = this._lastSearchResponse?.sources ?? [];
+      if (sources.length === 0) return 'web-untrusted';
+      const officialDomainRe = /(?:^|\.)docs?\.|(?:^|\.)developer\.|(?:^|\.)mdn\.|(?:^|\.)nodejs\.org$|(?:^|\.)react\.dev$|(?:^|\.)nextjs\.org$|(?:^|\.)typescriptlang\.org$|(?:^|\.)tailwindcss\.com$|(?:^|\.)vuejs\.org$|(?:^|\.)svelte\.dev$|(?:^|\.)astro\.build$|(?:^|\.)nuxt\.com$|(?:^|\.)docker\.com$|(?:^|\.)kubernetes\.io$|(?:^|\.)python\.org$|(?:^|\.)rust-lang\.org$|(?:^|\.)go\.dev$/i;
+      const officialHit = sources.some((s) => officialDomainRe.test(s.domain ?? ''));
+      if (officialHit) return 'official-docs';
+      const tiers = sources.map((s) => s.trustTier ?? 'low');
+      const highCount = tiers.filter((t) => t === 'high').length;
+      const lowCount = tiers.filter((t) => t === 'low' || t === 'untrusted').length;
+      if (highCount > 0 && lowCount === 0) return 'official-docs';
+      if (lowCount === sources.length) return 'web-untrusted';
+      return 'web-mixed';
+    }
+
+    // Everything else is local curated knowledge (taught-match, taught-doc,
+    // direct-match, synthesis, networking, framework-devops, language arms,
+    // best-practices, creative-code, scaffold, conversational, plan/debate).
+    return 'local-curated';
   }
 
   /** Wrap a strategy result to record what happened. Returns the response string unchanged. */
@@ -1632,7 +1757,10 @@ export class VaiEngine implements ModelAdapter {
 
     this.recordShadowObservation(userContent, request.messages);
     const durationMs = Math.round(performance.now() - start);
-    if (this._lastMeta) this._lastMeta.durationMs = durationMs;
+    if (this._lastMeta) {
+      this._lastMeta.durationMs = durationMs;
+      this._lastMeta.trustBadge = this.computeTrustBadge(this._lastMeta);
+    }
 
     return {
       message: { role: 'assistant', content: response },
@@ -1687,7 +1815,10 @@ export class VaiEngine implements ModelAdapter {
 
     const durationMs = Math.round(performance.now() - start);
     // Patch timing into the last tracked meta after the teacher loop completes
-    if (this._lastMeta) this._lastMeta.durationMs = durationMs;
+    if (this._lastMeta) {
+      this._lastMeta.durationMs = durationMs;
+      this._lastMeta.trustBadge = this.computeTrustBadge(this._lastMeta);
+    }
 
     // Learning flywheel — extract and persist knowledge from this exchange
     // Skip when noLearn is set (protective parenting — Vegga controls what Vai learns)
@@ -1712,6 +1843,7 @@ export class VaiEngine implements ModelAdapter {
           trustTier: s.trust.tier,
           trustScore: s.trust.score,
         })),
+        sourcePresentation: 'research',
         followUps: generateFollowUps(userContent, searchResult),
         confidence: searchResult.confidence,
         groundedBrief: groundedBuildBrief ?? undefined,
@@ -1743,6 +1875,7 @@ export class VaiEngine implements ModelAdapter {
         yield {
           type: 'sources',
           sources: extractedSources,
+          sourcePresentation: 'supporting',
           followUps,
           confidence: this._lastMeta?.confidence ?? 0.7,
         };
@@ -2512,7 +2645,26 @@ export class VaiEngine implements ModelAdapter {
 
     // Strategy 0: Math expressions — evaluate before anything else
     const mathResult = this.tryMath(lower);
-    if (mathResult !== null) return this.tracked('math', mathResult, input);
+    if (mathResult !== null) {
+      const augmented = this.augmentMathWithFollowOn(mathResult, input, lower);
+      return this.tracked('math', augmented, input);
+    }
+
+    // Strategy 0.005: Buried math — when the user wrapped a math question in
+    // chatter ("this isn't what I wanted, emm tell me 100 plus fifty five")
+    // the leading-anchored math arm misses. Scan for an explicit math
+    // sub-expression anywhere in the input and evaluate it.
+    const buriedMath = this.tryBuriedMath(input);
+    if (buriedMath !== null) {
+      const augmented = this.augmentMathWithFollowOn(buriedMath, input, lower);
+      return this.tracked('math', augmented, input);
+    }
+
+    // Strategy 0.007: Literal meta-questions about the prompt itself.
+    // "what is the first letter in this question" → first letter of prompt.
+    // "how many words in this sentence" → token count.
+    const literalMeta = this.tryLiteralMetaQuestion(input);
+    if (literalMeta !== null) return this.tracked('literal-response', literalMeta, input);
 
     // Strategy 0.01: Real-time utility questions — time, date, day — caught before anything
     const utilityResult = this.tryUtilityQuestion(lower, input, history);
@@ -2684,6 +2836,12 @@ export class VaiEngine implements ModelAdapter {
 
     // Strategy 0.44: Contextual product follow-up — fire before yes/no so
     // storefront/product continuations do not collapse into generic binary answers.
+    const directConversationRecall = this.tryConversationRecall(lower, history);
+    if (directConversationRecall) return this.tracked('conversational', directConversationRecall, input);
+
+    const githubRankingConversation = this.tryGithubRankingConversation(input, history);
+    if (githubRankingConversation) return this.tracked('github-ranking', githubRankingConversation, input);
+
     const topicFollowUpEarly = this.tryTopicAwareFollowUp(lower, input, history);
     if (topicFollowUpEarly) return this.tracked('topic-followup', topicFollowUpEarly, input);
 
@@ -2695,6 +2853,16 @@ export class VaiEngine implements ModelAdapter {
     if (contextGroundedFollowUp) return this.tracked('context-grounded-followup', contextGroundedFollowUp, input);
 
     // Strategy 0.45: Yes/No reasoning — answer yes/no questions using knowledge
+    // Pre-guard: if the user is doing a "nickname + I'm going to ask" prelude,
+    // route to the conversational acknowledgement instead of yes/no.
+    {
+      const nick = input.match(/\bmy\s+(?:nickname|nick|alias|handle|name)\s+is\s+([a-z][a-z'\-]{1,25})\b/i);
+      const ask = /\b(?:i\s+(?:am|'m|will|wanna|want\s+to)\s+(?:going\s+to\s+)?ask|going\s+to\s+ask|then\s+i\s+(?:will|'ll)\s+ask|im\s+going\s+to\s+ask)\b/i.test(input);
+      if (nick && ask) {
+        const cap = nick[1].charAt(0).toUpperCase() + nick[1].slice(1);
+        return this.tracked('nickname-prelude', `Got it, **${cap}** — noted. Go ahead and ask, I'll do my best to answer.`, input);
+      }
+    }
     const yesNoResult = this.tryYesNoAnswer(input, lower);
     if (yesNoResult) return this.tracked('yesno', yesNoResult, input);
 
@@ -2787,6 +2955,25 @@ export class VaiEngine implements ModelAdapter {
     // Strategy 1: Conversational awareness — handle common patterns
     const conversational = this.handleConversational(lower, history);
     if (conversational) return this.tracked('conversational', conversational, input);
+
+    // Strategy 1.05: "Tell me about <X>" / "Explain <X>" / "What is <X>"
+    // Route to curated primer or local concept BEFORE we let the search arm
+    // pull a noisy scrape result. Stays bounded to lookups that exist locally.
+    {
+      const aboutMatch = input.match(/^(?:please\s+)?(?:could\s+you\s+)?(?:tell\s+me\s+(?:more\s+)?about|explain|describe|what\s+(?:is|are)|teach\s+me\s+about)\s+(?:the\s+|a\s+|an\s+)?(.+?)[\s.?!]*$/i);
+      if (aboutMatch) {
+        const topic = aboutMatch[1]
+          .replace(/\s+please$/i, '')
+          .replace(/\s+to\s+me$/i, '')
+          .trim()
+          .toLowerCase();
+        const primer = this.findCuratedShortTopicPrimer(topic);
+        if (primer) {
+          const sourceTags = (primer.sourceUrls ?? []).map((u) => `\n\n[Source: ${u}]`).join('');
+          return this.tracked('about-topic-curated', `${primer.text}${sourceTags}`, input);
+        }
+      }
+    }
 
     const directStorefrontPreview = this.tryCreativeCodeProject(lower, history);
     if (
@@ -2971,16 +3158,41 @@ export class VaiEngine implements ModelAdapter {
     if (testGen) return this.tracked('test-gen', testGen, input);
 
     // Strategy 2: Check knowledge store for a direct match
-    // Guard: bootstrap self-description entries should only match when the user is asking about Vai/VeggaAI itself
-    const match = this.cachedFindBestMatch(input);
+    // Guard: bootstrap self-description entries should only match when the user is asking about Vai/VeggaAI itself.
+    // Also: tiny follow-up cues ("tell me then", "go on", "more?") must NOT pull a stale knowledge entry by accident.
+    const trimmedInputLen = input.trim().split(/\s+/).length;
+    const isFollowUpCue = trimmedInputLen <= 4 && /^(?:tell\s+me(?:\s+(?:then|more|about\s+it))?|go\s+on|continue|more|what\s+else|and\s+then|and\??|so\??|why\??|how\??)[\s.?!]*$/i.test(input.trim());
+    const match = isFollowUpCue ? null : this.cachedFindBestMatch(input);
     if (match) {
-      const isBootstrapSelfEntry = (match.source === 'bootstrap' || match.source.startsWith('bootstrap'))
-        && /\bVeggaAI\b|I am v0|I learn from sources/i.test(match.response);
-      const isAskingAboutVai = /\b(?:veggaai|vai|vegga)\b/i.test(input)
-        || /^(?:what|who)\s+(?:are|r)\s+(?:you|u)\b/i.test(lower)
-        || /\b(?:what\s+(?:can|do)\s+you|your\s+(?:capabilities|features|name))\b/i.test(lower);
-      if (!isBootstrapSelfEntry || isAskingAboutVai) {
-        return this.tracked('direct-match', match.response, input);
+      // Relevance gate: cachedFindBestMatch is fuzzy and will happily return
+      // an unrelated nearest-neighbor (kubernetes primer for "Anna puts a ball
+      // in box A...", Quisling bio for "Hey, my name is Mira") when nothing
+      // in the store actually matches. Require the matched pattern's content
+      // tokens to substantially overlap the input before we trust it as a
+      // direct answer. Without this gate, Strategy 2 hijacks creative,
+      // cognitive, and scenario prompts.
+      const inputLowerNorm = input.toLowerCase();
+      const patternTokens = match.pattern
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((t) => t.length >= 3 && !/^(?:the|and|for|with|from|that|this|what|how|why|are|you|your|its|but|not|all|any|one|two|out|use|can|has|have|does|did|was|were|been|being|will|would|could|should|may|might|into|over|under|when|where|which|who|whom|been|than|then|them|they|their|some|each|other|such|just|like|more|most|less|very)$/.test(t));
+      const overlap = patternTokens.filter((t) => inputLowerNorm.includes(t)).length;
+      const overlapRatio = patternTokens.length === 0 ? 0 : overlap / patternTokens.length;
+      const relevant = patternTokens.length === 0
+        ? inputLowerNorm.includes(match.pattern.toLowerCase())
+        : patternTokens.length <= 2
+          ? overlap === patternTokens.length
+          : overlapRatio >= 0.6;
+      if (relevant) {
+        const isBootstrapSelfEntry = (match.source === 'bootstrap' || match.source.startsWith('bootstrap'))
+          && /\bVeggaAI\b|I am v0|I learn from sources/i.test(match.response);
+        const isAskingAboutVai = /\b(?:veggaai|vai|vegga)\b/i.test(input)
+          || /^(?:what|who)\s+(?:are|r)\s+(?:you|u)\b/i.test(lower)
+          || /\b(?:what\s+(?:can|do)\s+you|your\s+(?:capabilities|features|name))\b/i.test(lower);
+        if (!isBootstrapSelfEntry || isAskingAboutVai) {
+          return this.tracked('direct-match', match.response, input);
+        }
       }
     }
 
@@ -3017,14 +3229,17 @@ export class VaiEngine implements ModelAdapter {
     const taught = this.learnFromChat(lower, history);
     if (taught) return this.tracked('learn-chat', taught, input);
 
-    // Strategy 5: Web search — when we don't have local knowledge
-    const webResult = attemptedRoutedResearch && !synthesized
+    // Strategy 5: Web search — when we don't have local knowledge.
+    // Hard guard: tiny conversational follow-up cues ("tell me then", "go on")
+    // must NOT trigger a web search — the results are always garbage.
+    const webGateBlocked = isFollowUpCue;
+    const webResult = (attemptedRoutedResearch && !synthesized) || webGateBlocked
       ? null
       : await this.tryWebSearch(lower);
     if (webResult) return this.tracked('web-search', webResult, input);
 
     // Strategy 6: Contextual "I don't know" — tell user what we DO know
-    return this.tracked('fallback', this.buildHelpfulFallback(lower, history), input);
+    return this.tracked('fallback', this.buildHelpfulFallback(input, history), input);
   }
 
   private async tryRoutedResearch(input: string, lower: string, synthesized: string | null): Promise<{
@@ -3070,6 +3285,11 @@ export class VaiEngine implements ModelAdapter {
     if (this._activeMode === 'builder' || this._hasActiveSandboxContext) {
       return false;
     }
+    // Tiny conversational follow-up cues never warrant a research roundtrip.
+    const wc = input.trim().split(/\s+/).length;
+    if (wc <= 4 && /^(?:tell\s+me(?:\s+(?:then|more|about\s+it))?|go\s+on|continue|more|what\s+else|and\s+then|and\??|so\??|why\??|how\??|ok|okay|yes|yeah|sure|right|cool|nice)[\s.?!]*$/i.test(input.trim())) {
+      return false;
+    }
     const normalizedInput = this.normalizeResearchIntentInput(input);
     const routing = getSubAgentRouter().route(input);
     const isFactualQuestion = /\b(?:what\s+is|what\s+are|how\s+does|how\s+do|explain|why\s+does|why\s+is|when\s+did|who\s+(?:is|was|are|were)|what'?s)\b/i.test(normalizedInput);
@@ -3107,6 +3327,14 @@ export class VaiEngine implements ModelAdapter {
   private shouldPrioritizeResearch(input: string, lower: string): boolean {
     if (this._activeMode === 'builder' || this._hasActiveSandboxContext) {
       return false;
+    }
+    // Reject ultra-short conversational fragments — "tell me then", "go on",
+    // "and?", "more?". These are follow-up cues, not search queries, and the
+    // web arm routinely returns garbage for them.
+    const wordCount = input.trim().split(/\s+/).length;
+    if (wordCount <= 4) {
+      const isFollowUpCue = /^(?:tell\s+me(?:\s+(?:then|more|about\s+it))?|go\s+on|continue|more|what\s+else|and\s+then|and\??|so\??|ok|okay|yes|yeah|nope?|sure|right|cool|nice|why\??|how\??)[\s.?!]*$/i.test(input.trim());
+      if (isFollowUpCue) return false;
     }
     const normalizedInput = this.normalizeResearchIntentInput(input);
     const blocksSearch = /\b(?:you are not being asked to search the web|do\s+not\s+(?:search|google|look\s+up)|don't\s+(?:search|google|look\s+up)|dont\s+(?:search|google|look\s+up)|without\s+(?:web\s+search|search|google))\b/i.test(lower);
@@ -10668,6 +10896,192 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     ].join('\n');
   }
 
+  private looksLikeActiveSandboxEditorialBlog(systemText: string): boolean {
+    return /\bEditorial Engineering Blog\b/i.test(systemText)
+      || /\bFeatured essay\b/i.test(systemText)
+      || /\bRecent essays\b/i.test(systemText)
+      || /\bArchive view\b/i.test(systemText)
+      || /\bAuthor note\b/i.test(systemText)
+      || /\bJoin the quiet newsletter\b/i.test(systemText);
+  }
+
+  private looksLikeActiveSandboxLandingPage(systemText: string): boolean {
+    return /\blanding-shell\b/i.test(systemText)
+      || /\bhero-panel\b/i.test(systemText)
+      || /\bcta-panel\b/i.test(systemText)
+      || /\btheme-toggle\b/i.test(systemText)
+      || /\bBook a demo\b/i.test(systemText)
+      || /\bStart the preview\b/i.test(systemText);
+  }
+
+  private generateActiveSandboxEditorialBlogEdit(
+    targetPath: string,
+    stylesPath: string,
+  ): string {
+    return [
+      'Keeping the same editorial essay, newsletter, archive, and author structure while warming the voice and making the page feel more analog.',
+      '',
+      `\`\`\`jsx title="${targetPath}"`,
+      "import React from 'react';",
+      '',
+      "const featuredEssay = {",
+      "  title: 'Field Notes on Calm Frontend Systems',",
+      "  readingTime: '12 min reading time',",
+      "  dek: 'A quieter essay about building software that feels more like a well-kept notebook than a launch deck.',",
+      '};',
+      '',
+      'const recentEssays = [',
+      "  { title: 'Why good interfaces should feel slightly handmade', readingTime: '8 min reading time', tag: 'Recent essay' },",
+      "  { title: 'Small rituals that keep product teams honest', readingTime: '6 min reading time', tag: 'Recent essay' },",
+      "  { title: 'Notes from a week spent simplifying a stubborn UI', readingTime: '9 min reading time', tag: 'Recent essay' },",
+      '];',
+      '',
+      'const archive = [',
+      "  'April 2026 - field notes on interface reliability',",
+      "  'March 2026 - product pacing and revision discipline',",
+      "  'February 2026 - essays on frontend maintenance',",
+      "  'January 2026 - archive of long-form engineering writing',",
+      '];',
+      '',
+      'export default function App() {',
+      '  return (',
+      '    <main className="editorial-shell editorial-warm">',
+      '      <header className="masthead">',
+      '        <div>',
+      '          <p className="eyebrow">Personal engineering essays with a slower, more analog pulse.</p>',
+      '          <h1>Editorial Engineering Blog</h1>',
+      '          <p className="lede">',
+      '            Long-form essays about frontend systems, product judgment, and the quiet work of making software feel trustworthy over time.',
+      '          </p>',
+      '        </div>',
+      '        <form className="newsletter-card">',
+      '          <span className="section-label">Newsletter</span>',
+      '          <h2>Letters from the workbench</h2>',
+      '          <p>A gentle newsletter for readers who prefer essays, references, and marginal notes over launch noise.</p>',
+      '          <label className="sr-only" htmlFor="newsletter-email">Email</label>',
+      '          <input id="newsletter-email" type="email" placeholder="Email for the newsletter" />',
+      '          <button type="button">Join the newsletter</button>',
+      '        </form>',
+      '      </header>',
+      '',
+      '      <section className="feature-grid">',
+      '        <article className="feature-story">',
+      '          <span className="section-label">Featured essay</span>',
+      '          <h2>{featuredEssay.title}</h2>',
+      '          <p className="reading-time">{featuredEssay.readingTime}</p>',
+      '          <p>{featuredEssay.dek}</p>',
+      '          <blockquote>',
+      '            The most useful product work rarely looks dramatic up close. It looks like careful edits, steadier defaults, and fewer sharp edges.',
+      '          </blockquote>',
+      '          <a href="#recent-essays">Read the featured essay</a>',
+      '        </article>',
+      '',
+      '        <aside className="author-note">',
+      '          <span className="section-label">Author note</span>',
+      '          <h2>Written like a notebook, not a campaign</h2>',
+      '          <p>',
+      '            The author note stays intentionally quiet: essays over slogans, warmth over polish theatre, and enough room for references, pull quotes, and archive trails.',
+      '          </p>',
+      '          <p className="author-signoff">Filed by an engineer who still trusts drafts, paper margins, and revision passes.</p>',
+      '        </aside>',
+      '      </section>',
+      '',
+      '      <section id="recent-essays" className="content-grid">',
+      '        <section className="recent-column">',
+      '          <div className="section-heading">',
+      '            <span className="section-label">Recent</span>',
+      '            <h2>Recent essays</h2>',
+      '          </div>',
+      '          <div className="essay-list">',
+      '            {recentEssays.map((essay) => (',
+      '              <article key={essay.title} className="essay-card">',
+      '                <span>{essay.tag}</span>',
+      '                <h3>{essay.title}</h3>',
+      '                <p>{essay.readingTime}</p>',
+      '              </article>',
+      '            ))}',
+      '          </div>',
+      '        </section>',
+      '',
+      '        <aside className="archive-column">',
+      '          <div className="section-heading">',
+      '            <span className="section-label">Archive</span>',
+      '            <h2>Archive view</h2>',
+      '          </div>',
+      '          <ul>',
+      '            {archive.map((entry) => (',
+      '              <li key={entry}>{entry}</li>',
+      '            ))}',
+      '          </ul>',
+      '        </aside>',
+      '      </section>',
+      '    </main>',
+      '  );',
+      '}',
+      '```',
+      '',
+      `\`\`\`css title="${stylesPath}"`,
+      ':root {',
+      '  color: #2d231a;',
+      '  background: #f3ecdf;',
+      "  font-family: 'Iowan Old Style', 'Georgia', 'Times New Roman', serif;",
+      '}',
+      '',
+      '* { box-sizing: border-box; }',
+      '',
+      'body {',
+      '  margin: 0;',
+      '  min-height: 100vh;',
+      '  background:',
+      '    radial-gradient(circle at top, rgba(191, 137, 82, 0.2), transparent 26%),',
+      '    linear-gradient(180deg, #f8f1e7 0%, #efe5d7 42%, #e8dccd 100%);',
+      '}',
+      '',
+      'button, input { font: inherit; }',
+      '',
+      '.editorial-shell {',
+      '  max-width: 1120px;',
+      '  margin: 0 auto;',
+      '  padding: 44px 20px 68px;',
+      '}',
+      '',
+      '.editorial-warm .newsletter-card,',
+      '.editorial-warm .feature-story,',
+      '.editorial-warm .author-note,',
+      '.editorial-warm .essay-card,',
+      '.editorial-warm .archive-column {',
+      '  border: 1px solid rgba(126, 93, 60, 0.16);',
+      '  background: rgba(255, 251, 245, 0.8);',
+      '  box-shadow: 0 22px 60px rgba(92, 68, 43, 0.08);',
+      '}',
+      '',
+      '.masthead, .feature-grid, .content-grid { display: grid; gap: 20px; }',
+      '.masthead { grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.92fr); align-items: start; margin-bottom: 24px; }',
+      '.feature-grid, .content-grid { grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.8fr); margin-bottom: 24px; }',
+      '.eyebrow, .section-label { margin: 0 0 10px; font-size: 0.73rem; letter-spacing: 0.18em; text-transform: uppercase; color: #9b6d3d; }',
+      'h1, h2, h3, p, blockquote, li { margin-top: 0; }',
+      'h1 { margin-bottom: 16px; font-size: clamp(3rem, 6vw, 5.4rem); line-height: 0.94; letter-spacing: -0.04em; }',
+      '.lede { max-width: 63ch; color: #5c4b3f; font-size: 1.08rem; line-height: 1.9; }',
+      '.newsletter-card, .feature-story, .author-note, .archive-column { border-radius: 28px; padding: 26px; }',
+      '.essay-card { border-radius: 22px; padding: 20px; }',
+      '.newsletter-card p, .feature-story p, .author-note p, .essay-card p, .archive-column li { color: #5f5044; line-height: 1.78; }',
+      '.newsletter-card input { width: 100%; margin: 14px 0 12px; padding: 0.92rem 1rem; border-radius: 999px; border: 1px solid rgba(126, 93, 60, 0.18); background: rgba(255,255,255,0.84); color: inherit; }',
+      '.newsletter-card button, .feature-story a { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 0.82rem 1.1rem; border-radius: 999px; border: 0; background: #9b6d3d; color: #fffaf2; font-weight: 700; text-decoration: none; cursor: pointer; }',
+      '.feature-story h2 { margin-bottom: 10px; font-size: clamp(2rem, 3.7vw, 3.2rem); line-height: 1; }',
+      '.reading-time { color: #9b6d3d; font-size: 0.95rem; }',
+      'blockquote { margin: 24px 0; padding: 22px 24px; border-left: 4px solid #c49b6d; font-size: 1.22rem; line-height: 1.68; color: #37291f; background: rgba(246, 236, 221, 0.72); }',
+      '.author-signoff { color: #8a5c32; font-style: italic; }',
+      '.section-heading { margin-bottom: 12px; }',
+      '.essay-list { display: grid; gap: 16px; }',
+      '.essay-card span { display: inline-block; margin-bottom: 12px; color: #9b6d3d; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.16em; }',
+      '.essay-card h3 { margin-bottom: 10px; font-size: 1.44rem; }',
+      '.archive-column ul { margin: 0; padding-left: 1.2rem; }',
+      '.archive-column li + li { margin-top: 12px; }',
+      '@media (max-width: 960px) { .masthead, .feature-grid, .content-grid { grid-template-columns: 1fr; } .editorial-shell { padding: 24px 14px 40px; } }',
+      '```',
+    ].join('\n');
+  }
+
   private generateBuilderVsCodeThemeExtension(_desc: string): string {
     const themePath = 'themes/safe-material-color-theme.json';
     const theme = {
@@ -17298,7 +17712,12 @@ export default function App() {
 }
 \`\`\`\n\n**3. Run it:**\n\`\`\`bash
 npm run dev
-\`\`\`\n\nThis gives you a working React + TypeScript app with add/toggle/delete functionality. Want me to add routing, state management, or connect it to an API?`;
+\`\`\`\n\nThis gives you a working React + TypeScript app with add/toggle/delete functionality.${this.maybeReactTailwindAddon(desc)} Want me to add routing, state management, or connect it to an API?`;
+  }
+
+  private maybeReactTailwindAddon(desc: string): string {
+    if (!/\btailwind(?:css)?\b/i.test(desc)) return '';
+    return `\n\n**Add Tailwind CSS:**\n\`\`\`bash\nnpm install -D tailwindcss @tailwindcss/vite\n\`\`\`\n\nUpdate \`vite.config.ts\`:\n\`\`\`ts\nimport { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\nimport tailwindcss from '@tailwindcss/vite';\n\nexport default defineConfig({ plugins: [react(), tailwindcss()] });\n\`\`\`\n\nReplace \`src/index.css\` with:\n\`\`\`css\n@import "tailwindcss";\n\`\`\`\n\nNow you can use Tailwind utility classes anywhere in your JSX.`;
   }
 
   private generateRestApi(desc: string, langHint: string): string {
@@ -36848,6 +37267,16 @@ function topKLargest(nums, k) {
   } | null> {
     if (this._activeMode !== 'chat' || this._hasActiveSandboxContext) return null;
     if (!this.isLikelyLexicalLookup(input, lower)) return null;
+    // Reject conversational follow-up cues — "more", "go on", "continue", "tell me",
+    // "yes", "okay" — these are NEVER lexical topic lookups; treating them as
+    // "what is more" pulls historical-figure trivia from the web.
+    {
+      const trimmed = input.trim();
+      const wc = trimmed.split(/\s+/).length;
+      if (wc <= 4 && /^(?:tell\s+me(?:\s+(?:then|more|about\s+it))?|go\s+on|continue|more|what\s+else|and\s+then|and\??|so\??|why\??|how\??|ok|okay|yes|yeah|sure|right|cool|nice|then|next)[\s.?!]*$/i.test(trimmed)) {
+        return null;
+      }
+    }
 
     const normalizedTopic = this.normalizeFollowUpTopic(input);
     if (!normalizedTopic) return null;
@@ -36953,6 +37382,38 @@ function topKLargest(nums, k) {
           'https://www.britannica.com/topic/meaning-philosophy',
         ],
       },
+      'pythagorean theorem': {
+        text: '**Pythagorean theorem.** For a right triangle with legs *a* and *b* and hypotenuse *c*: **a² + b² = c²**. The square of the hypotenuse equals the sum of the squares of the other two sides. Useful for finding any side when the other two are known, or for checking whether a triangle has a right angle.',
+        sourceUrls: ['https://en.wikipedia.org/wiki/Pythagorean_theorem'],
+      },
+      pythagoras: {
+        text: '**Pythagoras** was an ancient Greek mathematician (~570–495 BC) credited with the **Pythagorean theorem**: in a right triangle, **a² + b² = c²**, where *c* is the hypotenuse and *a*, *b* are the other two sides.',
+        sourceUrls: ['https://en.wikipedia.org/wiki/Pythagoras'],
+      },
+      'planet closest to the sun': {
+        text: '**Mercury** is the planet closest to the Sun, orbiting at an average distance of about 58 million km (0.39 AU). It is also the smallest planet in the Solar System.',
+        sourceUrls: ['https://en.wikipedia.org/wiki/Mercury_(planet)'],
+      },
+      'closest planet to the sun': {
+        text: '**Mercury** is the planet closest to the Sun, orbiting at an average distance of about 58 million km (0.39 AU). It is also the smallest planet in the Solar System.',
+        sourceUrls: ['https://en.wikipedia.org/wiki/Mercury_(planet)'],
+      },
+      'planet is closest to the sun': {
+        text: '**Mercury** is the planet closest to the Sun, orbiting at an average distance of about 58 million km (0.39 AU). It is also the smallest planet in the Solar System.',
+        sourceUrls: ['https://en.wikipedia.org/wiki/Mercury_(planet)'],
+      },
+      'is closest to the sun': {
+        text: '**Mercury** is the planet closest to the Sun, orbiting at an average distance of about 58 million km (0.39 AU). It is also the smallest planet in the Solar System.',
+        sourceUrls: ['https://en.wikipedia.org/wiki/Mercury_(planet)'],
+      },
+      'largest planet': {
+        text: '**Jupiter** is the largest planet in the Solar System, with a mass over 300× Earth\'s. Its iconic Great Red Spot is a storm wider than Earth.',
+        sourceUrls: ['https://en.wikipedia.org/wiki/Jupiter'],
+      },
+      'tallest mountain': {
+        text: '**Mount Everest** is the tallest mountain above sea level on Earth at 8,848.86 m (29,031.7 ft), in the Himalayas on the Nepal–China border.',
+        sourceUrls: ['https://en.wikipedia.org/wiki/Mount_Everest'],
+      },
     };
 
     return primers[normalizedTopic] ?? null;
@@ -36985,6 +37446,7 @@ function topKLargest(nums, k) {
       /^(?:reply|respond|answer|say)\s+(?:with\s+)?(?:exactly|verbatim)\s+(?:this\s+(?:text|token|word|phrase)\s*)?(?:and\s+nothing\s+else\s*)?:?\s*([\s\S]+)$/i,
       /^(?:reply|respond|answer|say)\s+(?:with\s+)?(?:the\s+)?(?:exact|verbatim|literal)\s+(?:text|words?)\s*:?\s*([\s\S]+)$/i,
       /^repeat\s+after\s+me\s*:?\s*([\s\S]+)$/i,
+      /^(?:say|write|send)\s+back\s+to\s+me\s*:?\s*([\s\S]+)$/i,
       /^(?:reply|respond|answer|say)\s+(?:with\s+)?(?:exactly|verbatim)\s+["'`“](.+?)["'`”]\s*$/i,
     ];
 
@@ -39161,6 +39623,79 @@ Want me to customize it with your actual links, change the color scheme, add ani
    * These need special handling because vai:v0 has no external clock — we use the host runtime.
    */
   private tryUtilityQuestion(lower: string, original: string, history: readonly Message[]): string | null {
+    // ── Conversation message count: "how many messages have I sent" ──
+    // Must run BEFORE generic date/time so we don't strip the count question.
+    {
+      const countUserMsgs = /\bhow\s+many\s+(?:messages|prompts|things|times)\s+(?:have|did)\s+i\s+(?:sent|send|written|write|asked|ask)\b/i.test(lower);
+      const countAllMsgs = /\bhow\s+many\s+(?:messages|turns|exchanges)\s+(?:are\s+(?:there|in)|in\s+this\s+(?:chat|conversation|thread))\b/i.test(lower);
+      if (countUserMsgs || countAllMsgs) {
+        // history INCLUDES the current user message (chat() passes request.messages
+        // as both userContent and history), so we count without adding 1.
+        const userTurns = history.filter((m) => m.role === 'user').length;
+        const assistantTurns = history.filter((m) => m.role === 'assistant').length;
+        if (countUserMsgs) {
+          return `You've sent **${userTurns} message${userTurns === 1 ? '' : 's'}** in this chat (this one included).`;
+        }
+        return `This chat has **${userTurns + assistantTurns} messages** so far — ${userTurns} from you, ${assistantTurns} from me.`;
+      }
+    }
+
+    // ── Relative date math: "what day is tomorrow", "yesterday", "in N days" ──
+    // Must run BEFORE the generic date question so "what day is tomorrow" doesn't
+    // collapse to today.
+    {
+      const isTomorrow = /\b(?:tomorrow|day\s+after\s+today|the\s+next\s+day|i\s*morgen)\b/i.test(lower)
+        && /\b(?:what\s+(?:day|date|is)|which\s+day|tell\s+me|whats|what'?s|hva\s+er)\b/i.test(lower);
+      const isYesterday = /\byesterday\b/i.test(lower)
+        && /\b(?:what\s+(?:day|date|was)|which\s+day|tell\s+me|whats|what'?s)\b/i.test(lower);
+      const inDaysMatch = lower.match(/\b(?:date|day)\s+(?:will\s+(?:it|that)\s+be\s+)?in\s+(\d{1,4})\s+days?\b/i)
+        || lower.match(/\bin\s+(\d{1,4})\s+days?[^?\n]*?\b(?:date|day|what)\b/i);
+      const agoMatch = lower.match(/\b(\d{1,4})\s+days?\s+ago\b/i);
+      let offsetDays: number | null = null;
+      if (isTomorrow) offsetDays = 1;
+      else if (isYesterday) offsetDays = -1;
+      else if (inDaysMatch) offsetDays = parseInt(inDaysMatch[1], 10);
+      else if (agoMatch) offsetDays = -parseInt(agoMatch[1], 10);
+      if (offsetDays !== null && Number.isFinite(offsetDays) && Math.abs(offsetDays) <= 36500) {
+        const target = new Date();
+        target.setDate(target.getDate() + offsetDays);
+        const dateStr = target.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        let dateAnswer: string;
+        if (offsetDays === 1) dateAnswer = `Tomorrow is **${dateStr}**.`;
+        else if (offsetDays === -1) dateAnswer = `Yesterday was **${dateStr}**.`;
+        else if (offsetDays > 0) dateAnswer = `In ${offsetDays} days it will be **${dateStr}**.`;
+        else dateAnswer = `${Math.abs(offsetDays)} days ago was **${dateStr}**.`;
+
+        // Compound: if the user also asked a math question, prepend the math answer.
+        // Detect math signal: explicit operators, "squared", "cubed", or "X plus Y".
+        const looksMathy = /\b(?:squared|cubed|plus|minus|times|divided|multiplied|over|mod)\b/i.test(lower)
+          || /\d+\s*[+\-*/^]\s*\d+/.test(lower);
+        if (looksMathy) {
+          // Try buriedMath, full tryMath, AND a per-clause split so "25 squared and what day is it tomorrow"
+          // can extract the "25 squared" fragment and evaluate it.
+          let mathAnswer = this.tryBuriedMath(original) ?? this.tryMath(lower);
+          if (!mathAnswer) {
+            const clauses = original.split(/\s+(?:and|also|plus)\s+/i);
+            for (const c of clauses) {
+              const cl = c.toLowerCase();
+              const r = this.tryMath(cl) ?? this.tryBuriedMath(c);
+              if (r) { mathAnswer = r; break; }
+            }
+          }
+          if (mathAnswer) {
+            return `${mathAnswer}\n\n${dateAnswer}`;
+          }
+        }
+
+        // Compound: if the user also asked a message-count question.
+        if (/\bhow\s+many\s+(?:messages|prompts|things|times)\s+(?:have|did)\s+i\b/i.test(lower)) {
+          const userTurns = history.filter((m) => m.role === 'user').length;
+          return `${dateAnswer}\n\nYou've sent **${userTurns} message${userTurns === 1 ? '' : 's'}** in this chat (this one included).`;
+        }
+        return dateAnswer;
+      }
+    }
+
     // ── Timezone conversion questions ── "what time is it in Tokyo if it's 3pm in New York"
     const tzConvertMatch = lower.match(/what\s+time\s+(?:is\s+it\s+)?in\s+([a-z\s]+?)\s+(?:if|when|right\s+now\s+if)\s+(?:it(?:'?s|\s+is)\s+)?(\d{1,2})(?::(\d{2}))?\s*(?:am|pm)?\s+in\s+([a-z\s]+)/i)
       || lower.match(/if\s+(?:it(?:'?s|\s+is)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s+in\s+([a-z\s]+?)\s*,?\s*what\s+time\s+(?:is\s+it\s+)?in\s+([a-z\s]+)/i);
@@ -39376,6 +39911,102 @@ Want me to customize it with your actual links, change the color scheme, add ani
     return answers
       .map(a => a.replace('\u0000UNRESOLVED\u0000', "I don't have a direct answer on this one — ask it on its own if you want me to dig."))
       .join('\n\n---\n\n');
+  }
+
+  /**
+   * Buried-math fallback. Scans the input for an explicit arithmetic
+   * sub-expression — words or digits — wrapped in conversational chatter and
+   * evaluates only that fragment. Conservative: only fires when a clear
+   * "<num> <op-word> <num>" pattern is present so we never hallucinate math.
+   */
+  private tryBuriedMath(input: string): string | null {
+    const candidatePattern = /(\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion)\b|\d+(?:\.\d+)?)(?:[\s\-]+(?:zero|one|two|three|four|five|six|seven|eight|nine|hundred|thousand|million|billion))*\s+(?:plus|minus|times|multiplied\s+by|divided\s+by|over|mod)\s+(\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion)\b|\d+(?:\.\d+)?)(?:[\s\-]+(?:zero|one|two|three|four|five|six|seven|eight|nine|hundred|thousand|million|billion))*/i;
+    const m = input.match(candidatePattern);
+    if (!m) return null;
+    const fragment = m[0].trim();
+    // Re-route the fragment through the main math arm.
+    return this.tryMath(fragment.toLowerCase());
+  }
+
+  /**
+   * After a math arm produces an answer, check whether the full input also
+   * contains a follow-on factual sub-question after "and" / "+" / "also".
+   * If so, attempt a curated/concept lookup and append the answer so compound
+   * prompts like "144/12 and which planet is closest to the sun?" don't drop
+   * the second clause.
+   */
+  private augmentMathWithFollowOn(mathAnswer: string, input: string, lower: string): string {
+    // Find the "and" / "+" / "also" boundary AFTER the math fragment.
+    const splitMatch = input.match(/[+,]\s*|\s+(?:and|also|plus)\s+/gi);
+    if (!splitMatch) return mathAnswer;
+    // Take the trailing clause after the LAST split.
+    const lastSplit = input.split(/[+,]|\s+(?:and|also|plus)\s+/i).filter((s) => s.trim().length > 0);
+    if (lastSplit.length < 2) return mathAnswer;
+    const trailing = lastSplit[lastSplit.length - 1].trim().replace(/[?!.]+$/, '');
+    if (!trailing || trailing.length < 5) return mathAnswer;
+    // Skip if the trailing clause is itself math.
+    if (/\d+\s*[+\-*/^]\s*\d+|\b(?:plus|minus|times|divided)\b/i.test(trailing)) return mathAnswer;
+    // Must look like a factual question.
+    if (!/\b(?:what|which|who|when|where|how|why|is|are|was|were|does|do)\b/i.test(trailing)) return mathAnswer;
+    // Try curated short-topic primer for known noun phrases.
+    const topic = trailing
+      .replace(/^(?:what\s+is|whats|what'?s|which\s+(?:is|planet|country|city|animal|element|number|year|day|month)|who\s+is|tell\s+me|the)\s+/i, '')
+      .replace(/\?+$/, '')
+      .trim();
+    const primer = this.findCuratedShortTopicPrimer(topic.toLowerCase());
+    if (primer) return `${mathAnswer}\n\n${primer.text}`;
+    // Try CS fundamentals.
+    const cs = this.tryCSFundamentals(trailing.toLowerCase());
+    if (cs) return `${mathAnswer}\n\n${cs}`;
+    // Try knowledge.
+    const match = this.cachedFindBestMatch(trailing);
+    if (match && !KnowledgeStore.isJunkContent(match.response) && match.response.length > 30) {
+      return `${mathAnswer}\n\n${match.response}`;
+    }
+    return mathAnswer;
+  }
+
+  /**
+   * Literal meta-questions about the prompt itself.
+   *  - "what is the first letter in this question" → first letter of the prompt
+   *  - "what is the last letter in this question" → last letter of the prompt
+   *  - "how many words in this question/sentence" → word count
+   *  - "how many characters in this question" → char count
+   * The "prompt" is the user's input itself, including the meta wrapper.
+   */
+  private tryLiteralMetaQuestion(input: string): string | null {
+    const trimmed = input.trim();
+    if (trimmed.length === 0) return null;
+    const lower = trimmed.toLowerCase();
+
+    // Detect intent first — must explicitly ask about "this question/sentence/prompt/message".
+    const refersToSelf = /\bin\s+this\s+(?:question|sentence|prompt|message|text|line)\b/i.test(trimmed)
+      || /\bof\s+this\s+(?:question|sentence|prompt|message|text|line)\b/i.test(trimmed);
+    if (!refersToSelf) return null;
+
+    const firstLetter = /\bfirst\s+(?:letter|character|char)\b/i.test(lower);
+    const lastLetter = /\blast\s+(?:letter|character|char)\b/i.test(lower);
+    const wordCount = /\bhow\s+many\s+words\b/i.test(lower);
+    const charCount = /\bhow\s+many\s+(?:characters|letters|chars)\b/i.test(lower);
+
+    if (firstLetter) {
+      const m = trimmed.match(/[A-Za-z\u00C0-\u024F]/);
+      if (m) return m[0].toLowerCase();
+      return null;
+    }
+    if (lastLetter) {
+      const matches = trimmed.match(/[A-Za-z\u00C0-\u024F]/g);
+      if (matches && matches.length > 0) return matches[matches.length - 1].toLowerCase();
+      return null;
+    }
+    if (wordCount) {
+      const words = trimmed.split(/\s+/).filter((w) => w.length > 0);
+      return String(words.length);
+    }
+    if (charCount) {
+      return String(trimmed.length);
+    }
+    return null;
   }
 
   /**
@@ -39665,10 +40296,22 @@ Want me to customize it with your actual links, change the color scheme, add ani
       result = result.replace(new RegExp(`\\b${word}\\b`, 'gi'), String(num));
     }
 
+    // Combine compound tens-units that words produce, e.g. "50 5" → "55",
+    // "20-3" → "23", "70-3" → "73". Allow space OR hyphen as the join char
+    // since English writes "seventy-three" with a hyphen.
+    result = result.replace(/\b([2-9])0[\s\-]+([1-9])\b/g, (_m, tens, units) => `${tens}${units}`);
+
     // Handle remaining standalone magnitude words (without a preceding number)
     for (const [mag, val] of Object.entries(magnitudes)) {
       result = result.replace(new RegExp(`\\b${mag}\\b`, 'gi'), String(val));
     }
+
+    // Combine "<digit> 100" / "<digit> 1000" etc. multiplicatively. Words like
+    // "two hundred" become "2 100" after the per-word replace; collapse to
+    // "200". Limit single-digit multiplier so "1 1000" isn't mistaken.
+    result = result.replace(/\b([1-9])\s+(100|1000|1000000|1000000000|1000000000000)\b/g, (_m, n, mag) => {
+      return String(parseInt(n, 10) * parseInt(mag, 10));
+    });
 
     // Clean up commas in numbers: "1,000,000" → "1000000"
     result = result.replace(/(\d),(\d{3})/g, '$1$2');
@@ -39762,6 +40405,150 @@ Want me to customize it with your actual links, change the color scheme, add ani
   /**
    * Handle common conversational patterns without needing learned knowledge.
    */
+  private tryConversationRecall(input: string, history: readonly Message[]): string | null {
+    const userMessages = history.filter(m => m.role === 'user');
+    const normalizedInput = input.trim().toLowerCase();
+    const priorUserPool = userMessages.length > 0
+      && userMessages[userMessages.length - 1].content.trim().toLowerCase() === normalizedInput
+      ? userMessages.slice(0, -1)
+      : userMessages;
+
+    const ordinalMap: Record<string, number> = {
+      first: 1, second: 2, third: 3, fourth: 4, fifth: 5,
+      sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10,
+    };
+    const nthMsgMatch = input.match(/\bwhat\s+(?:is|was)\s+(?:the\s+)?(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|\d{1,2}(?:st|nd|rd|th)?)\s+(?:message|prompt|question|thing\s+i\s+(?:said|asked|wrote))\b/i);
+    if (nthMsgMatch) {
+      if (priorUserPool.length === 0) {
+        return "This is the first message in the chat â€” there isn't an earlier one to quote yet.";
+      }
+      const raw = nthMsgMatch[1].toLowerCase();
+      let idx: number | null = null;
+      if (raw === 'last') idx = priorUserPool.length - 1;
+      else if (raw in ordinalMap) idx = ordinalMap[raw] - 1;
+      else {
+        const num = parseInt(raw, 10);
+        if (!isNaN(num) && num >= 1) idx = num - 1;
+      }
+      if (idx !== null && idx >= 0 && idx < priorUserPool.length) {
+        return `Message ${idx + 1}: "${priorUserPool[idx].content}"`;
+      }
+      if (idx !== null && idx >= priorUserPool.length) {
+        return `There are only ${priorUserPool.length} prior message${priorUserPool.length === 1 ? '' : 's'} in this chat, so there's no ${raw} one yet.`;
+      }
+    }
+
+    const lengthWordMap: Record<string, number> = {
+      one: 1,
+      two: 2,
+      three: 3,
+      four: 4,
+      five: 5,
+      six: 6,
+      seven: 7,
+      eight: 8,
+      nine: 9,
+      ten: 10,
+    };
+    const wordRecallMatch = input.match(/\bwhat\s+(?:is|was|are)\s+(?:the\s+)?(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)[-\s]?letter\s+word\b[\s\S]*\b(?:i\s+(?:wrote|said|typed)|at\s+(?:the\s+)?(?:start|beginning)|first\s+message)\b/i);
+    if (wordRecallMatch) {
+      const rawLength = wordRecallMatch[1].toLowerCase();
+      const targetLength = rawLength in lengthWordMap ? lengthWordMap[rawLength] : Number.parseInt(rawLength, 10);
+      const referencesStart = /\b(?:start|beginning|first\s+message|first\s+thing)\b/i.test(input);
+      const targetMessage = referencesStart ? priorUserPool[0] : priorUserPool[priorUserPool.length - 1];
+      if (!targetMessage) {
+        return "I don't have an earlier user message in this chat to inspect yet.";
+      }
+
+      const matchingWords = (targetMessage.content.match(/[a-z0-9'-]+/gi) ?? [])
+        .map(word => word.trim())
+        .filter(word => word.length === targetLength);
+
+      if (matchingWords.length === 1) {
+        return `You wrote "${matchingWords[0]}".`;
+      }
+      if (matchingWords.length > 1) {
+        const uniqueWords = [...new Set(matchingWords.map(word => `"${word}"`))];
+        return `I found ${uniqueWords.length} ${targetLength}-letter words in that message: ${uniqueWords.join(', ')}.`;
+      }
+      return `I don't see a ${targetLength}-letter word in "${targetMessage.content}".`;
+    }
+
+    if (/\bwhat\s+(?:did|do|was)\s+i\s+(?:write|say|type)\b[\s\S]*\b(?:at\s+(?:the\s+)?(?:start|beginning)|first\s+message)\b/i.test(input)) {
+      if (priorUserPool.length === 0) {
+        return "I don't have an earlier user message in this chat to quote yet.";
+      }
+      return `You started with: "${priorUserPool[0].content}".`;
+    }
+
+    return null;
+  }
+
+  private tryGithubRankingConversation(input: string, history: readonly Message[]): string | null {
+    const normalized = input.replace(/\s+/g, ' ').trim();
+    const lower = normalized.toLowerCase();
+    if (!normalized) return null;
+
+    const recentContext = history
+      .filter((message) => message.role !== 'system')
+      .slice(-8)
+      .map((message) => message.content.toLowerCase())
+      .join(' ');
+
+    const inGithubRankingThread =
+      /\bgithub\b/.test(recentContext)
+      && /\b(?:frontend|web|developer|dev|maintainer|followers?|followed|stars?|ranking|top|best|names)\b/.test(recentContext);
+
+    const asksTopGithubDeveloper =
+      /\b(?:who\s+is|who'?s|top|best|rank(?:ed|ing)?)\b/i.test(normalized)
+      && /\bgithub\b/i.test(normalized)
+      && /\b(?:frontend|web|developer|dev|maintainer|open[-\s]?source)\b/i.test(normalized);
+
+    if (asksTopGithubDeveloper) {
+      return [
+        'There is not a single objective "top" frontend developer on GitHub.',
+        '',
+        'It depends on the axis:',
+        '- followers -> public-profile popularity',
+        '- stars -> project reach',
+        '- maintainer impact -> how central they are to major tools',
+        '- teaching / portfolio -> a different signal again',
+        '',
+        'If you want, I can narrow it to one of these:',
+        '- top by GitHub followers',
+        '- top frontend maintainers',
+        '- 3 high-signal names to inspect',
+      ].join('\n');
+    }
+
+    const asksFollowerRanking =
+      /\bwho\s+has\s+the\s+most\s+followers(?:\s+then)?\b/i.test(normalized)
+      || /\bmost\s+followers\b/i.test(normalized);
+    if (inGithubRankingThread && asksFollowerRanking) {
+      return [
+        "If you mean GitHub followers specifically, I should not pretend I know the live ranking without a fresh lookup.",
+        '',
+        'If you just want strong names to inspect, start with Dan Abramov, Guillermo Rauch, and Evan You.',
+      ].join('\n');
+    }
+
+    const asksShortNameList =
+      /\b(?:give|show)\s+me\b[\s\S]{0,40}\b(?:3|three)\s+names\b/i.test(normalized)
+      || /\bshort\s+list\b/i.test(normalized)
+      || /\bjust\s+(?:3|three)\s+names\b/i.test(normalized);
+    if (inGithubRankingThread && asksShortNameList) {
+      return [
+        '- Dan Abramov',
+        '- Guillermo Rauch',
+        '- Evan You',
+        '',
+        'Those are high-signal frontend/open-source names to inspect, not a verified current top-3 by followers.',
+      ].join('\n');
+    }
+
+    return null;
+  }
+
   private handleConversational(input: string, history: readonly Message[]): string | null {
     if (
       this._activeMode === 'builder'
@@ -39773,6 +40560,12 @@ Want me to customize it with your actual links, change the color scheme, add ani
 
     // Filter out system messages — only count real user/assistant turns
     const conversationTurns = history.filter(m => m.role !== 'system');
+    const userMessages = history.filter(m => m.role === 'user');
+    const normalizedInput = input.trim().toLowerCase();
+    const priorUserPool = userMessages.length > 0
+      && userMessages[userMessages.length - 1].content.trim().toLowerCase() === normalizedInput
+      ? userMessages.slice(0, -1)
+      : userMessages;
 
     // ── Conversation-referential queries ──
     // "what is the (first|second|third|Nth|last) message (here|in this chat)?"
@@ -39784,11 +40577,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
     };
     const nthMsgMatch = input.match(/\bwhat\s+(?:is|was)\s+(?:the\s+)?(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|\d{1,2}(?:st|nd|rd|th)?)\s+(?:message|prompt|question|thing\s+i\s+(?:said|asked|wrote))\b/i);
     if (nthMsgMatch) {
-      const userMessages = history.filter(m => m.role === 'user');
-      // Exclude the current in-flight user message if it matches the query itself
-      const pool = userMessages.length > 0 && userMessages[userMessages.length - 1].content.trim() === input.trim()
-        ? userMessages.slice(0, -1)
-        : userMessages;
+      const pool = priorUserPool;
       if (pool.length === 0) {
         return "This is the first message in the chat — there isn't an earlier one to quote yet.";
       }
@@ -39815,6 +40604,49 @@ Want me to customize it with your actual links, change the color scheme, add ani
     // (e.g. "Hello, who is the king of Norway?"), skip the greeting handler
     // so the factual question reaches the real retrieval pipeline instead of
     // bouncing back a useless "Hey! I'm VeggaAI" blurb.
+    const lengthWordMap: Record<string, number> = {
+      one: 1,
+      two: 2,
+      three: 3,
+      four: 4,
+      five: 5,
+      six: 6,
+      seven: 7,
+      eight: 8,
+      nine: 9,
+      ten: 10,
+    };
+    const wordRecallMatch = input.match(/\bwhat\s+(?:is|was|are)\s+(?:the\s+)?(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)[-\s]?letter\s+word\b[\s\S]*\b(?:i\s+(?:wrote|said|typed)|at\s+(?:the\s+)?(?:start|beginning)|first\s+message)\b/i);
+    if (wordRecallMatch) {
+      const rawLength = wordRecallMatch[1].toLowerCase();
+      const targetLength = rawLength in lengthWordMap ? lengthWordMap[rawLength] : Number.parseInt(rawLength, 10);
+      const referencesStart = /\b(?:start|beginning|first\s+message|first\s+thing)\b/i.test(input);
+      const targetMessage = referencesStart ? priorUserPool[0] : priorUserPool[priorUserPool.length - 1];
+      if (!targetMessage) {
+        return "I don't have an earlier user message in this chat to inspect yet.";
+      }
+
+      const matchingWords = (targetMessage.content.match(/[a-z0-9'-]+/gi) ?? [])
+        .map(word => word.trim())
+        .filter(word => word.length === targetLength);
+
+      if (matchingWords.length === 1) {
+        return `You wrote "${matchingWords[0]}".`;
+      }
+      if (matchingWords.length > 1) {
+        const uniqueWords = [...new Set(matchingWords.map(word => `"${word}"`))];
+        return `I found ${uniqueWords.length} ${targetLength}-letter words in that message: ${uniqueWords.join(', ')}.`;
+      }
+      return `I don't see a ${targetLength}-letter word in "${targetMessage.content}".`;
+    }
+
+    if (/\bwhat\s+(?:did|do|was)\s+i\s+(?:write|say|type)\b[\s\S]*\b(?:at\s+(?:the\s+)?(?:start|beginning)|first\s+message)\b/i.test(input)) {
+      if (priorUserPool.length === 0) {
+        return "I don't have an earlier user message in this chat to quote yet.";
+      }
+      return `You started with: "${priorUserPool[0].content}".`;
+    }
+
     const hasFactualQuestionAfterGreeting = /[?,]/.test(input)
       || /\b(?:who|what|where|when|why|how|which|whose|whom|can|could|should|would|does|do|did|is|are|was|were|will)\b\s+\w+/i.test(input.replace(/^(hello|hi|hey|yo|sup|hei|hallo|howdy|oyoy|oy+|myyh|fese|ey+|oi|heia|heisann|heihei|yoyo|aye|wassup|whaddup|wazzup|g'?day|good\s+(morning|afternoon|evening))[,!\s.?]*/i, ''));
     if (!hasFactualQuestionAfterGreeting
@@ -39844,6 +40676,24 @@ Want me to customize it with your actual links, change the color scheme, add ani
           'What\'s on your mind?',
         ];
         return followUpGreetings[Math.floor(Math.random() * followUpGreetings.length)];
+      }
+      if (conversationTurns.length < 3) {
+        if (isNorwegianGreeting) {
+          if (this._activeMode === 'builder') {
+            return 'Hei - hva vil du bygge?';
+          }
+          if (this._activeMode === 'agent') {
+            return 'Hei - hva vil du at jeg skal ta tak i?';
+          }
+          return 'Hei - hva skjer?';
+        }
+        if (this._activeMode === 'builder') {
+          return 'Hey - what do you want to build?';
+        }
+        if (this._activeMode === 'agent') {
+          return 'Hey - what do you want me to tackle?';
+        }
+        return "Hey - what's up?";
       }
       const stats = this.getStats();
       if (isNorwegianGreeting) {
@@ -40453,6 +41303,16 @@ Want me to customize it with your actual links, change the color scheme, add ani
 
     // Personal introductions: "my name is X [and ...]" / "I'm Vetle [and ...]"
     // Extract just the first name word (stop at "and", comma, or sentence boundary)
+    // ALSO: nickname/intent prelude — "my nickname is ola and I am going to ask you to ..."
+    // We capture the nickname AND acknowledge the upcoming question instead of stalling.
+    const nicknameMatch = input.match(/\bmy\s+(?:nickname|nick|alias|handle|name)\s+is\s+([a-z][a-z'\-]{1,25})\b/i);
+    const wantsToAsk = /\b(?:i\s+(?:am|'m|will|wanna|want\s+to)\s+(?:going\s+to\s+)?ask|going\s+to\s+ask|i\s+will\s+then\s+ask|then\s+i\s+(?:will|'ll)\s+ask)\b/i.test(input);
+    if (nicknameMatch && wantsToAsk) {
+      const nick = nicknameMatch[1].trim();
+      const cap = nick.charAt(0).toUpperCase() + nick.slice(1);
+      return `Got it, **${cap}** — noted. Go ahead and ask, I'll do my best to answer.`;
+    }
+
     const nameIntroMatch = input.match(/^my\s+name\s+is\s+([a-z]+)/i)
       || input.match(/^i(?:'m| am)\s+([a-z]+)/i);
     if (nameIntroMatch) {
@@ -40478,7 +41338,15 @@ Want me to customize it with your actual links, change the color scheme, add ani
     // Also handles longer teaching like "I want to teach you about X: ..."
     // MUST NOT match questions: skip if starts with question words, command words, or contains "?"
     // MUST NOT match comparisons: "X vs Y which is better" is a question, not a teaching
-    if (!/^(what|who|how|why|when|where|which|can|do|does|did|is\s+(it|there)|are\s+(you|there)|explain|describe|tell|show|list|compare|give|write|create|build|make|generate|set\s?up|implement)\b/i.test(input) && !input.includes('?') && !/\b(?:vs\.?|versus|compare|difference|which\s+(?:is|are|one))\b/i.test(input)) {
+    // MUST NOT match greetings or directives mixed with questions like
+    //   "hello i am vetle and i want to know who is king in norway, please tell me ..."
+    //   That is a question wrapped in a greeting, not a fact to learn.
+    const wordCount = input.trim().split(/\s+/).length;
+    const teachGateBlocks = /^(?:hello|hi|hey|hei|yo|sup|greetings|good\s+(?:morning|afternoon|evening))\b/i.test(input)
+      || /\b(?:please|kindly|could\s+you|can\s+you|would\s+you|will\s+you)\b/i.test(input)
+      || /\b(?:tell|give|show|reply|respond|answer|explain|describe|list|find|search|look\s+up|teach\s+me|help\s+me|let\s+me\s+know|i\s+want\s+to\s+(?:know|learn|see|find|build|make|create))\b/i.test(input)
+      || wordCount > 18;
+    if (!teachGateBlocks && !/^(what|who|how|why|when|where|which|can|do|does|did|is\s+(it|there)|are\s+(you|there)|explain|describe|tell|show|list|compare|give|write|create|build|make|generate|set\s?up|implement)\b/i.test(input) && !input.includes('?') && !/\b(?:vs\.?|versus|compare|difference|which\s+(?:is|are|one))\b/i.test(input)) {
       // Short teaching: "X is Y"
       const teachMatch = input.match(/^(?:remember\s+that\s+)?([A-Za-z][A-Za-z0-9 _-]{2,50})\s+(?:is|means|equals)\s+(.{3,200})$/i);
       if (teachMatch) {
@@ -40930,6 +41798,14 @@ Want me to customize it with your actual links, change the color scheme, add ani
     // Short ambiguous message (1-3 words, no clear intent) — ask for clarification
     // rather than returning a useless "I don't know about X" response
     if (wordCount <= 3 && !/^(?:hi|hey|hello|help|test|ping)/i.test(input)) {
+      // Looks like a proper-noun reply ("Harald V Vetle", "John Smith") —
+      // typically the user supplying an answer the assistant just asked for.
+      // Acknowledge instead of stalling with "could you say more".
+      const looksLikeNameReply = /^(?:[A-Z][a-zA-Z'\-]{0,20}\.?\s*){1,4}$/.test(input.trim());
+      if (looksLikeNameReply) {
+        const cleaned = input.trim();
+        return `Got it — **${cleaned}**. Anything else you want to ask?`;
+      }
       // If it sounds like a topic name, ask what they want to know
       if (/^[a-z][a-z0-9\s\-+#.]+$/i.test(input) && wordCount <= 2) {
         const topic = input.trim();
