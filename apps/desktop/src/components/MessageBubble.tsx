@@ -22,11 +22,22 @@ import { extractFilesFromMarkdown, stripFileBlocksFromMarkdown } from '../lib/fi
 import { shouldShowFallbackRecoveryChrome } from '../lib/fallback-recovery-visibility.js';
 import { filterStructuredFollowUps } from '../lib/message-follow-ups.js';
 import {
+  hasStructuredSources as hasStructuredEvidence,
+  shouldUseResearchMessageLayout,
+} from '../lib/message-presentation.js';
+import {
   buildGroundedBuildBriefExecutionPrompt,
   getGroundedBuildBriefActionLabel,
 } from '../lib/grounded-build-brief-actions.js';
 import { extractProjectUpdateArtifact, parseProjectUpdateBody, stripProjectArtifactMarkup } from '../lib/project-artifact.js';
-import type { SearchSourceUI, GroundedBuildBriefUI, MessageSender, IDE_AGENT_COLORS as _Colors } from '../stores/chatStore.js';
+import type {
+  SearchSourceUI,
+  GroundedBuildBriefUI,
+  MessageSender,
+  SourcePresentationUI,
+  TurnKindUI,
+  IDE_AGENT_COLORS as _Colors,
+} from '../stores/chatStore.js';
 import type { DeployIntent, RecoveryPattern } from '../lib/intent-detector.js';
 import { ProjectArtifactCard } from './ProjectArtifactCard.js';
 import { SourceCards } from './SourceCards.js';
@@ -59,6 +70,10 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
   /** Search sources for Perplexity-style citation cards */
   sources?: SearchSourceUI[];
+  /** Whether citations should render as research chrome or quieter supporting references */
+  sourcePresentation?: SourcePresentationUI;
+  /** High-level routing classification for the assistant turn */
+  turnKind?: TurnKindUI;
   /** Follow-up questions the user can click */
   followUps?: string[];
   /** Confidence score (0-1) from search pipeline */
@@ -492,7 +507,7 @@ export function MessageBubble({
   fallbackDeploy, recoveryPattern = 'silent', allIntents, onIntentAction,
   isLatest = false, isStreaming = false,
   respondingModelId, fallback,
-  sources, followUps, confidence, groundedBuildBrief, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
+  sources, sourcePresentation, turnKind, followUps, confidence, groundedBuildBrief, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
   isAutoRepair = false, repairAttempt,
   compactResearchChrome = false,
   isLatestResearchMessage = false,
@@ -563,7 +578,7 @@ export function MessageBubble({
   const summarizedContent = hasAppliedFileBlocks
     ? stripFileBlocksFromMarkdown(displayContent)
     : displayContent;
-  const hasStructuredSources = !isUser && Boolean(sources?.length);
+  const hasStructuredSources = !isUser && hasStructuredEvidence(sources);
   const filteredFollowUps = filterStructuredFollowUps({
     followUps,
     content: summarizedContent,
@@ -573,7 +588,13 @@ export function MessageBubble({
   });
   const hasStructuredFollowUps = !isUser && filteredFollowUps.length > 0;
   const visibleFollowUps = hasStructuredFollowUps ? filteredFollowUps.slice(0, 2) : [];
-  const isResearchMessage = !isUser && (hasStructuredSources || Boolean(groundedBuildBrief));
+  const isResearchMessage = shouldUseResearchMessageLayout({
+    role,
+    sources,
+    sourcePresentation,
+    turnKind,
+    groundedBuildBrief,
+  });
   const compactResearchMode = compactResearchChrome && isResearchMessage;
   const cleanedContent = isUser
     ? summarizedContent
@@ -646,13 +667,13 @@ export function MessageBubble({
   const actionVisibility = isLatest && !isStreaming
     ? 'opacity-100'
     : 'opacity-0 group-hover/msg:opacity-100';
-  const showHeaderConfidence = !isUser && !isProjectUpdate && confidence !== undefined && hasStructuredSources && !compactResearchMode && confidence < 1;
+  const showHeaderConfidence = !isUser && !isProjectUpdate && confidence !== undefined && hasStructuredSources && isResearchMessage && !compactResearchMode && confidence < 1;
   const sourceRailDomains = sources
     ? Array.from(new Set(sources.map((source) => source.domain.replace(/^www\./, '')))).slice(0, 2)
     : [];
   const sourceRailConfidenceLabel = confidence !== undefined ? `${Math.round(confidence * 100)}% confidence` : null;
-  const showCompactResearchMeta = (compactResearchMode || sourceRailHandlesSources) && hasStructuredSources && Boolean(sources?.length);
-  const showExpandedSources = hasStructuredSources && sources && !compactResearchMode && !sourceRailHandlesSources;
+  const showCompactResearchMeta = isResearchMessage && (compactResearchMode || sourceRailHandlesSources) && hasStructuredSources && Boolean(sources?.length);
+  const showExpandedSources = isResearchMessage && hasStructuredSources && sources && !compactResearchMode && !sourceRailHandlesSources;
   const showResearchFollowUps = isResearchMessage
     && visibleFollowUps.length > 0
     && !isStreaming
@@ -690,6 +711,7 @@ export function MessageBubble({
       data-chat-message-role={role}
       data-message-latest={isLatest ? 'true' : 'false'}
       data-research-message={isResearchMessage ? 'true' : 'false'}
+      data-turn-kind={turnKind ?? 'default'}
       data-streaming={isStreaming ? 'true' : 'false'}
     >
       <div className={`flex w-full gap-3 ${isUser ? 'max-w-[72%] flex-row-reverse 2xl:max-w-[48rem]' : isResearchMessage ? (compactResearchMode ? 'max-w-[50rem] flex-row items-start' : 'max-w-[56rem] flex-row items-start xl:max-w-[58rem]') : 'max-w-[64rem] flex-row items-start'}`}>
@@ -782,7 +804,7 @@ export function MessageBubble({
               isUser
                 ? studioChrome
                   ? 'rounded-2xl rounded-br-md border border-sky-200/80 bg-sky-50 px-4 py-3 text-zinc-900 shadow-sm'
-                  : 'rounded-2xl rounded-br-md bg-zinc-800/50 px-4 py-3 text-zinc-100'
+                  : 'rounded-2xl rounded-br-md bg-zinc-800/70 px-4 py-3 text-zinc-100 ring-1 ring-zinc-700/55 shadow-[0_2px_10px_rgba(0,0,0,0.22)]'
                 : isProjectUpdate
                   ? `w-full overflow-visible px-0 py-0 ${studioChrome ? 'text-zinc-800' : 'text-zinc-100'}`
                 : compactResearchMode
@@ -906,7 +928,7 @@ export function MessageBubble({
                       />
                       {/* Streaming cursor */}
                       {isStreaming && content.length > 0 && (
-                        <span className="streaming-cursor" />
+                        <span className="vai-streaming-cursor text-zinc-400" />
                       )}
                     </div>
                   </div>
@@ -991,7 +1013,11 @@ export function MessageBubble({
 
                 {hasStructuredSources && sources && !isResearchMessage && (
                   <div className="border-t border-zinc-800/70 pt-3">
-                    <SourceCards sources={sources} confidence={confidence} />
+                    <SourceCards
+                      sources={sources}
+                      confidence={confidence}
+                      tone={sourcePresentation === 'supporting' ? 'supporting' : 'research'}
+                    />
                   </div>
                 )}
 

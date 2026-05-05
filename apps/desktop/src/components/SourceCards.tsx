@@ -14,6 +14,8 @@ interface SourceCardsProps {
   confidence?: number;
   /** chips = compact horizontal favicon row (top of message); list = expandable numbered list */
   variant?: 'chips' | 'list';
+  /** supporting = quieter evidence chrome for plain chat answers with references */
+  tone?: 'research' | 'supporting';
 }
 
 /** Compact favicon chip — shown in the horizontal row at top of research answers */
@@ -110,16 +112,27 @@ function SourceChipRow({ sources, confidence }: { sources: SearchSourceUI[]; con
 }
 
 /** Numbered source list — rendered below the answer text (expandable) */
-function SourceList({ sources, confidence }: { sources: SearchSourceUI[]; confidence?: number }) {
+function SourceList({
+  sources,
+  confidence,
+  tone = 'research',
+}: {
+  sources: SearchSourceUI[];
+  confidence?: number;
+  tone?: 'research' | 'supporting';
+}) {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? sources : sources.slice(0, 3);
   const hiddenCount = Math.max(0, sources.length - visible.length);
-  const confidenceLabel = confidence !== undefined ? `${Math.round(confidence * 100)}% confidence` : null;
+  const confidenceLabel = tone === 'research' && confidence !== undefined ? `${Math.round(confidence * 100)}% confidence` : null;
+  const headingLabel = tone === 'supporting'
+    ? `Supporting source${sources.length === 1 ? '' : 's'}`
+    : `Grounded in ${sources.length} source${sources.length === 1 ? '' : 's'}`;
 
   return (
     <section className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-zinc-500">
-        <span className="font-semibold uppercase tracking-[0.18em] text-zinc-400">Grounded in {sources.length} source{sources.length === 1 ? '' : 's'}</span>
+        <span className="font-semibold uppercase tracking-[0.18em] text-zinc-400">{headingLabel}</span>
         {confidenceLabel && <span className="text-zinc-600">{confidenceLabel}</span>}
       </div>
 
@@ -191,9 +204,9 @@ function SourceList({ sources, confidence }: { sources: SearchSourceUI[]; confid
   );
 }
 
-export function SourceCards({ sources, confidence, variant = 'list' }: SourceCardsProps) {
+export function SourceCards({ sources, confidence, variant = 'list', tone = 'research' }: SourceCardsProps) {
   if (sources.length === 0) return null;
   return variant === 'chips'
     ? <SourceChipRow sources={sources} confidence={confidence} />
-    : <SourceList sources={sources} confidence={confidence} />;
+    : <SourceList sources={sources} confidence={confidence} tone={tone} />;
 }

@@ -46,6 +46,7 @@ import type { PerIdeConfig } from './BroadcastTargetPicker.js';
 import { ResearchContextRail } from './chat/ResearchContextRail.js';
 import { ChatEmptyState } from './chat/ChatEmptyState.js';
 import { resolveSendTimeWorkIntent } from '../lib/auto-sandbox-intent.js';
+import { resolveLatestResearchContext } from '../lib/research-context.js';
 import {
   buildIdeMentionItems,
   filterMentionItems,
@@ -93,12 +94,6 @@ function formatRelativeTime(value: string): string {
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
   return `${Math.floor(diff / 86_400_000)}d ago`;
-}
-
-function summarizeResearchPrompt(value: string): string {
-  const cleaned = value.replace(/\s+/g, ' ').trim();
-  if (cleaned.length <= 72) return cleaned;
-  return `${cleaned.slice(0, 69).trimEnd()}...`;
 }
 
 /* ── File extension detection ── */
@@ -234,28 +229,7 @@ export function ChatWindow() {
     () => messages.filter((message) => message.role === 'user').length,
     [messages],
   );
-  const latestResearchContext = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const message = messages[i];
-      if (message.role !== 'assistant' || !message.sources || message.sources.length === 0) continue;
-
-      let question = 'this answer';
-      for (let j = i - 1; j >= 0; j -= 1) {
-        if (messages[j]?.role === 'user') {
-          question = summarizeResearchPrompt(messages[j].content);
-          break;
-        }
-      }
-
-      return {
-        assistantIndex: i,
-        question,
-        sources: message.sources,
-      };
-    }
-
-    return null;
-  }, [messages]);
+  const latestResearchContext = useMemo(() => resolveLatestResearchContext(messages), [messages]);
   const hasResearchRailContext = Boolean(latestResearchContext);
   const researchThreadMode = Boolean(latestResearchContext && userTurnCount > 1);
   const useResearchRailWideLayout = Boolean(hasResearchRailContext && isResearchRailOpen);
@@ -1365,7 +1339,12 @@ export function ChatWindow() {
                   const fb = fallbackDeployMap.get(idx);
                   const sourceRailHandlesSources = latestResearchContext?.assistantIndex === idx;
                   return (
-                    <div key={msg.id}>
+                    <motion.div
+                      key={msg.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
+                    >
                       <MessageBubble
                         role={msg.role}
                         content={msg.content}
@@ -1384,6 +1363,8 @@ export function ChatWindow() {
                         isLatest={idx === messages.length - 1}
                         isStreaming={isStreaming && idx === messages.length - 1}
                         sources={msg.sources}
+                        sourcePresentation={msg.sourcePresentation}
+                        turnKind={msg.turnKind}
                         followUps={msg.followUps}
                         confidence={msg.confidence}
                         groundedBuildBrief={msg.groundedBuildBrief}
@@ -1400,7 +1381,7 @@ export function ChatWindow() {
                         sourceRailOpen={sourceRailHandlesSources && isResearchRailOpen}
                         onOpenSources={sourceRailHandlesSources ? () => setIsResearchRailOpen(true) : undefined}
                       />
-                    </div>
+                    </motion.div>
                   );
                 })}
 
@@ -1486,14 +1467,14 @@ export function ChatWindow() {
           )}
           {/* The input box */}
           <motion.div
-            className={`relative flex flex-col overflow-visible rounded-[1.25rem] border transition-all ${
+            className={`relative flex flex-col overflow-visible rounded-[1.25rem] border transition-all focus-within:ring-[2.5px] ${
               deliveryRoute === 'broadcast'
                 ? studioBuilderChrome
-                  ? 'border-blue-200 bg-white shadow-sm'
-                  : 'border-blue-500/15 bg-zinc-950/82 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.55)]'
+                  ? 'border-blue-200 bg-white shadow-sm focus-within:ring-blue-200/70'
+                  : 'border-blue-500/15 bg-zinc-950/82 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.55)] focus-within:border-violet-500/35 focus-within:ring-violet-500/10'
                 : studioBuilderChrome
-                  ? 'border-zinc-200 bg-white shadow-sm'
-                  : 'border-zinc-800/60 bg-zinc-950/82 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.55)]'
+                  ? 'border-zinc-200 bg-white shadow-sm focus-within:ring-zinc-200/60'
+                  : 'border-zinc-800/60 bg-zinc-950/82 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.55)] focus-within:border-violet-500/30 focus-within:ring-violet-500/8'
             }`}
             animate={canSend ? { borderColor: deliveryRoute === 'broadcast' ? 'rgba(96,165,250,0.24)' : studioBuilderChrome ? 'rgba(228,228,231,1)' : 'rgba(63,63,70,0.75)' } : {}}
             transition={{ duration: 0.2 }}
@@ -1932,9 +1913,9 @@ export function ChatWindow() {
                       exit={{ scale: 0.8, opacity: 0 }}
                       onClick={() => handleSend()}
                       disabled={!canSend}
-                      className={`flex h-8 w-8 items-center justify-center rounded-full text-white transition-all duration-200 ${
+                      className={`flex h-8 w-8 items-center justify-center rounded-full transition-all duration-200 ${
                         canSend
-                          ? 'bg-zinc-100 text-zinc-900 hover:bg-white'
+                          ? 'bg-gradient-to-br from-violet-500 to-indigo-500 text-white shadow-[0_2px_10px_rgba(139,92,246,0.4)] hover:from-violet-400 hover:to-indigo-400 hover:shadow-[0_4px_14px_rgba(139,92,246,0.5)]'
                           : 'bg-zinc-800 text-zinc-600'
                       }`}
                       whileHover={canSend ? { scale: 1.05 } : {}}

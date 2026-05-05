@@ -29,6 +29,9 @@ export interface SearchSourceUI {
   trustScore: number;
 }
 
+export type SourcePresentationUI = 'research' | 'supporting';
+export type TurnKindUI = 'conversational' | 'research' | 'builder' | 'analysis';
+
 export interface GroundedBuildBriefUI {
   intent: 'build' | 'edit';
   focusLabel: string;
@@ -77,6 +80,10 @@ export interface ChatMessage {
   sender?: MessageSender;
   /** Search sources attached to this response */
   sources?: SearchSourceUI[];
+  /** Whether citations should render as full research chrome or lighter supporting references */
+  sourcePresentation?: SourcePresentationUI;
+  /** High-level routing classification for the assistant turn */
+  turnKind?: TurnKindUI;
   /** Follow-up question suggestions */
   followUps?: string[];
   /** Confidence score (0-1) from search pipeline */
@@ -566,6 +573,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         textDelta?: string;
         reasoningDelta?: string;
         sources?: SearchSourceUI[];
+        sourcePresentation?: SourcePresentationUI;
+        turnKind?: TurnKindUI;
         followUps?: string[];
         confidence?: number;
         groundedBrief?: GroundedBuildBriefUI;
@@ -587,8 +596,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
 
-      if (chunk.type === 'sources' && chunk.sources) {
-        // Attach sources + follow-ups + confidence to the current assistant message
+      if (chunk.type === 'turn_kind' && chunk.turnKind) {
         set((state) => {
           const msgs = [...state.messages];
           const targetIndex = activeStreamingAssistantId
@@ -598,9 +606,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (target && target.role === 'assistant') {
             msgs[targetIndex] = {
               ...target,
-              sources: chunk.sources,
+              turnKind: chunk.turnKind,
+            };
+          }
+          return { messages: msgs };
+        });
+      } else if (chunk.type === 'sources' && chunk.sources) {
+        // Attach sources + follow-ups + confidence to the current assistant message
+        set((state) => {
+          const msgs = [...state.messages];
+          const targetIndex = activeStreamingAssistantId
+            ? msgs.findIndex((message) => message.id === activeStreamingAssistantId)
+            : msgs.length - 1;
+          const target = targetIndex >= 0 ? msgs[targetIndex] : null;
+          if (target && target.role === 'assistant') {
+            const hasSources = chunk.sources.length > 0;
+            const hasGroundedBrief = Boolean(chunk.groundedBrief);
+            const shouldAttachEvidenceMeta = hasSources || hasGroundedBrief;
+            msgs[targetIndex] = {
+              ...target,
+              sources: hasSources ? chunk.sources : undefined,
+              sourcePresentation: shouldAttachEvidenceMeta ? chunk.sourcePresentation : undefined,
               followUps: chunk.followUps,
-              confidence: chunk.confidence,
+              confidence: shouldAttachEvidenceMeta ? chunk.confidence : undefined,
               groundedBuildBrief: chunk.groundedBrief,
               respondingModelId: chunk.modelId ?? target.respondingModelId,
             };

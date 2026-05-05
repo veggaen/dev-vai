@@ -645,6 +645,7 @@ function VerificationCard({ event }: { event: SessionEvent }) {
     started: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30',
     passed: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
     failed: 'bg-red-500/15 text-red-300 border-red-500/30',
+    skipped: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30',
   };
 
   return (

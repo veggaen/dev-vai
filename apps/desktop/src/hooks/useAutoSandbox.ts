@@ -37,6 +37,7 @@ import {
   buildGroundedExecutionRepairPlan,
   shouldTriggerGroundedExecutionRepair,
 } from '../lib/grounded-build-execution.js';
+import { isNonPreviewableCodeFileSet } from '../lib/non-previewable-file-set.js';
 import { extractBrowserRuntimeErrors } from '../lib/sandbox-runtime-validation.js';
 import { serializeProjectUpdateArtifact, type ProjectUpdateArtifact } from '../lib/project-artifact.js';
 import { toast } from 'sonner';
@@ -54,58 +55,6 @@ function formatChangedFiles(files: ExtractedFile[], limit = 6): string[] {
     visible.push(`- +${remaining} more file${remaining === 1 ? '' : 's'}`);
   }
   return visible;
-}
-
-function isNonPreviewableCodeFileSet(files: ExtractedFile[]): boolean {
-  const paths = new Set(files.map((file) => file.path.replace(/\\/g, '/').toLowerCase()));
-  const packageJson = files.find((file) => file.path.replace(/\\/g, '/').toLowerCase() === 'package.json')?.content ?? '';
-  const hasThemeJson = [...paths].some((filePath) => /^themes\/.+\.json$/.test(filePath));
-  const isVsCodeThemeExtension = hasThemeJson
-    && /"contributes"\s*:\s*{[\s\S]*"themes"\s*:/i.test(packageJson);
-  if (isVsCodeThemeExtension) return true;
-
-  const hasBrowserPreviewEntrypoint = [...paths].some((filePath) => (
-    filePath === 'index.html'
-    || /^src\/app\.(?:tsx|jsx|ts|js|svelte)$/.test(filePath)
-    || /^src\/main\.(?:tsx|jsx|ts|js|svelte)$/.test(filePath)
-    || filePath.endsWith('.html')
-    || filePath.endsWith('.tsx')
-    || filePath.endsWith('.jsx')
-    || filePath.endsWith('.svelte')
-  ));
-  const isPackageBasedCodeArtifact = Boolean(packageJson)
-    && !hasBrowserPreviewEntrypoint
-    && (
-      /"bin"\s*:/i.test(packageJson)
-      || /"workspaces"\s*:/i.test(packageJson)
-      || /"contributes"\s*:/i.test(packageJson)
-      || /"engines"\s*:\s*{[\s\S]*"vscode"/i.test(packageJson)
-      || [...paths].some((filePath) => filePath.startsWith('packages/'))
-    );
-  if (isPackageBasedCodeArtifact) return true;
-
-  const hasWebEntrypoint = [...paths].some((filePath) => (
-    filePath === 'package.json'
-    || filePath === 'index.html'
-    || /^src\/app\.(?:tsx|jsx|ts|js|svelte)$/.test(filePath)
-    || /^src\/main\.(?:tsx|jsx|ts|js|svelte)$/.test(filePath)
-    || filePath.endsWith('.html')
-    || filePath.endsWith('.tsx')
-    || filePath.endsWith('.jsx')
-    || filePath.endsWith('.svelte')
-  ));
-  if (hasWebEntrypoint) return false;
-
-  return [...paths].some((filePath) => (
-    filePath === 'cargo.toml'
-    || filePath.endsWith('.rs')
-    || filePath === 'requirements.txt'
-    || filePath === 'pyproject.toml'
-    || filePath.endsWith('.py')
-    || filePath.endsWith('.go')
-    || filePath.endsWith('.csproj')
-    || filePath.endsWith('.cs')
-  ));
 }
 
 function buildProjectUpdateMessage(summary: string, details: string[], files: ExtractedFile[] = [], artifact?: ProjectUpdateArtifact): string {

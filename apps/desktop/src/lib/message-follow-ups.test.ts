@@ -36,4 +36,35 @@ describe('filterStructuredFollowUps', () => {
       hasAppliedFileBlocks: false,
     })).toEqual([]);
   });
+
+  it('filters awkward templated research follow-ups', () => {
+    expect(filterStructuredFollowUps({
+      followUps: [
+        'Show me a practical example with who is top master frontend web dev on github',
+        'What are the most common mistakes with who is top master frontend web dev on github?',
+      ],
+      content: 'There is not a single objective top frontend developer on GitHub.',
+      isUser: false,
+      isProjectUpdate: false,
+      hasAppliedFileBlocks: false,
+    })).toEqual([]);
+  });
+
+  it('keeps concise action follow-ups for discovery answers', () => {
+    expect(filterStructuredFollowUps({
+      followUps: [
+        'Rank this by GitHub followers',
+        'Rank this by project stars instead',
+        'Give me 3 high-signal names to inspect',
+      ],
+      content: 'There is not a single objective top frontend developer on GitHub. It depends on followers, stars, maintainer impact, and teaching signal.',
+      isUser: false,
+      isProjectUpdate: false,
+      hasAppliedFileBlocks: false,
+    })).toEqual([
+      'Rank this by GitHub followers',
+      'Rank this by project stars instead',
+      'Give me 3 high-signal names to inspect',
+    ]);
+  });
 });

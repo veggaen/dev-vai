@@ -18,8 +18,11 @@ function isReasonableFollowUp(question: string, content: string): boolean {
   const normalized = question.trim();
   if (normalized.length < 12 || normalized.length > 120) return false;
   if (!/[?a-z]/i.test(normalized)) return false;
+  if (/\b(?:practical example|common mistakes?|cleanest project structure)\s+(?:with|for|about)\s+(?:who|what|why|how|when|where|which)\b/i.test(normalized)) {
+    return false;
+  }
 
-  const prompty = /^(?:what|how|why|which|can|could|would|should|is|are|do|does|make|add|change|turn|show|explain)\b/i.test(normalized);
+  const prompty = /^(?:what|how|why|which|can|could|would|should|is|are|do|does|make|add|change|turn|show|explain|give|rank|narrow|list)\b/i.test(normalized);
   if (!prompty) return false;
 
   const questionTokens = tokenizeFollowUpSeed(normalized);
@@ -28,7 +31,7 @@ function isReasonableFollowUp(question: string, content: string): boolean {
   const contentTokens = new Set(tokenizeFollowUpSeed(content).slice(0, 80));
   const overlap = questionTokens.filter((token) => contentTokens.has(token)).length;
 
-  if (/^(?:make|add|change|turn|show|explain)\b/i.test(normalized)) {
+  if (/^(?:make|add|change|turn|show|explain|give|rank|narrow|list)\b/i.test(normalized)) {
     return overlap >= 1 || questionTokens.length <= 5;
   }
 

@@ -195,6 +195,22 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* ── Streaming cursor blink ── */
+@keyframes vai-cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.vai-streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  background: currentColor;
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  border-radius: 1px;
+  animation: vai-cursor-blink 0.75s ease-in-out infinite;
+}
+
 body {
   margin: 0;
   font-family: 'DM Sans', 'Inter', system-ui, sans-serif;
