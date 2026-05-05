@@ -30,6 +30,16 @@ test-out.txt
 test-result.txt
 .codex-run/
 
+# Scratch probes / one-off scripts
+scripts/_*.mjs
+scripts/apply-engine-patches*.mjs
+scripts/bulk-probe*.mjs
+scripts/dogfood-send*.mjs
+scripts/iter*-probe.mjs
+scripts/probe-*.mjs
+scripts/probe-set-*.txt
+*.log
+
 # Coverage / package manager noise
 coverage/
 pnpm-debug.log*

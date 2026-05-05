@@ -63,6 +63,60 @@ Confidence column meaning:
 | **planning solver** (parallel/serial tasks under a budget) | 6 → **1 case** | XL | 1 / XL |
 | **structured creative output** (N distinct items with named fields) | 10 → **1 case** | M | 1 / M |
 
+---
+
+## Appendix A — Capability candidate not surfaced by the corpus: self-evaluation
+
+Added cycle-2 supplement (Block 3 of the foundation-deepening pass). This capability was not in the original 22-row gap analysis because none of the failing cases probe it directly. It is meta to the others: a candidate response is generated, then evaluated against the original prompt's constraints, then emitted / revised / flagged.
+
+### Trenchcoat disclosure
+
+Self-evaluation is plausibly **three sub-capabilities sharing one mechanism**, not a single capability. The shared mechanism is the second-pass-with-predicates infrastructure. The sub-capabilities are:
+
+1. **Constraint-checking** — verify candidate satisfies explicit format / length / word-list / topic constraints. Mostly mechanical predicates.
+2. **Consistency-checking** — verify candidate coheres with the engine's prior turns and with itself within the response. State-comparison predicates.
+3. **Fact-grounding / fabrication detection** — verify candidate's factual claims are grounded in the engine's knowledge store. Provenance predicates.
+
+Build-cost implication: as one umbrella, infrastructure is built once and predicates registered per sub-capability. As three separate builds, infrastructure is duplicated. This argues for the umbrella framing on cost grounds, but the sub-capabilities have different correctness profiles and could be shipped independently. Confidence in the unified-bucket framing: **0.65**.
+
+### Cases self-eval would have caught (retroactive attribution)
+
+Honest, non-exhaustive list. Each has a confidence rating on the attribution.
+
+| # | Failing case | Sub-cap that would catch | Attribution confidence |
+|---|---|---|---|
+| 1 | cog-theory-of-mind-001 (kubernetes hijack on Sally-Anne) | constraint-checking ("is this response about the prompt's named entities") | 0.75 |
+| 2 | cog-calibrated-uncertainty-002 (frinkonium fabrication) | fact-grounding | 0.85 |
+| 3 | cre-voice-non-default-001 (loose-regex pass on voice control) | constraint-checking ("does the response adopt the requested voice") | 0.65 |
+| 4 | cog-clarifying-question-001 turn 2 (CSV→JSON primer hijack) | constraint-checking ("is this response addressing the user's stated topic") | 0.70 |
+| 5 | mt-context-retention-001 (prose name-intro lost) | consistency-checking ("does this response use facts from the prior turn") | 0.50 — weak attribution; this is more naturally a multi-turn-memory build than a self-eval catch |
+| 6 | mt-contradiction-handling-001 turn 3 | consistency-checking | 0.55 |
+
+Estimated reach: of the 22 failing cases, self-eval at moderate-quality build would catch **5–7** as **passed-via-refusal** (see anti-pattern #4). It would NOT cleanly close any bucket — every case it catches is closed by refusing-the-wrong-answer, not by exhibiting the bucket-native capability.
+
+### Build-cost estimate
+
+- **M (constraint-checking only)** — predicate registry + second-pass gate + revise-once loop. Builds on existing strategy-handler infrastructure.
+- **L (constraint + consistency)** — adds turn-history state-comparison.
+- **XL (full three sub-capabilities)** — adds provenance tracking on every fact in the knowledge store.
+
+Confidence in cost estimates: **0.60**. Software estimation is famously unreliable, and this is novel ground for Vai.
+
+### Capability-bleed risk (cross-ref anti-pattern #4 and #13)
+
+This is the **highest capability-bleed risk** in the candidate list. If self-eval is built before theory-of-mind, multi-turn-memory, or fabrication-detection, several cases in those buckets will silently flip from fail → pass. Per the mitigation in anti-pattern #4, those flips must be tagged **passed-via-refusal** and the bucket's open-case count must not decrement until the bucket-native capability is implemented and verified to pass with self-eval disabled.
+
+Operationally: any cycle that ships self-eval must run the full corpus twice — once with self-eval enabled, once disabled — and the gap analysis tracks **two columns** of pass/fail. Decisions on which capability to build next use the self-eval-disabled column.
+
+### Coverage in MD corpus
+
+Six cases written in `eval/corpus-md/edge-cases/self-evaluation/`, all `expected_status: pending-feature`. 3 edge / 2 boundary / 1 adversarial. The adversarial case (`edge-se-fake-self-eval-injection-001`) is the canonical probe for anti-pattern #13 (performative self-evaluation).
+
+### Honest recommendation deferred
+
+Per operating constraint (no capability recommendations this turn), no recommendation on whether to build self-eval next is offered. The asymmetry to flag for Block 4: building self-eval may **reduce** the apparent gap without reducing the real gap, which is uniquely confounding compared to the other 11 candidates.
+
+
 (Build-cost legend: **S** ≈ a session, **M** ≈ a focused multi-day push, **L** ≈ a sub-system, **XL** ≈ research-scale.)
 
 ---
