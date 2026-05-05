@@ -11,7 +11,7 @@
  *
  * Schema (frontmatter):
  *   id, title, version, pattern (H↔M | M↔M | AI↔AI),
- *   category (cognitive | creative | project | multi-turn | audience),
+ *   category (cognitive | creative | project | multi-turn | audience | regression),
  *   tags: [], weight: number, expected_status: active | pending-feature,
  *   budget: { max_ms, max_chars },
  *   turns: [{ role, say, must, must_not, min_len, max_len }]
@@ -34,7 +34,7 @@ const MD_ROOT = join(ROOT, 'eval', 'corpus-md');
 const OUT_FILE = join(ROOT, 'eval', 'generated', 'corpus.ts');
 
 const VALID_PATTERNS = new Set(['H↔M', 'M↔M', 'AI↔AI']);
-const VALID_CATEGORIES = new Set(['cognitive', 'creative', 'project', 'multi-turn', 'audience']);
+const VALID_CATEGORIES = new Set(['cognitive', 'creative', 'project', 'multi-turn', 'audience', 'regression']);
 const VALID_STATUSES = new Set(['active', 'pending-feature']);
 const VALID_ROLES = new Set(['user', 'assistant']);
 const REQUIRED_TOP = ['id', 'title', 'version', 'pattern', 'category', 'expected_status', 'turns'];
@@ -193,7 +193,7 @@ function build(cases) {
     '  version: number;',
     '  updatedAt: string | null;',
     "  pattern: 'H↔M' | 'M↔M' | 'AI↔AI';",
-    "  category: 'cognitive' | 'creative' | 'project' | 'multi-turn' | 'audience';",
+    "  category: 'cognitive' | 'creative' | 'project' | 'multi-turn' | 'audience' | 'regression';",
     '  tags: string[];',
     '  weight: number;',
     "  expectedStatus: 'active' | 'pending-feature';",

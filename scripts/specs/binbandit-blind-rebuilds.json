@@ -1,0 +1,128 @@
+{
+  "suiteName": "binbandit",
+  "sourceLeakPattern": "binbandit|github\\.com/binbandit",
+  "specs": [
+    {
+      "family": "binbandit",
+      "slug": "desktop-code-review-app",
+      "sourceRepo": "https://github.com/binbandit/dispatch",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a desktop code review app with CI/CD integration, inspired by a project built with Electron, React, and Tailwind CSS. Do not ask follow-up questions. The preview must visibly include a pull request list panel with title, author, and status, a diff viewer with added lines highlighted green and removed lines highlighted red, a CI pipeline status column showing pass and fail badges per check, an inline comment thread that opens below a diff line, a review submit panel with Approve and Request Changes buttons, and a GitHub connection status badge.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["pull request", "diff", "CI", "pipeline", "approve", "comment"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 2 },
+      "followUps": [
+        {
+          "label": "add-timeline-view",
+          "prompt": "Add a PR timeline view showing commit history, review events, and comments in chronological order below the diff.",
+          "expect": ["timeline", "commit", "review"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "binbandit",
+      "slug": "git-worktree-manager",
+      "sourceRepo": "https://github.com/binbandit/workty",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a Git worktree workspace manager, inspired by a tool that treats worktrees as daily-driver workspaces. Do not ask follow-up questions. The preview must visibly include a worktree list panel showing branch name, local path, and status for each worktree, a create new worktree form with branch name and base branch fields, a switch active worktree button per row, a health indicator that flags stale or diverged worktrees, a linked branch remote status, and a terminal command snippet panel showing the git worktree add and switch commands.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["worktree", "branch", "path", "stale", "diverged", "switch"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-prune-action",
+          "prompt": "Add a prune action that lists orphaned worktrees whose branches have been deleted and offers to remove them in one click.",
+          "expect": ["prune", "orphan", "delete"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "binbandit",
+      "slug": "secretfetch-manager-ui",
+      "sourceRepo": "https://github.com/binbandit/secretfetch",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a secret management dashboard using the SecretFetch approach. Do not ask follow-up questions. The preview must visibly include a secret catalog table with masked values and a reveal-on-hover toggle, source tabs for env file, AWS Secrets Manager, HashiCorp Vault, and GCP Secret Manager, a validation status badge per secret showing present or missing, a batch load button, a last-refreshed timestamp per secret, and a code panel showing the SecretFetch Go struct tag annotation syntax.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["secret", "env", "AWS", "Vault", "GCP", "validate", "mask"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-rotation-reminder",
+          "prompt": "Add a rotation reminder panel that flags secrets older than 90 days with a warning badge and a rotate button.",
+          "expect": ["rotation", "90 days", "warning"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "binbandit",
+      "slug": "mcp-smart-router-explorer",
+      "sourceRepo": "https://github.com/binbandit/mcp-smart-router",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of an MCP smart tool router explorer. Do not ask follow-up questions. The preview must visibly include a tool catalog panel listing at least eight mock MCP tools with names, descriptions, and categories, a prompt input that routes the query to the best matching tool based on intent keywords, a routing confidence score bar, a top-three candidate list, a context rot warning panel that activates when more than ten tools are loaded, and a tool filter by category.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["MCP", "tool", "routing", "intent", "confidence", "context"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 2 },
+      "followUps": [
+        {
+          "label": "add-tool-audit-log",
+          "prompt": "Add a tool audit log panel that records each routing decision with the prompt, selected tool, and confidence score.",
+          "expect": ["audit", "log", "confidence"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "binbandit",
+      "slug": "conduit-socket-demo",
+      "sourceRepo": "https://github.com/binbandit/conduit",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a simple socket programming library demo using a clean API called Conduit. Do not ask follow-up questions. The preview must visibly include a connection panel with host and port fields and a connect button, a message send area, a live received messages feed that updates as messages arrive, a connected clients count badge, an error display panel, a broadcast versus direct message toggle, and a code panel showing the Conduit API with simple open, send, listen, and close calls.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["socket", "host", "port", "broadcast", "clients", "open", "send"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-ping-latency",
+          "prompt": "Add a ping latency panel that sends a heartbeat every two seconds and displays round-trip time.",
+          "expect": ["ping", "latency", "heartbeat"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "binbandit",
+      "slug": "semantic-version-bumper",
+      "sourceRepo": "https://github.com/binbandit/bumpit",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a semantic versioning automation dashboard. Do not ask follow-up questions. The preview must visibly include a mock commit history panel that classifies each commit as feat, fix, chore, or breaking change using colour badges, a version bump calculator showing the current version and the computed next version, a changelog preview panel with grouped release notes, a GitHub Actions pipeline integration diagram, manual override buttons for major, minor, and patch bumps, and a dry run toggle that previews all changes without applying them.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["semantic", "version", "feat", "breaking change", "changelog", "major", "minor"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-tag-preview",
+          "prompt": "Add a Git tag preview panel showing the exact tag command that would be run and the resulting tag name.",
+          "expect": ["tag", "Git", "command"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    }
+  ]
+}

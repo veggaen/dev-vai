@@ -55,6 +55,53 @@
         { "paths": ["README.md"], "pattern": "<LagRadar\\s*/>|frames=|speed=|size=|inset=", "label": "usage example" }
       ],
       "preview": false
+    },
+    {
+      "slug": "suspense-render-as-you-fetch",
+      "sourceRepo": "https://github.com/gaearon/suspense-experimental-github-demo",
+      "prompt": "Build the first runnable preview of a React Suspense render-as-you-fetch explorer. Do not ask follow-up questions. The preview must visibly include a user profile card that loads inside a Suspense boundary with a visible skeleton fallback, an error boundary demo that catches and displays a failed fetch, a side-by-side fetch-on-render versus render-as-you-fetch comparison panel, a waterfall diagram showing the difference in request timing, a notes panel explaining why render-as-you-fetch eliminates sequential loading waterfalls, and a retry action.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Suspense", "render-as-you-fetch", "skeleton", "error boundary", "waterfall", "retry"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 2 },
+      "followUps": [
+        {
+          "label": "add-nested-suspense",
+          "prompt": "Add a nested Suspense demo where an inner boundary resolves independently from the outer one, showing both loading states simultaneously.",
+          "expect": ["nested", "Suspense", "boundary"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "slug": "woodshed-claude-skills",
+      "sourceRepo": "https://github.com/gaearon/woodshed",
+      "prompt": "Build the first runnable preview of a Claude Skills creator and tester app. Do not ask follow-up questions. The preview must visibly include a skill editor panel where the user writes a skill definition in markdown or YAML, a live preview panel showing the generated system prompt, a test runner that sends the skill to a mock model endpoint and streams back a response, a skill catalog sidebar with at least three example skills, a version history dropdown, and an export button that copies the skill definition.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["skill", "Claude", "YAML", "test", "catalog", "prompt", "export"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-skill-rating",
+          "prompt": "Add a quality rating panel to the test runner that scores the model response on relevance, length, and tone.",
+          "expect": ["rating", "relevance", "tone"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "slug": "flux-architecture-explorer",
+      "sourceRepo": "https://github.com/gaearon/flux-react-router-example",
+      "prompt": "Build a runnable Flux architecture explorer. Do not ask follow-up questions. The preview must visibly include an animated data flow diagram showing Action, Dispatcher, Store, and View layers, a live action dispatch panel where users can fire named actions, a store state viewer that updates in real time, a router-integrated navigation example with at least two routes, a shopping list demo driven entirely by Flux, and a comparison panel mapping Flux concepts to modern Redux and Zustand equivalents.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Flux", "Action", "Dispatcher", "Store", "View", "Redux", "dispatch"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 2 }
     }
   ]
 }

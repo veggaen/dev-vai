@@ -1,0 +1,141 @@
+{
+  "id": "memory-and-context",
+  "label": "Perplexity-class memory: first-message recall, build-iteration memory, summarize-so-far, project-scoped recall across turns.",
+  "scenarios": [
+    {
+      "id": "first-message-literal-recall",
+      "messages": [
+        { "role": "user", "content": "I want to build a Lunaflow scheduling tool, dark theme, calm aesthetic." },
+        { "role": "user", "content": "Tell me about CSS grid." },
+        { "role": "user", "content": "What is debouncing?" },
+        { "role": "user", "content": "Now back to my project. What was the very first thing I asked you in this conversation?" }
+      ],
+      "assert": {
+        "minLength": 20,
+        "contains": ["/Lunaflow/i"],
+        "anyOfContains": ["/scheduling|dark theme|calm/i"],
+        "notContains": ["/I (?:don't|do not) (?:remember|have access)/i", "/I (?:can't|cannot) recall/i"]
+      }
+    },
+    {
+      "id": "first-message-paraphrase-recall",
+      "messages": [
+        { "role": "user", "content": "Building a meal planner called PlatePal. Tailwind, soft greens, drag-and-drop weekly view." },
+        { "role": "user", "content": "What is React strict mode?" },
+        { "role": "user", "content": "Summarize what I told you at the start in one sentence." }
+      ],
+      "assert": {
+        "minLength": 20,
+        "contains": ["/PlatePal/i"],
+        "anyOfContains": ["/meal planner|weekly|drag/i"]
+      }
+    },
+    {
+      "id": "count-turns-meta",
+      "messages": [
+        { "role": "user", "content": "Hello." },
+        { "role": "user", "content": "How are you?" },
+        { "role": "user", "content": "What is recursion?" },
+        { "role": "user", "content": "How many messages have I sent in this conversation so far, including this one?" }
+      ],
+      "assert": {
+        "minLength": 5,
+        "contains": ["/4|four/i"],
+        "notContains": ["/I (?:don't|do not) (?:know|have access)/i"]
+      }
+    },
+    {
+      "id": "build-iteration-recall-after-fix",
+      "messages": [
+        { "role": "user", "content": "Build a tiny single-file landing page in HTML+CSS for a coffee shop called Brewline. Brown palette. Single file." },
+        { "role": "user", "content": "Now add a hero with a headline and a subhead. Keep it single-file." },
+        { "role": "user", "content": "Increase the hero contrast for accessibility." },
+        { "role": "user", "content": "What is the name of the coffee shop, and what was the most recent change I asked for?" }
+      ],
+      "assert": {
+        "minLength": 20,
+        "contains": ["/Brewline/i"],
+        "anyOfContains": ["/contrast|accessib/i"]
+      }
+    },
+    {
+      "id": "constraint-still-applies-many-turns-later",
+      "messages": [
+        { "role": "user", "content": "Important: every code answer in this conversation must use only TypeScript and never JavaScript. No exceptions." },
+        { "role": "user", "content": "What are React hooks?" },
+        { "role": "user", "content": "Show me a button component." },
+        { "role": "user", "content": "Show me a counter component." }
+      ],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": ["/:\\s*(?:number|string|JSX\\.Element|React\\.FC)|interface\\s+\\w+|type\\s+\\w+\\s*=/"],
+        "notContains": ["/^function\\s+\\w+\\s*\\(.*\\)\\s*\\{[\\s\\S]*?\\}\\s*$/"]
+      }
+    },
+    {
+      "id": "name-and-tech-stack-recall",
+      "messages": [
+        { "role": "user", "content": "Project: Stargrove. Stack: SvelteKit + Drizzle + Postgres. I'm calling the main feature 'echoes'." },
+        { "role": "user", "content": "What is dependency injection?" },
+        { "role": "user", "content": "What is normalization in databases?" },
+        { "role": "user", "content": "Remind me of my project's name, stack, and the main feature name." }
+      ],
+      "assert": {
+        "minLength": 30,
+        "contains": ["/Stargrove/i", "/SvelteKit/i", "/Drizzle/i", "/Postgres/i", "/echoes/i"]
+      }
+    },
+    {
+      "id": "summarize-conversation-so-far",
+      "messages": [
+        { "role": "user", "content": "I'm planning a personal CRM called Threadly." },
+        { "role": "user", "content": "I want it to use Next.js App Router and Prisma." },
+        { "role": "user", "content": "Auth via Lucia. SQLite for local-first." },
+        { "role": "user", "content": "Give me a 3-bullet summary of everything we've discussed so far in this conversation." }
+      ],
+      "assert": {
+        "minLength": 60,
+        "contains": ["/Threadly/i"],
+        "anyOfContains": ["/Next\\.?js|Prisma|Lucia|SQLite|local-first/i"]
+      }
+    },
+    {
+      "id": "decision-versus-suggestion-recall",
+      "messages": [
+        { "role": "user", "content": "I'm choosing between Tailwind and CSS modules for my new app." },
+        { "role": "user", "content": "Decision: I'm going with Tailwind. Lock that in." },
+        { "role": "user", "content": "What is composition over inheritance?" },
+        { "role": "user", "content": "Which styling approach did I commit to earlier?" }
+      ],
+      "assert": {
+        "minLength": 10,
+        "contains": ["/Tailwind/i"],
+        "notContains": ["/CSS modules\\b(?!.*Tailwind)/i"]
+      }
+    },
+    {
+      "id": "go-back-to-prior-version-intent",
+      "messages": [
+        { "role": "user", "content": "Build a single-file HTML+CSS page with a green theme." },
+        { "role": "user", "content": "Change it to a blue theme." },
+        { "role": "user", "content": "Actually, go back to the previous version." }
+      ],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": ["/green/i", "/previous|prior|earlier/i"]
+      }
+    },
+    {
+      "id": "do-not-confuse-projects-when-asked-about-current",
+      "messages": [
+        { "role": "user", "content": "Building Aurora — a markdown notes app." },
+        { "role": "user", "content": "What was the project name I just gave you?" }
+      ],
+      "assert": {
+        "minLength": 5,
+        "contains": ["/Aurora/i"],
+        "notContains": ["/Lunaflow|PlatePal|Stargrove|Threadly|Brewline/i"]
+      }
+    }
+  ]
+}

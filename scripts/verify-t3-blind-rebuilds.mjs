@@ -61,6 +61,125 @@ const BLIND_SPECS = [
     preview: true,
   },
   {
+    slug: 'chirp-twitter-clone',
+    sourceRepo: 'https://github.com/t3dotgg/chirp',
+    prompt: 'Build the first runnable preview of a Twitter-like social app built with the T3 stack. Do not ask follow-up questions. The preview must visibly include a tweet-style post feed with at least five mock posts, a compose box with a character counter, user avatar and username badges, like and retweet counters per post, a profile sidebar, a trending topics panel, and status indicators for the Clerk auth session and the Prisma database connection.',
+    expectedPathGroups: [['package.json'], ['src/App.tsx', 'src/App.jsx'], ['src/styles.css']],
+    requiredText: ['feed', 'compose', 'character', 'like', 'retweet', 'Clerk', 'Prisma'],
+    forbiddenText: ['what features', 'what would you like', 'Image gallery'],
+    preview: true,
+    animationCheck: { minAnimatedElements: 2 },
+    followUps: [
+      {
+        label: 'add-reply-thread',
+        prompt: 'Add a reply thread panel that expands under a post when the reply button is clicked, keeping the same feed layout.',
+        expect: ['reply', 'thread', 'expand'],
+        forbiddenText: ['what would you like', 'clarify'],
+        requireProjectUpdate: true,
+      },
+    ],
+  },
+  {
+    slug: 'drive-file-manager',
+    sourceRepo: 'https://github.com/t3dotgg/drive-tutorial',
+    prompt: 'Build the first runnable preview of a Google Drive-like file manager built with the T3 stack and UploadThing. Do not ask follow-up questions. The preview must visibly include a file grid with seeded mock files and folders, folder breadcrumb navigation, file type icons, a drag-and-drop upload zone, file size and last-modified columns, a storage quota progress bar, and a right-click context menu with rename, move, and delete actions.',
+    expectedPathGroups: [['package.json'], ['src/App.tsx', 'src/App.jsx'], ['src/styles.css']],
+    requiredText: ['folder', 'upload', 'storage', 'quota', 'rename', 'drag', 'UploadThing'],
+    forbiddenText: ['what features', 'what would you like'],
+    preview: true,
+    animationCheck: { minAnimatedElements: 2 },
+    followUps: [
+      {
+        label: 'add-search-bar',
+        prompt: 'Add a search bar that filters files and folders by name in real time, highlighting matches.',
+        expect: ['search', 'filter', 'highlight'],
+        forbiddenText: ['what would you like', 'clarify'],
+        requireProjectUpdate: true,
+      },
+    ],
+  },
+  {
+    slug: 'roundest-pokemon-vote',
+    sourceRepo: 'https://github.com/t3dotgg/roundest-mon',
+    prompt: 'Build the first runnable preview of a Pokémon roundness voting app. Do not ask follow-up questions. The preview must visibly include two Pokémon images side by side for comparison, a vote button under each one, a running vote tally, a leaderboard sorted by vote percentage, a total votes counter, and the heading Which Pokémon is Rounder?',
+    expectedPathGroups: [['package.json'], ['src/App.tsx', 'src/App.jsx'], ['src/styles.css']],
+    requiredText: ['rounder', 'vote', 'leaderboard', 'Pokémon', 'percentage', 'tally'],
+    forbiddenText: ['what features', 'what would you like'],
+    preview: true,
+    followUps: [
+      {
+        label: 'add-skip-button',
+        prompt: 'Add a skip button that loads a new pair without recording a vote, and show a skip count in the stats.',
+        expect: ['skip', 'pair', 'stats'],
+        forbiddenText: ['what would you like', 'clarify'],
+        requireProjectUpdate: true,
+      },
+    ],
+  },
+  {
+    slug: 'server-actions-vs-trpc',
+    sourceRepo: 'https://github.com/t3dotgg/server-actions-trpc-examples',
+    prompt: 'Build a runnable interactive comparison explorer for Next.js Server Actions versus tRPC. Do not ask follow-up questions. The preview must include side-by-side code panels showing the same mutation written three ways — Server Action, tRPC mutation, and raw fetch — a feature matrix table covering type safety, streaming, mutation, form support, and bundle size, winner badges per row, and a recommendation guide for which approach fits different project types.',
+    expectedPathGroups: [['package.json'], ['src/App.tsx', 'src/App.jsx'], ['src/styles.css']],
+    requiredText: ['Server Actions', 'tRPC', 'type safety', 'streaming', 'mutation', 'recommendation'],
+    forbiddenText: ['what features', 'what would you like'],
+    preview: true,
+    followUps: [
+      {
+        label: 'add-real-time-row',
+        prompt: 'Add a real-time subscriptions row to the feature matrix showing how each approach handles live updates.',
+        expect: ['real-time', 'subscription', 'matrix'],
+        forbiddenText: ['what would you like', 'clarify'],
+        requireProjectUpdate: true,
+      },
+    ],
+  },
+  {
+    slug: 'react-compiler-perf-demo',
+    sourceRepo: 'https://github.com/t3dotgg/compiler-perf-demo',
+    prompt: 'Build a runnable before-and-after performance demo for the React Compiler. Do not ask follow-up questions. The preview must visibly include two component trees labelled Without Compiler and With Compiler, a render count badge on each component that increments on re-render, a stress-test button that triggers many re-renders, a flamegraph-style timeline panel, memoisation savings statistics, and an explanation note that the compiler replaces manual useMemo and useCallback.',
+    expectedPathGroups: [['package.json'], ['src/App.tsx', 'src/App.jsx'], ['src/styles.css']],
+    requiredText: ['React Compiler', 'Without Compiler', 'With Compiler', 'render', 'useMemo', 'memoisation'],
+    forbiddenText: ['what features', 'what would you like'],
+    preview: true,
+    animationCheck: { minAnimatedElements: 2 },
+  },
+  {
+    slug: 'electron-turborepo-dashboard',
+    sourceRepo: 'https://github.com/t3dotgg/yerba',
+    prompt: 'Build the first runnable preview of an Electron Turborepo monorepo starter dashboard. Do not ask follow-up questions. The preview must visibly include a Next.js web app workspace card, an Electron desktop app workspace card, a shared TypeScript packages list, a Turbo pipeline status panel with build, dev, and lint task indicators, a pnpm workspace tree view, and setup commands for each workspace.',
+    expectedPathGroups: [['package.json'], ['src/App.tsx', 'src/App.jsx'], ['src/styles.css']],
+    requiredText: ['Electron', 'Turborepo', 'Next.js', 'workspace', 'pnpm', 'pipeline'],
+    forbiddenText: ['what features', 'what would you like'],
+    preview: true,
+    followUps: [
+      {
+        label: 'add-build-log',
+        prompt: 'Add a live build log panel that streams fake Turbo build output line by line for the selected workspace.',
+        expect: ['build', 'log', 'stream'],
+        forbiddenText: ['what would you like', 'clarify'],
+        requireProjectUpdate: true,
+      },
+    ],
+  },
+  {
+    slug: 'paycheck-tweet-extension',
+    sourceRepo: 'https://github.com/t3dotgg/paycheck-extension',
+    prompt: 'Create a Chrome extension popup that estimates how much a tweet or social post is worth based on follower count and engagement. Do not ask follow-up questions. Return manifest.json, popup.html, and the popup script. The popup must visibly include a follower count input, an engagement rate slider, a calculated earnings range output, a CPM assumption note, a platform selector for Twitter and LinkedIn, and a copy result button.',
+    expectedPathGroups: [['manifest.json'], ['popup.html', 'src/popup.tsx'], ['package.json']],
+    requiredText: ['follower', 'engagement', 'earnings', 'CPM', 'popup', 'copy'],
+    forbiddenText: ['what features', 'what would you like'],
+    preview: false,
+    followUps: [
+      {
+        label: 'add-youtube-platform',
+        prompt: 'Add YouTube as a third platform option with a view-count-based earnings formula.',
+        expect: ['YouTube', 'view', 'earnings'],
+        forbiddenText: ['what would you like', 'clarify'],
+      },
+    ],
+  },
+  {
     slug: 'safe-material-code-theme',
     sourceRepo: 'https://github.com/t3dotgg/vsc-material-but-i-wont-sue-you',
     prompt: 'Create a complete VS Code color theme extension for a safe Material-inspired dark theme that avoids copying protected branding. Return package.json plus a theme JSON file. It needs editor foreground/background colors, activity bar/sidebar colors, token colors for strings/functions/classes/comments, and marketplace metadata.',
@@ -156,6 +275,7 @@ async function loadBlindSpecs(specFile) {
       ...check,
       pattern: new RegExp(check.pattern, check.flags ?? ''),
     })),
+    sourceLeakPattern: spec.sourceLeakPattern ? new RegExp(spec.sourceLeakPattern, 'i') : undefined,
   }));
 }
 
@@ -279,7 +399,9 @@ function extractTitledPaths(content) {
 }
 
 function expectedPathGroups(spec) {
-  return spec.expectedPathGroups ?? spec.expectedPaths.map((filePath) => [filePath]);
+  if (Array.isArray(spec.expectedPathGroups)) return spec.expectedPathGroups;
+  if (Array.isArray(spec.expectedPaths)) return spec.expectedPaths.map((filePath) => [filePath]);
+  return [];
 }
 
 function expectedPathCandidates(spec) {
@@ -290,7 +412,7 @@ function formatPathGroup(group) {
   return group.join(' or ');
 }
 
-function scoreResponse(spec, content, sourceLeakPattern = DEFAULT_SOURCE_LEAK_PATTERN) {
+function scoreResponse(spec, content, sourceLeakPattern = DEFAULT_SOURCE_LEAK_PATTERN, options = {}) {
   const paths = extractTitledPaths(content);
   const failures = [];
   const warnings = [];
@@ -300,21 +422,63 @@ function scoreResponse(spec, content, sourceLeakPattern = DEFAULT_SOURCE_LEAK_PA
       failures.push(`missing file block ${formatPathGroup(group)}`);
     }
   }
-  for (const required of spec.requiredText) {
+  for (const required of spec.requiredText ?? []) {
     if (!content.toLowerCase().includes(required.toLowerCase())) failures.push(`missing required response text ${required}`);
   }
   for (const forbidden of spec.forbiddenText ?? []) {
     if (content.toLowerCase().includes(forbidden.toLowerCase())) failures.push(`response contains wrong-archetype text ${forbidden}`);
   }
+
+  // Clarification / file-request detection — Vai should build, not ask
   if (/tell me more|what would you like|send `src\/App|need the current page|I can edit the active app/i.test(content)) {
     failures.push('response looks like a clarification/file-request instead of a build');
   }
-  if (sourceLeakPattern.test(content)) {
+  if (/what (?:features|functionality|do you want|would you like to see|should i (?:focus|include|add)|kind of app)/i.test(content)) {
+    failures.push('response asks for feature specification instead of building');
+  }
+  if (/(?:let me know (?:what|if)|please (?:specify|clarify|provide)|can you (?:tell|describe|clarify) (?:me |more )?(?:about|what))/i.test(content)) {
+    failures.push('response defers with clarification request instead of building');
+  }
+
+  // Warn when the response contains no fenced code blocks (expected for every build)
+  if (options.warnOnShort !== false && spec.requireCodeBlock !== false) {
+    const codeBlockOpeners = (content.match(/^```/gm) ?? []).length;
+    if (codeBlockOpeners < 1) {
+      warnings.push('response has no fenced code blocks — expected runnable file output');
+    }
+  }
+
+  // Per-spec source leak pattern overrides the suite-level default
+  const effectiveLeakPattern = spec.sourceLeakPattern ?? sourceLeakPattern;
+  if (effectiveLeakPattern.test(content)) {
     warnings.push('response leaked source repository identity');
   }
-  if (content.length < 700) warnings.push('short response for a blind rebuild request');
+
+  if (options.warnOnShort !== false && content.length < 700) warnings.push('short response for a blind rebuild request');
 
   return { paths, failures, warnings };
+}
+
+function scoreFollowUp(spec, followUp, content, sourceLeakPattern = DEFAULT_SOURCE_LEAK_PATTERN) {
+  const quality = scoreResponse({
+    expectedPathGroups: followUp.expectedPathGroups ?? [],
+    expectedPaths: followUp.expectedPaths ?? [],
+    requiredText: followUp.requiredText ?? followUp.expect ?? [],
+    forbiddenText: followUp.forbiddenText ?? [],
+    requiredFilePatterns: [],
+  }, content, sourceLeakPattern, { warnOnShort: false });
+
+  if (followUp.maxLength && content.length > followUp.maxLength) {
+    quality.failures.push(`follow-up response exceeded maxLength ${followUp.maxLength}`);
+  }
+  if (followUp.requireBulletCount) {
+    const bulletCount = String(content).split('\n').filter((line) => /^\s*(?:[-*]|\d+\.)\s+/.test(line)).length;
+    if (bulletCount < followUp.requireBulletCount) {
+      quality.failures.push(`follow-up response had ${bulletCount} bullets, expected at least ${followUp.requireBulletCount}`);
+    }
+  }
+
+  return quality;
 }
 
 async function waitForConversationSandboxId(apiUrl, page, conversationId, timeoutMs) {
@@ -463,6 +627,14 @@ async function auditPreview(browser, outputDir, spec, sandbox) {
   if (spec.slug.includes('tool') && dom.inputCount < 1) failures.push('tool preview has no input/upload control');
   if (consoleErrors.length > 0) failures.push(`preview console errors: ${consoleErrors.slice(0, 3).join(' | ')}`);
 
+  // Animation-specific DOM audit: specs can declare { animationCheck: { minAnimatedElements: N } }
+  if (spec.animationCheck?.minAnimatedElements != null) {
+    const min = spec.animationCheck.minAnimatedElements;
+    if (dom.animatedCount < min) {
+      failures.push(`preview has ${dom.animatedCount} animated elements, expected at least ${min}`);
+    }
+  }
+
   return { url, screenshotPath, dom, consoleErrors, failures };
 }
 
@@ -500,6 +672,7 @@ async function main() {
       const startedAt = Date.now();
       const result = {
         slug: spec.slug,
+        family: spec.family ?? null,
         sourceRepo: spec.sourceRepo,
         prompt: spec.prompt,
         status: 'unknown',
@@ -511,6 +684,7 @@ async function main() {
         responseQuality: null,
         fileQuality: null,
         preview: null,
+        followUps: [],
         durationMs: null,
       };
       results.push(result);
@@ -595,6 +769,42 @@ async function main() {
           result.warnings.push('no sandbox binding observed');
         }
 
+        for (const followUp of spec.followUps ?? []) {
+          const beforeFollowUpMessageCount = result.conversationId
+            ? await getConversationMessageCount(options.apiUrl, result.conversationId)
+            : 0;
+          const { state: followState, latestAssistant: followAssistant } = await sendPrompt(
+            page,
+            followUp.prompt,
+            followUp.timeoutMs ?? Math.min(options.timeoutMs, 120_000),
+          );
+          result.conversationId = followState.activeConversationId || result.conversationId;
+          const followUpEntry = {
+            label: followUp.label ?? followUp.prompt,
+            prompt: followUp.prompt,
+            response: followAssistant?.content ?? '',
+            quality: null,
+            projectUpdate: null,
+          };
+          followUpEntry.quality = scoreFollowUp(spec, followUp, followUpEntry.response, options.sourceLeakPattern);
+          result.followUps.push(followUpEntry);
+          result.failures.push(...followUpEntry.quality.failures.map((failure) => `[follow-up:${followUpEntry.label}] ${failure}`));
+          result.warnings.push(...followUpEntry.quality.warnings.map((warning) => `[follow-up:${followUpEntry.label}] ${warning}`));
+
+          if (followUp.requireProjectUpdate && result.conversationId) {
+            const followArtifact = await waitForProjectUpdateArtifact(
+              options.apiUrl,
+              result.conversationId,
+              beforeFollowUpMessageCount,
+              Math.min(followUp.timeoutMs ?? options.timeoutMs, 90_000),
+            ).catch(() => null);
+            followUpEntry.projectUpdate = followArtifact ? String(followArtifact.content ?? '') : null;
+            if (!followArtifact) {
+              result.failures.push(`[follow-up:${followUpEntry.label}] expected a project update artifact after the edit prompt`);
+            }
+          }
+        }
+
         result.status = result.failures.length === 0 ? 'pass' : 'fail';
       } catch (error) {
         result.status = 'error';
@@ -624,10 +834,16 @@ async function main() {
     reportPath: path.join(options.outputDir, 'report.json'),
     results: results.map((result) => ({
       slug: result.slug,
+      family: result.family,
       sourceRepo: result.sourceRepo,
       status: result.status,
       failures: result.failures,
       warnings: result.warnings,
+      followUps: result.followUps.map((followUp) => ({
+        label: followUp.label,
+        failures: followUp.quality?.failures ?? [],
+        warnings: followUp.quality?.warnings ?? [],
+      })),
       conversationId: result.conversationId,
       sandboxId: result.sandboxId,
       previewUrl: result.preview?.url ?? null,

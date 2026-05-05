@@ -17,18 +17,22 @@
  */
 
 import { spawn, execSync } from 'node:child_process';
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 const RUNTIME_DIR = join(ROOT, 'packages', 'runtime');
+const ARTIFACT_DIR = join(ROOT, '.codex-run');
+const SERVER_OUT_LOG = join(ARTIFACT_DIR, 'vai-server.out.log');
+const SERVER_ERR_LOG = join(ARTIFACT_DIR, 'vai-server.err.log');
 const PID_FILE = join(ROOT, '.vai-server.pid');
 const PORT = 3006;
 const HEALTH_URL = `http://localhost:${PORT}/health`;
-const STARTUP_TIMEOUT_MS = 30_000;
+const STARTUP_TIMEOUT_MS = Number.parseInt(process.env.VAI_STARTUP_TIMEOUT_MS || '60000', 10);
 const KILL_GRACE_MS = 5_000;
+const TSX_CLI = join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -182,37 +186,28 @@ async function startServer() {
 
   log('Starting VAI server...');
 
-  const child = spawn('npx', ['tsx', 'src/index.ts'], {
+  mkdirSync(ARTIFACT_DIR, { recursive: true });
+  const stdoutFd = openSync(SERVER_OUT_LOG, 'a');
+  const stderrFd = openSync(SERVER_ERR_LOG, 'a');
+  const child = spawn(process.execPath, [TSX_CLI, 'src/index.ts'], {
     cwd: RUNTIME_DIR,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', stdoutFd, stderrFd],
     detached: true,
-    shell: true,
     env: { ...process.env, VAI_PORT: String(PORT) },
   });
 
   child.unref();
+  closeSync(stdoutFd);
+  closeSync(stderrFd);
 
   // Save PID
   writePid(child.pid);
   log(`Server process started (PID ${child.pid})`);
-
-  // Stream stdout/stderr during startup
-  let startupOutput = '';
-  const collectOutput = (data) => {
-    const text = data.toString();
-    startupOutput += text;
-    process.stdout.write(text);
-  };
-  child.stdout?.on('data', collectOutput);
-  child.stderr?.on('data', collectOutput);
+  log(`Runtime logs: ${SERVER_OUT_LOG}`);
 
   // Wait for health check
   log(`Waiting for server to be ready on port ${PORT}...`);
   const health = await healthCheck();
-
-  // Stop collecting output
-  child.stdout?.removeListener('data', collectOutput);
-  child.stderr?.removeListener('data', collectOutput);
 
   if (health) {
     const stats = health.stats;

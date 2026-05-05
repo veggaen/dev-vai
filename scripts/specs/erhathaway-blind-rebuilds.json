@@ -41,6 +41,79 @@
         { "paths": ["src/index.tsx", "src/index.ts"], "pattern": "page|cursor|next|previous|pagination", "flags": "i", "label": "pagination controls" }
       ],
       "preview": false
+    },
+    {
+      "slug": "cellular-automata-explorer",
+      "sourceRepo": "https://github.com/erhathaway/cellular_automata",
+      "prompt": "Build the first runnable preview of a browser cellular automaton explorer. Do not ask follow-up questions. The preview must visibly include a canvas that renders a Game of Life or similar cellular automaton in real time, play, pause, step-once, and reset controls, a speed slider, a grid size selector, a seeded pattern picker with at least Glider, Blinker, Pulsar, and random fill options, and a live generation counter.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["automaton", "Glider", "Blinker", "Pulsar", "generation", "play", "step"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 1 },
+      "followUps": [
+        {
+          "label": "add-draw-mode",
+          "prompt": "Add a draw mode where the user can click or drag on the canvas to toggle cells on or off while the simulation is paused.",
+          "expect": ["draw", "click", "toggle"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "slug": "elasticsearch-query-composer",
+      "sourceRepo": "https://github.com/erhathaway/elastic-composer",
+      "prompt": "Build the first runnable preview of a high-level Elasticsearch query manager and executor. Do not ask follow-up questions. The preview must visibly include a field filter panel where the user adds filter conditions with field, operator, and value inputs, a search suggestions panel with autocomplete chips, a paginated results list with a page size selector, a raw Elasticsearch query preview that updates as filters change, a sort control, a date range filter, and an index selector.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Elasticsearch", "filter", "pagination", "query", "index", "sort", "suggestion"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-aggregation-panel",
+          "prompt": "Add a bucket aggregation panel showing the top five values for any selected field alongside the filtered results.",
+          "expect": ["aggregation", "bucket", "field"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "slug": "url-query-state-manager",
+      "sourceRepo": "https://github.com/erhathaway/query-params-data",
+      "prompt": "Build a runnable URL query params state manager demo. Do not ask follow-up questions. The preview must visibly include a product list where every filter and sort preference is stored in URL search params, a filters sidebar with text search, category checkboxes, and a price range, a share button that copies the current URL, a reset button that clears all params, and a code panel comparing the query-params-data store pattern with plain useState to show why URL state is better for shareable links.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["query params", "URL", "filter", "share", "reset", "store"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-history-back-support",
+          "prompt": "Make the browser back button restore the previous filter state by preserving each change as a distinct history entry.",
+          "expect": ["history", "back", "filter"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "slug": "graphql-relay-connections",
+      "sourceRepo": "https://github.com/erhathaway/graphql-connections",
+      "prompt": "Build a runnable Relay-style GraphQL connections explorer. Do not ask follow-up questions. The preview must visibly include a paginated list that uses cursor-based pagination, a connection edges and nodes panel, a pageInfo block showing hasNextPage, hasPreviousPage, and endCursor, a Knex-like SQL query preview showing how the connection resolver translates to a SQL LIMIT and OFFSET or keyset query, an interactive page size selector, and forward and backward navigation buttons.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["GraphQL", "cursor", "pagination", "edges", "nodes", "pageInfo", "hasNextPage"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-total-count-field",
+          "prompt": "Add a totalCount field to the connection response and show it as a result count badge above the list.",
+          "expect": ["totalCount", "count", "badge"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
     }
   ]
 }

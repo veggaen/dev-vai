@@ -1,0 +1,123 @@
+{
+  "suiteName": "animation",
+  "sourceLeakPattern": "cssanimation\\.io|yesiamrocks|pixelgridui|daneden|animate\\.css|michalsnik|juliangarnier|binbandit",
+  "specs": [
+    {
+      "family": "web-animation",
+      "slug": "css-animation-library-playground",
+      "sourceRepo": "https://github.com/daneden/animate.css",
+      "artifactType": "app",
+      "prompt": "Build a runnable CSS animation library playground. Do not ask follow-up questions. The preview must visibly include a search bar that filters by animation name, category tabs for Entrances, Exits, and Attention Seekers, a live preview stage where each selected animation plays on a target element, a copy class name button, timing duration and iteration count controls, a reduced-motion toggle, and a delay slider.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["entrance", "exit", "attention", "copy", "timing", "reduced motion"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 4 },
+      "followUps": [
+        {
+          "label": "add-custom-keyframe",
+          "prompt": "Add a custom keyframe editor tab where the user can write raw @keyframes CSS and preview it live on the stage element.",
+          "expect": ["@keyframes", "custom", "preview"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "web-animation",
+      "slug": "scroll-reveal-showcase",
+      "sourceRepo": "https://github.com/michalsnik/aos",
+      "artifactType": "app",
+      "prompt": "Build a runnable scroll reveal animation showcase. Do not ask follow-up questions. The page must include at least five pinned scroll sections where elements fade or slide in as the user scrolls, a scroll progress bar at the top, parallax depth layers behind the content, staggered child item entrances, an easing selector, an offset and threshold control panel, and a performance note crediting IntersectionObserver over scroll event listeners.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["scroll", "reveal", "parallax", "IntersectionObserver", "progress", "stagger"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 5 },
+      "followUps": [
+        {
+          "label": "add-reset-scroll",
+          "prompt": "Add a reset button that jumps the page back to the top and replays all reveal animations.",
+          "expect": ["reset", "scroll", "replay"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "web-animation",
+      "slug": "text-effects-playground",
+      "sourceRepo": "https://github.com/topics/web-animation?l=css&o=desc&s=",
+      "artifactType": "app",
+      "prompt": "Build a runnable text animation effects playground. Do not ask follow-up questions. It must include a live text input, at least six animation presets — typewriter, gradient color shift, split-letter bounce, glitch scramble, wave ripple, and neon pulse — a live preview stage, speed and color controls, a copy CSS keyframes button, and a reduced-motion graceful fallback panel.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["typewriter", "gradient", "glitch", "wave", "keyframe", "reduced motion"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 4 },
+      "followUps": [
+        {
+          "label": "add-stagger-mode",
+          "prompt": "Add a stagger mode that applies the selected animation to each letter individually with a configurable delay between letters.",
+          "expect": ["stagger", "letter", "delay"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "web-animation",
+      "slug": "3d-css-card-kit",
+      "sourceRepo": "https://github.com/topics/web-animation?l=css&o=desc&s=",
+      "artifactType": "app",
+      "prompt": "Build a runnable 3D CSS card interaction kit. Do not ask follow-up questions. The preview must include perspective hover effects that tilt cards based on mouse position, a dynamic depth shadow system, front-and-back face card flip, a stacked deck expand on click, a controls panel with perspective distance and tilt sensitivity sliders, and a copy snippet button that exports the CSS for the selected card style.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["perspective", "3D", "hover", "tilt", "flip", "depth"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 3 },
+      "followUps": [
+        {
+          "label": "add-foil-gradient",
+          "prompt": "Add a holographic foil gradient layer that shifts hue based on mouse position when hovering a card.",
+          "expect": ["gradient", "hue", "hover"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "web-animation",
+      "slug": "creative-cursor-effects",
+      "sourceRepo": "https://github.com/topics/web-animation?l=css&o=desc&s=",
+      "artifactType": "app",
+      "prompt": "Build a runnable creative cursor effects showcase. Do not ask follow-up questions. It must include at least five distinct cursor modes — magnetic snap to nearest button, particle trail, radial spotlight, morphing shape, and spring physics lag — a mode switcher panel, a canvas or pointer-events overlay that follows the real cursor, a lag and spring tension control, and a copy snippet action for the selected cursor style.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["cursor", "magnetic", "trail", "spotlight", "spring", "lag"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 2 }
+    },
+    {
+      "family": "web-animation",
+      "slug": "loading-skeleton-design-system",
+      "sourceRepo": "https://github.com/topics/web-animation?l=css&o=desc&s=",
+      "artifactType": "app",
+      "prompt": "Build a runnable skeleton loading animation design system. Do not ask follow-up questions. It must include three animation variants — shimmer, pulse, and wave — skeleton placeholder layouts for a card, a list row, a table, and a profile header, speed and delay controls, a toggle that reveals the real content underneath, a dark mode switch, and accessibility notes covering aria-busy, role, and reduced motion preferences.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["skeleton", "shimmer", "pulse", "aria-busy", "reduced motion", "dark"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 3 },
+      "followUps": [
+        {
+          "label": "add-data-table-skeleton",
+          "prompt": "Add a data table skeleton variant with configurable row count and column widths, matching the existing shimmer animation.",
+          "expect": ["table", "row", "column", "skeleton"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    }
+  ]
+}

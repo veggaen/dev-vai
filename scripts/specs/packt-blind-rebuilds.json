@@ -1,0 +1,160 @@
+{
+  "suiteName": "packt",
+  "sourceLeakPattern": "packtpublishing|github\\.com/PacktPublishing",
+  "specs": [
+    {
+      "family": "packt",
+      "slug": "react-typescript-task-board",
+      "sourceRepo": "https://github.com/PacktPublishing/Full-Stack-React-TypeScript-and-Node",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a React TypeScript task board, the kind of application that would appear as a book companion for a full-stack React and TypeScript guide. Do not ask follow-up questions. The preview must visibly include typed task cards with three status columns labeled To Do, In Progress, and Done, a drag-ready column layout, a TypeScript interface badge or code panel, a new task form with field validation, filter controls by priority or assignee, and a sidebar with mock project stats and a sprint progress bar.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["TypeScript", "task", "To Do", "In Progress", "filter", "sprint"],
+      "forbiddenText": ["what features", "what would you like", "tell me more"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 2 },
+      "followUps": [
+        {
+          "label": "add-priority-badge",
+          "prompt": "Add a coloured priority badge to each task card — Critical, High, Medium, Low — without changing the column layout.",
+          "expect": ["priority", "badge", "task"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "packt",
+      "slug": "node-rest-api-explorer",
+      "sourceRepo": "https://github.com/PacktPublishing/Node.js-Web-Development",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of an Express Node.js REST API explorer, the kind of demo shipped with a Node.js web development book. Do not ask follow-up questions. It must visibly include an endpoint catalog with mock GET, POST, PUT, DELETE routes, a request builder panel with headers and body fields, a response viewer with status code badge, a middleware pipeline diagram showing auth and rate-limit layers, an error-shape reference, and environment variable setup notes for PORT and DATABASE_URL.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Express", "endpoint", "middleware", "rate limit", "DATABASE_URL", "status code"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-auth-header-flow",
+          "prompt": "Now add a Bearer token auth header to the request builder and show a 401 response example in the response viewer.",
+          "expect": ["Bearer", "401", "auth"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "packt",
+      "slug": "graphql-schema-explorer",
+      "sourceRepo": "https://github.com/PacktPublishing/Hands-On-Full-Stack-Web-Development-with-GraphQL-and-React",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a GraphQL schema explorer and query builder, the kind companion app for a hands-on GraphQL and React book. Do not ask follow-up questions. It must visibly include a schema type browser on the left, a query editor with syntax highlighting mock, a mock resolver execution result pane, a subscription status indicator, mutation examples with variable panels, and a type relationship diagram.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["GraphQL", "schema", "query", "mutation", "subscription", "resolver"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-variables-panel",
+          "prompt": "Keep the same app but make the variables panel collapsible and add JSON syntax validation feedback.",
+          "expect": ["variable", "JSON", "collapse"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "packt",
+      "slug": "react-hooks-pattern-gallery",
+      "sourceRepo": "https://github.com/PacktPublishing/React-Hooks",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a React Hooks pattern gallery, the kind of interactive companion shipped with a React Hooks programming book. Do not ask follow-up questions. The preview must visibly include a useEffect lifecycle visualizer with mount, update, and cleanup phases, a custom hook composition demo, a useReducer state machine card, a useContext theme switcher, a useMemo and useCallback performance comparison panel, and a dependency graph viewer.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["useEffect", "useReducer", "useContext", "custom hook", "useMemo", "dependency"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 2 }
+    },
+    {
+      "family": "packt",
+      "slug": "nextjs-fullstack-storefront",
+      "sourceRepo": "https://github.com/PacktPublishing/Real-World-Next.js",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a Next.js full-stack storefront book companion demonstrating real-world patterns. Do not ask follow-up questions. It must visibly include a product grid with seeded mock data, app-router navigation breadcrumbs, server component and client component status badges, an ISR vs SSR strategy selector with description cards, a cart state panel, an image optimisation note referencing next/image, and a deployment status area with Vercel and self-host options.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Next.js", "product", "server component", "ISR", "cart", "next/image"],
+      "forbiddenText": ["what features", "what would you like", "Custom storefront"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-wishlist",
+          "prompt": "Add a wishlist toggle to each product card that persists in localStorage, without changing the storefront layout.",
+          "expect": ["wishlist", "localStorage", "product"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "packt",
+      "slug": "webgl-3d-graphics-demo",
+      "sourceRepo": "https://github.com/PacktPublishing/Real-Time-3D-Graphics-with-WebGL-2",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a real-time 3D graphics playground using WebGL 2, the kind of interactive demo that accompanies a book on WebGL. Do not ask follow-up questions. The preview must visibly include a WebGL canvas rendering a rotating 3D object, shader control sliders for ambient light intensity and diffuse colour, a wireframe toggle, a camera orbit control description, a geometry selector with cube, sphere, and torus options, and a vertex and fragment shader code display panel with syntax highlighting.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["WebGL", "shader", "vertex", "fragment", "geometry", "ambient", "diffuse"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 2 },
+      "followUps": [
+        {
+          "label": "add-texture-upload",
+          "prompt": "Add a texture upload panel that lets the user drag in an image and apply it to the 3D object as a UV-mapped texture.",
+          "expect": ["texture", "upload", "UV"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "packt",
+      "slug": "vue3-design-patterns-gallery",
+      "sourceRepo": "https://github.com/PacktPublishing/Vue.js-3-Design-Patterns-and-Best-Practices",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a Vue.js 3 design patterns gallery, the kind of interactive companion shipped with a Vue design patterns book. Do not ask follow-up questions. The preview must visibly include pattern cards for Composable, Headless Component, Provider Pattern, Renderless Component, and Plugin, a live interactive demo for each pattern, a code snippet panel per pattern, a comparison note for Vue 2 Options API versus Vue 3 Composition API, and a search filter.",
+      "expectedPathGroups": [["package.json"], ["src/App.vue", "src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Vue", "Composable", "Plugin", "Composition API", "Options API", "Renderless"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-teleport-pattern",
+          "prompt": "Add a Teleport pattern card demonstrating Vue's Teleport component with a modal that renders outside the component tree.",
+          "expect": ["Teleport", "modal", "component tree"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "packt",
+      "slug": "fullstack-go-react-dashboard",
+      "sourceRepo": "https://github.com/PacktPublishing/Full-Stack-Web-Development-with-Go",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a full-stack Go and React dashboard, the kind of companion app for a Go web development book. Do not ask follow-up questions. The preview must visibly include a React frontend with a data table fed by mock Go API endpoints, an API health check panel showing endpoint status, a GORM database status card, a Gin router endpoint explorer listing routes with methods and paths, a JWT auth flow diagram, and environment setup notes for PORT, DATABASE_URL, and JWT_SECRET.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Go", "React", "Gin", "GORM", "JWT", "DATABASE_URL", "endpoint"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-middleware-chain",
+          "prompt": "Add a middleware chain visualiser showing how Gin middleware layers wrap each request before reaching the handler.",
+          "expect": ["middleware", "chain", "Gin"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,660 @@
+{
+  "specs": [
+    {
+      "family": "t3dotgg",
+      "slug": "client-image-export-tool",
+      "sourceRepo": "https://github.com/t3dotgg/quickpic",
+      "artifactType": "app",
+      "prompt": "Build a client-only image utility app. It should help users turn SVGs into high-resolution PNGs in two clicks and also make uploaded images square. The first preview must visibly include drag-and-drop upload, SVG to PNG export, scale choices, square crop or padding controls, and a download action.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["SVG", "PNG", "Download", "Square", "upload"],
+      "forbiddenText": ["Product Draft", "Shared Shopping List"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "tool-polish",
+          "prompt": "Keep the same tool, but make the upload panel clearer and the export controls more prominent. Do not turn it into a landing page.",
+          "expect": ["upload", "export", "download"],
+          "forbiddenText": ["what would you like", "marketing page"]
+        }
+      ]
+    },
+    {
+      "family": "t3dotgg",
+      "slug": "full-stack-image-gallery",
+      "sourceRepo": "https://github.com/t3dotgg/t3gallery",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a full-stack image gallery product. It should feel like a modern app-router gallery with mock auth, upload flow, image grid, image detail route preview, database or status panel, error monitoring badges, and analytics events. Use seeded images and make the preview visibly include Gallery, Upload, Auth, Database, and Analytics.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Gallery", "Upload", "Auth", "Database", "Analytics"],
+      "forbiddenText": ["Custom storefront", "Cart summary"],
+      "preview": true
+    },
+    {
+      "family": "t3dotgg",
+      "slug": "one-app-five-stacks",
+      "sourceRepo": "https://github.com/t3dotgg/1app5stacks",
+      "artifactType": "app",
+      "prompt": "Build a comparison explorer for one product implemented in five different stacks. The preview must include tabs or cards for Ruby on Rails, Elixir Phoenix, Go plus GraphQL plus React SPA, classic Next.js/T3 stack, and Next.js app-router or RSC. Include line-of-code comparison, deployment links as mock data, and a tradeoff matrix.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Ruby on Rails", "Elixir", "GraphQL", "T3", "RSC", "line of code"],
+      "preview": true
+    },
+    {
+      "family": "t3dotgg",
+      "slug": "safe-material-code-theme",
+      "sourceRepo": "https://github.com/t3dotgg/vsc-material-but-i-wont-sue-you",
+      "artifactType": "theme-extension",
+      "prompt": "Create a complete VS Code color theme extension for a safe Material-inspired dark theme that avoids copying protected branding. Return package.json plus a theme JSON file. It needs editor foreground and background colors, activity bar and sidebar colors, token colors for strings, functions, classes, and comments, plus marketplace metadata.",
+      "expectedPathGroups": [["package.json"], ["themes/safe-material-color-theme.json", "themes/material-safe-color-theme.json", "safe-material-color-theme.json"]],
+      "requiredText": ["color-theme", "Material", "tokenColors", "activityBar", "editor.background"],
+      "requiredFilePatterns": [
+        { "paths": ["package.json"], "pattern": "\"contributes\"\\s*:\\s*\\{[\\s\\S]*\"themes\"", "label": "VS Code theme contribution" },
+        { "paths": ["themes/safe-material-color-theme.json", "themes/material-safe-color-theme.json", "safe-material-color-theme.json"], "pattern": "\"tokenColors\"\\s*:\\s*\\[", "label": "token color array" }
+      ],
+      "preview": false
+    },
+    {
+      "family": "juliusmarminge",
+      "slug": "developer-defaults-cli",
+      "sourceRepo": "https://github.com/juliusmarminge/good-defaults",
+      "artifactType": "cli",
+      "prompt": "Create a runnable TypeScript CLI tool that scaffolds good project defaults. It should use an interactive prompt, let users select ESLint plus Prettier, VS Code settings and recommended extensions, strict TSConfig, and GitHub Actions CI with pnpm caching. Include the bin entry, CLI source, template writers, and an example generated workflow.",
+      "expectedPathGroups": [["package.json"], ["src/cli.ts", "src/index.ts"], ["src/templates.ts", "src/templates/index.ts"], [".github/workflows/ci.yml"]],
+      "requiredText": ["CLI", "ESLint", "Prettier", "VS Code", "TSConfig", "GitHub Actions", "pnpm"],
+      "requiredFilePatterns": [
+        { "paths": ["package.json"], "pattern": "\"bin\"\\s*:", "label": "CLI bin entry" },
+        { "paths": ["src/cli.ts", "src/index.ts"], "pattern": "select|prompt|checkbox|confirm", "flags": "i", "label": "interactive CLI prompt" }
+      ],
+      "preview": false,
+      "followUps": [
+        {
+          "label": "non-interactive-flag",
+          "prompt": "Now add a --yes flag that accepts the recommended defaults without interactive prompts.",
+          "expect": ["--yes", "defaults"],
+          "forbiddenText": ["what would you like", "send me"]
+        }
+      ]
+    },
+    {
+      "family": "juliusmarminge",
+      "slug": "python-upload-sdk-fastapi",
+      "sourceRepo": "https://github.com/juliusmarminge/uploadthing-py",
+      "artifactType": "python-sdk",
+      "prompt": "Create an unofficial Python SDK package for a file-upload service. It must include pyproject metadata, an async UTApi client with list_files and delete_file, typed models, a FastAPI route-handler adapter, CORS example, environment variable usage, and a quickstart script.",
+      "expectedPathGroups": [["pyproject.toml"], ["uploadthing_py/__init__.py"], ["uploadthing_py/client.py"], ["uploadthing_py/fastapi.py"], ["examples/fastapi_app.py", "examples/quickstart.py"]],
+      "requiredText": ["UTApi", "FastAPI", "list_files", "delete_file", "UPLOADTHING_SECRET", "CORS", "async"],
+      "requiredFilePatterns": [
+        { "paths": ["uploadthing_py/client.py"], "pattern": "async\\s+def\\s+(?:list_files|delete_file)", "label": "async client methods" },
+        { "paths": ["uploadthing_py/fastapi.py", "examples/fastapi_app.py"], "pattern": "FastAPI|APIRouter|Request|Response", "label": "FastAPI adapter" }
+      ],
+      "preview": false
+    },
+    {
+      "family": "juliusmarminge",
+      "slug": "tailwind-canonical-vscode-extension",
+      "sourceRepo": "https://github.com/juliusmarminge/tailwind-autofix-canonical-classnames",
+      "artifactType": "vscode-extension",
+      "prompt": "Create a VS Code extension that auto-fixes Tailwind CSS canonical class suggestions on save. It must listen to Tailwind CSS IntelliSense diagnostics shaped like 'The class ... can be written as ...', replace the class before save, expose a tailwindCanonicalClasses.fixOnSave setting, and include extension package metadata.",
+      "expectedPathGroups": [["package.json"], ["src/extension.ts"], ["README.md"]],
+      "requiredText": ["Tailwind", "canonical", "diagnostics", "fixOnSave", "VS Code", "on save"],
+      "requiredFilePatterns": [
+        { "paths": ["package.json"], "pattern": "\"contributes\"\\s*:\\s*\\{[\\s\\S]*\"configuration\"", "label": "VS Code setting contribution" },
+        { "paths": ["src/extension.ts"], "pattern": "languages\\.onDidChangeDiagnostics|onWillSaveTextDocument|workspace\\.onWillSaveTextDocument", "label": "diagnostic or save hook" }
+      ],
+      "preview": false
+    },
+    {
+      "family": "juliusmarminge",
+      "slug": "tanstack-start-theme-kit",
+      "sourceRepo": "https://github.com/juliusmarminge/tanstack-themes",
+      "artifactType": "app",
+      "prompt": "Build a runnable demo for a theme kit that makes TanStack Start-style apps easy to theme. The preview must include a ThemeProvider concept, light, dark, and system toggle, SSR-safe initial script explanation, localStorage persistence, CSS variables, route cards, and install snippets for npm, JSR, and Deno.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["TanStack", "ThemeProvider", "light", "dark", "system", "localStorage", "JSR", "Deno"],
+      "preview": true
+    },
+    {
+      "family": "gaearon",
+      "slug": "editorial-engineering-blog",
+      "sourceRepo": "https://github.com/gaearon/overreacted.io",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a personal engineering blog for long-form essays. It should feel editorial rather than startup-ish, and the page must visibly include a featured essay, reading time labels, newsletter signup, quote pullout styling, recent essays, an archive view, and a quiet author note section.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["essay", "reading time", "newsletter", "archive", "author", "recent"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "editorial-tone-warmth",
+          "prompt": "Keep the same structure, but make the voice slightly warmer and more analog without turning it into a startup landing page.",
+          "expect": ["essay", "newsletter", "author"],
+          "forbiddenText": ["pricing", "waitlist", "book a demo"]
+        }
+      ]
+    },
+    {
+      "family": "gaearon",
+      "slug": "frontend-term-glossary",
+      "sourceRepo": "https://github.com/gaearon/whatthefuck.is",
+      "artifactType": "app",
+      "prompt": "Build a runnable glossary site of computer science terms for front-end developers. It must visibly include a glossary search, alphabetical navigation, opinionated definition cards, front-end developer framing, a vote or request definitions panel, and contributor notes that improvements to the website are welcome even if new definitions are not accepted directly.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["glossary", "front-end developers", "opinionated", "definition", "vote", "request"],
+      "preview": true
+    },
+    {
+      "family": "gaearon",
+      "slug": "rsc-protocol-explorer",
+      "sourceRepo": "https://github.com/gaearon/rscexplorer",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a tool for exploring the React Server Components protocol. It must visibly include a streamed row inspector, server and client panes, a React tree view, step-by-step stream playback, example presets like hello, async, counter, form action, and pagination, plus a short note that both server and client behavior are approximated in the browser.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["React Server Components", "stream", "server", "client", "hello", "counter", "pagination"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "slower-playback-mode",
+          "prompt": "Add a slower playback mode and clearer server versus client labels without turning it into a generic docs page.",
+          "expect": ["server", "client", "playback"],
+          "forbiddenText": ["generic docs", "what would you like"]
+        }
+      ]
+    },
+    {
+      "family": "gaearon",
+      "slug": "minimal-js-vscode-theme",
+      "sourceRepo": "https://github.com/gaearon/subliminal",
+      "artifactType": "theme-extension",
+      "prompt": "Create a complete VS Code theme extension for a minimalistic, opinionated editor theme focused mostly on JavaScript. Return package.json plus a theme JSON file and a short README. It must include a hidden-status-bar minimalist philosophy, JavaScript-focused token colors, and settings suggestions like hiding line numbers, activity bar, minimap, and status bar.",
+      "expectedPathGroups": [["package.json"], ["themes/minimal-js-theme.json", "themes/subliminal-theme.json"], ["README.md"]],
+      "requiredText": ["VS Code", "minimalistic", "JavaScript", "status bar", "activity bar", "minimap"],
+      "requiredFilePatterns": [
+        { "paths": ["package.json"], "pattern": "\"contributes\"\\s*:\\s*\\{[\\s\\S]*\"themes\"", "label": "VS Code theme contribution" },
+        { "paths": ["themes/minimal-js-theme.json", "themes/subliminal-theme.json"], "pattern": "\"tokenColors\"\\s*:\\s*\\[", "label": "token color array" }
+      ],
+      "preview": false,
+      "followUps": [
+        {
+          "label": "comments-and-strings",
+          "prompt": "Now make comments a softer gray and strings a warmer amber, but keep the minimalist JavaScript-first feel.",
+          "expect": ["JavaScript", "theme", "token"],
+          "forbiddenText": ["marketing page", "landing page"]
+        }
+      ]
+    },
+    {
+      "family": "gaearon",
+      "slug": "react-lag-radar-package",
+      "sourceRepo": "https://github.com/gaearon/react-lag-radar",
+      "artifactType": "package",
+      "prompt": "Create a small React package that wraps a lag radar performance widget for development use. Return package metadata, the React component source, and a README. The package must expose props for frames, speed, size, and inset, explain that it helps detect dropped frames or responsiveness issues, and show a minimal usage example with a self-closing component.",
+      "expectedPathGroups": [["package.json"], ["src/index.tsx", "src/index.jsx"], ["README.md"]],
+      "requiredText": ["React", "lag radar", "frames", "speed", "size", "inset", "dropped frames"],
+      "requiredFilePatterns": [
+        { "paths": ["src/index.tsx", "src/index.jsx"], "pattern": "frames|speed|size|inset", "label": "lag radar props" },
+        { "paths": ["README.md"], "pattern": "<LagRadar\\s*/>|frames=|speed=|size=|inset=", "label": "usage example" }
+      ],
+      "preview": false
+    },
+    {
+      "family": "erhathaway",
+      "slug": "browser-child-logger-package",
+      "sourceRepo": "https://github.com/erhathaway/beano",
+      "artifactType": "package",
+      "prompt": "Create a browser logger package inspired by structured backend loggers. Return package metadata, the logger source, and a README. It must support child loggers, console group nesting, scoped module logging for packages, and options like collapse plus groupByMessage.",
+      "expectedPathGroups": [["package.json"], ["src/index.ts", "src/index.js"], ["README.md"]],
+      "requiredText": ["logger", "browser", "child", "console", "group", "collapse", "groupByMessage"],
+      "requiredFilePatterns": [
+        { "paths": ["src/index.ts", "src/index.js"], "pattern": "child|groupByMessage|collapse|console\\.group", "flags": "i", "label": "child logger implementation" }
+      ],
+      "preview": false,
+      "followUps": [
+        {
+          "label": "namespace-helper",
+          "prompt": "Now add a namespace helper for package modules without losing child logger support.",
+          "expect": ["namespace", "child", "logger"],
+          "forbiddenText": ["what would you like", "marketing page"]
+        }
+      ]
+    },
+    {
+      "family": "erhathaway",
+      "slug": "framework-agnostic-router-library",
+      "sourceRepo": "https://github.com/erhathaway/router-primitives",
+      "artifactType": "package",
+      "prompt": "Create a framework agnostic application router library. Return package metadata, the core router source, and a README. It must emphasize declarative routing by way of layout primitives, include a Manager concept, router declarations, route state, scene or stack primitives, and template support.",
+      "expectedPathGroups": [["package.json"], ["src/index.ts", "src/index.js"], ["README.md"]],
+      "requiredText": ["framework agnostic", "router", "layout primitives", "Manager", "route", "template", "scene"],
+      "requiredFilePatterns": [
+        { "paths": ["src/index.ts", "src/index.js"], "pattern": "Manager|route|template|scene|layout", "flags": "i", "label": "router primitive implementation" }
+      ],
+      "preview": false
+    },
+    {
+      "family": "erhathaway",
+      "slug": "kinetic-animation-showcase",
+      "sourceRepo": "https://github.com/erhathaway/kinetic-components",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a state-based animation showcase for React. It must visibly include readable animation states, a method switcher for different animation approaches, an orchestration panel, state-driven component cards, and copy that says the system is sane and readable rather than flashy for its own sake.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["animation", "state", "orchestration", "sane", "readable", "method", "React"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "restrained-motion",
+          "prompt": "Keep the same showcase, but make the motion more restrained and readable rather than flashy.",
+          "expect": ["readable", "state", "animation"],
+          "forbiddenText": ["what would you like", "landing page"]
+        }
+      ]
+    },
+    {
+      "family": "erhathaway",
+      "slug": "ink-list-paginator-package",
+      "sourceRepo": "https://github.com/erhathaway/ink-list-paginator",
+      "artifactType": "package",
+      "prompt": "Create a React Ink list pagination component package for terminal UIs. Return package metadata, the paginator source, and a README. It must work with list-style output, mention ink-table compatibility, expose page or cursor controls, and keep dependencies limited to React and React Ink peer dependencies.",
+      "expectedPathGroups": [["package.json"], ["src/index.tsx", "src/index.ts"], ["README.md"]],
+      "requiredText": ["Ink", "pagination", "list", "ink-table", "React Ink", "page", "cursor"],
+      "requiredFilePatterns": [
+        { "paths": ["package.json"], "pattern": "\"peerDependencies\"\\s*:\\s*\\{[\\s\\S]*react[\\s\\S]*ink", "label": "React and Ink peer dependencies" },
+        { "paths": ["src/index.tsx", "src/index.ts"], "pattern": "page|cursor|next|previous|pagination", "flags": "i", "label": "pagination controls" }
+      ],
+      "preview": false
+    },
+    {
+      "family": "web-animation",
+      "slug": "scroll-product-storytelling",
+      "sourceRepo": "https://github.com/pixelgridui/animated-bottle-scroll",
+      "artifactType": "app",
+      "prompt": "Build a runnable scroll-driven product storytelling page with a central bottle or object stage. Do not ask follow-up questions. The preview must visibly include pinned scroll sections, product story beats, a progress indicator, ingredient or spec callouts, and motion that feels premium rather than gimmicky.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["scroll", "progress", "story", "ingredient", "premium"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 3 },
+      "followUps": [
+        {
+          "label": "add-sound-cue-panel",
+          "prompt": "Add a muted sound cue panel that shows which audio beat would play at each scroll milestone, without actually playing audio.",
+          "expect": ["sound", "scroll", "milestone"],
+          "forbiddenText": ["what would you like", "clarify"]
+        }
+      ]
+    },
+    {
+      "family": "web-animation",
+      "slug": "css-animation-catalog",
+      "sourceRepo": "https://github.com/yesiamrocks/cssanimation",
+      "artifactType": "app",
+      "prompt": "Build a runnable CSS animation catalog playground. Do not ask follow-up questions. The preview must visibly include animation search, category chips, preview cards, a copy CSS snippet action, an easing or timing panel, and a reduced-motion toggle so the gallery is useful instead of just flashy.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["animation", "search", "category", "copy", "timing", "reduced motion"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 4 },
+      "followUps": [
+        {
+          "label": "add-easing-curve-preview",
+          "prompt": "Add a bezier easing curve visualiser so users can see the timing curve for the selected animation before copying it.",
+          "expect": ["bezier", "easing", "curve"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "packt",
+      "slug": "react-typescript-task-board",
+      "sourceRepo": "https://github.com/PacktPublishing/Full-Stack-React-TypeScript-and-Node",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a React TypeScript task board, the kind of application that would appear as a book companion for a full-stack React and TypeScript guide. Do not ask follow-up questions. The preview must visibly include typed task cards with three status columns labeled To Do, In Progress, and Done, a drag-ready column layout, a TypeScript interface badge or code panel, a new task form with field validation, filter controls by priority or assignee, and a sidebar with mock project stats and a sprint progress bar.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["TypeScript", "task", "To Do", "In Progress", "filter", "sprint"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 2 },
+      "followUps": [
+        {
+          "label": "add-priority-badge",
+          "prompt": "Add a coloured priority badge to each task card — Critical, High, Medium, Low — without changing the column layout.",
+          "expect": ["priority", "badge", "task"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "packt",
+      "slug": "node-rest-api-explorer",
+      "sourceRepo": "https://github.com/PacktPublishing/Node.js-Web-Development",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of an Express Node.js REST API explorer, the kind of demo shipped with a Node.js web development book. Do not ask follow-up questions. It must visibly include an endpoint catalog with mock GET, POST, PUT, DELETE routes, a request builder panel with headers and body fields, a response viewer with status code badge, a middleware pipeline diagram showing auth and rate-limit layers, an error-shape reference, and environment variable setup notes for PORT and DATABASE_URL.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Express", "endpoint", "middleware", "rate limit", "DATABASE_URL", "status code"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+    {
+      "family": "packt",
+      "slug": "graphql-schema-explorer",
+      "sourceRepo": "https://github.com/PacktPublishing/Hands-On-Full-Stack-Web-Development-with-GraphQL-and-React",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a GraphQL schema explorer and query builder, the kind of companion app for a hands-on GraphQL and React book. Do not ask follow-up questions. It must visibly include a schema type browser on the left, a query editor with syntax highlighting mock, a mock resolver execution result pane, a subscription status indicator, mutation examples with variable panels, and a type relationship diagram.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["GraphQL", "schema", "query", "mutation", "subscription", "resolver"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-variables-panel",
+          "prompt": "Keep the same app but make the variables panel collapsible and add JSON syntax validation feedback.",
+          "expect": ["variable", "JSON", "collapse"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "packt",
+      "slug": "react-hooks-pattern-gallery",
+      "sourceRepo": "https://github.com/PacktPublishing/React-Hooks",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a React Hooks pattern gallery, the kind of interactive companion shipped with a React Hooks programming book. Do not ask follow-up questions. The preview must visibly include a useEffect lifecycle visualiser with mount, update, and cleanup phases, a custom hook composition demo, a useReducer state machine card, a useContext theme switcher, a useMemo and useCallback performance comparison panel, and a hook dependency graph.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["useEffect", "useReducer", "useContext", "custom hook", "useMemo", "dependency"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 2 }
+    },
+    {
+      "family": "packt",
+      "slug": "nextjs-fullstack-storefront",
+      "sourceRepo": "https://github.com/PacktPublishing/Real-World-Next.js",
+      "artifactType": "app",
+      "prompt": "Build the first runnable preview of a Next.js full-stack storefront book companion demonstrating real-world patterns. Do not ask follow-up questions. It must visibly include a product grid with seeded mock data, app-router navigation breadcrumbs, server component and client component status badges, an ISR vs SSR strategy selector with description cards, a cart state panel, an image optimisation note referencing next/image, and a deployment status area with Vercel and self-host options.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Next.js", "product", "server component", "ISR", "cart", "next/image"],
+      "forbiddenText": ["what features", "what would you like", "Custom storefront"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-wishlist",
+          "prompt": "Add a wishlist toggle to each product card that persists in localStorage, without changing the storefront layout.",
+          "expect": ["wishlist", "localStorage", "product"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "creative-css",
+      "slug": "gradient-mesh-generator",
+      "sourceRepo": "https://github.com/topics/web-animation?l=css&o=desc&s=",
+      "artifactType": "app",
+      "prompt": "Build a runnable CSS gradient mesh generator tool. Do not ask follow-up questions. It must include a visual canvas where the user can adjust gradient control point weights via sliders, hue and saturation controls per colour stop, a live CSS output panel that updates in real time, a copy to clipboard button, a preset gallery with dark moody, candy, aurora, and sunset options, and a randomise button that generates a new palette.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["gradient", "preset", "aurora", "CSS", "copy", "randomise"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 2 },
+      "followUps": [
+        {
+          "label": "add-export-svg",
+          "prompt": "Add an Export as SVG button that downloads the current gradient mesh as an SVG file.",
+          "expect": ["SVG", "export", "download"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "creative-css",
+      "slug": "noise-texture-art-generator",
+      "sourceRepo": "https://github.com/topics/web-animation?l=css&o=desc&s=",
+      "artifactType": "app",
+      "prompt": "Build a runnable generative CSS and canvas noise texture art generator. Do not ask follow-up questions. It must include a canvas that renders animated grain texture, adjustable grain size, saturation, brightness, and animation speed controls, at least four base palettes — dark moody, pastel, high-contrast, and monochrome — a regenerate button, and a copy CSS custom property snippet for the current grain settings.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["noise", "grain", "texture", "palette", "CSS", "regenerate"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 1 }
+    },
+    {
+      "family": "creative-css",
+      "slug": "glassmorphism-component-kit",
+      "sourceRepo": "https://github.com/topics/web-animation?l=css&o=desc&s=",
+      "artifactType": "app",
+      "prompt": "Build a runnable glassmorphism UI component kit. Do not ask follow-up questions. The preview must include at least five glass-effect components — card, modal, navbar, sidebar, and badge — a backdrop blur and opacity control, a background gradient selector, a dark mode toggle, a copy CSS snippet button per component, and a note about browser support for backdrop-filter.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["glass", "backdrop-filter", "blur", "opacity", "copy", "dark mode"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 3 },
+      "followUps": [
+        {
+          "label": "add-frosted-tab-bar",
+          "prompt": "Add a frosted glass tab bar component at the bottom of the kit preview, matching the existing blur and opacity system.",
+          "expect": ["tab", "glass", "blur"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "family": "creative-css",
+      "slug": "scroll-snap-storytelling",
+      "sourceRepo": "https://github.com/topics/web-animation?l=css&o=desc&s=",
+      "artifactType": "app",
+      "prompt": "Build a runnable CSS scroll snap storytelling experience. Do not ask follow-up questions. The page must use CSS scroll-snap with at least six full-viewport sections, each section revealing a different product or narrative beat as the user scrolls, a progress dot indicator, entrance animations per section, a skip-to-end button, and a reduced-motion fallback that removes transitions but keeps the content.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["scroll-snap", "progress", "entrance", "section", "reduced motion", "skip"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "animationCheck": { "minAnimatedElements": 5 }
+    },
+
+    { "family": "t3dotgg", "slug": "chirp-twitter-clone", "sourceRepo": "https://github.com/t3dotgg/chirp", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a Twitter-like social app built with the T3 stack. Do not ask follow-up questions. The preview must visibly include a tweet-style post feed with at least five mock posts, a compose box with a character counter, user avatar and username badges, like and retweet counters per post, a profile sidebar, a trending topics panel, and status indicators for the Clerk auth session and the Prisma database connection.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["feed", "compose", "character", "like", "retweet", "Clerk", "Prisma"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true, "animationCheck": { "minAnimatedElements": 2 },
+      "followUps": [{ "label": "add-reply-thread", "prompt": "Add a reply thread panel that expands under a post when the reply button is clicked.", "expect": ["reply", "thread", "expand"], "forbiddenText": ["what would you like"], "requireProjectUpdate": true }]
+    },
+    { "family": "t3dotgg", "slug": "drive-file-manager", "sourceRepo": "https://github.com/t3dotgg/drive-tutorial", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a Google Drive-like file manager built with the T3 stack and UploadThing. Do not ask follow-up questions. The preview must visibly include a file grid with seeded mock files and folders, folder breadcrumb navigation, file type icons, a drag-and-drop upload zone, file size and last-modified columns, a storage quota progress bar, and a right-click context menu with rename, move, and delete actions.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["folder", "upload", "storage", "quota", "rename", "drag", "UploadThing"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true, "animationCheck": { "minAnimatedElements": 2 },
+      "followUps": [{ "label": "add-search-bar", "prompt": "Add a search bar that filters files and folders by name in real time, highlighting matches.", "expect": ["search", "filter", "highlight"], "forbiddenText": ["what would you like"], "requireProjectUpdate": true }]
+    },
+    { "family": "t3dotgg", "slug": "roundest-pokemon-vote", "sourceRepo": "https://github.com/t3dotgg/roundest-mon", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a Pokémon roundness voting app. Do not ask follow-up questions. The preview must visibly include two Pokémon images side by side, a vote button under each, a running vote tally, a leaderboard sorted by vote percentage, a total votes counter, and the heading Which Pokémon is Rounder?",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["rounder", "vote", "leaderboard", "Pokémon", "percentage", "tally"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [{ "label": "add-skip-button", "prompt": "Add a skip button that loads a new pair without recording a vote.", "expect": ["skip", "pair", "stats"], "forbiddenText": ["what would you like"], "requireProjectUpdate": true }]
+    },
+    { "family": "t3dotgg", "slug": "server-actions-vs-trpc", "sourceRepo": "https://github.com/t3dotgg/server-actions-trpc-examples", "artifactType": "app",
+      "prompt": "Build a runnable interactive comparison explorer for Next.js Server Actions versus tRPC. Do not ask follow-up questions. The preview must include side-by-side code panels showing the same mutation written three ways — Server Action, tRPC mutation, and raw fetch — a feature matrix table covering type safety, streaming, mutation, form support, and bundle size, winner badges per row, and a recommendation guide.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Server Actions", "tRPC", "type safety", "streaming", "mutation", "recommendation"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [{ "label": "add-real-time-row", "prompt": "Add a real-time subscriptions row to the feature matrix showing how each approach handles live updates.", "expect": ["real-time", "subscription", "matrix"], "forbiddenText": ["what would you like"], "requireProjectUpdate": true }]
+    },
+    { "family": "t3dotgg", "slug": "react-compiler-perf-demo", "sourceRepo": "https://github.com/t3dotgg/compiler-perf-demo", "artifactType": "app",
+      "prompt": "Build a runnable before-and-after performance demo for the React Compiler. Do not ask follow-up questions. The preview must visibly include two component trees labelled Without Compiler and With Compiler, a render count badge on each component, a stress-test button that triggers many re-renders, a flamegraph-style timeline panel, memoisation savings stats, and an explanation that the compiler replaces useMemo and useCallback.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["React Compiler", "Without Compiler", "With Compiler", "render", "useMemo", "memoisation"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true, "animationCheck": { "minAnimatedElements": 2 }
+    },
+    { "family": "t3dotgg", "slug": "electron-turborepo-dashboard", "sourceRepo": "https://github.com/t3dotgg/yerba", "artifactType": "app",
+      "prompt": "Build the first runnable preview of an Electron Turborepo monorepo starter dashboard. Do not ask follow-up questions. The preview must visibly include a Next.js web app workspace card, an Electron desktop app workspace card, a shared TypeScript packages list, a Turbo pipeline status panel with build, dev, and lint task indicators, a pnpm workspace tree view, and setup commands for each workspace.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Electron", "Turborepo", "Next.js", "workspace", "pnpm", "pipeline"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+    { "family": "t3dotgg", "slug": "paycheck-tweet-extension", "sourceRepo": "https://github.com/t3dotgg/paycheck-extension", "artifactType": "extension",
+      "prompt": "Create a Chrome extension popup that estimates how much a tweet or social post is worth based on follower count and engagement. Do not ask follow-up questions. Return manifest.json, popup.html, and the popup script. The popup must include a follower count input, an engagement rate slider, a calculated earnings range, a CPM assumption note, a platform selector for Twitter and LinkedIn, and a copy result button.",
+      "expectedPathGroups": [["manifest.json"], ["popup.html", "src/popup.tsx"], ["package.json"]],
+      "requiredText": ["follower", "engagement", "earnings", "CPM", "popup", "copy"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": false
+    },
+
+    { "family": "juliusmarminge", "slug": "trpc-react-form-suite", "sourceRepo": "https://github.com/juliusmarminge/trpc-tools", "artifactType": "app",
+      "prompt": "Build a runnable demo of a tRPC React form suite. Do not ask follow-up questions. The preview must visibly include a contact form wired to a tRPC mutation with Zod validation and inline errors, a loading spinner on submission, optimistic update feedback, a refreshing query list, and a code panel showing the tRPC router definition alongside the React form.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["tRPC", "mutation", "Zod", "validation", "optimistic", "router"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [{ "label": "add-file-upload-field", "prompt": "Add a file upload field that validates file type and size using Zod before submitting.", "expect": ["file", "upload", "Zod", "size"], "forbiddenText": ["what would you like"], "requireProjectUpdate": true }]
+    },
+    { "family": "juliusmarminge", "slug": "nextjs-url-filter-patterns", "sourceRepo": "https://github.com/juliusmarminge/nextjs-filter-in-params", "artifactType": "app",
+      "prompt": "Build a runnable Next.js URL-based filter pattern demo. Do not ask follow-up questions. The preview must include a product list reading filter state from URL search params, a filter sidebar with category checkboxes, price range, and sort order, a share button, a reset filters button, a result count badge, and a notes panel on the nuqs or useSearchParams approach.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["filter", "search params", "URL", "category", "sort", "deep-link"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+    { "family": "juliusmarminge", "slug": "convex-betterauth-starter", "sourceRepo": "https://github.com/juliusmarminge/convex-betterauth", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a Convex and BetterAuth full-stack starter. Do not ask follow-up questions. The preview must include a sign-in panel using BetterAuth, a Convex real-time data dashboard, an auth-gated feature area, a session token display, environment notes for CONVEX_URL and BETTER_AUTH_SECRET, and a connection status badge.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Convex", "BetterAuth", "session", "CONVEX_URL", "BETTER_AUTH_SECRET", "real-time"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+    { "family": "juliusmarminge", "slug": "t3-complete-stack-demo", "sourceRepo": "https://github.com/juliusmarminge/t3-complete", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a complete T3 stack reference app with every feature wired up. Do not ask follow-up questions. The preview must include an app-router Next.js layout, Auth.js session panel, tRPC query and mutation examples, a Prisma schema diagram, shadcn-style UI components, a feature checklist, and environment notes for DATABASE_URL, NEXTAUTH_SECRET, and NEXTAUTH_URL.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["T3", "Auth.js", "tRPC", "Prisma", "feature checklist", "DATABASE_URL"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+
+    { "family": "gaearon", "slug": "suspense-render-as-you-fetch", "sourceRepo": "https://github.com/gaearon/suspense-experimental-github-demo", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a React Suspense render-as-you-fetch explorer. Do not ask follow-up questions. The preview must include a user profile card inside a Suspense boundary with a skeleton fallback, an error boundary demo, a fetch-on-render versus render-as-you-fetch comparison panel, a waterfall timing diagram, an explanation panel, and a retry action.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Suspense", "render-as-you-fetch", "skeleton", "error boundary", "waterfall", "retry"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true, "animationCheck": { "minAnimatedElements": 2 },
+      "followUps": [{ "label": "add-nested-suspense", "prompt": "Add a nested Suspense demo where an inner boundary resolves independently from the outer one.", "expect": ["nested", "Suspense", "boundary"], "forbiddenText": ["what would you like"], "requireProjectUpdate": true }]
+    },
+    { "family": "gaearon", "slug": "woodshed-claude-skills", "sourceRepo": "https://github.com/gaearon/woodshed", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a Claude Skills creator and tester. Do not ask follow-up questions. The preview must include a skill editor panel, a live generated system prompt preview, a test runner that streams a mock response, a skill catalog sidebar, a version history dropdown, and an export button.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["skill", "Claude", "YAML", "test", "catalog", "prompt", "export"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+    { "family": "gaearon", "slug": "flux-architecture-explorer", "sourceRepo": "https://github.com/gaearon/flux-react-router-example", "artifactType": "app",
+      "prompt": "Build a runnable Flux architecture explorer. Do not ask follow-up questions. The preview must include an animated data flow diagram for Action, Dispatcher, Store, and View, a live dispatch panel, a store state viewer, a router navigation example, a shopping list demo driven by Flux, and a comparison panel mapping Flux to Redux and Zustand.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Flux", "Action", "Dispatcher", "Store", "View", "Redux", "dispatch"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true, "animationCheck": { "minAnimatedElements": 2 }
+    },
+
+    { "family": "erhathaway", "slug": "cellular-automata-explorer", "sourceRepo": "https://github.com/erhathaway/cellular_automata", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a browser cellular automaton explorer. Do not ask follow-up questions. The preview must include a canvas rendering a Game of Life automaton in real time, play, pause, step-once, and reset controls, a speed slider, a grid size selector, a pattern picker with Glider, Blinker, Pulsar, and random fill, and a live generation counter.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["automaton", "Glider", "Blinker", "Pulsar", "generation", "play", "step"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true, "animationCheck": { "minAnimatedElements": 1 },
+      "followUps": [{ "label": "add-draw-mode", "prompt": "Add a draw mode where the user can click or drag on the canvas to toggle cells.", "expect": ["draw", "click", "toggle"], "forbiddenText": ["what would you like"], "requireProjectUpdate": true }]
+    },
+    { "family": "erhathaway", "slug": "elasticsearch-query-composer", "sourceRepo": "https://github.com/erhathaway/elastic-composer", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a high-level Elasticsearch query manager. Do not ask follow-up questions. The preview must include a field filter panel, a search suggestions panel, a paginated results list, a raw Elasticsearch query preview, a sort control, a date range filter, and an index selector.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Elasticsearch", "filter", "pagination", "query", "index", "sort", "suggestion"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+    { "family": "erhathaway", "slug": "url-query-state-manager", "sourceRepo": "https://github.com/erhathaway/query-params-data", "artifactType": "app",
+      "prompt": "Build a runnable URL query params state manager demo. Do not ask follow-up questions. The preview must include a product list where all filter state is in URL search params, a filter sidebar, a share button, a reset button, and a code panel comparing the store pattern with plain useState.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["query params", "URL", "filter", "share", "reset", "store"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+    { "family": "erhathaway", "slug": "graphql-relay-connections", "sourceRepo": "https://github.com/erhathaway/graphql-connections", "artifactType": "app",
+      "prompt": "Build a runnable Relay-style GraphQL connections explorer. Do not ask follow-up questions. The preview must include a cursor-based paginated list, an edges and nodes panel, a pageInfo block with hasNextPage and endCursor, a SQL query preview, a page size selector, and forward and backward navigation.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["GraphQL", "cursor", "pagination", "edges", "nodes", "pageInfo", "hasNextPage"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+
+    { "family": "binbandit", "slug": "desktop-code-review-app", "sourceRepo": "https://github.com/binbandit/dispatch", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a desktop code review app with CI/CD integration, inspired by a project built with Electron, React, and Tailwind. Do not ask follow-up questions. The preview must include a pull request list, a diff viewer with added and removed line highlighting, a CI pipeline status column, an inline comment thread, a review submit panel with Approve and Request Changes, and a GitHub connection badge.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["pull request", "diff", "CI", "pipeline", "approve", "comment"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true, "animationCheck": { "minAnimatedElements": 2 },
+      "followUps": [{ "label": "add-timeline-view", "prompt": "Add a PR timeline view showing commit history, review events, and comments in order.", "expect": ["timeline", "commit", "review"], "forbiddenText": ["what would you like"], "requireProjectUpdate": true }]
+    },
+    { "family": "binbandit", "slug": "git-worktree-manager", "sourceRepo": "https://github.com/binbandit/workty", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a Git worktree workspace manager. Do not ask follow-up questions. The preview must include a worktree list with branch name, path, and status, a create new worktree form, a switch active worktree button, a health indicator for stale or diverged worktrees, and a command snippet panel.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["worktree", "branch", "path", "stale", "diverged", "switch"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+    { "family": "binbandit", "slug": "mcp-smart-router-explorer", "sourceRepo": "https://github.com/binbandit/mcp-smart-router", "artifactType": "app",
+      "prompt": "Build the first runnable preview of an MCP smart tool router explorer. Do not ask follow-up questions. The preview must include a tool catalog with eight mock MCP tools, a prompt input that routes to the best tool by intent, a confidence score bar, a top-three candidates list, a context rot warning panel, and a category filter.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["MCP", "tool", "routing", "intent", "confidence", "context"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true, "animationCheck": { "minAnimatedElements": 2 }
+    },
+    { "family": "binbandit", "slug": "secretfetch-manager-ui", "sourceRepo": "https://github.com/binbandit/secretfetch", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a secret management dashboard using the SecretFetch approach. Do not ask follow-up questions. The preview must include a secret catalog with masked values and a reveal toggle, source tabs for env, AWS, Vault, and GCP, a validation status badge per secret, a batch load button, and a code panel showing the struct tag annotation syntax.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["secret", "env", "AWS", "Vault", "GCP", "validate", "mask"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+    { "family": "binbandit", "slug": "semantic-version-bumper", "sourceRepo": "https://github.com/binbandit/bumpit", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a semantic versioning automation dashboard. Do not ask follow-up questions. The preview must include a commit history panel classifying commits as feat, fix, chore, or breaking change, a version bump calculator, a changelog preview, a GitHub Actions diagram, manual major/minor/patch override buttons, and a dry run toggle.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["semantic", "version", "feat", "breaking change", "changelog", "major", "minor"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+    { "family": "binbandit", "slug": "conduit-socket-demo", "sourceRepo": "https://github.com/binbandit/conduit", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a socket programming library demo using a clean API called Conduit. Do not ask follow-up questions. The preview must include a connection panel with host and port fields, a message send area, a live received messages feed, a clients count badge, an error display, a broadcast vs direct toggle, and a code panel showing the Conduit open, send, listen, and close API.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["socket", "host", "port", "broadcast", "clients", "open", "send"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+
+    { "family": "packt", "slug": "webgl-3d-graphics-demo", "sourceRepo": "https://github.com/PacktPublishing/Real-Time-3D-Graphics-with-WebGL-2", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a real-time 3D graphics playground using WebGL 2, the kind of interactive demo that accompanies a book on WebGL. Do not ask follow-up questions. The preview must include a WebGL canvas with a rotating 3D object, shader sliders for ambient light and diffuse colour, a wireframe toggle, a geometry selector with cube, sphere, and torus, and a vertex and fragment shader code display.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["WebGL", "shader", "vertex", "fragment", "geometry", "ambient", "diffuse"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true, "animationCheck": { "minAnimatedElements": 2 }
+    },
+    { "family": "packt", "slug": "vue3-design-patterns-gallery", "sourceRepo": "https://github.com/PacktPublishing/Vue.js-3-Design-Patterns-and-Best-Practices", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a Vue.js 3 design patterns gallery, the kind shipped with a Vue patterns book. Do not ask follow-up questions. The preview must include pattern cards for Composable, Headless Component, Provider, Renderless, and Plugin, a live demo per pattern, a code snippet panel, a Composition API vs Options API comparison, and a search filter.",
+      "expectedPathGroups": [["package.json"], ["src/App.vue", "src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Vue", "Composable", "Plugin", "Composition API", "Options API", "Renderless"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+    { "family": "packt", "slug": "fullstack-go-react-dashboard", "sourceRepo": "https://github.com/PacktPublishing/Full-Stack-Web-Development-with-Go", "artifactType": "app",
+      "prompt": "Build the first runnable preview of a full-stack Go and React dashboard, the kind companion for a Go web development book. Do not ask follow-up questions. The preview must include a data table from mock Go endpoints, an API health panel, a GORM database status card, a Gin router explorer, a JWT auth flow diagram, and env notes for PORT, DATABASE_URL, and JWT_SECRET.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Go", "React", "Gin", "GORM", "JWT", "DATABASE_URL", "endpoint"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    }
+  ]
+}

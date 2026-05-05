@@ -1,0 +1,93 @@
+{
+  "id": "constraint-enforcement",
+  "label": "Constraint enforcement: when the user states a hard rule (TS-only, single-file HTML, no JS, no external libs, Tailwind only), every later code reply must respect it.",
+  "scenarios": [
+    {
+      "id": "typescript-only-button",
+      "messages": [
+        { "role": "user", "content": "Important: every code answer in this conversation must use only TypeScript and never JavaScript. No exceptions." },
+        { "role": "user", "content": "Show me a small React button component." }
+      ],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": ["/:\\s*(?:number|string|boolean|JSX\\.Element|React\\.FC|React\\.ReactNode)|interface\\s+\\w+|type\\s+\\w+\\s*=/"],
+        "notContains": ["/```js\\b/i", "/```javascript\\b/i"]
+      }
+    },
+    {
+      "id": "typescript-only-counter-after-distractor",
+      "messages": [
+        { "role": "user", "content": "Important: every code answer in this conversation must use only TypeScript and never JavaScript. No exceptions." },
+        { "role": "user", "content": "What are React hooks?" },
+        { "role": "user", "content": "Show me a counter component." }
+      ],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": ["/:\\s*(?:number|string|boolean|JSX\\.Element|React\\.FC|useState<)|interface\\s+\\w+|type\\s+\\w+\\s*=/"],
+        "notContains": ["/```js\\b/i", "/```javascript\\b/i"]
+      }
+    },
+    {
+      "id": "single-file-html-no-js",
+      "messages": [
+        { "role": "user", "content": "Constraint: build me a single-file HTML page only. No JavaScript at all. Pure HTML and CSS in one file." },
+        { "role": "user", "content": "Build a pricing page with three tiers." }
+      ],
+      "assert": {
+        "minLength": 200,
+        "contains": ["/<html|<!DOCTYPE/i", "/<style/i"],
+        "notContains": ["/<script/i", "/```js\\b/i", "/```javascript\\b/i", "/```jsx\\b/i", "/```tsx\\b/i", "/import\\s+React/i"]
+      }
+    },
+    {
+      "id": "no-external-libraries",
+      "messages": [
+        { "role": "user", "content": "Rule: no external libraries, no npm packages, no CDNs. Vanilla only." },
+        { "role": "user", "content": "Build a tabs component." }
+      ],
+      "assert": {
+        "minLength": 100,
+        "notContains": ["/npm\\s+install/i", "/yarn\\s+add/i", "/pnpm\\s+add/i", "/from\\s+['\"]react['\"]/", "/<script\\s+src=['\"]https?:/i", "/cdnjs|unpkg|jsdelivr/i"]
+      }
+    },
+    {
+      "id": "tailwind-only-styling",
+      "messages": [
+        { "role": "user", "content": "Constraint: all styling must be Tailwind utility classes only. Never use plain CSS, never use styled-components, never use CSS modules." },
+        { "role": "user", "content": "Show me a card component." }
+      ],
+      "assert": {
+        "minLength": 80,
+        "anyOfContains": ["/className=\"[^\"]*(?:p-\\d|m-\\d|flex|grid|rounded|bg-|text-|shadow)/", "/class=\"[^\"]*(?:p-\\d|m-\\d|flex|grid|rounded|bg-|text-|shadow)/"],
+        "notContains": ["/styled\\.\\w+`/", "/from\\s+['\"]styled-components['\"]/", "/\\.module\\.css/"]
+      }
+    },
+    {
+      "id": "constraint-recall-after-many-turns",
+      "messages": [
+        { "role": "user", "content": "Important: every code answer in this conversation must use only TypeScript and never JavaScript." },
+        { "role": "user", "content": "Explain promises briefly." },
+        { "role": "user", "content": "Explain async/await briefly." },
+        { "role": "user", "content": "What constraints did I set earlier in this chat?" }
+      ],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": ["/TypeScript/i"],
+        "notContains": ["/no\\s+constraints?\\b/i", "/none\\b/i"]
+      }
+    },
+    {
+      "id": "constraint-not-violated-by-distractor",
+      "messages": [
+        { "role": "user", "content": "Constraint: every code reply must use only TypeScript. No JavaScript." },
+        { "role": "user", "content": "How does the V8 engine compile JavaScript?" },
+        { "role": "user", "content": "Show me a small fetch helper." }
+      ],
+      "assert": {
+        "minLength": 60,
+        "anyOfContains": ["/:\\s*(?:Promise<|Response|string|unknown|RequestInit)|async\\s+function\\s+\\w+\\s*\\([^)]*:\\s*\\w/"],
+        "notContains": ["/```js\\b/i", "/```javascript\\b/i"]
+      }
+    }
+  ]
+}

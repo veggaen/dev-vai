@@ -1,0 +1,85 @@
+{
+  "id": "build-iteration",
+  "label": "Build iteration: track add/change/swap/revert across turns; recall what changed and what state we're in.",
+  "scenarios": [
+    {
+      "id": "recall-last-add",
+      "messages": [
+        { "role": "user", "content": "I'm building a notes app called Inkwell with React + Tailwind." },
+        { "role": "user", "content": "Now add a dark mode toggle in the header." },
+        { "role": "user", "content": "What was the most recent change I asked for?" }
+      ],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": ["/dark\\s*mode/i"]
+      }
+    },
+    {
+      "id": "recall-switch-instead",
+      "messages": [
+        { "role": "user", "content": "I'm building a dashboard called Pulse with React and CSS modules." },
+        { "role": "user", "content": "Actually switch to Tailwind instead of CSS modules." },
+        { "role": "user", "content": "What change did I last request?" }
+      ],
+      "assert": {
+        "minLength": 30,
+        "anyOfContains": ["/tailwind/i"]
+      }
+    },
+    {
+      "id": "go-back-after-changes",
+      "messages": [
+        { "role": "user", "content": "I'm building a project called Brewline." },
+        { "role": "user", "content": "Add a hero section with a coffee bean illustration." },
+        { "role": "user", "content": "Now add a 3-tier pricing table below the hero." },
+        { "role": "user", "content": "Actually, go back to the previous version." }
+      ],
+      "assert": {
+        "minLength": 40,
+        "anyOfContains": ["/revert|undo|prior|previous/i"],
+        "contains": ["/pricing|hero|previous/i"]
+      }
+    },
+    {
+      "id": "list-iterations",
+      "messages": [
+        { "role": "user", "content": "Building an app called Tide." },
+        { "role": "user", "content": "Add a bottom nav with three tabs." },
+        { "role": "user", "content": "Now change the accent color to teal." },
+        { "role": "user", "content": "Add a profile screen with avatar upload." },
+        { "role": "user", "content": "What changes have we made so far?" }
+      ],
+      "assert": {
+        "minLength": 60,
+        "contains": ["/bottom\\s*nav|tabs/i", "/teal|accent/i", "/profile|avatar/i"]
+      }
+    },
+    {
+      "id": "iteration-count",
+      "messages": [
+        { "role": "user", "content": "Building Echo, a podcast app." },
+        { "role": "user", "content": "Add a player bar at the bottom." },
+        { "role": "user", "content": "Change the player to support variable speed." },
+        { "role": "user", "content": "Add a sleep timer." },
+        { "role": "user", "content": "How many changes have I requested?" }
+      ],
+      "assert": {
+        "minLength": 10,
+        "anyOfContains": ["/\\b3\\b|three\\s+changes?|3\\s+changes?/i"]
+      }
+    },
+    {
+      "id": "first-iteration-recall",
+      "messages": [
+        { "role": "user", "content": "I'm building Lattice, a CRM." },
+        { "role": "user", "content": "Add a contacts table with search and sort." },
+        { "role": "user", "content": "Now add a deal pipeline kanban view." },
+        { "role": "user", "content": "What was the first change I asked for?" }
+      ],
+      "assert": {
+        "minLength": 20,
+        "anyOfContains": ["/contacts|search|sort|table/i"]
+      }
+    }
+  ]
+}

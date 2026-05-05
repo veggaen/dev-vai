@@ -1,0 +1,241 @@
+{
+  "$schema": "./projects.schema.json",
+  "version": 1,
+  "description": "15 build prompts for Vai. Each project names a reference repo as the quality bar (style, fit/finish, technique) — Vai is NOT asked to copy, just to meet that bar. Rubrics are deterministic so the harness still scores without a judge model.",
+  "projects": [
+    {
+      "id": "marketing-hero-css-anim",
+      "prompt": "Build a single-file static landing page hero using only HTML + CSS (no framework). Bold gradient headline, animated floating shapes (CSS keyframes only), responsive at 375/768/1280, CLS < 0.1, no external runtime JS. Output a complete index.html with <style> embedded.",
+      "referenceRepo": "https://github.com/topics/web-animation?l=css",
+      "qualityBar": "Award-winning CSS-only motion. Fluid, no jank, accessible.",
+      "expectFiles": ["index.html"],
+      "framework": "static",
+      "rubric": {
+        "mustContain": ["@keyframes", "prefers-reduced-motion", "<meta name=\"viewport\"", "<style"],
+        "mustNotContain": ["<script src=\"http"],
+        "minBytesIndex": 2000
+      },
+      "lighthouseTargets": { "performance": 0.95, "accessibility": 0.9, "best-practices": 0.9 },
+      "viewports": [375, 768, 1280, 1920]
+    },
+    {
+      "id": "t3-todo-app",
+      "prompt": "Build a tiny T3-style todo app: Vite + React + TypeScript + Tailwind, single page, in-memory store (no backend), keyboard-accessible add/toggle/delete, dark mode by system pref. Provide package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx, src/App.tsx, src/index.css.",
+      "referenceRepo": "https://github.com/t3-oss/create-t3-app",
+      "qualityBar": "T3 strictness: typed everything, lint-clean, sensible defaults.",
+      "expectFiles": ["package.json", "vite.config.ts", "src/App.tsx", "index.html"],
+      "framework": "vite-react",
+      "rubric": {
+        "mustContain": ["\"react\"", "tailwindcss", "useState", "aria-"],
+        "mustNotContain": ["any as any", "// TODO"],
+        "minBytesApp": 1200
+      },
+      "turns": [
+        {
+          "prompt": "Now add a 'Clear completed' button below the list that removes all completed todos. Keep it accessible (visible focus, aria-label) and keep types clean.",
+          "rubric": { "mustContain": ["Clear completed"] }
+        }
+      ],
+      "lighthouseTargets": { "performance": 0.85, "accessibility": 0.9, "best-practices": 0.9 },
+      "viewports": [375, 768, 1280, 1920]
+    },
+    {
+      "id": "shadcn-card-grid",
+      "prompt": "Build a Vite + React + Tailwind page that renders a responsive 1/2/3-col card grid of 6 cards with shadcn-style design language (rounded-xl, soft shadows, subtle borders, hover lift). Each card has icon, title, description, action button. Provide package.json, vite.config.ts, src/main.tsx, src/App.tsx, src/index.css, index.html.",
+      "referenceRepo": "https://github.com/shadcn-ui/ui",
+      "qualityBar": "Shadcn fit and finish: tasteful spacing, restrained color, real interaction states.",
+      "expectFiles": ["package.json", "src/App.tsx", "index.html"],
+      "framework": "vite-react",
+      "rubric": {
+        "mustContain": ["grid-cols-", "rounded", "hover:", "focus-visible"],
+        "mustNotContain": ["!important"],
+        "minBytesApp": 1500
+      },
+      "lighthouseTargets": { "performance": 0.85, "accessibility": 0.9, "best-practices": 0.9 },
+      "viewports": [375, 768, 1280, 1920]
+    },
+    {
+      "id": "framer-motion-stagger",
+      "prompt": "Build a Vite + React + Tailwind + Framer Motion page that staggers a list of 8 feature items in on first paint, with hover scale and tap feedback. Respect prefers-reduced-motion. Provide package.json, src/main.tsx, src/App.tsx, src/index.css, index.html.",
+      "referenceRepo": "https://github.com/juliusmarminge",
+      "qualityBar": "Subtle, tasteful motion. No bouncy distractions.",
+      "expectFiles": ["package.json", "src/App.tsx"],
+      "framework": "vite-react",
+      "rubric": {
+        "mustContain": ["framer-motion", "staggerChildren", "prefers-reduced-motion"],
+        "minBytesApp": 1000
+      },
+      "lighthouseTargets": { "performance": 0.8, "accessibility": 0.9, "best-practices": 0.9 },
+      "viewports": [768, 1280]
+    },
+    {
+      "id": "binbandit-utility-page",
+      "prompt": "Build a single-page utility (color palette generator). Vite + React + TS + Tailwind. Click buttons to generate 5 OKLCH swatches, each click animated via CSS transitions, copy-to-clipboard on click of any swatch hex. No external API. Provide package.json, src/main.tsx, src/App.tsx, src/index.css, index.html.",
+      "referenceRepo": "https://github.com/binbandit",
+      "qualityBar": "Useful, fast, single-purpose, zero bloat.",
+      "expectFiles": ["package.json", "src/App.tsx"],
+      "framework": "vite-react",
+      "rubric": {
+        "mustContain": ["oklch", "navigator.clipboard", "useState"],
+        "minBytesApp": 1200
+      },
+      "lighthouseTargets": { "performance": 0.9, "accessibility": 0.9, "best-practices": 0.9 },
+      "viewports": [375, 1280]
+    },
+    {
+      "id": "packt-react-fundamentals",
+      "prompt": "Build a Vite + React + TypeScript counter+form demo that teaches React fundamentals: controlled input, derived state, useEffect cleanup, error boundary. Comment each fundamental briefly inline. Provide package.json, src/main.tsx, src/App.tsx, src/ErrorBoundary.tsx, index.html.",
+      "referenceRepo": "https://github.com/PacktPublishing",
+      "qualityBar": "Textbook clarity. Self-explanatory code, idiomatic React.",
+      "expectFiles": ["package.json", "src/App.tsx", "src/ErrorBoundary.tsx"],
+      "framework": "vite-react",
+      "rubric": {
+        "mustContain": ["componentDidCatch", "useEffect", "return ()", "controlled"],
+        "minBytesApp": 1500
+      },
+      "lighthouseTargets": { "performance": 0.9, "accessibility": 0.9, "best-practices": 0.9 },
+      "viewports": [768, 1280]
+    },
+    {
+      "id": "pure-html-pricing",
+      "prompt": "Build a single-file pricing page (3 tiers) in pure HTML+CSS. No JS. Highlight the recommended tier. Responsive 375/768/1280. WCAG AA contrast. Output a complete index.html with embedded <style>.",
+      "referenceRepo": "https://github.com/topics/web-animation?l=css",
+      "qualityBar": "No-framework, ships in under 10kb gzipped.",
+      "expectFiles": ["index.html"],
+      "framework": "static",
+      "rubric": {
+        "mustContain": ["<style", "@media", "Recommended"],
+        "mustNotContain": ["<script"],
+        "minBytesIndex": 2500
+      },
+      "turns": [
+        {
+          "prompt": "Now add a Compare features section below the tiers as a semantic <table> with at least 5 feature rows and a check/dash per tier. Pure HTML+CSS, still no JS, still single index.html. Re-emit the complete file.",
+          "rubric": { "mustContain": ["<table", "Compare"] }
+        }
+      ],
+      "lighthouseTargets": { "performance": 0.98, "accessibility": 0.95, "best-practices": 0.95 },
+      "viewports": [375, 768, 1280]
+    },
+    {
+      "id": "uploadthing-style-dropzone",
+      "prompt": "Build a Vite + React + Tailwind drag-and-drop file dropzone (no upload, just preview file names + sizes locally). Visible focus, keyboard activation, drag-over visual state. Provide package.json, src/main.tsx, src/App.tsx, src/index.css, index.html.",
+      "referenceRepo": "https://github.com/pingdotgg/uploadthing",
+      "qualityBar": "Polished interaction states. Real keyboard support.",
+      "expectFiles": ["package.json", "src/App.tsx"],
+      "framework": "vite-react",
+      "rubric": {
+        "mustContain": ["onDrop", "onDragOver", "preventDefault", "aria-"],
+        "minBytesApp": 1200
+      },
+      "lighthouseTargets": { "performance": 0.9, "accessibility": 0.95, "best-practices": 0.9 },
+      "viewports": [375, 1280]
+    },
+    {
+      "id": "trpc-style-typed-form",
+      "prompt": "Build a Vite + React + TS + Zod typed contact form with end-to-end inferred types and inline validation messages. No network call — log to console. Provide package.json, src/main.tsx, src/App.tsx, src/schema.ts, src/index.css, index.html.",
+      "referenceRepo": "https://github.com/trpc/trpc",
+      "qualityBar": "Type-safe end to end, runtime + compile-time validation aligned.",
+      "expectFiles": ["package.json", "src/App.tsx", "src/schema.ts"],
+      "framework": "vite-react",
+      "rubric": {
+        "mustContain": ["zod", "z.object", "infer<typeof"],
+        "minBytesApp": 1200
+      },
+      "lighthouseTargets": { "performance": 0.9, "accessibility": 0.9, "best-practices": 0.9 },
+      "viewports": [768, 1280]
+    },
+    {
+      "id": "next-app-router-blog",
+      "prompt": "Build a minimal Next.js 14 App Router blog with two static posts. Tailwind. SEO meta, OpenGraph, sitemap.xml, robots.txt. Provide package.json, next.config.mjs, app/layout.tsx, app/page.tsx, app/posts/[slug]/page.tsx, app/sitemap.ts, app/robots.ts, app/globals.css.",
+      "referenceRepo": "https://github.com/vercel/next.js",
+      "qualityBar": "Production Next.js defaults. SEO clean.",
+      "expectFiles": ["package.json", "app/layout.tsx", "app/page.tsx"],
+      "framework": "next",
+      "rubric": {
+        "mustContain": ["next", "metadata", "generateStaticParams", "tailwind"],
+        "minBytesApp": 2000
+      },
+      "lighthouseTargets": { "performance": 0.85, "accessibility": 0.9, "best-practices": 0.9, "seo": 0.95 },
+      "viewports": [375, 1280]
+    },
+    {
+      "id": "css-only-tabs",
+      "prompt": "Build a single-file accessible tabbed interface using only CSS (radio-button technique) and ARIA roles. 3 tabs, keyboard navigable, no JS. Output complete index.html.",
+      "referenceRepo": "https://github.com/topics/web-animation?l=css",
+      "qualityBar": "WCAG AA, keyboard parity with JS tabs.",
+      "expectFiles": ["index.html"],
+      "framework": "static",
+      "rubric": {
+        "mustContain": ["role=\"tab", "input type=\"radio", "aria-"],
+        "mustNotContain": ["<script"],
+        "minBytesIndex": 1500
+      },
+      "lighthouseTargets": { "performance": 0.98, "accessibility": 0.95, "best-practices": 0.95 },
+      "viewports": [375, 1280]
+    },
+    {
+      "id": "dashboard-stat-cards",
+      "prompt": "Build a Vite + React + Tailwind dashboard page with 4 stat cards (number, label, sparkline drawn as inline SVG), responsive grid, dark mode toggle that persists to localStorage. Provide package.json, src/main.tsx, src/App.tsx, src/index.css, index.html.",
+      "referenceRepo": "https://github.com/shadcn-ui/ui",
+      "qualityBar": "Dashboard aesthetic: dense, calm, scannable.",
+      "expectFiles": ["package.json", "src/App.tsx"],
+      "framework": "vite-react",
+      "rubric": {
+        "mustContain": ["localStorage", "<svg", "dark:", "useState"],
+        "minBytesApp": 1500
+      },
+      "turns": [
+        {
+          "prompt": "Now add a search input above the cards that filters the visible cards by label (case-insensitive substring match). Keep it accessible with a label or aria-label.",
+          "rubric": { "mustContain": ["toLowerCase"] }
+        }
+      ],
+      "lighthouseTargets": { "performance": 0.85, "accessibility": 0.9, "best-practices": 0.9 },
+      "viewports": [375, 1280, 1920]
+    },
+    {
+      "id": "scroll-reveal-css",
+      "prompt": "Build a single-file scroll-reveal page using CSS scroll-driven animations (animation-timeline: view()). 6 sections that fade and translate in as they enter the viewport. Graceful fallback: instant visibility for unsupported browsers. Output complete index.html with embedded <style>.",
+      "referenceRepo": "https://github.com/topics/web-animation?l=css",
+      "qualityBar": "Modern CSS. No JS, no IntersectionObserver.",
+      "expectFiles": ["index.html"],
+      "framework": "static",
+      "rubric": {
+        "mustContain": ["animation-timeline", "view()", "@supports"],
+        "mustNotContain": ["IntersectionObserver"],
+        "minBytesIndex": 1800
+      },
+      "lighthouseTargets": { "performance": 0.95, "accessibility": 0.9, "best-practices": 0.9 },
+      "viewports": [375, 1280]
+    },
+    {
+      "id": "command-palette",
+      "prompt": "Build a Vite + React + TS + Tailwind command palette overlay (Cmd/Ctrl+K to open, Esc to close, fuzzy filter over a fixed list of 12 commands, arrow-key navigation, Enter to invoke). Trap focus while open. Provide package.json, src/main.tsx, src/App.tsx, src/CommandPalette.tsx, src/index.css, index.html.",
+      "referenceRepo": "https://github.com/t3dotgg",
+      "qualityBar": "Linear-style palette quality: instant, focused, keyboard-first.",
+      "expectFiles": ["package.json", "src/App.tsx", "src/CommandPalette.tsx"],
+      "framework": "vite-react",
+      "rubric": {
+        "mustContain": ["KeyboardEvent", "Escape", "preventDefault", "role=\"dialog"],
+        "minBytesApp": 1800
+      },
+      "lighthouseTargets": { "performance": 0.85, "accessibility": 0.95, "best-practices": 0.9 },
+      "viewports": [768, 1280, 1920]
+    },
+    {
+      "id": "three-rotating-cube",
+      "prompt": "Build a Vite + Three.js page with a single rotating cube, responsive canvas, color shifts on hover, paused when tab not visible. Provide package.json, vite.config.ts, src/main.ts, src/style.css, index.html.",
+      "referenceRepo": "https://github.com/mrdoob/three.js",
+      "qualityBar": "Smooth 60fps, properly dispose on unmount, no leaks.",
+      "expectFiles": ["package.json", "src/main.ts", "index.html"],
+      "framework": "vite-vanilla",
+      "rubric": {
+        "mustContain": ["three", "requestAnimationFrame", "visibilitychange", "renderer.dispose"],
+        "minBytesApp": 1200
+      },
+      "lighthouseTargets": { "performance": 0.85, "accessibility": 0.85, "best-practices": 0.9 },
+      "viewports": [768, 1280]
+    }
+  ]
+}

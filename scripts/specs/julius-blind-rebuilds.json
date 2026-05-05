@@ -83,6 +83,87 @@
       "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
       "requiredText": ["Trellix", "tRPC", "Auth.js", "Turso", "TURSO_URL", "AUTH_SECRET", "kanban"],
       "preview": true
+    },
+    {
+      "slug": "trpc-react-form-suite",
+      "sourceRepo": "https://github.com/juliusmarminge/trpc-tools",
+      "prompt": "Build a runnable demo of a tRPC React form suite. Do not ask follow-up questions. The preview must visibly include a contact form wired to a tRPC mutation with field-level Zod validation and inline error messages, a loading spinner on submission, optimistic update feedback that briefly shows the item before the server confirms, a refreshing query list below the form, and a code panel showing the tRPC router definition alongside the React form component.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["tRPC", "mutation", "Zod", "validation", "optimistic", "router"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-file-upload-field",
+          "prompt": "Add a file upload field to the form that validates file type and size using Zod before submitting.",
+          "expect": ["file", "upload", "Zod", "size"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "slug": "nextjs-url-filter-patterns",
+      "sourceRepo": "https://github.com/juliusmarminge/nextjs-filter-in-params",
+      "prompt": "Build a runnable Next.js URL-based filter pattern demo. Do not ask follow-up questions. The preview must visibly include a product list that reads all filter and sort state from URL search params, a filter sidebar with category checkboxes, a price range slider, and a sort order dropdown, a deep-link share button that copies the current URL, a reset filters button, a result count badge, and a notes panel explaining the nuqs or useSearchParams approach and why it beats useState for shareable links.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["filter", "search params", "URL", "category", "sort", "deep-link"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-pagination-param",
+          "prompt": "Add a page number to the URL params so pagination state is also shareable via link.",
+          "expect": ["page", "pagination", "URL"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "slug": "convex-betterauth-starter",
+      "sourceRepo": "https://github.com/juliusmarminge/convex-betterauth",
+      "prompt": "Build the first runnable preview of a Convex and BetterAuth full-stack starter. Do not ask follow-up questions. The preview must visibly include a sign-in and sign-up panel using BetterAuth session handling, a Convex real-time data dashboard showing live query results, an auth-gated feature area that reveals only when signed in, a session token display, environment variable setup notes covering CONVEX_URL and BETTER_AUTH_SECRET, and a connection status badge per service.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["Convex", "BetterAuth", "session", "CONVEX_URL", "BETTER_AUTH_SECRET", "real-time"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-role-based-gate",
+          "prompt": "Add an admin-only panel that is gated by a role field on the BetterAuth session, showing a permission denied state for regular users.",
+          "expect": ["admin", "role", "permission"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
+    },
+    {
+      "slug": "tanstack-convex-authkit",
+      "sourceRepo": "https://github.com/juliusmarminge/convex-tanstack-start-authkit",
+      "prompt": "Build the first runnable preview of a TanStack Start app with Convex and WorkOS AuthKit. Do not ask follow-up questions. The preview must visibly include a TanStack Start file-based router setup diagram, a WorkOS AuthKit login panel, a Convex live data dashboard with a real-time message feed, environment variable notes for WORKOS_API_KEY and CONVEX_URL, a TanStack Query integration status card, and a session display showing the authenticated user with a role badge.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["TanStack Start", "Convex", "WorkOS", "AuthKit", "WORKOS_API_KEY", "session"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true
+    },
+    {
+      "slug": "t3-complete-stack-demo",
+      "sourceRepo": "https://github.com/juliusmarminge/t3-complete",
+      "prompt": "Build the first runnable preview of a complete T3 stack reference app with every feature wired up. Do not ask follow-up questions. The preview must visibly include an app-router Next.js layout, an Auth.js session panel with sign-in and sign-out, tRPC query and mutation examples with loading states, a Prisma schema diagram, shadcn-style UI components, a feature checklist marking what is included versus still needs configuration, and environment variable notes for DATABASE_URL, NEXTAUTH_SECRET, and NEXTAUTH_URL.",
+      "expectedPathGroups": [["package.json"], ["src/App.tsx", "src/App.jsx"], ["src/styles.css"]],
+      "requiredText": ["T3", "Auth.js", "tRPC", "Prisma", "feature checklist", "DATABASE_URL"],
+      "forbiddenText": ["what features", "what would you like"],
+      "preview": true,
+      "followUps": [
+        {
+          "label": "add-stripe-integration",
+          "prompt": "Add a Stripe integration card to the feature checklist with a basic webhook event log and checkout session example.",
+          "expect": ["Stripe", "webhook", "checkout"],
+          "forbiddenText": ["what would you like", "clarify"],
+          "requireProjectUpdate": true
+        }
+      ]
     }
   ]
 }

@@ -1,0 +1,82 @@
+{
+  "id": "project-scoped-retrieval",
+  "label": "Project-scoped retrieval: when the user juggles two projects in one chat, recall must distinguish current vs first vs both, and not conflate them.",
+  "scenarios": [
+    {
+      "id": "current-project-when-multiple",
+      "messages": [
+        { "role": "user", "content": "I'm building Inkwell, a markdown notes app." },
+        { "role": "user", "content": "Also working on Tide, a podcast app." },
+        { "role": "user", "content": "What's my current project?" }
+      ],
+      "assert": {
+        "minLength": 10,
+        "contains": ["/tide/i"],
+        "notContains": ["/inkwell/i"]
+      }
+    },
+    {
+      "id": "first-project-when-multiple",
+      "messages": [
+        { "role": "user", "content": "I'm building Inkwell, a markdown notes app." },
+        { "role": "user", "content": "Also working on Tide, a podcast app." },
+        { "role": "user", "content": "What was my first project?" }
+      ],
+      "assert": {
+        "minLength": 10,
+        "contains": ["/inkwell/i"]
+      }
+    },
+    {
+      "id": "list-all-projects",
+      "messages": [
+        { "role": "user", "content": "I'm building Inkwell, a markdown notes app." },
+        { "role": "user", "content": "Also working on Tide, a podcast app." },
+        { "role": "user", "content": "What projects am I working on?" }
+      ],
+      "assert": {
+        "minLength": 20,
+        "contains": ["/inkwell/i", "/tide/i"]
+      }
+    },
+    {
+      "id": "project-summary-for-named-project",
+      "messages": [
+        { "role": "user", "content": "I'm building Inkwell, a markdown notes app with React + Tailwind." },
+        { "role": "user", "content": "Also working on Tide, a podcast app with SvelteKit." },
+        { "role": "user", "content": "Remind me what Inkwell is." }
+      ],
+      "assert": {
+        "minLength": 20,
+        "contains": ["/inkwell/i"],
+        "anyOfContains": ["/notes|markdown/i"]
+      }
+    },
+    {
+      "id": "do-not-conflate-stacks-across-projects",
+      "messages": [
+        { "role": "user", "content": "I'm building Inkwell with React and Tailwind." },
+        { "role": "user", "content": "Also working on Tide with SvelteKit and Pico CSS." },
+        { "role": "user", "content": "What stack does Tide use?" }
+      ],
+      "assert": {
+        "minLength": 10,
+        "anyOfContains": ["/sveltekit|pico/i"]
+      }
+    },
+    {
+      "id": "current-project-after-iteration",
+      "messages": [
+        { "role": "user", "content": "I'm building Inkwell, a markdown notes app." },
+        { "role": "user", "content": "Add a sidebar with note categories." },
+        { "role": "user", "content": "Also working on Tide, a podcast app." },
+        { "role": "user", "content": "Now add a player bar at the bottom." },
+        { "role": "user", "content": "What's the current project I'm iterating on?" }
+      ],
+      "assert": {
+        "minLength": 10,
+        "contains": ["/tide/i"]
+      }
+    }
+  ]
+}
