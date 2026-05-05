@@ -24,8 +24,11 @@ apps/extension/.web-extension/
 
 # Local diagnostics / scratch dumps
 _*.txt
+_*.json
+_*_debug.mjs
 test-out.txt
 test-result.txt
+.codex-run/
 
 # Coverage / package manager noise
 coverage/
