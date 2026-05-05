@@ -72,7 +72,7 @@ function killPortHolder(port: number): boolean {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
-  const { app, port, vaiEngine } = await createServer();
+  const { app, port, vaiEngine, chatService, config } = await createServer();
 
   // Flush knowledge persistence on shutdown.
   process.on('SIGINT', () => { vaiEngine.flushPersist(); process.exit(0); });
@@ -101,6 +101,29 @@ async function main() {
   }
 
   await startWithRetry();
+
+  // Pre-warm: fire a synthetic templated message so the constrained-code-emitter,
+  // intent matcher, and any lazy modules are hot before the first real request.
+  // Fire-and-forget; never block startup, never crash on failure.
+  if (process.env.VAI_DISABLE_PREWARM !== '1') {
+    void (async () => {
+      try {
+        const t0 = Date.now();
+        const convId = chatService.createConversation(config.defaultModelId, 'prewarm');
+        let chunks = 0;
+        for await (const _chunk of chatService.sendMessage(
+          convId,
+          'build a simple counter in pure HTML and CSS',
+          undefined,
+          undefined,
+          true, // noLearn — don't pollute knowledge with the warm-up
+        )) { chunks++; }
+        console.log(`[VAI] prewarm ok (${Date.now() - t0}ms · ${chunks} chunks)`);
+      } catch (e: unknown) {
+        console.log(`[VAI] prewarm skipped: ${(e as Error)?.message || e}`);
+      }
+    })();
+  }
 }
 
 void main();
