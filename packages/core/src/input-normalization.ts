@@ -155,8 +155,29 @@ const NORMALIZATION_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bpostrges\b/gi, 'postgres'],
   [/\brecat\b/gi, 'react'],
   [/\breactt\b/gi, 'react'],
+  [/\braect\b/gi, 'react'],
+  [/\brract\b/gi, 'react'],
+  [/\breactjs\b/gi, 'react'],
   [/\bnextj\b/gi, 'nextjs'],
   [/\bnxtjs\b/gi, 'nextjs'],
+  [/\bnextjs\b/gi, 'nextjs'],
+  [/\bnetxjs\b/gi, 'nextjs'],
+  [/\btialwind\b/gi, 'tailwind'],
+  [/\btailwnd\b/gi, 'tailwind'],
+  [/\btaiwind\b/gi, 'tailwind'],
+  [/\bsvetle\b/gi, 'svelte'],
+  [/\bsvelt\b/gi, 'svelte'],
+  [/\bvuejs\b/gi, 'vue'],
+  [/\bvuee\b/gi, 'vue'],
+  [/\bfastapy\b/gi, 'fastapi'],
+  [/\bfasapi\b/gi, 'fastapi'],
+  [/\bdjnago\b/gi, 'django'],
+  [/\bdjagno\b/gi, 'django'],
+  [/\bnodejs\b/gi, 'node'],
+  [/\bnodjs\b/gi, 'node'],
+  [/\bvietst\b/gi, 'vitest'],
+  [/\bvitset\b/gi, 'vitest'],
+  [/\btyepscript\b/gi, 'typescript'],
   [/\bmeanng\b/gi, 'meaning'],
   [/\bmeanig\b/gi, 'meaning'],
   [/\bprograming\b/gi, 'programming'],
@@ -207,7 +228,8 @@ function stripDisfluencies(input: string): string {
   out = out.replace(/,\s*like,\s*/gi, ', ');
   out = out.replace(/,\s*like\s+/gi, ' ');
 
-  out = out.replace(/\s+comma\b/gi, ',');
+  // "comma" as spoken punctuation → "," but NOT when part of "comma-separated" / "comma-delimited"
+  out = out.replace(/\s+comma(?![\s]*[-—])\b/gi, ',');
   out = out.replace(/\s+(?:period|full\s+stop)\b/gi, '.');
   out = out.replace(/\s+question\s+mark\b/gi, '?');
   out = out.replace(/\s+exclamation(?:\s+(?:point|mark))?\b/gi, '!');

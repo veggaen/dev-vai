@@ -21,7 +21,16 @@ import {
 } from './chat-quality.js';
 import { CONVERSATION_MODE_SYSTEM_PROMPTS, DEFAULT_CONVERSATION_MODE, type ConversationMode, isConversationMode } from './modes.js';
 import { tryHandleChatMeta } from './meta-router.js';
+import {
+  extractConversationFacts,
+  tryHandleFactRecall,
+  buildFactsSystemPrelude,
+  type FactsHistoryMessage,
+} from './conversation-facts.js';
+import { tryEmitConstrainedCode } from './constrained-code-emitter.js';
+import { tryEmitContinuation } from './chat-continuation.js';
 import { resolveChatPromptRewriteConfig, rewriteChatPrompt } from './prompt-rewrite.js';
+import { buildTurnKindSystemHint, classifyChatTurn } from './turn-kind.js';
 import { decideVaiFallback, pickFallbackModelId } from './vai-fallback.js';
 
 export interface ImageInput {
@@ -371,10 +380,11 @@ export class ChatService {
     // deterministically from persisted history and bypass model dispatch.
     // Only applies when the user sent text (image-only turns fall through).
     if (!image && content.trim().length > 0) {
-      const metaResult = tryHandleChatMeta(
-        content,
-        history.map((m) => ({ role: m.role as 'user' | 'assistant' | 'system' | 'tool', content: m.content })),
-      );
+      const metaHistory: FactsHistoryMessage[] = history.map((m) => ({
+        role: m.role as 'user' | 'assistant' | 'system' | 'tool',
+        content: m.content,
+      }));
+      const metaResult = tryHandleChatMeta(content, metaHistory);
       if (metaResult) {
         const startedAt = Date.now();
         yield { type: 'text_delta', textDelta: metaResult.reply } as ChatChunk;
@@ -407,6 +417,158 @@ export class ChatService {
           .run();
         return;
       }
+
+      // Fact recall (project name, stack, decisions, constraints, last change)
+      const factResult = tryHandleFactRecall(content, metaHistory);
+      if (factResult) {
+        const startedAt = Date.now();
+        yield { type: 'text_delta', textDelta: factResult.reply } as ChatChunk;
+        const factDurationMs = Date.now() - startedAt;
+        yield {
+          type: 'done',
+          usage: { promptTokens: 0, completionTokens: 0 },
+          durationMs: factDurationMs,
+        } as ChatChunk;
+
+        const factAssistantId = ulid();
+        this.db.insert(messages).values({
+          id: factAssistantId,
+          conversationId,
+          role: 'assistant',
+          content: factResult.reply,
+          modelId: `chat-facts:${factResult.intent}`,
+          durationMs: factDurationMs,
+          createdAt: new Date(),
+        }).run();
+
+        const factUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+        if (conv.title === 'New Chat' && content.length > 0) {
+          factUpdates.title = this.generateTitle(content);
+        }
+        this.db.update(conversations)
+          .set(factUpdates)
+          .where(eq(conversations.id, conversationId))
+          .run();
+        return;
+      }
+
+      // Constrained-code emitter: when the user has stated a hard rule
+      // (TS-only, single-file HTML, no external libs, Tailwind only) and
+      // is now asking for a small piece of code, emit a templated reply
+      // that respects the rule. Beats the corpus-retrieval lottery, which
+      // ignores system prompts and regurgitates random captured snippets.
+      const factsForCode = extractConversationFacts(metaHistory);
+      // Find the most recent prior assistant turn that came from the
+      // constrained-code emitter — its intent becomes "sticky" so a
+      // follow-up like "now add X" can extend the same template instead
+      // of falling through to the slow corpus path.
+      let priorIntent: string | undefined;
+      let priorAssistantText: string | undefined;
+      for (let i = history.length - 1; i >= 0; i--) {
+        const m = history[i];
+        if (m.role !== 'assistant') continue;
+        const mid = (m as { modelId?: string }).modelId ?? '';
+        if (mid.startsWith('chat-constrained-code:')) {
+          priorIntent = mid.slice('chat-constrained-code:'.length);
+          priorAssistantText = m.content;
+          break;
+        }
+        // Stop searching once we hit any non-templated assistant turn —
+        // the user has moved past the constrained slice.
+        break;
+      }
+      const modeForDeterministicShortcuts = isConversationMode(conv.mode) ? conv.mode : DEFAULT_CONVERSATION_MODE;
+      const allowConstrainedCodeShortcut =
+        modeForDeterministicShortcuts !== 'builder'
+        && modeForDeterministicShortcuts !== 'agent'
+        && !conv.sandboxProjectId;
+      const codeResult = allowConstrainedCodeShortcut
+        ? tryEmitConstrainedCode({
+          content,
+          facts: factsForCode,
+          priorIntent: priorIntent as never,
+          priorAssistantText,
+        })
+        : null;
+      if (codeResult) {
+        const startedAt = Date.now();
+        yield { type: 'text_delta', textDelta: codeResult.reply } as ChatChunk;
+        const codeDurationMs = Date.now() - startedAt;
+        yield {
+          type: 'done',
+          usage: { promptTokens: 0, completionTokens: 0 },
+          durationMs: codeDurationMs,
+        } as ChatChunk;
+
+        const codeAssistantId = ulid();
+        this.db.insert(messages).values({
+          id: codeAssistantId,
+          conversationId,
+          role: 'assistant',
+          content: codeResult.reply,
+          modelId: `chat-constrained-code:${codeResult.intent}`,
+          durationMs: codeDurationMs,
+          createdAt: new Date(),
+        }).run();
+
+        const codeUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+        if (conv.title === 'New Chat' && content.length > 0) {
+          codeUpdates.title = this.generateTitle(content);
+        }
+        this.db.update(conversations)
+          .set(codeUpdates)
+          .where(eq(conversations.id, conversationId))
+          .run();
+        return;
+      }
+
+      // Engine-layer continuation emitter: when the templated code path
+      // didn't fire but the user's message is a recognizable follow-up
+      // ("now add a button", "explain it", "make it dark"), short-circuit
+      // with a focused deterministic snippet instead of letting the slow
+      // corpus path retrieve fresh and risk wedging on a non-templated
+      // session. Falls through to normal dispatch for any unrecognized
+      // shape — we never fabricate continuations we don't understand.
+      let mostRecentAssistantText: string | undefined;
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].role === 'assistant') {
+          mostRecentAssistantText = history[i].content;
+          break;
+        }
+      }
+      if (mostRecentAssistantText) {
+        const contResult = tryEmitContinuation({
+          content,
+          priorAssistantText: mostRecentAssistantText,
+        });
+        if (contResult) {
+          const startedAt = Date.now();
+          yield { type: 'text_delta', textDelta: contResult.reply } as ChatChunk;
+          const contDurationMs = Date.now() - startedAt;
+          yield {
+            type: 'done',
+            usage: { promptTokens: 0, completionTokens: 0 },
+            durationMs: contDurationMs,
+          } as ChatChunk;
+
+          const contAssistantId = ulid();
+          this.db.insert(messages).values({
+            id: contAssistantId,
+            conversationId,
+            role: 'assistant',
+            content: contResult.reply,
+            modelId: `chat-continuation:${contResult.kind}`,
+            durationMs: contDurationMs,
+            createdAt: new Date(),
+          }).run();
+
+          this.db.update(conversations)
+            .set({ updatedAt: new Date() })
+            .where(eq(conversations.id, conversationId))
+            .run();
+          return;
+        }
+      }
     }
 
     const trimmedHistory = history.length > MAX_HISTORY_MESSAGES
@@ -423,21 +585,57 @@ export class ChatService {
     const isTerminalHarness = Boolean(systemPrompt?.includes('TERMINAL_HARNESS_V1'));
     const modePrompt = isTerminalHarness ? null : CONVERSATION_MODE_SYSTEM_PROMPTS[resolvedMode];
     const systemMessages: Message[] = [];
+    const hasActiveSandbox = Boolean(conv.sandboxProjectId);
+    const turnKind = isTerminalHarness
+      ? 'analysis'
+      : classifyChatTurn({
+        userContent: content,
+        mode: resolvedMode,
+        hasActiveSandbox,
+        hasImage: Boolean(image),
+      });
+
     if (modePrompt) {
       systemMessages.push({ role: 'system', content: modePrompt });
     }
-    const temporaryTurnMode = isTerminalHarness ? null : resolveTemporaryTurnMode(resolvedMode, content);
+
+    // Anchor the model to user-stated facts (project name, stack, decisions,
+    // constraints) extracted from this conversation. Keeps later turns
+    // consistent with named entities even when grounding regex misses.
+    if (!isTerminalHarness) {
+      const factsForPrelude = extractConversationFacts(
+        history.map((m) => ({
+          role: m.role as 'user' | 'assistant' | 'system' | 'tool',
+          content: m.content,
+        })),
+      );
+      const factsPrelude = buildFactsSystemPrelude(factsForPrelude);
+      if (factsPrelude) {
+        systemMessages.push({ role: 'system', content: factsPrelude });
+      }
+    }
+
+    const turnKindHint = isTerminalHarness ? null : buildTurnKindSystemHint(turnKind);
+    if (turnKindHint) {
+      systemMessages.push({ role: 'system', content: turnKindHint });
+    }
+    const temporaryTurnMode = isTerminalHarness || turnKind === 'conversational'
+      ? null
+      : resolveTemporaryTurnMode(resolvedMode, content);
     if (temporaryTurnMode) {
       systemMessages.push({
         role: 'system',
         content: buildTemporaryModeOverrideSystemHint(temporaryTurnMode),
       });
     }
-    const hasActiveSandbox = Boolean(conv.sandboxProjectId);
     if (hasActiveSandbox) {
       systemMessages.push({ role: 'system', content: ACTIVE_SANDBOX_EXECUTION_HINT });
     }
-    const shouldInjectSkillContext = !isTerminalHarness && !hasActiveSandbox && resolvedMode !== 'builder';
+    const shouldInjectSkillContext =
+      !isTerminalHarness
+      && turnKind !== 'conversational'
+      && !hasActiveSandbox
+      && resolvedMode !== 'builder';
     const skillMatch = shouldInjectSkillContext ? this.skillRouter.getBestMatch(content) : null;
     if (skillMatch && !this.skillRouter.isExplicitScaffoldRequest(content)) {
       systemMessages.push({
@@ -448,7 +646,7 @@ export class ChatService {
     if (systemPrompt?.trim()) {
       systemMessages.push({ role: 'system', content: systemPrompt.trim() });
     }
-    const rewrite = isTerminalHarness
+    const rewrite = isTerminalHarness || turnKind === 'conversational'
       ? null
       : rewriteChatPrompt({
         userContent: content,
@@ -464,11 +662,11 @@ export class ChatService {
       systemMessages.push({ role: 'system', content: rewrite.systemMessage });
     }
 
-    if (!isTerminalHarness && shouldInjectChatStructureHint(resolvedMode, content)) {
+    if (!isTerminalHarness && turnKind !== 'conversational' && shouldInjectChatStructureHint(resolvedMode, content)) {
       systemMessages.push({ role: 'system', content: CHAT_STRUCTURE_SYSTEM_HINT });
     }
 
-    if (!isTerminalHarness) {
+    if (!isTerminalHarness && turnKind !== 'conversational') {
       const turnQualityHint = buildChatTurnQualitySystemHint(resolvedMode, content, chatMessages);
       if (turnQualityHint) {
         systemMessages.push({ role: 'system', content: turnQualityHint });
@@ -482,7 +680,13 @@ export class ChatService {
       // Skip entirely for generation intents (build/scaffold/create requests) — retrieved
       // web captures won't help and will inject noise into the model's context.
       // Also skip for vai:v0 which uses its own knowledge store directly.
-      if (modelId !== 'vai:v0' && this.retrieveKnowledge && !isGenerationIntent(content)) {
+      if (
+        modelId !== 'vai:v0'
+        && this.retrieveKnowledge
+        && turnKind !== 'conversational'
+        && turnKind !== 'builder'
+        && !isGenerationIntent(content)
+      ) {
         const relevant = this.retrieveKnowledge(content, 8);
         const useful = relevant.filter((r) => r.score > KNOWLEDGE_RETRIEVAL_SCORE_MIN);
         if (useful.length > 0) {
@@ -520,6 +724,35 @@ export class ChatService {
         { content, mode: resolvedMode },
       )
       : null;
+    const normalizeSourceChunkForTurn = (chunk: ChatChunk): ChatChunk | null => {
+      if (chunk.type !== 'sources') return chunk;
+
+      if (turnKind === 'conversational' && !chunk.groundedBrief) {
+        return null;
+      }
+
+      if (turnKind === 'research') {
+        return {
+          ...chunk,
+          sourcePresentation: 'research',
+        };
+      }
+
+      if (turnKind === 'builder') {
+        if (!chunk.groundedBrief && (!chunk.sources || chunk.sources.length === 0)) {
+          return null;
+        }
+        return {
+          ...chunk,
+          sourcePresentation: 'supporting',
+        };
+      }
+
+      return {
+        ...chunk,
+        sourcePresentation: 'supporting',
+      };
+    };
 
     // Stream from model
     const adapter = this.models.get(primaryModelId);
@@ -528,8 +761,11 @@ export class ChatService {
     let durationMs: number | undefined;
     let responseModelId = primaryModelId;
 
+    yield { type: 'turn_kind', turnKind } as ChatChunk;
+
     if (primaryModelId === 'vai:v0' && fallbackModelId) {
       const bufferedChunks: ChatChunk[] = [];
+      const bufferedSourceChunks: ChatChunk[] = [];
       let bufferedText = '';
       let bufferedUsage = { promptTokens: 0, completionTokens: 0 };
       let bufferedDurationMs: number | undefined;
@@ -540,7 +776,10 @@ export class ChatService {
         if (chunk.modelId) bufferedModelId = chunk.modelId;
         if (chunk.type === 'sources') {
           if (typeof chunk.confidence === 'number') latestConfidence = chunk.confidence;
-          yield chunk;
+          const normalizedSourceChunk = normalizeSourceChunkForTurn(chunk);
+          if (normalizedSourceChunk) {
+            bufferedSourceChunks.push(normalizedSourceChunk);
+          }
           continue;
         }
         bufferedChunks.push(chunk);
@@ -563,6 +802,9 @@ export class ChatService {
         totalUsage = bufferedUsage;
         durationMs = bufferedDurationMs;
         responseModelId = bufferedModelId;
+        for (const chunk of bufferedSourceChunks) {
+          yield chunk;
+        }
         for (const chunk of bufferedChunks) {
           yield chunk;
         }
@@ -583,6 +825,13 @@ export class ChatService {
 
         for await (const chunk of fallbackAdapter.chatStream({ messages: fallbackMessages, noLearn })) {
           if (chunk.modelId) responseModelId = chunk.modelId;
+          if (chunk.type === 'sources') {
+            const normalizedSourceChunk = normalizeSourceChunkForTurn(chunk);
+            if (normalizedSourceChunk) {
+              yield normalizedSourceChunk;
+            }
+            continue;
+          }
           if (chunk.type === 'text_delta' && chunk.textDelta) {
             fullText += chunk.textDelta;
           }
@@ -604,6 +853,13 @@ export class ChatService {
     } else {
       for await (const chunk of adapter.chatStream({ messages: primaryMessages, noLearn })) {
         if (chunk.modelId) responseModelId = chunk.modelId;
+        if (chunk.type === 'sources') {
+          const normalizedSourceChunk = normalizeSourceChunkForTurn(chunk);
+          if (normalizedSourceChunk) {
+            yield normalizedSourceChunk;
+          }
+          continue;
+        }
         if (chunk.type === 'text_delta' && chunk.textDelta) {
           fullText += chunk.textDelta;
         }

@@ -51,6 +51,12 @@ const RECAP_RE =
   /\b(summari[sz]e|recap|tldr|tl;dr|sum\s+up|summary\s+of|overview\s+of|catch\s+me\s+up\s+on)\b[^?]*\b(this|our|the)\s+(chat|conversation|thread|discussion|exchange|talk|session)\b/i;
 const RECAP_ALT_RE =
   /\bwhat\s+(have|did)\s+we\s+(talked\s+about|discussed|covered|been\s+talking\s+about|been\s+discussing)\b/i;
+// Paraphrased recall asks like "summarize what I told you at the start" or
+// "remind me what I asked first" — treat as first-user recall.
+const FIRST_USER_PARAPHRASE_RE =
+  /\b(?:summari[sz]e|recap|repeat|tell\s+me|remind\s+me)\b[^?]*\bwhat\s+i\s+(?:told|said|wrote|asked|gave)\s+(?:you\s+)?(?:at|in|from|about|near)\s+(?:the\s+)?(?:start|beginning|opening|outset|top)\b/i;
+const FIRST_USER_PARAPHRASE_ALT_RE =
+  /\bwhat\s+i\s+(?:told|said|wrote|asked|gave)\s+(?:you\s+)?(?:at|in|from|about|near)\s+(?:the\s+)?(?:start|beginning|opening|outset)\b/i;
 
 function quote(text: string, max = 280): string {
   const trimmed = text.trim().replace(/\s+/g, ' ');
@@ -105,7 +111,8 @@ export function tryHandleChatMeta(
   const text = content.trim();
   if (!text) return null;
 
-  if (FIRST_USER_RE.test(text) || FIRST_USER_ALT_RE.test(text)) {
+  if (FIRST_USER_RE.test(text) || FIRST_USER_ALT_RE.test(text)
+    || FIRST_USER_PARAPHRASE_RE.test(text) || FIRST_USER_PARAPHRASE_ALT_RE.test(text)) {
     const msg = firstUserMessage(history);
     if (!msg) return { reply: "You haven't sent any messages yet — this is your first turn.", intent: 'first-user' };
     return { reply: `Your first message in this chat was: ${quote(msg.content)}.`, intent: 'first-user' };

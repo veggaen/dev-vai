@@ -76,6 +76,68 @@ const INSTRUCTION_CONSTRAINT_PATTERN = new RegExp(
     "\\breply\\s+with\\s+(?:the|a|an)\\s+(?:name|number|year|date|value|answer|word|letter|digit)\\b",
     // "what's the name", "just the name", "only the name"
     "\\b(?:just|only)\\s+(?:the|a|an)\\s+(?:name|number|year|date|answer|word|value|letter|digit)\\b",
+    // "respond within quotes ...", "answer in quotes", "in double quotes", "in quotation marks"
+    "\\b(?:within|in)\\s+(?:double\\s+|single\\s+)?(?:quotes?|quotation\\s+marks?|inverted\\s+commas?)\\b",
+    // "in parentheses", "in brackets"
+    "\\bin\\s+(?:parentheses|brackets?|braces?)\\b",
+    // "only the name of X", "tell me only the name" — broader phrasing
+    "\\bonly\\s+(?:the\\s+)?name\\b|\\bname\\s+only\\b",
+    // "as a dotted list", "as a bullet list", "as a numbered list"
+    "\\bas\\s+(?:a\\s+)?(?:dotted|bullet|bulleted|numbered|dot)\\s+list\\b",
+    // "tell me only his/her/their children's names", "only the children"
+    "\\bonly\\s+(?:his|her|their|the)\\s+(?:children|child|kids?|sons?|daughters?)\\b",
+    // "exactly N tokens/words/letters/characters"
+    "\\bexactly\\s+\\d+\\s+(?:tokens?|words?|letters?|characters?|chars?)\\b",
+    // "respond with only like 5 tokens", "only like N tokens"
+    "\\bonly\\s+(?:like\\s+)?\\d+\\s+(?:tokens?|words?|letters?|characters?|chars?)\\b",
+    // "4 letters + the semicolon", "N letters + X in between"
+    "\\b\\d+\\s+(?:letters?|chars?|characters?|tokens?|words?)\\s+(?:\\+|and|plus|with)\\b",
+    // "all caps", "in all caps", "in uppercase", "ALL CAPS"
+    "\\b(?:in\\s+)?(?:all\\s+caps|uppercase|all\\s+uppercase)\\b",
+    // "as JSON", "as a JSON object", "respond with JSON"
+    "\\bas\\s+(?:a\\s+)?json\\b|\\bjson\\s+(?:object|format|output|only)\\b",
+    // "comma-separated", "comma separated list"
+    "\\bcomma[\\s-]separated\\b",
+    // "format as HH:MM", "in the format", "in format"
+    "\\bin\\s+(?:the\\s+)?format\\b",
+    // "in single quotes" / "inside single quotes" / "with single quotes"
+    "\\b(?:in|inside|using|with)\\s+single\\s+quotes?(?:\\s+marks?)?\\b",
+    // "arrow-separated", "separated by arrows", "separated by → arrows"
+    "\\barrow[- ]separated\\b|\\bseparated\\s+by\\s+arrows?\\b",
+    // "separated by → (arrow character)"
+    "separated\\s+by\\s+[\\u2192]|[\\u2192]\\s+(?:arrows?|separated|between)",
+    // "→ between", "with → in between", "using → symbols"
+    "\\bwith\\s+(?:a\\s+)?(?:→|arrow)\\s+(?:between|in\\s+between)\\b",
+    // "spelled backwards", "spell it backwards", "in reverse"
+    "\\b(?:spelled?|spell|write|say|type)\\s+(?:it\\s+)?(?:backwards?|in\\s+reverse)\\b",
+    // "only the symbol" / "only the chemical symbol" / "just the symbol"
+    "\\b(?:only|just)\\s+(?:the\\s+)?(?:chemical\\s+)?symbol\\b",
+    // "on separate lines" — each result on its own line
+    "\\bon\\s+separate\\s+lines?\\b",
+    // "no extra text", "no other text", "no additional text"
+    "\\bno\\s+(?:extra|other|additional)\\s+(?:text|words?|explanation|context)\\b",
+    // "just the answer" / "only the answer"
+    "\\b(?:just|only)\\s+the\\s+answer\\b",
+    // "in lowercase" / "all lowercase" / "in all lowercase"
+    "\\b(?:in\\s+)?(?:all\\s+)?lowercase\\b",
+    // "as a table" / "as a markdown table" / "in a table"
+    "\\bas\\s+(?:a\\s+)?(?:markdown\\s+)?table\\b|\\bin\\s+(?:a\\s+)?table(?:\\s+format)?\\b",
+    // "surname only" / "only the surname"
+    "\\b(?:only\\s+(?:the\\s+)?)?surname\\b",
+    // "only the first name" / "first name only" (broader than existing)
+    "\\bfirst\\s+name\\s+only\\b|\\bonly\\s+(?:the\\s+)?(?:first|given)\\s+name\\b",
+    // "only his name" / "only her first name" / "just his last name"
+    "\\b(?:only|just)\\s+(?:his|her|their)\\s+(?:(?:first|last|given|full)\\s+)?name\\b",
+    // "tell me only his name" / "give me only the name"
+    "\\b(?:tell\\s+me|give\\s+me)\\s+only\\s+(?:his|her|their|the)\\s+(?:(?:first|last|full)\\s+)?name\\b",
+    // "spell X backwards" with optional words between — "spell his last name backwards"
+    "\\bspell(?:ed)?\\s+(?:\\w+\\s+){0,4}backwards?\\b",
+    // "semicolon-separated", "separated by semicolons"
+    "\\bsemicolon[- ]separated\\b|\\bseparated\\s+by\\s+semicolons?\\b",
+    // "pipe-separated", "separated by pipes", "separated by |"
+    "\\bpipe[- ]separated\\b|\\bseparated\\s+by\\s+(?:pipes?|\\|)\\b",
+    // "reply yes or no", "answer yes or no", "just yes or no"
+    "\\b(?:reply|answer|respond|say)\\s+(?:just\\s+|only\\s+)?(?:yes\\s+or\\s+no|yes\\/no)\\b|\\bjust\\s+(?:yes\\s+or\\s+no|yes\\/no)\\b",
   ].join('|'),
   'i',
 );

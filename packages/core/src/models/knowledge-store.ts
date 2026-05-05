@@ -256,6 +256,15 @@ export class KnowledgeStore {
   }
 
   private extractConcepts(text: string, source: string): void {
+    // YouTube transcripts are spoken-word streams that the regex below mis-parses
+    // as authoritative "X is Y" definitions. A casual narrator line like
+    // "A server is just a program running forever on a machine" gets registered
+    // as the canonical definition of `server`, then surfaces verbatim for any
+    // short technical query that touches the word ("explain server actions").
+    // Concept extraction must come from authoritative sources only.
+    if (source.includes('youtube.com') || source.includes('youtu.be') || source === 'youtube') {
+      return;
+    }
     const sentences = text.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 10 && s.length < 500);
 
     for (const sentence of sentences) {
@@ -819,6 +828,12 @@ export class KnowledgeStore {
     }
 
     const totalDocs = this.documents.length;
+    // Short technical lookups (e.g. "explain server actions", "what is suspense")
+    // are systematically contaminated by YouTube transcript chunks that mention
+    // the query word in passing without authoritatively defining it. Tighten the
+    // YouTube penalty further when the query is short.
+    const isShortTechnicalQuery = queryWords.length > 0 && queryWords.length <= 4;
+    const youtubeMultiplier = isShortTechnicalQuery ? 0.15 : 0.6;
     const scored: Array<{ text: string; source: string; score: number }> = [];
     for (const docIdx of candidateDocIndices) {
       const doc = this.documents[docIdx];
@@ -835,10 +850,16 @@ export class KnowledgeStore {
       if (matchedWords === 0) continue;
 
       const source = doc.source;
+      const isYoutube = source.includes('youtube.com') || source.includes('youtu.be') || source === 'youtube';
+      // Short technical queries (≤4 content tokens) are dominated by transcript
+      // chunks that mention a query word in passing. Filter YouTube out entirely
+      // in that regime so the engine falls back to authoritative entries/docs
+      // or to an honest "I don't know" rather than a misleading transcript snippet.
+      if (isYoutube && isShortTechnicalQuery) continue;
       if (source.startsWith('entry:bootstrap') || source.startsWith('entry:user-taught') || source.startsWith('entry:vcus')) {
         score *= 1.4;
-      } else if (source.includes('youtube.com') || source.includes('youtu.be') || source === 'youtube') {
-        score *= 0.6;
+      } else if (isYoutube) {
+        score *= youtubeMultiplier;
       }
 
       const text = doc.words.join(' ');
@@ -890,6 +911,11 @@ export class KnowledgeStore {
       .map((w) => w.replace(/[^a-z0-9æøå]+/g, ''))
       .filter((w) => w.length > 2 && !KnowledgeStore.STOP_WORDS.has(w));
     const contentTokenSet = new Set(contentTokens);
+    // Short technical lookups (≤ 4 content tokens) are systematically contaminated
+    // by YouTube transcript chunks. Tighten the YouTube multiplier in that regime
+    // so transcripts cannot win against authoritative entries / docs / bootstrap.
+    const isShortTechnicalQuery = contentTokens.length > 0 && contentTokens.length <= 4;
+    const youtubeMultiplier = isShortTechnicalQuery ? 0.15 : 0.6;
     const candidates = contentTokenSet.size === 0
       ? hits.filter((h) => h.bm25 > 0)
       : hits.filter((h) => {
@@ -898,6 +924,28 @@ export class KnowledgeStore {
           for (const tok of contentTokenSet) if (docWords.has(tok)) return true;
           return false;
         });
+
+    // Iter-20: definition-query entity-leading-copula boost. For "what is X" /
+    // "who is X" / "what are X" queries, a candidate that actually defines X
+    // (i.e. contains a sentence "X is/are/was/refers to ...") deserves to win
+    // over peripheral mentions. Without this, queries like "what is alphabet
+    // inc" let an LSTM Stock-Price-Predictor README outrank the Wikipedia
+    // entry that contains "Alphabet Inc. is an American multinational...".
+    // Multiplicative 1.6× boost, bounded, fires only on definition shape.
+    let definitionBoostRe: RegExp | null = null;
+    {
+      const defForm = /^(?:what(?:'s|\s+is|\s+are|\s+was|\s+were)|who(?:\s+is|\s+are|\s+was|\s+were))\s+(.+?)\??$/i.exec(query.trim());
+      if (defForm) {
+        const entity = defForm[1].trim().toLowerCase()
+          .replace(/^(?:the|a|an)\s+/i, '')
+          .replace(/[?.!,]+$/g, '');
+        if (entity.length > 0 && entity.length <= 60) {
+          const entityEsc = entity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          definitionBoostRe = new RegExp(`\\b${entityEsc}[\\s.,'\u2019:;-]{0,8}(?:is|are|was|were|refers\\s+to)\\b`, 'i');
+        }
+      }
+    }
+
     const scored: Array<{ text: string; source: string; score: number }> = [];
     for (const hit of candidates) {
       const text = hit.doc.text;
@@ -907,10 +955,17 @@ export class KnowledgeStore {
 
       let score = hit.score;
       const source = hit.doc.source ?? '';
+      const isYoutube = source.includes('youtube.com') || source.includes('youtu.be') || source === 'youtube';
+      // Same hard-filter as the legacy path: short technical queries cannot be
+      // answered from raw YouTube transcript chunks.
+      if (isYoutube && isShortTechnicalQuery) continue;
       if (source.startsWith('entry:bootstrap') || source.startsWith('entry:user-taught') || source.startsWith('entry:vcus')) {
         score *= 1.4;
-      } else if (source.includes('youtube.com') || source.includes('youtu.be') || source === 'youtube') {
-        score *= 0.6;
+      } else if (isYoutube) {
+        score *= youtubeMultiplier;
+      }
+      if (definitionBoostRe && definitionBoostRe.test(text)) {
+        score *= 1.6;
       }
       scored.push({ text, source, score });
     }

@@ -467,10 +467,30 @@ function deriveFollowUpSubject(topic: string): string {
 
 export function normalizeFollowUpTopic(raw: string): string {
   return stripTopicNoiseTerms(sanitizeTopicPhrase(normalizeCommonTypos(raw)
+    // Strip leading conversational glue from follow-up prompts. Without this,
+    // "and how does that compare to fine tuning?" survives as the topic and
+    // the related-question templates emit ungrammatical garbage like
+    // "Which trade-offs matter most between and how does that compare to fine tuning?".
+    .replace(/^(?:and|but|so|ok(?:ay)?|well|hmm+|yeah|ja|men|og)\s+/i, '')
+    // "how does that compare to/with X" → "X". MUST run before the generic
+    // "how does" stripper below, otherwise that one eats "how does" first
+    // and leaves "that compare to X".
+    .replace(/^(?:how\s+does\s+(?:that|it|this)\s+compare\s+(?:to|with|against)\s+)/i, '')
+    .replace(/^(?:how\s+does\s+(?:that|it|this)\s+(?:differ|stack\s+up)\s+(?:from|against|to|with)\s+)/i, '')
+    // Re-strip any question-opener that followed the glue word.
     .replace(/^(?:please\s+)?(?:(?:what\s+(?:is|are)|how\s+(?:do|does|to)|why\s+(?:is|are|does)|can\s+you\s+explain|explain|describe|tell\s+me\s+about|show\s+me|give\s+me|search\s+(?:for)?|find|look\s+up|hva\s+er|forklar|beskriv|fortell\s+meg\s+om|hvordan(?:\s+fungerer)?)\s+)?/i, '')
     .replace(/^(?:can|could|would)\s+you\s+/i, '')
     .replace(/^(?:set\s*up|setup|build|create|make|start|generate|install|launch|spin\s*up|scaffold)\s+/i, '')
     .replace(/\b(?:in\s+simple\s+words?|simply|for\s+beginners?|med\s+enkle\s+ord|kort\s+fortalt|kort\s+forklart)\b/gi, ' ')
+    // Strip terse-output adverbs that the user adds for brevity. Without
+    // this, "explain typescript briefly" normalises to "typescript briefly"
+    // and never hits the curated primer (`typescript`) or the exact-entry
+    // patterns (`what is typescript`, `explain typescript`). This caused
+    // chat-mode "explain X <adverb>" prompts to fall through to retrieval
+    // and emit a self-captured opinion-quote about the topic instead of an
+    // actual explanation. Adverbs are pure formatting hints — the topic is
+    // the noun phrase that remains.
+    .replace(/\b(?:briefly|shortly|quickly|in\s+(?:short|brief|a\s+nutshell|one\s+(?:sentence|line)|a\s+sentence|a\s+line|a\s+paragraph|few\s+words?)|tldr|tl;dr|kort)\b/gi, ' ')
     .replace(/\b(?:include|with)\s+(?:sources?|citations?|references?)\b/gi, ' ')
     .replace(/\b(?:for\s+me|please|pls|thanks?|thank\s+you|kan\s+du|kort)\b/gi, ' ')
     .replace(/^a\s+|^an\s+|^the\s+/i, '')
@@ -536,6 +556,17 @@ function isPerplexityWrapperLikeResult(raw: RawSearchResult): boolean {
   return isPerplexityUnofficialResult(raw) || isPerplexityCloneOrWrapperResult(raw);
 }
 
+// "who is the current king of norway" / "president of france" style queries
+// look up a person, not a software project. Code-hosting domains never have
+// the answer and frequently leak unrelated repos like `flike/kingshard`.
+function isHeadOfStateQuery(query: string): boolean {
+  return /\b(?:who\s+is\s+(?:the\s+)?(?:current\s+|present\s+|sitting\s+)?(?:king|queen|monarch|emperor|empress|president|prime\s+minister|pm|chancellor|sultan|emir|ruler|head\s+of\s+state|head\s+of\s+government))\b/i.test(query);
+}
+
+function isCodeHostingDomain(domain: string): boolean {
+  return /(^|\.)(?:github\.com|gitlab\.com|bitbucket\.org|sourceforge\.net|codeberg\.org|gitea\.io)$/i.test(domain);
+}
+
 function isPerplexityProductResult(raw: RawSearchResult): boolean {
   const haystack = `${raw.title} ${raw.snippet} ${raw.url}`.toLowerCase();
   return /\bperplexity ai\b|perplexity_ai|perplexity\.ai|\bsonar\b|\bsearch engine\b|\bai company\b|\bllm\b/.test(haystack);
@@ -560,7 +591,14 @@ export function generateTopicFollowUps(rawTopic: string, intent = 'general'): st
   const topic = normalizeFollowUpTopic(rawTopic);
   if (topic.length < 2) return [];
 
+  // Suppress follow-ups when the cleaned topic is still conversational filler
+  // ("that", "it", "this", "you"...) or starts with a sentence-fragment opener.
+  // Producing "Which trade-offs matter most between that?" is worse than nothing.
+  if (/^(?:that|it|this|those|these|you|me|us|them|something|anything|everything|stuff|things?)$/i.test(topic)) return [];
+  if (/^(?:write|show|give|tell|teach|help|make|give\s+me|how\s+can|how\s+do)\b/i.test(topic)) return [];
+
   const subject = deriveFollowUpSubject(topic);
+  if (subject.length < 2 || /^(?:that|it|this)$/i.test(subject)) return [];
 
   if (intent === 'comparison') {
     return finalizeFollowUps([
@@ -581,6 +619,14 @@ export function generateTopicFollowUps(rawTopic: string, intent = 'general'): st
       `How is ${subject} used in practice?`,
       `What are the core ideas behind ${subject}?`,
       `What should I learn next after ${subject}?`,
+    ]);
+  }
+
+  if (/\bgithub\b/i.test(topic) && /\b(?:top|most|rank(?:ed|ing)?|followers?|stars?|maintainers?|developers?|devs?)\b/i.test(topic)) {
+    return finalizeFollowUps([
+      'Rank this by GitHub followers',
+      'Rank this by project stars instead',
+      'Give me 3 high-signal names to inspect',
     ]);
   }
 
@@ -623,9 +669,9 @@ export function generateTopicFollowUps(rawTopic: string, intent = 'general'): st
       ]);
     default:
       return finalizeFollowUps([
-        `Show me a practical example with ${subject}`,
-        `What are the most common mistakes with ${subject}?`,
-        `What is the cleanest project structure for ${subject}?`,
+        'Narrow this to the strongest recommendation',
+        'Show the key trade-offs',
+        'Give me the shortest useful version',
       ]);
   }
 }
@@ -1014,6 +1060,7 @@ function rankSnippets(
   const scored: Array<SearchSnippet & { familyKey: string | null; wrapperLike: boolean; mathLike: boolean }> = [];
   const primarySubject = extractPrimarySubject(query, []);
   const biasPerplexityProduct = shouldBiasPerplexityToProduct(query, primarySubject);
+  const dropCodeHosting = isHeadOfStateQuery(query);
   const hasOfficialPerplexityResult = biasPerplexityProduct
     && rawResults.some((raw) => isPerplexityOfficialResult(raw) && !isPerplexityUnofficialResult(raw));
 
@@ -1026,6 +1073,11 @@ function rankSnippets(
     } catch {
       continue; // skip unsafe URLs
     }
+
+    // Drop code-hosting results when the query is asking about a real-world
+    // person (head of state). Prevents leaks like `flike/kingshard` for
+    // "who is the king of norway".
+    if (dropCodeHosting && isCodeHostingDomain(domain)) continue;
 
     // Content safety
     const safety = scanContentSafety(raw.snippet);
@@ -1217,16 +1269,79 @@ function looksLikeNoisyUiSentence(sentence: string): boolean {
   return compact.length > 0 && (punctuationCount / compact.length) > 0.22;
 }
 
+/**
+ * Detects sentences that are actually infobox / table-of-fields fragments
+ * masquerading as prose because the period-splitter let an `Inc.` /
+ * `Corp.` boundary fall through and stitched a section header onto the
+ * next chunk. Symptoms: high ratio of capitalized title-case words, no
+ * main explanatory verb, often opens with a year-paren (`"2026)"`) or a
+ * footnotes-ref (`"Footnotes / references"`), or contains canonical
+ * infobox field labels (`Subsidiaries`, `Founders`, `Headquarters`,
+ * `Key people`, `Area served`, `Number of employees`, `Website`).
+ * Iter-14 fix.
+ */
+function looksLikeInfoboxFragment(sentence: string): boolean {
+  // Canonical infobox labels — single-word presence is enough.
+  if (/\b(?:Subsidiaries|Founders?|Headquarters|Area served|Number of employees|Trade name|Company type|Key people|Industry|Predecessor|Operating income|Net income|Total assets|Total equity|Stockholders'? equity|Footnotes \/ references|Bret Taylor \( chairman \)|isin|ISIN)\b/.test(sentence)) {
+    return true;
+  }
+  // Opens with a year-close-paren (infobox table fragment leftover).
+  if (/^\d{4}\s*\)/.test(sentence.trim())) return true;
+  // Opens with `1 ` or `2 ` followed by a capitalized phrase ending with `Inc.`/`Corp.`/`Ltd.`
+  // (footnotes-style stub).
+  if (/^\d+\s+[A-Z][\w&\s,'-]{3,}\s+(?:Inc|Corp|Ltd|LLC|Co)\.\s*$/.test(sentence.trim())) return true;
+  // High title-case ratio with no explanatory verb is an infobox row.
+  const words = sentence.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length >= 4 && !hasExplanatoryVerb(sentence)) {
+    const titleCaseCount = words.filter((w) => /^[A-Z][a-z0-9]+$/.test(w) || /^[A-Z]{2,}$/.test(w)).length;
+    if (titleCaseCount / words.length >= 0.55) return true;
+  }
+  return false;
+}
+
 function hasExplanatoryVerb(sentence: string): boolean {
   return /\b(?:is|are|was|were|supports|queries|aggregates?|functions?|removes|stores|gives|uses|works|returns|provides|avoids|focuses)\b/i.test(sentence);
 }
 
+/**
+ * Common abbreviations whose trailing period must NOT be treated as a
+ * sentence boundary. Without this, `"Perplexity AI, Inc. is an AI search
+ * engine ..."` gets split into `"Perplexity AI, Inc."` (13 chars,
+ * dropped by the ≥40 filter) plus `"is an AI search engine ..."`
+ * (subject-less stub). Same for `Alphabet Inc.`, `Microsoft Corp.`,
+ * `J.R.R. Tolkien`, `e.g.`, `vs.`, etc. Iter-14 fix for the dormant
+ * defect observed in iter-9.
+ */
+const SENTENCE_SPLIT_NON_TERMINAL_ABBREVIATIONS: readonly string[] = [
+  'Inc', 'Corp', 'Co', 'Ltd', 'LLC', 'PLC', 'GmbH', 'S.A',
+  'Mr', 'Mrs', 'Ms', 'Dr', 'Prof', 'Sr', 'Jr',
+  'St', 'Mt', 'Ave', 'Blvd', 'Rd',
+  'vs', 'etc', 'e.g', 'i.e', 'cf', 'al',
+  'Jan', 'Feb', 'Mar', 'Apr', 'Jun', 'Jul', 'Aug', 'Sep', 'Sept', 'Oct', 'Nov', 'Dec',
+];
+
 function splitIntoSentences(text: string): string[] {
-  return sanitizeSnippetText(text)
+  // Protect non-terminal abbreviations: replace `Inc.` → `Inc\u0001` so
+  // the period doesn't match the splitter, then restore after split.
+  const sanitized = sanitizeSnippetText(text);
+  let protectedText = sanitized;
+  for (const abbr of SENTENCE_SPLIT_NON_TERMINAL_ABBREVIATIONS) {
+    // Match the abbreviation followed by `.` and a space + lowercase
+    // OR end-of-string. Capital-letter-followed cases (a real new
+    // sentence) keep the period as terminal.
+    const re = new RegExp(`\\b(${abbr.replace(/\./g, '\\.')})\\.(?=\\s+[a-z]|\\s*$|,|\\s+\\()`, 'g');
+    protectedText = protectedText.replace(re, '$1\u0001');
+  }
+  // Also protect single-letter initials: `J. R. R. Tolkien`, `T. S. Eliot`.
+  protectedText = protectedText.replace(/\b([A-Z])\.(?=\s*[A-Z]\.)/g, '$1\u0001');
+  protectedText = protectedText.replace(/\b([A-Z])\.(?=\s+[A-Z][a-z])/g, '$1\u0001');
+
+  return protectedText
     .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim().replace(/^\d+\s+/, ''))
+    .map((sentence) => sentence.replace(/\u0001/g, '.').trim().replace(/^\d+\s+/, ''))
     .filter((sentence) => sentence.length >= 40 && sentence.length <= 320)
-    .filter((sentence) => !looksLikeNoisyUiSentence(sentence));
+    .filter((sentence) => !looksLikeNoisyUiSentence(sentence))
+    .filter((sentence) => !looksLikeInfoboxFragment(sentence));
 }
 
 function sentenceScore(sentence: string, query: string, plan: VaiSearchPlan, primarySubject: string, comparisonSubject: string | null): number {
@@ -1370,6 +1485,77 @@ function buildEvidenceSummary(
   };
 }
 
+// Honest-audit fix: query/snippet content-word overlap gate. Prevents the
+// pipeline from emitting Bee Movie scripts, random GitHub repo blurbs, or
+// other off-topic snippets when retrieval scored everything low. If none
+// of the top snippets share any meaningful content word with the query,
+// we refuse to render an answer and tell the user we didn't find anything.
+const SEARCH_STOPWORDS = new Set([
+  'the','a','an','and','or','but','if','then','of','to','in','on','for','at','by','with','from','as','is','are','was','were','be','been','being','this','that','these','those','it','its','i','you','we','they','he','she','my','your','our','their','his','her',
+  'what','who','where','when','why','how','which','whom',
+  'do','does','did','doing','done','have','has','had','having',
+  'can','could','should','would','will','shall','may','might','must',
+  'me','us','them','him','so','just','very','really','about','tell','give','show','say','said','please','some','any','all','no','not','yes',
+  'thing','things','stuff','okay','ok','well','um','uh','hey','hi','hello','yo','vai',
+]);
+function extractContentWords(text: string): Set<string> {
+  const out = new Set<string>();
+  const tokens = text.toLowerCase().match(/[a-z][a-z0-9]{2,}/g) || [];
+  for (const t of tokens) if (!SEARCH_STOPWORDS.has(t)) out.add(t);
+  return out;
+}
+function snippetSharesQueryWords(snippetText: string, queryWords: Set<string>, minHits = 1): boolean {
+  if (queryWords.size === 0) return true; // nothing to gate on
+  const lower = snippetText.toLowerCase();
+  let hits = 0;
+  for (const w of queryWords) {
+    if (lower.includes(w)) {
+      hits++;
+      if (hits >= minHits) return true;
+    }
+  }
+  return false;
+}
+
+// Honest-audit fix: README/SEO-style snippet detector. Web results sometimes
+// surface low-quality landing pages or GitHub READMEs that happen to share
+// keywords with the query (e.g. "Simple weather reporter of different capital
+// cities in Australia." for "capital city of australia"). These are visibly
+// off-topic to a human reader; refuse to render them as the answer.
+function looksLikeJunkSnippet(text: string, title: string): boolean {
+  const t = (text || '').trim();
+  if (!t) return true;
+  const lower = t.toLowerCase();
+  const titleLower = (title || '').toLowerCase();
+  const seoOpeners = [
+    /^if\s+you\s+(?:were|are)\s+looking\s+for\b/,
+    /^featured\s+in\s+do\s+it\s+all\b/,
+    /^you\s+(?:are|were)\s+at\s+(?:the\s+)?right\s+place\b/,
+    /^(?:click|tap)\s+here\b/,
+  ];
+  for (const re of seoOpeners) if (re.test(lower)) return true;
+  const readmeOpeners = [
+    /^this\s+(?:python|node|javascript|typescript|rust|go|c\+\+|c#|java|ruby|php|bash|shell)?\s*(?:script|program|repo(?:sitory)?|module|package|library|tool|project|external\s+service)\b/,
+    /^simple\s+(?:program|script|tool|app|api|weather\s+reporter|implementation|example|chat(?:bot)?|website)\b/,
+    /^python\s+codes?\s+and\s+jupyter\b/,
+    /^create\s+a\s+beginner-?friendly\b/,
+    /^generally\s+(?:humanoid|robots?|the)\b/,
+  ];
+  for (const re of readmeOpeners) if (re.test(lower)) return true;
+  if (lower.length < 400) {
+    if (/\bat\s+right\s+place\b/.test(lower)) return true;
+    if (/\bquillbot\s+writing\s+tools\b/.test(lower)) return true;
+    if (/\bai\s+generator\s+tools\b/.test(lower)) return true;
+  }
+  // GitHub repo chrome leakage
+  if (/\b(?:stars?|watchers?|forks?)\s+\d+\s+(?:stars?|watchers?|forks?)/.test(lower)) return true;
+  if (/\bnotifications?\s+you\s+must\s+be\s+signed\s+in\b/.test(lower)) return true;
+  if (/\bactivity\s+stars?\s+\d+\s+stars?\b/.test(lower)) return true;
+  // Title indicators of repo browsing pages
+  if (/\bgithub\b/.test(titleLower) && /\b(?:stars?|watchers?|forks?|notifications?)\b/.test(lower)) return true;
+  return false;
+}
+
 function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): string {
   if (snippets.length === 0) {
     return `I searched for "${query}" but couldn't find useful results. Try rephrasing or being more specific.`;
@@ -1382,18 +1568,71 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): st
 
   // Build answer from highest trust sources first
   const ordered = [...highTrust, ...medTrust, ...otherTrust];
-  const used = ordered.slice(0, 5);
+  const candidatesAll = ordered.slice(0, 8);
+
+  // Honest-audit gate: drop snippets that share too few content words with the
+  // query. With ≥2 query content words, require ≥2 hits (in title+text combined)
+  // so a single common-word coincidence ("india") cannot pull in an off-topic doc.
+  // Also drop README/SEO-style snippets entirely.
+  const queryWords = extractContentWords(query);
+  const minHits = queryWords.size >= 2 ? 2 : 1;
+  const relevantUsed = candidatesAll.filter((s) => {
+    if (looksLikeJunkSnippet(s.text, s.title || '')) return false;
+    // Body-alone gate: requires minHits-1 (min 1) hit in the snippet text so
+    // JWST-style bodies that say "the telescope uses infrared optics" (1 hit)
+    // aren't blocked even though the TITLE already supplies the second hit.
+    // The combined (title+text) gate below is the strict gate.
+    const bodyMinHits = Math.max(1, minHits - 1);
+    if (queryWords.size > 0 && !snippetSharesQueryWords(s.text, queryWords, bodyMinHits)) return false;
+    const combined = `${s.title || ''} \n ${s.text}`;
+    return snippetSharesQueryWords(combined, queryWords, minHits);
+  });
+  if (relevantUsed.length === 0) {
+    return `I searched for "${query}" but didn't find anything that actually matches. The web results were off-topic, so I'm not going to invent an answer. Try rephrasing or being more specific.`;
+  }
+  const used = relevantUsed.slice(0, 5);
 
   const lines: string[] = [];
   const { plan, primarySubject, comparisonSubject, summary, supporting, reasons } = buildEvidenceSummary(query, used);
+  // Iter-17 guard: for "what is X" / "who is X" definition prompts, the lead
+  // sentence must start with the entity + copula. Without this, retrieval
+  // sometimes leads with a third-party mention fragment ("swift community
+  // driven package for openai public api") instead of the actual definition
+  // sentence. Scan all snippets for an entity-leading sentence and override
+  // the summary if one exists.
+  let effectiveSummary = summary;
+  let suppressedLeadText: string | null = null;
+  if (primarySubject && /^(?:what(?:'s|\s+is|\s+are|\s+was|\s+were)|who(?:\s+is|\s+are|\s+was|\s+were)|hva\s+er)\b/i.test(query.trim())) {
+    const subj = primarySubject.toLowerCase();
+    const subjEsc = subj.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const entityLead = new RegExp(`^${subjEsc}[\\s.,'\u2019:;-]{0,8}(?:is|are|was|were|refers\\s+to)\\b`, 'i');
+    const summaryHasEntityLead = summary ? entityLead.test(summary.text) : false;
+    if (!summaryHasEntityLead) {
+      let best: { text: string; sourceIndex: number } | null = null;
+      for (let i = 0; i < used.length; i++) {
+        const sents = splitIntoSentences(used[i].text);
+        for (const s of sents) {
+          if (entityLead.test(s) && s.length >= 40 && s.length <= 600) {
+            best = { text: s, sourceIndex: i };
+            break;
+          }
+        }
+        if (best) break;
+      }
+      if (best) {
+        if (summary) suppressedLeadText = summary.text;
+        effectiveSummary = best;
+      }
+    }
+  }
   const prefersSimpleFraming = /\b(?:explain|definition|what is|what are|in simple words?)\b/i.test(query)
     || plan.intent === 'definition'
     || plan.intent === 'explanation';
   const asksWhatItDoes = /\bwhat\s+it\s+does\b/i.test(query) || plan.intent === 'definition' || plan.intent === 'explanation';
   const asksWhenToUse = /\b(?:when\s+should\s+i\s+use|when\s+to\s+use|best\s+fit|should\s+use\s+it|when\s+should\s+you\s+use)\b/i.test(query);
 
-  if (summary) {
-    lines.push(`${summary.text} ${collectCitationMarks([summary.sourceIndex])}`.trim());
+  if (effectiveSummary) {
+    lines.push(`${effectiveSummary.text} ${collectCitationMarks([effectiveSummary.sourceIndex])}`.trim());
   } else {
     const fallbackSource = used[0];
     const fallbackText = sanitizeSnippetText(fallbackSource.text);
@@ -1401,8 +1640,13 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): st
     lines.push(`${snippetText} ${collectCitationMarks([0])}`.trim());
   }
 
-  if (prefersSimpleFraming && supporting.length > 0) {
-    const simpleLead = supporting[0];
+  // Filter out the suppressed (off-topic) lead from supporting if it slipped in.
+  const supportingFiltered = suppressedLeadText
+    ? supporting.filter((entry) => entry.text !== suppressedLeadText)
+    : supporting;
+
+  if (prefersSimpleFraming && supportingFiltered.length > 0) {
+    const simpleLead = supportingFiltered[0];
     lines.push('');
     lines.push('In simple words');
     lines.push(`${simpleLead.text} ${collectCitationMarks([simpleLead.sourceIndex])}`.trim());
@@ -1415,16 +1659,16 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): st
       lines.push(reasonSentence.trim());
     }
 
-    if (supporting.length > 0) {
+    if (supportingFiltered.length > 0) {
       lines.push('');
       lines.push('Key evidence:');
-      for (const entry of supporting) {
+      for (const entry of supportingFiltered) {
         lines.push(`- ${entry.text} ${collectCitationMarks([entry.sourceIndex])}`.trim());
       }
     }
-  } else if (supporting.length > 0) {
+  } else if (supportingFiltered.length > 0) {
     lines.push('');
-    const remainingSupport = prefersSimpleFraming ? supporting.slice(1) : supporting;
+    const remainingSupport = prefersSimpleFraming ? supportingFiltered.slice(1) : supportingFiltered;
     const sectionHeading = asksWhatItDoes
       ? 'What it does:'
       : asksWhenToUse
@@ -1439,12 +1683,11 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): st
   }
 
   lines.push('');
-  lines.push('Sources:');
+  lines.push('**Sources**');
   for (let i = 0; i < used.length; i++) {
     const s = used[i];
-    const trustBadge = s.trust.tier === 'high' ? '🟢' : s.trust.tier === 'medium' ? '🟡' : '🔴';
     const title = s.title || s.domain;
-    lines.push(`${i + 1}. ${trustBadge} [${title}](${s.url}) — trust: ${s.trust.score.toFixed(2)}`);
+    lines.push(`${i + 1}. [${title}](${s.url})`);
   }
 
   return lines.join('\n');

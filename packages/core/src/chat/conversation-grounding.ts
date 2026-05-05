@@ -175,6 +175,18 @@ export function shouldDeferContextGroundedFollowUp(input: string, history: reado
     return true;
   }
 
+  // Iter-28: defer when the input looks like a canonical knowledge question
+  // ("what does X do", "what is X", "explain X", "how do i X") — those should
+  // route to curated fact/snippet strategies, not generic grounded continuation
+  // scaffolding. Without this, follow-up turns leak meta-text like
+  // "**Grounded continuation**\nContinuing from..." instead of an actual answer.
+  if (/^(?:so\s+|and\s+|but\s+|then\s+)?(?:what(?:'s|\s+is|\s+are|\s+does|\s+do)|how\s+(?:do\s+i|to|does)|why\s+(?:does|is|do|are)|when\s+(?:does|do)|explain|review\s+this)\b/i.test(lower)) {
+    return true;
+  }
+  if (/^(?:explain|what does this|what's this|whats this)\b/i.test(lower)) {
+    return true;
+  }
+
   const recentAssistant = [...history].reverse().find((message) => message.role === 'assistant' && message.content.trim().length > 0);
   const priorHasCode = Boolean(recentAssistant && /```[\s\S]+```/.test(recentAssistant.content));
   if (

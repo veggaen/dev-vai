@@ -159,7 +159,7 @@ export interface CheckpointMeta {
 export interface VerificationMeta {
   eventType: 'verification';
   target: 'dev-server' | 'preview-runtime' | 'template-preview' | 'deploy-preview' | 'sandbox-link';
-  status: 'started' | 'passed' | 'failed';
+  status: 'started' | 'passed' | 'failed' | 'skipped';
   port?: number;
   timeoutMs?: number;
   evidence?: string[];

@@ -5,6 +5,7 @@ import { CONVERSATION_MODE_SYSTEM_PROMPTS } from '../src/chat/modes.js';
 import { rewriteChatPrompt } from '../src/chat/prompt-rewrite.js';
 import { VaiEngine, VaiTokenizer, KnowledgeStore } from '../src/models/vai-engine.js';
 import { SkillRouter } from '../src/models/skill-router.js';
+import type { SearchResponse } from '../src/search/types.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -163,7 +164,7 @@ describe('VaiEngine', () => {
     const response = await engine.chat({
       messages: [{ role: 'user', content: 'hello' }],
     });
-    expect(response.message.content).toContain('VeggaAI');
+    expect(response.message.content).toContain("what's up");
     expect(response.finishReason).toBe('stop');
   });
 
@@ -171,7 +172,7 @@ describe('VaiEngine', () => {
     const response = await engine.chat({
       messages: [{ role: 'user', content: 'hei' }],
     });
-    expect(response.message.content).toContain('VeggaAI');
+    expect(response.message.content.toLowerCase()).toContain('hva skjer');
   });
 
   it('honors temporary plan-mode overrides for local chat quality shaping', async () => {
@@ -1299,6 +1300,8 @@ describe('VaiEngine', () => {
     expect(response.message.content).toContain('Shared Shopping List');
     expect(response.message.content).toContain('Household');
     expect(response.message.content).toContain('Activity Chat');
+    expect(response.message.content).toContain("Tonight's store run");
+    expect(response.message.content).not.toContain('const promptLabel');
     expect(response.message.content).not.toMatch(/here's how we can approach this|step 1|tell me more/i);
   });
 
@@ -1315,6 +1318,10 @@ describe('VaiEngine', () => {
     expect(response.message.content).toContain('```tsx title="src/App.tsx"');
     expect(response.message.content).toContain("<script type='module' src='/src/main.tsx'></script>");
     expect(response.message.content).toContain('Shared Shopping List');
+    expect(response.message.content).toContain("Tonight's store run");
+    expect(response.message.content).not.toContain('const promptLabel');
+    expect(response.message.content).not.toContain('first runnable version now');
+    expect(response.message.content).not.toContain('create a compact but polished shared shopping app');
     expect(response.message.content).not.toContain('I can edit the active app');
   });
 
@@ -2081,6 +2088,9 @@ describe('VaiEngine', () => {
     expect(response.message.content).toContain('```json title="package.json"');
     expect(response.message.content).toContain('```tsx title="src/App.tsx"');
     expect(response.message.content).toContain('Shared Shopping List');
+    expect(response.message.content).not.toContain('const promptLabel');
+    expect(response.message.content).not.toContain('first runnable version now');
+    expect(response.message.content).not.toContain('create a compact but polished shared shopping app');
     expect(response.message.content).not.toContain('**Signals**');
   });
 
@@ -4108,6 +4118,194 @@ describe('VaiEngine', () => {
     expect(body).toMatch(/only\s+\d+\s+prior|no\s+tenth|no\s+earlier/i);
   });
 
+  it('echoes literal "say back to me" prompts instead of grounding them to retrieval junk', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: "say back to me 'hello'" }],
+    });
+
+    expect(response.message.content.trim()).toBe('hello');
+  });
+
+  it('recalls the short first word from chat history instead of drifting into grounded continuation', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'user', content: 'hey' },
+        { role: 'assistant', content: "Hey! I'm VeggaAI." },
+        { role: 'user', content: "say back to me 'hello'" },
+        { role: 'assistant', content: 'hello' },
+        { role: 'user', content: 'what are the 3 letter word I wrote at start here in this chat?' },
+      ],
+    });
+
+    const body = response.message.content.toLowerCase();
+    expect(body).toContain('hey');
+    expect(body).not.toContain('grounded continuation');
+  });
+
+  it('keeps a first-turn greeting natural instead of bragging about internal stats', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'hey' }],
+    });
+
+    const body = response.message.content.toLowerCase();
+    expect(body).toContain("what's up");
+    expect(body).not.toContain('picked up');
+    expect(body).not.toContain('ask me anything');
+  });
+
+  it('answers ambiguous GitHub ranking prompts without drifting into junk retrieval', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'who is top master frontend web dev on github' }],
+    });
+
+    const body = response.message.content.toLowerCase();
+    expect(body).toContain('not a single objective "top" frontend developer on github');
+    expect(body).toContain('followers');
+    expect(body).toContain('stars');
+    expect(body).not.toContain('npm install');
+  });
+
+  it('keeps follower follow-ups anchored to the GitHub ranking thread', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'user', content: 'who is top master frontend web dev on github' },
+        {
+          role: 'assistant',
+          content: [
+            'There is not a single objective "top" frontend developer on GitHub.',
+            '',
+            'It depends on the axis:',
+            '- followers -> public-profile popularity',
+            '- stars -> project reach',
+          ].join('\n'),
+        },
+        { role: 'user', content: 'who has the most followers then?' },
+      ],
+    });
+
+    const body = response.message.content.toLowerCase();
+    expect(body).toContain('github followers specifically');
+    expect(body).toContain('dan abramov');
+    expect(body).not.toContain('instagram');
+    expect(body).not.toContain('gym');
+  });
+
+  it('compresses a GitHub ranking thread into a short safe list instead of free-associating', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'user', content: 'who is top master frontend web dev on github' },
+        {
+          role: 'assistant',
+          content: [
+            'There is not a single objective "top" frontend developer on GitHub.',
+            '',
+            'If you just want strong names to inspect, start with Dan Abramov, Guillermo Rauch, and Evan You.',
+          ].join('\n'),
+        },
+        { role: 'user', content: 'give me just 3 names in one short list' },
+      ],
+    });
+
+    const body = response.message.content;
+    expect(body).toContain('Dan Abramov');
+    expect(body).toContain('Guillermo Rauch');
+    expect(body).toContain('Evan You');
+    expect(body).not.toContain('ssh');
+    expect(body).not.toContain('chemistry');
+  });
+
+  it('marks web-search source chunks as research presentation', async () => {
+    const originalGenerateResponse = (engine as any).generateResponse.bind(engine);
+    try {
+      (engine as any).generateResponse = vi.fn(async () => {
+        (engine as any)._lastMeta = {
+          strategy: 'web-search',
+          confidence: 0.82,
+          topicDetected: 'bun runtime',
+          knowledgeDepth: 'deep',
+          responseLength: 18,
+          durationMs: 0,
+        };
+        (engine as any)._lastSearchResponse = {
+          answer: 'Bun is a runtime.',
+          sources: [{
+            url: 'https://bun.sh',
+            domain: 'bun.sh',
+            title: 'Bun',
+            favicon: 'https://bun.sh/favicon.ico',
+            text: 'Bun is a fast JavaScript runtime.',
+            trust: { tier: 'high', score: 0.93, reason: 'official docs' },
+            rank: 1,
+          }],
+          plan: {
+            originalQuery: 'what is bun?',
+            intent: 'explain bun',
+            entities: ['Bun'],
+            constraints: {},
+            fanOutQueries: ['what is bun runtime'],
+          },
+          rawResultCount: 1,
+          confidence: 0.84,
+          durationMs: 12,
+          sync: {
+            state: 'parallel',
+            latencyMs: 12,
+            recommendedConcurrency: 2,
+            medianLatencyMs: 12,
+            p95LatencyMs: 12,
+            observations: 1,
+          },
+          audit: [],
+        } satisfies SearchResponse;
+        return 'Bun is a runtime.';
+      });
+
+      const chunks: Array<{ type: string; sourcePresentation?: string }> = [];
+      for await (const chunk of engine.chatStream({
+        messages: [{ role: 'user', content: 'what is bun?' }],
+        noLearn: true,
+      })) {
+        chunks.push(chunk);
+      }
+
+      const sourceChunk = chunks.find((chunk) => chunk.type === 'sources');
+      expect(sourceChunk?.sourcePresentation).toBe('research');
+    } finally {
+      (engine as any).generateResponse = originalGenerateResponse;
+    }
+  });
+
+  it('marks inline source citations as supporting presentation', async () => {
+    const originalGenerateResponse = (engine as any).generateResponse.bind(engine);
+    try {
+      (engine as any).generateResponse = vi.fn(async () => {
+        (engine as any)._lastMeta = {
+          strategy: 'knowledge-answer',
+          confidence: 0.71,
+          topicDetected: 'bun runtime',
+          knowledgeDepth: 'shallow',
+          responseLength: 52,
+          durationMs: 0,
+        };
+        (engine as any)._lastSearchResponse = null;
+        return 'Bun is a runtime. [Source: https://bun.sh/docs]';
+      });
+
+      const chunks: Array<{ type: string; sourcePresentation?: string }> = [];
+      for await (const chunk of engine.chatStream({
+        messages: [{ role: 'user', content: 'what is bun?' }],
+        noLearn: true,
+      })) {
+        chunks.push(chunk);
+      }
+
+      const sourceChunk = chunks.find((chunk) => chunk.type === 'sources');
+      expect(sourceChunk?.sourcePresentation).toBe('supporting');
+    } finally {
+      (engine as any).generateResponse = originalGenerateResponse;
+    }
+  });
+
   it('does not double-echo "I don\'t have a good answer" on multi-question that all fail to split (Fix D)', async () => {
     const response = await engine.chat({
       messages: [{ role: 'user', content: 'hello who are you and what is this place' }],
@@ -4117,7 +4315,83 @@ describe('VaiEngine', () => {
     const matches = body.match(/I don't have a good answer for this one/gi) ?? [];
     expect(matches.length).toBeLessThanOrEqual(1);
   });
+
+  // ─── Multi-turn memory detector (capability: prose-introduction surface forms) ──
+  // Pre-written test bodies. Spec: docs/capabilities/multi-turn-memory-detector.md §6.
+  // Audit: artifacts/audits/multi-turn-detector-precheck-2026-04-28T07-35Z.md.
+  // These should FAIL before implementation and PASS after the two surgical edits.
+  describe('multi-turn memory detector — prose-introduction surface forms', () => {
+    it('§6.1 acknowledges bare "My name is Sara." introduction', async () => {
+      const response = await engine.chat({
+        messages: [{ role: 'user', content: 'My name is Sara.' }],
+      });
+      expect(response.message.content).toMatch(/\*\*Sara\*\*/);
+    });
+
+    it("§6.2 acknowledges \"Hi, I'm Mira.\" introduction", async () => {
+      const response = await engine.chat({
+        messages: [{ role: 'user', content: "Hi, I'm Mira." }],
+      });
+      expect(response.message.content).toMatch(/\*\*Mira\*\*/);
+    });
+
+    it('§6.3 acknowledges "Call me V3gga." introduction', async () => {
+      const response = await engine.chat({
+        messages: [{ role: 'user', content: 'Call me V3gga.' }],
+      });
+      expect(response.message.content).toMatch(/\*\*V3gga\*\*/);
+    });
+
+    it('§6.4 acknowledges "This is Anna speaking." introduction', async () => {
+      const response = await engine.chat({
+        messages: [{ role: 'user', content: 'This is Anna speaking.' }],
+      });
+      expect(response.message.content).toMatch(/\*\*Anna\*\*/);
+    });
+
+    it('§6.5 recalls name on a later turn via "what\'s my name?"', async () => {
+      const response = await engine.chat({
+        messages: [
+          { role: 'user', content: "Hi, I'm Sara." },
+          { role: 'assistant', content: 'Hi **Sara** — noted. What can I help with?' },
+          { role: 'user', content: "What's a good way to write a quick sort in JavaScript?" },
+          { role: 'assistant', content: 'A simple quicksort in JavaScript looks like this...' },
+          { role: 'user', content: "what's my name?" },
+        ],
+      });
+      expect(response.message.content).toMatch(/\*\*Sara\*\*/);
+    });
+
+    it('§6.6 does not capture a stop-list false positive ("I\'m working on a chat app.")', async () => {
+      const response = await engine.chat({
+        messages: [{ role: 'user', content: "I'm working on a chat app." }],
+      });
+      // Must not turn the false-positive token "Working" into a name acknowledgement.
+      expect(response.message.content).not.toMatch(/\*\*Working\*\*/);
+      // And the multi-turn detector must not have hijacked dispatch.
+      // (We don't assert exact strategy badge here — just that the response is not
+      // a name-acknowledgement template addressing the user as "Working".)
+      expect(response.message.content).not.toMatch(/\bHi\s+\*\*Working\*\*/);
+      expect(response.message.content).not.toMatch(/\bGot it,\s+\*\*Working\*\*/);
+    });
+
+    it('§6.7 preserves existing nickname-prelude path verbatim ("my nickname is mira and im going to ask")', async () => {
+      // This is the audit's INDEPENDENT-classified passing turn (thr-nickname-prelude-mira).
+      // The new bare-introduction branch must be guarded by `if (!askCueMatched)` so the
+      // existing handler still fires and emits its EXISTING wording. Spec on the corpus
+      // turn requires content matching: mira | go ahead | ask | sure | of course.
+      const response = await engine.chat({
+        messages: [{ role: 'user', content: 'my nickname is mira and im going to ask you something' }],
+      });
+      const body = response.message.content;
+      expect(body).toMatch(/\*\*Mira\*\*/);
+      // Existing wording cue from L2993: "Got it, **Mira** — noted. Go ahead and ask"
+      expect(body).toMatch(/Got it,\s+\*\*Mira\*\*/);
+      expect(body).toMatch(/Go ahead and ask/);
+    });
+  });
 });
+
 
 /* ══════════════════════════════════════════════════════════════════
    SkillRouter — Domain Detection & Routing Tests

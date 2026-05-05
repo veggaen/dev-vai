@@ -51,6 +51,7 @@ export class IngestPipeline {
   hydrate(): { sourcesLoaded: number; chunksLoaded: number; imagesLoaded: number } {
     const allSources = this.db.select().from(sources).all();
     let chunksLoaded = 0;
+    let skippedSources = 0;
 
     for (const src of allSources) {
       // Load L0 chunks into n-gram model + TF-IDF
@@ -60,8 +61,20 @@ export class IngestPipeline {
         .filter(c => c.level === 0)
         .sort((a, b) => a.ordinal - b.ordinal);
 
+      const fullText = l0Chunks.length > 0 ? l0Chunks.map(c => c.content).join(' ') : '';
+
+      // Iter-10 — PubMed UI chrome leak guard. Scientific abstract pages get scraped
+      // with their navigation chrome ("Full text links / CiteDisplay options /
+      // AbstractPubMedPMID Abstract") intact. Phrases like "database inception to
+      // November 2025" then hijack unrelated polysemous queries (e.g. "summarize the
+      // plot of inception" returns a laryngeal dystonia abstract). Skip the entire
+      // contaminated source so neither n-gram chunks nor the L1 summary leak through.
+      if (IngestPipeline.isPubmedChromeContaminated(fullText)) {
+        skippedSources++;
+        continue;
+      }
+
       if (l0Chunks.length > 0) {
-        const fullText = l0Chunks.map(c => c.content).join(' ');
         const language = this.detectLanguage(fullText);
         this.engine.train(fullText, src.url ?? src.title, language);
         chunksLoaded += l0Chunks.length;
@@ -74,6 +87,9 @@ export class IngestPipeline {
         .find(c => c.level === 1);
 
       if (l1) {
+        if (IngestPipeline.isPubmedChromeContaminated(l1.content)) {
+          continue;
+        }
         const language = this.detectLanguage(l1.content);
         this.engine.knowledge.addEntry(
           src.title,
@@ -82,6 +98,10 @@ export class IngestPipeline {
           language,
         );
       }
+    }
+
+    if (skippedSources > 0) {
+      console.log(`[IngestPipeline] Skipped ${skippedSources} contaminated sources during hydrate (PubMed chrome leak)`);
     }
 
     // Hydrate image descriptions into the engine
@@ -708,6 +728,22 @@ export class IngestPipeline {
     }
 
     return points.join('\n');
+  }
+
+  /**
+   * Iter-10 — detect PubMed abstract pages whose UI chrome was scraped along with
+   * the abstract text. Any of these markers indicates the source is contaminated
+   * navigation noise rather than usable scientific content.
+   */
+  private static readonly PUBMED_CHROME_PATTERNS: readonly RegExp[] = [
+    /full\s*text\s*links\s*cite\s*display\s*options/i,
+    /abstract\s*pub\s*med\s*pmid\s*abstract/i,
+    /database\s+inception\s+to\s+\w+\s+\d{4}/i,
+  ];
+
+  static isPubmedChromeContaminated(text: string): boolean {
+    if (!text || text.length === 0) return false;
+    return IngestPipeline.PUBMED_CHROME_PATTERNS.some((re) => re.test(text));
   }
 
   private detectLanguage(text: string): KnowledgeEntry['language'] {

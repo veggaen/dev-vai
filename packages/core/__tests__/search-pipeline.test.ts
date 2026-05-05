@@ -470,7 +470,7 @@ describe('SearchPipeline.search', () => {
 
     expect(result.answer).toContain('SearXNG is a privacy-respecting metasearch engine');
     expect(result.answer).toContain('prefer SearXNG over DuckDuckGo Instant Answer API');
-    expect(result.answer).toContain('Sources:');
+    expect(result.answer).toMatch(/\*\*Sources\*\*|Sources:/);
     expect(result.answer).not.toContain('**Search:');
   });
 
@@ -984,6 +984,17 @@ describe('generateFollowUps', () => {
       'What are the core ideas behind git?',
       'What should I learn next after git?',
     ]);
+  });
+
+  it('uses ranking follow-ups for GitHub discovery prompts instead of awkward topic templates', () => {
+    const followUps = generateTopicFollowUps('who is top master frontend web dev on github');
+
+    expect(followUps).toEqual([
+      'Rank this by GitHub followers',
+      'Rank this by project stars instead',
+      'Give me 3 high-signal names to inspect',
+    ]);
+    expect(followUps.every((item) => !/practical example with|common mistakes with/i.test(item))).toBe(true);
   });
 
   it('uses product-specific follow-ups for notes, social, ops, and SaaS builder topics', () => {

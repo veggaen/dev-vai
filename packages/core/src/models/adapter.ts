@@ -1,4 +1,5 @@
 import type { ModelCapabilities, ModelCost, ModelProfile, ProviderId } from '../config/types.js';
+import type { ChatTurnKind } from '../chat/turn-kind.js';
 
 // ── Messages ──
 
@@ -73,11 +74,14 @@ export interface GroundedBuildBrief {
   readonly confidence: number;
 }
 
+export type SourcePresentation = 'research' | 'supporting';
+
 export interface ChatChunk {
   readonly type:
     | 'text_delta'
     | 'reasoning_delta'
     | 'tool_call_delta'
+    | 'turn_kind'
     | 'sources'
     | 'done'
     | 'conversation_resolved'
@@ -85,8 +89,12 @@ export interface ChatChunk {
   readonly textDelta?: string;
   readonly reasoningDelta?: string;
   readonly toolCallDelta?: { readonly id: string; readonly name: string; readonly argumentsDelta: string };
+  /** High-level routing classification for the current assistant turn. */
+  readonly turnKind?: ChatTurnKind;
   /** Search sources — sent before text when a web search was performed */
   readonly sources?: readonly SearchSource[];
+  /** Tells the UI whether citations should render as full research chrome or quieter supporting references. */
+  readonly sourcePresentation?: SourcePresentation;
   /** Suggested follow-up questions (Perplexity-style) */
   readonly followUps?: readonly string[];
   /** Confidence score (0-1) for the search results */

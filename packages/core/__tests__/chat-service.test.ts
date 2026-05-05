@@ -217,8 +217,8 @@ describe('ChatService', () => {
 
     const fallbackNoticeIndex = chunks.findIndex((chunk) => chunk.type === 'fallback_notice');
     const sourcesIndex = chunks.findIndex((chunk) => chunk.type === 'sources');
-    expect(sourcesIndex).toBeGreaterThanOrEqual(0);
-    expect(fallbackNoticeIndex).toBeGreaterThan(sourcesIndex);
+    expect(sourcesIndex).toBe(-1);
+    expect(fallbackNoticeIndex).toBeGreaterThanOrEqual(0);
 
     const fallbackNotice = chunks[fallbackNoticeIndex];
     expect(fallbackNotice.fallback).toEqual({
@@ -239,6 +239,48 @@ describe('ChatService', () => {
     expect(persisted).toHaveLength(2);
     expect(persisted[1].content).toBe('External answer');
     expect(persisted[1].modelId).toBe('mock:test');
+  });
+
+  it('does not leak discarded primary sources when a vai:v0 turn falls back', async () => {
+    const registry = new ModelRegistry();
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      {
+        type: 'sources',
+        sources: [{
+          url: 'https://irrelevant.example/noisy',
+          title: 'Noisy primary source',
+          domain: 'irrelevant.example',
+          snippet: 'This evidence belongs to the answer that was discarded.',
+          favicon: 'https://irrelevant.example/favicon.ico',
+          trustTier: 'low',
+          trustScore: 0.2,
+        }],
+        sourcePresentation: 'research',
+        confidence: 0.2,
+      },
+      { type: 'text_delta', textDelta: 'I do not know this one.' },
+      { type: 'done', usage: { promptTokens: 2, completionTokens: 6 }, modelId: 'vai:v0' },
+    ]);
+    const externalAdapter = new StubStreamAdapter('mock:test', [
+      { type: 'text_delta', textDelta: 'Better fallback answer' },
+      { type: 'done', usage: { promptTokens: 4, completionTokens: 3 }, modelId: 'mock:test' },
+    ]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(convId, 'Help me choose a deployment path')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.some((chunk) => chunk.type === 'sources')).toBe(false);
+    expect(chunks.some((chunk) => chunk.type === 'fallback_notice')).toBe(true);
+    const text = chunks.filter((chunk) => chunk.type === 'text_delta').map((chunk) => chunk.textDelta).join('');
+    expect(text).toBe('Better fallback answer');
   });
 
   it('does not replace builder file artifacts with external fallback output', async () => {
@@ -318,6 +360,140 @@ describe('ChatService', () => {
     expect(persisted[1].modelId).toBe('vai:v0');
   });
 
+  it('preserves source presentation metadata from streamed source chunks', async () => {
+    const registry = new ModelRegistry();
+    const adapterWithSources = new StubStreamAdapter('mock:test', [
+      {
+        type: 'sources',
+        sources: [{
+          url: 'https://example.com',
+          title: 'Example',
+          domain: 'example.com',
+          snippet: 'Snippet',
+          favicon: 'https://example.com/favicon.ico',
+          trustTier: 'high',
+          trustScore: 0.9,
+        }],
+        sourcePresentation: 'supporting',
+        confidence: 0.72,
+      },
+      { type: 'text_delta', textDelta: 'Answer with references' },
+      { type: 'done', usage: { promptTokens: 1, completionTokens: 3 }, modelId: 'mock:test' },
+    ]);
+    registry.register(adapterWithSources);
+    const svc = new ChatService(createDb(':memory:'), registry);
+    const convId = svc.createConversation('mock:test');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(convId, 'Tell me briefly')) {
+      chunks.push(chunk);
+    }
+
+    const sourceChunk = chunks.find((chunk) => chunk.type === 'sources');
+    expect(sourceChunk?.sourcePresentation).toBe('supporting');
+  });
+
+  it('suppresses source chrome for plain conversational turns', async () => {
+    const registry = new ModelRegistry();
+    const adapterWithNoisySources = new StubStreamAdapter('mock:test', [
+      {
+        type: 'sources',
+        sources: [{
+          url: 'https://example.com/noise',
+          title: 'Noise',
+          domain: 'example.com',
+          snippet: 'Should not show for a greeting.',
+          favicon: 'https://example.com/favicon.ico',
+          trustTier: 'medium',
+          trustScore: 0.5,
+        }],
+        sourcePresentation: 'research',
+        confidence: 0.4,
+      },
+      { type: 'text_delta', textDelta: 'hey' },
+      { type: 'done', usage: { promptTokens: 1, completionTokens: 1 }, modelId: 'mock:test' },
+    ]);
+    registry.register(adapterWithNoisySources);
+    const svc = new ChatService(createDb(':memory:'), registry);
+    const convId = svc.createConversation('mock:test');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(convId, 'hey')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toContainEqual({ type: 'turn_kind', turnKind: 'conversational' });
+    expect(chunks.some((chunk) => chunk.type === 'sources')).toBe(false);
+  });
+
+  it('downgrades analysis source chunks to supporting references', async () => {
+    const registry = new ModelRegistry();
+    const adapterWithSources = new StubStreamAdapter('mock:test', [
+      {
+        type: 'sources',
+        sources: [{
+          url: 'https://example.com/bun',
+          title: 'Bun',
+          domain: 'example.com',
+          snippet: 'Bun is a JavaScript runtime.',
+          favicon: 'https://example.com/favicon.ico',
+          trustTier: 'high',
+          trustScore: 0.9,
+        }],
+        sourcePresentation: 'research',
+        confidence: 0.8,
+      },
+      { type: 'text_delta', textDelta: 'Bun is a JS runtime.' },
+      { type: 'done', usage: { promptTokens: 3, completionTokens: 5 }, modelId: 'mock:test' },
+    ]);
+    registry.register(adapterWithSources);
+    const svc = new ChatService(createDb(':memory:'), registry);
+    const convId = svc.createConversation('mock:test');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(convId, 'what is bun?')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toContainEqual({ type: 'turn_kind', turnKind: 'analysis' });
+    const sourceChunk = chunks.find((chunk) => chunk.type === 'sources');
+    expect(sourceChunk?.sourcePresentation).toBe('supporting');
+  });
+
+  it('keeps discovery source chunks in research presentation', async () => {
+    const registry = new ModelRegistry();
+    const adapterWithSources = new StubStreamAdapter('mock:test', [
+      {
+        type: 'sources',
+        sources: [{
+          url: 'https://github.com/frontendmasters',
+          title: 'Frontend Masters',
+          domain: 'github.com',
+          snippet: 'Frontend learning organization.',
+          favicon: 'https://github.com/favicon.ico',
+          trustTier: 'high',
+          trustScore: 0.9,
+        }],
+        sourcePresentation: 'supporting',
+        confidence: 0.84,
+      },
+      { type: 'text_delta', textDelta: 'There is no objective top developer.' },
+      { type: 'done', usage: { promptTokens: 6, completionTokens: 7 }, modelId: 'mock:test' },
+    ]);
+    registry.register(adapterWithSources);
+    const svc = new ChatService(createDb(':memory:'), registry);
+    const convId = svc.createConversation('mock:test');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(convId, 'who is top master frontend web dev on github')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toContainEqual({ type: 'turn_kind', turnKind: 'research' });
+    const sourceChunk = chunks.find((chunk) => chunk.type === 'sources');
+    expect(sourceChunk?.sourcePresentation).toBe('research');
+  });
+
   it('short-circuits chat-meta queries without invoking the model adapter', async () => {
     const convId = chatService.createConversation('mock:test');
 
@@ -344,6 +520,22 @@ describe('ChatService', () => {
     const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
     expect(lastAssistant?.modelId).toBe('chat-meta:first-user');
     expect(lastAssistant?.content).toContain('"tell me about redbull"');
+  });
+
+  it('does not let constrained code snippets hijack builder app requests', async () => {
+    const convId = chatService.createConversation('mock:test', 'Builder', 'builder');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of chatService.sendMessage(
+      convId,
+      'Build the first runnable version now. Create a compact shared shopping app for a household or roommates. Use Tailwind CSS v4 styling and framer-motion for subtle motion.',
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(adapter.lastStreamRequest).toBeDefined();
+    expect(chunks.some((chunk) => chunk.type === 'text_delta' && /framer-motion-stagger/i.test(chunk.textDelta ?? ''))).toBe(false);
+    expect(chatService.getMessages(convId).at(-1)?.modelId).toBe('mock:test');
   });
 
   it('counts messages via chat-meta short-circuit', async () => {
@@ -439,6 +631,73 @@ describe('ChatService', () => {
     expect(systemText).toMatch(/Turn quality contract for this answer/i);
     expect(systemText).toMatch(/correcting or refining the previous answer/i);
     expect(systemText).toMatch(/recommendation in the first sentence/i);
+  });
+
+  it('keeps plain conversational turns free of retrieval stuffing and heavy quality chrome', async () => {
+    const registry = new ModelRegistry();
+    const conversationalAdapter = new MockAdapter();
+    registry.register(conversationalAdapter);
+    const svc = new ChatService(db, registry, {
+      retrieveKnowledge: () => [{
+        text: 'Random retrieved snippet that should not be injected into a greeting.',
+        source: 'https://example.com/noisy-context',
+        score: 0.91,
+      }],
+    });
+    const convId = svc.createConversation('mock:test', 'Chat', 'chat');
+
+    for await (const _chunk of svc.sendMessage(convId, 'hey')) {
+      // consume
+    }
+
+    const systemText =
+      conversationalAdapter.lastStreamRequest?.messages
+        .filter((message) => message.role === 'system')
+        .map((message) => message.content)
+        .join('\n\n') ?? '';
+
+    expect(systemText).toMatch(/plain conversational turn/i);
+    expect(systemText).not.toMatch(/Potentially relevant excerpts from Vai's local knowledge store/i);
+    expect(systemText).not.toMatch(/Turn quality contract for this answer/i);
+    expect(systemText).not.toMatch(/Response format hint: the user message likely benefits from a scannable answer/i);
+  });
+
+  it('emits a conversational turn_kind chunk before streamed text for plain chat turns', async () => {
+    const convId = chatService.createConversation('mock:test', 'Chat', 'chat');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of chatService.sendMessage(convId, 'hey')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks[0]).toMatchObject({ type: 'turn_kind', turnKind: 'conversational' });
+  });
+
+  it('adds a research posture hint for discovery prompts', async () => {
+    const convId = chatService.createConversation('mock:test', 'Chat', 'chat');
+
+    for await (const _chunk of chatService.sendMessage(convId, 'who is top master frontend web dev on github')) {
+      // consume
+    }
+
+    const systemText =
+      adapter.lastStreamRequest?.messages
+        .filter((message) => message.role === 'system')
+        .map((message) => message.content)
+        .join('\n\n') ?? '';
+
+    expect(systemText).toMatch(/research or discovery turn/i);
+  });
+
+  it('emits a research turn_kind chunk before streamed text for discovery prompts', async () => {
+    const convId = chatService.createConversation('mock:test', 'Chat', 'chat');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of chatService.sendMessage(convId, 'who is top master frontend web dev on github')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks[0]).toMatchObject({ type: 'turn_kind', turnKind: 'research' });
   });
 
   it('injects domain skill context for non-scaffold requests', async () => {
