@@ -80,6 +80,7 @@ import { normalizeInputForUnderstanding, detectRegister, extractTopicFromQuery, 
 import { analyze, type CognitiveFrame } from '../cognitive/index.js';
 import type { KindShape } from '../cognitive/shaper.js';
 import { KnowledgeConfidenceLedger, classifyFeedback, type DreamReport } from '../learning/confidence-ledger.js';
+import { preAct, act as oodaAct, type OodaTrace } from '../agentic/index.js';
 
 export { KnowledgeStore, VaiTokenizer };
 export type { KnowledgeEntry };
@@ -135,7 +136,7 @@ export interface ResponseMeta {
   /** True when the opinion-framing wrapper added a "my take" hedge. */
   opinionFramingApplied?: boolean;
   /** Optional OODA-loop trace metadata for observability. */
-  oodaTrace?: unknown;
+  oodaTrace?: OodaTrace;
 }
 
 export interface TeacherLoopMeta {
@@ -251,6 +252,7 @@ export class VaiEngine implements ModelAdapter {
   private strategyStats: Map<string, number> = new Map();
   private _lastMeta: ResponseMeta | null = null;
   private _lastCognitiveFrame: CognitiveFrame | null = null;
+  private _lastOodaTrace: OodaTrace | null = null;
   private readonly _knowledgeLedger = new KnowledgeConfidenceLedger();
   private _lastSearchResponse: SearchResponse | null = null;
   private _lastCitedAnswer: CitedAnswer | null = null;
@@ -1816,6 +1818,7 @@ export class VaiEngine implements ModelAdapter {
     this._lastSearchResponse = null;
     this._lastCitedAnswer = null;
     this._lastTeacherDecision = null;
+    this._lastOodaTrace = null;
     const start = performance.now();
     let response = await this.generateResponse(userContent, request.messages);
     response = this.applyBrevityConstraint(userContent, response);
@@ -1823,6 +1826,12 @@ export class VaiEngine implements ModelAdapter {
       allowLearning: !request.noLearn,
     });
     response = this.sanitizeOffTopicBootstrapResponse(userContent, response);
+    // OODA Act phase — post-process the response per the trace's decision.
+    if (this._lastOodaTrace) {
+      const result = oodaAct(this._lastOodaTrace, response);
+      response = result.response;
+      this._lastOodaTrace = { ...this._lastOodaTrace, act: result.act };
+    }
     this.updateLastChatQualityMeta(userContent, request.messages, response);
 
     // Learning flywheel — extract and persist knowledge from this exchange
@@ -1834,6 +1843,10 @@ export class VaiEngine implements ModelAdapter {
     if (this._lastMeta) {
       this._lastMeta.durationMs = durationMs;
       this._lastMeta.trustBadge = this.computeTrustBadge(this._lastMeta);
+      this._lastMeta.responseLength = response.length;
+      if (this._lastOodaTrace) {
+        this._lastMeta.oodaTrace = this._lastOodaTrace;
+      }
       // Record this response in the knowledge confidence ledger so the engine
       // accumulates a self-assessed confidence per topic over time.
       const topic = this._lastMeta.topicDetected;
@@ -2631,6 +2644,20 @@ export class VaiEngine implements ModelAdapter {
     // Cognitive frame is computed once per request from the (post-normalization)
     // user input so every tracked() meta carries the same classification.
     this._lastCognitiveFrame = analyze(input);
+    // OODA preamble — Observe + Orient + Decide. Returns null when the gate
+    // fails (trivial prompts), so cheap by default.
+    {
+      const topic = this.detectTopic(input);
+      const ledgerEntry = topic && topic.trim().length > 0
+        ? this._knowledgeLedger.get(topic)
+        : null;
+      const topicConfidence = ledgerEntry ? ledgerEntry.confidence : null;
+      this._lastOodaTrace = preAct({
+        frame: this._lastCognitiveFrame,
+        topic,
+        topicConfidence,
+      });
+    }
     const correctiveFollowUpRewrite = this.rewriteCorrectiveFollowUpInput(input, history);
     if (correctiveFollowUpRewrite) {
       input = correctiveFollowUpRewrite;
