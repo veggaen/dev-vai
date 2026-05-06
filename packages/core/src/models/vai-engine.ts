@@ -77,6 +77,8 @@ import { getSubAgentRouter } from '../skills/sub-agent-router.js';
 import { getTeacherAgent, type TeacherDecision } from '../skills/teacher-agent.js';
 import type { CitedAnswer, LearnedUnit } from '../skills/types.js';
 import { normalizeInputForUnderstanding, detectRegister, extractTopicFromQuery, topicContentTokens, textConcernsTopic } from '../input-normalization.js';
+import { analyze, type CognitiveFrame } from '../cognitive/index.js';
+import type { KindShape } from '../cognitive/shaper.js';
 
 export { KnowledgeStore, VaiTokenizer };
 export type { KnowledgeEntry };
@@ -125,6 +127,14 @@ export interface ResponseMeta {
   trustBadge?: 'local-curated' | 'official-docs' | 'web-mixed' | 'web-untrusted' | 'fallback' | 'computed';
   /** Whether the brevity firewall trimmed the response to honor a user scope constraint. */
   brevityEnforced?: boolean;
+  /** Cognitive analysis of the user's prompt (kind, entities, sub-questions, signals). */
+  cognitiveFrame?: CognitiveFrame;
+  /** Active kind-aware shape transform that fired (if any). */
+  kindShape?: KindShape;
+  /** True when the opinion-framing wrapper added a "my take" hedge. */
+  opinionFramingApplied?: boolean;
+  /** Optional OODA-loop trace metadata for observability. */
+  oodaTrace?: unknown;
 }
 
 export interface TeacherLoopMeta {
@@ -239,6 +249,7 @@ export class VaiEngine implements ModelAdapter {
   private responseHistory: ResponseMeta[] = [];
   private strategyStats: Map<string, number> = new Map();
   private _lastMeta: ResponseMeta | null = null;
+  private _lastCognitiveFrame: CognitiveFrame | null = null;
   private _lastSearchResponse: SearchResponse | null = null;
   private _lastCitedAnswer: CitedAnswer | null = null;
   private _lastTeacherDecision: TeacherDecision | null = null;
@@ -1629,6 +1640,7 @@ export class VaiEngine implements ModelAdapter {
       topDocIds: extra?.topDocIds,
       matchedPattern: extra?.matchedPattern,
       register: detectRegister(input),
+      cognitiveFrame: this._lastCognitiveFrame ?? undefined,
     };
     this._lastMeta = meta;
     this.responseHistory.push(meta);
@@ -2591,6 +2603,9 @@ export class VaiEngine implements ModelAdapter {
   private async generateResponse(input: string, history: readonly Message[]): Promise<string> {
     input = this.normalizeUserInputForUnderstanding(input);
     const originalInput = input;
+    // Cognitive frame is computed once per request from the (post-normalization)
+    // user input so every tracked() meta carries the same classification.
+    this._lastCognitiveFrame = analyze(input);
     const correctiveFollowUpRewrite = this.rewriteCorrectiveFollowUpInput(input, history);
     if (correctiveFollowUpRewrite) {
       input = correctiveFollowUpRewrite;
