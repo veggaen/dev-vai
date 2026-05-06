@@ -79,6 +79,7 @@ import type { CitedAnswer, LearnedUnit } from '../skills/types.js';
 import { normalizeInputForUnderstanding, detectRegister, extractTopicFromQuery, topicContentTokens, textConcernsTopic } from '../input-normalization.js';
 import { analyze, type CognitiveFrame } from '../cognitive/index.js';
 import type { KindShape } from '../cognitive/shaper.js';
+import { KnowledgeConfidenceLedger, classifyFeedback, type DreamReport } from '../learning/confidence-ledger.js';
 
 export { KnowledgeStore, VaiTokenizer };
 export type { KnowledgeEntry };
@@ -250,6 +251,7 @@ export class VaiEngine implements ModelAdapter {
   private strategyStats: Map<string, number> = new Map();
   private _lastMeta: ResponseMeta | null = null;
   private _lastCognitiveFrame: CognitiveFrame | null = null;
+  private readonly _knowledgeLedger = new KnowledgeConfidenceLedger();
   private _lastSearchResponse: SearchResponse | null = null;
   private _lastCitedAnswer: CitedAnswer | null = null;
   private _lastTeacherDecision: TeacherDecision | null = null;
@@ -1791,9 +1793,26 @@ export class VaiEngine implements ModelAdapter {
     };
   }
 
+  /** Public access to the per-engine knowledge confidence ledger. */
+  get knowledgeLedger(): KnowledgeConfidenceLedger {
+    return this._knowledgeLedger;
+  }
+
+  /** Run an offline consolidation pass over the knowledge ledger. */
+  dream(): DreamReport {
+    return this._knowledgeLedger.dream();
+  }
+
   async chat(request: ChatRequest): Promise<ChatResponse> {
     const lastMessage = request.messages[request.messages.length - 1];
     const userContent = (lastMessage && typeof lastMessage.content === 'string') ? lastMessage.content : '';
+    // Apply feedback to the PREVIOUS topic before this turn overwrites _lastMeta.
+    // If the new user message is corrective/affirmative and we have a prior topic,
+    // route the signal to the ledger so it scores the previous answer.
+    const priorTopic = this._lastMeta?.topicDetected;
+    if (priorTopic && priorTopic.trim().length > 0 && classifyFeedback(userContent) !== 'neutral') {
+      this._knowledgeLedger.recordFeedback(priorTopic, userContent);
+    }
     this._lastSearchResponse = null;
     this._lastCitedAnswer = null;
     this._lastTeacherDecision = null;
@@ -1815,6 +1834,12 @@ export class VaiEngine implements ModelAdapter {
     if (this._lastMeta) {
       this._lastMeta.durationMs = durationMs;
       this._lastMeta.trustBadge = this.computeTrustBadge(this._lastMeta);
+      // Record this response in the knowledge confidence ledger so the engine
+      // accumulates a self-assessed confidence per topic over time.
+      const topic = this._lastMeta.topicDetected;
+      if (topic && topic.trim().length > 0) {
+        this._knowledgeLedger.recordResponse(topic, this._lastMeta.strategy, this._lastMeta.confidence);
+      }
     }
 
     return {
