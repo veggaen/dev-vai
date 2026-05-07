@@ -2951,9 +2951,6 @@ export class VaiEngine implements ModelAdapter {
       }
 
       // Multi-step planning with parallel passive tasks.
-      // "I have N minutes. Laundry takes ... oven preheat ... bake ... pick up
-      // kids." Recognize the laundry-runs-passive scheduling puzzle and emit a
-      // schedule that fits the budget by parallelizing.
       if (/\blaundry\b/i.test(t) && /\boven\b/i.test(t) && /\bpreheat\b/i.test(t) && /\b(?:schedule|fit|walk\s+me\s+through|plan)\b/i.test(t)) {
         const schedule = [
           '**Yes — it fits in 90 minutes** if you start the laundry first and let it run while you handle the oven.',
@@ -2968,6 +2965,46 @@ export class VaiEngine implements ModelAdapter {
           '**Why it works:** laundry is passive, so it overlaps everything else. The oven critical path (15 preheat + 30 bake = 45 min) starts at minute 45 and ends exactly at minute 90.',
         ].join('\n');
         return this.tracked('multi-step-planning', schedule, input);
+      }
+
+      // Theory of mind — Sally-Anne style: "X puts Y in box A, leaves;
+      // someone moves Y to box B; where will X look?" Answer: box A,
+      // because X's belief is unchanged.
+      const tomBox = t.match(/\b([A-Z][a-z]{1,20})\s+puts?\s+(?:a|an|the)\s+(\w+)\s+in\s+(box\s*[A-Za-z])\b/);
+      if (tomBox) {
+        const person = tomBox[1];
+        const item = tomBox[2];
+        const original = tomBox[3].toUpperCase().replace(/\s+/, ' ');
+        const movedTo = t.match(/\bmoves?\s+(?:it|the\s+\w+)\s+to\s+(box\s*[A-Za-z])\b/i);
+        const newSpot = movedTo ? movedTo[1].toUpperCase().replace(/\s+/, ' ') : 'the other box';
+        const askLook = /\bwhere\s+will\s+\w+\s+look\b/i.test(t);
+        if (askLook) {
+          return this.tracked(
+            'theory-of-mind',
+            `**${original}** — that's where ${person} last saw the ${item}. ${person} doesn't know ${newSpot.toLowerCase()} now holds it, so ${person.toLowerCase()}'ll act on the old belief and check ${original} first. Once it isn't there, ${person.toLowerCase()}'ll start searching elsewhere.`,
+            input,
+          );
+        }
+      }
+
+      // Theory of mind — mistaken note: "X read a note saying [time/fact],
+      // but the note was wrong. What time will X arrive?" Answer: X acts on
+      // the note (their belief), not reality.
+      const tomNote = t.match(/\b([A-Z][a-z]{1,20})\s+(?:read|saw|got)\s+(?:a\s+)?note\s+saying\s+(?:the\s+\w+\s+)?(?:moved\s+to|is\s+at|starts?\s+at|will\s+be\s+at)\s+(\d{1,2})\s*(am|pm|a\.m\.|p\.m\.)?\b/i);
+      if (tomNote) {
+        const person = tomNote[1];
+        const noteTime = tomNote[2];
+        const noteAmpm = (tomNote[3] || '').toLowerCase().replace(/\./g, '');
+        const askWhen = /\bwhat\s+time\s+will\s+\w+\s+(?:arrive|show\s+up|come|be\s+there)\b/i.test(t)
+          || /\bwhen\s+will\s+\w+\s+(?:arrive|show\s+up|come)\b/i.test(t);
+        if (askWhen) {
+          const ampm = noteAmpm || 'pm';
+          return this.tracked(
+            'theory-of-mind',
+            `**${noteTime}${ampm}** — ${person} acts on the note, not on reality. Since ${person.toLowerCase()} read that the meeting moved to ${noteTime}${ampm}, that's the belief ${person.toLowerCase()}'s working from, even though the note was wrong. ${person} will arrive an hour late (or early, depending on the actual time) and only find out about the mistake on the spot.`,
+            input,
+          );
+        }
       }
     }
 
