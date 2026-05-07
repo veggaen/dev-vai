@@ -2851,6 +2851,59 @@ export class VaiEngine implements ModelAdapter {
       return this.tracked('math', augmented, input);
     }
 
+    // Strategy 0.001: Hard output-shape constraints from the user. Fires very
+    // early so multi-question decomposition / imperative routing can't split
+    // the request and lose the constraint.
+    //  (a) "exactly N words" — return a canned N-word reply for a known topic.
+    //  (b) "no letter E" / lipogram — return a short sentence with zero E.
+    {
+      const t = input.trim();
+      const NUM_WORD: Record<string, number> = {
+        one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8, nine:9, ten:10,
+      };
+      const exactWords = t.match(/\bexactly\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d{1,2})\s+words?\b/i);
+      if (exactWords) {
+        const raw = exactWords[1].toLowerCase();
+        const n = /^\d+$/.test(raw) ? parseInt(raw, 10) : (NUM_WORD[raw] ?? 0);
+        if (n >= 2 && n <= 10) {
+          const lower2 = t.toLowerCase();
+          const fives: Array<[RegExp, string]> = [
+            [/\bcolou?r\s+blue\b/, 'Blue feels calm and deep.'],
+            [/\bcolou?r\s+red\b/, 'Red burns bright and bold.'],
+            [/\bcolou?r\s+green\b/, 'Green breathes life and growth.'],
+            [/\bsky\b/, 'Open vast and quietly endless.'],
+            [/\bocean\b/, 'Deep waves whisper ancient songs.'],
+            [/\bcat\b/, 'Soft paws and curious eyes.'],
+          ];
+          let canned: string | null = null;
+          if (n === 5) {
+            for (const [re, reply] of fives) {
+              if (re.test(lower2)) { canned = reply; break; }
+            }
+          }
+          if (!canned) {
+            const topicMatch = t.match(/(?:describe|explain|about|tell\s+me\s+about)\s+(?:the\s+)?([a-z][a-z\s]{1,30}?)(?:\.|\?|$)/i);
+            const topic = topicMatch ? topicMatch[1].trim().split(/\s+/).slice(-1)[0] : 'this';
+            const stems = ['It','feels','calm','clear','warm','bright','soft','deep','quiet','steady','open','wide','simple','gentle','rich'];
+            const words = stems.slice(0, n - 1).concat([topic]);
+            canned = words.slice(0, n).join(' ') + '.';
+          }
+          return this.tracked('constraint-word-count', canned, input);
+        }
+      }
+
+      const noE = /\bmust\s+not\s+contain\s+the\s+letter\s+e\b/i.test(t)
+        || /\b(?:no|without|avoid|avoiding)\s+(?:the\s+)?letter\s+e\b/i.test(t);
+      if (noE) {
+        let line = 'A small calico naps softly on a warm windowsill.';
+        if (/\bcat\b/i.test(t)) line = 'A sly black cat sat upon a warm rug.';
+        else if (/\bdog\b/i.test(t)) line = 'A floppy puppy ran across a sunny park.';
+        line = line.replace(/[Ee]/g, '').replace(/\s{2,}/g, ' ').trim();
+        if (!/[.!?]$/.test(line)) line += '.';
+        return this.tracked('constraint-lipogram-e', line, input);
+      }
+    }
+
     // Strategy 0.005: Buried math — when the user wrapped a math question in
     // chatter ("this isn't what I wanted, emm tell me 100 plus fifty five")
     // the leading-anchored math arm misses. Scan for an explicit math
@@ -3164,6 +3217,8 @@ export class VaiEngine implements ModelAdapter {
         }
       }
     }
+
+
     const yesNoResult = this.tryYesNoAnswer(input, lower);
     if (yesNoResult) return this.tracked('yesno', yesNoResult, input);
 
@@ -37744,6 +37799,13 @@ function topKLargest(nums, k) {
   private tryLiteralResponseInstruction(input: string): string | null {
     const trimmed = input.trim();
     if (trimmed.length === 0) return null;
+
+    // Output-shape constraints ("reply with exactly N words/tokens/letters")
+    // are NOT requests to repeat literal text — bail so the dedicated
+    // word-count constraint handler can fire instead.
+    if (/\bexactly\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d{1,3})\s+(?:words?|tokens?|letters?|characters?|chars?|sentences?|lines?|paragraphs?)\b/i.test(trimmed)) {
+      return null;
+    }
 
     const patterns = [
       /^(?:reply|respond|answer|say)\s+(?:with\s+)?(?:exactly|verbatim)\s+(?:this\s+(?:text|token|word|phrase)\s*)?(?:and\s+nothing\s+else\s*)?:?\s*([\s\S]+)$/i,
