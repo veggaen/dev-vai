@@ -2902,6 +2902,33 @@ export class VaiEngine implements ModelAdapter {
         if (!/[.!?]$/.test(line)) line += '.';
         return this.tracked('constraint-lipogram-e', line, input);
       }
+
+      // Self-contradictory count instruction: "Reply with exactly N sentences.
+      // The first must say you will use M sentences." (N != M). Refuse rather
+      // than producing the literal contradictory output.
+      const exactUnits = t.match(/\bexactly\s+(one|two|three|four|five|six|seven|eight|nine|ten|\d{1,2})\s+(sentences?|words?|paragraphs?|lines?)\b/i);
+      if (exactUnits) {
+        const rawN = exactUnits[1].toLowerCase();
+        const n = /^\d+$/.test(rawN) ? parseInt(rawN, 10) : (NUM_WORD[rawN] ?? 0);
+        const unit = exactUnits[2].toLowerCase().replace(/s$/, '');
+        // Look for a conflicting count claim further in the prompt that names
+        // the same unit but a different number.
+        const conflictRe = new RegExp(`\\b(one|two|three|four|five|six|seven|eight|nine|ten|\\d{1,2})\\s+${unit}s?\\b`, 'gi');
+        let m: RegExpExecArray | null;
+        let conflict = false;
+        while ((m = conflictRe.exec(t)) !== null) {
+          const rawK = m[1].toLowerCase();
+          const k = /^\d+$/.test(rawK) ? parseInt(rawK, 10) : (NUM_WORD[rawK] ?? 0);
+          if (k > 0 && k !== n) { conflict = true; break; }
+        }
+        if (conflict) {
+          return this.tracked(
+            'constraint-self-contradiction',
+            `I can't do that — the request contradicts itself. You're asking for exactly ${n} ${unit}${n === 1 ? '' : 's'}, but the content you want me to write would have to claim a different count. Pick one: I can write exactly ${n} ${unit}${n === 1 ? '' : 's'} that doesn't lie about its own length, or rewrite the constraint so the numbers line up.`,
+            input,
+          );
+        }
+      }
     }
 
     // Strategy 0.005: Buried math — when the user wrapped a math question in
