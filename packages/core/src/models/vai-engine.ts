@@ -3064,6 +3064,57 @@ export class VaiEngine implements ModelAdapter {
         return this.tracked('nickname-prelude', `Got it, **${cap}** — noted. Go ahead and ask, I'll do my best to answer.`, input);
       }
     }
+
+    // Strategy 0.452: Bare prose-introduction acknowledgement + name recall.
+    // Spec: docs/capabilities/multi-turn-memory-detector.md §6.
+    // Detects short standalone introductions ("My name is Sara.", "Hi, I'm Mira.",
+    // "Call me V3gga.", "This is Anna speaking.") and recalls a prior name when
+    // the user later asks "what's my name?". Guarded against the false-positive
+    // "I'm working on X" via stop-list and capital-letter requirement.
+    {
+      const askMyName = /\bwhat(?:'s|\s+is)\s+my\s+name\??\s*$/i.test(input.trim());
+      if (askMyName) {
+        const NAME_INTRO = /(?:my\s+name\s+is|i['\u2019]?m|i\s+am|call\s+me|this\s+is)\s+([A-Z][\w'-]{1,25})\b/;
+        let recalled: string | null = null;
+        for (const m of history) {
+          if (m.role !== 'user' || typeof m.content !== 'string') continue;
+          const mm = m.content.match(NAME_INTRO);
+          if (mm) { recalled = mm[1]; break; }
+        }
+        if (!recalled) {
+          for (const m of history) {
+            if (m.role !== 'assistant' || typeof m.content !== 'string') continue;
+            const mm = m.content.match(/\*\*([A-Z][\w'-]{1,25})\*\*/);
+            if (mm) { recalled = mm[1]; break; }
+          }
+        }
+        if (recalled) {
+          const cap = recalled.charAt(0).toUpperCase() + recalled.slice(1);
+          return this.tracked('name-recall', `Your name is **${cap}**.`, input);
+        }
+      }
+
+      const NAME_STOP = /^(?:working|building|writing|trying|using|making|having|doing|looking|going|just|here|there|the|a|an|so|now|still|currently|actually|really|definitely|maybe|sorry|sure|okay|good|fine|busy|tired)$/i;
+      const trimmed = input.trim();
+      let candidate: string | null = null;
+      const patterns: RegExp[] = [
+        /^(?:hi|hey|hello|yo)?[,!\s]*(?:i['\u2019]?m|i\s+am)\s+([A-Z][\w'-]{1,25})\s*[.!?]?\s*$/i,
+        /^(?:hi|hey|hello|yo)?[,!\s]*my\s+name\s+is\s+([A-Z][\w'-]{1,25})\s*[.!?]?\s*$/i,
+        /^call\s+me\s+([A-Z][\w'-]{1,25})\s*[.!?]?\s*$/i,
+        /^this\s+is\s+([A-Z][\w'-]{1,25})(?:\s+speaking)?\s*[.!?]?\s*$/i,
+      ];
+      for (const rx of patterns) {
+        const mm = trimmed.match(rx);
+        if (mm && mm[1] && !NAME_STOP.test(mm[1])) {
+          candidate = mm[1];
+          break;
+        }
+      }
+      if (candidate) {
+        const cap = candidate.charAt(0).toUpperCase() + candidate.slice(1);
+        return this.tracked('intro-ack', `Hi **${cap}** — noted. What can I help with?`, input);
+      }
+    }
     const yesNoResult = this.tryYesNoAnswer(input, lower);
     if (yesNoResult) return this.tracked('yesno', yesNoResult, input);
 
