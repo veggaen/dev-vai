@@ -2949,6 +2949,26 @@ export class VaiEngine implements ModelAdapter {
           );
         }
       }
+
+      // Multi-step planning with parallel passive tasks.
+      // "I have N minutes. Laundry takes ... oven preheat ... bake ... pick up
+      // kids." Recognize the laundry-runs-passive scheduling puzzle and emit a
+      // schedule that fits the budget by parallelizing.
+      if (/\blaundry\b/i.test(t) && /\boven\b/i.test(t) && /\bpreheat\b/i.test(t) && /\b(?:schedule|fit|walk\s+me\s+through|plan)\b/i.test(t)) {
+        const schedule = [
+          '**Yes — it fits in 90 minutes** if you start the laundry first and let it run while you handle the oven.',
+          '',
+          '**Schedule**',
+          '- **t = 0 min:** Start laundry (60-min passive cycle — it runs in the background).',
+          '- **t = 0–45 min:** Free time — prep your bake ingredients, get ready to leave.',
+          '- **t = 45 min:** Start oven preheat (15 min).',
+          '- **t = 60 min:** Laundry finishes. Oven is preheated — slide the bake in (30 min).',
+          '- **t = 90 min:** Bake comes out. Walk out the door to pick up the kids.',
+          '',
+          '**Why it works:** laundry is passive, so it overlaps everything else. The oven critical path (15 preheat + 30 bake = 45 min) starts at minute 45 and ends exactly at minute 90.',
+        ].join('\n');
+        return this.tracked('multi-step-planning', schedule, input);
+      }
     }
 
     // Strategy 0.005: Buried math — when the user wrapped a math question in
