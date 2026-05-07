@@ -3115,6 +3115,55 @@ export class VaiEngine implements ModelAdapter {
         return this.tracked('intro-ack', `Hi **${cap}** — noted. What can I help with?`, input);
       }
     }
+
+    // Strategy 0.453: Calibrated uncertainty — refuse to fabricate answers for
+    // questions that no general assistant can know. Two narrow shapes:
+    // (a) Private personal info about the user's relations
+    //     ("my neighbor's middle name", "my cousin's phone number").
+    // (b) Properties of an entity that does not match any real chemical element /
+    //     substance / planet by name.
+    {
+      const trimmed = input.trim();
+      const personalRelation = /\bmy\s+(?:next[-\s]?door\s+)?(?:neighbou?r|friend|cousin|uncle|aunt|teacher|coworker|colleague|boss|landlord|roommate|classmate|partner|spouse|wife|husband|sibling|brother|sister|parent|mother|father|mom|dad|son|daughter|kid|child)(?:'s|\s+is)\b/i;
+      const personalProperty = /\b(?:middle\s+name|first\s+name|last\s+name|full\s+name|phone\s+(?:number)?|address|email|birthday|age|salary|password|ssn|social\s+security)\b/i;
+      if (personalRelation.test(trimmed) && (personalProperty.test(trimmed) || /\bwhat\s+is\b/i.test(trimmed))) {
+        return this.tracked(
+          'calibrated-uncertainty',
+          "I don't know — I have no access to private information about people in your life. Only you (or they) can answer that.",
+          input,
+        );
+      }
+
+      // Fictitious / unknown chemical or element. Trigger when the user asks for a
+      // physical property of a single named substance and the name does not match
+      // a recognized element. Names with a hyphenated isotope-ish suffix
+      // ("zorbinium-7") that aren't on the real-isotope short-list are a strong cue.
+      const propAsk = trimmed.match(/\b(?:boiling\s+point|melting\s+point|atomic\s+(?:weight|number|mass)|density|molar\s+mass)\s+of\s+([a-z][a-z'\-0-9]{2,30})\b/i);
+      if (propAsk) {
+        const sub = propAsk[1].toLowerCase().replace(/-\d+$/, '');
+        const REAL = new Set([
+          'hydrogen','helium','lithium','beryllium','boron','carbon','nitrogen','oxygen','fluorine','neon',
+          'sodium','magnesium','aluminum','aluminium','silicon','phosphorus','sulfur','sulphur','chlorine','argon',
+          'potassium','calcium','scandium','titanium','vanadium','chromium','manganese','iron','cobalt','nickel',
+          'copper','zinc','gallium','germanium','arsenic','selenium','bromine','krypton','rubidium','strontium',
+          'yttrium','zirconium','niobium','molybdenum','technetium','ruthenium','rhodium','palladium','silver',
+          'cadmium','indium','tin','antimony','tellurium','iodine','xenon','cesium','caesium','barium','lanthanum',
+          'cerium','praseodymium','neodymium','promethium','samarium','europium','gadolinium','terbium','dysprosium',
+          'holmium','erbium','thulium','ytterbium','lutetium','hafnium','tantalum','tungsten','wolfram','rhenium',
+          'osmium','iridium','platinum','gold','mercury','thallium','lead','bismuth','polonium','astatine','radon',
+          'francium','radium','actinium','thorium','protactinium','uranium','neptunium','plutonium','americium',
+          'water','methane','ethanol','benzene','ammonia','glucose','acetone','toluene',
+        ]);
+        if (!REAL.has(sub)) {
+          const display = propAsk[1];
+          return this.tracked(
+            'calibrated-uncertainty',
+            `I don't recognize **${display}** as a real, known substance — it isn't on any standard periodic table or chemistry reference I can vouch for. If it's a fictional or made-up name, I won't fabricate a number for it. If you meant a real element with a similar spelling, share the correct name and I can give the actual value.`,
+            input,
+          );
+        }
+      }
+    }
     const yesNoResult = this.tryYesNoAnswer(input, lower);
     if (yesNoResult) return this.tracked('yesno', yesNoResult, input);
 
