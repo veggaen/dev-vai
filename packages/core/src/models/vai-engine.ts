@@ -2929,6 +2929,26 @@ export class VaiEngine implements ModelAdapter {
           );
         }
       }
+
+      // Counterfactual: "If my X hadn't Y, I would have <bad outcome>. My X
+      // did Y. Did I <bad outcome>?" The hypothetical antecedent didn't hold,
+      // so the consequence didn't either.
+      const cfMatch = t.match(/\bif\s+(?:my|the|our|your)\s+(\w+)\s+hadn'?t\s+([\w\s]{2,30}?)[,.]/i);
+      if (cfMatch) {
+        const subj = cfMatch[1].toLowerCase();
+        const subjFiredRe = new RegExp(`\\b(?:my|the|our|your)\\s+${subj}\\s+(?:did|does)\\s+`, 'i');
+        const askDidI = /\bdid\s+(?:i|we|you|they|he|she)\b[^?]*\?/i.test(t);
+        if (subjFiredRe.test(t) && askDidI) {
+          // Try to extract the outcome verb+noun for a clean reply.
+          const outcomeMatch = t.match(/\bdid\s+(?:i|we|you|they|he|she)\s+([\w\s]{2,40}?)\?/i);
+          const outcome = outcomeMatch ? outcomeMatch[1].trim() : 'experience that outcome';
+          return this.tracked(
+            'counterfactual',
+            `**No** — you didn't ${outcome}. The "if ${subj} hadn't" scenario was the counterfactual; since your ${subj} actually did happen as stated, the bad outcome it would have caused didn't follow. You're fine.`,
+            input,
+          );
+        }
+      }
     }
 
     // Strategy 0.005: Buried math — when the user wrapped a math question in
