@@ -40890,7 +40890,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
           if (this._activeMode === 'agent') {
             return 'Hei - hva vil du at jeg skal ta tak i?';
           }
-          return 'Hei - hva skjer?';
+          return 'Hei - VeggaAI her, hva skjer?';
         }
         if (this._activeMode === 'builder') {
           return 'Hey - what do you want to build?';
@@ -40898,7 +40898,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
         if (this._activeMode === 'agent') {
           return 'Hey - what do you want me to tackle?';
         }
-        return "Hey - what's up?";
+        return "Hey - VeggaAI here, what's up?";
       }
       const stats = this.getStats();
       if (isNorwegianGreeting) {
