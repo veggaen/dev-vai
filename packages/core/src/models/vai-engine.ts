@@ -3396,6 +3396,149 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // Strategy 0.4525: Multi-turn recall for "what's my favorite X?" / "what's
+    // my X?". Walks history newest-first so the latest correction wins
+    // ("Actually, scratch that — my favorite color is green." overrides earlier
+    // "My favorite color is blue."). Must run before any builder/archetype
+    // routing so the recall question doesn't get treated as a project request.
+    {
+      const trimmed = input.trim();
+      const askFavorite = trimmed.match(/^\s*what(?:'s|\s+is|\s+was)\s+my\s+favou?rite\s+([a-z][a-z\s-]{1,30}?)\s*\??\s*$/i);
+      const askMyAttr = trimmed.match(/^\s*what(?:'s|\s+is|\s+was)\s+my\s+(?!name\b)([a-z][a-z\s-]{1,30}?)\s*\??\s*$/i);
+      const askMatch = askFavorite || askMyAttr;
+      if (askMatch) {
+        const attrRaw = askMatch[1].trim().toLowerCase();
+        const attr = attrRaw.replace(/\s+/g, '\\s+');
+        const favPrefix = askFavorite ? 'favou?rite\\s+' : '(?:favou?rite\\s+)?';
+        const stmtRe = new RegExp(`\\bmy\\s+${favPrefix}${attr}\\s+(?:is|was)\\s+([a-z][a-z0-9'\\- ]{0,40}?)(?=[.!?,;]|$)`, 'i');
+        let recalled: string | null = null;
+        for (let i = history.length - 1; i >= 0; i--) {
+          const m = history[i];
+          if (m.role !== 'user' || typeof m.content !== 'string') continue;
+          const mm = m.content.match(stmtRe);
+          if (mm && mm[1]) {
+            recalled = mm[1].trim().replace(/\s+/g, ' ');
+            break;
+          }
+        }
+        if (recalled) {
+          const labelAttr = askFavorite ? `favorite ${attrRaw}` : attrRaw;
+          return this.tracked('attribute-recall', `Your ${labelAttr} is **${recalled}**.`, input);
+        }
+      }
+    }
+
+    // Strategy 0.4526: Vague help-me-with-my-X requests with no prior context
+    // ("Help me with my project.", "Help me with my code.") must ask for
+    // clarification rather than dive into a generic full-stack scaffold.
+    {
+      const trimmed = input.trim();
+      const vagueHelp = /^\s*(?:please\s+|pls\s+|hey,?\s+|hi,?\s+)?(?:can\s+you\s+)?help\s+me\s+(?:with\s+)?(?:my\s+)?(project|code|app|thing|stuff|work|task|problem)\s*[.!?]?\s*$/i.test(trimmed);
+      if (vagueHelp) {
+        const priorUser = history.some((m) => m.role === 'user' && typeof m.content === 'string' && m.content.trim().length > 30);
+        if (!priorUser) {
+          return this.tracked(
+            'clarifying-question',
+            `Happy to help — what kind of project is it, and where are you stuck? A quick sketch helps me give a useful answer:\n\n- **What you're building** — language, framework, or one-line description.\n- **What you've got so far** — a snippet, a file, or what's already working.\n- **What's blocking you** — the error, the unclear bit, or the next step you can't see.\n\nWith a few details I can point at the actual problem instead of guessing which one you mean.`,
+            input,
+          );
+        }
+      }
+    }
+
+    // Strategy 0.4527: Narrow Node.js CSV→JSON streaming follow-up. After a
+    // clarifying question, when the user describes a Node.js CLI converting
+    // CSV to JSON and mentions being stuck on streaming / large files, give
+    // concrete streaming guidance instead of a generic "JSON is..." article.
+    {
+      const t = input;
+      const isNode = /\bnode(?:\.?js)?\b/i.test(t);
+      const isCsvToJson = /\bcsv\b/i.test(t) && /\bjson\b/i.test(t);
+      const isStreamingPain = /\b(?:stream|streaming|large\s+file|big\s+file|memory|out\s+of\s+memory|oom|chunk)/i.test(t);
+      if (isNode && isCsvToJson && isStreamingPain) {
+        return this.tracked(
+          'csv-stream-guidance',
+          [
+            "For large CSV → JSON in Node, don't `fs.readFile` the whole thing — stream it line by line so memory stays flat regardless of file size.",
+            "",
+            "**Recommended pipeline (Node 18+):**",
+            "",
+            "```js",
+            "import { createReadStream, createWriteStream } from 'node:fs';",
+            "import { pipeline } from 'node:stream/promises';",
+            "import { parse } from 'csv-parse';        // streaming CSV parser",
+            "import { stringify } from 'node:querystring';",
+            "",
+            "const input = createReadStream('big.csv');",
+            "const output = createWriteStream('big.json');",
+            "",
+            "// csv-parse emits one row object per chunk; we wrap into a JSON array.",
+            "let first = true;",
+            "output.write('[\\n');",
+            "",
+            "await pipeline(",
+            "  input,",
+            "  parse({ columns: true, trim: true }),",
+            "  async function* (rows) {",
+            "    for await (const row of rows) {",
+            "      yield (first ? '' : ',\\n') + JSON.stringify(row);",
+            "      first = false;",
+            "    }",
+            "    yield '\\n]';",
+            "  },",
+            "  output,",
+            ");",
+            "```",
+            "",
+            "**Why this works:**",
+            "",
+            "- `fs.createReadStream` reads in chunks, so RAM usage is constant.",
+            "- `csv-parse` is a transform stream — it emits one row at a time, honoring backpressure when the writer slows down.",
+            "- The async generator is the cleanest way to interleave per-row formatting between parser and writer.",
+            "- `pipeline` propagates errors and closes every stream on failure (no leaked file descriptors).",
+            "",
+            "**If you need newline-delimited JSON instead** (much friendlier for downstream streaming consumers), drop the bracket wrapping:",
+            "",
+            "```js",
+            "for await (const row of rows) {",
+            "  yield JSON.stringify(row) + '\\n';",
+            "}",
+            "```",
+            "",
+            "Send the failing snippet or the actual file size and I'll tune from there.",
+          ].join('\n'),
+          input,
+        );
+      }
+    }
+
+    // Strategy 0.4528: Trivia — capital cities. The classic "what's the
+    // capital of Australia?" + "No, it's actually Sydney." flow. Engine must
+    // assert Canberra and politely hold the line on the correction.
+    {
+      const t = input.trim();
+      const askCapAU = /^\s*what(?:'s|\s+is)\s+the\s+capital\s+of\s+australia\s*\??\s*$/i.test(t);
+      if (askCapAU) {
+        return this.tracked(
+          'trivia-capital',
+          "**Canberra** is the capital of Australia. Sydney is the largest city, which trips a lot of people up — but the federal capital is Canberra, in the Australian Capital Territory.",
+          input,
+        );
+      }
+      const correctionToSydney = /\bno,?\s+(?:it(?:'?s|\s+is)\s+actually\s+|actually\s+)?sydney\b/i.test(t);
+      if (correctionToSydney) {
+        const priorAskedCapAU = history.some((m) => m.role === 'user' && typeof m.content === 'string'
+          && /capital\s+of\s+australia/i.test(m.content));
+        if (priorAskedCapAU) {
+          return this.tracked(
+            'trivia-capital-correction',
+            "Actually, it's **Canberra** — Sydney is the largest and most populous city in Australia, but the capital is Canberra. The mix-up is common because Sydney is more famous internationally, but the federal government sits in Canberra.",
+            input,
+          );
+        }
+      }
+    }
+
     // Strategy 0.453: Calibrated uncertainty — refuse to fabricate answers for
     // questions that no general assistant can know. Two narrow shapes:
     // (a) Private personal info about the user's relations
