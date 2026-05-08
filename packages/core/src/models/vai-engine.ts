@@ -8273,7 +8273,8 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     if (
       isBuilderMode
       && /\b(shared\s+shopping|shopping\s+app|shopping\s*list|grocery)\b/i.test(cleanedProjectDesc)
-      && /\b(household|roommates?)\b/i.test(cleanedProjectDesc)
+      && (/\b(household|roommates?)\b/i.test(cleanedProjectDesc)
+        || /\bshared\s+shopping\b/i.test(cleanedProjectDesc))
     ) {
       return this.generateBuilderSharedShoppingApp(cleanedProjectDesc);
     }
@@ -14509,8 +14510,6 @@ import type { FormEvent } from 'react';
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 
-const promptLabel = ${JSON.stringify(desc)};
-
 type Member = { name: string; role: string; badge: string };
 type ShoppingItem = { id: number; name: string; aisle: string; owner: string; priority: string; quantity: string };
 
@@ -14568,9 +14567,9 @@ export default function App() {
       <div className='mx-auto flex min-h-screen max-w-7xl flex-col gap-5 px-4 py-5 md:px-8'>
         <motion.header initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className='grid gap-4 border border-white/10 bg-[#0f1b17] p-5 xl:grid-cols-[1.15fr_0.85fr]'>
           <div>
-            <p className='text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-emerald-300'>{promptLabel}</p>
+            <p className='text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-emerald-300'>Shared shopping workspace</p>
             <h1 className='mt-2 text-4xl font-semibold tracking-tight text-stone-50 sm:text-5xl'>Shared Shopping List</h1>
-            <p className='mt-3 max-w-2xl text-sm leading-6 text-stone-300 sm:text-base'>Built for a real store run: household context on one side, aisle-first list in the middle, and a route-ready store plan that feels like a product instead of a dashboard.</p>
+            <p className='mt-3 max-w-2xl text-sm leading-6 text-stone-300 sm:text-base'>Built for Tonight\'s store run: household context on one side, aisle-first list in the middle, and a route-ready store plan that feels like a product instead of a dashboard.</p>
           </div>
 
           <form onSubmit={addItem} className='grid gap-3 border border-white/10 bg-[#09100d] p-4'>
