@@ -180,10 +180,17 @@ export function shouldDeferContextGroundedFollowUp(input: string, history: reado
   // route to curated fact/snippet strategies, not generic grounded continuation
   // scaffolding. Without this, follow-up turns leak meta-text like
   // "**Grounded continuation**\nContinuing from..." instead of an actual answer.
-  if (/^(?:so\s+|and\s+|but\s+|then\s+)?(?:what(?:'s|\s+is|\s+are|\s+does|\s+do)|how\s+(?:do\s+i|to|does)|why\s+(?:does|is|do|are)|when\s+(?:does|do)|explain|review\s+this)\b/i.test(lower)) {
+  // Exception: when "explain" / "what is" / "how do" refers anaphorically to
+  // the prior turn ("explain that more simply", "what is it doing here") it
+  // is a context-grounded follow-up, not a canonical knowledge ask.
+  const refersToPriorTurn = /\b(?:that|this|it|them|these|those|the\s+(?:above|previous|last)\s+(?:answer|response|explanation|message))\b/i.test(lower);
+  if (
+    !refersToPriorTurn
+    && /^(?:so\s+|and\s+|but\s+|then\s+)?(?:what(?:'s|\s+is|\s+are|\s+does|\s+do)|how\s+(?:do\s+i|to|does)|why\s+(?:does|is|do|are)|when\s+(?:does|do)|explain|review\s+this)\b/i.test(lower)
+  ) {
     return true;
   }
-  if (/^(?:explain|what does this|what's this|whats this)\b/i.test(lower)) {
+  if (!refersToPriorTurn && /^(?:explain|what does this|what's this|whats this)\b/i.test(lower)) {
     return true;
   }
 
