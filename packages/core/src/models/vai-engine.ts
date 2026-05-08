@@ -4030,6 +4030,42 @@ export class VaiEngine implements ModelAdapter {
     // Also: tiny follow-up cues ("tell me then", "go on", "more?") must NOT pull a stale knowledge entry by accident.
     const trimmedInputLen = input.trim().split(/\s+/).length;
     const isFollowUpCue = trimmedInputLen <= 4 && /^(?:tell\s+me(?:\s+(?:then|more|about\s+it))?|go\s+on|continue|more|what\s+else|and\s+then|and\??|so\??|why\??|how\??)[\s.?!]*$/i.test(input.trim());
+    // Strategy 2-pre: Typo-tolerant explain-X pattern. Catches things like
+    // "kan u forklare pyhton" / "can you explain dockre" — short prompts that
+    // boil down to a single topic, where the topic word is misspelled. Without
+    // this, the relevance gate at Strategy 2 rejects the fuzzy match because
+    // the typo'd token doesn't substring-match the canonical pattern token.
+    if (!isFollowUpCue) {
+      const explainTopic = input.trim().match(
+        /^\s*(?:can|could|kan|kunne|will|would|please)\s+(?:you|u|du)\s+(?:please\s+)?(?:explain|describe|forklare?|forkalr|tell\s+me\s+about|si\s+meg\s+om)\s+(?:what\s+(?:is|are)\s+|hva\s+er\s+|en\s+|et\s+|a\s+|an\s+|the\s+)?([a-z][a-z0-9.+#-]{2,30})\s*[.!?]?\s*$/i,
+      );
+      if (explainTopic) {
+        const TYPO_FIX: Record<string, string> = {
+          pyhton: 'python', pythn: 'python', phyton: 'python',
+          dockre: 'docker', dockr: 'docker', dokcer: 'docker',
+          typescirpt: 'typescript', tpyescript: 'typescript', typescirpt2: 'typescript',
+          javasrcipt: 'javascript', jaavscript: 'javascript',
+          websokcet: 'websocket', websokc: 'websocket', wbsocket: 'websocket',
+          kuberntees: 'kubernetes', kubrnetes: 'kubernetes',
+          rceat: 'react', raect: 'react',
+          nodes: 'node', nodjs: 'node',
+        };
+        const raw = explainTopic[1].toLowerCase();
+        const fixed = TYPO_FIX[raw] ?? raw;
+        const topicMatch = this.cachedFindBestMatch(fixed);
+        if (topicMatch) {
+          const patternLower = topicMatch.pattern.toLowerCase();
+          const isOnTopic = patternLower.includes(fixed) || fixed.includes(patternLower);
+          if (isOnTopic) {
+            const isBootstrapSelfEntry = (topicMatch.source === 'bootstrap' || topicMatch.source.startsWith('bootstrap'))
+              && /\bVeggaAI\b|I am v0|I learn from sources/i.test(topicMatch.response);
+            if (!isBootstrapSelfEntry) {
+              return this.tracked('direct-match', topicMatch.response, input);
+            }
+          }
+        }
+      }
+    }
     const match = isFollowUpCue ? null : this.cachedFindBestMatch(input);
     if (match) {
       // Relevance gate: cachedFindBestMatch is fuzzy and will happily return
