@@ -92,8 +92,10 @@ const INSTRUCTION_CONSTRAINT_PATTERN = new RegExp(
     "\\bonly\\s+(?:like\\s+)?\\d+\\s+(?:tokens?|words?|letters?|characters?|chars?)\\b",
     // "4 letters + the semicolon", "N letters + X in between"
     "\\b\\d+\\s+(?:letters?|chars?|characters?|tokens?|words?)\\s+(?:\\+|and|plus|with)\\b",
-    // "all caps", "in all caps", "in uppercase", "ALL CAPS"
-    "\\b(?:in\\s+)?(?:all\\s+caps|uppercase|all\\s+uppercase)\\b",
+    // "in all caps" / "in uppercase" / "ALL CAPS" — must be a directive
+    // about output formatting, not a description of input data ("a valid
+    // uppercase Roman numeral string" is NOT a constraint on the answer).
+    "\\bin\\s+(?:all\\s+caps|uppercase|all\\s+uppercase)\\b|\\ball\\s+caps\\b",
     // "as JSON", "as a JSON object", "respond with JSON"
     "\\bas\\s+(?:a\\s+)?json\\b|\\bjson\\s+(?:object|format|output|only)\\b",
     // "comma-separated", "comma separated list"
