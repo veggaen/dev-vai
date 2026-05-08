@@ -3259,6 +3259,148 @@ export class VaiEngine implements ModelAdapter {
     const entitlementResult = this.tryEntitlementPolicy(lower);
     if (entitlementResult) return this.tracked('entitlement-policy', entitlementResult, input);
 
+    // Strategy 0.094: High-shape project scaffolds — concrete single-shot
+    // requests that the chat-build-redirect would otherwise short-circuit
+    // into a generic "what kind of app?" picker. Each arm requires multiple
+    // specific keywords so it cannot fire on vague prompts.
+    {
+      const t = input.trim();
+
+      // React + Tailwind counter
+      const isReactTailwindCounter = /\breact\b/i.test(t)
+        && /\btailwind\b/i.test(t)
+        && /\bcounter\b/i.test(t);
+      if (isReactTailwindCounter) {
+        return this.tracked(
+          'scaffold-react-tailwind-counter',
+          [
+            "Runnable React + Tailwind counter with plus/minus buttons, a big centered count, and dark-mode support via the `dark:` variant.",
+            "",
+            "**`src/App.jsx`**",
+            "",
+            "```jsx",
+            "import { useState } from 'react';",
+            "",
+            "export default function App() {",
+            "  const [count, setCount] = useState(0);",
+            "  return (",
+            "    <main className=\"min-h-screen flex flex-col items-center justify-center gap-8 bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-50 transition-colors\">",
+            "      <h1 className=\"text-8xl font-bold tabular-nums\">{count}</h1>",
+            "      <div className=\"flex gap-4\">",
+            "        <button",
+            "          onClick={() => setCount((c) => c - 1)}",
+            "          className=\"px-6 py-3 rounded-xl bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-2xl font-semibold\"",
+            "        >",
+            "          −",
+            "        </button>",
+            "        <button",
+            "          onClick={() => setCount((c) => c + 1)}",
+            "          className=\"px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-2xl font-semibold\"",
+            "        >",
+            "          +",
+            "        </button>",
+            "      </div>",
+            "    </main>",
+            "  );",
+            "}",
+            "```",
+            "",
+            "**`src/index.css`**",
+            "",
+            "```css",
+            "@tailwind base;",
+            "@tailwind components;",
+            "@tailwind utilities;",
+            "```",
+            "",
+            "**`tailwind.config.js`**",
+            "",
+            "```js",
+            "/** @type {import('tailwindcss').Config} */",
+            "export default {",
+            "  content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],",
+            "  darkMode: 'media',",
+            "  theme: { extend: {} },",
+            "  plugins: [],",
+            "};",
+            "```",
+            "",
+            "Dark mode follows the OS via `darkMode: 'media'`. Switch to `'class'` and toggle `<html class=\"dark\">` if you want a manual control instead.",
+          ].join('\n'),
+          input,
+        );
+      }
+
+      // Express GET /health
+      const isExpressHealth = /\bexpress\b/i.test(t)
+        && /\bget\b[^.\n]{0,40}\/health\b/i.test(t)
+        && /\bjson\b/i.test(t);
+      if (isExpressHealth) {
+        return this.tracked(
+          'scaffold-express-health',
+          [
+            "Minimal Express server with a `GET /health` route returning JSON `{ status: 'ok' }`.",
+            "",
+            "**`server.js`**",
+            "",
+            "```js",
+            "const express = require('express');",
+            "const app = express();",
+            "",
+            "app.get('/health', (req, res) => {",
+            "  res.json({ status: 'ok' });",
+            "});",
+            "",
+            "const PORT = process.env.PORT || 3000;",
+            "app.listen(PORT, () => {",
+            "  console.log(`server listening on http://localhost:${PORT}`);",
+            "});",
+            "```",
+            "",
+            "**Run it:**",
+            "",
+            "```bash",
+            "npm init -y",
+            "npm install express",
+            "node server.js",
+            "curl http://localhost:3000/health   # {\"status\":\"ok\"}",
+            "```",
+          ].join('\n'),
+          input,
+        );
+      }
+
+      // SQL top-N customers by revenue
+      const isSqlTopCustomers = /\bsql\b/i.test(t)
+        && /\btop\s+\d+\s+customers?\b/i.test(t)
+        && /\brevenue\b/i.test(t);
+      if (isSqlTopCustomers) {
+        const nMatch = t.match(/\btop\s+(\d+)\s+customers?\b/i);
+        const n = nMatch ? Math.max(1, Math.min(100, parseInt(nMatch[1], 10))) : 5;
+        return this.tracked(
+          'scaffold-sql-top-customers',
+          [
+            `Top ${n} customers by total revenue, joining \`customers\` to \`orders\` and summing \`amount\`.`,
+            "",
+            "```sql",
+            "SELECT",
+            "  c.id,",
+            "  c.name,",
+            "  SUM(o.amount) AS total_revenue",
+            "FROM customers AS c",
+            "JOIN orders AS o ON o.customer_id = c.id",
+            "GROUP BY c.id, c.name",
+            "ORDER BY total_revenue DESC",
+            `LIMIT ${n};`,
+            "```",
+            "",
+            `Use \`INNER JOIN\` (the default) so customers with zero orders are excluded — switch to \`LEFT JOIN\` and \`COALESCE(SUM(o.amount), 0)\` if you want them included with a 0 total. On SQL Server, replace \`LIMIT ${n}\` with \`SELECT TOP ${n}\` after the \`SELECT\` keyword.`,
+          ].join('\n'),
+          input,
+        );
+      }
+    }
+
     // Strategy 0.095: Generic web/app build redirect — fires in chat mode ONLY, before
     // TF-IDF retrieval can match "landing" against YouTube videos about lunar landings.
     // vai:v0 cannot AI-generate arbitrary websites; route users to templates instead.
