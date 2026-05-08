@@ -8289,8 +8289,17 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       return this.generateBuilderNodeExpressApp(cleanedProjectDesc);
     }
 
-    if (isBuilderMode && (/dashboard.*chart|chart.*dashboard|analytics\s*dashboard|metrics\s*dashboard|data\s*dashboard|revenue\s+over\s+time|traffic\s+sources/i.test(fullDesc)
-      || (/\bdashboard\b/i.test(cleanedProjectDesc) && /chart|graph|plot|recharts|analytics|metric|kpi/i.test(langHint)))) {
+    // Operational/ops dashboards (approval queue, decision lanes, workflow surfaces)
+    // belong to the dashboard archetype in compose-builder-app, not the
+    // analytics-charts shell. Skip the recharts shell when the prompt is
+    // clearly ops/workflow-flavoured even if it also says "charts".
+    const isOpsDashboardSignal = /\b(?:approval|approvals|decision|decision\s+lanes?|workflow|review\s+queue|incident|on-?call|operations?\s+dashboard|ops\s+dashboard|admin\s+dashboard|internal\s+tool)\b/i.test(fullDesc);
+    if (
+      !isOpsDashboardSignal
+      && isBuilderMode
+      && (/dashboard.*chart|chart.*dashboard|analytics\s*dashboard|metrics\s*dashboard|data\s*dashboard|revenue\s+over\s+time|traffic\s+sources/i.test(fullDesc)
+        || (/\bdashboard\b/i.test(cleanedProjectDesc) && /chart|graph|plot|recharts|analytics|metric|kpi/i.test(langHint)))
+    ) {
       return this.generateBuilderReactDashboard(cleanedProjectDesc);
     }
 
