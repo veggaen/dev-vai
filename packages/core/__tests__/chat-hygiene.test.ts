@@ -339,6 +339,15 @@ describe('chat hygiene', () => {
       ['who was Isaac Newton?', /\b(?:Principia|gravitation|calculus|laws of motion|Royal Society)\b/i],
       ['who was Galileo Galilei?', /\b(?:telescope|Jupiter|moons|Inquisition|Copernican|heliocentr)\b/i],
       ['who was Stephen Hawking?', /\b(?:Hawking radiation|Cambridge|black hole|ALS|Brief History)\b/i],
+      // Round 5 — Norse mythology, Greek gods, programming languages, NYC.
+      ['who is Zeus?', /\b(?:Olympus|Greek|sky|thunder|Jupiter|Cronus)\b/i],
+      ['who is Odin?', /\b(?:Norse|Asgard|Valhalla|raven|Yggdrasil|Wednesday)\b/i],
+      ['who is Thor?', /\b(?:Norse|Mj[öo]lnir|hammer|thunder|Asgard|Thursday)\b/i],
+      ['who is Loki?', /\b(?:Norse|trickster|Fenrir|J[öo]rmungandr|shape[\s-]?shift)\b/i],
+      ['what is Ragnarok?', /\b(?:Norse|Fenrir|Surtr|Odin|Thor|end of the world|twilight)\b/i],
+      ['what is Yggdrasil?', /\b(?:world tree|Norse|ash|Norn|Asgard|root)\b/i],
+      ['what is Valhalla?', /\b(?:Odin|Asgard|einherjar|Valkyrie|hall|slain)\b/i],
+      ['what is New York City?', /\b(?:Manhattan|Brooklyn|five boroughs|Hudson|United States|New Amsterdam)\b/i],
     ];
     const fallbackPattern = /(?:i don['']t yet hold|isn['']t in my knowledge yet|isn['']t somewhere i can speak with confidence|real gap in what i hold|don['']t have \*\*[^*]+\*\* locally yet|empty pocket on)/i;
     for (const [q, expected] of cases) {
