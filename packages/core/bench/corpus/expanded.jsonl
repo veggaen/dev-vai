@@ -1,0 +1,33 @@
+{"id":"med-001","category":"medicine","q":"what causes type 2 diabetes?","mustMatch":["insulin resistance|insulin|blood sugar|glucose"]}
+{"id":"med-002","category":"medicine","q":"what is hypertension?","mustMatch":["blood pressure|systolic|diastolic"]}
+{"id":"med-003","category":"medicine","q":"what is asthma?","mustMatch":["airways|bronch|inflammation"]}
+{"id":"med-004","category":"medicine","q":"what is an mRNA vaccine?","mustMatch":["messenger RNA|spike|protein|immune"]}
+{"id":"med-005","category":"medicine","q":"what is the difference between a virus and bacteria?","mustMatch":["antibiotic|cell|host|living"]}
+{"id":"bio-001","category":"biology","q":"how does the human heart work?","mustMatch":["chamber|atria|ventricle|valve"]}
+{"id":"bio-002","category":"biology","q":"what is natural selection?","mustMatch":["Darwin|fitness|evolution|adaptation"]}
+{"id":"bio-003","category":"biology","q":"what is DNA?","mustMatch":["double helix|nucleotide|base pair|adenine"]}
+{"id":"bio-004","category":"biology","q":"what are stem cells?","mustMatch":["differentiate|pluripotent|undifferentiated"]}
+{"id":"phys-001","category":"physics","q":"what is the speed of light?","mustMatch":["299|approximately 300|kilometres per second|km/s|3.*10"]}
+{"id":"phys-002","category":"physics","q":"what is a black hole?","mustMatch":["event horizon|singularity|escape velocity|gravity"]}
+{"id":"phys-003","category":"physics","q":"what is quantum mechanics?","mustMatch":["wave|particle|probability|superposition|uncertainty"]}
+{"id":"phys-004","category":"physics","q":"what is the theory of special relativity?","mustMatch":["Einstein|speed of light|time dilation|reference frame"]}
+{"id":"math-001","category":"math","q":"what is calculus?","mustMatch":["derivative|integral|Newton|Leibniz"]}
+{"id":"math-002","category":"math","q":"what is the Pythagorean theorem?","mustMatch":["a.{0,3}\\+\\s*b|hypotenuse|right triangle"]}
+{"id":"math-003","category":"math","q":"what is a prime number?","mustMatch":["divisible|factor|1 and itself"]}
+{"id":"math-004","category":"math","q":"what is pi?","mustMatch":["3\\.14|circumference|diameter|irrational"]}
+{"id":"hist-001","category":"history","q":"what caused World War I?","mustMatch":["Franz Ferdinand|Sarajevo|alliance|assassination"]}
+{"id":"hist-002","category":"history","q":"what was the Renaissance?","mustMatch":["Florence|Italy|14|15|rebirth|humanism"]}
+{"id":"hist-003","category":"history","q":"what was the Roman Empire?","mustMatch":["Augustus|Caesar|Mediterranean|emperor"]}
+{"id":"hist-004","category":"history","q":"what was the French Revolution?","mustMatch":["1789|Bastille|guillotine|Louis"]}
+{"id":"prog-007","category":"programming","q":"what is recursion?","mustMatch":["calls itself|base case|stack"]}
+{"id":"prog-008","category":"programming","q":"what is REST?","mustMatch":["HTTP|stateless|resource|GET|POST"]}
+{"id":"prog-009","category":"programming","q":"what is a database index?","mustMatch":["B-tree|lookup|query|column"]}
+{"id":"prog-010","category":"programming","q":"what is git?","mustMatch":["version control|Linus|distributed|commit"]}
+{"id":"prog-011","category":"programming","q":"what is OOP?","mustMatch":["object|class|inheritance|encapsulation|polymorphism"]}
+{"id":"geo-006","category":"geography","q":"what is the capital of Australia?","mustMatch":["Canberra"]}
+{"id":"geo-007","category":"geography","q":"what is the highest mountain in the world?","mustMatch":["Everest|8,?848|8,?849"]}
+{"id":"geo-008","category":"geography","q":"what is the largest country by area?","mustMatch":["Russia"]}
+{"id":"geo-009","category":"geography","q":"what is the smallest country in the world?","mustMatch":["Vatican"]}
+{"id":"ppl-006","category":"people","q":"who was Albert Einstein?","mustMatch":["relativity|physicist|German|1879|Nobel"]}
+{"id":"ppl-007","category":"people","q":"who was Leonardo da Vinci?","mustMatch":["Renaissance|polymath|Mona Lisa|Italian|Vinci"]}
+{"id":"ppl-008","category":"people","q":"who was Marie Curie?","mustMatch":["radium|polonium|Nobel|radioactivity|Polish"]}
