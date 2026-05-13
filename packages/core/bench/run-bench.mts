@@ -71,7 +71,8 @@ const LOWQ_PATTERNS = [
   /article (?:contains|may|relies)/i,
   /\bredirect[s]?\s+(?:here|to)\b/i,
   /\bnot to be confused with\b/i,
-  /\bfor (?:other|the|ships|disambiguation)/i,
+  /\bfor other uses,?\s+see\b/i,
+  /\bfor the [a-z ]+,? see\b/i,
   /from wikipedia, the free encyclopedia/i,
   /\[\d+\]\s+\*\*sources\*\*/i,
 ];
