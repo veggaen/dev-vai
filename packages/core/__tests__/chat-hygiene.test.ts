@@ -327,6 +327,18 @@ describe('chat hygiene', () => {
       ['who was Immanuel Kant?', /\b(?:Critique|Königsberg|Konigsberg|Categorical Imperative|transcendental)\b/i],
       ['who was Adam Smith?', /\b(?:Wealth of Nations|invisible hand|Scottish|economics|1776)\b/i],
       ['who was Henrik Ibsen?', /\b(?:Norwegian|Doll['']s House|Peer Gynt|playwright|drama)\b/i],
+      // Round 4 — mythology, games, organic chemistry, scientists, stats.
+      ['who was Achilles?', /\b(?:Trojan|Iliad|Patroclus|Hector|heel)\b/i],
+      ['who was Odysseus?', /\b(?:Ithaca|Odyssey|Penelope|Trojan|Cyclops|Polyphemus)\b/i],
+      ['what is Pac-Man?', /\b(?:Namco|1980|Iwatani|maze|ghost)\b/i],
+      ['what is Half-Life?', /\b(?:Valve|1998|Gordon Freeman|Black Mesa|Xen)\b/i],
+      ['what is a hydrocarbon?', /\b(?:alkane|alkene|petroleum|carbon|hydrogen)\b/i],
+      ['what is a polymer?', /\b(?:monomer|polymerisation|polymerization|plastic|chain)\b/i],
+      ['what is a p-value?', /\b(?:null hypothesis|significance|frequentist|alpha|0\.05)\b/i],
+      ['who was Marie Curie?', /\b(?:radioactivity|polonium|radium|Nobel|Sk[łl]odowska)\b/i],
+      ['who was Isaac Newton?', /\b(?:Principia|gravitation|calculus|laws of motion|Royal Society)\b/i],
+      ['who was Galileo Galilei?', /\b(?:telescope|Jupiter|moons|Inquisition|Copernican|heliocentr)\b/i],
+      ['who was Stephen Hawking?', /\b(?:Hawking radiation|Cambridge|black hole|ALS|Brief History)\b/i],
     ];
     const fallbackPattern = /(?:i don['']t yet hold|isn['']t in my knowledge yet|isn['']t somewhere i can speak with confidence|real gap in what i hold|don['']t have \*\*[^*]+\*\* locally yet|empty pocket on)/i;
     for (const [q, expected] of cases) {
