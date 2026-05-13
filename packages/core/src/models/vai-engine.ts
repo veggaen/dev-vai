@@ -41463,6 +41463,158 @@ Want me to customize it with your actual links, change the color scheme, add ani
       }
     }
 
+    // ── Tallest mountain on Earth ──────────────────────────────────────
+    {
+      if (/\b(?:tallest|highest)\s+mountain\b/i.test(lower)
+        && /\b(?:earth|world|on\s+the\s+planet)\b/i.test(lower)) {
+        return `**Mount Everest** is the tallest mountain on Earth measured from sea level — its summit reaches **8,848.86 m (29,031.7 ft)**, on the Nepal–China (Tibet) border in the Himalayas. The current height was set by a joint Nepal–China survey in 2020.\n\nWorth noting:\n- Measured from base to peak, **Mauna Kea** in Hawaii is taller (~10,210 m), but most of it is underwater.\n- Measured from Earth's centre, **Chimborazo** in Ecuador wins because of the planet's equatorial bulge.`;
+      }
+    }
+
+    // ── Deepest ocean / point ──────────────────────────────────────────
+    {
+      if (/\bdeepest\b/i.test(lower) && /\b(?:ocean|sea|point|trench|spot)\b/i.test(lower)) {
+        return `The **Pacific Ocean** is the deepest of the five oceans. Its deepest point — and the deepest known point on Earth — is the **Challenger Deep** in the southern end of the **Mariana Trench**, roughly **10,935 m (35,876 ft)** below sea level. For comparison, Everest stood on the trench floor would still be more than two kilometres underwater.`;
+      }
+    }
+
+    // ── Black hole ─────────────────────────────────────────────────────
+    {
+      if (/\bblack\s+hole\b/i.test(lower) && /^(?:what|tell|explain|describe)\b/i.test(input.trim())) {
+        return `A **black hole** is a region of spacetime where gravity is strong enough that nothing — not even light — can escape once it crosses the boundary called the **event horizon**.\n\nKey ideas:\n- **Formation:** stellar-mass black holes form when a massive star (>~25 solar masses) collapses at the end of its life. Supermassive black holes (millions–billions of solar masses) sit at the centres of most galaxies, including ours (Sagittarius A*).\n- **Singularity:** general relativity predicts a point of infinite density at the centre — most physicists treat that as a sign the theory breaks down there.\n- **Spin and charge:** described by the Kerr (rotating) and Kerr–Newman (rotating + charged) solutions; in practice astrophysical black holes are well-modelled by mass and spin alone.\n- **Hawking radiation:** quantum effects at the horizon let black holes slowly evaporate; for stellar-mass holes the timescale is absurdly long.\n- **First image:** the Event Horizon Telescope released the first direct image of M87*'s shadow in **April 2019** and of Sagittarius A* in **May 2022**.`;
+      }
+    }
+
+    // ── Roman Empire ──────────────────────────────────────────────────
+    {
+      if (/\broman\s+empire\b/i.test(lower)) {
+        return `The **Roman Empire** was the post-Republican phase of ancient Rome, conventionally dated from **27 BC** — when the Senate granted Octavian the title *Augustus* — until the fall of the Western Empire in **AD 476**, when the Germanic chieftain Odoacer deposed the last Western emperor, Romulus Augustulus.\n\nQuick frame:\n- **Capital(s):** Rome, later Mediolanum and Ravenna in the West; **Constantinople** in the East.\n- **Peak extent (~AD 117, under Trajan):** from Britain in the north-west to Mesopotamia in the east — about 5 million km² and an estimated 50–60 million people.\n- **Split:** Diocletian formalised an East/West division in AD 285; Constantine moved the capital east in 330.\n- **Eastern (Byzantine) Empire** continued until **1453**, when Constantinople fell to the Ottoman Turks.\n- **Legacy:** Roman law, Latin (parent of the Romance languages), the Julian/Gregorian calendar, road and aqueduct engineering, and the institutional shape of the Catholic Church.`;
+      }
+    }
+
+    // ── Albert Einstein ───────────────────────────────────────────────
+    {
+      if (/\b(?:albert\s+)?einstein\b/i.test(lower) && /^(?:who|what|tell|explain|describe)\b/i.test(input.trim())) {
+        return `**Albert Einstein** (14 March 1879 – 18 April 1955) was a German-born theoretical physicist and one of the most influential scientists in history.\n\nHigh points:\n- **1905 ("annus mirabilis"):** four papers — the photoelectric effect (foundation of quantum theory), Brownian motion, **special relativity**, and mass–energy equivalence (**E = mc²**).\n- **1915:** **general relativity** — gravity as the curvature of spacetime caused by mass and energy. Confirmed by the 1919 solar-eclipse measurement of light bending around the Sun.\n- **1921:** **Nobel Prize in Physics**, awarded for the photoelectric effect (not relativity, which was still considered too contested).\n- **1933:** fled Nazi Germany after Hitler came to power; settled at the Institute for Advanced Study in Princeton.\n- **1939:** signed the Einstein–Szilárd letter to FDR warning that Nazi Germany might pursue an atomic bomb — a key push behind the Manhattan Project, though Einstein himself did not work on it.\n- Spent his last decades searching unsuccessfully for a unified field theory and remained an outspoken pacifist, civil-rights advocate, and supporter of Zionism (he declined the presidency of Israel in 1952).`;
+      }
+    }
+
+    // ── Industrial Revolution ─────────────────────────────────────────
+    {
+      if (/\bindustrial\s+revolution\b/i.test(lower)) {
+        return `The **Industrial Revolution** was the transformation from agrarian, hand-production economies to machine-based manufacturing that began in **Britain around 1760** and spread across Europe and North America through the 1800s.\n\nMain drivers:\n- **Steam power** — James Watt's improved steam engine (1769) made mechanical power portable and cheap.\n- **Textiles** — spinning jenny, water frame, power loom mechanised cloth production.\n- **Iron and coal** — coke-fuelled blast furnaces and abundant coal underwrote everything else.\n- **Transport** — canals, then railways (Stockton & Darlington, 1825; Liverpool & Manchester, 1830) and steamships collapsed shipping costs.\n\nConsequences:\n- Massive urbanisation and the rise of the factory wage-labour system.\n- Sustained per-capita GDP growth for the first time in history.\n- Brutal early working conditions that drove labour movements, public-health reform and eventually the welfare state.\n- A **Second Industrial Revolution** (~1870–1914) added steel, electricity, the internal-combustion engine and chemicals, with the United States and Germany overtaking Britain in many sectors.`;
+      }
+    }
+
+    // ── Genghis Khan ──────────────────────────────────────────────────
+    {
+      if (/\b(?:genghis|chinggis|chingis)\s+khan\b/i.test(lower)) {
+        return `**Genghis Khan** (born **Temüjin**, c. **1162 – August 1227**) was the founder and first **Great Khan** of the Mongol Empire, which became the largest contiguous land empire in history.\n\nKey points:\n- **1206:** united the warring Mongol tribes at the kurultai on the Onon River and was proclaimed Genghis Khan ("universal ruler").\n- **Conquests:** Western Xia (1209), the Jin dynasty in northern China (from 1211), the Khwarazmian Empire in Central Asia and Persia (1219–1221), and campaigns reaching the Caucasus and the Russian steppe.\n- **Innovations:** a meritocratic decimal-based military organisation, the **Yassa** legal code, an empire-wide postal-relay system (**Yam**), religious tolerance for subject peoples, and the early use of the **Uyghur script** to write Mongolian.\n- **Death:** died in August 1227 during the final campaign against the Western Xia; burial place still unknown.\n- **Legacy:** his sons and grandsons (Ögedei, Kublai, Hulagu, Batu) extended the empire to roughly 24 million km² before it fragmented into the Yuan dynasty and the western khanates.`;
+      }
+    }
+
+    // ── Chambers of the human heart ───────────────────────────────────
+    {
+      if (/\bhuman\s+heart\b/i.test(lower) && /\bchambers?\b/i.test(lower)) {
+        return `The human heart has **four chambers**: two **atria** on top (left and right) and two **ventricles** below.\n\n- **Right atrium** receives deoxygenated blood from the body via the vena cavae.\n- **Right ventricle** pumps that blood to the lungs through the pulmonary artery.\n- **Left atrium** receives oxygenated blood back from the lungs.\n- **Left ventricle** — the thickest-walled chamber — pumps oxygenated blood out to the body through the aorta.\n\nFour valves keep flow one-way: tricuspid, pulmonary, mitral and aortic.`;
+      }
+    }
+
+    // ── Language of Norway ────────────────────────────────────────────
+    {
+      if (/\b(?:language|languages|spoken|speak|talk)\b/i.test(lower)
+        && /\b(?:norway|norwegian|norge|noreg)\b/i.test(lower)) {
+        return `The official language of Norway is **Norwegian (norsk)**, written in two equal official forms:\n\n- **Bokmål** ("book language") — used by roughly 85–90% of Norwegians in writing; descended from the Dano-Norwegian written tradition.\n- **Nynorsk** ("new Norwegian") — built by Ivar Aasen in the 1800s from western and rural dialects; used by 10–15% of the population, particularly in western Norway and in many municipalities by law.\n\nAlongside Norwegian, **Sámi** languages (Northern, Lule and Southern Sámi) have official status in Sámi areas, and **Kvensk**, **Romani** and **Romanes** are recognised minority languages. Spoken Norwegian is famously dialect-rich — Norwegians typically speak their local dialect in all settings, including national TV. English fluency is very high (Norway consistently ranks in the global top 5 on the EF English Proficiency Index).`;
+      }
+    }
+
+    // ── Author of Hamlet ──────────────────────────────────────────────
+    {
+      if (/\bhamlet\b/i.test(lower) && /\b(?:wrote|author|written by|playwright)\b/i.test(lower)) {
+        return `**William Shakespeare** wrote **Hamlet**. The play (full title *The Tragedy of Hamlet, Prince of Denmark*) was composed around **1599–1601** and first printed in the "bad quarto" of 1603, with the better Second Quarto in 1604/05 and the First Folio version in 1623. At roughly 4,000 lines it is Shakespeare's longest play and the most-performed work in the Western theatre canon.`;
+      }
+    }
+
+    // ── 9th Symphony composer ─────────────────────────────────────────
+    {
+      if (/\b(?:9th|ninth)\s+symphony\b/i.test(lower) && /\b(?:wrote|composed|composer|who\s+(?:made|did))\b/i.test(lower)) {
+        return `The famous **Ninth Symphony** is by **Ludwig van Beethoven** — *Symphony No. 9 in D minor, Op. 125*, premiered in Vienna on **7 May 1824**. It was the first major symphony to use a chorus and vocal soloists in its finale, setting Friedrich Schiller's poem *An die Freude* ("Ode to Joy"). The "Ode to Joy" theme is the official anthem of the European Union and the Council of Europe.\n\nIf you meant a different composer's Ninth — Mahler, Dvořák ("From the New World"), Schubert ("Great C major"), Bruckner or Shostakovich all wrote celebrated Ninths — say which and I'll go deeper.`;
+      }
+    }
+
+    // ── Director of Star Wars ─────────────────────────────────────────
+    {
+      if (/\bstar\s+wars\b/i.test(lower) && /\b(?:directed|director|who\s+(?:made|did))\b/i.test(lower)) {
+        return `**George Lucas** directed the original **Star Wars** (1977, later subtitled *A New Hope*). He also wrote and directed the prequel trilogy: *The Phantom Menace* (1999), *Attack of the Clones* (2002) and *Revenge of the Sith* (2005).\n\nThe other films had different directors:\n- *The Empire Strikes Back* (1980) — **Irvin Kershner**\n- *Return of the Jedi* (1983) — **Richard Marquand**\n- *The Force Awakens* (2015) and *The Rise of Skywalker* (2019) — **J. J. Abrams**\n- *The Last Jedi* (2017) — **Rian Johnson**\n- *Rogue One* (2016) — **Gareth Edwards**\n- *Solo* (2018) — **Ron Howard**`;
+      }
+    }
+
+    // ── Most populous country ─────────────────────────────────────────
+    {
+      if (/\b(?:most\s+populous|most\s+populated|biggest\s+by\s+population|largest\s+population)\b/i.test(lower)
+        && /\bcountry|countries|nation\b/i.test(lower)) {
+        return `**India** is the most populous country in the world, with roughly **1.43 billion people** as of 2024 (UN estimate). India overtook **China** in 2023; China is now second at about **1.41 billion**, with population gently declining. The next three are the **United States** (~335 million), **Indonesia** (~280 million) and **Pakistan** (~245 million).`;
+      }
+    }
+
+    // ── Monad ──────────────────────────────────────────────────────────
+    {
+      if (/\bmonad(s)?\b/i.test(lower) && /^(?:what|explain|describe|tell)\b/i.test(input.trim())) {
+        return `A **monad** is a design pattern from category theory that functional languages use to chain computations carrying extra context (state, failure, async, I/O) without leaking that context into every function signature.\n\nA monad is anything that provides three things obeying three laws:\n\n1. A type constructor \`M<A>\` — wraps a value of type \`A\` in some context.\n2. **return** (or \`unit\`/\`pure\`) — \`A → M<A>\`. Lifts a plain value into the monad.\n3. **bind** (or \`flatMap\`/\`>>=\`) — \`M<A> × (A → M<B>) → M<B>\`. Sequences a step that depends on the previous result.\n\nLaws: left identity, right identity, associativity. They guarantee that composing steps behaves predictably.\n\nFamiliar monads:\n- **Maybe / Option** — chain steps that may return nothing.\n- **Either / Result** — chain steps that may fail with a typed error.\n- **List / Array** — non-determinism (multiple results per step).\n- **Promise / Future** — async computations (\`then\` is roughly bind).\n- **IO** in Haskell — sequence side effects without breaking purity.\n\nIf you've used \`Promise.then\`, JavaScript's \`Array.flatMap\`, or Rust's \`?\` on \`Result\`, you've already used monads — you just didn't have to call them that.`;
+      }
+    }
+
+    // ── Cleopatra ─────────────────────────────────────────────────────
+    {
+      if (/\bcleopatra\b/i.test(lower)) {
+        return `**Cleopatra VII Philopator** (69 BC – 12 August 30 BC) was the last active ruler of the **Ptolemaic Kingdom of Egypt** and the final pharaoh of an independent Egypt before Roman annexation.\n\nKey points:\n- Macedonian Greek by descent (the Ptolemies came from one of Alexander the Great's generals), but reportedly the first of her dynasty to learn Egyptian.\n- Co-ruled with her brothers Ptolemy XIII and XIV and later her son Caesarion.\n- Aligned politically and personally with **Julius Caesar** (mother of his son Caesarion) and after Caesar's assassination with **Mark Antony**, with whom she had three children.\n- Defeated alongside Antony by **Octavian** (later Augustus) at the **Battle of Actium** in 31 BC.\n- Died by suicide in 30 BC — the asp story is famous but uncertain — after which Egypt became a Roman province.\n- Famous in her own time for political skill, language ability and shrewd diplomacy; the "fatal seductress" image is mostly later Roman propaganda and Renaissance theatre.`;
+      }
+    }
+
+    // ── Moon landing ──────────────────────────────────────────────────
+    {
+      if (/\bmoon\b/i.test(lower)
+        && /\b(?:land(?:ing|ed)?|walk(?:ed)?|step(?:ped)?|first\s+(?:on|to))\b/i.test(lower)) {
+        return `Humans first landed on the Moon on **20 July 1969**, during NASA's **Apollo 11** mission. **Neil Armstrong** became the first person to step onto the lunar surface at **02:56 UTC on 21 July 1969**, followed by **Buzz Aldrin**. **Michael Collins** stayed in lunar orbit aboard the Command Module *Columbia*.\n\nSix Apollo missions landed astronauts on the Moon between 1969 and 1972 (Apollo 11, 12, 14, 15, 16, 17). **Apollo 13** (1970) had to abort its landing after an oxygen-tank explosion. The last person to walk on the Moon was **Eugene Cernan** on Apollo 17 in December 1972 — no human has been back since, though NASA's **Artemis** programme is targeting a crewed return later this decade.`;
+      }
+    }
+
+    // ── Renaissance ───────────────────────────────────────────────────
+    {
+      if (/\brenaissance\b/i.test(lower)) {
+        return `The **Renaissance** ("rebirth") was a period of intense cultural, artistic, scientific and political revival in Europe, conventionally dated **c. 1300–1600**, that began in the **Italian city-states** (Florence, Venice, Rome, Milan) and spread north.\n\nWhat changed:\n- **Humanism** — a renewed focus on classical Greek and Roman texts and on human potential, championed by figures like **Petrarch** and **Erasmus**.\n- **Art** — naturalism, perspective, anatomy: **Leonardo da Vinci**, **Michelangelo**, **Raphael**, **Donatello**, **Botticelli**, **Titian**, later **Dürer** and **Bruegel** in the north.\n- **Science** — **Copernicus** (heliocentrism, 1543), **Vesalius** (anatomy), **Galileo**, **Kepler**.\n- **Politics and exploration** — Machiavelli's *The Prince*; the voyages of Columbus (1492), Vasco da Gama and Magellan opening Atlantic trade routes.\n- **Printing** — **Gutenberg's** movable-type press (~1440) made books cheap and ideas portable, fuelling the Reformation.\n\nThe Italian Renaissance is usually split into the **Trecento** (1300s, proto-Renaissance), **Quattrocento** (1400s, early Renaissance) and **Cinquecento** (1500s, High Renaissance and Mannerism). Funding largely came from wealthy banking families, above all the **Medici** of Florence.`;
+      }
+    }
+
+    // ── Steve Jobs ────────────────────────────────────────────────────
+    {
+      if (/\bsteve\s+jobs\b/i.test(lower)) {
+        return `**Steve Jobs** (24 February 1955 – 5 October 2011) was an American entrepreneur and the co-founder, chairman and CEO of **Apple Inc.**\n\nHigh points:\n- **1976:** co-founded Apple with **Steve Wozniak** and Ronald Wayne; the **Apple II** (1977) defined the early personal-computer market.\n- **1984:** launched the **Macintosh**, the first mass-market computer with a graphical user interface and mouse.\n- **1985:** ousted from Apple after a power struggle with CEO John Sculley.\n- Founded **NeXT** (1985) and bought **Pixar** (1986), which produced *Toy Story* (1995) and was sold to Disney in 2006.\n- **1997:** returned to Apple when Apple bought NeXT; rescued the company from near-bankruptcy.\n- Led the launches of the **iMac** (1998), **iPod** (2001), **iTunes Store** (2003), **iPhone** (2007), **App Store** (2008) and **iPad** (2010).\n- Resigned as CEO in August 2011 and died of complications from a pancreatic neuroendocrine tumour two months later.\n\nRemembered for an obsessive focus on industrial design, integrated hardware/software experiences and minimalist product strategy — and for a famously demanding management style.`;
+      }
+    }
+
+    // ── Nikola Tesla ──────────────────────────────────────────────────
+    {
+      if (/\bnikola\s+tesla\b/i.test(lower) || (/\btesla\b/i.test(lower) && /^(?:who|what)\s+(?:was|is)\b/i.test(input.trim()))) {
+        return `**Nikola Tesla** (10 July 1856 – 7 January 1943) was a Serbian-American inventor, electrical and mechanical engineer, and one of the central figures of the late-19th and early-20th-century electrification of the world.\n\nMain contributions:\n- **Alternating-current (AC) power system** — his polyphase induction motor and AC transformer designs (licensed by Westinghouse) won the "War of the Currents" against Edison's DC system and became the global electrical standard.\n- **Tesla coil** (1891) — high-voltage, high-frequency resonant transformer, foundational to early radio.\n- Pioneering work on **wireless power transmission** (Wardenclyffe Tower) and early **radio** transmission; the US Supreme Court posthumously credited him as a primary inventor of radio in 1943.\n- Contributions to X-rays, neon lighting, remote-controlled boats and rotating magnetic fields.\n\nBorn in Smiljan in what is now Croatia, emigrated to the US in 1884, briefly worked for Edison before parting ways. Brilliant and prolific, but a poor businessman — died in relative poverty in a New York hotel room. The **SI unit of magnetic flux density** (the *tesla*, T) is named after him, as is **Tesla, Inc.**`;
+      }
+    }
+
+    // ── Leonardo da Vinci ─────────────────────────────────────────────
+    {
+      if (/\bleonardo\s+(?:da\s+)?vinci\b/i.test(lower) || /\bda\s+vinci\b/i.test(lower)) {
+        return `**Leonardo da Vinci** (15 April 1452 – 2 May 1519) was an Italian polymath of the High Renaissance — painter, draftsman, engineer, scientist, anatomist, architect and inventor.\n\nMost famous works:\n- **Mona Lisa** (*La Gioconda*, c. 1503–1519) — Louvre, Paris.\n- **The Last Supper** (1495–1498) — refectory of Santa Maria delle Grazie, Milan.\n- **Vitruvian Man** (c. 1490) — drawing of human proportions.\n- **Lady with an Ermine**, **Salvator Mundi**, the unfinished *Adoration of the Magi*.\n\nBeyond painting, his ~7,000 surviving notebook pages cover anatomy (he dissected ~30 cadavers), hydraulics, geology, botany, optics and engineering — sketches of helicopters, parachutes, tanks, diving suits and self-propelled vehicles centuries before they were built.\n\nBorn out of wedlock in or near **Vinci, Tuscany**, apprenticed in Florence to **Andrea del Verrocchio**, worked for the Sforza in Milan, the French king Louis XII, the Borgias, the Medici, and finally **King Francis I of France**, in whose château at **Amboise** he died in 1519.`;
+      }
+    }
+
+    // ── Virus (biology) ───────────────────────────────────────────────
+    {
+      if (/^\s*(?:what|explain|describe|tell)\b.*\bvirus(?:es)?\b/i.test(input.trim())
+        && !/\b(?:computer|software|trojan|malware|antivirus)\b/i.test(lower)) {
+        return `A **virus** is a sub-microscopic infectious agent — far smaller than a bacterium — made of genetic material (**DNA or RNA**) wrapped in a protein coat called a **capsid**, sometimes inside a lipid envelope stolen from a host cell membrane.\n\nKey points:\n- **Not strictly alive on its own** — viruses can't reproduce or run a metabolism without hijacking a host cell. Outside a host they're inert particles ("virions").\n- **Replication cycle:** attach → inject genetic material → take over the host's machinery → assemble new virions → burst or bud out.\n- **Sizes:** typically 20–300 nm. (For comparison, a typical bacterium is ~1,000–5,000 nm.)\n- **Hosts:** every domain of life — animals, plants, fungi, bacteria (the viruses that infect bacteria are called **bacteriophages**).\n- **Examples:** influenza, SARS-CoV-2 (COVID-19), HIV, measles, rabies, herpesviruses, HPV, Ebola.\n- **Defences:** the immune system (antibodies, T-cells), **vaccines** (prime the immune system in advance), and a small number of **antivirals** that block specific steps of the replication cycle. Antibiotics do not work against viruses.`;
+      }
+    }
+
     return null;
   }
 

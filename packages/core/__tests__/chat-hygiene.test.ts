@@ -174,4 +174,43 @@ describe('chat hygiene', () => {
       });
     }
   });
+
+  describe('common-knowledge coverage — no honest-gap fallback', () => {
+    // These topics were curated after a coverage probe found Vai stalling on
+    // them. Each row is [question, regex the answer MUST contain]. The test
+    // also enforces that the answer does NOT use any of the honest-gap
+    // fallback phrasings.
+    const cases: Array<[string, RegExp]> = [
+      ['what is the tallest mountain on Earth?', /\bMount Everest\b/i],
+      ['what is the deepest ocean?', /\bMariana Trench|Challenger Deep|Pacific\b/i],
+      ['what is a black hole?', /\bevent horizon\b/i],
+      ['what was the Roman Empire?', /\b(?:27 BC|Augustus|476)\b/],
+      ['who was Albert Einstein?', /\b(?:relativity|Nobel|E\s*=\s*mc)/i],
+      ['what was the Industrial Revolution?', /\b(?:steam|factory|Britain)\b/i],
+      ['who was Genghis Khan?', /\b(?:Mongol|Temüjin|1206)\b/i],
+      ['how many chambers in the human heart?', /\bfour chambers?\b/i],
+      ['what language do they speak in Norway?', /\bBokmål\b|\bNynorsk\b|\bNorwegian\b/i],
+      ['who wrote Hamlet?', /\bShakespeare\b/i],
+      ['who composed the 9th Symphony?', /\bBeethoven\b/i],
+      ['who directed Star Wars?', /\bGeorge Lucas\b/i],
+      ['what is the most populous country?', /\bIndia\b/i],
+      ['what is a monad?', /\b(?:flatMap|bind|category theory|Maybe|Promise)\b/i],
+      ['who was Cleopatra?', /\b(?:Ptolem|Egypt|Mark Antony|Caesar)\b/i],
+      ['when did humans first land on the moon?', /\b(?:Apollo 11|Armstrong|1969)\b/i],
+      ['what was the Renaissance?', /\b(?:Florence|humanism|Medici|Leonardo|Michelangelo)\b/i],
+      ['who was Steve Jobs?', /\b(?:Apple|Macintosh|iPhone|Pixar)\b/i],
+      ['who was Nikola Tesla?', /\b(?:alternating current|AC|tesla coil|Westinghouse)\b/i],
+      ['who was Leonardo da Vinci?', /\b(?:Mona Lisa|Last Supper|Vinci|polymath)\b/i],
+      ['what is a virus?', /\b(?:capsid|DNA|RNA|host cell|virion)\b/i],
+    ];
+    const fallbackPattern = /(?:i don['']t yet hold|isn['']t in my knowledge yet|isn['']t somewhere i can speak with confidence|real gap in what i hold|don['']t have \*\*[^*]+\*\* locally yet|empty pocket on)/i;
+    for (const [q, expected] of cases) {
+      it(`"${q}" → answers concretely`, async () => {
+        const r = await engine.chat({ messages: [{ role: 'user', content: q }] });
+        const text = r.message.content;
+        expect(text, `${q} → should match ${expected}`).toMatch(expected);
+        expect(text, `${q} → should not stall in honest-gap fallback`).not.toMatch(fallbackPattern);
+      });
+    }
+  });
 });
