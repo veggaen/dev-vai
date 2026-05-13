@@ -454,6 +454,23 @@ describe('chat hygiene', () => {
       ['who was Queen Elizabeth I?', /\b(?:Tudor|Henry VIII|Anne Boleyn|Virgin Queen|Spanish Armada|1558|1603|Mary|Shakespeare|Elizabethan|Protestant)\b/i],
       ['who was Henry VIII?', /\b(?:Tudor|six|wives|Catherine of Aragon|Anne Boleyn|Reformation|Church of England|Pope|Cromwell|Wolsey|1509|1547|monasteries)\b/i],
       ['what is a mortgage?', /\b(?:loan|property|collateral|principal|interest|foreclos|borrower|lender|amortis|fixed-rate|adjustable|home|real estate|down payment)\b/i],
+      // ── Round 9 ──
+      ['what is a protein?', /\b(?:amino acid|peptide|polypeptide|enzyme|gene|DNA|ribosome|haemoglobin|hemoglobin|biomolecule|AlphaFold)\b/i],
+      ['what is an enzyme?', /\b(?:catalyst|catalyse|catalyze|protein|substrate|active site|ribozyme|amylase|cofactor|EC class|coenzyme|allosteric)\b/i],
+      ['what is a fungus?', /\b(?:Fungi|chitin|hyphae|mycelium|mushroom|yeast|mould|mold|lichen|mycorrhiz|spore|kingdom|Penicillium)\b/i],
+      ['what is a chromosome?', /\b(?:DNA|histone|nucleus|46|23|autosome|sex chromosome|centromere|telomere|sister chromatid|karyotype|Down syndrome)\b/i],
+      ['what is a gene?', /\b(?:DNA|heredity|allele|locus|protein|Mendel|Johannsen|exon|intron|promoter|central dogma|CRISPR|genome|20,000)\b/i],
+      ['what is a vaccine?', /\b(?:immune|pathogen|antibody|antibodies|memory|Jenner|smallpox|cowpox|MMR|mRNA|live-attenuated|inactivated|herd immunity|polio|measles)\b/i],
+      ['what is a truck?', /\b(?:lorry|cargo|payload|pickup|F-150|semi-trailer|tractor|chassis|diesel|GVWR|Daimler|Volvo|Mack|Class 8|18-wheeler|18 wheeler|articulated)\b/i],
+      ['what is a motorcycle?', /\b(?:Daimler|Maybach|Reitwagen|Honda|Yamaha|Kawasaki|Suzuki|Harley|Ducati|Triumph|MotoGP|cruiser|sport|adventure|two-wheel)\b/i],
+      ['what is a submarine?', /\b(?:underwater|U-boat|nuclear|SSN|SSBN|ballast|Hunley|Nautilus|Ohio|Yasen|hydroplane|diesel-electric|periscope|ballistic|Virginia class)\b/i],
+      ['what is a helicopter?', /\b(?:rotorcraft|rotor|Sikorsky|VTOL|tail rotor|VS-300|main rotor|Apache|Black Hawk|Chinook|Huey|Mi-26|Robinson|Bell|tilting|cyclic|collective)\b/i],
+      ['what is a rocket?', /\b(?:thrust|engine|propellant|Newton|Tsiolkovsky|Goddard|V-2|von Braun|Saturn V|Falcon 9|SpaceX|liquid|solid|oxidiser|oxidizer|Sputnik)\b/i],
+      ['what is a satellite?', /\b(?:orbit|Sputnik|Explorer 1|LEO|MEO|GEO|geostationary|GPS|Hubble|James Webb|Starlink|communications|Earth observation|Telstar|Van Allen)\b/i],
+      ['what is Tokyo?', /\b(?:Japan|capital|Edo|Honshu|Tokugawa|Meiji|prefecture|Shibuya|Shinjuku|Skytree|Tokyo Tower|Kantō|Kanto|earthquake|Olympic|Imperial Palace)\b/i],
+      ['what is a drum?', /\b(?:percussion|drumhead|membrane|skin|snare|bass drum|timpani|tom|drum kit|tabla|djembe|conga|bongo|taiko|Bonham)\b/i],
+      ['what is a flute?', /\b(?:woodwind|reedless|transverse|piccolo|Boehm|recorder|shakuhachi|Hohle Fels|Galway|Rampal|silver|embouchure|Pan flute)\b/i],
+      ['what is a saxophone?', /\b(?:Adolphe Sax|woodwind|brass|reed|alto|tenor|soprano|baritone|jazz|Coltrane|Charlie Parker|Belgian|1846|conical)\b/i],
     ];
     const fallbackPattern = /(?:i don['']t yet hold|isn['']t in my knowledge yet|isn['']t somewhere i can speak with confidence|real gap in what i hold|don['']t have \*\*[^*]+\*\* locally yet|empty pocket on)/i;
     for (const [q, expected] of cases) {
