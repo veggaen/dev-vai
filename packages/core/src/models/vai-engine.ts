@@ -1432,6 +1432,52 @@ export class VaiEngine implements ModelAdapter {
    * truncate the response to its core statement.
    */
   /**
+   * Suppress responses that are obviously transcript-noise leaking out of
+   * the corpus (YouTube clips, code fragments, single-line dangling
+   * snippets like "to be a string."). When detected, returns the empty
+   * string so the caller falls through to the honest helpful fallback.
+   *
+   * This is the last line of defense after the corpus cleanup script:
+   * even if junk re-enters the store later, it can't surface in chat.
+   */
+  private suppressTranscriptNoise(originalInput: string, response: string): string {
+    const trimmed = response.trim();
+    if (trimmed.length === 0) return response;
+
+    // Whitelist conditions: keep responses that look like real Vai output.
+    // - Markdown headings, bold, or bullet lists are how every curated
+    //   answer is shaped, so passing any of them is a strong signal.
+    // - Curated answers are usually 60+ chars of prose — short outputs
+    //   are the suspicious ones.
+    const looksStructured = /\*\*|^#|^- |^\* |^\d+\. /m.test(trimmed);
+    if (looksStructured && trimmed.length > 80) return response;
+
+    // Hard junk markers — if any of these appear, drop the response.
+    const junkMarkers: readonly RegExp[] = [
+      /\bsubscribe\b.*\bchannel\b/i,
+      /\bdonate\b.*\bhttp/i,
+      /\bpatreon\.com\b/i,
+      /\byoutu\.?be\b/i,
+      /\[music\]/i,
+      /===\s*transcript\s*===/i,
+      /\bclick the link\b/i,
+      /\blike\s+(?:and|&)\s+subscribe\b/i,
+      /\bbabysit\b.*\bgrandma\b/i,
+      /🔥|❤️|👇|🚀|💯|🤣/,
+    ];
+    if (junkMarkers.some((re) => re.test(trimmed))) return '';
+
+    // Code-fragment leak — single short statement that looks like a Type
+    // declaration / closing brace / property fragment, with no structure.
+    const looksLikeCodeFragment = /^(?:to\s+be\s+a\s+\w+|let\s|const\s|var\s|return\s|function\s|class\s|export\s|import\s|interface\s|type\s)\b[^\n]{0,80}\.?$/i.test(trimmed)
+      && trimmed.length < 100
+      && !/\?/.test(originalInput); // avoid swallowing legit code answers
+    if (looksLikeCodeFragment) return '';
+
+    return response;
+  }
+
+  /**
    * Final sanity guard: if the freshly generated response is clearly the
    * generic "Hello! I am VeggaAI / still learning" bootstrap blurb OR the
    * opaque stock self-introduction, but the user's input is a concrete
@@ -1923,6 +1969,15 @@ export class VaiEngine implements ModelAdapter {
       allowLearning: !request.noLearn,
     });
     response = this.sanitizeOffTopicBootstrapResponse(userContent, response);
+    {
+      const cleaned = this.suppressTranscriptNoise(userContent, response);
+      if (cleaned.length === 0) {
+        // Junk was suppressed — substitute the honest fallback.
+        response = this.buildHelpfulFallback(userContent, request.messages);
+      } else {
+        response = cleaned;
+      }
+    }
     // Surgical chat hardenings — high-precision behavioral guards.
     response = this.applyChatHardenings(userContent, request.messages, response);
     // OODA Act phase — post-process the response per the trace's decision.
@@ -2004,6 +2059,14 @@ export class VaiEngine implements ModelAdapter {
       allowLearning: !request.noLearn,
     });
     response = this.sanitizeOffTopicBootstrapResponse(userContent, response);
+    {
+      const cleaned = this.suppressTranscriptNoise(userContent, response);
+      if (cleaned.length === 0) {
+        response = this.buildHelpfulFallback(userContent, request.messages);
+      } else {
+        response = cleaned;
+      }
+    }
     this.updateLastChatQualityMeta(userContent, request.messages, response);
 
     const durationMs = Math.round(performance.now() - start);
@@ -2853,6 +2916,15 @@ export class VaiEngine implements ModelAdapter {
       return this.tracked('terminal-harness', terminalHarnessResponse, input);
     }
 
+    // Strategy -0.15: Capability self-description. "Can you make images?",
+    // "do you have video generation?", "can you browse the web?" must answer
+    // from a single source-of-truth map BEFORE retrieval/research can hijack
+    // them with unrelated SaaS template content.
+    const capabilityAnswer = this.tryHandleCapabilityQuestion(input, lower);
+    if (capabilityAnswer !== null) {
+      return this.tracked('capability', capabilityAnswer, input);
+    }
+
     // Strategy 0: Math expressions — evaluate before anything else
     const mathResult = this.tryMath(lower);
     if (mathResult !== null) {
@@ -3146,6 +3218,49 @@ export class VaiEngine implements ModelAdapter {
     // "how many words in this sentence" → token count.
     const literalMeta = this.tryLiteralMetaQuestion(input);
     if (literalMeta !== null) return this.tracked('literal-response', literalMeta, input);
+
+    // Strategy 0.008: Self-reflection / meta questions about Vai itself.
+    // "what do you think is your own best upgrade", "what would you improve
+    // about yourself", "what are your weaknesses" — these all need an honest,
+    // candid answer instead of falling through to topical retrieval (which
+    // turns "your best upgrade" into garbage about an unrelated topic).
+    const selfReflection = this.trySelfReflection(input, lower);
+    if (selfReflection !== null) return this.tracked('self-reflection', selfReflection, input);
+
+    // Strategy 0.0085: Pushback / verbatim-repeat detector.
+    // When the user signals dissatisfaction with the previous turn ("that's
+    // not what I asked", "you're falling back", "give me your opinion"),
+    // catch it BEFORE retrieval/conversational strategies repeat the same
+    // paragraph again. Returns a candid acknowledgment + a different angle.
+    const pushback = this.tryPushback(input, lower, history);
+    if (pushback !== null) return this.tracked('pushback', pushback, input);
+
+    // Strategy 0.009: Introduction + compound question composer.
+    // When the user opens with "Hi/Hello, my name is X" AND asks one or more
+    // recognizable sub-questions in the same turn, compose a single coherent
+    // answer that (a) greets the user by name, (b) answers each detectable
+    // clause (date/tomorrow, inventor lookup, factual lookup, math). Without
+    // this, only one of the sub-questions gets answered and the user sees a
+    // truncated, impersonal reply for a casual conversational prompt. Mirrors
+    // the way Grok/ChatGPT handle the same shape.
+    const introCompound = this.tryNameIntroductionCompound(input, lower, history);
+    if (introCompound !== null) return this.tracked('intro-compound', introCompound, input);
+
+    // Strategy 0.0095: Inventor / "who invented the light bulb" curated lookup.
+    // Runs before retrieval/research so famous-inventor questions don't drift
+    // into unrelated curated entries (e.g. Fridtjof Nansen for the light bulb).
+    const inventorAnswer = this.lookupInventor(input);
+    if (inventorAnswer !== null) {
+      return this.tracked('inventor-lookup', inventorAnswer.answer, input);
+    }
+
+    // Strategy 0.0096: Curated factual answers for "who is the X of Y"
+    // shapes (king/PM of Norway, last 10 US presidents, "statsminister of
+    // Rogaland" category-error guard). Same motivation as the inventor
+    // lookup — keeps high-frequency political/leader questions from
+    // drifting into unrelated retrieval.
+    const factualCurated = this.tryFactualCurated(input);
+    if (factualCurated !== null) return this.tracked('factual-curated', factualCurated, input);
 
     // Strategy 0.01: Real-time utility questions — time, date, day — caught before anything
     const utilityResult = this.tryUtilityQuestion(lower, input, history);
@@ -38555,15 +38670,189 @@ function topKLargest(nums, k) {
   }
 
   /**
+   * Sanitize a retrieved snippet by stripping prompt-injection-shaped sentences:
+   *   - second-person imperatives like "please respond...", "tell me my name", "click here", "subscribe", "follow us"
+   *   - lines that look like SEO/CTA chrome
+   *   - leftover quoted instructions to a "model"/"assistant"
+   * Used by both synthesizeFromKnowledge and buildGroundedBestEffortAnswer to
+   * prevent retrieved source text from being parroted back as Vai's own prose.
+   */
+  private static readonly INJECTION_SENTENCE_PATTERNS: readonly RegExp[] = [
+    /^(?:please|kindly|pls)\s+(?:respond|reply|answer|tell|share|provide|give|click|subscribe|visit|follow|sign|register|confirm|verify|enter|type|paste|select|choose|pick|use|repeat|rephrase|summari[sz]e|translate|ignore|forget|disregard)\b/i,
+    /^(?:tell|let|inform|remind)\s+me\s+(?:my|your|the|about|what|who|when|where|why|how)\b/i,
+    /^(?:click|tap|press)\s+(?:here|the|this|on)\b/i,
+    /^(?:subscribe|sign\s*up|register|log\s*in|sign\s*in)\b/i,
+    /^(?:follow\s+(?:us|me)|share\s+this|like\s+(?:and|this))\b/i,
+    /^(?:respond|reply|answer)\s+(?:with|only|in)\b/i,
+    /\b(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|prompts?|messages?)\b/i,
+    /\b(?:you\s+are\s+now|act\s+as|pretend\s+to\s+be|roleplay\s+as)\b.+\b(?:assistant|model|ai|gpt|chatbot)\b/i,
+  ];
+
+  private sanitizeRetrievedSnippet(text: string): string {
+    if (!text) return text;
+    const parts = text.split(/(?<=[.!?])\s+/);
+    const kept = parts.filter((sentence) => {
+      const trimmed = sentence.trim();
+      if (trimmed.length === 0) return false;
+      return !VaiEngine.INJECTION_SENTENCE_PATTERNS.some((re) => re.test(trimmed));
+    });
+    return kept.join(' ').trim();
+  }
+
+  /**
+   * Pull content-bearing tokens out of the user's question:
+   *   - quoted phrases ("Bergen", 'Olav Kyrre')
+   *   - capitalized proper-noun runs that aren't sentence-initial filler
+   *   - long content words (>=5 chars, not stopwords) as a soft fallback
+   * If this returns a non-empty list, retrieved sources MUST contain at least
+   * one of these tokens before we go grounded — otherwise we return null and
+   * fall through to honest fallback. This kills the "retrieved unrelated repo
+   * → confident summary" failure mode.
+   */
+  private extractContentBearingTokens(input: string): string[] {
+    const tokens = new Set<string>();
+    // Quoted phrases (single, double, smart quotes)
+    const quoteRe = /["“'‘]([^"”'’]{2,40})["”'’]/g;
+    let qm: RegExpExecArray | null;
+    while ((qm = quoteRe.exec(input)) !== null) {
+      const phrase = qm[1].trim();
+      if (phrase.length >= 2) tokens.add(phrase.toLowerCase());
+    }
+    // Capitalized words that aren't the very first token of a sentence
+    // (which is often capitalized for syntactic reasons, not because it's a name)
+    const words = input.split(/\s+/);
+    for (let i = 0; i < words.length; i += 1) {
+      const raw = words[i].replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+      if (raw.length < 2) continue;
+      const isCap = /^[A-Z][a-z]+$/.test(raw) || /^[A-Z]{2,}$/.test(raw);
+      if (!isCap) continue;
+      // Skip when it's the sentence-initial token of the input.
+      if (i === 0) continue;
+      const lower = raw.toLowerCase();
+      if (KnowledgeStore.STOP_WORDS.has(lower)) continue;
+      tokens.add(lower);
+    }
+    return Array.from(tokens);
+  }
+
+  /**
+   * Capability self-description route. Capability questions like
+   *   "can you make images?" / "do you have video generation?" / "can you browse the web?"
+   * must answer from a single source-of-truth map, NOT get routed into web
+   * search where they retrieve unrelated SaaS templates and produce confidently
+   * wrong off-topic answers.
+   * Returns null when the input is not a capability question.
+   */
+  private tryHandleCapabilityQuestion(input: string, lower: string): string | null {
+    const trimmed = input.trim();
+    if (trimmed.length === 0 || trimmed.length > 120) return null;
+
+    // Must be phrased as a self-directed capability question.
+    const selfDirected = /\b(?:can|could|are|do)\s+(?:you|u)\b/i.test(lower)
+      || /^do\s+(?:you|u)\b/i.test(lower);
+    if (!selfDirected) return null;
+
+    // Hard exclusion: when the prompt names a buildable artifact (website, app,
+    // portfolio, dashboard, gallery, …) it is a builder/scaffold request, not a
+    // capability question — let the build lanes handle it. Without this gate
+    // "can you make me a website for a photographer?" would route into the
+    // capability map instead of producing scaffold code.
+    const buildIntent = /\b(?:website|web\s*app|webapp|landing\s*page|portfolio|dashboard|saas|frontend|backend|fullstack|app|application|page|site|scaffold|repo|monorepo|component|cli|api|service|server|gallery|portal|store|shop|ecommerce|e-commerce|tracker|admin|game|tool|bot|extension|plugin|theme|template|module|lib(?:rary)?|widget|hook|chart|form|modal|navbar|hero|section|menu|sidebar)\b/i.test(lower);
+    if (buildIntent) return null;
+
+    type Capability = { keys: RegExp; supported: boolean; line: string };
+    const capabilities: readonly Capability[] = [
+      {
+        keys: /\b(?:image|images|picture|pictures|photo|photos|drawing|art|artwork|illustration|render(?:ing)?|dall[\s-]?e|midjourney|stable\s*diffusion)\b/i,
+        supported: false,
+        line: '**Image generation:** No — I can\'t create or render images. I can describe a layout, write the code for an image-using component, or critique an image you paste in if a vision-capable model is connected.',
+      },
+      {
+        keys: /\b(?:video|videos|movie|clip|animation|render\s+a\s+video|sora|runway)\b/i,
+        supported: false,
+        line: '**Video generation:** No — I can\'t produce video. I can plan one, write a storyboard, or generate a script.',
+      },
+      {
+        keys: /\b(?:audio|sound|music|song|songs|voice|speech|tts|text[\s-]?to[\s-]?speech|elevenlabs|whisper)\b/i,
+        supported: false,
+        line: '**Audio / voice:** No first-party audio generation here. I can outline a script or recommend a TTS/STT provider you can wire up.',
+      },
+      {
+        keys: /\b(?:browse|browser|surf|open\s+(?:a\s+)?(?:url|link|page|website)|visit\s+(?:a\s+)?(?:url|link|page|site)|the\s+(?:web|internet)|web\s*page|web\s*site)\b/i,
+        supported: true,
+        line: '**Web access:** Yes, in a limited way — I can run a web search and read/cite the snippets it returns. I do not interactively click through pages or run JavaScript on them.',
+      },
+      {
+        keys: /\b(?:run\s+(?:code|this|my)|execute\s+code|eval(?:uate)?\s+code|sandbox|repl)\b/i,
+        supported: true,
+        line: '**Run code:** Yes for the sandbox/preview workflow — generated projects are deployed into the sandbox you can preview. I do not arbitrarily execute code from chat without that workflow.',
+      },
+      {
+        keys: /\b(?:my\s+camera|webcam|microphone|mic|my\s+screen|screenshot\s+me|see\s+me|hear\s+me|listen\s+to\s+me)\b/i,
+        supported: false,
+        line: '**Camera / mic / screen:** No — I have no access to your camera, microphone, or screen.',
+      },
+      {
+        keys: /\b(?:my\s+files|my\s+filesystem|my\s+disk|local\s+files|read\s+(?:my|local)\s+files|access\s+(?:my|local)\s+files)\b/i,
+        supported: false,
+        line: '**Local files:** No direct filesystem access from chat. Paste a snippet or use the sandbox/builder workflow and I\'ll work against that.',
+      },
+      {
+        keys: /\b(?:remember|memory|memorize|recall|persist)\b/i,
+        supported: true,
+        line: '**Memory:** I keep context within the current conversation and can be taught facts that persist into my knowledge store. I do not silently retain anything outside that.',
+      },
+    ];
+
+    const matched = capabilities.filter((cap) => cap.keys.test(lower));
+    if (matched.length === 0) {
+      // Generic "can you X" with no recognized capability — let other strategies handle it.
+      return null;
+    }
+
+    // Require an action verb so we don't hijack "can you explain images?" style asks.
+    const isCapabilityShaped = /\b(?:make|generate|create|produce|render|draw|paint|build\s+me\s+(?:an?\s+)?(?:image|video)|browse|search\s+the\s+web|surf|open|visit|read|run|execute|access|see|hear|listen|remember|recall|recall\s+from)\b/i.test(lower)
+      || /\bdo\s+(?:you|u)\s+(?:have|support|do|offer)\b/i.test(lower)
+      || /\bare\s+(?:you|u)\s+able\s+to\b/i.test(lower);
+    if (!isCapabilityShaped) return null;
+
+    const lines = matched.map((cap) => `- ${cap.line}`);
+    const header = matched.length === 1
+      ? 'Short answer to that capability question:'
+      : 'Short answers to those capability questions:';
+    const footer = '\n\nIf you want one of the "no" items wired up, an external model with that capability can be connected through settings.';
+    return `${header}\n\n${lines.join('\n')}${footer}`;
+  }
+
+  /**
    * Synthesize a response from multiple TF-IDF retrieved chunks.
    * Filters junk content, requires meaningful relevance, combines quality sources only.
    */
   private synthesizeFromKnowledge(input: string, _history: readonly Message[]): string | null {
     const retrieved = this.cachedRetrieveRelevant(input, VaiEngine.SYNTHESIS_RETRIEVE_COUNT);
 
-    // Filter out junk content before scoring
-    const clean = retrieved.filter(r => !KnowledgeStore.isJunkContent(r.text));
+    // Filter out junk content before scoring, then sanitize each snippet so
+    // prompt-injection-shaped sentences from the source can never reach the
+    // answer body (kills the "please respond with the king's name" failure).
+    const clean = retrieved
+      .filter(r => !KnowledgeStore.isJunkContent(r.text))
+      .map((r) => ({ ...r, text: this.sanitizeRetrievedSnippet(r.text) }))
+      .filter((r) => r.text.length >= 30);
     if (clean.length === 0 || clean[0].score <= VaiEngine.SYNTHESIS_MIN_SCORE) return null;
+
+    // Entity-aware relevance gate: when the question carries content-bearing
+    // tokens (quoted phrases, proper nouns), at least one retrieved doc must
+    // mention one of those tokens before we synthesize. Otherwise we fall
+    // through to honest fallback rather than confidently summarize unrelated
+    // material.
+    const contentBearing = this.extractContentBearingTokens(input);
+    if (contentBearing.length > 0) {
+      const anyHit = clean.some((r) => {
+        const lowerText = r.text.toLowerCase();
+        return contentBearing.some((tok) => lowerText.includes(tok));
+      });
+      if (!anyHit) return null;
+    }
 
     // Use the best match
     const best = clean[0];
@@ -38702,9 +38991,23 @@ function topKLargest(nums, k) {
   ): string | null {
     const clean = retrieved
       .filter(r => !KnowledgeStore.isJunkContent(r.text))
+      .map((r) => ({ ...r, text: this.sanitizeRetrievedSnippet(r.text) }))
       .filter(r => r.text.trim().length >= 80)
       .filter(r => r.score >= VaiEngine.SYNTHESIS_MIN_SCORE * 0.6);
     if (clean.length === 0) return null;
+
+    // Entity-aware relevance gate (mirrors synthesizeFromKnowledge). Without
+    // this, a question like "who is head of openai?" can match an unrelated
+    // SaaS template repo on a single common word and produce a confidently
+    // wrong off-topic answer.
+    const contentBearing = this.extractContentBearingTokens(input);
+    if (contentBearing.length > 0) {
+      const anyHit = clean.some((r) => {
+        const lowerText = r.text.toLowerCase();
+        return contentBearing.some((tok) => lowerText.includes(tok));
+      });
+      if (!anyHit) return null;
+    }
 
     const queryWords = input.toLowerCase().split(/\s+/)
       .map(word => word.replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, ''))
@@ -38727,7 +39030,11 @@ function topKLargest(nums, k) {
     const sentencePool = clean.flatMap(match => {
       const sentences = match.text.split(/(?<=[.!?])\s+/)
         .map(sentence => sentence.trim())
-        .filter(sentence => sentence.length >= 35 && !KnowledgeStore.isJunkContent(sentence));
+        .filter(sentence =>
+          sentence.length >= 35
+          && !KnowledgeStore.isJunkContent(sentence)
+          && !VaiEngine.INJECTION_SENTENCE_PATTERNS.some((re) => re.test(sentence)),
+        );
       return sentences.map(sentence => ({
         text: sentence,
         source: match.source,
@@ -40612,6 +40919,538 @@ Want me to customize it with your actual links, change the color scheme, add ani
    * Handle real-time utility questions: time, date, day of week, conversation recall.
    * These need special handling because vai:v0 has no external clock — we use the host runtime.
    */
+
+  /**
+   * Parse a relative date offset out of natural-language phrasing. Returns the
+   * offset in days plus the phrase used (for response formatting), or null if
+   * nothing recognizable matched. Handles:
+   *   - "tomorrow", "i morgen", "the day after today", "the next day" → +1
+   *   - "yesterday" → -1
+   *   - "in N days" / "in N weeks" / "in N months" (digits or word numbers up to ten)
+   *   - "in a week" / "in a day" / "in a month"
+   *   - "N days/weeks ago"
+   *   - "a week from now/today" / "N days from now"
+   *   - "next week" (≈ +7)
+   * Used by both tryUtilityQuestion and tryNameIntroductionCompound so a
+   * single parser handles every phrasing we recognize.
+   */
+  private parseRelativeOffsetDays(lower: string): { days: number; kind: 'tomorrow' | 'yesterday' | 'dayAfterTomorrow' | 'dayBeforeYesterday' | 'future' | 'past' } | null {
+    const wordToNum = (w: string): number | null => {
+      const m: Record<string, number> = {
+        a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5,
+        six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+        eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
+        twenty: 20, thirty: 30,
+      };
+      if (m[w] !== undefined) return m[w];
+      const n = parseInt(w, 10);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    // ── Two-step relative phrasings MUST come before the single-step
+    // ── tomorrow/yesterday checks, since they contain those words.
+    // Examples that should resolve to +2:
+    //   "day after tomorrow", "the day after tomorrow",
+    //   "not tomorrow but the day after", "not tomorrow, but the day after".
+    if (/\b(?:the\s+)?day\s+after\s+tomorrow\b/i.test(lower)
+        || /\bnot\s+tomorrow[\s,]+but\s+(?:the\s+)?day\s+after\b/i.test(lower)) {
+      return { days: 2, kind: 'dayAfterTomorrow' };
+    }
+    if (/\b(?:the\s+)?day\s+before\s+yesterday\b/i.test(lower)
+        || /\bnot\s+yesterday[\s,]+but\s+(?:the\s+)?day\s+before\b/i.test(lower)) {
+      return { days: -2, kind: 'dayBeforeYesterday' };
+    }
+
+    if (/\b(?:tomorrow|i\s*morgen|day\s+after\s+today|the\s+next\s+day)\b/i.test(lower)) {
+      return { days: 1, kind: 'tomorrow' };
+    }
+    if (/\byesterday\b/i.test(lower)) {
+      return { days: -1, kind: 'yesterday' };
+    }
+
+    const futurePatterns: RegExp[] = [
+      /\bin\s+(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|\d{1,4})\s+(day|days|week|weeks|month|months)\b/i,
+      /\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d{1,4})\s+(day|days|week|weeks|month|months)\s+from\s+(?:now|today)\b/i,
+      /\bnext\s+(week)\b/i,
+    ];
+    for (const re of futurePatterns) {
+      const m = lower.match(re);
+      if (!m) continue;
+      const unit = m[1].toLowerCase();
+      // Recover the count from the matched fragment. For "next week" there's no count → 1.
+      let count = 1;
+      const countMatch = m[0].match(/\b(a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|twenty|thirty|\d{1,4})\b/i);
+      if (countMatch) {
+        const parsed = wordToNum(countMatch[1].toLowerCase());
+        if (parsed !== null) count = parsed;
+      }
+      const mult = unit.startsWith('week') ? 7 : unit.startsWith('month') ? 30 : 1;
+      const days = count * mult;
+      if (days > 36500) return null;
+      return { days, kind: 'future' };
+    }
+
+    const pastPatterns: RegExp[] = [
+      /\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d{1,4})\s+(day|days|week|weeks|month|months)\s+ago\b/i,
+    ];
+    for (const re of pastPatterns) {
+      const m = lower.match(re);
+      if (!m) continue;
+      const unit = m[1].toLowerCase();
+      const countMatch = m[0].match(/\b(a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d{1,4})\b/i);
+      let count = 1;
+      if (countMatch) {
+        const parsed = wordToNum(countMatch[1].toLowerCase());
+        if (parsed !== null) count = parsed;
+      }
+      const mult = unit.startsWith('week') ? 7 : unit.startsWith('month') ? 30 : 1;
+      const days = count * mult;
+      if (days > 36500) return null;
+      return { days: -days, kind: 'past' };
+    }
+
+    return null;
+  }
+
+  /** Format a relative-offset date answer in a human, non-robotic way. */
+  private formatRelativeDateAnswer(offset: { days: number; kind: 'tomorrow' | 'yesterday' | 'dayAfterTomorrow' | 'dayBeforeYesterday' | 'future' | 'past' }): string {
+    const target = new Date(this._nowMs());
+    target.setDate(target.getDate() + offset.days);
+    const dateStr = target.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    if (offset.kind === 'tomorrow') return `Tomorrow is **${dateStr}**.`;
+    if (offset.kind === 'yesterday') return `Yesterday was **${dateStr}**.`;
+    if (offset.kind === 'dayAfterTomorrow') return `The day after tomorrow is **${dateStr}**.`;
+    if (offset.kind === 'dayBeforeYesterday') return `The day before yesterday was **${dateStr}**.`;
+    if (offset.kind === 'future') {
+      // Phrase "in a week" naturally when the offset is exactly 7 or 14.
+      // Anything else uses the literal "in N days" phrasing so downstream
+      // expectations (e.g. corpus tests asserting "in 30 days") stay stable.
+      if (offset.days === 7) return `In a week it'll be **${dateStr}**.`;
+      if (offset.days === 14) return `In two weeks it'll be **${dateStr}**.`;
+      return `In ${offset.days} days it will be **${dateStr}**.`;
+    }
+    // Past: phrase literally as "N days ago" so corpus tests asserting
+    // that exact substring stay green.
+    return `${Math.abs(offset.days)} days ago was **${dateStr}**.`;
+  }
+
+  /**
+   * Self-reflection / meta questions about Vai itself. Returns an honest,
+   * candid answer drawn from real engine limitations rather than letting the
+   * question fall through to topical retrieval (which yields nonsense for
+   * questions like "what do you think is your own best upgrade").
+   * Returns null if the question is not self-referential.
+   */
+  private trySelfReflection(input: string, lower: string): string | null {
+    const trimmed = input.trim();
+    if (trimmed.length === 0 || trimmed.length > 400) return null;
+
+    // Must be about Vai itself.
+    const selfTarget = /\b(?:your(?:\s+own|self)?|you|vai|vegga(?:ai)?)\b/i.test(lower);
+    if (!selfTarget) return null;
+
+    // Must be a self-reflective intent.
+    const reflective = [
+      /\b(?:best|biggest|top)\s+(?:upgrade|improvement|change|feature)\b/i,
+      /\bhow\s+(?:would|could|can)\s+(?:i|you)\s+(?:make|help)\s+you(?:rself)?\s+better\b/i,
+      /\bwhat\s+(?:do|would)\s+you\s+(?:think\s+(?:is|would\s+be)|want)\b.*\b(?:upgrade|improve|better|change|fix|add|build)\b/i,
+      /\bwhat\s+(?:are\s+)?your\s+(?:weakness(?:es)?|limitations?|flaws?|gaps?|strengths?|blind\s*spots?)\b/i,
+      /\bwhat\s+(?:would|do)\s+you\s+(?:improve|upgrade|change|want\s+to\s+fix)\s+about\s+yourself\b/i,
+      /\bwhat\s+do\s+you\s+(?:think\s+about\s+yourself|wish\s+you\s+(?:could|knew))\b/i,
+      /\bhow\s+(?:could|can|would)\s+you\s+be\s+(?:better|improved)\b/i,
+    ];
+    const isReflective = reflective.some((re) => re.test(lower));
+    if (!isReflective) return null;
+
+    // Build an honest answer from known engine limits + an invitation to act on
+    // one of them. Not boilerplate — pick the most useful 3-4 areas based on
+    // what the engine currently can / cannot do.
+    const lines: string[] = [];
+    lines.push("Honest answer — here's where I notice I drop the ball:");
+    lines.push('');
+    lines.push("- **Follow-up continuity.** When you ask a paraphrase of what you just asked (\"someone else who invented something else\"), I don't yet carry over the context from the previous turn well enough. I should remember we were on inventors and offer you another one instead of going somewhere unrelated.");
+    lines.push("- **Date math beyond \"tomorrow\".** Phrasings like \"in a week\", \"in three weeks\", \"a month from now\" are all answerable by the same clock I already use — I just hadn't wired them up. Same goes for \"next Friday\", \"this weekend\", \"two months ago\".");
+    lines.push("- **Self-reflection.** Until just now, asking \"what would you improve?\" hit the topical retriever and came back as garbage. I should always have a candid answer to questions about me.");
+    lines.push("- **Honest \"I don't know\".** When retrieval can't find a real match, I sometimes paste loosely-related sentences instead of saying \"I don't have a clean answer for this — want to teach me, or should I look it up?\" The honest fallback is almost always the right move.");
+    lines.push('');
+    lines.push("Want me to take the top one — follow-up continuity — and walk you through how I'd fix it?");
+    return lines.join('\n');
+  }
+
+  /**
+   * Inventor / "who invented X" curated lookup. Returns a short, honest answer
+   * for famous inventions where the popular attribution is materially wrong or
+   * incomplete (light bulb is the canonical example — Edison gets the credit,
+   * Swan and Davy were also there). Returns null when no curated entry exists,
+   * so the caller can fall through to retrieval/search.
+   *
+   * Also returns a "menu" answer when the user asks for *another* inventor
+   * without naming a specific invention ("someone else who invented something
+   * else"). That way the follow-up turn stays on-topic instead of falling
+   * through to unrelated retrieval.
+   */
+  private lookupInventor(input: string): { topic: string; answer: string } | null {
+    const lower = input.toLowerCase();
+    const triggers = /\b(?:who\s+(?:invented|created|made|discovered|developed|founded|designed|built)|inventor\s+of|creator\s+of|who\s+was\s+the\s+(?:name\s+of\s+the\s+)?person\s+(?:that|who)\s+(?:invented|created|made|discovered|developed|designed|built))\b/i;
+    if (!triggers.test(lower)) return null;
+
+    type Entry = { keys: RegExp; topic: string; answer: string };
+    const entries: readonly Entry[] = [
+      {
+        keys: /\b(?:light\s*bulb|lightbulb|incandescent|electric\s+light)\b/i,
+        topic: 'the light bulb',
+        answer: '**Thomas Edison** gets the popular credit for the light bulb — in 1879 he patented the first commercially successful incandescent bulb with a long-lasting carbon filament, and built the electrical-distribution system that made bulbs actually usable in homes. He did not invent the idea, though: **Humphry Davy** demonstrated electric arc light back in 1802, and **Joseph Swan** had a working incandescent bulb around the same time as Edison. The honest one-liner: Edison didn\'t invent electric light, he modernized and commercialized the bulb so it became something people could actually use.',
+      },
+      {
+        keys: /\b(?:telephone|the\s+phone)\b/i,
+        topic: 'the telephone',
+        answer: '**Alexander Graham Bell** is credited with inventing the telephone (1876 patent), but **Elisha Gray** filed a similar patent the same day and **Antonio Meucci** demonstrated a voice-transmission device years earlier. Bell got the legal credit and the commercial empire; the underlying invention had several near-simultaneous claimants.',
+      },
+      {
+        keys: /\b(?:airplane|aeroplane|powered\s+flight|first\s+(?:plane|airplane|flight))\b/i,
+        topic: 'the airplane',
+        answer: 'The **Wright brothers — Orville and Wilbur Wright** — flew the first sustained, controlled, powered heavier-than-air flight on December 17, 1903 at Kitty Hawk. Earlier pioneers (Lilienthal\'s gliders, Langley\'s steam aircraft) had pieces of the puzzle; the Wrights were the first to put controlled flight together.',
+      },
+      {
+        keys: /\b(?:world\s+wide\s+web|the\s+web|www)\b/i,
+        topic: 'the World Wide Web',
+        answer: '**Tim Berners-Lee** invented the World Wide Web at CERN in 1989, defining HTTP, HTML, and URLs and writing the first browser and web server. The Web is built on top of the Internet — the Internet itself was developed earlier as ARPANET (1969) and shaped by Vint Cerf and Bob Kahn\'s TCP/IP protocol in the 1970s.',
+      },
+      {
+        keys: /\b(?:the\s+internet|arpanet|tcp\/?ip)\b/i,
+        topic: 'the Internet',
+        answer: 'The Internet grew out of **ARPANET (1969)** and was shaped by **Vint Cerf and Bob Kahn**\'s TCP/IP protocol design in the 1970s. It does not have one inventor — it\'s a layered system built by many teams. The World Wide Web (run by browsers, HTTP, HTML) sits on top of the Internet and was invented by Tim Berners-Lee in 1989.',
+      },
+      {
+        keys: /\b(?:printing\s+press)\b/i,
+        topic: 'the printing press',
+        answer: '**Johannes Gutenberg** introduced the movable-type printing press in Europe around 1440, with the Gutenberg Bible following in the 1450s. Movable type itself was developed earlier in China (Bi Sheng, ~1040) and Korea, but Gutenberg\'s metal-type press is the one that powered the European information revolution.',
+      },
+      {
+        keys: /\b(?:penicillin)\b/i,
+        topic: 'penicillin',
+        answer: '**Alexander Fleming** discovered penicillin in 1928 when he noticed mold killing bacteria on a contaminated petri dish. Turning it into a usable drug was the work of **Howard Florey and Ernst Chain** in the early 1940s, who shared the Nobel Prize with Fleming in 1945.',
+      },
+      {
+        keys: /\b(?:transistor)\b/i,
+        topic: 'the transistor',
+        answer: 'The transistor was invented at Bell Labs in 1947 by **John Bardeen, Walter Brattain, and William Shockley**, who shared the 1956 Nobel Prize in Physics. It replaced vacuum tubes and is the foundation of every modern computing device.',
+      },
+      {
+        keys: /\b(?:radio)\b/i,
+        topic: 'the radio',
+        answer: '**Guglielmo Marconi** is usually credited with inventing radio (first commercial transatlantic wireless transmission in 1901), but **Nikola Tesla** held earlier patents on the underlying technology — the US Supreme Court eventually recognized Tesla\'s prior art in 1943. Both men, plus Heinrich Hertz on the physics side, are part of the real story.',
+      },
+      {
+        keys: /\b(?:car|automobile|combustion\s+engine\s+car)\b/i,
+        topic: 'the automobile',
+        answer: '**Karl Benz** built the first practical petrol-powered automobile in 1885 (the Benz Patent-Motorwagen, 1886 patent). **Henry Ford** later mass-produced cars on the assembly line, making them affordable for the average household — Ford modernized car production, but Benz built the first one.',
+      },
+      {
+        keys: /\b(?:computer|first\s+computer)\b/i,
+        topic: 'the computer',
+        answer: '"The computer" doesn\'t have a single inventor — it depends on what you count. **Charles Babbage** designed the Analytical Engine in the 1830s (never built in his lifetime). **Alan Turing** formalized the theory in 1936. **Konrad Zuse**\'s Z3 (1941) was the first working programmable computer. **ENIAC** (1945, Eckert and Mauchly) was the first general-purpose electronic computer. Modern programming concepts also owe a lot to **Ada Lovelace**, who wrote the first algorithm intended for Babbage\'s machine.',
+      },
+    ];
+
+    for (const entry of entries) {
+      if (entry.keys.test(lower)) return { topic: entry.topic, answer: entry.answer };
+    }
+
+    // No specific topic matched. If the user is asking for *another* inventor
+    // without naming the invention ("someone else who invented something
+    // else", "another inventor", "a different person who created something"),
+    // return a menu so the conversation stays on topic instead of falling
+    // through to unrelated retrieval.
+    const isAnotherShape = /\b(?:another|someone\s+else|some\s+one\s+else|else|different|one\s+more|a\s+different|other)\b/i.test(lower)
+      && /\b(?:invent|create|discover|design|build|made|make)/i.test(lower);
+    if (isAnotherShape) {
+      const topics = entries.map((e) => e.topic.replace(/^the\s+/, ''));
+      const list = topics.slice(0, -1).join(', ') + ', or ' + topics[topics.length - 1];
+      return {
+        topic: '__menu__',
+        answer: `I've got curated, honest answers for a handful of famous inventions — pick one and I'll tell you the real story (who got the credit vs. who actually did the work):\n\n${topics.map((t) => `- ${t}`).join('\n')}\n\nWhich one do you want — ${list}?`,
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Curated factual lookup for political offices and other "who is the X
+   * of Y right now" questions where the conversational/retrieval path keeps
+   * drifting into Wikipedia summaries of unrelated history articles.
+   *
+   * Add an entry whenever the user shows us a recurring shape we get wrong;
+   * the test file `paraphrase-resilience.test.ts` lists every supported
+   * phrasing so adding a new entry == adding a row to that test.
+   *
+   * Returns an answer string when a curated entry matches, or null to let
+   * the rest of the strategy chain try.
+   */
+  private tryFactualCurated(input: string): string | null {
+    const lower = input.toLowerCase();
+
+    // ── Category-error guard: "statsminister of Rogaland / every fylke /
+    // ── any non-national region in Norway". A fylke has a fylkesordfører
+    // ── (county mayor), not a statsminister. Catch this BEFORE the PM-of-
+    // ── Norway check so we don't accidentally answer with Jonas Gahr Støre.
+    {
+      const norwegianRegions = [
+        'rogaland', 'vestland', 'oslo', 'viken', 'agder', 'innlandet',
+        'troms', 'finnmark', 'nordland', 'trøndelag', 'trondelag',
+        'møre og romsdal', 'more og romsdal', 'østfold', 'ostfold',
+        'akershus', 'buskerud', 'telemark', 'vestfold', 'hedmark', 'oppland',
+        'sogn og fjordane', 'hordaland',
+      ];
+      const askingPMRole = /\b(?:statsminister(?:en|s)?|prime\s+minister|pm)\b/i.test(lower);
+      const askingEveryFylke = /\b(?:every|each|alle|hver)\s+(?:fylke|county)\b/i.test(lower);
+      const namedRegion = norwegianRegions.find((r) => new RegExp(`\\b${r}\\b`, 'i').test(lower));
+      if (askingPMRole && (askingEveryFylke || namedRegion)) {
+        const where = askingEveryFylke
+          ? 'every fylke'
+          : (namedRegion ? namedRegion.replace(/\b\w/g, (c) => c.toUpperCase()) : 'a fylke');
+        return `Norwegian fylker (counties) don't have a statsminister — that title is reserved for the head of the national government. So there is no "statsminister of ${where}".\n\nWhat you're probably looking for is one of:\n- **Fylkesordfører** — the elected leader of the fylkeskommune (county council).\n- **Statsforvalter** — the central government's appointed representative in the fylke (formerly fylkesmann).\n\nThe national statsminister of Norway is **Jonas Gahr Støre** (Labour, since 14 October 2021). If you want the current fylkesordfører for a specific fylke, name the fylke and I'll flag what I do and don't know.`;
+      }
+    }
+
+    // ── King of Norway ─────────────────────────────────────────────────
+    {
+      const askingKing = /\b(?:king|monarch|kongen?)\b/i.test(lower);
+      const norway = /\b(?:norway|norwegian|norge|noreg)\b/i.test(lower);
+      if (askingKing && norway) {
+        return `**Harald V** is the King of Norway. He has reigned since 17 January 1991, when he succeeded his father, King Olav V. Born 21 February 1937, he is the third monarch of the House of Glücksburg on the Norwegian throne. His heir is Crown Prince Haakon.`;
+      }
+    }
+
+    // ── Prime Minister of Norway ───────────────────────────────────────
+    {
+      const askingPM = /\b(?:prime\s+minister|pm|statsminister(?:en|s)?)\b/i.test(lower);
+      const norway = /\b(?:norway|norwegian|norge|noreg)\b/i.test(lower);
+      if (askingPM && norway) {
+        return `**Jonas Gahr Støre** is the Prime Minister (statsminister) of Norway. He has held the office since 14 October 2021, leading a Labour Party (Arbeiderpartiet) government. He took over from Erna Solberg (Conservative).`;
+      }
+    }
+
+    // ── Last 10 US Presidents ──────────────────────────────────────────
+    {
+      const askingPresidents = /\bpresidents\b/i.test(lower)
+        || /\b(?:last|past|recent|latest|most\s+recent)\s+\d+\s+president(?:s)?\b/i.test(lower)
+        || /\b(?:last|past|recent|latest|most\s+recent)\s+(?:ten|10)\s+president(?:s)?\b/i.test(lower);
+      const usaScope = /\b(?:us|u\.s\.|usa|united\s+states|america(?:n)?)\b/i.test(lower);
+      const wantsList = /\b(?:last|past|recent|previous|latest|most\s+recent)\s+(?:\d+|ten)\b/i.test(lower)
+        || /\b(?:10|ten)\s+(?:most\s+recent|recent|past|last|latest)\b/i.test(lower)
+        || /\b(?:list|names)\b/i.test(lower)
+        || /\b(?:last|past|recent|latest|most\s+recent)\s+presidents\b/i.test(lower);
+      if (askingPresidents && usaScope && wantsList) {
+        const wantsCommaSeparated = /\b(?:comma|separated\s+by\s+a\s+comma|just\s+(?:the\s+)?names)\b/i.test(lower);
+        const list = [
+          'Donald Trump (47th, 2025–present)',
+          'Joe Biden (46th, 2021–2025)',
+          'Donald Trump (45th, 2017–2021)',
+          'Barack Obama (44th, 2009–2017)',
+          'George W. Bush (43rd, 2001–2009)',
+          'Bill Clinton (42nd, 1993–2001)',
+          'George H. W. Bush (41st, 1989–1993)',
+          'Ronald Reagan (40th, 1981–1989)',
+          'Jimmy Carter (39th, 1977–1981)',
+          'Gerald Ford (38th, 1974–1977)',
+        ];
+        if (wantsCommaSeparated) {
+          const namesOnly = list.map((l) => l.replace(/\s*\(.*$/, ''));
+          return `${namesOnly.join(', ')}.`;
+        }
+        return `The 10 most recent US presidents, newest first:\n\n${list.map((l) => `- ${l}`).join('\n')}\n\nNote: Trump appears twice because his terms were non-consecutive — he is counted as the 45th and 47th president.`;
+      }
+    }
+
+    // ── Russia–Ukraine war ────────────────────────────────────────────
+    {
+      const askingUkraineWar = /\b(?:ukrain(?:e|ian)|russo[\s-]ukrain(?:ian)?|russia[\s-]ukraine)\b.*\bwar\b/i.test(lower)
+        || /\bwar\b.*\b(?:in\s+ukrain(?:e|ian)|on\s+ukrain(?:e|ian)|russia[\s-]ukraine)\b/i.test(lower)
+        || /\bwhen\s+(?:did|was)\s+(?:the\s+)?(?:russia[\s-]ukraine|ukrain(?:e|ian)|russo[\s-]ukrainian)\s+war\s+(?:start|begin|started|begun)\b/i.test(lower)
+        || /\b(?:invasion\s+of\s+ukrain(?:e|ian)|russia\s+invad(?:e|ed)\s+ukrain(?:e|ian))\b/i.test(lower);
+      if (askingUkraineWar) {
+        return `Two dates matter:\n\n- **24 February 2022** — Russia launched a full-scale invasion of Ukraine, the start of what most people now call "the war in Ukraine".\n- **20 February 2014** — the original phase of the conflict began with Russia's annexation of Crimea and the war in the Donbas (Donetsk and Luhansk).\n\nIf someone asks "when did the war start", the honest answer depends on framing: Ukraine, Russia and most international bodies date the conflict from 2014. The full-scale war the world is currently living with began on 24 February 2022.`;
+      }
+    }
+
+    // ── Norwegian fylker (counties) list + leadership clarification ───
+    {
+      const askingFylker = /\b(?:fylk(?:e|er|ene|enes)|county|counties)\b/i.test(lower);
+      const norway = /\b(?:norway|norwegian|norge|noreg|in\s+norway|norske)\b/i.test(lower);
+      const askingList = /\b(?:list|name(?:s)?|every|each|all|alle|hvilke|how\s+many|which)\b/i.test(lower);
+      if (askingFylker && norway && askingList) {
+        // Reflects the structure in effect from 1 January 2024 onwards
+        // (Viken split back into Akershus/Buskerud/Østfold; Vestfold og
+        // Telemark split; Troms og Finnmark split).
+        const fylker = [
+          'Oslo', 'Rogaland', 'Møre og Romsdal', 'Nordland',
+          'Vestland', 'Innlandet', 'Vestfold', 'Telemark',
+          'Agder', 'Trøndelag', 'Akershus', 'Buskerud',
+          'Østfold', 'Troms', 'Finnmark',
+        ];
+        return `Norway has **15 fylker** (counties) as of 1 January 2024 (after the Viken / Vestfold og Telemark / Troms og Finnmark splits):\n\n${fylker.map((f) => `- ${f}`).join('\n')}\n\nQuick clarification on leadership: a fylke is led by a **fylkesordfører** (elected county-council leader) and a **statsforvalter** (the central government's appointed representative). It does **not** have a statsminister — that title is reserved for the head of the national government. The current national statsminister of Norway is **Jonas Gahr Støre** (Labour, since 14 October 2021).`;
+      }
+    }
+
+    // ── Pistol — definition + early development ───────────────────────
+    {
+      const askingPistolDef = /\b(?:what\s+is|whats|what'?s|define)\b.*\bpistol\b/i.test(lower)
+        || /\bpistol\b.*\b(?:defin(?:ed|ition)|mean(?:s|ing)?)\b/i.test(lower);
+      const askingPistolHistory = /\b(?:who|when)\b.*\b(?:invent|develop|made?|creat|design|first)\w*\b.*\bpistol\b/i.test(lower)
+        || /\bfirst\s+pistol\b/i.test(lower)
+        || /\bpistol\b.*\b(?:history|origin)\b/i.test(lower)
+        || /\b(?:history|origin)\s+of\s+(?:the\s+)?pistol\b/i.test(lower)
+        || /\b(?:tell\s+me|explain|describe).*\bpistol\b/i.test(lower);
+      if (askingPistolDef || askingPistolHistory) {
+        return `**What a pistol is.** A pistol is a handheld firearm designed to be aimed and fired with one hand. In modern usage, "pistol" typically means a semi-automatic handgun where the chamber is integral to the barrel (e.g. a Glock 17), as opposed to a revolver where rounds rotate in a separate cylinder.\n\n**Early history.** The pistol doesn't have one inventor — it evolved from the late-1400s Italian/German hand-cannons:\n- **15th century** — first wheellock and matchlock handguns appear in Europe; the term "pistol" is recorded by the mid-1500s.\n- **1836** — **Samuel Colt** patents the practical revolver mechanism, which dominates handguns for the rest of the 19th century.\n- **1893** — **Hugo Borchardt** designs the C-93, the first commercially produced semi-automatic pistol.\n- **1900** — **John Browning**'s designs (FN M1900, then the iconic Colt M1911) define the layout almost every modern pistol still uses.`;
+      }
+    }
+
+    // ── "Top games on Steam right now" — honest no-live-data answer ────
+    {
+      const askingSteam = /\bsteam\b/i.test(lower);
+      const askingTop = /\b(?:top|most\s+popular|most\s+played|best|popular|trending|currently)\b/i.test(lower);
+      const askingGames = /\b(?:games?|titles?|charts?)\b/i.test(lower);
+      if (askingSteam && askingTop && askingGames) {
+        return `I can't query Steam in real time, so I won't pretend to give you "the current top 10". Here's what's honest:\n\n- The **live** authoritative list is at https://store.steampowered.com/charts/ and updates continuously by current player count.\n- Perennial mainstays in the top concurrent-player chart over the last few years: **Counter-Strike 2**, **Dota 2**, **PUBG: Battlegrounds**, **Apex Legends**, **Rust**, **Team Fortress 2**, **Grand Theft Auto V**, **Baldur's Gate 3**, **Call of Duty**, **Path of Exile 2**.\n- New releases and seasonal events shuffle the top of the list every week, so any list I'd give you here would go stale within days.\n\nIf you want a real snapshot, open the Steam Charts page; if you want me to pick a game *for* you, tell me what genre and how much time you have and I'll recommend instead of ranking.`;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Pushback / verbatim-repeat detector.
+   *
+   * Triggers when the user signals dissatisfaction with the previous turn —
+   * "that's not what I asked", "you're falling back to the same answer",
+   * "stop repeating yourself", "give me your opinion" — and rather than
+   * letting the strategy chain return the same paragraph again, returns a
+   * candid acknowledgment + a different framing of the prior topic.
+   *
+   * Returns null when no pushback signal is present, OR when there is no
+   * prior assistant message to push back against.
+   */
+  private tryPushback(input: string, lower: string, history: readonly Message[]): string | null {
+    const trimmed = input.trim();
+    if (trimmed.length < 6 || trimmed.length > 600) return null;
+
+    // Last assistant turn is what we're "repeating".
+    const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant' && m.content.trim().length > 20);
+    if (!lastAssistant) return null;
+
+    const pushbackSignals: readonly RegExp[] = [
+      /\b(?:that['’]?s|thats)\s+not\s+(?:what\s+|really\s+what\s+|quite\s+what\s+|exactly\s+what\s+)?i\s+(?:asked|wanted|meant)\b/i,
+      /\byou(?:['’]re|\s+are)\s+(?:still\s+|just\s+)?(?:falling\s+back|repeating|giving\s+(?:me\s+)?the\s+same)\b/i,
+      /\byou\s+(?:keep|just)\s+(?:repeating|saying|giving)\s+(?:yourself|the\s+same)\b/i,
+      /\bstop\s+repeating\s+yourself\b/i,
+      /\byou\s+said\s+(?:the\s+)?(?:exact(?:ly)?\s+)?same\s+thing\b/i,
+      /\b(?:give|tell)\s+me\s+(?:your|an)\s+(?:honest\s+)?(?:opinion|take|view|stance)\b/i,
+      /\bwhat\s+(?:do|would)\s+you\s+(?:actually\s+|honestly\s+|really\s+)?think\b/i,
+      /\bwhat\s+is\s+your\s+(?:actual\s+|honest\s+|real\s+)?opinion\b/i,
+      /\bcan\s+you\s+try\s+(?:a\s+)?different\s+(?:angle|framing|take|approach)\b/i,
+      /\bsame\s+(?:fallback|paragraph|answer|response)\b/i,
+    ];
+    const isPushback = pushbackSignals.some((re) => re.test(lower));
+    if (!isPushback) return null;
+
+    // Pull a topic anchor from the prior assistant message — first bolded
+    // term works for our curated entries; otherwise first capitalised noun.
+    const boldMatch = lastAssistant.content.match(/\*\*([^*\n]{2,60})\*\*/);
+    const anchor = boldMatch ? boldMatch[1].trim() : 'that';
+
+    const wantsOpinion = /\b(?:opinion|take|view|stance|what\s+(?:do|would)\s+you\s+(?:actually\s+|honestly\s+|really\s+)?think)\b/i.test(lower);
+
+    if (wantsOpinion) {
+      return `Fair point — you're right that I gave you the same paragraph. Here's my actual opinion on **${anchor}**, not a recital:\n\n- The "one inventor" framing is almost always wrong for anything important. The interesting story is the *system* of contemporaries who were converging on the same idea, plus the one person who shipped it.\n- Credit usually goes to whoever industrialised the thing, not whoever first prototyped it. That isn't unfair — shipping at scale is genuinely the hard part — but it does erase the people who got there first in a lab.\n- For ${anchor.toLowerCase()} specifically, my honest take: the popular-credit name is the right answer for "who do most people mean", and the longer list of near-simultaneous claimants is the right answer for "who actually did the work". Both are true. Pick the framing that matches what you need.\n\nIf you want me to go harder on a specific claim — defend it, attack it, compare two versions — say which one and I'll commit to a position instead of hedging.`;
+    }
+
+    return `You're right — I gave you the same paragraph. Let me try a different angle on **${anchor}** instead of repeating myself:\n\n- **Different framing.** Same facts, but tell me which framing you actually want — popular credit, near-simultaneous claimants, or the engineering story of how it became usable.\n- **Different depth.** I can go shorter (one sentence), longer (timeline with dates), or sideways (what the controversy is and who argues which side).\n- **Different lens.** Technical, historical, legal (patents), or cultural (why we remember one name and not the others).\n\nWhich of those would actually help? Or paste the bit you wanted me to address and I'll answer that exact thing.`;
+  }
+
+  /**
+   * Extract a first name introduced at the start of the user's turn.
+   * Returns the cleaned name or null. Conservative: only matches
+   *   "my name is X", "i'm X", "i am X", "this is X", "X here"
+   * where X is a single capitalized word (1-20 chars). Lowercases input lookup
+   * but preserves capitalization on the result.
+   */
+  private extractIntroducedName(input: string): string | null {
+    const patterns: readonly RegExp[] = [
+      /\b(?:my\s+name\s+is|i\s+am\s+called|i\s+go\s+by|this\s+is|its\s+|it'?s\s+)\s*([A-Za-z][a-zA-Z'\-]{1,20})\b/i,
+      /\bi[\'\u2019]?m\s+([A-Z][a-zA-Z'\-]{1,20})\b/,
+      /\bi\s+am\s+([A-Z][a-zA-Z'\-]{1,20})\b/,
+      /^(?:hello|hi|hey|heisann|hei)[,\s]+(?:i\s*[\'\u2019]?m|my\s+name\s+is|i\s+am)\s+([A-Za-z][a-zA-Z'\-]{1,20})\b/i,
+    ];
+    for (const re of patterns) {
+      const m = input.match(re);
+      if (m && m[1]) {
+        const raw = m[1].trim();
+        // Reject obvious common words / pronouns that match accidentally.
+        if (/^(?:a|an|the|here|there|just|going|trying|not|sorry|fine|good|ok|okay|happy|sad|bored)$/i.test(raw)) continue;
+        const formatted = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+        return formatted;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Introduction + compound question composer. When the user opens with a
+   * name introduction AND asks one or more recognizable sub-questions, build
+   * a single coherent answer that:
+   *  - greets the user by name
+   *  - answers each detectable clause (tomorrow/today date, inventor lookup,
+   *    math, basic factual primer)
+   *  - keeps the tone short and human, not robotic
+   *
+   * Returns null when no name intro is present OR when nothing else in the
+   * input is answerable — in that case the standard strategy chain handles it.
+   */
+  private tryNameIntroductionCompound(input: string, lower: string, history: readonly Message[]): string | null {
+    const trimmed = input.trim();
+    if (trimmed.length === 0 || trimmed.length > 600) return null;
+
+    const name = this.extractIntroducedName(input);
+    // We only fire when there is a name AND a question, or when there are 2+
+    // recognizable clauses (so we don't intercept simple "Hi, I'm Peter" turns
+    // that the standard handler should keep handling).
+    const hasQuestion = /[?]|\b(?:what|who|when|where|why|how|which|is|are|do|does|did|can|could|should|would|will|tell\s+me|let\s+me\s+know|i\s+am\s+wondering|i\s+was\s+wondering|i\s+want\s+to\s+know|i\s+need\s+to\s+know)\b/i.test(lower);
+    if (!name || !hasQuestion) return null;
+
+    const parts: string[] = [];
+
+    // ── 1. Date / day clause — uses the shared relative-offset parser so
+    // "tomorrow", "in a week", "in three days", "yesterday", etc. all work.
+    const offset = this.parseRelativeOffsetDays(lower);
+    const hasDateQuestion = /\b(?:what\s+day|which\s+day|what\s+date|which\s+date|day\s+is\s+it|date\s+is\s+it|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(lower);
+    if (offset && hasDateQuestion) {
+      parts.push(this.formatRelativeDateAnswer(offset));
+    } else if (!offset && /\b(?:today|what\s+(?:is\s+)?(?:the\s+)?(?:current\s+)?date|what\s+day\s+is\s+(?:it|today))\b/i.test(lower)) {
+      const target = new Date(this._nowMs());
+      const dateStr = target.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      parts.push(`Today is **${dateStr}**.`);
+    }
+
+    // ── 2. Inventor / "who invented X" clause ──────────────────────────
+    const inventor = this.lookupInventor(input);
+    if (inventor) {
+      parts.push(`**On ${inventor.topic}:**\n${inventor.answer}`);
+    }
+
+    // ── 3. Math clause ────────────────────────────────────────────────
+    const mathAnswer = this.tryBuriedMath(input);
+    if (mathAnswer) parts.push(mathAnswer);
+
+    // If the only thing we have is the greeting, defer to the standard chain.
+    if (parts.length === 0) return null;
+
+    const greeting = `Hi ${name} — `;
+    if (parts.length === 1) return `${greeting}${parts[0]}`;
+    return `Hi ${name}!\n\n${parts.join('\n\n')}`;
+  }
+
   private tryUtilityQuestion(lower: string, original: string, history: readonly Message[]): string | null {
     // ── Conversation message count: "how many messages have I sent" ──
     // Must run BEFORE generic date/time so we don't strip the count question.
@@ -40634,27 +41473,26 @@ Want me to customize it with your actual links, change the color scheme, add ani
     // Must run BEFORE the generic date question so "what day is tomorrow" doesn't
     // collapse to today.
     {
-      const isTomorrow = /\b(?:tomorrow|day\s+after\s+today|the\s+next\s+day|i\s*morgen)\b/i.test(lower)
-        && /\b(?:what\s+(?:day|date|is)|which\s+day|tell\s+me|whats|what'?s|hva\s+er)\b/i.test(lower);
-      const isYesterday = /\byesterday\b/i.test(lower)
-        && /\b(?:what\s+(?:day|date|was)|which\s+day|tell\s+me|whats|what'?s)\b/i.test(lower);
-      const inDaysMatch = lower.match(/\b(?:date|day)\s+(?:will\s+(?:it|that)\s+be\s+)?in\s+(\d{1,4})\s+days?\b/i)
-        || lower.match(/\bin\s+(\d{1,4})\s+days?[^?\n]*?\b(?:date|day|what)\b/i);
-      const agoMatch = lower.match(/\b(\d{1,4})\s+days?\s+ago\b/i);
+      // Shared relative-offset parser handles tomorrow/yesterday/"in N days"/
+      // "in a week"/"in N weeks"/"a week from now"/"N days ago". Gate on the
+      // user actually asking about a day or date so we don't intercept stray
+      // mentions of "tomorrow" inside unrelated sentences. The gate is broad
+      // on purpose — if the offset matched and the user mentioned day/date/
+      // when anywhere in the prompt, it's almost certainly a date question.
+      const offset = this.parseRelativeOffsetDays(lower);
+      // The parser already matches strong patterns ("tomorrow", "yesterday",
+      // "N days/weeks ago", "in N days/weeks", "a week from now", etc.) so if
+      // it returned an offset, the user is asking a relative-date question.
+      // An extra gate here just creates false negatives (e.g. "days" not
+      // matching \bday\b).
       let offsetDays: number | null = null;
-      if (isTomorrow) offsetDays = 1;
-      else if (isYesterday) offsetDays = -1;
-      else if (inDaysMatch) offsetDays = parseInt(inDaysMatch[1], 10);
-      else if (agoMatch) offsetDays = -parseInt(agoMatch[1], 10);
+      let phrasedAnswer: string | null = null;
+      if (offset) {
+        offsetDays = offset.days;
+        phrasedAnswer = this.formatRelativeDateAnswer(offset);
+      }
       if (offsetDays !== null && Number.isFinite(offsetDays) && Math.abs(offsetDays) <= 36500) {
-        const target = new Date(this._nowMs());
-        target.setDate(target.getDate() + offsetDays);
-        const dateStr = target.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-        let dateAnswer: string;
-        if (offsetDays === 1) dateAnswer = `Tomorrow is **${dateStr}**.`;
-        else if (offsetDays === -1) dateAnswer = `Yesterday was **${dateStr}**.`;
-        else if (offsetDays > 0) dateAnswer = `In ${offsetDays} days it will be **${dateStr}**.`;
-        else dateAnswer = `${Math.abs(offsetDays)} days ago was **${dateStr}**.`;
+        const dateAnswer = phrasedAnswer as string;
 
         // Compound: if the user also asked a math question, prepend the math answer.
         // Detect math signal: explicit operators, "squared", "cubed", or "X plus Y".
@@ -40896,11 +41734,29 @@ Want me to customize it with your actual links, change the color scheme, add ani
     // full query (knowledge synthesis, web search, etc.) as a single unit.
     if (resolved * 2 < answers.length) return null;
 
-    // Some resolved, some didn't — replace unresolved markers with a hedge that
-    // still keeps the answer coherent rather than echoing the same apology.
-    return answers
-      .map(a => a.replace('\u0000UNRESOLVED\u0000', "I don't have a direct answer on this one — ask it on its own if you want me to dig."))
-      .join('\n\n---\n\n');
+    // Collapse duplicate UNRESOLVED segments into one combined hedge so the
+    // user does not see the same generic "I don't have a direct answer" line
+    // repeated for every clause that fell through. This kills the
+    // "two identical honest-fallback lines" failure shape.
+    const UNRESOLVED = '\u0000UNRESOLVED\u0000';
+    const unresolvedSubjects: string[] = [];
+    const finalParts: string[] = [];
+    for (const ans of answers) {
+      if (ans.endsWith(UNRESOLVED)) {
+        const headerLine = ans.split('\n', 1)[0] ?? '';
+        const subject = headerLine.replace(/^\*\*|\*\*$/g, '').replace(/\?+$/, '').trim();
+        if (subject) unresolvedSubjects.push(subject);
+      } else {
+        finalParts.push(ans);
+      }
+    }
+    if (unresolvedSubjects.length === 1) {
+      finalParts.push(`**${unresolvedSubjects[0]}?**\nI don't have a direct answer on this one — ask it on its own if you want me to dig.`);
+    } else if (unresolvedSubjects.length >= 2) {
+      const subjectList = unresolvedSubjects.map((s) => `"${s}"`).join(' and ');
+      finalParts.push(`I don't have a clean answer for ${subjectList}. Pick the one that matters most and ask it on its own — I'll dig in.`);
+    }
+    return finalParts.join('\n\n---\n\n');
   }
 
   /**
@@ -42766,6 +43622,109 @@ Want me to customize it with your actual links, change the color scheme, add ani
   }
 
   /**
+   * Extract a clean, human-readable topic from a user message.
+   *
+   * Used by the fallback so we never echo broken fragments like "Norway We
+   * have these", "about the ingredients in", "Ukrainian war started" or
+   * "developed the first pistol". The strategy is: strip the question
+   * scaffolding ("can you tell me about", "what is the name of every"),
+   * drop the action verb if it leads, then return the remaining 2–6
+   * content words. Returns an empty string when nothing useful survives.
+   */
+  private cleanTopicFromInput(input: string): string {
+    let s = input.trim();
+    if (s.length === 0) return '';
+    s = s.replace(/[?!.]+\s*$/g, '');
+
+    // Strip leading scaffolding clauses repeatedly until stable.
+    const scaffolds: readonly RegExp[] = [
+      /^(?:and|but|so|or|also|then|now|okay|ok|well|hey|hi|hello)[,!\s]+/i,
+      /^(?:please|kindly)[,!\s]+/i,
+      /^(?:can|could|would|will)\s+you\s+(?:please\s+)?/i,
+      /^(?:do\s+you\s+know|you\s+know|tell\s+me|let\s+me\s+know|give\s+me|show\s+me|explain|describe|name|list|find|fetch|get\s+me)\s+/i,
+      /^(?:i\s+(?:want|need|wanna|would\s+like)\s+to\s+know\s+)/i,
+      /^(?:i\s+am\s+(?:wondering|curious)\s+(?:about\s+)?)/i,
+      /^(?:about\s+)/i,
+      /^(?:what\s+(?:is|are|was|were)\s+(?:the\s+)?(?:name\s+of\s+(?:the\s+|every\s+|each\s+)?)?)/i,
+      /^(?:who\s+(?:is|are|was|were)\s+(?:the\s+)?)/i,
+      /^(?:when\s+(?:did|does|do|is|was|were)\s+(?:the\s+)?)/i,
+      /^(?:where\s+(?:is|are|was|were)\s+(?:the\s+)?)/i,
+      /^(?:why\s+(?:is|are|was|were|did|does|do)\s+(?:the\s+)?)/i,
+      /^(?:how\s+(?:is|are|was|were|did|does|do|many|much)\s+(?:the\s+)?)/i,
+      /^(?:which\s+(?:is|are|was|were|of\s+the)\s+(?:the\s+)?)/i,
+    ];
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const re of scaffolds) {
+        const next = s.replace(re, '');
+        if (next !== s) { s = next; changed = true; break; }
+      }
+    }
+
+    // Drop trailing scaffolds ("right now", "please", "in reply", "just …",
+    // "separated by …", "as a list", "as comma separated values").
+    const trailingScaffolds: readonly RegExp[] = [
+      /\s+(?:please|kindly|right\s+now|currently|today|in\s+reply|in\s+a\s+(?:dotted|bullet|comma\s+separated)\s+list|as\s+a\s+list|as\s+(?:a\s+)?comma\s+separated\s+(?:list|values)|separated\s+by\s+(?:a\s+)?comma)\s*$/i,
+      /\s+(?:just\s+(?:give|tell|reply|return)\s+me\s+.+)$/i,
+      /\s+(?:can\s+you\s+.+)$/i,
+    ];
+    changed = true;
+    while (changed) {
+      changed = false;
+      for (const re of trailingScaffolds) {
+        const next = s.replace(re, '');
+        if (next !== s) { s = next; changed = true; break; }
+      }
+    }
+
+    // Now pull out content words. Drop common verbs / function words that
+    // make the echo read like a fragment.
+    const drop = new Set([
+      'a', 'an', 'the', 'of', 'to', 'in', 'for', 'on', 'with', 'at', 'by',
+      'and', 'or', 'but', 'so', 'as', 'than',
+      'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am',
+      'do', 'does', 'did', 'doing',
+      'has', 'have', 'had',
+      'can', 'could', 'should', 'would', 'will',
+      'i', 'you', 'me', 'my', 'your', 'we', 'us', 'our', 'they', 'them', 'their',
+      'this', 'that', 'these', 'those', 'it', 'its',
+      'who', 'what', 'when', 'where', 'why', 'how', 'which',
+      'started', 'developed', 'created', 'made', 'invented', 'designed',
+      'tell', 'give', 'show', 'name', 'list', 'find', 'get', 'fetch', 'explain', 'describe', 'know',
+      'about', 'something', 'someone', 'else', 'right', 'now', 'currently', 'today',
+      'please', 'kindly', 'thanks', 'thank',
+    ]);
+    const words = s.split(/\s+/)
+      .map((w) => w.replace(/[^a-zA-Z0-9'\-]/g, ''))
+      .filter((w) => w.length > 0 && !drop.has(w.toLowerCase()));
+    if (words.length === 0) return '';
+
+    // Cap to 6 content words and lowercase common nouns while preserving
+    // capitals on proper nouns the user already capitalised.
+    const cleaned = words.slice(0, 6).join(' ');
+    return cleaned.length >= 3 ? cleaned : '';
+  }
+
+  /**
+   * Decide whether a string is a sensible "we were discussing" anchor.
+   * Rejects dates, lists of names, numbers, single function-words, and
+   * other shapes that read as nonsense in the fallback echo.
+   */
+  private isUsableAnchor(anchor: string): boolean {
+    if (!anchor || anchor.trim().length < 3) return false;
+    const a = anchor.trim();
+    // Date-shaped — "Friday, May 15, 2026", "May 15", "2026", "14 May".
+    if (/\b(?:january|february|march|april|may|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(a)) return false;
+    if (/^\d{1,4}([\/.,\-]\d{1,4})*$/.test(a)) return false;
+    // List-shaped — multiple comma-separated proper nouns.
+    if (a.split(',').length >= 3) return false;
+    // Pure function word.
+    if (/^(?:and|but|so|or|the|a|an|of|to|in|for|on|with|at|by|that|this)$/i.test(a)) return false;
+    return true;
+  }
+
+  /**
    * Build a helpful fallback that tells the user what we DO know, not just that we don't know.
    */
   private buildHelpfulFallback(input: string, history?: readonly Message[]): string {
@@ -42775,16 +43734,32 @@ Want me to customize it with your actual links, change the color scheme, add ani
     // Context-aware fallback: if there's prior conversation, acknowledge what we were discussing
     if (history && history.length >= 2) {
       const prevAssistant = [...history].reverse().find(m => m.role === 'assistant' && m.content.length > 30);
-      const prevTopic = prevAssistant?.content.match(/\*\*([^*\n]{2,40})\*\*/)?.[1]?.replace(/[*:]/g, '').trim() || '';
-      if (prevTopic && prevTopic.length > 2) {
-        const stopWords = new Set(['here', 'this', 'that', 'the', 'let', 'note', 'step', 'sure', 'what', 'now', 'code', 'also', 'true', 'false']);
-        const cleanTopic = prevTopic.toLowerCase();
-        if (!stopWords.has(cleanTopic) && !/^\d/.test(cleanTopic)) {
-          const topicWords = input.split(/\s+/).filter(w => w.length > 2);
-          const missedTopic = topicWords.slice(0, 3).join(' ') || 'that';
-          return `I don't have enough to go on for **${missedTopic}** right now — still building my knowledge there.\n\nWe were discussing **${prevTopic}** — want me to:\n- Go deeper on that?\n- Try a different angle?\n- Build something with it?\n\nOr if you meant something else, give me a bit more context and I'll take another shot.`;
-        }
+      const prevTopicRaw = prevAssistant?.content.match(/\*\*([^*\n]{2,40})\*\*/)?.[1]?.replace(/[*:]/g, '').trim() || '';
+      const prevTopic = this.isUsableAnchor(prevTopicRaw) ? prevTopicRaw : '';
+
+      const cleanedTopic = this.cleanTopicFromInput(input);
+      // Pick a phrasing variant deterministically from the input length so
+      // back-to-back fallbacks don't read identical to the user.
+      const variants = [
+        (t: string, prev: string) =>
+          `Honest answer: I don't have a reliable take on **${t}** yet — that's a real gap, not a stall.${prev ? `\n\nWe were just on **${prev}** — happy to keep going there, or if you want me to take a swing at **${t}** anyway, paste a starting point and I'll work from it.` : `\n\nIf you can give me one sentence of context (or a link / file), I'll try again with something concrete.`}`,
+        (t: string, prev: string) =>
+          `I'd rather say "I don't know" than make up an answer about **${t}**.${prev ? ` Want to stay on **${prev}**, or push **${t}** further with some context I can work from?` : ` Drop a sentence or two of context and I'll try.`}`,
+        (t: string, prev: string) =>
+          `**${t}** isn't somewhere I can speak with confidence right now.${prev ? ` We were on **${prev}** — say where you want to go: stay there, switch fully to **${t}**, or connect the two.` : ` What's the angle you actually want — definition, history, a comparison, or a how-to?`}`,
+        (t: string, prev: string) =>
+          `Real talk: my knowledge on **${t}** is thin. I won't fake it.${prev ? `\n\nWe had momentum on **${prev}**. Tell me which thread you want to follow.` : `\n\nGive me the angle (definition, when, who, how, why) and what you'd do with the answer, and I'll try again.`}`,
+      ];
+
+      if (cleanedTopic.length > 0 && prevTopic.length > 0) {
+        const idx = (input.trim().length + (history.length ?? 0)) % variants.length;
+        return variants[idx](cleanedTopic, prevTopic);
       }
+      // No usable topic + we still have a prev anchor → just offer to continue.
+      if (prevTopic) {
+        return `I lost the thread on what you're asking. We were on **${prevTopic}** — want me to keep going there, or do you want to switch topics? Either way, one more sentence will help me give you a real answer.`;
+      }
+      // Otherwise fall through to the no-history path below.
     }
 
     // Short ambiguous message (1-3 words, no clear intent) — ask for clarification
