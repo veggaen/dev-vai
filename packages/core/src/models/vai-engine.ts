@@ -264,6 +264,13 @@ export class VaiEngine implements ModelAdapter {
   private _lastShadowPredictions: Array<{ strategy: string; score: number }> = [];
   private static readonly HISTORY_SIZE = 100;
 
+  // ── Living-conversation memory (Lead-Engineer rebuild, May 2026) ──
+  /** Classified intent for the *current* turn. Set at the top of generateResponse. */
+  private _lastIntent: 'fact' | 'explore' | 'build' | 'pushback' | 'casual' | 'meta' | 'unknown' = 'unknown';
+  /** Ring buffer of normalized openers (first ~24 chars) for the last few responses. */
+  private _recentOpeners: string[] = [];
+  private static readonly OPENER_MEMORY = 4;
+
   // ── Deterministic-engine knobs (see top-of-file TEST MODE doc block) ──
   /** True when web search is disabled. Constructor flag wins over env var. */
   readonly testMode: boolean;
@@ -1795,7 +1802,143 @@ export class VaiEngine implements ModelAdapter {
       this.responseHistory.shift();
     }
     this.strategyStats.set(strategy, (this.strategyStats.get(strategy) ?? 0) + 1);
+    // Record this opener so the next turn can avoid repeating it.
+    this.rememberOpener(response);
     return response;
+  }
+
+  /**
+   * Classify the user's *intent* for this turn before any strategy fires.
+   * Strategies and the fallback consult `this._lastIntent` to choose tone,
+   * length, and whether to offer scaffolding versus prose.
+   *
+   * Cheap, deterministic, regex-based — runs in microseconds and never
+   * blocks. Returns 'unknown' when no signal is strong enough; downstream
+   * code should treat 'unknown' as "behave as before".
+   */
+  private classifyIntent(
+    input: string,
+    history: readonly Message[],
+  ): 'fact' | 'explore' | 'build' | 'pushback' | 'casual' | 'meta' | 'unknown' {
+    const s = input.trim();
+    if (s.length === 0) return 'unknown';
+    const lower = s.toLowerCase();
+    const wc = s.split(/\s+/).filter(Boolean).length;
+
+    // Pushback first — overrides everything because the user is upset and we
+    // must not fire a normal answer template.
+    const pushbackSignals = [
+      /\b(?:that(?:'s| is)? not (?:what|right|it)|not what i asked)\b/i,
+      /\b(?:stop|quit) (?:repeating|saying|doing)\b/i,
+      /\b(?:you(?:'re| are) (?:falling back|repeating|stuck)|same (?:answer|paragraph|response|fallback))\b/i,
+      /\b(?:try (?:a )?different (?:angle|framing|take))\b/i,
+      /\b(?:give me your (?:opinion|take|view)|what do you (?:actually|really) think)\b/i,
+      /\b(?:be honest|stop dodging|cut the (?:fluff|crap))\b/i,
+    ];
+    if (pushbackSignals.some((re) => re.test(lower))) return 'pushback';
+
+    // Casual chat — short greetings, banter, emoji-only, "lol", "ok", "thanks".
+    const casualPatterns = [
+      /^(?:hi|hey|hello|yo|sup|hej|hola|heya|howdy)\b/i,
+      /^(?:lol|haha+|lmao|nice|cool|sweet|sick|cheers|thanks?(?: you)?|ty|np)\b[!.\s]*$/i,
+      /^(?:ok|okay|alright|got it|sure|yeah|yep|yup|nope|nah)\b[!.\s]*$/i,
+      /^(?:wow|oh|hm+|huh|wait)\b[!.\s]*$/i,
+    ];
+    if (wc <= 4 && casualPatterns.some((re) => re.test(s))) return 'casual';
+
+    // Build / create — explicit construction verbs.
+    const buildSignals = [
+      /\b(?:build|create|make|generate|scaffold|set up|spin up|bootstrap|write me|give me)\s+(?:me\s+)?(?:a |an |the )?\w+/i,
+      /\b(?:build|create|make|generate)\s+(?:a|an|the)\b/i,
+      /\b(?:can you (?:build|make|create|write|implement|draft))\b/i,
+      /\b(?:turn this into|convert this to|refactor (?:this|it) (?:to|into))\b/i,
+    ];
+    if (buildSignals.some((re) => re.test(lower))) return 'build';
+
+    // Meta — questions about Vai itself, capabilities, the conversation.
+    const metaSignals = [
+      /\b(?:who are you|what are you|what can you do|what do you (?:know|remember))\b/i,
+      /\b(?:your (?:weakness|limitation|flaw|strength|memory|knowledge))\b/i,
+      /\b(?:are you (?:an? (?:ai|llm|bot|model)|alive|conscious))\b/i,
+      /\b(?:how (?:do|does) you (?:work|think))\b/i,
+    ];
+    if (metaSignals.some((re) => re.test(lower))) return 'meta';
+
+    // Deep exploration — long question, "why", "how does X work", "explain in depth".
+    const explorePatterns = [
+      /\b(?:explain|walk me through|deep[- ]?dive|in depth|step by step)\b/i,
+      /\bwhy (?:does|do|is|are|did|would)\b/i,
+      /\bhow (?:does|do) .* (?:work|happen|function)\b/i,
+      /\b(?:compare|difference between|trade[- ]?offs?)\b/i,
+      /\bwhat['' ]?s the (?:reason|story|history|theory|argument)\b/i,
+    ];
+    if (explorePatterns.some((re) => re.test(lower)) || wc >= 18) return 'explore';
+
+    // Fact — short pointed Q-word question, "when", "who", "what is X", "name", "list".
+    const factPatterns = [
+      /^(?:who|what|when|where|which|how many|how much)\b/i,
+      /\b(?:capital|population|date|year|name|list|count)\s+of\b/i,
+      /^(?:is|are|was|were|does|do|did)\s+\w+/i,
+    ];
+    if (wc <= 14 && factPatterns.some((re) => re.test(s))) return 'fact';
+
+    return 'unknown';
+  }
+
+  /** Normalize a response's first words to a comparable opener key. */
+  private openerKey(response: string): string {
+    const head = response.trim().slice(0, 80);
+    // Strip leading bold/markdown so "**X** — …" and "**Y** — …" share a key.
+    const noMd = head.replace(/^\*+/, '').replace(/^[#>\-\d.\s]+/, '');
+    // First 3 lowercase content words, stripped of punctuation.
+    const words = noMd.toLowerCase()
+      .split(/\s+/)
+      .map((w) => w.replace(/[^a-z0-9'-]/g, ''))
+      .filter(Boolean)
+      .slice(0, 3);
+    return words.join(' ');
+  }
+
+  /** Push a response's opener into the recent-openers ring buffer. */
+  private rememberOpener(response: string): void {
+    const key = this.openerKey(response);
+    if (!key) return;
+    this._recentOpeners.push(key);
+    if (this._recentOpeners.length > VaiEngine.OPENER_MEMORY) {
+      this._recentOpeners.shift();
+    }
+  }
+
+  /**
+   * Pick a variant from a list while avoiding any whose opener matches a
+   * recently-used one. `salt` makes the choice stable for the same input
+   * (e.g. unit tests stay deterministic) while still rotating across turns.
+   *
+   * If every variant collides with recent openers, fall back to the
+   * salt-indexed variant rather than returning nothing.
+   */
+  private pickVariant<T extends string>(variants: readonly T[], salt: string): T {
+    if (variants.length === 0) {
+      throw new Error('pickVariant: variants must be non-empty');
+    }
+    if (variants.length === 1) return variants[0];
+
+    let h = 2166136261;
+    for (let i = 0; i < salt.length; i += 1) {
+      h ^= salt.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    const start = Math.abs(h) % variants.length;
+
+    const recent = new Set(this._recentOpeners);
+    for (let i = 0; i < variants.length; i += 1) {
+      const idx = (start + i) % variants.length;
+      const candidate = variants[idx];
+      if (!recent.has(this.openerKey(candidate))) {
+        return candidate;
+      }
+    }
+    return variants[start];
   }
 
   private strategyConfidence(strategy: string): number {
@@ -2807,6 +2950,9 @@ export class VaiEngine implements ModelAdapter {
     // Cognitive frame is computed once per request from the (post-normalization)
     // user input so every tracked() meta carries the same classification.
     this._lastCognitiveFrame = analyze(input);
+    // Living-conversation memory: classify intent once per turn so strategies
+    // and the fallback can adapt tone/length to what the user actually wants.
+    this._lastIntent = this.classifyIntent(input, history);
     // OODA preamble — Observe + Orient + Decide. Returns null when the gate
     // fails (trivial prompts), so cheap by default.
     {
@@ -43731,6 +43877,17 @@ Want me to customize it with your actual links, change the color scheme, add ani
     const stats = this.getStats();
     const wordCount = input.trim().split(/\s+/).length;
 
+    // Always try grounded best-effort first, before any honest-admission
+    // variants fire. This protects retrieval quality: if any indexed source
+    // can answer the question, surface that rather than admitting a gap.
+    {
+      const earlyRetrieved = this.cachedRetrieveRelevant(input, 5);
+      if (earlyRetrieved.length > 0) {
+        const earlyGrounded = this.buildGroundedBestEffortAnswer(input, earlyRetrieved);
+        if (earlyGrounded) return earlyGrounded;
+      }
+    }
+
     // Context-aware fallback: if there's prior conversation, acknowledge what we were discussing
     if (history && history.length >= 2) {
       const prevAssistant = [...history].reverse().find(m => m.role === 'assistant' && m.content.length > 30);
@@ -43738,26 +43895,59 @@ Want me to customize it with your actual links, change the color scheme, add ani
       const prevTopic = this.isUsableAnchor(prevTopicRaw) ? prevTopicRaw : '';
 
       const cleanedTopic = this.cleanTopicFromInput(input);
-      // Pick a phrasing variant deterministically from the input length so
-      // back-to-back fallbacks don't read identical to the user.
-      const variants = [
-        (t: string, prev: string) =>
-          `Honest answer: I don't have a reliable take on **${t}** yet — that's a real gap, not a stall.${prev ? `\n\nWe were just on **${prev}** — happy to keep going there, or if you want me to take a swing at **${t}** anyway, paste a starting point and I'll work from it.` : `\n\nIf you can give me one sentence of context (or a link / file), I'll try again with something concrete.`}`,
-        (t: string, prev: string) =>
-          `I'd rather say "I don't know" than make up an answer about **${t}**.${prev ? ` Want to stay on **${prev}**, or push **${t}** further with some context I can work from?` : ` Drop a sentence or two of context and I'll try.`}`,
-        (t: string, prev: string) =>
-          `**${t}** isn't somewhere I can speak with confidence right now.${prev ? ` We were on **${prev}** — say where you want to go: stay there, switch fully to **${t}**, or connect the two.` : ` What's the angle you actually want — definition, history, a comparison, or a how-to?`}`,
-        (t: string, prev: string) =>
-          `Real talk: my knowledge on **${t}** is thin. I won't fake it.${prev ? `\n\nWe had momentum on **${prev}**. Tell me which thread you want to follow.` : `\n\nGive me the angle (definition, when, who, how, why) and what you'd do with the answer, and I'll try again.`}`,
-      ];
 
-      if (cleanedTopic.length > 0 && prevTopic.length > 0) {
-        const idx = (input.trim().length + (history.length ?? 0)) % variants.length;
-        return variants[idx](cleanedTopic, prevTopic);
+      // Intent-aware variant pools. Each variant is a self-contained string
+      // so pickVariant() can compare openers and skip recently-used shapes.
+      const intent = this._lastIntent;
+      const t = cleanedTopic;
+      const prev = prevTopic;
+      const buildVariants = (): string[] => {
+        if (intent === 'casual') {
+          return [
+            `Honestly, **${t}** isn't something I can speak to with confidence yet.${prev ? ` Want to keep on **${prev}** instead?` : ''}`,
+            `Don't have a real answer for **${t}** in me right now.${prev ? ` We were on **${prev}** — keep going there?` : ''}`,
+            `Empty pocket on **${t}** so far.${prev ? ` Stay with **${prev}** or pivot?` : ''}`,
+          ];
+        }
+        if (intent === 'pushback') {
+          return [
+            `Fair pushback. **${t}** genuinely isn't something I can answer well yet — I'd be guessing if I tried.${prev ? ` We were on **${prev}**; if you want a different angle on that, say which.` : ` Tell me what shape of answer would actually help and I'll try again.`}`,
+            `You're right to push. I don't have **${t}** in solid form.${prev ? ` On **${prev}** I can swing again from a new angle if you point one.` : ` Give me one concrete sub-question and I'll bite.`}`,
+          ];
+        }
+        if (intent === 'build') {
+          return [
+            `I can't yet build cleanly around **${t}** — not enough grounding. ${prev ? `If you want, I can scaffold something close to **${prev}** instead and we shape it from there.` : `Give me a target stack and a one-line goal and I'll scaffold a starting point.`}`,
+            `**${t}** isn't ready ground for me to build on yet.${prev ? ` We can ship something on **${prev}** quickly if that helps.` : ` Tell me the language, framework, and goal and I'll scaffold.`}`,
+          ];
+        }
+        if (intent === 'explore') {
+          return [
+            `Honest take: **${t}** is a real gap in what I hold. I'd rather flag it than fake depth.${prev ? `\n\nWe had momentum on **${prev}** — happy to go deeper there, or take a swing at **${t}** if you give me one anchor (a name, a link, a date) to ground from.` : `\n\nGive me one anchor — a name, a date, a paper, a link — and I can build outward from it.`}`,
+            `**${t}** sits outside what I can speak to with confidence.${prev ? ` On **${prev}** I can keep going as deep as you want.` : ` Drop one concrete reference and I'll work from it.`}`,
+            `Real talk on **${t}** — my knowledge is too thin to give you a layered answer.${prev ? ` We were exploring **${prev}**; want to stay there or pivot?` : ` Where do you want me to start: definition, history, or trade-offs?`}`,
+          ];
+        }
+        // fact / meta / unknown — short, direct.
+        return [
+          `I don't yet hold **${t}** in my local memory. Would you like me to help you discover it another way?`,
+          `Don't have **${t}** locally yet.${prev ? ` We were on **${prev}** — keep going?` : ` Want me to point you somewhere I trust to look it up?`}`,
+          `**${t}** isn't in my knowledge yet.${prev ? ` Stay on **${prev}** or pivot fully?` : ` One link or sentence of context and I can try again.`}`,
+        ];
+      };
+
+      if (cleanedTopic.length > 0) {
+        const variants = buildVariants();
+        return this.pickVariant(variants, `${input}|${prev}|${intent}`);
       }
       // No usable topic + we still have a prev anchor → just offer to continue.
       if (prevTopic) {
-        return `I lost the thread on what you're asking. We were on **${prevTopic}** — want me to keep going there, or do you want to switch topics? Either way, one more sentence will help me give you a real answer.`;
+        const continuations = [
+          `I lost the thread there. We were on **${prevTopic}** — keep going, or pivot?`,
+          `Hard for me to read what you're asking. We had **${prevTopic}** open — same direction, or somewhere new?`,
+          `Not sure what you're after. We were exploring **${prevTopic}**. One more sentence and I'll have it.`,
+        ];
+        return this.pickVariant(continuations, `${input}|${prevTopic}`);
       }
       // Otherwise fall through to the no-history path below.
     }
