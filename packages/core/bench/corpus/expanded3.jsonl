@@ -1,0 +1,52 @@
+{"id":"law-001","category":"law","q":"what is the rule of law?","mustMatch":["equal|accountab|govern"]}
+{"id":"law-002","category":"law","q":"explain habeas corpus","mustMatch":["detention|unlaw|court|judge"]}
+{"id":"law-003","category":"law","q":"what is common law?","mustMatch":["precedent|England|case|judge"]}
+{"id":"law-004","category":"law","q":"what is the Geneva Convention?","mustMatch":["war|prisoner|wounded|civilian"]}
+{"id":"law-005","category":"law","q":"what are human rights?","mustMatch":["Universal Declaration|1948|inherent|UN"]}
+{"id":"med-001","category":"medicine","q":"what is diabetes?","mustMatch":["insulin|blood sugar|glucose|pancreas"]}
+{"id":"med-002","category":"medicine","q":"what causes cancer?","mustMatch":["mutation|cell|tumor|tumour|DNA"]}
+{"id":"med-003","category":"medicine","q":"what is a vaccine?","mustMatch":["immune|antigen|antibod|pathogen"]}
+{"id":"med-004","category":"medicine","q":"what is antibiotic resistance?","mustMatch":["bacteria|resistant|antibiotic|evol"]}
+{"id":"med-005","category":"medicine","q":"how does the human heart work?","mustMatch":["chamber|atri|ventricle|blood"]}
+{"id":"bio-001","category":"biology","q":"what is DNA?","mustMatch":["double helix|nucleotide|genetic|Watson"]}
+{"id":"bio-002","category":"biology","q":"what is photosynthesis?","mustMatch":["chlorophyll|glucose|sunlight|CO2|carbon dioxide"]}
+{"id":"bio-003","category":"biology","q":"what is evolution?","mustMatch":["natural selection|Darwin|species|adapt"]}
+{"id":"bio-004","category":"biology","q":"what is mitosis?","mustMatch":["cell division|chromosome|daughter|nucleus"]}
+{"id":"bio-005","category":"biology","q":"what is a protein?","mustMatch":["amino acid|peptide|chain|fold"]}
+{"id":"phys-001","category":"physics","q":"what is gravity?","mustMatch":["mass|Newton|attract|force"]}
+{"id":"phys-002","category":"physics","q":"what is the speed of light?","mustMatch":["299|metres per second|vacuum|c\\b"]}
+{"id":"phys-003","category":"physics","q":"what is electricity?","mustMatch":["charge|current|electron|voltage"]}
+{"id":"phys-004","category":"physics","q":"what is quantum mechanics?","mustMatch":["Planck|wave|particle|uncertainty"]}
+{"id":"phys-005","category":"physics","q":"explain entropy","mustMatch":["disorder|thermodynamics|second law|S\\b"]}
+{"id":"math-001","category":"math","q":"what is pi?","mustMatch":["circle|circumference|3\\.14|irrational"]}
+{"id":"math-002","category":"math","q":"what is the Pythagorean theorem?","mustMatch":["right triangle|hypotenuse|squared|a\\^2"]}
+{"id":"math-003","category":"math","q":"what is calculus?","mustMatch":["derivative|integral|Newton|Leibniz"]}
+{"id":"math-004","category":"math","q":"what is a prime number?","mustMatch":["divisor|divisible|1 and itself|prime"]}
+{"id":"math-005","category":"math","q":"who invented zero?","mustMatch":["India|Brahmagupta|numeral|zero"]}
+{"id":"geo-001","category":"geography","q":"what is the largest ocean?","mustMatch":["Pacific|largest|km|sq"]}
+{"id":"geo-002","category":"geography","q":"what is Mount Everest?","mustMatch":["Himalayas|8,?848|Nepal|Tibet"]}
+{"id":"geo-003","category":"geography","q":"what is the Sahara?","mustMatch":["desert|Africa|largest|sand"]}
+{"id":"geo-004","category":"geography","q":"what is the Amazon rainforest?","mustMatch":["Brazil|rainforest|river|species"]}
+{"id":"geo-005","category":"geography","q":"what is the Great Barrier Reef?","mustMatch":["coral|Australia|Queensland|reef"]}
+{"id":"hist-009","category":"history","q":"what was the French Revolution?","mustMatch":["1789|Bastille|monarchy|Louis"]}
+{"id":"hist-010","category":"history","q":"what was the Renaissance?","mustMatch":["Italy|Florence|14th|art|rebirth"]}
+{"id":"hist-011","category":"history","q":"what was the Industrial Revolution?","mustMatch":["steam|Britain|18th|factory"]}
+{"id":"hist-012","category":"history","q":"what was the Cold War?","mustMatch":["Soviet|United States|nuclear|1945|1991"]}
+{"id":"hist-013","category":"history","q":"what was World War 1?","mustMatch":["1914|Archduke|Franz Ferdinand|trench"]}
+{"id":"ppl-014","category":"people","q":"who was Albert Einstein?","mustMatch":["relativity|physicist|E.?=.?mc|1905"]}
+{"id":"ppl-015","category":"people","q":"who was Isaac Newton?","mustMatch":["gravity|Principia|calculus|laws of motion"]}
+{"id":"ppl-016","category":"people","q":"who was Marie Curie?","mustMatch":["radioactivity|Nobel|polonium|radium"]}
+{"id":"ppl-017","category":"people","q":"who was William Shakespeare?","mustMatch":["Stratford|playwright|sonnet|Hamlet"]}
+{"id":"ppl-018","category":"people","q":"who was Mahatma Gandhi?","mustMatch":["India|nonviolent|independence|salt"]}
+{"id":"prog-018","category":"programming","q":"what is recursion?","mustMatch":["calls itself|base case|stack|recurs"]}
+{"id":"prog-019","category":"programming","q":"what is a hash table?","mustMatch":["key|value|hash|O\\(1\\)|bucket"]}
+{"id":"prog-020","category":"programming","q":"what is big O notation?","mustMatch":["complexity|algorithm|worst|growth"]}
+{"id":"prog-021","category":"programming","q":"what is git?","mustMatch":["version control|Linus|distributed|commit"]}
+{"id":"prog-022","category":"programming","q":"what is a REST API?","mustMatch":["HTTP|stateless|resource|representational"]}
+{"id":"food-004","category":"food","q":"what is sourdough?","mustMatch":["starter|wild yeast|lactobacillus|fermentation"]}
+{"id":"food-005","category":"food","q":"what is sushi?","mustMatch":["rice|Japan|vinegar|fish"]}
+{"id":"art-004","category":"arts","q":"what is impressionism?","mustMatch":["Monet|light|France|19th"]}
+{"id":"art-005","category":"arts","q":"what is the Sistine Chapel?","mustMatch":["Michelangelo|Vatican|ceiling|fresco"]}
+{"id":"sport-004","category":"sports","q":"how does soccer work?","mustMatch":["11|football|goal|FIFA"]}
+{"id":"sport-005","category":"sports","q":"what is the Super Bowl?","mustMatch":["NFL|championship|February|American football"]}
+{"id":"music-001","category":"music","q":"who was Beethoven?","mustMatch":["composer|symphony|deaf|German"]}
