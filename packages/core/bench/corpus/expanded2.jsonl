@@ -1,0 +1,51 @@
+{"id":"chem-001","category":"chemistry","q":"what is the periodic table?","mustMatch":["element|atomic number|Mendeleev|group|period"]}
+{"id":"chem-002","category":"chemistry","q":"what is an acid?","mustMatch":["proton|H\\+|hydrogen ion|pH"]}
+{"id":"chem-003","category":"chemistry","q":"what is a covalent bond?","mustMatch":["share|electron|molecule"]}
+{"id":"chem-004","category":"chemistry","q":"what is the difference between an atom and a molecule?","mustMatch":["atom|element|bond|two or more"]}
+{"id":"chem-005","category":"chemistry","q":"what is oxidation?","mustMatch":["electron|loss|reduction|redox"]}
+{"id":"astro-001","category":"astronomy","q":"how many planets are in the solar system?","mustMatch":["eight|8\\b|Pluto|dwarf"]}
+{"id":"astro-002","category":"astronomy","q":"what is the Milky Way?","mustMatch":["galaxy|spiral|barred|stars|billion"]}
+{"id":"astro-003","category":"astronomy","q":"what is a supernova?","mustMatch":["explosion|massive|core collapse|star"]}
+{"id":"astro-004","category":"astronomy","q":"what is the Big Bang?","mustMatch":["13.?8\\s*billion|expansion|singularity|cosmic microwave"]}
+{"id":"astro-005","category":"astronomy","q":"what is a neutron star?","mustMatch":["dense|neutron|pulsar|teaspoon"]}
+{"id":"earth-001","category":"earth-science","q":"what causes earthquakes?","mustMatch":["tectonic|plates?|fault|seismic"]}
+{"id":"earth-002","category":"earth-science","q":"what is climate change?","mustMatch":["greenhouse|CO2|carbon dioxide|warming|fossil"]}
+{"id":"earth-003","category":"earth-science","q":"what causes volcanoes?","mustMatch":["magma|tectonic|mantle|subduction"]}
+{"id":"earth-004","category":"earth-science","q":"what is the water cycle?","mustMatch":["evaporation|condensation|precipitation"]}
+{"id":"econ-001","category":"economics","q":"what is GDP?","mustMatch":["gross domestic product|goods and services|economy"]}
+{"id":"econ-002","category":"economics","q":"what is supply and demand?","mustMatch":["price|equilibrium|quantity|market"]}
+{"id":"econ-003","category":"economics","q":"what is a recession?","mustMatch":["GDP|two consecutive|decline|contraction"]}
+{"id":"econ-004","category":"economics","q":"what is capitalism?","mustMatch":["private|means of production|market|profit"]}
+{"id":"econ-005","category":"economics","q":"what is a central bank?","mustMatch":["monetary policy|interest rate|currency|Federal Reserve|ECB"]}
+{"id":"hist-005","category":"history","q":"what was the Cold War?","mustMatch":["Soviet|United States|1947|1991|nuclear"]}
+{"id":"hist-006","category":"history","q":"what was the Industrial Revolution?","mustMatch":["steam|18th|19th|Britain|factory|textile"]}
+{"id":"hist-007","category":"history","q":"who built the pyramids?","mustMatch":["Egyptian|pharaoh|Giza|Khufu|labour"]}
+{"id":"hist-008","category":"history","q":"what was the Silk Road?","mustMatch":["trade|China|Asia|Europe|caravan"]}
+{"id":"ppl-009","category":"people","q":"who was Nelson Mandela?","mustMatch":["South Africa|apartheid|prison|president|ANC"]}
+{"id":"ppl-010","category":"people","q":"who was Mahatma Gandhi?","mustMatch":["India|nonviolence|independence|British|satyagraha"]}
+{"id":"ppl-011","category":"people","q":"who was Martin Luther King Jr?","mustMatch":["civil rights|I Have a Dream|1968|nonviolent"]}
+{"id":"ppl-012","category":"people","q":"who was Winston Churchill?","mustMatch":["British|Prime Minister|World War|1940"]}
+{"id":"ppl-013","category":"people","q":"who was Abraham Lincoln?","mustMatch":["16th|president|civil war|emancipation|1865"]}
+{"id":"prog-012","category":"programming","q":"what is functional programming?","mustMatch":["pure function|immutable|first-class|side effect"]}
+{"id":"prog-013","category":"programming","q":"what is a hash table?","mustMatch":["key|value|hash function|collision|O\\(1\\)"]}
+{"id":"prog-014","category":"programming","q":"what is the difference between SQL and NoSQL?","mustMatch":["relational|schema|document|MongoDB|JSON"]}
+{"id":"prog-015","category":"programming","q":"what is a linked list?","mustMatch":["node|pointer|next|head"]}
+{"id":"prog-016","category":"programming","q":"what is a binary tree?","mustMatch":["node|left|right|child|root"]}
+{"id":"prog-017","category":"programming","q":"what is HTTP?","mustMatch":["hypertext|protocol|request|response|client|server"]}
+{"id":"food-001","category":"food","q":"what is umami?","mustMatch":["fifth taste|glutamate|savory|savoury|Ikeda"]}
+{"id":"food-002","category":"food","q":"how is cheese made?","mustMatch":["milk|curd|whey|rennet|culture"]}
+{"id":"food-003","category":"food","q":"what is fermentation?","mustMatch":["yeast|bacteria|sugar|alcohol|lactic"]}
+{"id":"art-001","category":"arts","q":"who painted The Starry Night?","mustMatch":["Van Gogh|1889|Saint.?R[eé]my|MoMA"]}
+{"id":"art-002","category":"arts","q":"what is the Louvre?","mustMatch":["Paris|museum|Mona Lisa|France|pyramid"]}
+{"id":"art-003","category":"arts","q":"what is Cubism?","mustMatch":["Picasso|Braque|geometric|fragment"]}
+{"id":"sport-001","category":"sports","q":"what is the offside rule in soccer?","mustMatch":["second.?to.?last|defender|forward|nearer"]}
+{"id":"sport-002","category":"sports","q":"how long is a marathon?","mustMatch":["42\\.?195|26\\.?2\\s*mil"]}
+{"id":"sport-003","category":"sports","q":"what is the Tour de France?","mustMatch":["cycling|France|July|yellow jersey|stage"]}
+{"id":"lang-001","category":"language","q":"how many letters are in the English alphabet?","mustMatch":["26\\b|twenty-six"]}
+{"id":"lang-002","category":"language","q":"what is the most spoken language?","mustMatch":["Mandarin|Chinese|English"]}
+{"id":"phil-001","category":"philosophy","q":"what is stoicism?","mustMatch":["virtue|Marcus Aurelius|Epictetus|Seneca|Zeno"]}
+{"id":"phil-002","category":"philosophy","q":"what is the trolley problem?","mustMatch":["five|one|track|utilitarian|Foot"]}
+{"id":"myth-001","category":"mythology","q":"who is Zeus?","mustMatch":["Greek|Olympus|sky|thunder|Cronus"]}
+{"id":"myth-002","category":"mythology","q":"who is Thor?","mustMatch":["Norse|hammer|Mj[oö]lnir|thunder|Odin"]}
+{"id":"tech-001","category":"tech","q":"what is blockchain?","mustMatch":["distributed|ledger|hash|block|consensus"]}
+{"id":"tech-002","category":"tech","q":"what is machine learning?","mustMatch":["data|train|model|pattern|algorithm"]}
