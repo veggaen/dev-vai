@@ -1,0 +1,51 @@
+{"id":"rel-001","category":"religion","q":"what is Christianity?","mustMatch":["Jesus|Christ|God|salvation"]}
+{"id":"rel-002","category":"religion","q":"what is Islam?","mustMatch":["Muhammad|Quran|Allah|Mecca"]}
+{"id":"rel-003","category":"religion","q":"what is Buddhism?","mustMatch":["Buddha|enlightenment|Four Noble|nirvana"]}
+{"id":"rel-004","category":"religion","q":"what is Judaism?","mustMatch":["Torah|Hebrew|Abraham|Jewish"]}
+{"id":"rel-005","category":"religion","q":"what is Hinduism?","mustMatch":["dharma|karma|Vedas|India"]}
+{"id":"phil-002","category":"philosophy","q":"what is utilitarianism?","mustMatch":["greatest happiness|Bentham|Mill|consequence"]}
+{"id":"phil-003","category":"philosophy","q":"who was Socrates?","mustMatch":["Athens|method|hemlock|Plato"]}
+{"id":"phil-004","category":"philosophy","q":"what is existentialism?","mustMatch":["Sartre|existence|Kierkegaard|absurd"]}
+{"id":"phil-005","category":"philosophy","q":"what is the trolley problem?","mustMatch":["trolley|five|one|ethics"]}
+{"id":"cs-001","category":"compsci","q":"what is machine learning?","mustMatch":["data|model|train|algorithm"]}
+{"id":"cs-002","category":"compsci","q":"what is a neural network?","mustMatch":["neuron|layer|weight|backpropagation"]}
+{"id":"cs-003","category":"compsci","q":"what is encryption?","mustMatch":["key|cipher|plaintext|RSA"]}
+{"id":"cs-004","category":"compsci","q":"what is the cloud?","mustMatch":["server|internet|AWS|remote"]}
+{"id":"cs-005","category":"compsci","q":"what is an operating system?","mustMatch":["kernel|hardware|process|Linux"]}
+{"id":"fin-001","category":"finance","q":"what is compound interest?","mustMatch":["interest|principal|exponential|Einstein"]}
+{"id":"fin-002","category":"finance","q":"what is the stock market?","mustMatch":["share|exchange|company|equity"]}
+{"id":"fin-003","category":"finance","q":"what is inflation?","mustMatch":["price|purchasing power|money|CPI"]}
+{"id":"fin-004","category":"finance","q":"what is a bond?","mustMatch":["debt|coupon|maturity|interest"]}
+{"id":"fin-005","category":"finance","q":"what is bitcoin?","mustMatch":["Nakamoto|blockchain|mining|cryptocurrency"]}
+{"id":"lang-002","category":"language","q":"what is the most spoken language?","mustMatch":["Mandarin|Chinese|English|million"]}
+{"id":"lang-003","category":"language","q":"how many languages exist?","mustMatch":["7,?000|7,?100|languages|world"]}
+{"id":"lang-004","category":"language","q":"what is Latin?","mustMatch":["Roman|dead|romance|Italy"]}
+{"id":"lang-005","category":"language","q":"what is grammar?","mustMatch":["rules|syntax|word|structure"]}
+{"id":"music-002","category":"music","q":"who was Mozart?","mustMatch":["Wolfgang|Salzburg|composer|Austrian"]}
+{"id":"music-003","category":"music","q":"what is jazz?","mustMatch":["jazz|improvisation|New Orleans|African"]}
+{"id":"music-004","category":"music","q":"who were the Beatles?","mustMatch":["Liverpool|Lennon|McCartney|British"]}
+{"id":"music-005","category":"music","q":"what is an opera?","mustMatch":["sung|drama|aria|Italian"]}
+{"id":"film-001","category":"film","q":"who is Steven Spielberg?","mustMatch":["director|Jaws|Schindler|American"]}
+{"id":"film-002","category":"film","q":"what is the Oscars?","mustMatch":["Academy|Awards|Hollywood|film"]}
+{"id":"film-003","category":"film","q":"who was Alfred Hitchcock?","mustMatch":["suspense|British|Psycho|director"]}
+{"id":"lit-001","category":"literature","q":"who wrote 1984?","mustMatch":["Orwell|George|dystopia|Big Brother"]}
+{"id":"lit-002","category":"literature","q":"what is the Iliad?","mustMatch":["Homer|Trojan|Achilles|Greek"]}
+{"id":"lit-003","category":"literature","q":"who wrote Don Quixote?","mustMatch":["Cervantes|Spanish|knight|Sancho"]}
+{"id":"lit-004","category":"literature","q":"who was Jane Austen?","mustMatch":["Pride|Prejudice|English|novelist"]}
+{"id":"lit-005","category":"literature","q":"what is a haiku?","mustMatch":["Japanese|5-7-5|syllable|three"]}
+{"id":"tech-002","category":"tech","q":"what is artificial intelligence?","mustMatch":["intelligence|machine|learning|reasoning"]}
+{"id":"tech-003","category":"tech","q":"what is 5G?","mustMatch":["wireless|cellular|fifth|speed"]}
+{"id":"tech-004","category":"tech","q":"what is the internet?","mustMatch":["network|protocol|TCP|global"]}
+{"id":"tech-005","category":"tech","q":"who invented the World Wide Web?","mustMatch":["Berners-Lee|Tim|CERN|1989"]}
+{"id":"sport-006","category":"sports","q":"what are the Olympics?","mustMatch":["athletes|games|Greece|every four"]}
+{"id":"sport-007","category":"sports","q":"what is basketball?","mustMatch":["hoop|Naismith|five|NBA"]}
+{"id":"sport-008","category":"sports","q":"how does chess work?","mustMatch":["64|squares|king|checkmate"]}
+{"id":"food-006","category":"food","q":"what is chocolate?","mustMatch":["cacao|cocoa|Theobroma|bean"]}
+{"id":"food-007","category":"food","q":"what is coffee?","mustMatch":["bean|caffeine|roast|Coffea"]}
+{"id":"food-008","category":"food","q":"what is pasta?","mustMatch":["wheat|Italian|durum|flour"]}
+{"id":"food-009","category":"food","q":"what is bread?","mustMatch":["flour|water|yeast|baked"]}
+{"id":"travel-001","category":"travel","q":"what is the Great Wall of China?","mustMatch":["wall|China|Ming|defensive"]}
+{"id":"travel-002","category":"travel","q":"what is the Taj Mahal?","mustMatch":["Agra|Shah Jahan|marble|mausoleum"]}
+{"id":"travel-003","category":"travel","q":"what is the Eiffel Tower?","mustMatch":["Paris|Eiffel|1889|iron"]}
+{"id":"astro-006","category":"astronomy","q":"what is a black hole?","mustMatch":["gravity|event horizon|singularity|escape"]}
+{"id":"astro-007","category":"astronomy","q":"what is the sun made of?","mustMatch":["hydrogen|helium|plasma|fusion"]}
