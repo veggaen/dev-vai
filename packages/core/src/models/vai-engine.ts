@@ -3047,11 +3047,13 @@ export class VaiEngine implements ModelAdapter {
 
     // Strategy -0.9: Conversational follow-up shape gate — short prompts like
     // "and the second?", "no the second message", "what about the third?"
-    // are *continuations* that depend on prior context, not standalone
-    // knowledge queries. If the harness/UI doesn't actually carry that
-    // context, we must NOT route them through retrieval — they will match
-    // unrelated chunks on weak words ("second", "message") and produce
-    // gibberish like the symbol-weight rant. Refuse honestly instead.
+    // are *continuations* that depend on prior context. Vai does not have a
+    // reliable way to recall a specific prior list item from arbitrary
+    // history, so any retrieval/web path triggered by them lands on weak
+    // overlap and produces gibberish (the symbol-weight rant on May 14, 2026
+    // — even WITH prior assistant turns in the conversation, the
+    // tryRoutedResearch path returned a Wikipedia Numeral_system snippet).
+    // The honest move is to always ask the user to disambiguate.
     {
       const trimmedFollowUp = input.trim();
       const wcFollowUp = trimmedFollowUp.split(/\s+/).length;
@@ -3060,14 +3062,11 @@ export class VaiEngine implements ModelAdapter {
         && /^(?:and|or|but|no|yes|so|then|the|what\s+about|how\s+about|tell\s+me|give\s+me)\b/i.test(trimmedFollowUp)
         && /\b(?:first|second|third|fourth|fifth|last|next|previous|other|one|message|reply|answer|response|point|item|option|choice|version)\b/i.test(trimmedFollowUp)
       ) {
-        const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant');
-        if (!lastAssistant || lastAssistant.content.trim().length === 0) {
-          return this.tracked(
-            'conversational-followup-no-context',
-            "I lost the thread there — could you say which message or item you mean? I don't have a previous answer to follow up on yet.",
-            input,
-          );
-        }
+        return this.tracked(
+          'conversational-followup-disambiguate',
+          "I'm not sure which one you mean — could you say it back in your own words? (For example: \"the second item from the list\" or quote the part you want me to expand on.)",
+          input,
+        );
       }
     }
 
