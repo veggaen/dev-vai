@@ -3045,6 +3045,32 @@ export class VaiEngine implements ModelAdapter {
       if (debateResult) return this.tracked('debate-mode', debateResult, input);
     }
 
+    // Strategy -0.9: Conversational follow-up shape gate — short prompts like
+    // "and the second?", "no the second message", "what about the third?"
+    // are *continuations* that depend on prior context, not standalone
+    // knowledge queries. If the harness/UI doesn't actually carry that
+    // context, we must NOT route them through retrieval — they will match
+    // unrelated chunks on weak words ("second", "message") and produce
+    // gibberish like the symbol-weight rant. Refuse honestly instead.
+    {
+      const trimmedFollowUp = input.trim();
+      const wcFollowUp = trimmedFollowUp.split(/\s+/).length;
+      if (
+        wcFollowUp <= 6
+        && /^(?:and|or|but|no|yes|so|then|the|what\s+about|how\s+about|tell\s+me|give\s+me)\b/i.test(trimmedFollowUp)
+        && /\b(?:first|second|third|fourth|fifth|last|next|previous|other|one|message|reply|answer|response|point|item|option|choice|version)\b/i.test(trimmedFollowUp)
+      ) {
+        const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant');
+        if (!lastAssistant || lastAssistant.content.trim().length === 0) {
+          return this.tracked(
+            'conversational-followup-no-context',
+            "I lost the thread there — could you say which message or item you mean? I don't have a previous answer to follow up on yet.",
+            input,
+          );
+        }
+      }
+    }
+
     // Strategy -1: Empty or gibberish input — catch before pipeline
     if (lower.length === 0) {
       return this.tracked('empty', 'It looks like you sent an empty message. What would you like to know? Try asking about Docker, React, TypeScript, Git, or any topic I\'ve learned about.', input);
@@ -38999,6 +39025,22 @@ function topKLargest(nums, k) {
    * Filters junk content, requires meaningful relevance, combines quality sources only.
    */
   private synthesizeFromKnowledge(input: string, _history: readonly Message[]): string | null {
+    // Conversational follow-up gate — mirrors buildGroundedBestEffortAnswer.
+    // Short context-dependent inputs ("and the second?", "no the second
+    // message", "tell me more") must not be matched against the knowledge
+    // corpus; they need the prior conversation context, not retrieval.
+    {
+      const trimmed = input.trim();
+      const wc = trimmed.split(/\s+/).length;
+      if (
+        wc <= 6
+        && /^(?:and|or|but|no|yes|so|then|the|what\s+about|how\s+about|tell\s+me|give\s+me)\b/i.test(trimmed)
+        && /\b(?:first|second|third|fourth|fifth|last|next|previous|other|one|message|reply|answer|response|point|item|option|choice|version)\b/i.test(trimmed)
+      ) {
+        return null;
+      }
+    }
+
     const retrieved = this.cachedRetrieveRelevant(input, VaiEngine.SYNTHESIS_RETRIEVE_COUNT);
 
     // Filter out junk content before scoring, then sanitize each snippet so
@@ -39159,6 +39201,25 @@ function topKLargest(nums, k) {
     input: string,
     retrieved: Array<{ text: string; source: string; score: number }>,
   ): string | null {
+    // Conversational follow-up gate — short, context-dependent inputs like
+    // "and the second?", "no the second message", "what about the third?",
+    // "tell me more" must never be answered by retrieval synthesis. They
+    // are continuations of an earlier turn; matching them against the
+    // knowledge corpus produces nonsense (the "weight of the second
+    // symbol = 35" misroute on May 14, 2026). Let the fallback path
+    // build a clarifying response instead.
+    {
+      const trimmed = input.trim();
+      const wc = trimmed.split(/\s+/).length;
+      if (
+        wc <= 6
+        && /^(?:and|or|but|no|yes|so|then|the|what\s+about|how\s+about|tell\s+me|give\s+me)\b/i.test(trimmed)
+        && /\b(?:first|second|third|fourth|fifth|last|next|previous|other|one|message|reply|answer|response|point|item|option|choice|version)\b/i.test(trimmed)
+      ) {
+        return null;
+      }
+    }
+
     const clean = retrieved
       .filter(r => !KnowledgeStore.isJunkContent(r.text))
       .map((r) => ({ ...r, text: this.sanitizeRetrievedSnippet(r.text) }))
@@ -39196,6 +39257,50 @@ function topKLargest(nums, k) {
     const docCoverage = queryWords.length > 0 ? topDocHits / queryWords.length : 0;
     if (queryWords.length >= 3 && docCoverage < 0.3) return null;
     if (queryWords.length >= 2 && topDocHits === 0) return null;
+
+    // Anchor-token gate — for short, focused queries the *longest* content
+    // word is almost always the entity the user asked about ("apple" in
+    // "who was founder of apple", "legends" in "skills for league of
+    // legends", "second" in "and the second?"). If the top retrieved
+    // document does not contain that anchor as a whole word, refuse to
+    // answer rather than synthesise from an unrelated article. This is
+    // the gate that closes the recurring "Avro / Talon / symbol-weight
+    // gibberish" misroute we saw end-to-end on May 14, 2026.
+    if (queryWords.length > 0 && queryWords.length <= 8) {
+      const anchor = [...queryWords].sort((a, b) => b.length - a.length)[0];
+      if (anchor && anchor.length >= 4) {
+        const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`\\b${escaped}\\b`, 'i');
+        if (!re.test(clean[0].text)) return null;
+      }
+    }
+
+    // Rarest-word gate — mirrors synthesizeFromKnowledge. The rarest query
+    // word (lowest doc count across the knowledge corpus) is the most
+    // discriminating signal of what the user is actually asking about. If
+    // the top retrieved document doesn't contain it, the doc almost
+    // certainly isn't about the user's topic. This catches longer queries
+    // (>8 words) that bypass the anchor-token gate above. For example
+    // "what are the top 10 most important skills needed to know of when
+    // playing league of legends?" — anchor "important" matches a YouTube
+    // "learn to code" transcript, but the rarest word "legends" doesn't,
+    // so this gate refuses to dump the unrelated transcript.
+    if (queryWords.length >= 2) {
+      let rarest: string | null = null;
+      let rarestCount = Infinity;
+      for (const word of queryWords) {
+        const count = this.knowledge.getWordDocCount(word);
+        if (count < rarestCount) {
+          rarestCount = count;
+          rarest = word;
+        }
+      }
+      if (rarest && rarest.length >= 3) {
+        const escaped = rarest.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`\\b${escaped}\\b`, 'i');
+        if (!re.test(clean[0].text)) return null;
+      }
+    }
 
     const sentencePool = clean.flatMap(match => {
       const sentences = match.text.split(/(?<=[.!?])\s+/)
@@ -41266,7 +41371,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
     //  - "isn't it bill that made windows", "wasn't it linus that made linux"
     //  - "didn't bill gates make windows", "did linus torvalds invent linux"
     // We deliberately do NOT match bare declarative "X made Y" — too noisy.
-    const triggers = /\b(?:who\s+(?:invented|created|made|discovered|developed|founded|designed|built)|inventor\s+of|creator\s+of|who\s+was\s+the\s+(?:name\s+of\s+the\s+)?person\s+(?:that|who)\s+(?:invented|created|made|discovered|developed|designed|built)|(?:is(?:e?n[\u2019']?t|nt)?|was(?:n[\u2019']?t|nt)?|did(?:n[\u2019']?t|nt)?|isent|wasent|aint)\s+(?:it\s+)?[a-z][a-z .'\-]{1,40}?\s+(?:that\s+)?(?:invent|create|made?|make|built?|build|design)(?:ed)?)\b/i;
+    const triggers = /\b(?:who\s+(?:invented|created|made|discovered|developed|founded|designed|built|founders?\s+of|started)|who\s+was\s+(?:the\s+)?founder\s+of|founders?\s+of|inventor\s+of|creator\s+of|who\s+was\s+the\s+(?:name\s+of\s+the\s+)?person\s+(?:that|who)\s+(?:invented|created|made|discovered|developed|designed|built|founded|started)|(?:is(?:e?n[\u2019']?t|nt)?|was(?:n[\u2019']?t|nt)?|did(?:n[\u2019']?t|nt)?|isent|wasent|aint)\s+(?:it\s+)?[a-z][a-z .'\-]{1,40}?\s+(?:that\s+)?(?:invent|create|made?|make|built?|build|design|found(?:ed)?|start(?:ed)?))\b/i;
     if (!triggers.test(lower)) return null;
 
     type Entry = { keys: RegExp; topic: string; answer: string };
@@ -41355,6 +41460,11 @@ Want me to customize it with your actual links, change the color scheme, add ani
         keys: /\b(?:tesla(?:\s*(?:cars?|motors?|inc|company))?|model\s*(?:s|3|x|y))\b/i,
         topic: 'Tesla',
         answer: '**Tesla, Inc.** was founded as Tesla Motors on **1 July 2003** by **Martin Eberhard** and **Marc Tarpenning**. **Elon Musk** joined in February 2004 as chairman and lead investor of the Series A and later became CEO; **JB Straubel** (long-time CTO and battery architect) and **Ian Wright** are also typically listed among the co-founders following a 2009 settlement. Eberhard and Tarpenning built the original company and shipped the first Roadster prototype; Musk\'s capital and product direction took it to the Model S, Model 3 and the modern Tesla.',
+      },
+      {
+        keys: /\b(?:apple(?:\s+(?:inc|computer|computers))?)\b/i,
+        topic: 'Apple',
+        answer: '**Apple** was founded on **1 April 1976** by **Steve Jobs**, **Steve Wozniak** and **Ronald Wayne** in Los Altos, California. Wozniak designed the original Apple I and Apple II hardware; Jobs drove product, marketing and the company; Wayne sold his 10% stake back two weeks later for $800. The company was originally **Apple Computer, Inc.** and was renamed **Apple Inc.** on 9 January 2007 when it shipped the iPhone. Tim Cook has been CEO since 24 August 2011.',
       },
       {
         keys: /\b(?:facebook|the\s+facebook)\b/i,
