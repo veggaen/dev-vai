@@ -41370,7 +41370,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
     //  - "isn't it bill that made windows", "wasn't it linus that made linux"
     //  - "didn't bill gates make windows", "did linus torvalds invent linux"
     // We deliberately do NOT match bare declarative "X made Y" — too noisy.
-    const triggers = /\b(?:who\s+(?:invented|created|made|discovered|developed|founded|designed|built|founders?\s+of|started)|who\s+was\s+(?:the\s+)?founder\s+of|founders?\s+of|inventor\s+of|creator\s+of|who\s+was\s+the\s+(?:name\s+of\s+the\s+)?person\s+(?:that|who)\s+(?:invented|created|made|discovered|developed|designed|built|founded|started)|(?:is(?:e?n[\u2019']?t|nt)?|was(?:n[\u2019']?t|nt)?|did(?:n[\u2019']?t|nt)?|isent|wasent|aint)\s+(?:it\s+)?[a-z][a-z .'\-]{1,40}?\s+(?:that\s+)?(?:invent|create|made?|make|built?|build|design|found(?:ed)?|start(?:ed)?))\b/i;
+    const triggers = /\b(?:who\s+(?:invented|created|made|discovered|developed|founded|designed|built|founders?\s+of|started)|who\s+was\s+(?:the\s+)?founder\s+of|founders?\s+of|inventor\s+of|creator\s+of|who\s+was\s+the\s+(?:name\s+of\s+the\s+)?person\s+(?:that|who)\s+(?:invented|created|made|discovered|developed|designed|built|founded|started)|(?:is(?:e?n[\u2019']?t|nt)?|was(?:n[\u2019']?t|nt)?|did(?:n[\u2019']?t|nt)?|isent|wasent|aint)\s+(?:it\s+)?[a-z][a-z .'\-]{1,40}?\s+(?:that\s+)?(?:invent|create|made?|make|built?|build|design|found(?:ed)?|start(?:ed)?)|(?:was|were|is|are)\s+(?:founded|created|made|invented|started|built|designed|developed)\s+by\s+(?:who|whom|what\s+(?:person|people)))\b/i;
     if (!triggers.test(lower)) return null;
 
     type Entry = { keys: RegExp; topic: string; answer: string };
