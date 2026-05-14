@@ -11,6 +11,8 @@
  * specifically-crafted entries earlier in the file (Rounds 13–20).
  */
 
+import { bulkFactsLookup2Compiled } from './curated-facts-bulk-2';
+
 interface CountryFact {
   /** lower-case names/aliases to match (e.g. ['france', 'french republic']) */
   names: string[];
@@ -439,5 +441,6 @@ export function bulkFactsLookup(lower: string): string | null {
       return entry.render();
     }
   }
-  return null;
+  // Round-22 extensions (companion module) — gated by the same checks above.
+  return bulkFactsLookup2Compiled(lower);
 }

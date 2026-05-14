@@ -1,0 +1,58 @@
+{"id":"country-r22-001","category":"geography","q":"tell me about Greece","mustMatch":["Athens|Greek|Europe"]}
+{"id":"country-r22-002","category":"geography","q":"what is Portugal?","mustMatch":["Lisbon|Portuguese|Europe"]}
+{"id":"country-r22-003","category":"geography","q":"tell me about Switzerland","mustMatch":["Bern|Alps|neutral"]}
+{"id":"country-r22-004","category":"geography","q":"what is Belgium?","mustMatch":["Brussels|Dutch|French"]}
+{"id":"country-r22-005","category":"geography","q":"tell me about Austria","mustMatch":["Vienna|German|Alps"]}
+{"id":"country-r22-006","category":"geography","q":"what is Ireland?","mustMatch":["Dublin|Irish|English"]}
+{"id":"country-r22-007","category":"geography","q":"tell me about Denmark","mustMatch":["Copenhagen|Danish|Scandinavia"]}
+{"id":"country-r22-008","category":"geography","q":"what is Finland?","mustMatch":["Helsinki|Finnish|Nordic"]}
+{"id":"country-r22-009","category":"geography","q":"tell me about Czechia","mustMatch":["Prague|Czech|Europe"]}
+{"id":"country-r22-010","category":"geography","q":"what is Ukraine?","mustMatch":["Kyiv|Ukrainian|Europe"]}
+{"id":"element-r22-001","category":"science","q":"tell me about sodium","mustMatch":["Na|alkali|salt"]}
+{"id":"element-r22-002","category":"science","q":"what is sulfur?","mustMatch":["S|brimstone|sulfuric"]}
+{"id":"element-r22-003","category":"science","q":"tell me about calcium","mustMatch":["Ca|bones|alkaline"]}
+{"id":"element-r22-004","category":"science","q":"what is aluminium?","mustMatch":["Al|abundant|metal"]}
+{"id":"element-r22-005","category":"science","q":"tell me about lead element","mustMatch":["Pb|toxic|battery|batteries"]}
+{"id":"element-r22-006","category":"science","q":"what is the mercury element?","mustMatch":["Hg|liquid|quicksilver"]}
+{"id":"element-r22-007","category":"science","q":"tell me about platinum","mustMatch":["Pt|precious|catalytic"]}
+{"id":"element-r22-008","category":"science","q":"what is lithium?","mustMatch":["Li|battery|batteries|lightest"]}
+{"id":"element-r22-009","category":"science","q":"tell me about neon","mustMatch":["Ne|noble|sign"]}
+{"id":"element-r22-010","category":"science","q":"what is chlorine?","mustMatch":["Cl|halogen|disinfect"]}
+{"id":"animal-r22-001","category":"biology","q":"tell me about wolves","mustMatch":["Canis|pack|Canidae"]}
+{"id":"animal-r22-002","category":"biology","q":"what is a dolphin?","mustMatch":["Tursiops|mammal|Delphinidae"]}
+{"id":"animal-r22-003","category":"biology","q":"tell me about crocodiles","mustMatch":["Crocodylidae|reptile|predator"]}
+{"id":"animal-r22-004","category":"biology","q":"what is a komodo dragon?","mustMatch":["Varanus|lizard|Indonesian"]}
+{"id":"animal-r22-005","category":"biology","q":"tell me about gorillas","mustMatch":["Hominidae|primate|silverback"]}
+{"id":"animal-r22-006","category":"biology","q":"what is a kangaroo?","mustMatch":["Macropus|marsupial|Australia"]}
+{"id":"animal-r22-007","category":"biology","q":"tell me about hippopotamus","mustMatch":["Hippopotamus|mammal|Africa"]}
+{"id":"animal-r22-008","category":"biology","q":"what is a bald eagle?","mustMatch":["Haliaeetus|North America|United States"]}
+{"id":"animal-r22-009","category":"biology","q":"tell me about honey bees","mustMatch":["Apis|pollinat|colony|colonies"]}
+{"id":"animal-r22-010","category":"biology","q":"what is an anaconda?","mustMatch":["Eunectes|snake|South America"]}
+{"id":"proglang-r22-001","category":"programming","q":"tell me about PHP","mustMatch":["Lerdorf|1995|web"]}
+{"id":"proglang-r22-002","category":"programming","q":"what is Kotlin?","mustMatch":["JetBrains|JVM|Android"]}
+{"id":"proglang-r22-003","category":"programming","q":"tell me about Scala","mustMatch":["Odersky|JVM|Spark"]}
+{"id":"proglang-r22-004","category":"programming","q":"what is Haskell?","mustMatch":["functional|lazy|1990"]}
+{"id":"proglang-r22-005","category":"programming","q":"tell me about Lua","mustMatch":["Ierusalimschy|1993|embed"]}
+{"id":"proglang-r22-006","category":"programming","q":"what is Perl?","mustMatch":["Larry Wall|1987|text"]}
+{"id":"proglang-r22-007","category":"programming","q":"tell me about R language","mustMatch":["Ihaka|statistic|1993"]}
+{"id":"proglang-r22-008","category":"programming","q":"what is Dart language?","mustMatch":["Google|Flutter|2011"]}
+{"id":"proglang-r22-009","category":"programming","q":"tell me about Elixir language","mustMatch":["Valim|BEAM|Erlang"]}
+{"id":"proglang-r22-010","category":"programming","q":"what is Clojure?","mustMatch":["Hickey|Lisp|JVM"]}
+{"id":"planet-r22-001","category":"astronomy","q":"tell me about planet Earth","mustMatch":["third|Moon|life"]}
+{"id":"planet-r22-002","category":"astronomy","q":"what is planet Uranus?","mustMatch":["seventh|Herschel|1781"]}
+{"id":"city-r22-001","category":"geography","q":"tell me about Berlin","mustMatch":["Germany|Spree|Wall"]}
+{"id":"city-r22-002","category":"geography","q":"what is Rome?","mustMatch":["Italy|Tiber|Roman"]}
+{"id":"city-r22-003","category":"geography","q":"tell me about Sydney","mustMatch":["Australia|Harbour|Opera"]}
+{"id":"city-r22-004","category":"geography","q":"what is Mumbai?","mustMatch":["India|Bombay|Bollywood"]}
+{"id":"city-r22-005","category":"geography","q":"tell me about Beijing","mustMatch":["China|Forbidden|Tiananmen"]}
+{"id":"city-r22-006","category":"geography","q":"what is Dubai?","mustMatch":["Emirates|Burj|Gulf"]}
+{"id":"state-r22-001","category":"geography","q":"tell me about California","mustMatch":["Sacramento|Los Angeles|Hollywood|Silicon"]}
+{"id":"state-r22-002","category":"geography","q":"what is Texas?","mustMatch":["Austin|Houston|Republic"]}
+{"id":"state-r22-003","category":"geography","q":"tell me about Florida","mustMatch":["Tallahassee|Disney|Cape Canaveral"]}
+{"id":"state-r22-004","category":"geography","q":"what is New York state?","mustMatch":["Albany|New York City|Hudson"]}
+{"id":"state-r22-005","category":"geography","q":"tell me about Alaska","mustMatch":["Juneau|Anchorage|Russian"]}
+{"id":"state-r22-006","category":"geography","q":"what is Hawaii?","mustMatch":["Honolulu|Pacific|island"]}
+{"id":"state-r22-007","category":"geography","q":"tell me about Illinois","mustMatch":["Springfield|Chicago|Midwest"]}
+{"id":"state-r22-008","category":"geography","q":"what is Pennsylvania?","mustMatch":["Harrisburg|Philadelphia|Constitution"]}
+{"id":"state-r22-009","category":"geography","q":"tell me about Ohio","mustMatch":["Columbus|Cleveland|Midwest"]}
+{"id":"state-r22-010","category":"geography","q":"what is Washington state?","mustMatch":["Olympia|Seattle|Pacific"]}
