@@ -1,0 +1,110 @@
+{"id":"p9-h01","category":"people","q":"who is Albert Einstein","mustMatch":["1879|relativity|physics"]}
+{"id":"p9-h02","category":"people","q":"tell me about Einstein","mustMatch":["1879|relativity|physics"]}
+{"id":"p9-h03","category":"people","q":"describe Einstein","mustMatch":["1879|relativity|physics"]}
+{"id":"p9-h04","category":"people","q":"who was Isaac Newton","mustMatch":["Principia|gravitation|calculus"]}
+{"id":"p9-h05","category":"people","q":"explain Newton","mustMatch":["Principia|gravitation|calculus"]}
+{"id":"p9-h06","category":"people","q":"facts about Charles Darwin","mustMatch":["Origin|Beagle|evolution"]}
+{"id":"p9-h07","category":"people","q":"tell me more about Darwin","mustMatch":["Origin|Beagle|evolution"]}
+{"id":"p9-h08","category":"people","q":"information about Nikola Tesla","mustMatch":["AC|alternating|induction"]}
+{"id":"p9-h09","category":"people","q":"who is Thomas Edison","mustMatch":["phonograph|incandescent|Menlo"]}
+{"id":"p9-h10","category":"people","q":"describe Leonardo da Vinci","mustMatch":["Mona Lisa|Renaissance|polymath"]}
+{"id":"p9-h11","category":"people","q":"tell me about da Vinci","mustMatch":["Mona Lisa|Renaissance|polymath"]}
+{"id":"p9-h12","category":"people","q":"info on William Shakespeare","mustMatch":["Hamlet|Globe|playwright|sonnets"]}
+{"id":"p9-h13","category":"people","q":"explain Shakespeare","mustMatch":["Hamlet|Globe|playwright|sonnets"]}
+{"id":"p9-h14","category":"people","q":"facts about Abraham Lincoln","mustMatch":["Civil War|Gettysburg|16th"]}
+{"id":"p9-h15","category":"people","q":"tell me more about Mahatma Gandhi","mustMatch":["satyagraha|nonviolent|India"]}
+{"id":"p9-h16","category":"people","q":"who is Gandhi","mustMatch":["satyagraha|nonviolent|India"]}
+{"id":"p9-h17","category":"people","q":"info about Martin Luther King Jr","mustMatch":["civil-rights|Dream|Birmingham"]}
+{"id":"p9-h18","category":"people","q":"describe MLK","mustMatch":["civil-rights|Dream|Birmingham"]}
+{"id":"p9-h19","category":"people","q":"who was Marie Curie","mustMatch":["radioactiv|polonium|radium|Nobel"]}
+{"id":"p9-h20","category":"people","q":"give me facts about Galileo","mustMatch":["telescop|Jupiter|heliocent|Inquisition"]}
+{"id":"p9-r01","category":"religion","q":"what is Christianity","mustMatch":["Jesus|Bible|Catholic|Protestant"]}
+{"id":"p9-r02","category":"religion","q":"tell me about Christianity","mustMatch":["Jesus|Bible|Catholic|Protestant"]}
+{"id":"p9-r03","category":"religion","q":"describe Islam","mustMatch":["Muhammad|Qur|Mecca|Five Pillars"]}
+{"id":"p9-r04","category":"religion","q":"explain Islam","mustMatch":["Muhammad|Qur|Mecca|Five Pillars"]}
+{"id":"p9-r05","category":"religion","q":"info on Hinduism","mustMatch":["Vedas|dharma|karma|India"]}
+{"id":"p9-r06","category":"religion","q":"facts about Hinduism","mustMatch":["Vedas|dharma|karma|India"]}
+{"id":"p9-r07","category":"religion","q":"what is Buddhism","mustMatch":["Buddha|Noble|nirvana|Eightfold"]}
+{"id":"p9-r08","category":"religion","q":"give me the rundown on Buddhism","mustMatch":["Buddha|Noble|nirvana|Eightfold"]}
+{"id":"p9-r09","category":"religion","q":"tell me more about Judaism","mustMatch":["Torah|Israel|Hebrew|Abraham"]}
+{"id":"p9-r10","category":"religion","q":"info about Sikhism","mustMatch":["Nanak|Punjab|Khalsa|Granth"]}
+{"id":"p9-r11","category":"religion","q":"describe Taoism","mustMatch":["Tao|Laozi|wu wei|yin"]}
+{"id":"p9-r12","category":"religion","q":"explain Shinto","mustMatch":["kami|Japan|shrine"]}
+{"id":"p9-c01","category":"geography","q":"what is South Africa","mustMatch":["Pretoria|Cape Town|apartheid|Mandela"]}
+{"id":"p9-c02","category":"geography","q":"tell me about Saudi Arabia","mustMatch":["Riyadh|Mecca|oil"]}
+{"id":"p9-c03","category":"geography","q":"describe Nigeria","mustMatch":["Abuja|Lagos|African|Nollywood"]}
+{"id":"p9-c04","category":"geography","q":"info on Vietnam","mustMatch":["Hanoi|South-East Asia|Doi Moi|Ho Chi Minh"]}
+{"id":"p9-c05","category":"geography","q":"facts about Thailand","mustMatch":["Bangkok|Buddhism|never colonised|colonized"]}
+{"id":"p9-c06","category":"geography","q":"give me facts about Indonesia","mustMatch":["Jakarta|archipel|Muslim|17,000"]}
+{"id":"p9-c07","category":"geography","q":"tell me more about Philippines","mustMatch":["Manila|Catholic|7,641|Spanish"]}
+{"id":"p9-c08","category":"geography","q":"explain New Zealand","mustMatch":["Wellington|Maori|M.ori|Waitangi|Pacific"]}
+{"id":"p9-c09","category":"geography","q":"information about Iran","mustMatch":["Tehran|Persian|Shia|1979"]}
+{"id":"p9-c10","category":"geography","q":"describe Singapore","mustMatch":["English|Malay|Lee Kuan Yew|Raffles|city-state"]}
+{"id":"p9-s01","category":"geography","q":"what is Georgia state","mustMatch":["Atlanta|Peach|colonies|King George"]}
+{"id":"p9-s02","category":"geography","q":"tell me about Virginia","mustMatch":["Richmond|Jamestown|presidents|Pentagon"]}
+{"id":"p9-s03","category":"geography","q":"describe Massachusetts","mustMatch":["Boston|Harvard|Plymouth|Pilgrim"]}
+{"id":"p9-s04","category":"geography","q":"info on Michigan","mustMatch":["Lansing|Detroit|Great Lakes|automobile"]}
+{"id":"p9-s05","category":"geography","q":"facts about Colorado","mustMatch":["Denver|Rocky|Centennial|14,000"]}
+{"id":"p9-s06","category":"geography","q":"explain Arizona","mustMatch":["Phoenix|Grand Canyon|Sonoran|Navajo"]}
+{"id":"p9-s07","category":"geography","q":"tell me more about Oregon","mustMatch":["Salem|Portland|Cascade|Willamette"]}
+{"id":"p9-s08","category":"geography","q":"info about Nevada","mustMatch":["Carson City|Las Vegas|desert|Silver"]}
+{"id":"p9-s09","category":"geography","q":"give me the rundown on Minnesota","mustMatch":["Saint Paul|Minneapolis|10,000|Twin Cities"]}
+{"id":"p9-s10","category":"geography","q":"describe Wisconsin","mustMatch":["Madison|Milwaukee|cheese|dairy"]}
+{"id":"p9-y01","category":"geography","q":"what is Madrid","mustMatch":["Spain|Prado|Royal Palace|capital"]}
+{"id":"p9-y02","category":"geography","q":"tell me about Moscow","mustMatch":["Russia|Kremlin|Red Square|Moskva"]}
+{"id":"p9-y03","category":"geography","q":"describe Cairo","mustMatch":["Egypt|Nile|Pyramids|Africa"]}
+{"id":"p9-y04","category":"geography","q":"explain Toronto","mustMatch":["Canada|Ontario|CN Tower|largest"]}
+{"id":"p9-y05","category":"geography","q":"info on Los Angeles","mustMatch":["California|Hollywood|Pacific|film"]}
+{"id":"p9-y06","category":"geography","q":"facts about Chicago","mustMatch":["Illinois|Michigan|Midwest|skyscraper"]}
+{"id":"p9-y07","category":"geography","q":"tell me more about Hong Kong","mustMatch":["China|Victoria Peak|harbour|harbor|financial"]}
+{"id":"p9-y08","category":"geography","q":"information about Bangkok","mustMatch":["Thailand|Chao Phraya|Chakri|Grand Palace"]}
+{"id":"p9-y09","category":"geography","q":"describe Istanbul","mustMatch":["Turkey|Bosphorus|Hagia Sophia|Constantinople"]}
+{"id":"p9-y10","category":"geography","q":"explain Rio de Janeiro","mustMatch":["Brazil|Christ the Redeemer|Carnival|Sugarloaf"]}
+{"id":"p9-sp01","category":"sports","q":"what is soccer","mustMatch":["FIFA|1863|World Cup|England"]}
+{"id":"p9-sp02","category":"sports","q":"tell me about association football","mustMatch":["FIFA|1863|World Cup|England"]}
+{"id":"p9-sp03","category":"sports","q":"describe basketball","mustMatch":["Naismith|1891|FIBA|NBA"]}
+{"id":"p9-sp04","category":"sports","q":"explain American football","mustMatch":["NFL|Super Bowl|downs|11"]}
+{"id":"p9-sp05","category":"sports","q":"info on baseball","mustMatch":["MLB|World Series|innings|9"]}
+{"id":"p9-sp06","category":"sports","q":"facts about tennis","mustMatch":["Wimbledon|Grand Slam|1873|Open"]}
+{"id":"p9-sp07","category":"sports","q":"give me facts about golf","mustMatch":["Scotland|St Andrews|Masters|18"]}
+{"id":"p9-sp08","category":"sports","q":"tell me more about cricket","mustMatch":["ICC|MCC|England|22 yards"]}
+{"id":"p9-sp09","category":"sports","q":"describe ice hockey","mustMatch":["NHL|Montreal|Stanley Cup|rink"]}
+{"id":"p9-i01","category":"music","q":"what is the piano","mustMatch":["Cristofori|88|keyboard|Florence"]}
+{"id":"p9-i02","category":"music","q":"tell me about piano","mustMatch":["Cristofori|88|keyboard|Florence"]}
+{"id":"p9-i03","category":"music","q":"describe the guitar","mustMatch":["Spain|Torres|electric|six-string|EADGBE"]}
+{"id":"p9-i04","category":"music","q":"explain violin","mustMatch":["Italy|Stradivari|bowed|fifths"]}
+{"id":"p9-i05","category":"music","q":"info on drums","mustMatch":["snare|bass|hi-hat|percussion"]}
+{"id":"p9-i06","category":"music","q":"facts about saxophone","mustMatch":["Adolphe Sax|1840|reed|jazz"]}
+{"id":"p9-i07","category":"music","q":"tell me more about flute","mustMatch":["Boehm|woodwind|3 octaves|edge-blown"]}
+{"id":"p9-i08","category":"music","q":"give me the rundown on cello","mustMatch":["bowed|Italy|fifths|quartet"]}
+{"id":"p9-i09","category":"music","q":"describe trumpet","mustMatch":["brass|valves|jazz|Armstrong"]}
+{"id":"p9-mix01","category":"geography","q":"what is France","mustMatch":["Paris|French|Europe"]}
+{"id":"p9-mix02","category":"geography","q":"tell me about Germany","mustMatch":["Berlin|German|Europe"]}
+{"id":"p9-mix03","category":"geography","q":"describe Japan","mustMatch":["Tokyo|Japanese|Asia"]}
+{"id":"p9-mix04","category":"science","q":"what is hydrogen","mustMatch":["H|lightest|atomic"]}
+{"id":"p9-mix05","category":"science","q":"explain oxygen","mustMatch":["O|breath|atmosphere"]}
+{"id":"p9-mix06","category":"science","q":"info on gold","mustMatch":["Au|precious|metal"]}
+{"id":"p9-mix07","category":"biology","q":"describe lions","mustMatch":["Panthera|cat|pride"]}
+{"id":"p9-mix08","category":"biology","q":"tell me about elephants","mustMatch":["mammal|trunk|tusk"]}
+{"id":"p9-mix09","category":"biology","q":"facts about gorillas","mustMatch":["Hominidae|primate|silverback"]}
+{"id":"p9-mix10","category":"programming","q":"explain JavaScript","mustMatch":["Brendan|Eich|web|browser"]}
+{"id":"p9-mix11","category":"programming","q":"info on TypeScript","mustMatch":["Microsoft|JavaScript|types"]}
+{"id":"p9-mix12","category":"programming","q":"give me facts about Python","mustMatch":["Guido|1991|interpret|dynamic"]}
+{"id":"p9-mix13","category":"programming","q":"describe Rust","mustMatch":["Mozilla|memory|safe|borrow"]}
+{"id":"p9-mix14","category":"astronomy","q":"explain planet Mars","mustMatch":["fourth|red|iron"]}
+{"id":"p9-mix15","category":"astronomy","q":"info about planet Jupiter","mustMatch":["fifth|gas|largest"]}
+{"id":"p9-mix16","category":"geography","q":"what is California","mustMatch":["Sacramento|Los Angeles|Hollywood|Silicon"]}
+{"id":"p9-mix17","category":"geography","q":"tell me about Texas","mustMatch":["Austin|Houston|Republic"]}
+{"id":"p9-mix18","category":"geography","q":"describe Florida","mustMatch":["Tallahassee|Disney|Cape Canaveral"]}
+{"id":"p9-mix19","category":"geography","q":"explain Brazil","mustMatch":["Brasilia|Portuguese|South America|Amazon"]}
+{"id":"p9-mix20","category":"geography","q":"info on Australia","mustMatch":["Canberra|continent|Pacific"]}
+{"id":"p9-mix21","category":"geography","q":"facts about Switzerland","mustMatch":["Bern|Alps|neutral"]}
+{"id":"p9-mix22","category":"geography","q":"tell me more about Sweden","mustMatch":["Stockholm|Swedish|Scandinavia"]}
+{"id":"p9-mix23","category":"geography","q":"describe Norway","mustMatch":["Oslo|Norwegian|fjord"]}
+{"id":"p9-mix24","category":"geography","q":"info about Greece","mustMatch":["Athens|Greek|Europe"]}
+{"id":"p9-mix25","category":"geography","q":"give me the rundown on Portugal","mustMatch":["Lisbon|Portuguese|Europe"]}
+{"id":"p9-mix26","category":"geography","q":"info about London","mustMatch":["England|Thames|United Kingdom|UK"]}
+{"id":"p9-mix27","category":"geography","q":"explain Paris","mustMatch":["France|Seine|capital"]}
+{"id":"p9-mix28","category":"geography","q":"facts about Berlin","mustMatch":["Germany|Spree|Wall"]}
+{"id":"p9-mix29","category":"geography","q":"tell me about Dubai","mustMatch":["Emirates|Burj|Gulf"]}
+{"id":"p9-mix30","category":"science","q":"info on iron","mustMatch":["Fe|metal|steel"]}

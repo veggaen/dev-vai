@@ -386,9 +386,12 @@ for (const s of US_STATES) {
  * Pure compiled lookup — no question-shape gating. The caller (the main
  * bulkFactsLookup in curated-facts-bulk.ts) is expected to gate first.
  */
+import { bulkFactsLookup3Compiled } from './curated-facts-bulk-3';
+
 export function bulkFactsLookup2Compiled(lower: string): string | null {
   for (const entry of COMPILED_2) {
     if (entry.match.test(lower)) return entry.render();
   }
-  return null;
+  // Round-25 extensions (companion module) — gated by the same checks above.
+  return bulkFactsLookup3Compiled(lower);
 }
