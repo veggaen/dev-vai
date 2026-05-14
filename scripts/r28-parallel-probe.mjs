@@ -30,6 +30,23 @@ const SUITES = [
     ],
   },
   {
+    id: 'apple-name-only',
+    canonical: 'who was founder of apple? tell me his name only',
+    needsHistory: false,
+    // Honor terseness: response must be short and must NOT contain the date
+    // / location prose from the curated entry.
+    expect: {
+      mustInclude: /jobs/i,
+      mustNotInclude: /1976|los altos|california|founded on|the company was/i,
+      maxChars: 120,
+    },
+    variants: [
+      'who started apple? just the name',
+      'who founded apple - names only',
+      'tell me only the names of apple founders',
+    ],
+  },
+  {
     id: 'lol',
     canonical: 'what are the top 10 most important skills needed to know of when playing league of legends?',
     needsHistory: false,
@@ -133,6 +150,9 @@ for (const suite of SUITES) {
       } else if (suite.expect.mustInclude && !suite.expect.mustInclude.test(text)) {
         verdict = 'FAIL';
         reason = `did not match mustInclude ${suite.expect.mustInclude}`;
+      } else if (suite.expect.maxChars && text.trim().length > suite.expect.maxChars) {
+        verdict = 'FAIL';
+        reason = `response ${text.trim().length} chars exceeds maxChars=${suite.expect.maxChars}`;
       }
     } catch (e) {
       verdict = 'ERROR';

@@ -3441,6 +3441,21 @@ export class VaiEngine implements ModelAdapter {
     // into unrelated curated entries (e.g. Fridtjof Nansen for the light bulb).
     const inventorAnswer = this.lookupInventor(input);
     if (inventorAnswer !== null) {
+      // Honor explicit terseness constraints — "name only", "just his name",
+      // "only the name", "tell me only the name(s)". When the user asks for
+      // just the name we collapse the curated answer down to the bolded
+      // people names, comma-separated, with no surrounding prose.
+      const wantsNameOnly = /\b(?:name(?:s)?\s+only|just\s+(?:his|her|their|the)\s+names?|only\s+(?:his|her|their|the)\s+names?|just\s+(?:the\s+)?names?|only\s+(?:the\s+)?names?)\b/i.test(input);
+      if (wantsNameOnly) {
+        const bolded = Array.from(inventorAnswer.answer.matchAll(/\*\*([^*]+)\*\*/g)).map((m) => m[1].trim());
+        // Heuristic: a person name is two-or-more capitalized tokens, no digits,
+        // not a date / company-suffix word.
+        const personNames = bolded.filter((s) => /^[A-Z][A-Za-zÀ-ÖØ-öø-ÿ.'\-]+(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ.'\-]+)+$/.test(s)
+          && !/\b(?:Inc|Corp|Co|Ltd|Apple|Microsoft|Google|Tesla|Facebook|Meta|Android|Linux|Windows|NeXT|NeXTSTEP|Bell\s+Labs|Apple\s+I+|Apple\s+II|Macintosh|iPhone|Mac\s+OS|Cheetah|GNU|XNU|Mach|BSD|Pixar|Disney|DEC|MS-DOS|Roadster|Model\s+[SXY3])\b/.test(s));
+        if (personNames.length > 0) {
+          return this.tracked('inventor-lookup-name-only', personNames.join(', '), input);
+        }
+      }
       return this.tracked('inventor-lookup', inventorAnswer.answer, input);
     }
 
@@ -41370,7 +41385,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
     //  - "isn't it bill that made windows", "wasn't it linus that made linux"
     //  - "didn't bill gates make windows", "did linus torvalds invent linux"
     // We deliberately do NOT match bare declarative "X made Y" — too noisy.
-    const triggers = /\b(?:who\s+(?:invented|created|made|discovered|developed|founded|designed|built|founders?\s+of|started)|who\s+was\s+(?:the\s+)?founder\s+of|founders?\s+of|inventor\s+of|creator\s+of|who\s+was\s+the\s+(?:name\s+of\s+the\s+)?person\s+(?:that|who)\s+(?:invented|created|made|discovered|developed|designed|built|founded|started)|(?:is(?:e?n[\u2019']?t|nt)?|was(?:n[\u2019']?t|nt)?|did(?:n[\u2019']?t|nt)?|isent|wasent|aint)\s+(?:it\s+)?[a-z][a-z .'\-]{1,40}?\s+(?:that\s+)?(?:invent|create|made?|make|built?|build|design|found(?:ed)?|start(?:ed)?)|(?:was|were|is|are)\s+(?:founded|created|made|invented|started|built|designed|developed)\s+by\s+(?:who|whom|what\s+(?:person|people)))\b/i;
+    const triggers = /\b(?:who\s+(?:invented|created|made|discovered|developed|founded|designed|built|founders?\s+of|started)|who\s+was\s+(?:the\s+)?founder\s+of|founders?\s+of|inventor\s+of|creator\s+of|who\s+was\s+the\s+(?:name\s+of\s+the\s+)?person\s+(?:that|who)\s+(?:invented|created|made|discovered|developed|designed|built|founded|started)|(?:is(?:e?n[\u2019']?t|nt)?|was(?:n[\u2019']?t|nt)?|did(?:n[\u2019']?t|nt)?|isent|wasent|aint)\s+(?:it\s+)?[a-z][a-z .'\-]{1,40}?\s+(?:that\s+)?(?:invent|create|made?|make|built?|build|design|found(?:ed)?|start(?:ed)?)|(?:was|were|is|are)\s+(?:founded|created|made|invented|started|built|designed|developed)\s+by\s+(?:who|whom|what\s+(?:person|people))|names?\s+of\s+(?:the\s+)?[a-z][a-z .'\-]{1,40}?\s+(?:founders?|inventors?|creators?|makers?))\b/i;
     if (!triggers.test(lower)) return null;
 
     type Entry = { keys: RegExp; topic: string; answer: string };
