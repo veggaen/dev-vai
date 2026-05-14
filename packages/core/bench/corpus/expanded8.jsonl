@@ -1,0 +1,150 @@
+{"id":"p8-c01","category":"geography","q":"what is France","mustMatch":["Paris|French|Europe"]}
+{"id":"p8-c02","category":"geography","q":"tell me about France","mustMatch":["Paris|French|Europe"]}
+{"id":"p8-c03","category":"geography","q":"give me the rundown on France","mustMatch":["Paris|French|Europe"]}
+{"id":"p8-c04","category":"geography","q":"information about Germany","mustMatch":["Berlin|German|Europe"]}
+{"id":"p8-c05","category":"geography","q":"tell me more about Germany","mustMatch":["Berlin|German|Europe"]}
+{"id":"p8-c06","category":"geography","q":"give me facts about Germany","mustMatch":["Berlin|German|Europe"]}
+{"id":"p8-c07","category":"geography","q":"describe Japan","mustMatch":["Tokyo|Japanese|Asia"]}
+{"id":"p8-c08","category":"geography","q":"info on Japan","mustMatch":["Tokyo|Japanese|Asia"]}
+{"id":"p8-c09","category":"geography","q":"facts about Japan","mustMatch":["Tokyo|Japanese|Asia"]}
+{"id":"p8-c10","category":"geography","q":"explain Italy","mustMatch":["Rome|Italian|Europe"]}
+{"id":"p8-c11","category":"geography","q":"information on Italy","mustMatch":["Rome|Italian|Europe"]}
+{"id":"p8-c12","category":"geography","q":"give me info on Spain","mustMatch":["Madrid|Spanish|Europe"]}
+{"id":"p8-c13","category":"geography","q":"tell me about Spain","mustMatch":["Madrid|Spanish|Europe"]}
+{"id":"p8-c14","category":"geography","q":"describe the United Kingdom","mustMatch":["London|British|England"]}
+{"id":"p8-c15","category":"geography","q":"info about the United States","mustMatch":["Washington|American|federal"]}
+{"id":"p8-c16","category":"geography","q":"facts about Brazil","mustMatch":["Brasilia|Portuguese|South America|Amazon"]}
+{"id":"p8-c17","category":"geography","q":"tell me more about Canada","mustMatch":["Ottawa|provinces|North America"]}
+{"id":"p8-c18","category":"geography","q":"explain China","mustMatch":["Beijing|Chinese|Asia"]}
+{"id":"p8-c19","category":"geography","q":"give me the rundown on India","mustMatch":["Delhi|Hindi|Asia"]}
+{"id":"p8-c20","category":"geography","q":"info on Russia","mustMatch":["Moscow|Russian|Eurasia|Europe"]}
+{"id":"p8-c21","category":"geography","q":"describe Australia","mustMatch":["Canberra|continent|Pacific"]}
+{"id":"p8-c22","category":"geography","q":"facts about Mexico","mustMatch":["Mexico City|Spanish|North America"]}
+{"id":"p8-c23","category":"geography","q":"tell me about South Korea","mustMatch":["Seoul|Korean|Asia"]}
+{"id":"p8-c24","category":"geography","q":"explain Egypt","mustMatch":["Cairo|Nile|Arabic"]}
+{"id":"p8-c25","category":"geography","q":"information about Turkey","mustMatch":["Ankara|Turkish|Europe|Asia"]}
+{"id":"p8-c26","category":"geography","q":"info on Argentina","mustMatch":["Buenos Aires|Spanish|South America"]}
+{"id":"p8-c27","category":"geography","q":"give me facts about Netherlands","mustMatch":["Amsterdam|Dutch|Europe"]}
+{"id":"p8-c28","category":"geography","q":"describe Sweden","mustMatch":["Stockholm|Swedish|Scandinavia"]}
+{"id":"p8-c29","category":"geography","q":"tell me more about Norway","mustMatch":["Oslo|Norwegian|fjord"]}
+{"id":"p8-c30","category":"geography","q":"explain Poland","mustMatch":["Warsaw|Polish|Europe"]}
+{"id":"p8-c31","category":"geography","q":"info about Greece","mustMatch":["Athens|Greek|Europe"]}
+{"id":"p8-c32","category":"geography","q":"give me the rundown on Portugal","mustMatch":["Lisbon|Portuguese|Europe"]}
+{"id":"p8-c33","category":"geography","q":"facts about Switzerland","mustMatch":["Bern|Alps|neutral"]}
+{"id":"p8-c34","category":"geography","q":"describe Belgium","mustMatch":["Brussels|Dutch|French"]}
+{"id":"p8-c35","category":"geography","q":"tell me about Austria","mustMatch":["Vienna|German|Alps"]}
+{"id":"p8-c36","category":"geography","q":"explain Ireland","mustMatch":["Dublin|Irish|English"]}
+{"id":"p8-c37","category":"geography","q":"info on Denmark","mustMatch":["Copenhagen|Danish|Scandinavia"]}
+{"id":"p8-c38","category":"geography","q":"information about Finland","mustMatch":["Helsinki|Finnish|Nordic"]}
+{"id":"p8-c39","category":"geography","q":"give me info on Czechia","mustMatch":["Prague|Czech|Europe"]}
+{"id":"p8-c40","category":"geography","q":"tell me more about Ukraine","mustMatch":["Kyiv|Ukrainian|Europe"]}
+{"id":"p8-e01","category":"science","q":"what is hydrogen","mustMatch":["H|lightest|atomic"]}
+{"id":"p8-e02","category":"science","q":"tell me about hydrogen","mustMatch":["H|lightest|atomic"]}
+{"id":"p8-e03","category":"science","q":"give me the rundown on oxygen","mustMatch":["O|breath|atmosphere"]}
+{"id":"p8-e04","category":"science","q":"describe oxygen","mustMatch":["O|breath|atmosphere"]}
+{"id":"p8-e05","category":"science","q":"information about gold","mustMatch":["Au|precious|metal"]}
+{"id":"p8-e06","category":"science","q":"facts about gold","mustMatch":["Au|precious|metal"]}
+{"id":"p8-e07","category":"science","q":"explain iron","mustMatch":["Fe|metal|steel"]}
+{"id":"p8-e08","category":"science","q":"info on iron","mustMatch":["Fe|metal|steel"]}
+{"id":"p8-e09","category":"science","q":"tell me more about carbon","mustMatch":["C|organic|diamond|life"]}
+{"id":"p8-e10","category":"science","q":"give me info on carbon","mustMatch":["C|organic|diamond|life"]}
+{"id":"p8-e11","category":"science","q":"describe nitrogen","mustMatch":["N|atmosphere|inert"]}
+{"id":"p8-e12","category":"science","q":"facts about helium","mustMatch":["He|noble|balloon|second"]}
+{"id":"p8-e13","category":"science","q":"info about silver","mustMatch":["Ag|metal|conductive|jewelry"]}
+{"id":"p8-e14","category":"science","q":"explain copper","mustMatch":["Cu|conduct|metal|wiring"]}
+{"id":"p8-e15","category":"science","q":"tell me about uranium","mustMatch":["U|radioactive|nuclear"]}
+{"id":"p8-e16","category":"science","q":"give me facts about sodium","mustMatch":["Na|alkali|salt"]}
+{"id":"p8-e17","category":"science","q":"description of sulfur","mustMatch":["S|brimstone|sulfuric"]}
+{"id":"p8-e18","category":"science","q":"information on calcium","mustMatch":["Ca|bones|alkaline"]}
+{"id":"p8-e19","category":"science","q":"tell me more about aluminium","mustMatch":["Al|abundant|metal"]}
+{"id":"p8-e20","category":"science","q":"explain lithium","mustMatch":["Li|battery|batteries|lightest"]}
+{"id":"p8-e21","category":"science","q":"info about neon","mustMatch":["Ne|noble|sign"]}
+{"id":"p8-e22","category":"science","q":"give me the rundown on chlorine","mustMatch":["Cl|halogen|disinfect"]}
+{"id":"p8-e23","category":"science","q":"facts about platinum","mustMatch":["Pt|precious|catalyst|metal"]}
+{"id":"p8-e24","category":"science","q":"describe lead element","mustMatch":["Pb|dense|metal"]}
+{"id":"p8-e25","category":"science","q":"tell me about mercury element","mustMatch":["Hg|liquid|thermometer"]}
+{"id":"p8-a01","category":"biology","q":"what are lions","mustMatch":["Panthera|cat|pride"]}
+{"id":"p8-a02","category":"biology","q":"describe lions","mustMatch":["Panthera|cat|pride"]}
+{"id":"p8-a03","category":"biology","q":"give me facts about tigers","mustMatch":["Panthera|cat|stripe"]}
+{"id":"p8-a04","category":"biology","q":"tell me about tigers","mustMatch":["Panthera|cat|stripe"]}
+{"id":"p8-a05","category":"biology","q":"info on elephants","mustMatch":["mammal|trunk|tusk"]}
+{"id":"p8-a06","category":"biology","q":"facts about elephants","mustMatch":["mammal|trunk|tusk"]}
+{"id":"p8-a07","category":"biology","q":"explain penguins","mustMatch":["Spheniscidae|flightless|Antarctic|Southern"]}
+{"id":"p8-a08","category":"biology","q":"tell me more about penguins","mustMatch":["Spheniscidae|flightless|Antarctic|Southern"]}
+{"id":"p8-a09","category":"biology","q":"information about blue whale","mustMatch":["Balaenoptera|krill|largest"]}
+{"id":"p8-a10","category":"biology","q":"info about dogs","mustMatch":["Canis|domestic|companion"]}
+{"id":"p8-a11","category":"biology","q":"give me the rundown on cats","mustMatch":["Felis|domestic|carnivor"]}
+{"id":"p8-a12","category":"biology","q":"describe great white shark","mustMatch":["Carcharodon|Lamnidae|predator|fish"]}
+{"id":"p8-a13","category":"biology","q":"facts about bald eagle","mustMatch":["Haliaeetus|raptor|United States"]}
+{"id":"p8-a14","category":"biology","q":"tell me about anaconda","mustMatch":["Eunectes|snake|Amazon|South America"]}
+{"id":"p8-a15","category":"biology","q":"explain wolves","mustMatch":["Canis|pack|Canidae"]}
+{"id":"p8-a16","category":"biology","q":"info on dolphins","mustMatch":["Tursiops|mammal|Delphinidae"]}
+{"id":"p8-a17","category":"biology","q":"give me info about crocodiles","mustMatch":["Crocodylidae|reptile|predator"]}
+{"id":"p8-a18","category":"biology","q":"describe gorillas","mustMatch":["Hominidae|primate|silverback"]}
+{"id":"p8-a19","category":"biology","q":"facts about kangaroos","mustMatch":["Macropus|marsupial|Australia"]}
+{"id":"p8-a20","category":"biology","q":"tell me more about hippopotamus","mustMatch":["Hippopotamus|mammal|Africa"]}
+{"id":"p8-a21","category":"biology","q":"info about honey bees","mustMatch":["Apis|pollinat|colony|colonies"]}
+{"id":"p8-a22","category":"biology","q":"give me the rundown on komodo dragon","mustMatch":["Varanus|lizard|Indonesia"]}
+{"id":"p8-a23","category":"biology","q":"explain bald eagle","mustMatch":["Haliaeetus|raptor|United States"]}
+{"id":"p8-a24","category":"biology","q":"tell me about anaconda","mustMatch":["Eunectes|snake|Amazon|South America"]}
+{"id":"p8-l01","category":"programming","q":"what is JavaScript","mustMatch":["Brendan|Eich|web|browser"]}
+{"id":"p8-l02","category":"programming","q":"describe JavaScript","mustMatch":["Brendan|Eich|web|browser"]}
+{"id":"p8-l03","category":"programming","q":"tell me about TypeScript","mustMatch":["Microsoft|JavaScript|types"]}
+{"id":"p8-l04","category":"programming","q":"info on TypeScript","mustMatch":["Microsoft|JavaScript|types"]}
+{"id":"p8-l05","category":"programming","q":"give me facts about Python","mustMatch":["Guido|1991|interpret|dynamic"]}
+{"id":"p8-l06","category":"programming","q":"explain Python","mustMatch":["Guido|1991|interpret|dynamic"]}
+{"id":"p8-l07","category":"programming","q":"describe Rust","mustMatch":["Mozilla|memory|safe|borrow"]}
+{"id":"p8-l08","category":"programming","q":"facts about Rust","mustMatch":["Mozilla|memory|safe|borrow"]}
+{"id":"p8-l09","category":"programming","q":"tell me more about Go language","mustMatch":["Google|goroutine|concurrent"]}
+{"id":"p8-l10","category":"programming","q":"information on Go language","mustMatch":["Google|goroutine|concurrent"]}
+{"id":"p8-l11","category":"programming","q":"give me the rundown on Swift","mustMatch":["Lattner|Apple|2014"]}
+{"id":"p8-l12","category":"programming","q":"explain C++","mustMatch":["Stroustrup|systems|object"]}
+{"id":"p8-l13","category":"programming","q":"info about C#","mustMatch":["Microsoft|.NET|object"]}
+{"id":"p8-l14","category":"programming","q":"describe Java","mustMatch":["Sun|JVM|object"]}
+{"id":"p8-l15","category":"programming","q":"tell me about Ruby","mustMatch":["Matsumoto|1995|Rails|object"]}
+{"id":"p8-l16","category":"programming","q":"facts about PHP","mustMatch":["Lerdorf|1995|web"]}
+{"id":"p8-l17","category":"programming","q":"explain Kotlin","mustMatch":["JetBrains|JVM|Android"]}
+{"id":"p8-l18","category":"programming","q":"info on Scala","mustMatch":["Odersky|JVM|Spark"]}
+{"id":"p8-l19","category":"programming","q":"give me facts about Haskell","mustMatch":["functional|lazy|1990"]}
+{"id":"p8-l20","category":"programming","q":"describe Lua","mustMatch":["Ierusalimschy|1993|embed"]}
+{"id":"p8-l21","category":"programming","q":"tell me more about Perl","mustMatch":["Larry Wall|1987|text"]}
+{"id":"p8-l22","category":"programming","q":"explain R language","mustMatch":["statistic|data|S language|Bell"]}
+{"id":"p8-l23","category":"programming","q":"facts about Dart language","mustMatch":["Google|Flutter|client"]}
+{"id":"p8-l24","category":"programming","q":"info about Elixir language","mustMatch":["Valim|Erlang|BEAM|functional"]}
+{"id":"p8-l25","category":"programming","q":"tell me about Clojure","mustMatch":["Hickey|Lisp|JVM"]}
+{"id":"p8-p01","category":"astronomy","q":"what is planet Mercury","mustMatch":["first|smallest|Sun"]}
+{"id":"p8-p02","category":"astronomy","q":"describe planet Venus","mustMatch":["second|hot|atmosphere"]}
+{"id":"p8-p03","category":"astronomy","q":"tell me about planet Mars","mustMatch":["fourth|red|iron"]}
+{"id":"p8-p04","category":"astronomy","q":"explain planet Jupiter","mustMatch":["fifth|gas|largest"]}
+{"id":"p8-p05","category":"astronomy","q":"info on planet Saturn","mustMatch":["sixth|ring|gas"]}
+{"id":"p8-p06","category":"astronomy","q":"give me facts about planet Earth","mustMatch":["third|Moon|life"]}
+{"id":"p8-p07","category":"astronomy","q":"facts about planet Uranus","mustMatch":["seventh|Herschel|1781"]}
+{"id":"p8-p08","category":"astronomy","q":"tell me more about planet Earth","mustMatch":["third|Moon|life"]}
+{"id":"p8-p09","category":"astronomy","q":"describe planet Uranus","mustMatch":["seventh|Herschel|1781"]}
+{"id":"p8-y01","category":"geography","q":"what is New York City","mustMatch":["Manhattan|Hudson|borough"]}
+{"id":"p8-y02","category":"geography","q":"tell me about London","mustMatch":["England|Thames|United Kingdom|UK"]}
+{"id":"p8-y03","category":"geography","q":"describe London","mustMatch":["England|Thames|United Kingdom|UK"]}
+{"id":"p8-y04","category":"geography","q":"explain Paris","mustMatch":["France|Seine|capital"]}
+{"id":"p8-y05","category":"geography","q":"info about Paris","mustMatch":["France|Seine|capital"]}
+{"id":"p8-y06","category":"geography","q":"give me facts about Tokyo","mustMatch":["Japan|Honshu|capital"]}
+{"id":"p8-y07","category":"geography","q":"facts about Berlin","mustMatch":["Germany|Spree|Wall"]}
+{"id":"p8-y08","category":"geography","q":"tell me more about Berlin","mustMatch":["Germany|Spree|Wall"]}
+{"id":"p8-y09","category":"geography","q":"explain Rome","mustMatch":["Italy|Tiber|Roman"]}
+{"id":"p8-y10","category":"geography","q":"give me the rundown on Sydney","mustMatch":["Australia|Harbour|Opera"]}
+{"id":"p8-y11","category":"geography","q":"info on Mumbai","mustMatch":["India|Bombay|Bollywood"]}
+{"id":"p8-y12","category":"geography","q":"describe Beijing","mustMatch":["China|Forbidden|Tiananmen"]}
+{"id":"p8-y13","category":"geography","q":"tell me about Dubai","mustMatch":["Emirates|Burj|Gulf"]}
+{"id":"p8-y14","category":"geography","q":"facts about Dubai","mustMatch":["Emirates|Burj|Gulf"]}
+{"id":"p8-s01","category":"geography","q":"what is California","mustMatch":["Sacramento|Los Angeles|Hollywood|Silicon"]}
+{"id":"p8-s02","category":"geography","q":"describe California","mustMatch":["Sacramento|Los Angeles|Hollywood|Silicon"]}
+{"id":"p8-s03","category":"geography","q":"tell me about Texas","mustMatch":["Austin|Houston|Republic"]}
+{"id":"p8-s04","category":"geography","q":"info on Texas","mustMatch":["Austin|Houston|Republic"]}
+{"id":"p8-s05","category":"geography","q":"explain Florida","mustMatch":["Tallahassee|Disney|Cape Canaveral"]}
+{"id":"p8-s06","category":"geography","q":"facts about Florida","mustMatch":["Tallahassee|Disney|Cape Canaveral"]}
+{"id":"p8-s07","category":"geography","q":"tell me more about New York state","mustMatch":["Albany|New York City|Empire"]}
+{"id":"p8-s08","category":"geography","q":"give me facts about Alaska","mustMatch":["Juneau|Anchorage|Russian"]}
+{"id":"p8-s09","category":"geography","q":"describe Hawaii","mustMatch":["Honolulu|Pacific|island"]}
+{"id":"p8-s10","category":"geography","q":"info about Illinois","mustMatch":["Springfield|Chicago|Lincoln"]}
+{"id":"p8-s11","category":"geography","q":"explain Pennsylvania","mustMatch":["Harrisburg|Philadelphia|Constitution"]}
+{"id":"p8-s12","category":"geography","q":"tell me about Ohio","mustMatch":["Columbus|Cleveland|Cincinnati"]}
+{"id":"p8-s13","category":"geography","q":"give me the rundown on Washington state","mustMatch":["Olympia|Seattle|Pacific"]}
