@@ -1,0 +1,60 @@
+{"id":"p10-c01","category":"geography","q":"what is Kenya","mustMatch":["Nairobi|Maasai|equator|East Africa"]}
+{"id":"p10-c02","category":"geography","q":"tell me about Morocco","mustMatch":["Rabat|Berber|Atlas|Marrakesh"]}
+{"id":"p10-c03","category":"geography","q":"describe Chile","mustMatch":["Santiago|Atacama|copper|Pacific"]}
+{"id":"p10-c04","category":"geography","q":"explain Peru","mustMatch":["Lima|Inca|Machu Picchu|Andes"]}
+{"id":"p10-c05","category":"geography","q":"info on Pakistan","mustMatch":["Islamabad|Karachi|1947|Indus|nuclear"]}
+{"id":"p10-c06","category":"geography","q":"facts about Bangladesh","mustMatch":["Dhaka|Bengali|Ganges|delta"]}
+{"id":"p10-c07","category":"geography","q":"give me facts about Malaysia","mustMatch":["Kuala Lumpur|Petronas|Borneo|Malay"]}
+{"id":"p10-c08","category":"geography","q":"tell me more about Israel","mustMatch":["Jerusalem|Hebrew|1948|Start-up"]}
+{"id":"p10-c09","category":"geography","q":"information about UAE","mustMatch":["Abu Dhabi|Dubai|Burj Khalifa|seven"]}
+{"id":"p10-c10","category":"geography","q":"describe Colombia","mustMatch":["Bogota|coffee|Spanish|Andes"]}
+{"id":"p10-s01","category":"geography","q":"what is North Carolina","mustMatch":["Raleigh|Charlotte|Tar Heel|Wright"]}
+{"id":"p10-s02","category":"geography","q":"tell me about New Jersey","mustMatch":["Trenton|Newark|Garden|densely"]}
+{"id":"p10-s03","category":"geography","q":"describe Tennessee","mustMatch":["Nashville|country|Memphis|Smoky"]}
+{"id":"p10-s04","category":"geography","q":"info on Maryland","mustMatch":["Annapolis|Baltimore|Chesapeake|Naval"]}
+{"id":"p10-s05","category":"geography","q":"facts about Indiana","mustMatch":["Indianapolis|Hoosier|Indy 500|Indianapolis 500"]}
+{"id":"p10-s06","category":"geography","q":"explain Missouri","mustMatch":["Jefferson City|Saint Louis|Mississippi|Twain"]}
+{"id":"p10-s07","category":"geography","q":"tell me more about South Carolina","mustMatch":["Columbia|Charleston|Palmetto|Fort Sumter"]}
+{"id":"p10-s08","category":"geography","q":"info about Oklahoma","mustMatch":["Oklahoma City|Sooner|Choctaw|tribal|Indian"]}
+{"id":"p10-s09","category":"geography","q":"describe Connecticut","mustMatch":["Hartford|Yale|Constitution|Insurance"]}
+{"id":"p10-s10","category":"geography","q":"explain Utah","mustMatch":["Salt Lake|Mormon|Brigham|Beehive"]}
+{"id":"p10-y01","category":"geography","q":"what is Mexico City","mustMatch":["Mexico|Tenochtitlan|Aztec|Zocalo"]}
+{"id":"p10-y02","category":"geography","q":"tell me about Buenos Aires","mustMatch":["Argentina|Rio de la Plata|tango|Casa Rosada"]}
+{"id":"p10-y03","category":"geography","q":"describe Saint Petersburg","mustMatch":["Russia|Peter|Hermitage|Neva"]}
+{"id":"p10-y04","category":"geography","q":"explain Vienna","mustMatch":["Austria|Habsburg|Schonbrunn|Danube|Mozart"]}
+{"id":"p10-y05","category":"geography","q":"info on Athens","mustMatch":["Greece|Acropolis|Parthenon|democracy"]}
+{"id":"p10-y06","category":"geography","q":"facts about Stockholm","mustMatch":["Sweden|Nobel|Malaren|14 islands|Gamla"]}
+{"id":"p10-y07","category":"geography","q":"give me the rundown on Vancouver","mustMatch":["Canada|British Columbia|Pacific|Stanley Park"]}
+{"id":"p10-y08","category":"geography","q":"tell me more about Seoul","mustMatch":["Korea|Han River|Samsung|Gangnam"]}
+{"id":"p10-y09","category":"geography","q":"information about Kuala Lumpur","mustMatch":["Malaysia|Petronas|Klang|tin"]}
+{"id":"p10-y10","category":"geography","q":"describe Jerusalem","mustMatch":["Western Wall|Holy Sepulchre|Al-Aqsa|Old City"]}
+{"id":"p10-f01","category":"programming","q":"what is React","mustMatch":["Facebook|Walke|virtual DOM|JSX"]}
+{"id":"p10-f02","category":"programming","q":"tell me about Vuejs","mustMatch":["Evan You|2014|component|Composition"]}
+{"id":"p10-f03","category":"programming","q":"describe Angular","mustMatch":["Google|TypeScript|Hevery|2016"]}
+{"id":"p10-f04","category":"programming","q":"explain Svelte","mustMatch":["Rich Harris|compile|2016|virtual DOM"]}
+{"id":"p10-f05","category":"programming","q":"info on Next.js","mustMatch":["Vercel|React|server|2016"]}
+{"id":"p10-f06","category":"programming","q":"facts about Django","mustMatch":["Python|2005|Holovaty|batteries|Lawrence"]}
+{"id":"p10-f07","category":"programming","q":"tell me about NestJS","mustMatch":["TypeScript|Mysliwiec|2017|Angular|Node"]}
+{"id":"p10-f08","category":"programming","q":"tell me more about Spring framework","mustMatch":["Java|Rod Johnson|2004|dependency"]}
+{"id":"p10-f09","category":"programming","q":"tell me about Expressjs","mustMatch":["Node|Holowaychuk|middleware|2010"]}
+{"id":"p10-f10","category":"programming","q":"describe FastAPI","mustMatch":["Python|Ramirez|Pydantic|OpenAPI|2018"]}
+{"id":"p10-co01","category":"business","q":"what is Google company","mustMatch":["Page|Brin|1998|Mountain View|Pichai"]}
+{"id":"p10-co02","category":"business","q":"tell me about Microsoft","mustMatch":["Gates|Allen|1975|Redmond|Nadella"]}
+{"id":"p10-co03","category":"business","q":"describe Apple Inc","mustMatch":["Jobs|Wozniak|1976|Cupertino|Cook"]}
+{"id":"p10-co04","category":"business","q":"explain Amazon company","mustMatch":["Bezos|1994|Seattle|AWS|Jassy"]}
+{"id":"p10-co05","category":"business","q":"info on Meta Platforms","mustMatch":["Zuckerberg|2004|Menlo Park|Facebook|Instagram"]}
+{"id":"p10-co06","category":"business","q":"facts about Nvidia","mustMatch":["Huang|1993|Santa Clara|GPU|CUDA"]}
+{"id":"p10-co07","category":"business","q":"give me facts about OpenAI","mustMatch":["Altman|2015|San Francisco|ChatGPT|GPT"]}
+{"id":"p10-co08","category":"business","q":"tell me more about Tesla company","mustMatch":["Eberhard|Musk|2003|Austin|Model"]}
+{"id":"p10-co09","category":"business","q":"information about Netflix","mustMatch":["Hastings|Randolph|1997|Los Gatos|streaming"]}
+{"id":"p10-co10","category":"business","q":"describe Adobe","mustMatch":["Warnock|Geschke|1982|San Jose|Photoshop"]}
+{"id":"p10-mix01","category":"people","q":"who is Albert Einstein","mustMatch":["1879|relativity|physics"]}
+{"id":"p10-mix02","category":"religion","q":"what is Buddhism","mustMatch":["Buddha|Noble|nirvana|Eightfold"]}
+{"id":"p10-mix03","category":"sports","q":"explain soccer","mustMatch":["FIFA|1863|World Cup|England"]}
+{"id":"p10-mix04","category":"music","q":"describe the piano","mustMatch":["Cristofori|88|keyboard|Florence"]}
+{"id":"p10-mix05","category":"geography","q":"tell me about Indonesia","mustMatch":["Jakarta|archipel|Muslim|17,000"]}
+{"id":"p10-mix06","category":"geography","q":"info on Vietnam","mustMatch":["Hanoi|South-East Asia|Doi Moi|Ho Chi Minh"]}
+{"id":"p10-mix07","category":"geography","q":"facts about Saudi Arabia","mustMatch":["Riyadh|Mecca|oil"]}
+{"id":"p10-mix08","category":"geography","q":"tell me more about Singapore","mustMatch":["Lee Kuan Yew|Raffles|city-state"]}
+{"id":"p10-mix09","category":"geography","q":"describe Arizona","mustMatch":["Phoenix|Grand Canyon|Sonoran|Navajo"]}
+{"id":"p10-mix10","category":"geography","q":"information about Madrid","mustMatch":["Spain|Prado|Royal Palace|capital"]}

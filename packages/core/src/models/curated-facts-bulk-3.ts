@@ -300,11 +300,14 @@ for (const i of INSTRUMENTS_3) {
   COMPILED_3.push({ re: makeMatcher3(i.names), render: () => renderInstrument3(i) });
 }
 
+import { bulkFactsLookup4Compiled } from './curated-facts-bulk-4';
+
 export function bulkFactsLookup3Compiled(lower: string): string | null {
   for (const entry of COMPILED_3) {
     if (entry.re.test(lower)) {
       return entry.render();
     }
   }
-  return null;
+  // Round-26 extensions (companion module) — gated by the same checks above.
+  return bulkFactsLookup4Compiled(lower);
 }
