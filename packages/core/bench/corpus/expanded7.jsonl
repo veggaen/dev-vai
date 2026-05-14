@@ -1,0 +1,68 @@
+{"id":"para-001","category":"geography","q":"explain France","mustMatch":["Paris|French|Europe"]}
+{"id":"para-002","category":"geography","q":"describe Germany","mustMatch":["Berlin|German|Europe"]}
+{"id":"para-003","category":"geography","q":"info about Japan","mustMatch":["Tokyo|Japanese|Asia"]}
+{"id":"para-004","category":"geography","q":"give me facts about Italy","mustMatch":["Rome|Italian|Europe"]}
+{"id":"para-005","category":"geography","q":"facts about Spain","mustMatch":["Madrid|Spanish|Europe"]}
+{"id":"para-006","category":"geography","q":"information on Greece","mustMatch":["Athens|Greek|Europe"]}
+{"id":"para-007","category":"geography","q":"give me the rundown on Portugal","mustMatch":["Lisbon|Portuguese|Europe"]}
+{"id":"para-008","category":"geography","q":"tell me more about Switzerland","mustMatch":["Bern|Alps|neutral"]}
+{"id":"para-009","category":"geography","q":"explain Belgium","mustMatch":["Brussels|Dutch|French"]}
+{"id":"para-010","category":"geography","q":"describe Austria","mustMatch":["Vienna|German|Alps"]}
+{"id":"para-011","category":"geography","q":"info on Ireland","mustMatch":["Dublin|Irish|English"]}
+{"id":"para-012","category":"geography","q":"facts about Denmark","mustMatch":["Copenhagen|Danish|Scandinavia"]}
+{"id":"para-013","category":"geography","q":"give me info about Finland","mustMatch":["Helsinki|Finnish|Nordic"]}
+{"id":"para-014","category":"geography","q":"information about Czechia","mustMatch":["Prague|Czech|Europe"]}
+{"id":"para-015","category":"geography","q":"explain Ukraine","mustMatch":["Kyiv|Ukrainian|Europe"]}
+{"id":"para-016","category":"science","q":"explain hydrogen","mustMatch":["H|lightest|atomic"]}
+{"id":"para-017","category":"science","q":"describe oxygen","mustMatch":["O|breath|atmosphere"]}
+{"id":"para-018","category":"science","q":"info about gold","mustMatch":["Au|precious|metal"]}
+{"id":"para-019","category":"science","q":"facts about iron","mustMatch":["Fe|metal|steel"]}
+{"id":"para-020","category":"science","q":"give me the rundown on carbon","mustMatch":["C|life|organic|diamond"]}
+{"id":"para-021","category":"science","q":"tell me more about sodium","mustMatch":["Na|alkali|salt"]}
+{"id":"para-022","category":"science","q":"information on sulfur","mustMatch":["S|brimstone|sulfuric"]}
+{"id":"para-023","category":"science","q":"describe calcium","mustMatch":["Ca|bones|alkaline"]}
+{"id":"para-024","category":"science","q":"explain aluminium","mustMatch":["Al|abundant|metal"]}
+{"id":"para-025","category":"science","q":"info on lithium","mustMatch":["Li|battery|batteries|lightest"]}
+{"id":"para-026","category":"science","q":"give me facts about neon","mustMatch":["Ne|noble|sign"]}
+{"id":"para-027","category":"science","q":"facts about chlorine","mustMatch":["Cl|halogen|disinfect"]}
+{"id":"para-028","category":"biology","q":"describe lions","mustMatch":["Panthera|cat|pride"]}
+{"id":"para-029","category":"biology","q":"explain tigers","mustMatch":["Panthera|cat|stripe"]}
+{"id":"para-030","category":"biology","q":"info on elephants","mustMatch":["mammal|trunk|tusk"]}
+{"id":"para-031","category":"biology","q":"tell me more about penguins","mustMatch":["Spheniscidae|flightless|Antarctic|Southern"]}
+{"id":"para-032","category":"biology","q":"facts about wolves","mustMatch":["Canis|pack|Canidae"]}
+{"id":"para-033","category":"biology","q":"give me the rundown on dolphins","mustMatch":["Tursiops|mammal|Delphinidae"]}
+{"id":"para-034","category":"biology","q":"information on crocodiles","mustMatch":["Crocodylidae|reptile|predator"]}
+{"id":"para-035","category":"biology","q":"explain gorillas","mustMatch":["Hominidae|primate|silverback"]}
+{"id":"para-036","category":"biology","q":"describe kangaroos","mustMatch":["Macropus|marsupial|Australia"]}
+{"id":"para-037","category":"biology","q":"info about hippopotamus","mustMatch":["Hippopotamus|mammal|Africa"]}
+{"id":"para-038","category":"biology","q":"facts about honey bees","mustMatch":["Apis|pollinat|colony|colonies"]}
+{"id":"para-039","category":"programming","q":"explain Python","mustMatch":["Guido|1991|interpret|dynamic"]}
+{"id":"para-040","category":"programming","q":"describe Rust","mustMatch":["Mozilla|memory|safe|borrow"]}
+{"id":"para-041","category":"programming","q":"info on Go language","mustMatch":["Google|goroutine|concurrent"]}
+{"id":"para-042","category":"programming","q":"tell me more about Swift","mustMatch":["Lattner|Apple|2014"]}
+{"id":"para-043","category":"programming","q":"facts about PHP","mustMatch":["Lerdorf|1995|web"]}
+{"id":"para-044","category":"programming","q":"give me the rundown on Kotlin","mustMatch":["JetBrains|JVM|Android"]}
+{"id":"para-045","category":"programming","q":"explain Scala","mustMatch":["Odersky|JVM|Spark"]}
+{"id":"para-046","category":"programming","q":"information about Haskell","mustMatch":["functional|lazy|1990"]}
+{"id":"para-047","category":"programming","q":"describe Lua","mustMatch":["Ierusalimschy|1993|embed"]}
+{"id":"para-048","category":"programming","q":"info on Perl","mustMatch":["Larry Wall|1987|text"]}
+{"id":"para-049","category":"programming","q":"facts about Clojure","mustMatch":["Hickey|Lisp|JVM"]}
+{"id":"para-050","category":"astronomy","q":"explain planet Mars","mustMatch":["fourth|red|iron"]}
+{"id":"para-051","category":"astronomy","q":"describe planet Jupiter","mustMatch":["fifth|gas|largest"]}
+{"id":"para-052","category":"astronomy","q":"info about planet Saturn","mustMatch":["sixth|ring|gas"]}
+{"id":"para-053","category":"astronomy","q":"give me facts about planet Earth","mustMatch":["third|Moon|life"]}
+{"id":"para-054","category":"astronomy","q":"tell me more about planet Uranus","mustMatch":["seventh|Herschel|1781"]}
+{"id":"para-055","category":"geography","q":"describe London","mustMatch":["England|Thames|United Kingdom|UK"]}
+{"id":"para-056","category":"geography","q":"info on Paris","mustMatch":["France|Seine|capital"]}
+{"id":"para-057","category":"geography","q":"explain Berlin","mustMatch":["Germany|Spree|Wall"]}
+{"id":"para-058","category":"geography","q":"facts about Rome","mustMatch":["Italy|Tiber|Roman"]}
+{"id":"para-059","category":"geography","q":"tell me more about Sydney","mustMatch":["Australia|Harbour|Opera"]}
+{"id":"para-060","category":"geography","q":"give me the rundown on Mumbai","mustMatch":["India|Bombay|Bollywood"]}
+{"id":"para-061","category":"geography","q":"information about Beijing","mustMatch":["China|Forbidden|Tiananmen"]}
+{"id":"para-062","category":"geography","q":"describe Dubai","mustMatch":["Emirates|Burj|Gulf"]}
+{"id":"para-063","category":"geography","q":"explain California","mustMatch":["Sacramento|Los Angeles|Hollywood|Silicon"]}
+{"id":"para-064","category":"geography","q":"info on Texas","mustMatch":["Austin|Houston|Republic"]}
+{"id":"para-065","category":"geography","q":"facts about Florida","mustMatch":["Tallahassee|Disney|Cape Canaveral"]}
+{"id":"para-066","category":"geography","q":"tell me more about Hawaii","mustMatch":["Honolulu|Pacific|island"]}
+{"id":"para-067","category":"geography","q":"give me facts about Alaska","mustMatch":["Juneau|Anchorage|Russian"]}
+{"id":"para-068","category":"geography","q":"describe Pennsylvania","mustMatch":["Harrisburg|Philadelphia|Constitution"]}
