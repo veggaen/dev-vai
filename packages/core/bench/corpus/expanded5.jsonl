@@ -1,0 +1,69 @@
+{"id":"country-001","category":"geography","q":"tell me about France","mustMatch":["Paris|French|Europe|euro"]}
+{"id":"country-002","category":"geography","q":"what is the capital of Germany?","mustMatch":["Berlin|German|Europe"]}
+{"id":"country-003","category":"geography","q":"tell me about Japan","mustMatch":["Tokyo|Japanese|Asia|yen"]}
+{"id":"country-004","category":"geography","q":"what is the capital of China?","mustMatch":["Beijing|Mandarin|Asia"]}
+{"id":"country-005","category":"geography","q":"tell me about India","mustMatch":["New Delhi|Hindi|Asia|rupee"]}
+{"id":"country-006","category":"geography","q":"what is the capital of the United States?","mustMatch":["Washington|English|America|dollar"]}
+{"id":"country-007","category":"geography","q":"tell me about the United Kingdom","mustMatch":["London|English|Europe|pound"]}
+{"id":"country-008","category":"geography","q":"what is the capital of Russia?","mustMatch":["Moscow|Russian|Eurasia|ruble"]}
+{"id":"country-009","category":"geography","q":"tell me about Brazil","mustMatch":["Brasília|Portuguese|South America|real"]}
+{"id":"country-010","category":"geography","q":"what is the capital of Canada?","mustMatch":["Ottawa|English|French|North America"]}
+{"id":"country-011","category":"geography","q":"tell me about Australia","mustMatch":["Canberra|English|Oceania|dollar"]}
+{"id":"country-012","category":"geography","q":"what is the capital of Italy?","mustMatch":["Rome|Italian|Europe|euro"]}
+{"id":"country-013","category":"geography","q":"tell me about Spain","mustMatch":["Madrid|Spanish|Europe|euro"]}
+{"id":"country-014","category":"geography","q":"what is the capital of Mexico?","mustMatch":["Mexico City|Spanish|North America"]}
+{"id":"country-015","category":"geography","q":"tell me about South Korea","mustMatch":["Seoul|Korean|Asia|won"]}
+{"id":"country-016","category":"geography","q":"what is the capital of North Korea?","mustMatch":["Pyongyang|Korean|Asia"]}
+{"id":"country-017","category":"geography","q":"tell me about Egypt","mustMatch":["Cairo|Arabic|Africa|Nile|pound"]}
+{"id":"country-018","category":"geography","q":"what is the capital of Nigeria?","mustMatch":["Abuja|English|Africa|naira"]}
+{"id":"country-019","category":"geography","q":"tell me about South Africa","mustMatch":["Pretoria|Cape Town|Africa|rand"]}
+{"id":"country-020","category":"geography","q":"what is the capital of Argentina?","mustMatch":["Buenos Aires|Spanish|South America|peso"]}
+{"id":"country-021","category":"geography","q":"tell me about Saudi Arabia","mustMatch":["Riyadh|Arabic|Asia|riyal"]}
+{"id":"country-022","category":"geography","q":"what is the capital of Turkey?","mustMatch":["Ankara|Turkish|Europe|Asia|lira"]}
+{"id":"country-023","category":"geography","q":"tell me about Indonesia","mustMatch":["Jakarta|Nusantara|Indonesian|Asia|rupiah"]}
+{"id":"country-024","category":"geography","q":"what is the capital of Vietnam?","mustMatch":["Hanoi|Vietnamese|Asia|đồng|dong"]}
+{"id":"country-025","category":"geography","q":"tell me about Thailand","mustMatch":["Bangkok|Thai|Asia|baht"]}
+{"id":"country-026","category":"geography","q":"what is the capital of Poland?","mustMatch":["Warsaw|Polish|Europe|złoty|zloty"]}
+{"id":"country-027","category":"geography","q":"tell me about Sweden","mustMatch":["Stockholm|Swedish|Europe|krona"]}
+{"id":"country-028","category":"geography","q":"what is the capital of Norway?","mustMatch":["Oslo|Norwegian|Europe|krone"]}
+{"id":"country-029","category":"geography","q":"tell me about the Netherlands","mustMatch":["Amsterdam|Dutch|Europe|euro"]}
+{"id":"elem-001","category":"chemistry","q":"what is hydrogen?","mustMatch":["atomic|symbol|H\\b|first"]}
+{"id":"elem-002","category":"chemistry","q":"tell me about helium","mustMatch":["atomic|symbol|He\\b|noble"]}
+{"id":"elem-003","category":"chemistry","q":"what is carbon?","mustMatch":["atomic|symbol|C\\b|allotrope|diamond|graphite"]}
+{"id":"elem-004","category":"chemistry","q":"tell me about nitrogen","mustMatch":["atomic|symbol|N\\b|atmosphere"]}
+{"id":"elem-005","category":"chemistry","q":"what is oxygen?","mustMatch":["atomic|symbol|O\\b|respiration|atmosphere"]}
+{"id":"elem-006","category":"chemistry","q":"tell me about gold","mustMatch":["atomic|symbol|Au|aurum|metal"]}
+{"id":"elem-007","category":"chemistry","q":"what is silver?","mustMatch":["atomic|symbol|Ag|argentum|conductivity"]}
+{"id":"elem-008","category":"chemistry","q":"tell me about iron","mustMatch":["atomic|symbol|Fe|ferrum|steel"]}
+{"id":"elem-009","category":"chemistry","q":"what is copper?","mustMatch":["atomic|symbol|Cu|cuprum|Bronze"]}
+{"id":"elem-010","category":"chemistry","q":"tell me about uranium","mustMatch":["atomic|symbol|U\\b|nuclear|fission"]}
+{"id":"animal-001","category":"biology","q":"tell me about lions","mustMatch":["Panthera|cat|pride|carnivore|male"]}
+{"id":"animal-002","category":"biology","q":"what is a tiger?","mustMatch":["Panthera|cat|species|stripe|carnivore"]}
+{"id":"animal-003","category":"biology","q":"tell me about elephants","mustMatch":["Loxodonta|Elephas|herbivore|mammal|three"]}
+{"id":"animal-004","category":"biology","q":"what is a blue whale?","mustMatch":["Balaenoptera|krill|largest|animal|mammal"]}
+{"id":"animal-005","category":"biology","q":"tell me about great white sharks","mustMatch":["Carcharodon|fish|carnivore|predator"]}
+{"id":"animal-006","category":"biology","q":"what is a polar bear?","mustMatch":["Ursus|Arctic|carnivore|ice|seal"]}
+{"id":"animal-007","category":"biology","q":"tell me about giraffes","mustMatch":["Giraffa|tallest|herbivore|Africa|neck"]}
+{"id":"animal-008","category":"biology","q":"what is an octopus?","mustMatch":["Octopoda|cephalopod|hearts|intelligent"]}
+{"id":"animal-009","category":"biology","q":"tell me about cheetahs","mustMatch":["Acinonyx|fastest|carnivore|Africa"]}
+{"id":"animal-010","category":"biology","q":"what is a penguin?","mustMatch":["Spheniscidae|Aves|bird|flightless|Antarctic"]}
+{"id":"lang-001","category":"programming","q":"tell me about Python","mustMatch":["Guido|1991|language|created|dynamic"]}
+{"id":"lang-002","category":"programming","q":"what is JavaScript?","mustMatch":["Brendan Eich|1995|language|created|browser"]}
+{"id":"lang-003","category":"programming","q":"tell me about Rust","mustMatch":["Hoare|2015|language|created|safety|ownership"]}
+{"id":"lang-004","category":"programming","q":"what is C++?","mustMatch":["Stroustrup|1985|language|created|object"]}
+{"id":"lang-005","category":"programming","q":"tell me about TypeScript","mustMatch":["Hejlsberg|Microsoft|2012|language|JavaScript"]}
+{"id":"lang-006","category":"programming","q":"what is Java?","mustMatch":["Gosling|Sun|1995|language|created|JVM"]}
+{"id":"lang-007","category":"programming","q":"tell me about C#","mustMatch":["Hejlsberg|Microsoft|2002|language|\\.NET"]}
+{"id":"lang-008","category":"programming","q":"what is Go programming language?","mustMatch":["Google|2009|language|Pike|Thompson|concurrent"]}
+{"id":"lang-009","category":"programming","q":"tell me about Ruby","mustMatch":["Matsumoto|1995|language|created|Rails"]}
+{"id":"lang-010","category":"programming","q":"what is Swift?","mustMatch":["Lattner|Apple|2014|language|created"]}
+{"id":"planet-001","category":"astronomy","q":"tell me about planet Mercury","mustMatch":["first|Sun|88|atmosphere|surface"]}
+{"id":"planet-002","category":"astronomy","q":"what is the planet Venus?","mustMatch":["second|Sun|225|atmosphere|hottest"]}
+{"id":"planet-003","category":"astronomy","q":"tell me about planet Mars","mustMatch":["fourth|Sun|red|atmosphere|Olympus"]}
+{"id":"planet-004","category":"astronomy","q":"what is planet Jupiter?","mustMatch":["fifth|largest|gas|moons|Galilean"]}
+{"id":"planet-005","category":"astronomy","q":"tell me about planet Saturn","mustMatch":["sixth|rings|moons|Titan|gas"]}
+{"id":"planet-006","category":"astronomy","q":"what is planet Neptune?","mustMatch":["eighth|outermost|atmosphere|moons|1846"]}
+{"id":"city-001","category":"geography","q":"tell me about London","mustMatch":["United Kingdom|Thames|Londinium|Roman"]}
+{"id":"city-002","category":"geography","q":"what is Paris?","mustMatch":["France|Seine|Eiffel|Louvre"]}
+{"id":"city-003","category":"geography","q":"tell me about New York City","mustMatch":["United States|Hudson|boroughs|Manhattan"]}
+{"id":"city-004","category":"geography","q":"what is Tokyo?","mustMatch":["Japan|Edo|Honshu|Bay|metropolitan"]}

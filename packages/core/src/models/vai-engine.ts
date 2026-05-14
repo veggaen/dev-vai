@@ -45,6 +45,7 @@ import type {
 } from './adapter.js';
 import { buildGroundedBuildBrief } from './grounded-build-brief.js';
 import { isExplicitWebSearchRequest } from './explicit-web-search.js';
+import { bulkFactsLookup } from './curated-facts-bulk.js';
 import { composeBuilderApp } from './builder/compose-builder-app.js';
 import { isFreshBuildRequestForEmptySandbox } from './builder/builder-request-router.js';
 import { resolveBuilderIntent } from './builder/resolve-builder-intent.js';
@@ -42294,6 +42295,14 @@ Want me to customize it with your actual links, change the color scheme, add ani
 
     // ── Bond (finance) ───────────────────────────────────────────────
     { if (/^\s*(?:what|explain|describe|tell|define)\b.*\bbond\b/i.test(input.trim()) && !/\bjames\s+bond\b|\bcovalent|hydrogen\b/i.test(lower)) return `A **bond** is a **debt security**: the issuer borrows money from the buyer and promises to pay it back at a specific date (**maturity**), with interest payments (**coupons**) along the way.\n\nKey terms:\n- **Face value (par)** — the amount repaid at maturity, usually $1,000.\n- **Coupon rate** — the annual interest rate paid on the face value.\n- **Maturity** — anything from days (T-bills) to 30+ years.\n- **Yield** — the actual return given the price you pay; moves *inversely* to price.\n- **Credit rating** — Moody's / S&P / Fitch grade the issuer's likelihood of default (AAA = safest).\n\nMain issuers:\n- **Government bonds** — US Treasuries, UK Gilts, Japanese JGBs, German Bunds, Norwegian statsobligasjoner; treated as low-risk benchmarks.\n- **Municipal bonds** — issued by states, cities and other local governments.\n- **Corporate bonds** — investment-grade or, below BBB-, **high-yield ("junk")**.\n- **Sovereign EM** — emerging-market governments, higher risk and yield.\n\nWhy people hold bonds: predictable income, lower volatility than equities, diversification, and (for governments) the ability to fund deficits. Why prices move: interest-rate changes (the biggest driver), inflation expectations, credit risk and liquidity.`; }
+
+    // ── Bulk curated facts (structured-template engine, Round 21) ─────
+    // Last-resort lookup so explicit handlers above can shadow generic
+    // bulk entries. See models/curated-facts-bulk.ts.
+    {
+      const bulk = bulkFactsLookup(lower);
+      if (bulk) return bulk;
+    }
 
     return null;
   }
