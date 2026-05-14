@@ -1649,7 +1649,13 @@ export class VaiEngine implements ModelAdapter {
       const lastStrategy = this._lastMeta?.strategy ?? '';
       const isCreativeCanned = lastStrategy.startsWith('creative-')
         || lastStrategy === 'multi-step-planning'
-        || lastStrategy === 'theory-of-mind';
+        || lastStrategy === 'theory-of-mind'
+        // Curated list answers are already shape-compliant for the
+        // requested format ("as a numbered list", "as bullets", "as a
+        // markdown table"). Letting the brevity firewall trim them to
+        // the first line ("The 8 planets of our solar system:") would
+        // throw away the actual answer.
+        || lastStrategy === 'curated-list';
       if (!isCreativeCanned) {
         const trimmed = this.enforceInstructionConstraint(input, response);
         if (trimmed !== response) {
@@ -3466,6 +3472,15 @@ export class VaiEngine implements ModelAdapter {
     // drifting into unrelated retrieval.
     const factualCurated = this.tryFactualCurated(input);
     if (factualCurated !== null) return this.tracked('factual-curated', factualCurated, input);
+
+    // Strategy 0.0097: Curated list lookup ("the 8 planets", "the 5
+    // oceans", "the 7 continents", "TCP vs UDP"). When the user explicitly
+    // asks for a famous closed list AND specifies a format ("as a numbered
+    // list", "as bullet points", "comma separated"), respect the format.
+    // Without this, retrieval drifts into fictional-planets repos and
+    // fragmented snippets.
+    const listAnswer = this.tryCuratedListLookup(input);
+    if (listAnswer !== null) return this.tracked('curated-list', listAnswer, input);
 
     // Strategy 0.01: Real-time utility questions — time, date, day — caught before anything
     const utilityResult = this.tryUtilityQuestion(lower, input, history);
@@ -41515,6 +41530,96 @@ Want me to customize it with your actual links, change the color scheme, add ani
   }
 
   /**
+   * Curated list lookup — closed, well-known sets that retrieval keeps
+   * misrouting (fictional planets repos, fragmented Wikipedia snippets).
+   * Returns a string that already honors any explicit format request in
+   * the prompt: numbered list, bulleted list, or comma-separated.
+   */
+  private tryCuratedListLookup(input: string): string | null {
+    const lower = input.toLowerCase();
+
+    type ListEntry = {
+      keys: RegExp;
+      title: string;
+      items: readonly string[];
+      // Optional inline annotation appended to each item ("Pacific — largest").
+      annotations?: readonly string[];
+    };
+    const entries: readonly ListEntry[] = [
+      {
+        keys: /\b(?:(?:eight|8)\s+planets?|planets?\s+of\s+(?:the|our)\s+solar\s+system|order\s+of\s+(?:the\s+)?planets?|planets?\s+from\s+the\s+sun)\b/i,
+        title: 'The 8 planets of our solar system, in order from the sun',
+        items: ['Mercury', 'Venus', 'Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'],
+      },
+      {
+        keys: /\b(?:(?:five|5)\s+oceans?|oceans?\s+of\s+the\s+world|world['\u2019]?s\s+oceans?|name\s+the\s+oceans?)\b/i,
+        title: "The 5 oceans of the world",
+        items: ['Pacific Ocean', 'Atlantic Ocean', 'Indian Ocean', 'Southern (Antarctic) Ocean', 'Arctic Ocean'],
+      },
+      {
+        keys: /\b(?:(?:seven|7)\s+continents?|continents?\s+of\s+the\s+world|name\s+the\s+continents?|all\s+the\s+continents?)\b/i,
+        title: 'The 7 continents',
+        items: ['Asia', 'Africa', 'North America', 'South America', 'Antarctica', 'Europe', 'Australia/Oceania'],
+        annotations: ['~4.7 billion', '~1.4 billion', '~0.6 billion', '~0.4 billion', '~0 (research stations only)', '~0.75 billion', '~0.045 billion'],
+      },
+      {
+        keys: /\b(?:tcp\s+(?:vs\.?|versus|and|or|compared\s+to)\s+udp|differences?\s+between\s+tcp\s+and\s+udp|udp\s+(?:vs\.?|versus)\s+tcp)\b/i,
+        title: 'Key differences between TCP and UDP',
+        items: [
+          'TCP is connection-oriented (3-way handshake); UDP is connectionless.',
+          'TCP guarantees in-order, reliable delivery with retransmission; UDP is best-effort with no retransmits.',
+          'TCP has flow control and congestion control; UDP has neither.',
+          'TCP has higher per-packet overhead (~20-byte header); UDP is leaner (~8-byte header).',
+          'TCP is used for HTTP/HTTPS, SSH, SMTP, file transfer; UDP is used for DNS, DHCP, VoIP, video streaming, gaming.',
+        ],
+      },
+      {
+        keys: /\b(?:days?\s+of\s+the\s+week|seven\s+days|7\s+days\s+of\s+the\s+week|name\s+the\s+days)\b/i,
+        title: 'The 7 days of the week',
+        items: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+      },
+      {
+        keys: /\b(?:months?\s+of\s+the\s+year|twelve\s+months|12\s+months|name\s+the\s+months)\b/i,
+        title: 'The 12 months of the year',
+        items: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+      },
+    ];
+
+    let entry: ListEntry | null = null;
+    for (const e of entries) {
+      if (e.keys.test(lower)) { entry = e; break; }
+    }
+    if (!entry) return null;
+
+    // Detect requested format. Default to a clean numbered list.
+    const wantsNumbered = /\b(?:numbered\s+list|number(?:ed)?\s+them|as\s+a\s+numbered|in\s+a\s+numbered|with\s+numbers?)\b/i.test(input);
+    const wantsBullets = /\b(?:bullet(?:s|ed)?(?:\s+list|\s+points?)?|as\s+bullets?|in\s+bullets?|bulleted)\b/i.test(input);
+    const wantsCommaSeparated = /\b(?:comma[\s-]?separated|comma\s+list|all\s+on\s+one\s+line|one\s+line\s+only|inline\s+list)\b/i.test(input);
+    const wantsTable = /\b(?:markdown\s+table|table\s+format|in\s+a\s+table|as\s+a\s+table)\b/i.test(input);
+    const wantsNamesOnly = /\b(?:names?\s+only|just\s+(?:the\s+)?names?|only\s+(?:the\s+)?names?)\b/i.test(input);
+
+    const items = entry.items;
+    const ann = entry.annotations ?? [];
+
+    if (wantsTable && ann.length === items.length) {
+      // Two-column markdown table with the annotation column.
+      const header = '| Item | Detail |\n|---|---|\n';
+      const rows = items.map((it, i) => `| ${it} | ${ann[i]} |`).join('\n');
+      return `${entry.title}:\n\n${header}${rows}`;
+    }
+    if (wantsCommaSeparated || wantsNamesOnly) {
+      return items.join(', ');
+    }
+    if (wantsBullets) {
+      return `${entry.title}:\n\n${items.map((it) => `- ${it}`).join('\n')}`;
+    }
+    // Default and explicit-numbered both produce numbered list — closed lists
+    // read better numbered.
+    void wantsNumbered;
+    return `${entry.title}:\n\n${items.map((it, i) => `${i + 1}. ${it}`).join('\n')}`;
+  }
+
+  /**
    * Curated factual lookup for political offices and other "who is the X
    * of Y right now" questions where the conversational/retrieval path keeps
    * drifting into Wikipedia summaries of unrelated history articles.
@@ -41852,6 +41957,8 @@ Want me to customize it with your actual links, change the color scheme, add ani
     { if (/\bhiggs\s+boson\b/i.test(lower) || /\bhiggs\s+particle\b/i.test(lower) || /\bhiggs\s+field\b/i.test(lower)) return `The **Higgs boson** is an elementary particle in the **Standard Model** of particle physics — the quantum excitation of the **Higgs field**, the field whose non-zero vacuum value gives mass to elementary particles via the **Higgs mechanism**.\n\n- **Mass:** approximately **125 GeV/c²** (about 133 times the proton mass); **spin 0** (the only known fundamental scalar particle); **electrically neutral**; **no colour charge**; mean lifetime ~**10⁻²² s**.\n- The **Higgs mechanism** was proposed independently in **1964** by six physicists in three papers: **Robert Brout & François Englert** (Brussels), **Peter Higgs** (Edinburgh), and **Gerald Guralnik, C. R. Hagen & Tom Kibble** (Imperial College London). It explains how the **electroweak symmetry** between the weak and electromagnetic forces is **spontaneously broken** at low energies, giving non-zero mass to the W and Z bosons (and to charged fermions through Yukawa couplings) while leaving the photon massless.\n- **Discovery:** announced on **4 July 2012** by the **ATLAS** and **CMS** collaborations at **CERN's Large Hadron Collider** (LHC), in proton-proton collisions at √s = 7–8 TeV — confirming the last unobserved prediction of the Standard Model.\n- **2013 Nobel Prize in Physics** awarded jointly to **François Englert** and **Peter Higgs** "for the theoretical discovery of a mechanism that contributes to our understanding of the origin of mass of subatomic particles, and which recently was confirmed through the discovery of the predicted fundamental particle."\n- Often called "the **God particle**" — the nickname comes from the title of **Leon Lederman**'s 1993 popular book; both Lederman (originally "the goddamn particle") and Higgs himself disliked the name.\n- The Higgs is now intensively studied at the LHC for couplings, possible non-Standard-Model decay channels, and as a probe of new physics.`; }
     { if (/\bgeneral\s+relativity\b/i.test(lower) || /\beinstein['']?s?\s+general\s+relativity\b/i.test(lower)) return `**General relativity** (GR) is the geometric theory of **gravitation** published by **Albert Einstein** in **1915** — describing **gravity not as a force but as a manifestation of the curvature of four-dimensional spacetime caused by mass and energy**.\n\n- Generalises Einstein's **special relativity** (1905) to include accelerated frames and gravity. The central insight is the **equivalence principle**: locally, the effects of gravity are indistinguishable from the effects of acceleration.\n- **Einstein field equations** (compact form): **G_μν + Λ g_μν = (8πG/c⁴) T_μν** — relating the curvature of spacetime (the Einstein tensor G_μν) to the distribution of matter and energy (the stress-energy tensor T_μν). Λ is the **cosmological constant**.\n- Famous predictions confirmed by experiment:\n  - **Perihelion precession of Mercury** — explained the 43"/century anomaly already in 1915.\n  - **Deflection of starlight** by the Sun — confirmed by **Arthur Eddington**'s **1919 solar eclipse** expedition (Príncipe and Sobral) — the result that made Einstein a global celebrity overnight.\n  - **Gravitational redshift** — confirmed by Pound–Rebka (1959).\n  - **Gravitational time dilation** — observed in atomic clocks at altitude (e.g., GPS satellites must apply GR corrections to remain accurate to ~30 ns/day).\n  - **Black holes** — first imaged by the **Event Horizon Telescope** in 2019 (M87*) and 2022 (Sagittarius A*).\n  - **Gravitational waves** — first directly detected by **LIGO** on **14 September 2015** from the merger of two ~30-M_☉ black holes (announcement 11 February 2016) — earning Weiss, Barish, and Thorne the **2017 Nobel Prize**.\n  - **Expanding universe** and the **Big Bang** cosmology, the bending of spacetime around rotating bodies (frame dragging — Gravity Probe B), gravitational lensing.\n- Remains the best current theory of gravity; an outstanding open problem is unifying GR with **quantum mechanics** into a theory of **quantum gravity**.`; }
     { if (/\bquantum\s+entanglement\b/i.test(lower) || /\bentangled\s+(?:particles|qubits|photons|states)\b/i.test(lower)) return `**Quantum entanglement** is a uniquely quantum-mechanical phenomenon in which two or more particles become linked in such a way that the quantum state of each particle **cannot be described independently** of the others — even when the particles are separated by arbitrarily large distances.\n\n- A measurement of one entangled particle **instantaneously** correlates with the result of a measurement on its partner — Einstein famously called this "**spooky action at a distance**" (***spukhafte Fernwirkung***).\n- Identified and analysed by **Einstein, Podolsky, and Rosen** in their famous **1935 EPR paper** as evidence that quantum mechanics must be incomplete; the term ***Verschränkung*** ("entanglement") was coined the same year by **Erwin Schrödinger**, who called it "***the*** characteristic trait of quantum mechanics."\n- **John Bell** (**1964**) showed that any **local hidden-variable theory** must satisfy certain inequalities (**Bell's inequalities**), and that quantum mechanics violates them — turning the EPR debate into an experimental question.\n- **Experimental confirmations** of Bell-inequality violation:\n  - **Alain Aspect** (Orsay, **1981–82**) — first compelling violations.\n  - **Anton Zeilinger** (Innsbruck/Vienna), **John Clauser**, and others closed successive "loopholes" through the 1990s and 2010s.\n  - **2015 "loophole-free" tests** at TU Delft (Hensen et al.) and elsewhere.\n  - **2022 Nobel Prize in Physics** to **Aspect, Clauser, and Zeilinger** "for experiments with entangled photons, establishing the violation of Bell inequalities and pioneering quantum information science."\n- Crucially, entanglement does **not** allow faster-than-light signalling — measurement outcomes look random locally; correlations are revealed only when results are compared classically.\n- Practical applications: **quantum cryptography** (BB84, Ekert E91 protocols), **quantum teleportation** (Bennett et al. 1993; first experimental demonstration Innsbruck 1997), **superdense coding**, the entire emerging field of **quantum computing**.`; }
+    { if (/\b(?:what\s+(?:is|are)\s+)?(?:the\s+|a\s+)?mitochondri(?:on|a|um)\b/i.test(lower) && !/\bmitochondrial\s+dna\b/i.test(lower) && !/\bmtdna\b/i.test(lower)) return `**The mitochondrion** (plural *mitochondria*) is the eukaryotic cell's **"powerhouse"** — a double-membrane organelle that generates most of the cell's **ATP** through aerobic respiration.\n\n- Roughly bean-shaped, ~0.5–1 μm wide and 1–10 μm long. A typical human cell contains anywhere from a few dozen mitochondria (a lymphocyte) to several thousand (a cardiac muscle cell or hepatocyte).\n- **Two membranes:** a smooth **outer membrane** permeable to small molecules (via porins), and a heavily-folded **inner membrane** whose folds (***cristae***) carry the four electron-transport-chain complexes and **ATP synthase**.\n- Inside the inner membrane sits the **matrix**, where the **citric-acid (Krebs) cycle** runs, fatty acids are β-oxidised, and the mitochondrion's own circular **mtDNA** and ribosomes live.\n- **Endosymbiotic origin** (Lynn Margulis, 1967): mitochondria descend from a free-living **alphaproteobacterium** engulfed by an early eukaryote ~2 billion years ago — the basis for their own genome, double membrane, and bacterial-style ribosomes.\n- Other essential roles: regulation of programmed cell death (**apoptosis** via cytochrome-c release), calcium buffering, heat generation in brown adipose tissue, biosynthesis of haem and steroid hormones.\n- **Mitochondrial diseases** — including LHON, MELAS, MERRF, Kearns–Sayre — most strongly affect tissues with the highest energy demand: brain, retina, skeletal and cardiac muscle.`; }
+    { if (/\b(?:what\s+(?:is|does)\s+)?http\b/i.test(lower) && !/\bhttps\b/i.test(lower) && !/\bhttp\s+request\b/i.test(lower) && !/\bhttp\s+(?:status|code|method|header)/i.test(lower)) return `**HTTP** stands for **Hypertext Transfer Protocol** — the foundational application-layer protocol of the World Wide Web, designed to transfer hypertext documents and other resources between a client (typically a web browser) and a server. It was created by **Tim Berners-Lee** at CERN in 1989–1991, with the first formal version (HTTP/0.9) supporting a single GET method that returned HTML. HTTP/1.0 was published as RFC 1945 in 1996, HTTP/1.1 (RFC 2616, then RFC 7230 family) in 1997, HTTP/2 (RFC 7540) in 2015, and HTTP/3 (RFC 9114) in 2022. HTTP is a stateless, text-based, request–response protocol: the client opens a connection (over TCP for HTTP/1.1 and HTTP/2, over QUIC over UDP for HTTP/3), sends a request consisting of a method (such as GET, POST, PUT, DELETE), a target URL path, headers, and an optional body, and the server returns a status code (such as 200 OK, 301 Moved Permanently, 404 Not Found, 500 Internal Server Error), response headers, and an optional body. Because HTTP itself sends data in plaintext, it is almost always wrapped today in **TLS** to form **HTTPS**, which adds confidentiality, integrity, and server authentication on top of the same protocol semantics. HTTP underlies essentially every web page load, every REST API call, every WebSocket upgrade, and most modern mobile and desktop application traffic.`; }
     { if (/\bmitochondrial\s+dna\b/i.test(lower) || /\bmtDNA\b/i.test(lower)) return `**Mitochondrial DNA** (**mtDNA**) is the small, circular DNA molecule located inside the **mitochondria** of eukaryotic cells — separate from the much larger linear DNA in the cell nucleus.\n\n- In humans the mitochondrial genome is **16,569 base pairs** long (sequenced by **Anderson et al. 1981** as the **Cambridge Reference Sequence**) and encodes **37 genes**: 13 protein subunits of the oxidative-phosphorylation electron-transport chain, plus 22 transfer RNAs and 2 ribosomal RNAs needed to synthesise those proteins inside the mitochondrion. The other ~1,500 mitochondrial proteins are encoded in the nuclear genome and imported into the organelle.\n- Each mitochondrion contains many copies of the genome, and each cell contains hundreds to thousands of mitochondria — so a typical somatic cell has ~1,000–10,000 copies of mtDNA.\n- **Inherited almost exclusively from the mother** (paternal mtDNA carried in the sperm midpiece is normally eliminated by ubiquitin-tagged degradation in the fertilised egg); this **maternal inheritance** makes mtDNA a powerful tool for tracing maternal ancestry — leading to the concept of **"Mitochondrial Eve"**, the most recent matrilineal common ancestor of all living humans, estimated to have lived in Africa **~150,000–200,000 years ago**.\n- Strong support for the **endosymbiotic theory** (Lynn Margulis, 1967): mitochondria descend from an **alphaproteobacterium** (closest modern relative likely Rickettsiales) that was engulfed by an early eukaryote ~2 billion years ago. mtDNA is bacterial-style circular DNA, has bacterial-style ribosomes, and replicates independently of the cell cycle.\n- Mutates ~10× faster than nuclear DNA (no histones, less effective repair, exposure to reactive oxygen species).\n- **Mitochondrial diseases** — including LHON (Leber's hereditary optic neuropathy), MELAS, MERRF, Kearns–Sayre syndrome — arise from mtDNA mutations and typically affect tissues with the highest energy demand (brain, muscle, heart, eye).`; }
     { if (/\bcrispr\b/i.test(lower)) return `**CRISPR** (**Clustered Regularly Interspaced Short Palindromic Repeats**) is a family of DNA sequences found in the genomes of bacteria and archaea that — together with associated **Cas** ("CRISPR-associated") proteins — form an adaptive **immune system** that protects prokaryotes from invading viruses (bacteriophages) and plasmids by storing fragments of past invaders' DNA in their own genome and using **RNA-guided** Cas nucleases to cut any matching sequence on a future encounter.\n\n- The repeats were first noticed in **1987** by **Yoshizumi Ishino** in *E. coli*, named **CRISPR** in **2002** by Jansen et al., and recognised as a bacterial immune system in **2007** by Barrangou & Horvath at Danisco.\n- The breakthrough that turned CRISPR into the most powerful gene-editing tool in biology came on **17 August 2012**, when **Jennifer Doudna** (UC Berkeley) and **Emmanuelle Charpentier** (then Umeå) published in *Science* that the **Cas9** nuclease of *Streptococcus pyogenes* could be programmed with a single chimeric **guide RNA** (**sgRNA**) to cut any chosen DNA sequence in vitro. **Feng Zhang** (Broad Institute) demonstrated the same editing in mammalian cells in early 2013 — leading to a long, contentious patent dispute between Berkeley and the Broad.\n- Mechanism: a 20-nucleotide region of the sgRNA pairs with a matching DNA target adjacent to a short **PAM** (Protospacer-Adjacent Motif, "NGG" for SpCas9). Cas9 then introduces a **double-strand break**, which the cell repairs either by error-prone **NHEJ** (knocking out a gene) or by **homology-directed repair** with a supplied template (precise editing).\n- Variants and refinements: **Cas12a (Cpf1)**, **Cas13** (RNA-targeting), **base editors** (Liu lab, 2016) and **prime editors** (Liu lab, 2019) for single-letter changes without double-strand breaks, and CRISPR interference / activation (CRISPRi/a) for gene regulation.\n- **2020 Nobel Prize in Chemistry** to **Charpentier and Doudna** "for the development of a method for genome editing."\n- First **FDA-approved CRISPR therapy**: **Casgevy** (exa-cel, Vertex/CRISPR Therapeutics), approved **8 December 2023** for **sickle-cell disease** and **transfusion-dependent beta-thalassemia**.`; }
     { if (/\bphotosynthesis\b/i.test(lower)) return `**Photosynthesis** is the biochemical process used by plants, algae, and cyanobacteria to convert **light energy** (mostly from the Sun) into **chemical energy** stored in carbohydrates — primarily **glucose** — synthesised from **carbon dioxide** and **water**, releasing **oxygen** as a by-product.\n\n- Net summary equation:\n  **6 CO₂ + 6 H₂O + light → C₆H₁₂O₆ + 6 O₂**\n  (carbon dioxide + water + sunlight → glucose + oxygen)\n- Takes place inside the **chloroplasts** of plant cells, in the **chlorophyll**-containing thylakoid membranes (light-dependent reactions) and the surrounding stroma (light-independent reactions).\n- Two stages:\n  - **Light-dependent reactions** (in the thylakoid membrane): chlorophyll a in **Photosystem II** absorbs photons, splits **water** into oxygen, protons, and electrons; electrons travel down an electron-transport chain to **Photosystem I**, generating a proton gradient that drives **ATP synthase** (chemiosmosis) to make **ATP**; PSI re-energises the electrons to reduce **NADP⁺** to **NADPH**. The **Z-scheme**.\n  - **Light-independent reactions / Calvin–Benson cycle** (in the stroma): the enzyme **RuBisCO** fixes CO₂ onto the 5-carbon sugar **RuBP**; the resulting molecules are reduced using ATP and NADPH from the light reactions to form the 3-carbon sugar **G3P**, which is used to build glucose and to regenerate RuBP. **Melvin Calvin** earned the 1961 Nobel Prize in Chemistry for working out the cycle.\n- Two main photosynthetic pigments: **chlorophyll a** (the primary pigment, absorbs strongly in red and blue, reflects green) and **chlorophyll b** (an accessory pigment); supplemented by **carotenoids** and (in algae) **phycobilins**.\n- Variants: **C₃** photosynthesis (most plants), **C₄** photosynthesis (maize, sugarcane, sorghum — pre-concentrates CO₂ to suppress photorespiration in hot dry climates), and **CAM** (Crassulacean Acid Metabolism — cacti, succulents, pineapples — open stomata at night).\n- Globally photosynthesis fixes ~**100 billion tonnes** of carbon per year and produces ~**half** of all atmospheric oxygen (the other half from cyanobacteria and algae in the oceans). Without photosynthesis no eukaryotic life as we know it could exist.`; }

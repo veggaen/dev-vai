@@ -436,6 +436,21 @@ export function bulkFactsLookup(lower: string): string | null {
     return null;
   }
 
+  // Direct-question short-circuit: when the user explicitly asks just for
+  // "the capital of <country>" we return a one-sentence answer rather than
+  // the full country fact-card. Without this short-circuit, simple direct
+  // questions get a 1000+ char response that buries the actual fact.
+  const capitalMatch = /\bcapital\s+(?:of|city\s+of)\s+/i.test(lower)
+    || /\bwhat\s+is\s+\w+(?:'s|s')\s+capital\b/i.test(lower);
+  if (capitalMatch) {
+    for (const country of COUNTRIES) {
+      const m = makeMatcher(country.names);
+      if (m.test(lower)) {
+        return `**${country.capital}** is the capital of ${country.display}. It sits in ${country.continent}, covering an area of ${country.area} with a population of ${country.population}. The currency is ${country.currency}, the primary language is ${country.language}, and the modern state was founded ${country.founded}.`;
+      }
+    }
+  }
+
   for (const entry of COMPILED) {
     if (entry.match.test(lower) && (!entry.exclude || !entry.exclude.test(lower))) {
       return entry.render();
