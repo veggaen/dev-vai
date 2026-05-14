@@ -2124,6 +2124,24 @@ export class VaiEngine implements ModelAdapter {
     }
     // Surgical chat hardenings — high-precision behavioral guards.
     response = this.applyChatHardenings(userContent, request.messages, response);
+    // Echo guard — if the model produced something almost identical to the
+    // user's own message (very close to a verbatim parrot), substitute an
+    // honest fallback so the user never sees their words mirrored back as
+    // an answer. Threshold: trimmed lower-cased payloads match exactly OR
+    // 90%+ of one is a substring of the other.
+    {
+      const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+      const u = norm(userContent);
+      const r = norm(response);
+      if (u.length >= 12) {
+        const exact = u === r;
+        const longSub = (u.length >= r.length * 0.9 && r.includes(u.slice(0, Math.min(60, u.length))))
+          || (r.length >= u.length * 0.9 && u.includes(r.slice(0, Math.min(60, r.length))));
+        if (exact || longSub) {
+          response = this.buildHelpfulFallback(userContent, request.messages);
+        }
+      }
+    }
     // OODA Act phase — post-process the response per the trace's decision.
     if (this._lastOodaTrace) {
       const trace: OodaTrace = this._lastOodaTrace;
@@ -41243,7 +41261,12 @@ Want me to customize it with your actual links, change the color scheme, add ani
    */
   private lookupInventor(input: string): { topic: string; answer: string } | null {
     const lower = input.toLowerCase();
-    const triggers = /\b(?:who\s+(?:invented|created|made|discovered|developed|founded|designed|built)|inventor\s+of|creator\s+of|who\s+was\s+the\s+(?:name\s+of\s+the\s+)?person\s+(?:that|who)\s+(?:invented|created|made|discovered|developed|designed|built))\b/i;
+    // Trigger covers explicit "who made/invented/created X" shapes plus a
+    // handful of looser follow-up phrasings we have observed in real chats:
+    //  - "isn't it bill that made windows", "wasn't it linus that made linux"
+    //  - "didn't bill gates make windows", "did linus torvalds invent linux"
+    // We deliberately do NOT match bare declarative "X made Y" — too noisy.
+    const triggers = /\b(?:who\s+(?:invented|created|made|discovered|developed|founded|designed|built)|inventor\s+of|creator\s+of|who\s+was\s+the\s+(?:name\s+of\s+the\s+)?person\s+(?:that|who)\s+(?:invented|created|made|discovered|developed|designed|built)|(?:is(?:e?n[\u2019']?t|nt)?|was(?:n[\u2019']?t|nt)?|did(?:n[\u2019']?t|nt)?|isent|wasent|aint)\s+(?:it\s+)?[a-z][a-z .'\-]{1,40}?\s+(?:that\s+)?(?:invent|create|made?|make|built?|build|design)(?:ed)?)\b/i;
     if (!triggers.test(lower)) return null;
 
     type Entry = { keys: RegExp; topic: string; answer: string };
@@ -41302,6 +41325,46 @@ Want me to customize it with your actual links, change the color scheme, add ani
         keys: /\b(?:computer|first\s+computer)\b/i,
         topic: 'the computer',
         answer: '"The computer" doesn\'t have a single inventor — it depends on what you count. **Charles Babbage** designed the Analytical Engine in the 1830s (never built in his lifetime). **Alan Turing** formalized the theory in 1936. **Konrad Zuse**\'s Z3 (1941) was the first working programmable computer. **ENIAC** (1945, Eckert and Mauchly) was the first general-purpose electronic computer. Modern programming concepts also owe a lot to **Ada Lovelace**, who wrote the first algorithm intended for Babbage\'s machine.',
+      },
+      {
+        keys: /\b(?:windows(?:\s*(?:os|operating\s*system|nt|xp|10|11))?|microsoft\s*windows|ms[\s-]?windows)\b/i,
+        topic: 'Microsoft Windows',
+        answer: '**Microsoft** made Windows. The company was co-founded by **Bill Gates** and **Paul Allen** in 1975. The first release of Windows (Windows 1.0) shipped on **20 November 1985**, layered as a graphical shell on top of MS-DOS. Modern Windows is built on the **Windows NT** kernel, which was led by **David Cutler** (formerly of DEC) and first released as Windows NT 3.1 in 1993. So the short, honest version: the company is Microsoft, the founders are Gates and Allen, and the modern NT codebase was driven by Cutler.',
+      },
+      {
+        keys: /\b(?:linux(?:\s*(?:kernel|os))?|gnu[\s\/]+linux)\b/i,
+        topic: 'Linux',
+        answer: '**Linus Torvalds** created the Linux kernel as a Finnish university student and announced it on the comp.os.minix newsgroup on **25 August 1991**. Around the kernel sits the **GNU userland** — compilers, shells, core utilities — built by **Richard Stallman** and the GNU Project from 1983 onwards. That is why people sometimes insist on calling the full system **GNU/Linux**: Torvalds wrote the kernel, Stallman and GNU wrote most of what runs on top of it. Today Linux powers the majority of servers, supercomputers, the cloud, and (through Android) most smartphones.',
+      },
+      {
+        keys: /\b(?:mac\s*os|macos|os\s*x|mac\s*os\s*x)\b/i,
+        topic: 'macOS',
+        answer: '**Apple** makes macOS. Modern macOS descends from **NeXTSTEP**, the operating system built by Steve Jobs\' company **NeXT** in the late 1980s. When Apple acquired NeXT in 1997, NeXTSTEP became the foundation of **Mac OS X 10.0 "Cheetah"** (released 24 March 2001), led at Apple by engineers including **Avie Tevanian** (kernel) and **Bertrand Serlet** (user-facing software). The kernel is **XNU** (a hybrid of Mach and BSD). So the short version: Apple ships it, but the lineage runs back through NeXT and Steve Jobs.',
+      },
+      {
+        keys: /\b(?:iphone)\b/i,
+        topic: 'the iPhone',
+        answer: '**Apple** made the iPhone, announced by **Steve Jobs** at Macworld on **9 January 2007** and released on 29 June 2007. The original iPhone was the result of a multi-year secret project at Apple led by Jobs with **Scott Forstall** (software), **Tony Fadell** (hardware, also the iPod\'s lead), **Jony Ive** (industrial design) and **Greg Christie** (UI). It collapsed phone, iPod and internet device into a single multi-touch slab and reset the entire smartphone industry.',
+      },
+      {
+        keys: /\b(?:android(?:\s*os|\s*operating\s*system)?)\b/i,
+        topic: 'Android',
+        answer: '**Android, Inc.** was founded in 2003 by **Andy Rubin**, **Rich Miner**, **Nick Sears** and **Chris White**. **Google** acquired it in 2005 and shipped the first commercial Android phone (the HTC Dream / T-Mobile G1) on **22 October 2008**. Android is built on the **Linux kernel** (so under the hood it inherits Linus Torvalds\' work) with Google\'s userland, runtime (originally Dalvik, now ART) and the Android Open Source Project (AOSP) on top. Today Android is the most-used operating system in the world by device count.',
+      },
+      {
+        keys: /\b(?:tesla(?:\s*(?:cars?|motors?|inc|company))?|model\s*(?:s|3|x|y))\b/i,
+        topic: 'Tesla',
+        answer: '**Tesla, Inc.** was founded as Tesla Motors on **1 July 2003** by **Martin Eberhard** and **Marc Tarpenning**. **Elon Musk** joined in February 2004 as chairman and lead investor of the Series A and later became CEO; **JB Straubel** (long-time CTO and battery architect) and **Ian Wright** are also typically listed among the co-founders following a 2009 settlement. Eberhard and Tarpenning built the original company and shipped the first Roadster prototype; Musk\'s capital and product direction took it to the Model S, Model 3 and the modern Tesla.',
+      },
+      {
+        keys: /\b(?:facebook|the\s+facebook)\b/i,
+        topic: 'Facebook',
+        answer: '**Mark Zuckerberg** launched Facebook from his Harvard dorm room on **4 February 2004**, with co-founders **Eduardo Saverin**, **Andrew McCollum**, **Dustin Moskovitz** and **Chris Hughes**. The parent company was renamed **Meta Platforms** on 28 October 2021 to signal its bet on the metaverse. Zuckerberg remains CEO.',
+      },
+      {
+        keys: /\b(?:google(?:\s*(?:search|the\s*search\s*engine))?)\b/i,
+        topic: 'Google',
+        answer: '**Larry Page** and **Sergey Brin** built Google as a Stanford research project on the PageRank algorithm and incorporated it on **4 September 1998**. Google was reorganised under the parent holding **Alphabet Inc.** on 2 October 2015. **Sundar Pichai** has been CEO of Google (and later Alphabet) since 2015 / 2019.',
       },
     ];
 
