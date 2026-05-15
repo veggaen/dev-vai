@@ -1754,14 +1754,23 @@ export class VaiEngine implements ModelAdapter {
     return out;
   }
 
-  private coerceToOneSentence(text: string): string {
+  private coerceToOneSentence(text: string, maxChars = 280): string {
     const cleaned = text.replace(/\*\*/g, '').replace(/^[-*]\s+/gm, '').trim();
     // Split off the first paragraph block before any bullet list.
     const paraEnd = cleaned.search(/\n\s*\n|\n\s*[-*•]\s/);
     const head = paraEnd > 20 ? cleaned.slice(0, paraEnd) : cleaned;
     const sentences = head.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 8);
-    if (sentences.length > 0) return sentences[0].trim();
-    return head.trim();
+    let first = (sentences[0] ?? head).trim();
+    // If the single sentence is unusually long (no punctuation in the first
+    // 280 chars), trim at the last word boundary inside the cap so we never
+    // emit a 400+ char "one sentence" answer.
+    if (first.length > maxChars) {
+      const slice = first.slice(0, maxChars);
+      const lastSpace = slice.lastIndexOf(' ');
+      first = (lastSpace > 80 ? slice.slice(0, lastSpace) : slice).trim();
+      if (!/[.!?]$/.test(first)) first += '.';
+    }
+    return first;
   }
 
   private coerceToShortFact(text: string, maxChars = 320): string {
