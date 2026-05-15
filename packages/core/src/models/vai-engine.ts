@@ -1654,6 +1654,16 @@ export class VaiEngine implements ModelAdapter {
     // the upstream answer to comply but does not always trim a verbose result
     // produced by an earlier deterministic strategy. This block enforces it.
     if (detectInstructionConstraint(input)) {
+      // When the user requests a multi-item list (e.g. "5 facts about X as a
+      // numbered list"), the generic brevity trim would collapse the answer
+      // to a single sentence and lose the requested shape. Defer to
+      // applyShapeCoercion which will reformat into a numbered list.
+      const shapeForBrevitySkip = detectShapeIntent(input);
+      const requestsMultiItemList = shapeForBrevitySkip?.format === 'list'
+        && (shapeForBrevitySkip.count ?? 0) >= 2;
+      if (requestsMultiItemList) {
+        // Skip the brevity trim — applyShapeCoercion will own the shape.
+      } else {
       // Canned creative responses are already shape-correct — do not let the
       // generic first-sentence trimmer collapse a haiku, an N-pitch list, or
       // a multi-paragraph voice answer.
@@ -1673,6 +1683,7 @@ export class VaiEngine implements ModelAdapter {
           if (this._lastMeta) this._lastMeta.brevityEnforced = true;
           return trimmed;
         }
+      }
       }
     }
 
