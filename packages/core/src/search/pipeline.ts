@@ -587,6 +587,172 @@ function isLexicalTopicFollowUpCandidate(topic: string): boolean {
   return true;
 }
 
+type FactualLookupKind =
+  | 'capital'
+  | 'population'
+  | 'currency'
+  | 'language'
+  | 'founder'
+  | 'founded-when'
+  | 'headquarters'
+  | 'ceo'
+  | 'speed'
+  | 'birth'
+  | 'death'
+  | 'who-is'
+  | 'where-is'
+  | 'when-was';
+
+interface FactualLookup {
+  kind: FactualLookupKind;
+  entity: string;
+}
+
+function titleCaseEntity(raw: string): string {
+  const cleaned = raw.replace(/[?.!,;:]+$/g, '').trim();
+  if (!cleaned) return cleaned;
+  if (/^[A-Z0-9]{2,}$/.test(cleaned)) return cleaned;
+  return cleaned.split(/\s+/).map((word) => {
+    if (/^(?:of|in|on|at|to|the|and|for|by|de|la|le)$/i.test(word)) return word.toLowerCase();
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+  }).join(' ');
+}
+
+function detectFactualLookup(rawTopic: string): FactualLookup | null {
+  const t = rawTopic.trim().replace(/[?.!]+$/g, '');
+  if (!t) return null;
+
+  let m = /\bcapital\s+(?:city\s+)?of\s+(.+)$/i.exec(t);
+  if (m) return { kind: 'capital', entity: titleCaseEntity(m[1]) };
+  m = /\bpopulation\s+of\s+(.+)$/i.exec(t);
+  if (m) return { kind: 'population', entity: titleCaseEntity(m[1]) };
+  m = /\bcurrency\s+(?:of|in)\s+(.+)$/i.exec(t);
+  if (m) return { kind: 'currency', entity: titleCaseEntity(m[1]) };
+  m = /\b(?:official\s+)?language(?:s)?\s+(?:of|spoken\s+in)\s+(.+)$/i.exec(t);
+  if (m) return { kind: 'language', entity: titleCaseEntity(m[1]) };
+
+  m = /\b(?:who\s+)?(?:founded|created|started)\s+(.+)$/i.exec(t);
+  if (m) return { kind: 'founder', entity: titleCaseEntity(m[1]) };
+  m = /\bfounder(?:s)?\s+of\s+(.+)$/i.exec(t);
+  if (m) return { kind: 'founder', entity: titleCaseEntity(m[1]) };
+  m = /\bwhen\s+was\s+(.+?)\s+(?:founded|created|started|established)\b/i.exec(t);
+  if (m) return { kind: 'founded-when', entity: titleCaseEntity(m[1]) };
+  m = /\b(?:headquarters|hq)\s+of\s+(.+)$/i.exec(t);
+  if (m) return { kind: 'headquarters', entity: titleCaseEntity(m[1]) };
+  m = /\b(?:ceo|chief\s+executive)\s+of\s+(.+)$/i.exec(t);
+  if (m) return { kind: 'ceo', entity: titleCaseEntity(m[1]) };
+
+  m = /\bspeed\s+of\s+(.+)$/i.exec(t);
+  if (m) return { kind: 'speed', entity: titleCaseEntity(m[1]) };
+
+  m = /\bwhen\s+was\s+(.+?)\s+born\b/i.exec(t);
+  if (m) return { kind: 'birth', entity: titleCaseEntity(m[1]) };
+  m = /\bwhen\s+(?:did|was)\s+(.+?)\s+die\b/i.exec(t);
+  if (m) return { kind: 'death', entity: titleCaseEntity(m[1]) };
+  m = /\bwho\s+(?:is|was)\s+(.+)$/i.exec(t);
+  if (m) {
+    const entity = titleCaseEntity(m[1].replace(/^the\s+/i, ''));
+    if (entity.length >= 2) return { kind: 'who-is', entity };
+  }
+  m = /\bwhere\s+is\s+(.+)$/i.exec(t);
+  if (m) return { kind: 'where-is', entity: titleCaseEntity(m[1]) };
+  m = /\bwhen\s+was\s+(.+)$/i.exec(t);
+  if (m) return { kind: 'when-was', entity: titleCaseEntity(m[1]) };
+
+  return null;
+}
+
+function factualLookupFollowUps({ kind, entity }: FactualLookup): string[] {
+  switch (kind) {
+    case 'capital':
+      return [
+        `What is the population of ${entity}?`,
+        `What language is spoken in ${entity}?`,
+        `What currency does ${entity} use?`,
+      ];
+    case 'population':
+      return [
+        `What is the capital of ${entity}?`,
+        `What is the largest city in ${entity}?`,
+        `What language is spoken in ${entity}?`,
+      ];
+    case 'currency':
+      return [
+        `What is the capital of ${entity}?`,
+        `What is the population of ${entity}?`,
+        `What language is spoken in ${entity}?`,
+      ];
+    case 'language':
+      return [
+        `What is the capital of ${entity}?`,
+        `What currency does ${entity} use?`,
+        `Where is ${entity} located?`,
+      ];
+    case 'founder':
+      return [
+        `When was ${entity} founded?`,
+        `Where is ${entity} headquartered?`,
+        `Who runs ${entity} today?`,
+      ];
+    case 'founded-when':
+      return [
+        `Who founded ${entity}?`,
+        `Where is ${entity} headquartered?`,
+        `What does ${entity} do today?`,
+      ];
+    case 'headquarters':
+      return [
+        `Who founded ${entity}?`,
+        `When was ${entity} founded?`,
+        `Who is the CEO of ${entity}?`,
+      ];
+    case 'ceo':
+      return [
+        `When was ${entity} founded?`,
+        `Where is ${entity} headquartered?`,
+        `Who founded ${entity}?`,
+      ];
+    case 'speed':
+      return [
+        `What is the speed of ${entity} in km/s?`,
+        `Why is the speed of ${entity} a constant?`,
+        `How was the speed of ${entity} first measured?`,
+      ];
+    case 'birth':
+      return [
+        `What is ${entity} best known for?`,
+        `When did ${entity} die?`,
+        `Where was ${entity} born?`,
+      ];
+    case 'death':
+      return [
+        `What is ${entity} best known for?`,
+        `When was ${entity} born?`,
+        `What did ${entity} create?`,
+      ];
+    case 'who-is':
+      return [
+        `What is ${entity} best known for?`,
+        `When was ${entity} born?`,
+        `Where is ${entity} from?`,
+      ];
+    case 'where-is':
+      return [
+        `What is ${entity} known for?`,
+        `When was ${entity} founded?`,
+        `Who lives in ${entity}?`,
+      ];
+    case 'when-was':
+      return [
+        `What is ${entity} known for?`,
+        `Where is ${entity}?`,
+        `Why does ${entity} matter?`,
+      ];
+    default:
+      return [];
+  }
+}
+
 export function generateTopicFollowUps(rawTopic: string, intent = 'general'): string[] {
   const topic = normalizeFollowUpTopic(rawTopic);
   if (topic.length < 2) return [];
@@ -599,6 +765,16 @@ export function generateTopicFollowUps(rawTopic: string, intent = 'general'): st
 
   const subject = deriveFollowUpSubject(topic);
   if (subject.length < 2 || /^(?:that|it|this)$/i.test(subject)) return [];
+
+  // Factual-lookup follow-ups: "capital of X", "population of X", "founder of X",
+  // "speed of light", "who founded X", "when was X born". The previous template
+  // path emitted nonsense like "How is the capital of Norway used in a real
+  // project?" because subject was the lookup phrase, not the entity.
+  const factual = detectFactualLookup(rawTopic);
+  if (factual) {
+    const items = factualLookupFollowUps(factual);
+    if (items.length > 0) return finalizeFollowUps(items);
+  }
 
   if (intent === 'comparison') {
     return finalizeFollowUps([

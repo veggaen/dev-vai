@@ -22,8 +22,10 @@
   --layout-viewport-height: 100dvh;
   --layout-rail-width: 48px;
   --layout-sidebar-width: 280px;
+  --layout-sidebar-max-cap: 35dvw;
   --layout-sidebar-effective-width: min(
     var(--layout-sidebar-width),
+    var(--layout-sidebar-max-cap),
     calc(
       var(--layout-viewport-width)
       - var(--layout-rail-width)
@@ -278,6 +280,7 @@ body {
 @media (max-width: 767px) {
   :root {
     --layout-rail-width: 0px;
+    --layout-sidebar-max-cap: 100dvw;
     --layout-sidebar-width: calc(
       var(--layout-viewport-width)
       - var(--layout-margin)
@@ -329,6 +332,7 @@ body {
 /* Tall portrait screens (height > 2×width — phone/tablet portrait) */
 @media (orientation: portrait) and (min-height: 2000px) {
   :root {
+    --layout-sidebar-max-cap: 100dvw;
     --layout-sidebar-width: calc(
       var(--layout-viewport-width)
       - var(--layout-margin)

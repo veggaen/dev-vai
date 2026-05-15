@@ -57,9 +57,9 @@ export function ChatEmptyState({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
-      className="flex min-h-full flex-col items-center justify-center px-5 py-10"
+      className="flex min-h-full min-w-0 flex-col items-center justify-center px-5 py-10"
     >
-      <div className="mx-auto w-full max-w-4xl text-center">
+      <div className="mx-auto w-full max-w-4xl min-w-0 text-center">
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -97,7 +97,7 @@ export function ChatEmptyState({
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15, duration: 0.4 }}
-        className="mx-auto mt-8 grid w-full max-w-4xl gap-3 lg:grid-cols-3"
+        className="mx-auto mt-8 grid w-full min-w-0 max-w-4xl gap-3 sm:grid-cols-2 xl:grid-cols-3"
       >
         {[
           {
@@ -130,7 +130,7 @@ export function ChatEmptyState({
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.2 + index * 0.04, duration: 0.3 }}
             onClick={lane.onClick}
-            className={`group/lane border p-5 text-left transition-all duration-200 ${
+            className={`group/lane border p-5 text-left min-w-0 transition-all duration-200 ${
               isLight
                 ? 'border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50'
                 : 'border-zinc-800/65 bg-zinc-950/58 hover:border-zinc-700 hover:bg-zinc-900/80'
@@ -163,13 +163,13 @@ export function ChatEmptyState({
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.24, duration: 0.4 }}
-        className={`mx-auto mt-4 w-full max-w-4xl border px-4 py-3 text-left ${
+        className={`mx-auto mt-4 w-full min-w-0 max-w-4xl border px-4 py-3 text-left ${
           isLight
             ? 'border-zinc-200 bg-zinc-50/80'
             : 'border-zinc-800/70 bg-zinc-950/52'
         }`}
       >
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
             <div className={`text-[11px] font-medium uppercase tracking-[0.2em] ${isLight ? 'text-zinc-500' : 'text-emerald-300/80'}`}>Memory workflow</div>
             <div className={`mt-1 text-[14px] font-medium ${isLight ? 'text-zinc-900' : 'text-zinc-100'}`}>Captured-page recall lives here when you want grounded answers.</div>
@@ -208,7 +208,7 @@ export function ChatEmptyState({
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3, duration: 0.4 }}
-        className="mx-auto mt-6 w-full max-w-4xl"
+        className="mx-auto mt-6 w-full min-w-0 max-w-4xl"
       >
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="text-[11px] font-medium uppercase tracking-[0.2em] text-zinc-500">Start with something concrete</div>

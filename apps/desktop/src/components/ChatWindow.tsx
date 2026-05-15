@@ -1313,7 +1313,7 @@ export function ChatWindow() {
         ) : (
           /* ═══════════ MESSAGE THREAD ═══════════ */
           /* justify-end makes sparse messages sit at the bottom, above input */
-          <div className={`mx-auto flex min-h-full w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100vw-2rem))]' : 'max-w-[min(68rem,calc(100vw-2rem))]'} flex-col px-4 py-5 md:px-5`}>
+          <div className={`mx-auto flex min-h-full w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100%-2rem))]' : 'max-w-[min(68rem,calc(100%-2rem))]'} flex-col px-4 py-5 md:px-5`}>
             {hasResearchRailContext && latestResearchContext && (
               <div className="mb-4 flex justify-end">
                 <button
@@ -1407,7 +1407,7 @@ export function ChatWindow() {
 
       {/* ── Input area — centered, auto-growing ── */}
       <div className="flex-shrink-0">
-        <div className={`mx-auto w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100vw-2rem))]' : 'max-w-[min(68rem,calc(100vw-2rem))]'} px-4 pb-4 pt-2 md:px-5`}>
+        <div className={`mx-auto w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100%-2rem))]' : 'max-w-[min(68rem,calc(100%-2rem))]'} px-4 pb-4 pt-2 md:px-5`}>
 
           {/* Image preview row */}
           {pastedImage && (
