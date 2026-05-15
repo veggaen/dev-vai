@@ -264,7 +264,103 @@ export function normalizeInputForUnderstanding(input: string): string {
     normalized = normalized.replace(pattern, replacement);
   }
 
+  // Shape-directive rewrites — convert "give me a short fact about X" /
+  // "list 5 facts about X" / "in one sentence what is X" / "X as a numbered list"
+  // into a plain "tell me about X" so downstream dispatchers can find the topic.
+  // The shape itself is detected separately by `detectShapeIntent` for response
+  // post-processing; here we only care about exposing the bare topic.
+  normalized = rewriteShapeFraming(normalized);
+
   return normalized.replace(/\s+/g, ' ').trim();
+}
+
+const SHAPE_LEADING_PATTERNS: ReadonlyArray<RegExp> = [
+  // "in one sentence, what is X?" → "what is X"
+  /^(?:in|with)\s+(?:one|a\s+single|two|three|just\s+a\s+few|a\s+couple\s+of)\s+(?:sentence|sentences|line|lines|words?|paragraph|paragraphs?)\s*[,:]?\s*/i,
+  // "give me a short fact about X" / "share 5 fun facts about X"
+  /^(?:please\s+)?(?:give|share|tell|show|send|drop)\s+(?:me\s+)?(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d{1,3})?\s*(?:short|quick|brief|tiny|small|fun|cool|interesting|key|important|notable|useful|essential|core)?\s*(?:bullet\s+)?(?:fact|facts?|note|notes?|point|points?|thing|things?|item|items?|tip|tips?|highlight|highlights?|takeaway|takeaways?)\s+(?:about|on|regarding|of|for)\s+/i,
+  // "list 3 key things about X" / "name 5 reasons for X"
+  /^(?:please\s+)?(?:list|enumerate|name|count\s+off|spell\s+out)\s+(?:me\s+)?(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d{1,3})?\s*(?:short|quick|brief|tiny|small|fun|cool|interesting|key|important|notable|useful|essential|core)?\s*(?:bullet\s+)?(?:fact|facts?|note|notes?|point|points?|thing|things?|item|items?|reason|reasons?|step|steps?|bullet|bullets?|highlight|highlights?|takeaway|takeaways?)?\s+(?:about|on|regarding|of|for)\s+/i,
+  // "5 bullet points about X" / "three facts about X"
+  /^(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d{1,3})\s+(?:short|quick|brief|fun|cool|interesting|key|important|notable|useful|essential|core)?\s*(?:bullet\s+)?(?:fact|facts?|note|notes?|point|points?|thing|things?|item|items?|reason|reasons?|step|steps?|bullet|bullets?|highlight|highlights?|takeaway|takeaways?)\s+(?:about|on|regarding|of|for)\s+/i,
+];
+
+const SHAPE_TRAILING_PATTERN = /\s+(?:as\s+(?:a\s+)?(?:numbered|ordered|bulleted?|bullet|markdown)\s+(?:list|points?)|in\s+(?:a\s+)?(?:numbered|ordered|bulleted?|bullet)\s+(?:list|points?|format)|in\s+bullet\s+points?|as\s+bullets?|as\s+a\s+list|as\s+(?:a\s+)?table|in\s+(?:a\s+)?table|in\s+csv|as\s+csv|in\s+json|as\s+json)\s*[?.!]*\s*$/i;
+
+function rewriteShapeFraming(input: string): string {
+  let out = input;
+  // Strip leading shape framings → "what is X?" lookalike
+  let prev = '';
+  while (prev !== out) {
+    prev = out;
+    for (const pat of SHAPE_LEADING_PATTERNS) {
+      const next = out.replace(pat, '');
+      if (next !== out) {
+        out = next.trimStart();
+        // If after stripping the topic doesn't already start with a question
+        // word or "tell me about", prepend a neutral framer so existing
+        // dispatchers ("what is …" / "tell me about …") match cleanly.
+        if (!/^(?:what|who|when|where|why|how|tell\s+me\s+about|describe|explain|define)\b/i.test(out)) {
+          out = `tell me about ${out}`;
+        }
+        break;
+      }
+    }
+  }
+  // Strip trailing format directives ("as a numbered list", "in csv", …).
+  out = out.replace(SHAPE_TRAILING_PATTERN, '');
+  // Strip trailing shape modifiers like "?" leftovers.
+  out = out.replace(/\s+/g, ' ').trim();
+  return out;
+}
+
+/**
+ * Detects the user's requested response shape (length / format) so callers can
+ * post-process the final answer to honor it. Returns null when no explicit
+ * directive is present.
+ *
+ *   "give me a short fact about norway"        → { length: 'short' }
+ *   "in one sentence, what is dna"             → { length: 'one-sentence' }
+ *   "list 5 facts about react"                 → { format: 'list', count: 5 }
+ *   "facts about norway as a numbered list"    → { format: 'list' }
+ *   "compare X and Y in a table"               → { format: 'table' }
+ *   "what's the capital of france (name only)" → { length: 'name-only' }
+ */
+export interface ShapeIntent {
+  length?: 'one-sentence' | 'short' | 'name-only';
+  format?: 'list' | 'table' | 'csv' | 'json';
+  count?: number;
+}
+
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+};
+
+export function detectShapeIntent(input: string): ShapeIntent | null {
+  if (typeof input !== 'string' || input.trim().length === 0) return null;
+  const lower = input.toLowerCase();
+  const intent: ShapeIntent = {};
+
+  // Length signals
+  if (/\bin\s+one\s+(?:sentence|line)\b/.test(lower)) intent.length = 'one-sentence';
+  else if (/\b(?:short|brief|quick|tiny|small)\s+(?:fact|note|answer|reply|response|explanation)\b/.test(lower)) intent.length = 'short';
+  else if (/\b(?:name|word)\s+only\b|\bjust\s+(?:the\s+)?(?:name|word|answer|number)\b|\bone[-\s]word\b/.test(lower)) intent.length = 'name-only';
+
+  // Format signals
+  const countMatch = lower.match(/\b(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:short|quick|brief|fun|cool|interesting|key|important|notable|useful|essential|core)?\s*(?:facts?|points?|things?|items?|reasons?|steps?|bullets?|highlights?|takeaways?)\b/);
+  if (countMatch) {
+    const raw = countMatch[1];
+    intent.count = NUMBER_WORDS[raw] ?? Number(raw);
+    if (intent.count > 0) intent.format = intent.format ?? 'list';
+  }
+
+  if (/\b(?:numbered|ordered|bullet(?:ed)?|markdown)\s+(?:list|points?)\b|\bin\s+bullet\s+points?\b|\bas\s+bullets?\b|\bas\s+a\s+list\b/.test(lower)) intent.format = 'list';
+  if (/\b(?:as\s+|in\s+)(?:a\s+)?table\b/.test(lower)) intent.format = 'table';
+  if (/\b(?:as|in)\s+csv\b/.test(lower)) intent.format = 'csv';
+  if (/\b(?:as|in)\s+json\b/.test(lower)) intent.format = 'json';
+
+  if (intent.length || intent.format || intent.count) return intent;
+  return null;
 }
 
 // ── Topic extraction ─────────────────────────────────────────────────────
@@ -284,6 +380,14 @@ const QUERY_FRAMING_PATTERNS: ReadonlyArray<RegExp> = [
   /^(?:please\s+)?(?:explain|describe|define|summari[sz]e)\s+(?:to\s+me\s+)?(?:about|how|what|of|on|regarding)?\s*/i,
   /^(?:i\s+(?:want|need|would\s+like)\s+to\s+(?:know|learn|hear)(?:\s+(?:about|of|on|regarding))?)\s+/i,
   /^(?:give\s+me\s+(?:a\s+)?(?:brief|overview|summary|rundown|quick\s+intro)\s+(?:of|about|on)?)\s+/i,
+  // Shape-directive framings: "give me a short fact about X" / "list 5 facts about X" /
+  // "in one sentence, what is X" / "name three X" / "share N points about X". These were
+  // missing and caused the engine to treat "give short fact" as the topic, producing
+  // canonical fallbacks for any topic following the shape prefix.
+  /^(?:in|with)\s+(?:one|a\s+single|two|three|just\s+a\s+few|a\s+couple\s+of)\s+(?:sentence|sentences|line|lines|words?|paragraph|paragraphs?)\s*[,:]?\s*(?:what\s+(?:is|are|was|were)|who\s+(?:is|are|was|were)|tell\s+me\s+about|describe|explain|define)\s+/i,
+  /^(?:please\s+)?(?:give|share|tell|show|send|drop)\s+(?:me\s+)?(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d{1,3})?\s*(?:short|quick|brief|tiny|small|fun|cool|interesting|key|important|notable|useful|essential|core)?\s*(?:fact|facts?|note|notes?|point|points?|thing|things?|item|items?|tip|tips?|highlight|highlights?|takeaway|takeaways?)\s+(?:about|on|regarding|of|for)\s+/i,
+  /^(?:please\s+)?(?:list|enumerate|name|count\s+off|spell\s+out)\s+(?:me\s+)?(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d{1,3})?\s*(?:short|quick|brief|tiny|small|fun|cool|interesting|key|important|notable|useful|essential|core)?\s*(?:fact|facts?|note|notes?|point|points?|thing|things?|item|items?|reason|reasons?|step|steps?|bullet|bullets?|highlight|highlights?|takeaway|takeaways?)?\s+(?:about|on|regarding|of|for)\s+/i,
+  /^(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d{1,3})\s+(?:short|quick|brief|fun|cool|interesting|key|important|notable|useful|essential|core)?\s*(?:fact|facts?|note|notes?|point|points?|thing|things?|item|items?|reason|reasons?|step|steps?|bullet|bullets?|highlight|highlights?|takeaway|takeaways?)\s+(?:about|on|regarding|of|for)\s+/i,
   /^what(?:'s|\s+is|\s+are|\s+was|\s+were)\s+/i,
   /^who(?:'s|\s+is|\s+are|\s+was|\s+were)\s+/i,
   /^how\s+(?:does|do|can|should|would|is|are)\s+/i,
@@ -305,6 +409,10 @@ const RESIDUAL_LEADING_PREPOSITION = /^(?:about|of|on|regarding|around|concernin
 
 const TRAILING_FILLERS = /\s+(?:please|for\s+me|in\s+simple\s+(?:words?|terms?|english)|simply|in\s+a\s+nutshell|tl;?dr|for\s+beginners|like\s+i'?m\s+(?:5|five)|eli5|kort\s+fortalt|med\s+enkle\s+ord)$/i;
 const TRAILING_QUALIFIER = /\s+(?:and\s+(?:why|how|when|where)|right\s+now|today|exactly|btw|by\s+the\s+way)$/i;
+// Strip trailing shape directives so the bare topic survives intact.
+//   "facts about norway as a numbered list" → "norway"
+//   "X in bullet points"                    → "X"
+const TRAILING_SHAPE_DIRECTIVE = /\s+(?:as\s+(?:a\s+)?(?:numbered|ordered|bulleted?|bullet|markdown)\s+(?:list|points?)|in\s+(?:a\s+)?(?:numbered|ordered|bulleted?|bullet)\s+(?:list|points?|format)|in\s+bullet\s+points?|as\s+bullets?|as\s+a\s+list|as\s+(?:a\s+)?table|in\s+(?:a\s+)?table|in\s+csv|as\s+csv|in\s+json|as\s+json)$/i;
 const WRAPPING_NOISE = /^[\s"'`([{<]+|[\s"'`\])}>.?!,:;]+$/g;
 
 /**
@@ -358,7 +466,7 @@ export function extractTopicFromQuery(query: string): string {
   prev = '';
   while (prev !== topic) {
     prev = topic;
-    topic = topic.replace(TRAILING_FILLERS, '').replace(TRAILING_QUALIFIER, '');
+    topic = topic.replace(TRAILING_FILLERS, '').replace(TRAILING_QUALIFIER, '').replace(TRAILING_SHAPE_DIRECTIVE, '');
   }
 
   topic = topic.replace(WRAPPING_NOISE, '').replace(/\s+/g, ' ').trim();

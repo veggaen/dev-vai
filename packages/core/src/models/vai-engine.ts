@@ -79,7 +79,7 @@ import { getSkillRegistry } from '../skills/registry.js';
 import { getSubAgentRouter } from '../skills/sub-agent-router.js';
 import { getTeacherAgent, type TeacherDecision } from '../skills/teacher-agent.js';
 import type { CitedAnswer, LearnedUnit } from '../skills/types.js';
-import { normalizeInputForUnderstanding, detectRegister, extractTopicFromQuery, topicContentTokens, textConcernsTopic } from '../input-normalization.js';
+import { normalizeInputForUnderstanding, detectRegister, extractTopicFromQuery, topicContentTokens, textConcernsTopic, detectShapeIntent, type ShapeIntent } from '../input-normalization.js';
 import { analyze, type CognitiveFrame } from '../cognitive/index.js';
 import type { KindShape } from '../cognitive/shaper.js';
 import { KnowledgeConfidenceLedger, classifyFeedback, type DreamReport } from '../learning/confidence-ledger.js';
@@ -1702,6 +1702,109 @@ export class VaiEngine implements ModelAdapter {
   }
 
   /**
+   * Shape coercion — when the user explicitly asks for a specific output
+   * shape ("in one sentence", "give me a short fact about", "5 facts about X
+   * as a numbered list"), reshape the assistant's response to honor the
+   * intent. Conservative: when the request is unclear or the response is
+   * already shape-compliant, return it unchanged.
+   *
+   * Skips builder/code/file responses (those carry their own shape rules).
+   */
+  private applyShapeCoercion(input: string, response: string): string {
+    if (!response || response.length === 0) return response;
+    if (/```/.test(response)) return response; // never reshape code answers
+    const shape: ShapeIntent | null = detectShapeIntent(input);
+    if (!shape) return response;
+
+    // Honest fallbacks should not be reshaped — that would hide them.
+    if (/^I (?:don'?t (?:have|know)|can'?t|cannot|am not|haven'?t)\b/i.test(response.trim())) {
+      return response;
+    }
+    if (/^I want to give you a useful answer/i.test(response.trim())) return response;
+
+    let out = response;
+
+    // Length constraint: one-sentence / short / name-only.
+    if (shape.length === 'one-sentence') {
+      out = this.coerceToOneSentence(out);
+    } else if (shape.length === 'short') {
+      out = this.coerceToShortFact(out);
+    } else if (shape.length === 'name-only') {
+      out = this.coerceToOneSentence(out);
+    }
+
+    // Format constraint: list with optional count.
+    if (shape.format === 'list') {
+      const want = shape.count && shape.count > 0 ? shape.count : 3;
+      out = this.coerceToNumberedList(out, want);
+    }
+
+    if (out !== response && this._lastMeta) this._lastMeta.brevityEnforced = true;
+    return out;
+  }
+
+  private coerceToOneSentence(text: string): string {
+    const cleaned = text.replace(/\*\*/g, '').replace(/^[-*]\s+/gm, '').trim();
+    // Split off the first paragraph block before any bullet list.
+    const paraEnd = cleaned.search(/\n\s*\n|\n\s*[-*•]\s/);
+    const head = paraEnd > 20 ? cleaned.slice(0, paraEnd) : cleaned;
+    const sentences = head.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 8);
+    if (sentences.length > 0) return sentences[0].trim();
+    return head.trim();
+  }
+
+  private coerceToShortFact(text: string, maxChars = 320): string {
+    if (text.length <= maxChars) return text;
+    const cleaned = text.replace(/\*\*/g, '');
+    // Use the first paragraph (before any bullet list or section break).
+    const paraEnd = cleaned.search(/\n\s*\n|\n\s*[-*•]\s/);
+    let head = paraEnd > 30 ? cleaned.slice(0, paraEnd).trim() : cleaned.trim();
+    if (head.length <= maxChars) return head;
+    // Trim to first 1-2 sentences that fit under maxChars.
+    const sentences = head.split(/(?<=[.!?])\s+/);
+    let acc = '';
+    for (const s of sentences) {
+      const next = acc ? `${acc} ${s}` : s;
+      if (next.length > maxChars) break;
+      acc = next;
+    }
+    return (acc || sentences[0] || head.slice(0, maxChars)).trim();
+  }
+
+  private coerceToNumberedList(text: string, want: number): string {
+    // Already has a numbered list with enough items? Leave it.
+    const numberedMatches = text.match(/^\s*\d+[.)]\s+/gm) || [];
+    if (numberedMatches.length >= want) return text;
+
+    // Convert existing bullets to numbered form when present.
+    const bulletLines = text.split(/\r?\n/).filter(l => /^\s*[-*•]\s+/.test(l));
+    if (bulletLines.length >= want) {
+      const items = bulletLines.slice(0, want).map((l, i) =>
+        `${i + 1}. ${l.replace(/^\s*[-*•]\s+/, '').trim()}`
+      );
+      return items.join('\n');
+    }
+
+    // Fallback: split prose into sentences; emit the first `want` as numbered items.
+    const cleaned = text.replace(/\*\*/g, '').replace(/^\s*[-*•]\s+/gm, '').trim();
+    const sentences = cleaned
+      .split(/(?<=[.!?])\s+/)
+      .map(s => s.trim())
+      .filter(s => s.length >= 12);
+    if (sentences.length >= 2) {
+      const items = sentences.slice(0, want).map((s, i) => `${i + 1}. ${s}`);
+      // Pad if short of `want` by reusing remaining sentences combined.
+      while (items.length < want && sentences.length > items.length) {
+        items.push(`${items.length + 1}. ${sentences[items.length]}`);
+      }
+      return items.join('\n');
+    }
+
+    // Not enough material to form a list — return original (don't fabricate).
+    return text;
+  }
+
+  /**
    * A1 helper — enforce a strict literal-output constraint by returning a
    * minimal extract of `response`. Conservative: returns the original
    * response unchanged when no clean minimal extract is available so we
@@ -2126,6 +2229,7 @@ export class VaiEngine implements ModelAdapter {
     const start = performance.now();
     let response = await this.generateResponse(userContent, request.messages);
     response = this.applyBrevityConstraint(userContent, response);
+    response = this.applyShapeCoercion(userContent, response);
     response = await this.maybeRunTeacherLoop(userContent, response, request.messages, {
       allowLearning: !request.noLearn,
     });
@@ -2234,6 +2338,7 @@ export class VaiEngine implements ModelAdapter {
     const start = performance.now();
     let response = await this.generateResponse(userContent, request.messages);
     response = this.applyBrevityConstraint(userContent, response);
+    response = this.applyShapeCoercion(userContent, response);
     response = await this.maybeRunTeacherLoop(userContent, response, request.messages, {
       allowLearning: !request.noLearn,
     });

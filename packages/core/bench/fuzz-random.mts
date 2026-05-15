@@ -293,13 +293,19 @@ async function run() {
     let reason = '';
     if (FALLBACK_PATTERNS.some(p => p.test(text))) { verdict = 'FALLBACK'; reason = 'fallback pattern matched'; }
     else if (LOWQ_PATTERNS.some(p => p.test(text))) { verdict = 'LOWQ'; reason = 'low-quality pattern matched'; }
-    else if (text.length < 60) { verdict = 'SHORT'; reason = `len=${text.length}`; }
     else {
-      const cReason = checkContent(topic, text);
-      if (cReason) { verdict = 'CONTENT_FAIL'; reason = cReason; }
+      // Shape-aware short-floor: one-sentence / short-fact answers can be ~30+
+      // chars and still be a valid response (e.g. "Sweden is a country in
+      // Northern Europe (Scandinavia)."). Other shapes still expect ~60+.
+      const shortFloor = (tpl.shape === 'one-sentence' || tpl.shape === 'short-fact' || tpl.shape === 'name-only') ? 30 : 60;
+      if (text.length < shortFloor) { verdict = 'SHORT'; reason = `len=${text.length}`; }
       else {
-        const fReason = checkFormat(tpl, text);
-        if (fReason) { verdict = 'FORMAT_FAIL'; reason = fReason; }
+        const cReason = checkContent(topic, text);
+        if (cReason) { verdict = 'CONTENT_FAIL'; reason = cReason; }
+        else {
+          const fReason = checkFormat(tpl, text);
+          if (fReason) { verdict = 'FORMAT_FAIL'; reason = fReason; }
+        }
       }
     }
 
