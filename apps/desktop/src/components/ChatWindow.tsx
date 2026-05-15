@@ -37,7 +37,7 @@ import { apiFetch } from '../lib/api.js';
 import {
   BookOpen, MessageCircle, Sparkles, Shield, Globe,
   Paperclip, X, FileText, ArrowUp, Square,
-  Eye, Brain, Bot, Wifi, Plus, Moon, Sun, ChevronDown, ChevronRight,
+  Eye, Brain, Bot, Wifi, Plus, Moon, Sun, ChevronDown, ChevronRight, Layers,
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { FocusModeToggle } from './LayoutModeToggle.js';
@@ -45,6 +45,7 @@ import { BroadcastStrip } from './BroadcastStrip.js';
 import type { PerIdeConfig } from './BroadcastTargetPicker.js';
 import { ResearchContextRail } from './chat/ResearchContextRail.js';
 import { ChatEmptyState } from './chat/ChatEmptyState.js';
+import { ConversationSourcesSidebar, aggregateConversationSources } from './chat/ConversationSourcesSidebar.js';
 import { resolveSendTimeWorkIntent } from '../lib/auto-sandbox-intent.js';
 import { resolveLatestResearchContext } from '../lib/research-context.js';
 import {
@@ -209,6 +210,7 @@ export function ChatWindow() {
   const [perIdeConfigs, setPerIdeConfigs] = useState<PerIdeConfig[]>([]);
   const [showIdePopup, setShowIdePopup] = useState(false);
   const [isResearchRailOpen, setIsResearchRailOpen] = useState(false);
+  const [isConversationSourcesOpen, setIsConversationSourcesOpen] = useState(false);
   const [activityCollapsed, setActivityCollapsed] = useState(false);
   /** `@` mention: start index in `input`, or null when not in a mention token */
   const [mentionAt, setMentionAt] = useState<number | null>(null);
@@ -315,6 +317,10 @@ export function ChatWindow() {
   const fallbackDeployMap = useMemo(
     () => computeFallbackMap(messages, intentStore),
     [messages, intentStore, intentStore.intents, intentStore.adaptiveBoost, isBuildMode],
+  );
+  const conversationSourcesCount = useMemo(
+    () => aggregateConversationSources(messages).length,
+    [messages],
   );
   const roundtablePeers = useMemo(
     () => peers.filter((peer) => peer.status !== 'idle'),
@@ -1092,6 +1098,7 @@ export function ChatWindow() {
   }, [activeConversationId]);
 
   return (
+    <div className="flex h-full min-w-0 flex-1 flex-row overflow-hidden">
     <div
       data-studio-builder-chrome={studioBuilderChrome ? 'true' : undefined}
       className={`relative flex h-full min-w-0 flex-1 flex-col overflow-hidden ${
@@ -1159,6 +1166,34 @@ export function ChatWindow() {
                 <span>Preview</span>
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setIsConversationSourcesOpen((open) => !open)}
+              data-conversation-sources-toggle
+              data-state={isConversationSourcesOpen ? 'open' : 'closed'}
+              className={`flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[11px] font-medium transition-colors ${
+                isConversationSourcesOpen
+                  ? (studioBuilderChrome
+                      ? 'border-violet-300 bg-violet-50 text-violet-700'
+                      : 'border-violet-500/40 bg-violet-500/10 text-violet-200')
+                  : (studioBuilderChrome
+                      ? 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50'
+                      : 'border-zinc-800/70 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200')
+              }`}
+              title={`${isConversationSourcesOpen ? 'Hide' : 'Show'} sources for this chat`}
+            >
+              <Layers className="h-3.5 w-3.5" />
+              <span>Sources</span>
+              {conversationSourcesCount > 0 && (
+                <span className={`ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-md px-1 text-[10px] font-semibold tabular-nums ${
+                  isConversationSourcesOpen
+                    ? 'bg-violet-500/20 text-violet-100'
+                    : (studioBuilderChrome ? 'bg-zinc-100 text-zinc-600' : 'bg-zinc-900 text-zinc-300')
+                }`}>
+                  {conversationSourcesCount}
+                </span>
+              )}
+            </button>
             <FocusModeToggle />
           </div>
         </div>
@@ -1935,6 +1970,12 @@ export function ChatWindow() {
           </p>
         </div>
       </div>
+    </div>
+    <ConversationSourcesSidebar
+      messages={messages}
+      isOpen={isConversationSourcesOpen}
+      onClose={() => setIsConversationSourcesOpen(false)}
+    />
     </div>
   );
 }

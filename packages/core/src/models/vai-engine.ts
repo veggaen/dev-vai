@@ -70,6 +70,8 @@ import {
   SearchPipeline,
   generateFollowUps,
   generateTopicFollowUps as generateSharedTopicFollowUps,
+  detectFactualLookup as detectSharedFactualLookup,
+  factualLookupFollowUps as sharedFactualLookupFollowUps,
   normalizeFollowUpTopic as normalizeSharedFollowUpTopic,
 } from '../search/pipeline.js';
 import type { SearchResponse, SearchSnippet } from '../search/types.js';
@@ -1290,6 +1292,15 @@ export class VaiEngine implements ModelAdapter {
   }
 
   private buildGroundedFollowUps(rawInput: string, history: readonly Message[], detectedTopic?: string): string[] {
+    // Factual lookups ("capital of X", "founder of X", etc.) deserve
+    // entity-aware follow-ups, not the generic definition templates that
+    // produce things like "How is the capital of Norway used in a real project?"
+    const factual = detectSharedFactualLookup(rawInput);
+    if (factual) {
+      const items = sharedFactualLookupFollowUps(factual);
+      if (items.length > 0) return items;
+    }
+
     const seed = this.deriveGroundedFollowUpSeed(rawInput, history, detectedTopic);
     if (!seed) return [];
 

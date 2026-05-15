@@ -603,7 +603,7 @@ type FactualLookupKind =
   | 'where-is'
   | 'when-was';
 
-interface FactualLookup {
+export interface FactualLookup {
   kind: FactualLookupKind;
   entity: string;
 }
@@ -618,7 +618,7 @@ function titleCaseEntity(raw: string): string {
   }).join(' ');
 }
 
-function detectFactualLookup(rawTopic: string): FactualLookup | null {
+export function detectFactualLookup(rawTopic: string): FactualLookup | null {
   const t = rawTopic.trim().replace(/[?.!]+$/g, '');
   if (!t) return null;
 
@@ -662,7 +662,7 @@ function detectFactualLookup(rawTopic: string): FactualLookup | null {
   return null;
 }
 
-function factualLookupFollowUps({ kind, entity }: FactualLookup): string[] {
+export function factualLookupFollowUps({ kind, entity }: FactualLookup): string[] {
   switch (kind) {
     case 'capital':
       return [
