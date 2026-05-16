@@ -620,7 +620,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             : msgs.length - 1;
           const target = targetIndex >= 0 ? msgs[targetIndex] : null;
           if (target && target.role === 'assistant') {
-            const hasSources = chunk.sources.length > 0;
+            const hasSources = (chunk.sources?.length ?? 0) > 0;
             const hasGroundedBrief = Boolean(chunk.groundedBrief);
             const shouldAttachEvidenceMeta = hasSources || hasGroundedBrief;
             msgs[targetIndex] = {
