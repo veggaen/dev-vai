@@ -3057,6 +3057,146 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- Sequence next (v20): arithmetic, geometric, fibonacci
+    {
+      const seqM = trimmed.match(/^(?:please\s+)?(?:what(?:'s|\s+is)?\s+(?:comes\s+)?next(?:\s+in\s+(?:this\s+)?(?:sequence|series))?|what(?:'s|\s+is)?\s+the\s+next\s+number|continue\s+the\s+sequence|what\s+number\s+follows|next\s+in\s+series|predict\s+the\s+next\s+value)\s*[:,]?\s*((?:-?\d+(?:\s*,\s*-?\d+){2,}))\s*\??\.?$/i);
+      if (seqM) {
+        const nums = seqM[1].split(/\s*,\s*/).map(Number).filter(n => Number.isFinite(n));
+        if (nums.length >= 3) {
+          // Arithmetic
+          const diffs: number[] = [];
+          for (let i = 1; i < nums.length; i++) diffs.push(nums[i] - nums[i - 1]);
+          if (diffs.every(d => d === diffs[0])) {
+            return `Next: **${nums[nums.length - 1] + diffs[0]}**.`;
+          }
+          // Geometric
+          if (nums.every(n => n !== 0)) {
+            const ratios: number[] = [];
+            for (let i = 1; i < nums.length; i++) ratios.push(nums[i] / nums[i - 1]);
+            if (ratios.every(r => Math.abs(r - ratios[0]) < 1e-9)) {
+              const next = nums[nums.length - 1] * ratios[0];
+              return `Next: **${Number.isInteger(next) ? next : Math.round(next * 1000) / 1000}**.`;
+            }
+          }
+          // Fibonacci-like (each = sum of previous two)
+          let fib = nums.length >= 3;
+          for (let i = 2; i < nums.length; i++) {
+            if (nums[i] !== nums[i - 1] + nums[i - 2]) { fib = false; break; }
+          }
+          if (fib) {
+            return `Next: **${nums[nums.length - 1] + nums[nums.length - 2]}**.`;
+          }
+        }
+      }
+    }
+
+    // --- Transitive compare (v20): "A is X-er than B, B is X-er than C, who is most/least X?"
+    {
+      const tcAdjs = '(?:taller|shorter|older|younger|faster|slower|bigger|smaller|heavier|lighter|greater|larger|wider|narrower)';
+      const tcSupMost: Record<string, string> = {
+        taller: 'tallest', older: 'oldest', faster: 'fastest', bigger: 'biggest', heavier: 'heaviest',
+        greater: 'greatest', larger: 'largest', wider: 'widest',
+      };
+      const tcSupLeast: Record<string, string> = {
+        taller: 'shortest', older: 'youngest', faster: 'slowest', bigger: 'smallest', heavier: 'lightest',
+        greater: 'smallest', larger: 'smallest', wider: 'narrowest',
+      };
+      // Form A: "if X is ADJ than Y, and Y is ADJ than Z, who/which is SUP?"
+      let tcM = trimmed.match(new RegExp(
+        `^(?:if|given)\\s+([A-Za-z]+)\\s+is\\s+${tcAdjs}\\s+than\\s+([A-Za-z]+)[,]?\\s+and\\s+\\2\\s+is\\s+${tcAdjs}\\s+than\\s+([A-Za-z]+)[,]?\\s+(?:who(?:'s)?|which)(?:\\s+(?:is|one\\s+is))?\\s+(?:the\\s+)?([a-z]+)\\??\\.?$`,
+        'i'
+      ));
+      // Form B: "X is ADJ than Y. Y is ADJ than Z. Who is the SUP?"
+      if (!tcM) tcM = trimmed.match(new RegExp(
+        `^([A-Za-z]+)\\s+is\\s+${tcAdjs}\\s+than\\s+([A-Za-z]+)\\.\\s+\\2\\s+is\\s+${tcAdjs}\\s+than\\s+([A-Za-z]+)\\.\\s+who(?:\\s+is)?\\s+(?:the\\s+)?([a-z]+)\\??\\.?$`,
+        'i'
+      ));
+      // Form C: "X is ADJ than Y, and Y is ADJ than Z. who is the SUP?"
+      if (!tcM) tcM = trimmed.match(new RegExp(
+        `^([A-Za-z]+)\\s+is\\s+${tcAdjs}\\s+than\\s+([A-Za-z]+)[,]?\\s+and\\s+\\2\\s+is\\s+${tcAdjs}\\s+than\\s+([A-Za-z]+)\\.\\s+who(?:\\s+is)?\\s+(?:the\\s+)?([a-z]+)\\??\\.?$`,
+        'i'
+      ));
+      // Form D: "if X > Y and Y > Z, which is SUP?"
+      if (!tcM) tcM = trimmed.match(/^if\s+([A-Za-z]+)\s*>\s*([A-Za-z]+)\s+and\s+\2\s*>\s*([A-Za-z]+)[,]?\s+which\s+is\s+([a-z]+)\??\.?$/i);
+      if (tcM) {
+        const a = tcM[1], b = tcM[2], c = tcM[3], sup = tcM[4].toLowerCase();
+        const mostVals = new Set([...Object.values(tcSupMost), 'most', 'biggest', 'greatest']);
+        const leastVals = new Set([...Object.values(tcSupLeast), 'least', 'smallest']);
+        if (mostVals.has(sup)) return `**${a}** is the ${sup} (since ${a} > ${b} > ${c}).`;
+        if (leastVals.has(sup)) return `**${c}** is the ${sup} (since ${a} > ${b} > ${c}).`;
+      }
+    }
+
+    // --- Set intersection (v20): bracketed lists
+    {
+      const siM = trimmed.match(/^(?:please\s+)?(?:what(?:'s|\s+is)?\s+(?:in\s+)?common\s+between|which\s+items\s+appear\s+in\s+both\s+lists[:,]?|find\s+the\s+intersection\s+of|what\s+items\s+are\s+in\s+both|give\s+me\s+the\s+overlap\s+between|which\s+(?:words|items)\s+appear\s+in\s+both)\s*\[([^\]]+)\]\s+and\s+\[([^\]]+)\]\s*\??\.?$/i);
+      if (siM) {
+        const a = siM[1].split(/\s*,\s*/).map(s => s.trim().toLowerCase()).filter(Boolean);
+        const b = new Set(siM[2].split(/\s*,\s*/).map(s => s.trim().toLowerCase()).filter(Boolean));
+        const common = Array.from(new Set(a.filter(x => b.has(x))));
+        if (common.length === 0) return `No items in common.`;
+        this._skipBrevityOnce = true;
+        return `Common items:\n${common.map(c => `- **${c}**`).join('\n')}`;
+      }
+    }
+
+    // --- Two-step word op (v20): compose reverse / uppercase / lowercase
+    {
+      // "reverse W and then uppercase it" / "take W, reverse it, then make it uppercase"
+      let twM = trimmed.match(/^(?:please\s+)?reverse\s+([A-Za-z]+)\s+and\s+then\s+(uppercase|lowercase)(?:\s+it)?\s*\.?$/i)
+        ?? trimmed.match(/^(?:please\s+)?take\s+([A-Za-z]+)[,]?\s+reverse\s+it[,]?\s+then\s+make\s+it\s+(uppercase|lowercase)\s*\.?$/i);
+      if (twM) {
+        const w = twM[1];
+        const cast = twM[2].toLowerCase();
+        const rev = w.split('').reverse().join('');
+        return `**${cast === 'uppercase' ? rev.toUpperCase() : rev.toLowerCase()}**`;
+      }
+      // "uppercase W then reverse it" / "make W uppercase and then reverse the result" / "lowercase W then reverse it"
+      twM = trimmed.match(/^(?:please\s+)?(uppercase|lowercase)\s+([A-Za-z]+)\s+then\s+reverse(?:\s+it)?\s*\.?$/i)
+        ?? trimmed.match(/^(?:please\s+)?make\s+([A-Za-z]+)\s+(uppercase|lowercase)\s+and\s+then\s+reverse(?:\s+the\s+result)?\s*\.?$/i);
+      if (twM) {
+        let cast: string, w: string;
+        if (twM[1].toLowerCase() === 'uppercase' || twM[1].toLowerCase() === 'lowercase') {
+          cast = twM[1].toLowerCase(); w = twM[2];
+        } else {
+          w = twM[1]; cast = twM[2].toLowerCase();
+        }
+        const cased = cast === 'uppercase' ? w.toUpperCase() : w.toLowerCase();
+        const rev = cased.split('').reverse().join('');
+        return `**${rev}**`;
+      }
+    }
+
+    // --- Nth from end (v20): bracketed list, "Nth from end"
+    {
+      const ordMap: Record<string, number> = { last: 1, '1st': 1, '2nd': 2, '3rd': 3, '4th': 4, '5th': 5, '6th': 6, '7th': 7, '8th': 8 };
+      // "what's the ORD from the end of [LIST]?" / "give me the ORD-to-last item of [LIST]"
+      let nfeM = trimmed.match(/^(?:please\s+)?(?:what(?:'s|\s+is)?\s+the\s+|give\s+me\s+the\s+|in\s+\[[^\]]+\][,]?\s+what(?:'s|\s+is)?\s+the\s+)?(last|\d+(?:st|nd|rd|th))(?:[-\s]+to[-\s]+last)?\s+(?:item\s+)?(?:from\s+the\s+end)?(?:\s+of\s+\[([^\]]+)\])?\s*\??\.?$/i);
+      // Need explicit list — try a more targeted form.
+      const formA = trimmed.match(/^(?:please\s+)?what(?:'s|\s+is)?\s+the\s+(last|\d+(?:st|nd|rd|th))\s+(?:from\s+the\s+end|item\s+from\s+the\s+end|-?\s*to\s*-?\s*last\s+item)\s*(?:of|[:])\s*\[([^\]]+)\]\s*\??\.?$/i);
+      const formB = trimmed.match(/^(?:please\s+)?give\s+me\s+the\s+(last|\d+(?:st|nd|rd|th))[-\s]+to[-\s]+last\s+item\s+of\s+\[([^\]]+)\]\s*\??\.?$/i);
+      const formC = trimmed.match(/^(?:please\s+)?in\s+\[([^\]]+)\][,]?\s+what(?:'s|\s+is)?\s+the\s+(last|\d+(?:st|nd|rd|th))\s+from\s+the\s+end\s*\??\.?$/i);
+      const formD = trimmed.match(/^(?:please\s+)?from\s+the\s+back\s+of\s+\[([^\]]+)\][,]?\s+give\s+me\s+(?:item\s+)?(\d+)\s*\??\.?$/i);
+      const formE = trimmed.match(/^(?:please\s+)?counting\s+from\s+the\s+end\s+of\s+\[([^\]]+)\][,]?\s+what(?:'s|\s+is)?\s+(?:number\s+|item\s+)?(\d+)\s*\??\.?$/i);
+      let listRaw = '', ordRaw = '';
+      if (formA) { ordRaw = formA[1]; listRaw = formA[2]; }
+      else if (formB) { ordRaw = formB[1]; listRaw = formB[2]; }
+      else if (formC) { listRaw = formC[1]; ordRaw = formC[2]; }
+      else if (formD) { listRaw = formD[1]; ordRaw = formD[2]; }
+      else if (formE) { listRaw = formE[1]; ordRaw = formE[2]; }
+      void nfeM;
+      if (listRaw && ordRaw) {
+        const items = listRaw.split(/\s*,\s*/).map(s => s.trim()).filter(Boolean);
+        let n: number;
+        if (/^\d+$/.test(ordRaw)) n = parseInt(ordRaw, 10);
+        else n = ordMap[ordRaw.toLowerCase()] || parseInt(ordRaw, 10);
+        if (Number.isFinite(n) && n >= 1 && n <= items.length) {
+          const item = items[items.length - n];
+          return `**${item}**`;
+        }
+      }
+    }
+
     if (/^(?:now\s+)?reverse(?:\s+(?:the\s+)?(?:order|list|them))?\.?$/i.test(trimmed)
         || /^(?:show|list|give)\s+(?:them|it|that|the\s+list)\s+(?:in\s+)?reversed?(?:\s+order)?\.?$/i.test(trimmed)
         || /^(?:in\s+)?reverse\s+order\.?$/i.test(trimmed)) {
