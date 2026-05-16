@@ -2069,19 +2069,19 @@ export class VaiEngine implements ModelAdapter {
     ];
 
     const FORBID_RX = [
-      /\bnot\s+([a-z][a-z\s\-]+?)(?:[?.!,]|$)/i,
-      /\bother\s+than\s+([a-z][a-z\s\-]+?)(?:[?.!,]|$)/i,
-      /\bexcept\s+([a-z][a-z\s\-]+?)(?:[?.!,]|$)/i,
-      /\bskip\s+([a-z][a-z\s\-]+?)(?:[?.!,]|$)/i,
-      /\bbut\s+(?:not|skip)\s+([a-z][a-z\s\-]+?)(?:[?.!,]|$)/i,
-      /\bwithout\s+mentioning\s+([a-z][a-z\s\-]+?)(?:[?.!,]|$)/i,
+      /\bnot\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
+      /\bother\s+than\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
+      /\bexcept\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
+      /\bskip\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
+      /\bbut\s+(?:not|skip)\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
+      /\bwithout\s+mentioning\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
     ];
     const forbidden = new Set<string>();
     for (const rx of FORBID_RX) {
       const m = input.match(rx);
       if (m) {
-        for (const piece of m[1].split(/\s+(?:and|or)\s+|,\s*/i)) {
-          const t = piece.trim().toLowerCase();
+        for (const piece of m[1].split(/\s*,\s*(?:and\s+|or\s+)?|\s+(?:and|or)\s+/i)) {
+          const t = piece.trim().replace(/^(?:and|or)\s+/i, '').toLowerCase();
           if (t) forbidden.add(t);
         }
       }
@@ -2117,7 +2117,14 @@ export class VaiEngine implements ModelAdapter {
     const isPick = /\b(?:name|pick|give|suggest|tell\s+me)\s+(?:a|an|one)\b/i.test(input)
       || /\bwho\s+is\s+a\b/i.test(input);
     const listMatch = input.match(/\blist\s+(\d+)\b/i);
-    const allowed = cat.items.filter((it) => !forbidden.has(it.toLowerCase()));
+    const allowed = cat.items.filter((it) => {
+      const il = it.toLowerCase();
+      for (const f of forbidden) {
+        if (!f) continue;
+        if (il === f || il.includes(f) || f.includes(il)) return false;
+      }
+      return true;
+    });
     if (allowed.length === 0) return null;
 
     if (listMatch) {
@@ -2383,6 +2390,28 @@ export class VaiEngine implements ModelAdapter {
         'Germany is a federal parliamentary republic made up of 16 states (Bundesländer).',
         'The country is known for engineering (BMW, Mercedes-Benz), philosophy, and classical music.',
       ],
+      italy: [
+        '**Italy** is a country in Southern Europe with Rome as its capital.',
+        'Italian is the official language and the country uses the Euro as its currency.',
+        'Italy is a peninsula in the Mediterranean and includes the islands of Sicily and Sardinia.',
+        'It is the birthplace of the Roman Empire and the Renaissance.',
+        'Italy is famous for its cuisine — pasta, pizza, espresso — as well as art, fashion, and opera.',
+        'It is a founding member of the European Union and NATO.',
+      ],
+      spain: [
+        '**Spain** is a country in Southwestern Europe with Madrid as its capital.',
+        'Spanish is the official language and the country uses the Euro as its currency.',
+        'Spain occupies most of the Iberian Peninsula and shares it with Portugal.',
+        'It is famous for flamenco, bullfighting, tapas, and architects like Antoni Gaudí.',
+        'Spain is a member of the European Union and NATO.',
+      ],
+      portugal: [
+        '**Portugal** is a country in Southwestern Europe with Lisbon as its capital.',
+        'Portuguese is the official language and the country uses the Euro as its currency.',
+        'It occupies the western edge of the Iberian Peninsula, bordered by Spain and the Atlantic.',
+        'Portugal led the Age of Discovery, exploring sea routes to Africa, India, and Brazil.',
+        'It is known for port wine, fado music, and historic cities like Lisbon and Porto.',
+      ],
       brazil: [
         '**Brazil** is the largest country in South America, with Brasília as its capital.',
         'Portuguese is the official language; it is the largest Portuguese-speaking country in the world.',
@@ -2422,6 +2451,7 @@ export class VaiEngine implements ModelAdapter {
     const TITLE: Record<string, string> = {
       france: 'France', japan: 'Japan', germany: 'Germany', brazil: 'Brazil',
       norway: 'Norway', aristotle: 'Aristotle', plato: 'Plato', react: 'React',
+      italy: 'Italy', spain: 'Spain', portugal: 'Portugal',
       'python-language': 'Python (programming language)',
       'python-snake': 'Python (snake)',
       'mercury-planet': 'Mercury (planet)',
@@ -2588,6 +2618,23 @@ export class VaiEngine implements ModelAdapter {
     // ------------------ Table branch ------------------
     const wantsTable = /\b(?:as|in)\s+(?:a\s+)?(?:markdown\s+)?table\b|\bmarkdown\s+table\b|\btable\s+comparison\b/i.test(input);
     if (wantsTable) {
+      // Facts-as-table for a single topic ("facts about france as a markdown table").
+      const factsTopic = (() => {
+        for (const t of Object.keys(FACT_LISTS)) {
+          const rx = new RegExp(`\\babout\\s+${t}\\b`, 'i');
+          if (rx.test(input)) return t;
+        }
+        return null;
+      })();
+      if (factsTopic) {
+        const list = FACT_LISTS[factsTopic];
+        const title = TITLE[factsTopic] ?? (factsTopic[0].toUpperCase() + factsTopic.slice(1));
+        const nm = input.match(/\b(\d+)\s+facts?\b/i);
+        const n = Math.max(1, Math.min(list.length, nm ? parseInt(nm[1], 10) : 5));
+        let md = `| # | Fact about ${title} |\n|---|---|\n`;
+        for (let i = 0; i < n; i++) md += `| ${i + 1} | ${list[i]} |\n`;
+        return md.trim();
+      }
       const compMatch = input.match(/compare\s+([A-Za-z0-9+#./\-]+)\s+(?:and|vs\.?|versus)\s+([A-Za-z0-9+#./\-]+)/i);
       if (compMatch) {
         const a = compMatch[1].toLowerCase();
@@ -2644,9 +2691,14 @@ export class VaiEngine implements ModelAdapter {
       || input.match(/\bbullet\s+points?[^.]*?(\d+)/i);
 
     const isNumbered = /\bnumbered\s+(?:list|facts?)\b/i.test(input) || /\bnumbered\b/i.test(input);
-    const isBullet = /\bbullet\s+(?:points?|items?|list)\b/i.test(input);
+    const isBullet = /\bbullet\s+(?:points?|items?|list)\b/i.test(input)
+      || /\bas\s+bullets?\b/i.test(input);
 
-    if ((numMatch || numberedListMatch || bulletMatch) && (isNumbered || isBullet)) {
+    // Allow bullets / numbered list without explicit count when the user
+    // asked "as bullet points" / "as a numbered list" — default to 5.
+    const formatOnly = !numMatch && !numberedListMatch && !bulletMatch && (isBullet || /\bas\s+a?\s*numbered\s+(?:list|facts?)\b/i.test(input));
+
+    if ((numMatch || numberedListMatch || bulletMatch || formatOnly) && (isNumbered || isBullet)) {
       // Prefer disambiguated topic when present ("python the snake" over
       // bare "python"), then fall back to bare topic.
       const disambigKey = findDisambigTopic();
