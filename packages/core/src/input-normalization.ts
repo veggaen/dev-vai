@@ -344,7 +344,14 @@ export function detectShapeIntent(input: string): ShapeIntent | null {
   // Length signals
   if (/\bin\s+one\s+(?:sentence|line)\b/.test(lower)) intent.length = 'one-sentence';
   else if (/\b(?:short|brief|quick|tiny|small)\s+(?:fact|note|answer|reply|response|explanation)\b/.test(lower)) intent.length = 'short';
-  else if (/\b(?:name|word)\s+only\b|\bjust\s+(?:the\s+)?(?:name|word|answer|number)\b|\bone[-\s]word\b/.test(lower)) intent.length = 'name-only';
+  else if (
+    /\b(?:name|word|year|number|symbol|formula|answer)\s+only\b/.test(lower) ||
+    /\bjust\s+(?:the\s+)?(?:name|word|answer|number|year|symbol|formula|value)\b/.test(lower) ||
+    /\bonly\s+the\s+(?:name|word|year|number|symbol|formula|answer)\b/.test(lower) ||
+    /\bone[-\s]word\b|\bin\s+one\s+word\b/.test(lower) ||
+    /\bno\s+(?:preamble|other\s+text|extra\s+text|explanation)\b/.test(lower) ||
+    /\banswer\s+with\s+(?:only\s+)?(?:the\s+)?(?:name|year|number|symbol|formula|word)\b/.test(lower)
+  ) intent.length = 'name-only';
 
   // Format signals
   const countMatch = lower.match(/\b(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:short|quick|brief|fun|cool|interesting|key|important|notable|useful|essential|core)?\s*(?:facts?|points?|things?|items?|reasons?|steps?|bullets?|highlights?|takeaways?)\b/);
@@ -355,9 +362,9 @@ export function detectShapeIntent(input: string): ShapeIntent | null {
   }
 
   if (/\b(?:numbered|ordered|bullet(?:ed)?|markdown)\s+(?:list|points?)\b|\bin\s+bullet\s+points?\b|\bas\s+bullets?\b|\bas\s+a\s+list\b/.test(lower)) intent.format = 'list';
-  if (/\b(?:as\s+|in\s+)(?:a\s+)?table\b/.test(lower)) intent.format = 'table';
-  if (/\b(?:as|in)\s+csv\b/.test(lower)) intent.format = 'csv';
-  if (/\b(?:as|in)\s+json\b/.test(lower)) intent.format = 'json';
+  if (/\b(?:as|in)\s+(?:a\s+)?(?:markdown\s+)?table\b|\bmarkdown\s+table\b/.test(lower)) intent.format = 'table';
+  if (/\b(?:as|in)\s+csv\b|\bcomma[-\s]separated\s+values?\b|\bas\s+csv\s+values?\b/.test(lower)) intent.format = 'csv';
+  if (/\b(?:as|in)\s+(?:a\s+)?json\b|\bjson\s+(?:object|with\s+keys?)\b/.test(lower)) intent.format = 'json';
 
   if (intent.length || intent.format || intent.count) return intent;
   return null;

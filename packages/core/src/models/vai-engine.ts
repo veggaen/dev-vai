@@ -1735,19 +1735,33 @@ export class VaiEngine implements ModelAdapter {
 
     let out = response;
 
+    // Strip "Calibrated take (lower confidence on this topic):" preamble
+    // before shape coercion runs. The preamble glues itself to "1." in
+    // numbered lists, hides the first item from the line-start regex, and
+    // bloats literal-output answers past their char budget. Stripping here
+    // is safe — the preamble is purely a confidence marker and is never
+    // the substantive content the user asked for.
+    out = out.replace(/^Calibrated take \([^)]+\):\s*/i, '');
+
     // Length constraint: one-sentence / short / name-only.
     if (shape.length === 'one-sentence') {
       out = this.coerceToOneSentence(out);
     } else if (shape.length === 'short') {
       out = this.coerceToShortFact(out);
     } else if (shape.length === 'name-only') {
-      out = this.coerceToOneSentence(out);
+      out = this.coerceToAtom(input, out);
     }
 
     // Format constraint: list with optional count.
     if (shape.format === 'list') {
       const want = shape.count && shape.count > 0 ? shape.count : 3;
       out = this.coerceToNumberedList(out, want);
+    } else if (shape.format === 'csv') {
+      out = this.coerceToCsv(out);
+    } else if (shape.format === 'table') {
+      out = this.coerceToTable(out);
+    } else if (shape.format === 'json') {
+      out = this.coerceToJson(input, out);
     }
 
     if (out !== response && this._lastMeta) this._lastMeta.brevityEnforced = true;
@@ -1825,6 +1839,70 @@ export class VaiEngine implements ModelAdapter {
   }
 
   /**
+   * Shape coercion for literal-output directives ("only the name", "just the
+   * year", "in one word", "no preamble"). Reuses enforceInstructionConstraint's
+   * extraction logic but always runs (the legacy gate is skipped upstream when
+   * shape coercion is in play, so we own the reformat here).
+   */
+  private coerceToAtom(input: string, response: string): string {
+    return this.enforceInstructionConstraint(input, response);
+  }
+
+  /**
+   * CSV coercion. If the response already has a comma-separated line with
+   * ≥3 commas, return as-is. Otherwise convert bullet/numbered list items
+   * into a single comma-separated line (cleaning leading bullets and
+   * trailing punctuation from each item).
+   */
+  private coerceToCsv(response: string): string {
+    const lines = response.split(/\r?\n/);
+    if (lines.some(l => (l.match(/,/g) || []).length >= 3 && !/^\s*[\d*\-•]/.test(l))) {
+      return response;
+    }
+    const items: string[] = [];
+    for (const raw of lines) {
+      const m = raw.match(/^\s*(?:\d+[.)]|[-*•])\s+(.+?)\s*$/);
+      if (m) {
+        const item = m[1]
+          .replace(/\*\*/g, '')
+          .replace(/[.;:]+$/, '')
+          .replace(/\s*[—–-]\s+.*$/, '') // drop "— description" suffixes
+          .trim();
+        if (item.length > 0 && item.length < 60) items.push(item);
+      }
+    }
+    if (items.length >= 3) return items.join(', ');
+    return response;
+  }
+
+  /**
+   * Markdown table coercion. If the response already has a `---` separator
+   * row, leave it. Otherwise return original (we don't fabricate tables —
+   * the engine should emit one when asked, and if it didn't, that's a real
+   * miss to fix at source rather than papered over).
+   */
+  private coerceToTable(response: string): string {
+    if (/\|[\s:|-]*-{3,}[\s:|-]*\|/.test(response)) return response;
+    return response;
+  }
+
+  /**
+   * JSON coercion. If a top-level `{...}` parses, leave it. Otherwise return
+   * original — like tables, fabricating JSON shapes from prose is unsafe.
+   */
+  private coerceToJson(_input: string, response: string): string {
+    const fenced = response.match(/```(?:json)?\s*([\s\S]+?)\s*```/);
+    if (fenced) {
+      try { JSON.parse(fenced[1]); return response; } catch { /* fall through */ }
+    }
+    const brace = response.match(/\{[\s\S]+\}/);
+    if (brace) {
+      try { JSON.parse(brace[0]); return response; } catch { /* fall through */ }
+    }
+    return response;
+  }
+
+  /**
    * A1 helper — enforce a strict literal-output constraint by returning a
    * minimal extract of `response`. Conservative: returns the original
    * response unchanged when no clean minimal extract is available so we
@@ -1874,6 +1952,10 @@ export class VaiEngine implements ModelAdapter {
       const m = body.match(/-?\d[\d,.]*/);
       if (m) return m[0].replace(/[.,]$/, '');
     }
+
+    // Strip "Calibrated take (lower confidence on this topic):" preamble so
+    // it doesn't push answers over the literal-output char budget.
+    body = body.replace(/^Calibrated take \([^)]+\):\s*/i, '').trim();
 
     // Default — take the first sentence (or first line). Strip a trailing
     // markdown source trail like "[Source: https://...]".
@@ -2289,6 +2371,12 @@ export class VaiEngine implements ModelAdapter {
       const result = oodaAct(trace, response);
       response = result.response;
       this._lastOodaTrace = { ...trace, act: result.act };
+      // OODA may have re-attached a "Calibrated take (...)" preamble that
+      // corrupts strict shape (numbered lists, CSV, JSON). Re-run the shape
+      // coercer so the final response still honors the user's directive.
+      if (result.act.calibrationPrefixAdded) {
+        response = this.applyShapeCoercion(userContent, response);
+      }
     }
     this.updateLastChatQualityMeta(userContent, request.messages, response);
 
