@@ -2768,6 +2768,124 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- Rhyme request: "give me 3 words that rhyme with cat"
+    const rhyM = trimmed.match(/^(?:please\s+)?(?:give|list|name|tell)\s+(?:me\s+)?(?:a\s+(?:few|couple)\s+|some\s+|(\d+)\s+)?words?\s+(?:that\s+)?rhym(?:e|ing)\s+with\s+([a-z]+)\.?\??$/i);
+    if (rhyM) {
+      const want = rhyM[1] ? Math.max(1, parseInt(rhyM[1], 10)) : 3;
+      const word = rhyM[2].toLowerCase();
+      const rhymes: Record<string, string[]> = {
+        cat: ['bat','hat','mat','rat','sat','pat','flat','that'],
+        dog: ['log','fog','frog','jog','cog','bog','hog'],
+        star: ['car','far','bar','jar','tar','scar','guitar'],
+        light: ['bright','fight','night','sight','flight','right','tight','might'],
+        sun: ['fun','run','bun','done','one','none','gun'],
+        blue: ['true','clue','glue','new','shoe','flew','knew'],
+        cake: ['lake','make','bake','take','snake','rake','wake'],
+        tree: ['free','bee','sea','three','knee','flee','agree'],
+        rain: ['pain','main','train','brain','plain','chain','gain'],
+        fire: ['wire','tire','hire','desire','admire','retire','choir'],
+        moon: ['soon','noon','spoon','tune','dune','balloon','cocoon'],
+        sky: ['high','fly','try','sigh','cry','my','pie','lie'],
+        time: ['rhyme','climb','prime','crime','dime','lime','mime'],
+        heart: ['art','part','start','smart','chart','dart','cart'],
+        hope: ['rope','soap','scope','slope','cope','dope'],
+        day: ['way','say','play','stay','may','tray','clay','gray'],
+        night: ['light','sight','fight','right','bright','flight','might'],
+        snow: ['glow','flow','grow','slow','blow','show','below'],
+        sea: ['tree','bee','flea','knee','three','agree','free'],
+        red: ['bed','head','said','led','fed','sled','thread'],
+      };
+      const list = rhymes[word];
+      if (list) {
+        const picks = list.slice(0, Math.max(want, 3));
+        const lines = picks.map((w, i) => `${i + 1}. **${w}**`).join('\n');
+        this._skipBrevityOnce = true;
+        return `Words that rhyme with **${word}**:\n${lines}`;
+      }
+    }
+
+    // --- Fraction to decimal: "what is 3/4 as a decimal?"
+    const frM = trimmed.match(/^(?:please\s+)?(?:what(?:'s|\s+is)|convert)\s+(\d+)\s*\/\s*(\d+)\s+(?:as\s+a\s+decimal|in\s+decimal(?:\s+form)?|to\s+(?:a\s+)?decimal)\s*\??\.?$/i);
+    if (frM) {
+      const num = parseInt(frM[1], 10), den = parseInt(frM[2], 10);
+      if (den !== 0) {
+        const dec = num / den;
+        // Show up to 4 decimal places, trim trailing zeros.
+        const s = (Math.round(dec * 10000) / 10000).toString();
+        return `${num}/${den} = **${s}**.`;
+      }
+    }
+
+    // --- Roman numerals: "write 47 in roman numerals"
+    const romM = trimmed.match(/^(?:please\s+)?(?:write|convert|express|give|show)\s+(\d+)\s+(?:in|as|to)\s+roman(?:\s+numerals?)?\.?\??$/i);
+    if (romM) {
+      const n2 = parseInt(romM[1], 10);
+      if (n2 >= 1 && n2 <= 3999) {
+        const map: [number, string][] = [
+          [1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'],
+          [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'],
+          [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I'],
+        ];
+        let rem = n2, s = '';
+        for (const [v, sym] of map) { while (rem >= v) { s += sym; rem -= v; } }
+        return `${n2} in Roman numerals is **${s}**.`;
+      }
+    }
+
+    // --- Day-of-week math: "what day is 3 days after Monday?"
+    const dowM = trimmed.match(/^(?:please\s+)?what\s+day\s+(?:is\s+|will\s+it\s+be\s+)?(\d+)\s+days?\s+(after|before)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\s*\??\.?$/i);
+    if (dowM) {
+      const days = parseInt(dowM[1], 10);
+      const dir = dowM[2].toLowerCase();
+      const base = dowM[3].toLowerCase();
+      const week = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+      const idx = week.indexOf(base);
+      if (idx >= 0) {
+        const sign = dir === 'after' ? 1 : -1;
+        const ni = ((idx + sign * days) % 7 + 7) % 7;
+        const day = week[ni];
+        return `That's **${day.charAt(0).toUpperCase() + day.slice(1)}**.`;
+      }
+    }
+
+    // --- Simple linear solve: "solve x + 5 = 12" / "solve 2x = 14" / "solve 3x + 1 = 10"
+    {
+      const slvM = trimmed.match(/^(?:please\s+)?(?:solve(?:\s+for\s+x)?|find\s+x\s+(?:in|when))\s*[:,]?\s*(.+?)\s*\??\.?$/i);
+      if (slvM) {
+        const expr = slvM[1].replace(/\s+/g, '');
+        // Match a*x op b = c  where a default 1, op default +.
+        const m2 = expr.match(/^(-?\d*)x([+\-]\d+)?=(-?\d+)$/i)
+          ?? expr.match(/^(-?\d+)\*?x([+\-]\d+)?=(-?\d+)$/i);
+        if (m2) {
+          let aStr = m2[1];
+          if (aStr === '' || aStr === '+') aStr = '1';
+          if (aStr === '-') aStr = '-1';
+          const a = parseInt(aStr, 10);
+          const b = m2[2] ? parseInt(m2[2], 10) : 0;
+          const c = parseInt(m2[3], 10);
+          if (a !== 0) {
+            const x = (c - b) / a;
+            const xStr = Number.isInteger(x) ? x.toString() : x.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+            return `**x = ${xStr}**.`;
+          }
+        }
+        // Form: x op b = c
+        const m3 = expr.match(/^x([+\-/*])(-?\d+)=(-?\d+)$/i);
+        if (m3) {
+          const op = m3[1];
+          const b = parseInt(m3[2], 10), c = parseInt(m3[3], 10);
+          let x: number | null = null;
+          if (op === '+') x = c - b;
+          else if (op === '-') x = c + b;
+          else if (op === '*') x = b !== 0 ? c / b : null;
+          else if (op === '/') x = c * b;
+          if (x !== null) {
+            const xStr = Number.isInteger(x) ? x.toString() : x.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+            return `**x = ${xStr}**.`;
+          }
+        }
+      }
+    }
 
     if (/^(?:now\s+)?reverse(?:\s+(?:the\s+)?(?:order|list|them))?\.?$/i.test(trimmed)
         || /^(?:show|list|give)\s+(?:them|it|that|the\s+list)\s+(?:in\s+)?reversed?(?:\s+order)?\.?$/i.test(trimmed)
