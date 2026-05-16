@@ -2441,28 +2441,60 @@ export class VaiEngine implements ModelAdapter {
   private tryAnswerEarlyHooks(input: string, history: readonly Message[]): string | null {
     if (typeof input !== 'string' || input.trim().length === 0) return null;
     const trimmed = input.trim();
+
+    // Helper — walk back to most recent assistant list and extract items.
+    const extractPriorList = (): { items: string[]; numbered: boolean } | null => {
+      for (let i = history.length - 2; i >= 0; i -= 1) {
+        const m = history[i];
+        if (!m || m.role !== 'assistant' || typeof m.content !== 'string') continue;
+        const lines = m.content.split(/\r?\n/);
+        const items: string[] = [];
+        let numbered = false;
+        for (const ln of lines) {
+          const nm = ln.match(/^\s*\d+[.)]\s+(.+?)\s*$/);
+          const bm = ln.match(/^\s*[-*]\s+(.+?)\s*$/);
+          const raw = nm ? nm[1] : (bm ? bm[1] : '');
+          if (!raw) continue;
+          if (nm) numbered = true;
+          items.push(raw.replace(/^\*+|\*+$/g, '').replace(/\s+[—\-:].*$/, '').trim());
+        }
+        if (items.length >= 2) return { items, numbered };
+      }
+      return null;
+    };
+
+    // --- Reverse list: "now reverse the order" / "reverse them" / "in reverse"
+    if (/^(?:now\s+)?reverse(?:\s+(?:the\s+)?(?:order|list|them))?\.?$/i.test(trimmed)
+        || /^(?:show|list|give)\s+(?:them|it|that|the\s+list)\s+(?:in\s+)?reversed?(?:\s+order)?\.?$/i.test(trimmed)
+        || /^(?:in\s+)?reverse\s+order\.?$/i.test(trimmed)) {
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 2) {
+        const reversed = [...prior.items].reverse();
+        const lines = prior.numbered
+          ? reversed.map((it, idx) => `${idx + 1}. **${it}**`)
+          : reversed.map((it) => `- **${it}**`);
+        return `Reversed:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Last item recall: "what was the last one?" / "the last item?"
+    if (/^(?:please\s*,?\s*)?(?:what\s+was\s+|what\s+is\s+|tell\s+me\s+)?the\s+last\s+(?:one|item)(?:\s+(?:you\s+mentioned|from\s+(?:that|the)\s+list|of\s+those))?\s*\??\.?$/i.test(trimmed)) {
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 1) {
+        return `The last one was **${prior.items[prior.items.length - 1]}**.`;
+      }
+    }
+
+    // --- Ordinal recall (first/second/third/fourth/fifth).
     const ordinal = trimmed.match(/^(?:please\s*,?\s*)?(?:what\s+was\s+|what\s+is\s+|tell\s+me\s+)?(?:the\s+)?(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:one|item)(?:\s+(?:you\s+mentioned|from\s+(?:that|the)\s+list|of\s+those|again))?\s*\??\.?$/i)
       ?? trimmed.match(/^the\s+(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:one|item)\s*[—\-]\s*what\s+was\s+it\??\.?$/i);
     if (!ordinal) return null;
     const map: Record<string, number> = { first: 0, second: 1, third: 2, fourth: 3, fifth: 4, '1st': 0, '2nd': 1, '3rd': 2, '4th': 3, '5th': 4 };
     const idx = map[ordinal[1].toLowerCase()];
     if (idx === undefined) return null;
-    for (let i = history.length - 2; i >= 0; i -= 1) {
-      const m = history[i];
-      if (!m || m.role !== 'assistant' || typeof m.content !== 'string') continue;
-      const lines = m.content.split(/\r?\n/);
-      const items: string[] = [];
-      for (const ln of lines) {
-        const bm = ln.match(/^\s*[-*]\s+(.+?)\s*$/);
-        const nm = ln.match(/^\s*\d+[.)]\s+(.+?)\s*$/);
-        const raw = bm ? bm[1] : (nm ? nm[1] : '');
-        if (!raw) continue;
-        items.push(raw.replace(/^\*+|\*+$/g, '').replace(/\s+[—\-:].*$/, '').trim());
-      }
-      if (items.length >= 2 && idx < items.length) {
-        const item = items[idx];
-        return `The ${ordinal[1].toLowerCase()} one was **${item}**.`;
-      }
+    const prior = extractPriorList();
+    if (prior && idx < prior.items.length) {
+      return `The ${ordinal[1].toLowerCase()} one was **${prior.items[idx]}**.`;
     }
     return null;
   }
@@ -2721,6 +2753,80 @@ export class VaiEngine implements ModelAdapter {
    * This is the format-bundle counterpart to tryAnswerCanonicalFact:
    * curated topic facts + a shape templater rather than a single sentence.
    */
+  private tryAnswerCodeRequest(input: string): string | null {
+    if (typeof input !== 'string' || input.trim().length === 0) return null;
+    const l = input.toLowerCase();
+    const wantsFence = /\b(?:code\s+block|fenced|in\s+a\s+block|in\s+a\s+fenced|triple\s+back\s*tick|backticks?)\b/i.test(input)
+      || /```/.test(input);
+    if (!wantsFence) return null;
+
+    // Hello world by language.
+    const hwLang = l.match(/\bhello\s+world\b[^.?!]*?\b(python|javascript|typescript|java|rust|go|ruby|c\+\+|c#|swift|kotlin)\b/i)
+      ?? l.match(/\bin\s+(python|javascript|typescript|java|rust|go|ruby|c\+\+|c#|swift|kotlin)\b[^.?!]*?\bhello\s+world\b/i);
+    if (hwLang && l.includes('hello world')) {
+      const lang = hwLang[1].toLowerCase();
+      const snippets: Record<string, { tag: string; code: string }> = {
+        python:     { tag: 'python',     code: 'print("Hello, World!")' },
+        javascript: { tag: 'javascript', code: 'console.log("Hello, World!");' },
+        typescript: { tag: 'typescript', code: 'const greet = (): void => console.log("Hello, World!");\ngreet();' },
+        java:       { tag: 'java',       code: 'public class Main {\n  public static void main(String[] args) {\n    System.out.println("Hello, World!");\n  }\n}' },
+        rust:       { tag: 'rust',       code: 'fn main() {\n    println!("Hello, World!");\n}' },
+        go:         { tag: 'go',         code: 'package main\nimport "fmt"\nfunc main() {\n    fmt.Println("Hello, World!")\n}' },
+        ruby:       { tag: 'ruby',       code: 'puts "Hello, World!"' },
+        'c++':      { tag: 'cpp',        code: '#include <iostream>\nint main() {\n    std::cout << "Hello, World!\\n";\n    return 0;\n}' },
+        'c#':       { tag: 'csharp',     code: 'using System;\nclass Program {\n  static void Main() {\n    Console.WriteLine("Hello, World!");\n  }\n}' },
+        swift:      { tag: 'swift',      code: 'print("Hello, World!")' },
+        kotlin:     { tag: 'kotlin',     code: 'fun main() {\n    println("Hello, World!")\n}' },
+      };
+      const s = snippets[lang];
+      if (s) return `Here's Hello World in **${lang}**:\n\n\`\`\`${s.tag}\n${s.code}\n\`\`\``;
+    }
+
+    // For loop by language.
+    const forLang = l.match(/\bfor\s+loop\b[^.?!]*?\b(python|javascript|typescript|java|rust|go|ruby)\b/i)
+      ?? l.match(/\b(python|javascript|typescript|java|rust|go|ruby)\b[^.?!]*?\bfor\s+loop\b/i)
+      ?? l.match(/\bin\s+(python|javascript|typescript|java|rust|go|ruby)\b[^.?!]*?\bfor\s+loop\b/i);
+    if (forLang) {
+      const lang = forLang[1].toLowerCase();
+      const loops: Record<string, { tag: string; code: string }> = {
+        python:     { tag: 'python',     code: 'for i in range(5):\n    print(i)' },
+        javascript: { tag: 'javascript', code: 'for (let i = 0; i < 5; i++) {\n  console.log(i);\n}' },
+        typescript: { tag: 'typescript', code: 'for (let i: number = 0; i < 5; i++) {\n  console.log(i);\n}' },
+        java:       { tag: 'java',       code: 'for (int i = 0; i < 5; i++) {\n    System.out.println(i);\n}' },
+        rust:       { tag: 'rust',       code: 'for i in 0..5 {\n    println!("{}", i);\n}' },
+        go:         { tag: 'go',         code: 'for i := 0; i < 5; i++ {\n    fmt.Println(i)\n}' },
+        ruby:       { tag: 'ruby',       code: '5.times do |i|\n  puts i\nend' },
+      };
+      const s = loops[lang];
+      if (s) return `Here's a simple for loop in **${lang}**:\n\n\`\`\`${s.tag}\n${s.code}\n\`\`\``;
+    }
+
+    // If statement by language.
+    const ifLang = l.match(/\bif\s+(?:statement|condition|else)\b[^.?!]*?\b(python|javascript|typescript|java|rust|go|ruby)\b/i)
+      ?? l.match(/\bin\s+(python|javascript|typescript|java|rust|go|ruby)\b[^.?!]*?\bif\s+(?:statement|condition|else)\b/i);
+    if (ifLang) {
+      const lang = ifLang[1].toLowerCase();
+      const ifs: Record<string, { tag: string; code: string }> = {
+        python:     { tag: 'python',     code: 'x = 10\nif x > 5:\n    print("big")\nelse:\n    print("small")' },
+        javascript: { tag: 'javascript', code: 'const x = 10;\nif (x > 5) {\n  console.log("big");\n} else {\n  console.log("small");\n}' },
+        typescript: { tag: 'typescript', code: 'const x: number = 10;\nif (x > 5) {\n  console.log("big");\n} else {\n  console.log("small");\n}' },
+        java:       { tag: 'java',       code: 'int x = 10;\nif (x > 5) {\n    System.out.println("big");\n} else {\n    System.out.println("small");\n}' },
+        rust:       { tag: 'rust',       code: 'let x = 10;\nif x > 5 {\n    println!("big");\n} else {\n    println!("small");\n}' },
+        go:         { tag: 'go',         code: 'x := 10\nif x > 5 {\n    fmt.Println("big")\n} else {\n    fmt.Println("small")\n}' },
+        ruby:       { tag: 'ruby',       code: 'x = 10\nif x > 5\n  puts "big"\nelse\n  puts "small"\nend' },
+      };
+      const s = ifs[lang];
+      if (s) return `Here's an if/else in **${lang}**:\n\n\`\`\`${s.tag}\n${s.code}\n\`\`\``;
+    }
+
+    // JSON object with name and age.
+    if (/\bjson\s+object\b[^.?!]*?\b(?:name|age)\b/i.test(input) || /\bname\s+and\s+age\b/i.test(input)) {
+      return 'Here\'s a small JSON object with **name** and **age**:\n\n```json\n{\n  "name": "Vai",\n  "age": 1\n}\n```';
+    }
+
+    return null;
+  }
+
   private tryAnswerStructuredFormat(input: string): string | null {
     if (typeof input !== 'string' || input.trim().length === 0) return null;
     const lower = input.toLowerCase();
@@ -3678,7 +3784,7 @@ export class VaiEngine implements ModelAdapter {
     if (disambiguated !== null) {
       response = disambiguated;
     } else {
-      const structured = this.tryAnswerStructuredFormat(userContent);
+      const structured = this.tryAnswerCodeRequest(userContent) ?? this.tryAnswerStructuredFormat(userContent);
       if (structured !== null) {
         response = structured;
         structuredFormatFired = true;
@@ -3720,6 +3826,16 @@ export class VaiEngine implements ModelAdapter {
         || /\buse\s+caps\b/i.test(userContent);
       if (!isUndoingLower && /\b(?:lowercase\s+only|all\s+lowercase|in\s+lowercase|lower[-\s]?case)\b/i.test(userContent)) {
         response = response.toLowerCase();
+      }
+    }
+    // Uppercase-only post-pass: same idea, but UPPER. Skip when undone.
+    {
+      const isUndoingUpper = /\b(?:never\s+mind|scratch|skip|forget|drop|remove|undo|cancel|wait,?\s*no)\b[^.!?]*\bupper[-\s]?case\b/i.test(userContent)
+        || /\b(?:normal|proper|regular|mixed|title)\s+(?:caps?|capitalization|case)\b/i.test(userContent);
+      if (!isUndoingUpper && /\b(?:uppercase\s+only|all\s+uppercase|in\s+uppercase|upper[-\s]?case|all\s+caps|in\s+caps)\b/i.test(userContent)) {
+        // Preserve fenced code blocks and inline code as-is.
+        const parts = response.split(/(```[\s\S]*?```|`[^`]+`)/g);
+        response = parts.map((p, idx) => idx % 2 === 0 ? p.toUpperCase() : p).join('');
       }
     }
     // Echo guard — if the model produced something almost identical to the
@@ -3831,7 +3947,7 @@ export class VaiEngine implements ModelAdapter {
     if (disambiguated !== null) {
       response = disambiguated;
     } else {
-      const structured = this.tryAnswerStructuredFormat(userContent);
+      const structured = this.tryAnswerCodeRequest(userContent) ?? this.tryAnswerStructuredFormat(userContent);
       if (structured !== null) {
         response = structured;
         structuredFormatFired = true;
