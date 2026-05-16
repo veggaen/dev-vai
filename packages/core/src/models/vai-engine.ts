@@ -1975,6 +1975,30 @@ export class VaiEngine implements ModelAdapter {
       return `compare ${a} and ${b}`;
     }
 
+    // ---- Person coreference: input contains "he" / "she" / "his" / "her"
+    // referring to a person named in the prior assistant turn. Walk back
+    // through the most recent assistant turn and extract the first **bold**
+    // proper noun (1–3 tokens) as the antecedent.
+    if (/\b(?:he|she|his|her|him)\b/i.test(trimmed)) {
+      let priorAssistant: string | null = null;
+      for (let i = history.length - 2; i >= 0; i--) {
+        const m = history[i];
+        if (m && m.role === 'assistant' && typeof m.content === 'string') { priorAssistant = m.content; break; }
+      }
+      if (priorAssistant) {
+        const nameMatch = priorAssistant.match(/\*\*([A-Z][A-Za-z.]+(?:\s+[A-Z][A-Za-z.]+){0,2})\*\*/);
+        if (nameMatch) {
+          const person = nameMatch[1];
+          let rewritten = trimmed
+            .replace(/\bhis\b/gi, `${person}'s`)
+            .replace(/\bher\b(?=\s+(?:nationality|age|company|firm|role|job|wife|husband|son|daughter|career|birthplace|education))/gi, `${person}'s`)
+            .replace(/\b(?:he|she|him)\b/gi, person);
+          rewritten = rewritten.replace(/^what\s+about\b/i, 'what is');
+          return rewritten;
+        }
+      }
+    }
+
     // ---- Coreference: input contains "it" / "its" referring to prior topic.
     // Examples: "who created it?", "what does it eat?", "what about its capital?"
     if (/\b(?:it|its|that)\b/i.test(trimmed)) {
@@ -2375,6 +2399,24 @@ export class VaiEngine implements ModelAdapter {
         answer: 'Pythons are non-venomous constrictors that eat mostly **mammals** (rodents, rabbits, small deer) and occasionally **birds** — they ambush prey and squeeze it before swallowing whole.' },
       { match: /\bwhat\s+is\s+(?:the\s+)?(?:python(?:s)?(?:'s)?\s+(?:the\s+snake\s+)?)?diet\b/i,
         answer: 'Pythons eat **mammals** (rodents, rabbits, small deer) and **birds** — they are constrictors that ambush prey.' },
+      // Presidents (current heads of state — narrow set)
+      { match: /\b(?:current\s+)?president\s+of\s+france\b|\bfrance['']?s?\s+(?:current\s+)?president\b/i,
+        answer: '**Emmanuel Macron** is the current President of France (since 2017).' },
+      { match: /\b(?:current\s+)?president\s+of\s+(?:the\s+)?(?:united\s+states|usa|us|america)\b|\b(?:united\s+states|usa|us|america)['']?s?\s+(?:current\s+)?president\b/i,
+        answer: '**Donald Trump** is the current President of the United States (47th president, took office January 20, 2025).' },
+      { match: /\b(?:current\s+)?(?:chancellor|chancellour)\s+of\s+germany\b|\bgermany['']?s?\s+(?:current\s+)?chancellor\b/i,
+        answer: '**Friedrich Merz** is the current Chancellor of Germany (since May 2025).' },
+      // Tim Cook / Apple CEO transition
+      { match: /\bwhen\s+did\s+(?:tim\s+cook|cook)\s+become\s+(?:the\s+)?ceo(?:\s+of\s+apple)?\b/i,
+        answer: '**Tim Cook** became CEO of Apple in **August 2011**, when Steve Jobs stepped down.' },
+      { match: /\bwho\s+(?:was|did)\s+(?:tim\s+cook|cook)['']?s?\s+predecessor\b|\bwho\s+came\s+before\s+(?:tim\s+)?cook\b/i,
+        answer: '**Steve Jobs** was Tim Cook\'s predecessor as CEO of Apple, until August 2011.' },
+      // Macron facts
+      { match: /\b(?:what\s+is\s+)?(?:emmanuel\s+)?macron['']?s?\s+nationality\b/i,
+        answer: '**Emmanuel Macron** is **French** — he was born in Amiens, France, in 1977.' },
+      // Python the snake — kill mechanism
+      { match: /\bhow\s+(?:do(?:es)?\s+)?(?:the\s+)?python(?:s)?(?:\s+the\s+snake)?\s+(?:kill|catch)\s+(?:its\s+|their\s+)?prey\b/i,
+        answer: 'Pythons are **non-venomous constrictors** — they kill prey by **wrapping** their coils around it and **squeezing** until blood flow stops (constriction), then swallow it whole.' },
     ];
     for (const entry of FACTS) {
       if (entry.match.test(input)) return entry.answer;
