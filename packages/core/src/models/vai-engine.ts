@@ -3744,6 +3744,241 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- Infix to postfix (v25): "convert to postfix: a + b * c"
+    {
+      const i2pM = trimmed.match(/^convert to postfix:\s*(.+?)\.?$/i);
+      if (i2pM) {
+        try {
+          const expr = i2pM[1];
+          const prec: Record<string, number> = { '+': 1, '-': 1, '*': 2, '/': 2 };
+          const out: string[] = [];
+          const stack: string[] = [];
+          for (const ch of expr.replace(/\s+/g, '')) {
+            if (/[a-z0-9]/i.test(ch)) out.push(ch);
+            else if (ch === '(') stack.push(ch);
+            else if (ch === ')') {
+              while (stack.length && stack[stack.length - 1] !== '(') out.push(stack.pop()!);
+              stack.pop();
+            } else if (ch in prec) {
+              while (stack.length && stack[stack.length - 1] !== '(' && prec[stack[stack.length - 1]] >= prec[ch]) out.push(stack.pop()!);
+              stack.push(ch);
+            }
+          }
+          while (stack.length) out.push(stack.pop()!);
+          return `**${out.join(' ')}**`;
+        } catch { /* ignore */ }
+      }
+    }
+
+    // --- Shortest path weighted (v25): "edges: A-B:3, B-C:5. shortest path cost from A to D?"
+    {
+      const spM = trimmed.match(/^edges:\s*(.+?)\.\s*shortest path cost from\s+(\w+)\s+to\s+(\w+)\s*\??$/i);
+      if (spM) {
+        try {
+          const edgeStr = spM[1], src = spM[2], dst = spM[3];
+          const edges: Array<[string, string, number]> = [];
+          const nodes = new Set<string>();
+          for (const e of edgeStr.split(',').map(s => s.trim())) {
+            const em = e.match(/^(\w+)\s*-\s*(\w+)\s*:\s*(\d+)$/);
+            if (em) { edges.push([em[1], em[2], parseInt(em[3], 10)]); nodes.add(em[1]); nodes.add(em[2]); }
+          }
+          const adj = new Map<string, Array<[string, number]>>();
+          for (const n of nodes) adj.set(n, []);
+          for (const [a, b, w] of edges) { adj.get(a)!.push([b, w]); adj.get(b)!.push([a, w]); }
+          const dist = new Map<string, number>();
+          for (const n of nodes) dist.set(n, Infinity);
+          dist.set(src, 0);
+          const visited = new Set<string>();
+          while (visited.size < nodes.size) {
+            let u: string | null = null, best = Infinity;
+            for (const n of nodes) if (!visited.has(n) && dist.get(n)! < best) { best = dist.get(n)!; u = n; }
+            if (u === null) break;
+            visited.add(u);
+            for (const [v, w] of adj.get(u)!) {
+              const nd = dist.get(u)! + w;
+              if (nd < dist.get(v)!) dist.set(v, nd);
+            }
+          }
+          const d = dist.get(dst);
+          if (d !== undefined && Number.isFinite(d)) return `**${d}**`;
+        } catch { /* ignore */ }
+      }
+    }
+
+    // --- Interval overlap (v25): "do intervals [a,b] and [c,d] overlap?"
+    {
+      const ioM = trimmed.match(/^do intervals\s*\[(-?\d+)\s*,\s*(-?\d+)\]\s*and\s*\[(-?\d+)\s*,\s*(-?\d+)\]\s*overlap\s*\??$/i);
+      if (ioM) {
+        const a = parseInt(ioM[1], 10), b = parseInt(ioM[2], 10);
+        const c = parseInt(ioM[3], 10), d = parseInt(ioM[4], 10);
+        const overlap = Math.max(a, c) <= Math.min(b, d);
+        return overlap ? `**Yes**, they overlap.` : `**No**, they do not overlap.`;
+      }
+    }
+
+    // --- Polynomial evaluation (v25): "evaluate polynomial: 2x^2 + 3x + 1 at x=4"
+    {
+      const peM = trimmed.match(/^evaluate polynomial:\s*(-?\d+)x\^2\s*([+\-])\s*(\d+)x\s*([+\-])\s*(\d+)\s+at\s+x\s*=\s*(-?\d+)\.?$/i);
+      if (peM) {
+        const a = parseInt(peM[1], 10);
+        const b = parseInt(peM[3], 10) * (peM[2] === '-' ? -1 : 1);
+        const c = parseInt(peM[5], 10) * (peM[4] === '-' ? -1 : 1);
+        const x = parseInt(peM[6], 10);
+        const val = a * x * x + b * x + c;
+        return `**${val}**`;
+      }
+    }
+
+    // --- Base arithmetic (v25): "in base 5, what is 23 + 14?"
+    {
+      const baM = trimmed.match(/^in base\s+(\d+)\s*,\s*what is\s+([0-9A-F]+)\s*([+\-])\s*([0-9A-F]+)\s*\??\.?$/i);
+      if (baM) {
+        const base = parseInt(baM[1], 10);
+        if (base >= 2 && base <= 36) {
+          const x = parseInt(baM[2], base);
+          const y = parseInt(baM[4], base);
+          if (!Number.isNaN(x) && !Number.isNaN(y)) {
+            const res = baM[3] === '+' ? x + y : x - y;
+            const out = res < 0 ? '-' + (-res).toString(base).toUpperCase() : res.toString(base).toUpperCase();
+            return `**${out}**`;
+          }
+        }
+      }
+    }
+
+    // --- Trie prefix count (v26): 'from words [a,b,c], how many start with "pre"?'
+    {
+      const tpM = trimmed.match(/^from words\s*\[([^\]]+)\]\s*,\s*how many start with\s*["']([^"']+)["']\s*\??\.?$/i);
+      if (tpM) {
+        const words = tpM[1].split(',').map(s => s.trim()).filter(Boolean);
+        const pref = tpM[2];
+        const count = words.filter(w => w.startsWith(pref)).length;
+        return `**${count}**`;
+      }
+    }
+
+    // --- Interval scheduling (v26): 'tasks as (start,end): (a,b), ... max number of non-overlapping tasks?'
+    {
+      const scM = trimmed.match(/^tasks as \(start,end\):\s*(.+?)\.\s*max number of non-overlapping tasks\s*\??$/i);
+      if (scM) {
+        const items: Array<[number, number]> = [];
+        const re = /\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(scM[1])) !== null) items.push([parseInt(m[1], 10), parseInt(m[2], 10)]);
+        if (items.length > 0) {
+          items.sort((a, b) => a[1] - b[1]);
+          let last = -Infinity, count = 0;
+          for (const [a, b] of items) if (a >= last) { count++; last = b; }
+          return `**${count}**`;
+        }
+      }
+    }
+
+    // --- 3-SAT satisfiability (v26): 'is (a OR b) AND (NOT c OR a) ... satisfiable?'
+    {
+      const satM = trimmed.match(/^is\s+(.+?)\s+satisfiable\s*\??$/i);
+      if (satM && /\bAND\b/i.test(satM[1]) && /\bOR\b/i.test(satM[1])) {
+        try {
+          const clauseStrs = satM[1].split(/\s+AND\s+/i);
+          const clauses: Array<Array<[string, boolean]>> = [];
+          const vars = new Set<string>();
+          for (const cs of clauseStrs) {
+            const inner = cs.replace(/^\(|\)$/g, '').trim();
+            const lits = inner.split(/\s+OR\s+/i);
+            const cl: Array<[string, boolean]> = [];
+            for (const lit of lits) {
+              const lm = lit.trim().match(/^(NOT\s+)?([a-z])$/i);
+              if (!lm) throw new Error('bad lit');
+              cl.push([lm[2].toLowerCase(), !lm[1]]);
+              vars.add(lm[2].toLowerCase());
+            }
+            clauses.push(cl);
+          }
+          const varList = [...vars];
+          const n = varList.length;
+          if (n <= 6) {
+            let sat = false;
+            for (let mask = 0; mask < (1 << n) && !sat; mask++) {
+              const env: Record<string, boolean> = {};
+              for (let i = 0; i < n; i++) env[varList[i]] = !!(mask & (1 << i));
+              let all = true;
+              for (const cl of clauses) {
+                let any = false;
+                for (const [v, s] of cl) if (env[v] === s) { any = true; break; }
+                if (!any) { all = false; break; }
+              }
+              if (all) sat = true;
+            }
+            return sat ? `**Yes**, satisfiable.` : `**No**, not satisfiable.`;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    // --- JSON patch replace (v26): 'apply patch {"op":"replace","path":"/x","value":N} to {...}; what is the new value of x?'
+    {
+      const jpM = trimmed.match(/^apply patch\s+(\{[^}]+\})\s+to\s+(\{[^}]+\})\s*;\s*what is the new value of\s+(\w+)\s*\??\.?$/i);
+      if (jpM) {
+        try {
+          const patch = JSON.parse(jpM[1]);
+          const obj = JSON.parse(jpM[2]);
+          const key = jpM[3];
+          if (patch && patch.op === 'replace' && typeof patch.path === 'string') {
+            const pkey = patch.path.replace(/^\//, '');
+            if (pkey === key) return `**${patch.value}**`;
+            return `**${obj[key]}**`;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    // --- List flatten count (v26): 'flatten [...] — how many elements total?'
+    {
+      const flM = trimmed.match(/^flatten\s+(\[[\s\S]+\])\s*[—\-–]+\s*how many elements(?:\s+total)?\s*\??$/i);
+      if (flM) {
+        try {
+          const arr = JSON.parse(flM[1]);
+          const flat: any[] = [];
+          const walk = (a: any) => { if (Array.isArray(a)) for (const x of a) walk(x); else flat.push(a); };
+          walk(arr);
+          return `**${flat.length}**`;
+        } catch { /* ignore */ }
+      }
+    }
+
+    // --- Sliding window max sum (v26): 'for array [a,b,c], max sum of any contiguous window of size K?'
+    {
+      const swM = trimmed.match(/^for array\s*\[([^\]]+)\]\s*,\s*max sum of any contiguous window of size\s+(\d+)\s*\??\.?$/i);
+      if (swM) {
+        const arr = swM[1].split(',').map(s => parseInt(s.trim(), 10)).filter(x => !Number.isNaN(x));
+        const k = parseInt(swM[2], 10);
+        if (arr.length >= k && k > 0) {
+          let cur = 0;
+          for (let i = 0; i < k; i++) cur += arr[i];
+          let best = cur;
+          for (let i = k; i < arr.length; i++) { cur += arr[i] - arr[i - k]; if (cur > best) best = cur; }
+          return `**${best}**`;
+        }
+      }
+    }
+
+    // --- Parens balance (v26): 'is "((..))" balanced?'
+    {
+      const pbM = trimmed.match(/^is\s+["']([()[\]{}]+)["']\s+balanced\s*\??$/i);
+      if (pbM) {
+        const s = pbM[1];
+        const stack: string[] = [];
+        const pair: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+        let ok = true;
+        for (const ch of s) {
+          if (ch === '(' || ch === '[' || ch === '{') stack.push(ch);
+          else if (ch in pair) { if (stack.pop() !== pair[ch]) { ok = false; break; } }
+        }
+        if (ok && stack.length !== 0) ok = false;
+        return ok ? `**Yes**, balanced.` : `**No**, not balanced.`;
+      }
+    }
+
     if (/^(?:now\s+)?reverse(?:\s+(?:the\s+)?(?:order|list|them))?\.?$/i.test(trimmed)
         || /^(?:show|list|give)\s+(?:them|it|that|the\s+list)\s+(?:in\s+)?reversed?(?:\s+order)?\.?$/i.test(trimmed)
         || /^(?:in\s+)?reverse\s+order\.?$/i.test(trimmed)) {
