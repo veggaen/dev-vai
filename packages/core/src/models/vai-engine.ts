@@ -3354,6 +3354,184 @@ export class VaiEngine implements ModelAdapter {
       if (bcM) return `**${parseInt(bcM[1], 16)}**`;
     }
 
+    // --- Nested conditional (v22): if X is even/odd/>/< Y [and …], say A; else if …, say B; else say C
+    {
+      const evalClause = (n: number, clause: string): boolean => {
+        // clause like "X is greater than 50", "X is even", optionally joined by "and"
+        const parts = clause.split(/\s+and\s+/i);
+        for (const p of parts) {
+          const cleaned = p.trim();
+          let m: RegExpMatchArray | null;
+          if ((m = cleaned.match(/^-?\d+\s+is\s+(even|odd)$/i))) {
+            const k = m[1].toLowerCase();
+            if (k === 'even' && n % 2 !== 0) return false;
+            if (k === 'odd' && n % 2 === 0) return false;
+            continue;
+          }
+          if ((m = cleaned.match(/^-?\d+\s+is\s+(greater|less|bigger|smaller|larger)\s+than\s+(-?\d+)$/i))) {
+            const op = m[1].toLowerCase(); const t = parseInt(m[2], 10);
+            const gt = (op === 'greater' || op === 'bigger' || op === 'larger');
+            if (gt && !(n > t)) return false;
+            if (!gt && !(n < t)) return false;
+            continue;
+          }
+          return false;
+        }
+        return true;
+      };
+      // Full match: if <cond1>, say "A"; else if <cond2>, say "B"; else say "C"
+      const ncM = trimmed.match(/^(?:please\s+)?if\s+(.+?)\s*[,]\s+say\s+["']([^"']+)["']\s*;\s*else\s+if\s+(.+?)\s*[,]\s+say\s+["']([^"']+)["']\s*;\s*else\s+say\s+["']([^"']+)["']\s*\.?$/i);
+      if (ncM) {
+        const cond1 = ncM[1], a = ncM[2], cond2 = ncM[3], b = ncM[4], c = ncM[5];
+        // Extract N from first clause
+        const numMatch = cond1.match(/(-?\d+)/);
+        if (numMatch) {
+          const n = parseInt(numMatch[1], 10);
+          if (evalClause(n, cond1)) return a;
+          if (evalClause(n, cond2)) return b;
+          return c;
+        }
+      }
+    }
+
+    // --- JSON extract (v22): "from {...}, get a.b.c" / "in {...}, what is the value at a.b.c"
+    {
+      let jeM = trimmed.match(/^(?:please\s+)?from\s+(\{.+?\})\s*[,]\s+get\s+([a-z][a-z0-9_.]*)\s*\??\.?$/i);
+      if (!jeM) jeM = trimmed.match(/^(?:please\s+)?in\s+(\{.+?\})\s*[,]\s+what\s+is\s+the\s+value\s+at\s+([a-z][a-z0-9_.]*)\s*\??\.?$/i);
+      if (jeM) {
+        try {
+          const obj = JSON.parse(jeM[1]);
+          const path = jeM[2].split('.');
+          let v: any = obj;
+          for (const k of path) { v = v?.[k]; }
+          if (v !== undefined && v !== null) return `**${v}**`;
+        } catch { /* ignore */ }
+      }
+    }
+
+    // --- Date arithmetic (v22): "what date is N days/weeks after/before M/D in 2024?"
+    {
+      const D2024 = [31,29,31,30,31,30,31,31,30,31,30,31];
+      const addDays = (m: number, d: number, delta: number) => {
+        let totalDay = d;
+        for (let i = 0; i < m - 1; i++) totalDay += D2024[i];
+        totalDay += delta;
+        totalDay = ((totalDay - 1) % 366 + 366) % 366 + 1;
+        let mm = 1;
+        while (totalDay > D2024[mm - 1]) { totalDay -= D2024[mm - 1]; mm++; }
+        return { m: mm, d: totalDay };
+      };
+      const daM = trimmed.match(/^(?:please\s+)?what\s+date\s+is\s+(\d+)\s+(days?|weeks?)\s+(after|before)\s+(\d{1,2})[\/-](\d{1,2})(?:\s+in\s+2024)?\s*\??\.?$/i);
+      if (daM) {
+        let amount = parseInt(daM[1], 10);
+        if (/^weeks?$/i.test(daM[2])) amount *= 7;
+        if (/^before$/i.test(daM[3])) amount = -amount;
+        const startM = parseInt(daM[4], 10), startD = parseInt(daM[5], 10);
+        if (startM >= 1 && startM <= 12 && startD >= 1 && startD <= D2024[startM - 1]) {
+          const { m, d } = addDays(startM, startD, amount);
+          return `**${m}/${d}**`;
+        }
+      }
+    }
+
+    // --- String pattern next (v22): "what comes next in this sequence: a, b, c?"
+    {
+      const spnM = trimmed.match(/^(?:please\s+)?what\s+comes\s+next\s+in\s+this\s+sequence:\s*(.+?)\s*\??\.?$/i);
+      if (spnM) {
+        const items = spnM[1].split(/\s*,\s*/).map(s => s.trim()).filter(Boolean);
+        if (items.length >= 2) {
+          // case A: all share same prefix, last char is letter incrementing
+          const prefixLen = items[0].length - 1;
+          const prefix = items[0].slice(0, prefixLen);
+          const allSamePrefix = items.every(it => it.length === items[0].length && it.slice(0, prefixLen) === prefix);
+          if (allSamePrefix && items.every(it => /^[a-z]$/i.test(it.slice(-1)))) {
+            const codes = items.map(it => it.charCodeAt(it.length - 1));
+            const diff = codes[1] - codes[0];
+            if (codes.every((c, i) => i === 0 || c - codes[i - 1] === diff)) {
+              const nextCode = codes[codes.length - 1] + diff;
+              if (nextCode >= 97 && nextCode <= 122) {
+                return `**${prefix}${String.fromCharCode(nextCode)}**`;
+              }
+            }
+          }
+          // case B: same suffix, first char letter incrementing
+          const suffixLen = items[0].length - 1;
+          const suffix = items[0].slice(1);
+          const allSameSuffix = items.every(it => it.length === items[0].length && it.slice(1) === suffix);
+          if (allSameSuffix && items.every(it => /^[a-z]$/i.test(it[0]))) {
+            const codes = items.map(it => it.charCodeAt(0));
+            const diff = codes[1] - codes[0];
+            if (codes.every((c, i) => i === 0 || c - codes[i - 1] === diff)) {
+              const nextCode = codes[codes.length - 1] + diff;
+              if (nextCode >= 97 && nextCode <= 122) {
+                return `**${String.fromCharCode(nextCode)}${suffix}**`;
+              }
+            }
+            void suffixLen;
+          }
+          // case C: stem + trailing number
+          const stemMatch = items.map(it => it.match(/^(.+?)(\d+)$/));
+          if (stemMatch.every(m => m !== null)) {
+            const stems = stemMatch.map(m => m![1]);
+            const nums = stemMatch.map(m => parseInt(m![2], 10));
+            if (stems.every(s => s === stems[0])) {
+              const diff = nums[1] - nums[0];
+              if (nums.every((c, i) => i === 0 || c - nums[i - 1] === diff)) {
+                return `**${stems[0]}${nums[nums.length - 1] + diff}**`;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // --- Logical order (v22): "A is taller than B. B is taller than C. order them from tallest to shortest"
+    {
+      const loM = trimmed.match(/^((?:[A-Za-z]+\s+is\s+(?:taller|shorter|older|younger|faster|slower|heavier|lighter|bigger|smaller)\s+than\s+[A-Za-z]+\.\s*)+)\s*order\s+them\s+from\s+(\w+)\s+to\s+(\w+)\.?$/i);
+      if (loM) {
+        const statements = loM[1].trim();
+        const sortHi = loM[2].toLowerCase();
+        // gather all directed edges hi→lo from "A is <adj> than B"
+        const edges: Array<[string, string, string]> = []; // [hi, lo, adj]
+        const stmtRe = /([A-Za-z]+)\s+is\s+(taller|shorter|older|younger|faster|slower|heavier|lighter|bigger|smaller)\s+than\s+([A-Za-z]+)\./gi;
+        let sm: RegExpExecArray | null;
+        while ((sm = stmtRe.exec(statements)) !== null) {
+          edges.push([sm[1], sm[3], sm[2].toLowerCase()]);
+        }
+        // Normalize: pick one canonical direction. For each edge, if adj ∈ {shorter,younger,slower,lighter,smaller} we flip so hi means dominant in that dimension.
+        const flipSet = new Set(['shorter','younger','slower','lighter','smaller']);
+        const norm = edges.map(([a, b, adj]) => flipSet.has(adj) ? [b, a] as [string, string] : [a, b] as [string, string]);
+        // Topo sort
+        const nodes = new Set<string>();
+        for (const [x, y] of norm) { nodes.add(x); nodes.add(y); }
+        const indeg = new Map<string, number>();
+        const adjMap = new Map<string, string[]>();
+        for (const n of nodes) { indeg.set(n, 0); adjMap.set(n, []); }
+        for (const [x, y] of norm) { adjMap.get(x)!.push(y); indeg.set(y, (indeg.get(y) || 0) + 1); }
+        const sorted: string[] = [];
+        const queue: string[] = [];
+        for (const [n, d] of indeg) if (d === 0) queue.push(n);
+        while (queue.length) {
+          const cur = queue.shift()!;
+          sorted.push(cur);
+          for (const nx of adjMap.get(cur)!) {
+            indeg.set(nx, (indeg.get(nx) || 0) - 1);
+            if (indeg.get(nx) === 0) queue.push(nx);
+          }
+        }
+        if (sorted.length === nodes.size && sorted.length >= 2) {
+          // sorted is hi → lo in the dominant adjective. If user asked from "shortest to tallest" (i.e. sortHi is the recessive word), reverse.
+          const dominantWords = new Set(['tallest','oldest','fastest','heaviest','biggest','largest']);
+          const recessiveWords = new Set(['shortest','youngest','slowest','lightest','smallest']);
+          let finalOrder = sorted;
+          if (recessiveWords.has(sortHi)) finalOrder = sorted.slice().reverse();
+          void dominantWords;
+          this._skipBrevityOnce = true;
+          return finalOrder.map((n, i) => `${i + 1}. **${n}**`).join('\n');
+        }
+      }
+    }
+
     if (/^(?:now\s+)?reverse(?:\s+(?:the\s+)?(?:order|list|them))?\.?$/i.test(trimmed)
         || /^(?:show|list|give)\s+(?:them|it|that|the\s+list)\s+(?:in\s+)?reversed?(?:\s+order)?\.?$/i.test(trimmed)
         || /^(?:in\s+)?reverse\s+order\.?$/i.test(trimmed)) {
