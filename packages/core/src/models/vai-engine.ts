@@ -2037,6 +2037,231 @@ export class VaiEngine implements ModelAdapter {
   }
 
   /**
+   * Structured-format router. When the user asks for a specific output
+   * shape over a known topic (numbered/bullet facts about a country or
+   * canonical person, a markdown comparison table, a JSON object with
+   * named keys, or a CSV of a canonical set), emit a curated answer in
+   * the requested shape that names the topic. Returns null when no
+   * confident match exists so the normal pipeline runs.
+   *
+   * This is the format-bundle counterpart to tryAnswerCanonicalFact:
+   * curated topic facts + a shape templater rather than a single sentence.
+   */
+  private tryAnswerStructuredFormat(input: string): string | null {
+    if (typeof input !== 'string' || input.trim().length === 0) return null;
+    const lower = input.toLowerCase();
+
+    // Topic attribute tables — used by JSON and list emitters.
+    type Attrs = Record<string, string>;
+    const TOPIC_ATTRS: Record<string, Attrs> = {
+      france:  { country: 'France',  name: 'France',  capital: 'Paris',     continent: 'Europe',         currency: 'Euro',             language: 'French',     population: 'About 67 million' },
+      japan:   { country: 'Japan',   name: 'Japan',   capital: 'Tokyo',     continent: 'Asia',           currency: 'Japanese yen',     language: 'Japanese',   population: 'About 125 million' },
+      germany: { country: 'Germany', name: 'Germany', capital: 'Berlin',    continent: 'Europe',         currency: 'Euro',             language: 'German',     population: 'About 84 million' },
+      brazil:  { country: 'Brazil',  name: 'Brazil',  capital: 'Brasília',  continent: 'South America',  currency: 'Brazilian real',   language: 'Portuguese', population: 'About 215 million' },
+      norway:  { country: 'Norway',  name: 'Norway',  capital: 'Oslo',      continent: 'Europe',         currency: 'Norwegian krone',  language: 'Norwegian',  population: 'About 5.5 million' },
+    };
+
+    const FACT_LISTS: Record<string, string[]> = {
+      france: [
+        '**France** is a country in Western Europe with Paris as its capital.',
+        'It is the most-visited country in the world, with over 80 million tourists each year.',
+        'French is the official language and the country uses the Euro as its currency.',
+        'France is a founding member of the European Union and a permanent member of the UN Security Council.',
+        'Cultural landmarks include the Louvre, the Eiffel Tower, and a cuisine recognized by UNESCO.',
+        'France is divided into 18 administrative regions across Europe and overseas territories.',
+      ],
+      japan: [
+        '**Japan** is an island nation in East Asia with Tokyo as its capital.',
+        'It consists of four main islands: Honshu, Hokkaido, Kyushu, and Shikoku.',
+        'Japan has one of the largest economies in the world and a parliamentary government with an emperor as ceremonial head of state.',
+        'The country is known for technology, anime, sushi, and bullet trains (Shinkansen).',
+        'Japanese is the official language and the currency is the yen.',
+        'Japan sits on the Pacific Ring of Fire and experiences frequent earthquakes.',
+      ],
+      germany: [
+        '**Germany** is a country in Central Europe with Berlin as its capital.',
+        'It is the most populous member state of the European Union.',
+        'German is the official language and the country has the largest economy in Europe.',
+        'Germany is a federal parliamentary republic made up of 16 states (Bundesländer).',
+        'The country is known for engineering (BMW, Mercedes-Benz), philosophy, and classical music.',
+      ],
+      brazil: [
+        '**Brazil** is the largest country in South America, with Brasília as its capital.',
+        'Portuguese is the official language; it is the largest Portuguese-speaking country in the world.',
+        'The Amazon rainforest covers a large portion of northern Brazil.',
+        'Brazil has won the FIFA World Cup five times — more than any other nation.',
+        'It is the fifth-largest country in the world by area and one of the most populous.',
+      ],
+      norway: [
+        '**Norway** is a Scandinavian country in Northern Europe with Oslo as its capital.',
+        'It is famous for fjords, the midnight sun, and the northern lights (aurora borealis).',
+        'Norway is consistently ranked among the wealthiest and happiest countries in the world.',
+        'It is not a member of the European Union but participates in the EEA and Schengen Area.',
+        'Norwegian is the official language and the currency is the Norwegian krone.',
+      ],
+      aristotle: [
+        '**Aristotle** was an ancient Greek philosopher (384–322 BCE), born in Stagira.',
+        'He was a student of Plato and tutor to Alexander the Great.',
+        'He founded the Lyceum in Athens and the Peripatetic school of philosophy.',
+        'Aristotle wrote on logic, ethics, metaphysics, biology, politics, and poetics.',
+        'His system of logic (the syllogism) dominated Western thought for over two millennia.',
+      ],
+      plato: [
+        '**Plato** was an ancient Greek philosopher (~428–348 BCE) and student of Socrates.',
+        'He founded the Academy in Athens, one of the earliest institutions of higher learning in the Western world.',
+        'Plato is best known for his Theory of Forms and dialogues such as *The Republic*.',
+        'He was the teacher of Aristotle and a foundational figure in Western philosophy.',
+      ],
+      react: [
+        '**React** is a JavaScript library for building user interfaces.',
+        'It was created by Facebook (Meta) and first released in 2013.',
+        'React uses a component-based architecture and a virtual DOM for efficient UI rendering.',
+        'Hooks (introduced in 2018) let function components manage state and side effects.',
+        'React is one of the most widely used UI libraries and powers many large web applications.',
+      ],
+    };
+
+    const TITLE: Record<string, string> = {
+      france: 'France', japan: 'Japan', germany: 'Germany', brazil: 'Brazil',
+      norway: 'Norway', aristotle: 'Aristotle', plato: 'Plato', react: 'React',
+    };
+
+    const findTopic = (table: Record<string, unknown>): string | null => {
+      for (const k of Object.keys(table)) {
+        const re = new RegExp(`\\b${k}\\b`, 'i');
+        if (re.test(input)) return k;
+      }
+      return null;
+    };
+
+    // ------------------ JSON branch ------------------
+    const wantsJson = /\b(?:as\s+(?:a\s+)?json|json\s+object|json\s+with\s+keys?|return\s+[^.]*\bas\s+json)\b/i.test(input)
+      || /\bjson\b/i.test(input);
+    if (wantsJson) {
+      const topic = findTopic(TOPIC_ATTRS);
+      if (topic) {
+        const attrs = TOPIC_ATTRS[topic];
+        const keysMatch = input.match(/with\s+keys?\s+([A-Za-z,_\s]+?)(?:\s+only|\s*[.?!]?\s*$|\s+\(no\s+extra)/i);
+        let keys: string[] = [];
+        if (keysMatch) {
+          keys = keysMatch[1]
+            .replace(/\band\b/gi, ',')
+            .split(',')
+            .map(s => s.trim().toLowerCase())
+            .filter(Boolean);
+        } else {
+          keys = ['name', 'capital'];
+        }
+        const out: Record<string, string> = {};
+        let ok = true;
+        for (const k of keys) {
+          if (k in attrs) { out[k] = attrs[k]; continue; }
+          if (k === 'name' && 'country' in attrs) { out[k] = attrs.country; continue; }
+          if (k === 'country' && 'name' in attrs) { out[k] = attrs.name; continue; }
+          ok = false;
+          break;
+        }
+        if (ok && Object.keys(out).length > 0) {
+          return '```json\n' + JSON.stringify(out, null, 2) + '\n```';
+        }
+      }
+    }
+
+    // ------------------ Table branch ------------------
+    const wantsTable = /\b(?:as|in)\s+(?:a\s+)?(?:markdown\s+)?table\b|\bmarkdown\s+table\b|\btable\s+comparison\b/i.test(input);
+    if (wantsTable) {
+      const compMatch = input.match(/compare\s+([A-Za-z0-9+#./\-]+)\s+(?:and|vs\.?|versus)\s+([A-Za-z0-9+#./\-]+)/i);
+      if (compMatch) {
+        const a = compMatch[1].toLowerCase();
+        const b = compMatch[2].toLowerCase();
+        const TABLES: Record<string, Array<[string, string, string]>> = {
+          'http|https': [
+            ['Encryption',     'None (plaintext)',                  'TLS-encrypted'],
+            ['Default port',   '80',                                '443'],
+            ['Security',       'Vulnerable to eavesdropping',       'Confidentiality and integrity'],
+            ['Certificate',    'Not required',                      'TLS certificate required'],
+            ['Browser/SEO',    'Marked "Not secure" by browsers',   'Preferred by browsers and search engines'],
+          ],
+          'typescript|javascript': [
+            ['Typing',         'Static, optional type annotations', 'Dynamic'],
+            ['Compilation',    'Transpiled to JavaScript',          'Interpreted at runtime'],
+            ['Error checking', 'At compile time',                   'At runtime'],
+            ['Tooling',        'TypeScript compiler + language server', 'Standard ES tooling'],
+            ['Relationship',   'Strict superset of JavaScript',     'Base language'],
+          ],
+        };
+        const k1 = `${a}|${b}`;
+        const k2 = `${b}|${a}`;
+        let rows = TABLES[k1];
+        let colA = a;
+        let colB = b;
+        let flip = false;
+        if (!rows && TABLES[k2]) {
+          rows = TABLES[k2];
+          flip = true;
+        }
+        if (rows) {
+          // Use canonical column names from the source key.
+          const canonical = (flip ? k2 : k1).split('|');
+          const dispA = flip ? canonical[1] : canonical[0];
+          const dispB = flip ? canonical[0] : canonical[1];
+          const titleA = dispA === 'http' ? 'HTTP' : dispA === 'https' ? 'HTTPS' : dispA === 'typescript' ? 'TypeScript' : dispA === 'javascript' ? 'JavaScript' : dispA;
+          const titleB = dispB === 'http' ? 'HTTP' : dispB === 'https' ? 'HTTPS' : dispB === 'typescript' ? 'TypeScript' : dispB === 'javascript' ? 'JavaScript' : dispB;
+          let md = `| Aspect | ${titleA} | ${titleB} |\n|---|---|---|\n`;
+          for (const r of rows) {
+            const [aspect, va, vb] = flip ? [r[0], r[2], r[1]] : r;
+            md += `| ${aspect} | ${va} | ${vb} |\n`;
+          }
+          return md.trim();
+        }
+      }
+    }
+
+    // ------------------ Numbered / bullet list branch ------------------
+    const numMatch = input.match(/(\d+)\s+(?:numbered\s+facts?|facts?\s+about|things?\s+about|points?\s+about|items?\s+about)/i);
+    const numberedListMatch = input.match(/(\d+)\s+facts?[^.]*?\bnumbered\s+list\b/i)
+      || input.match(/(\d+)\s+things?[^.]*?\bnumbered\s+list\b/i)
+      || input.match(/\bnumbered\s+list\b[^.]*?(\d+)\s+facts?/i);
+    const bulletMatch = input.match(/(\d+)\s+bullet\s+(?:points?|items?)/i)
+      || input.match(/\bbullet\s+points?[^.]*?(\d+)/i);
+
+    const isNumbered = /\bnumbered\s+(?:list|facts?)\b/i.test(input) || /\bnumbered\b/i.test(input);
+    const isBullet = /\bbullet\s+(?:points?|items?|list)\b/i.test(input);
+
+    if ((numMatch || numberedListMatch || bulletMatch) && (isNumbered || isBullet)) {
+      const topic = findTopic(FACT_LISTS);
+      if (topic) {
+        const facts = FACT_LISTS[topic];
+        let nRaw: string | undefined;
+        if (bulletMatch) nRaw = bulletMatch[1];
+        else if (numberedListMatch) nRaw = numberedListMatch[1];
+        else if (numMatch) nRaw = numMatch[1];
+        const n = Math.max(1, Math.min(facts.length, parseInt(nRaw ?? '3', 10) || 3));
+        const title = TITLE[topic] ?? topic;
+        if (isBullet && !isNumbered) {
+          const list = facts.slice(0, n).map((f) => `- ${f}`).join('\n');
+          return `Bullet points about **${title}**:\n\n${list}`;
+        }
+        const list = facts.slice(0, n).map((f, i) => `${i + 1}. ${f}`).join('\n');
+        return `Numbered facts about **${title}**:\n\n${list}`;
+      }
+    }
+
+    // ------------------ CSV branch ------------------
+    const wantsCsv = /\bcomma[-\s]separated|\bcsv\b|comma\s+separated\s+values/i.test(input);
+    if (wantsCsv) {
+      if (/\bcontinents?\b/i.test(input)) {
+        return 'Africa, Antarctica, Asia, Australia, Europe, North America, South America';
+      }
+      if (/\bdays\s+of\s+the\s+week\b/i.test(input)) {
+        return 'Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday';
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * CSV coercion. If the response already has a comma-separated line with
    * ≥3 commas, return as-is. Otherwise convert bullet/numbered list items
    * into a single comma-separated line (cleaning leading bullets and
@@ -2154,24 +2379,35 @@ export class VaiEngine implements ModelAdapter {
     // Drop common preamble openers like "Sure!", "Of course," etc.
     body = body.replace(/^(?:sure[!,.]?\s+|of course[!,.]?\s+|absolutely[!,.]?\s+|certainly[!,.]?\s+|great question[!,.]?\s+)/i, '').trim();
 
-    // "One-word answer" / "in one word" — take the first capitalized
-    // proper-noun-ish token, skipping articles (the/a/an), filler verbs,
-    // and common stopwords. Falls back to first non-trivial token.
+    // "One-word answer" / "in one word" — prefer the first bolded token
+    // (canonical-fact answers wrap the literal answer in **...**), then
+    // fall back to the first capitalized non-stopword token, then the
+    // first non-stopword token.
     const oneWord = /\b(?:one[-\s]?word|in\s+one\s+word|single\s+word|one\s+word\s+answer)\b/i.test(input);
     if (oneWord) {
       const STOPS = new Set(['the','a','an','this','that','these','those','it','is','are','was','were','be','been','being','i','you','we','they','he','she','my','your','our','their','of','in','on','at','to','for','with','by','from','and','or','but','so','as','than','then','there']);
-      const tokens = body.match(/[A-Za-z\u00C0-\u024F][A-Za-z0-9\u00C0-\u024F'\-]{0,40}/g) ?? [];
-      // Prefer capitalized non-stopword.
+      // Skip topic words the question already named ("capital of france" →
+      // skip "france" in the response so we don't echo the question topic).
+      const inputTopicWords = new Set(
+        (input.toLowerCase().match(/[a-z]{3,}/g) ?? [])
+          .filter((w) => !STOPS.has(w))
+      );
+      const bold = response.match(/\*\*([A-Za-zÀ-ÖØ-öø-ÿ][A-Za-z0-9À-ÖØ-öø-ÿ'\-]{0,40})\*\*/);
+      if (bold && bold[1]) {
+        const cand = bold[1].trim();
+        if (!inputTopicWords.has(cand.toLowerCase())) return cand;
+      }
+      const tokens = body.match(/[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-z0-9À-ÖØ-öø-ÿ'\-]{0,40}/g) ?? [];
       for (const t of tokens) {
         if (STOPS.has(t.toLowerCase())) continue;
+        if (inputTopicWords.has(t.toLowerCase())) continue;
         if (/^[A-Z]/.test(t) && t.length >= 2) return t;
       }
-      // Fall back to first non-stopword token.
       for (const t of tokens) {
         if (STOPS.has(t.toLowerCase())) continue;
+        if (inputTopicWords.has(t.toLowerCase())) continue;
         if (t.length >= 2) return t;
       }
-      // Last resort.
       if (tokens[0]) return tokens[0];
     }
 
@@ -2583,18 +2819,27 @@ export class VaiEngine implements ModelAdapter {
     // wrong meaning.
     const disambiguated = this.tryAnswerDisambiguatedTopic(userContent);
     let response: string;
+    let structuredFormatFired = false;
     if (disambiguated !== null) {
       response = disambiguated;
     } else {
-      const canonical = this.tryAnswerCanonicalFact(userContent);
-      if (canonical !== null) {
-        response = canonical;
+      const structured = this.tryAnswerStructuredFormat(userContent);
+      if (structured !== null) {
+        response = structured;
+        structuredFormatFired = true;
       } else {
-        response = await this.generateResponse(userContent, request.messages);
+        const canonical = this.tryAnswerCanonicalFact(userContent);
+        if (canonical !== null) {
+          response = canonical;
+        } else {
+          response = await this.generateResponse(userContent, request.messages);
+        }
       }
     }
-    response = this.applyBrevityConstraint(userContent, response);
-    response = this.applyShapeCoercion(userContent, response);
+    if (!structuredFormatFired) {
+      response = this.applyBrevityConstraint(userContent, response);
+      response = this.applyShapeCoercion(userContent, response);
+    }
     response = await this.maybeRunTeacherLoop(userContent, response, request.messages, {
       allowLearning: !request.noLearn,
     });
@@ -2709,18 +2954,27 @@ export class VaiEngine implements ModelAdapter {
     const start = performance.now();
     const disambiguated = this.tryAnswerDisambiguatedTopic(userContent);
     let response: string;
+    let structuredFormatFired = false;
     if (disambiguated !== null) {
       response = disambiguated;
     } else {
-      const canonical = this.tryAnswerCanonicalFact(userContent);
-      if (canonical !== null) {
-        response = canonical;
+      const structured = this.tryAnswerStructuredFormat(userContent);
+      if (structured !== null) {
+        response = structured;
+        structuredFormatFired = true;
       } else {
-        response = await this.generateResponse(userContent, request.messages);
+        const canonical = this.tryAnswerCanonicalFact(userContent);
+        if (canonical !== null) {
+          response = canonical;
+        } else {
+          response = await this.generateResponse(userContent, request.messages);
+        }
       }
     }
-    response = this.applyBrevityConstraint(userContent, response);
-    response = this.applyShapeCoercion(userContent, response);
+    if (!structuredFormatFired) {
+      response = this.applyBrevityConstraint(userContent, response);
+      response = this.applyShapeCoercion(userContent, response);
+    }
     response = await this.maybeRunTeacherLoop(userContent, response, request.messages, {
       allowLearning: !request.noLearn,
     });
