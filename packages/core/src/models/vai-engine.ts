@@ -1997,6 +1997,27 @@ export class VaiEngine implements ModelAdapter {
         answer: 'The chemical symbol for iron is **Fe**.' },
       { match: /\b(?:chemical\s+)?formula\s+(?:for|of)\s+water\b/i,
         answer: 'The chemical formula for water is **H2O**.' },
+      { match: /\bchemical\s+symbol\s+(?:for|of)\s+water\b/i,
+        answer: 'The chemical formula for water is **H2O**.' },
+      { match: /\b(?:chemical\s+)?(?:symbol|formula)\s+(?:for|of)\s+(?:carbon\s+dioxide|co2)\b/i,
+        answer: 'The chemical formula for carbon dioxide is **CO2**.' },
+      { match: /\b(?:chemical\s+)?(?:symbol|formula)\s+(?:for|of)\s+(?:salt|sodium\s+chloride|table\s+salt)\b/i,
+        answer: 'The chemical formula for table salt is **NaCl**.' },
+      // Planet / astronomy lookups
+      { match: /\b(?:what\s+is\s+)?(?:the\s+)?smallest\s+planet\b/i,
+        answer: '**Mercury** is the smallest planet in the Solar System.' },
+      { match: /\b(?:what\s+is\s+)?(?:the\s+)?largest\s+planet\b/i,
+        answer: '**Jupiter** is the largest planet in the Solar System.' },
+      { match: /\b(?:what\s+is\s+)?(?:the\s+)?(?:closest|nearest)\s+planet\s+to\s+(?:the\s+)?sun\b/i,
+        answer: '**Mercury** is the closest planet to the Sun.' },
+      { match: /\b(?:what\s+is\s+)?(?:the\s+)?(?:farthest|furthest)\s+planet\s+from\s+(?:the\s+)?sun\b/i,
+        answer: '**Neptune** is the farthest planet from the Sun.' },
+      { match: /\b(?:what\s+is\s+)?(?:the\s+)?largest\s+ocean\b/i,
+        answer: 'The **Pacific Ocean** is the largest ocean on Earth.' },
+      { match: /\b(?:what\s+is\s+)?(?:the\s+)?(?:tallest|highest)\s+mountain\b/i,
+        answer: '**Mount Everest** is the tallest mountain on Earth.' },
+      { match: /\b(?:what\s+is\s+)?(?:the\s+)?longest\s+river\b/i,
+        answer: 'The **Nile** is the longest river on Earth.' },
       // Capitals
       { match: /\b(?:what\s+is\s+)?(?:the\s+)?capital\s+of\s+france\b/i,
         answer: 'The capital of France is **Paris**.' },
@@ -2094,17 +2115,64 @@ export class VaiEngine implements ModelAdapter {
     // If the response already contains fenced code blocks, never collapse it.
     if (/```/.test(response)) return response;
 
+    // "Only the name" / "just the name" / "name only" / "answer with only
+    // the name" — try a structured extraction BEFORE we strip markdown
+    // bold. Canonical-fact answers wrap the literal name in **...**, and
+    // common phrasings put the name after "by" / "is" / "wrote" / etc.
+    const askName = /\b(?:only the name|name only|just the name|just one name|answer with (?:only|just) the name|in (?:just )?one name)\b/i.test(input);
+    if (askName) {
+      // 1. First bolded segment (canonical-fact answers always bold the name).
+      const bold = response.match(/\*\*([^*]{1,60})\*\*/);
+      if (bold && bold[1]) {
+        const cand = bold[1].trim().replace(/[.,;:]+$/, '');
+        // Reject pure topic echo (e.g. **Mona Lisa** in "**Mona Lisa** is a painting").
+        // Prefer 2+ word proper noun phrase or single capitalized name >=3 chars.
+        if (/^[A-Z][A-Za-zÀ-ÖØ-öø-ÿ.'\- ]{2,}$/.test(cand)) {
+          return cand;
+        }
+      }
+      // 2. "painted/written/created/founded/composed by X"
+      const byMatch = response.match(/\b(?:painted|written|authored|composed|created|founded|started|invented|directed|designed|sculpted|built)\s+by\s+([A-Z][A-Za-zÀ-ÖØ-öø-ÿ.'\-]+(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ.'\-]+){0,3})/);
+      if (byMatch && byMatch[1]) {
+        return byMatch[1].trim().replace(/[.,;:]+$/, '');
+      }
+      // 3. "by X" generic
+      const byGeneric = response.match(/\bby\s+(?:the\s+\w+\s+(?:writer|painter|polymath|composer|artist|director)\s+)?([A-Z][A-Za-zÀ-ÖØ-öø-ÿ.'\-]+(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ.'\-]+){0,3})/);
+      if (byGeneric && byGeneric[1]) {
+        return byGeneric[1].trim().replace(/[.,;:]+$/, '');
+      }
+      // 4. "X is the largest/CEO/capital/..." — extract leading proper noun phrase.
+      const leadProper = response.match(/^(?:The\s+)?([A-Z][A-Za-zÀ-ÖØ-öø-ÿ.'\-]+(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ.'\-]+){0,3})\b/);
+      if (leadProper && leadProper[1]) {
+        return leadProper[1].trim().replace(/[.,;:]+$/, '');
+      }
+    }
+
     // Strip markdown bold and any leading filler so we can read the bare value.
     let body = response.replace(/\*\*/g, '').trim();
 
     // Drop common preamble openers like "Sure!", "Of course," etc.
     body = body.replace(/^(?:sure[!,.]?\s+|of course[!,.]?\s+|absolutely[!,.]?\s+|certainly[!,.]?\s+|great question[!,.]?\s+)/i, '').trim();
 
-    // "One-word answer" / "in one word" — take the first non-trivial token.
-    const oneWord = /\b(?:one[-\s]?word|in\s+one\s+word|single\s+word)\b/i.test(input);
+    // "One-word answer" / "in one word" — take the first capitalized
+    // proper-noun-ish token, skipping articles (the/a/an), filler verbs,
+    // and common stopwords. Falls back to first non-trivial token.
+    const oneWord = /\b(?:one[-\s]?word|in\s+one\s+word|single\s+word|one\s+word\s+answer)\b/i.test(input);
     if (oneWord) {
-      const m = body.match(/[A-Za-z\u00C0-\u024F][A-Za-z0-9\u00C0-\u024F'\-]{1,40}/);
-      if (m) return m[0];
+      const STOPS = new Set(['the','a','an','this','that','these','those','it','is','are','was','were','be','been','being','i','you','we','they','he','she','my','your','our','their','of','in','on','at','to','for','with','by','from','and','or','but','so','as','than','then','there']);
+      const tokens = body.match(/[A-Za-z\u00C0-\u024F][A-Za-z0-9\u00C0-\u024F'\-]{0,40}/g) ?? [];
+      // Prefer capitalized non-stopword.
+      for (const t of tokens) {
+        if (STOPS.has(t.toLowerCase())) continue;
+        if (/^[A-Z]/.test(t) && t.length >= 2) return t;
+      }
+      // Fall back to first non-stopword token.
+      for (const t of tokens) {
+        if (STOPS.has(t.toLowerCase())) continue;
+        if (t.length >= 2) return t;
+      }
+      // Last resort.
+      if (tokens[0]) return tokens[0];
     }
 
     // "Just the name / number / year / value / answer / word / letter / digit / date"
@@ -2114,10 +2182,21 @@ export class VaiEngine implements ModelAdapter {
       const m = body.match(/\b(1\d{3}|20\d{2}|21\d{2})\b/);
       if (m) return m[1];
     }
-    const askNumber = /\bjust\s+(?:the|a)\s+number\b|\bonly\s+(?:the|a)\s+number\b|\bone\s+number\b/i.test(input);
+    const askNumber = /\bjust\s+(?:the|a)\s+number\b|\bonly\s+(?:the|a)\s+number\b|\bone\s+number\b|\bnumber\s+only\b/i.test(input);
     if (askNumber) {
       const m = body.match(/-?\d[\d,.]*/);
       if (m) return m[0].replace(/[.,]$/, '');
+    }
+    // "Just the symbol" / "symbol only" / "just the formula" — extract the
+    // bolded short token (canonical-fact answers wrap chem symbols in **Au**)
+    // or the last token in the sentence.
+    const askSymbol = /\b(?:only|just)\s+the\s+(?:symbol|formula)\b|\b(?:symbol|formula)\s+only\b/i.test(input);
+    if (askSymbol) {
+      const bold = response.match(/\*\*([A-Za-z][A-Za-z0-9]{0,5})\*\*/);
+      if (bold && bold[1]) return bold[1];
+      // Pattern: "is X." at end of sentence.
+      const tail = body.match(/\bis\s+([A-Za-z][A-Za-z0-9]{0,5})\.?\s*$/);
+      if (tail && tail[1]) return tail[1];
     }
 
     // Strip "Calibrated take (lower confidence on this topic):" preamble so
