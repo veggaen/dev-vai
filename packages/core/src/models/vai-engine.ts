@@ -2517,6 +2517,62 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- Insert item: "add Saturn as the 3rd one" / "insert X as the first one"
+    const insertM = trimmed.match(/^(?:please\s+)?(?:add|insert|put|include)\s+([A-Za-z][A-Za-z0-9\-']*(?:\s+[A-Za-z][A-Za-z0-9\-']*){0,2})\s+as\s+(?:the\s+)?(\d+|first|second|third|fourth|fifth|sixth|1st|2nd|3rd|4th|5th|6th)(?:\s+(?:one|item|entry))?\.?$/i);
+    if (insertM) {
+      const newItem = insertM[1].trim();
+      const ordMap: Record<string, number> = { first: 0, second: 1, third: 2, fourth: 3, fifth: 4, sixth: 5, '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '1st': 0, '2nd': 1, '3rd': 2, '4th': 3, '5th': 4, '6th': 5 };
+      const pos = ordMap[insertM[2].toLowerCase()];
+      const prior = extractPriorList();
+      if (prior && pos !== undefined) {
+        const items = [...prior.items];
+        const clampedPos = Math.min(pos, items.length);
+        items.splice(clampedPos, 0, newItem);
+        const lines = prior.numbered
+          ? items.map((it, i) => `${i + 1}. **${it}**`)
+          : items.map((it) => `- **${it}**`);
+        return `Added **${newItem}** at position ${clampedPos + 1}:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Filter by letter: "only keep the ones starting with M" / "keep ones beginning with B"
+    const filterM = trimmed.match(/^(?:please\s+)?(?:only\s+)?(?:keep|show|list|filter\s+to)\s+(?:the\s+)?(?:ones?|items?)\s+(?:starting|beginning)\s+with\s+([A-Za-z])\.?$/i);
+    if (filterM) {
+      const letter = filterM[1].toLowerCase();
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 2) {
+        const kept = prior.items.filter((it) => it.toLowerCase().startsWith(letter));
+        if (kept.length > 0) {
+          const lines = prior.numbered
+            ? kept.map((it, i) => `${i + 1}. **${it}**`)
+            : kept.map((it) => `- **${it}**`);
+          return `Filtered to items starting with **${letter.toUpperCase()}**:\n${lines.join('\n')}`;
+        }
+        return `No items in that list start with **${letter.toUpperCase()}**.`;
+      }
+    }
+
+    // --- Sort alphabetically: "sort them alphabetically" / "sort the list a-z"
+    if (/^(?:now\s+)?(?:please\s+)?sort\s+(?:them|it|the\s+list|those)?\s*(?:alphabetically|in\s+alphabetical\s+order|a\s*[-\s]\s*z|a\s+to\s+z|az)?\.?$/i.test(trimmed)) {
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 2) {
+        const sorted = [...prior.items].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+        const lines = prior.numbered
+          ? sorted.map((it, i) => `${i + 1}. **${it}**`)
+          : sorted.map((it) => `- **${it}**`);
+        return `Sorted alphabetically:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Count items: "how many were there?" / "how many items in that list?"
+    if (/^(?:please\s+)?(?:how\s+many|what(?:'s|\s+is)\s+the\s+count|count\s+(?:them|those))(?:\s+(?:were|are|was|is)\s+there)?(?:\s+in\s+(?:that|the)\s+list)?\s*\??\.?$/i.test(trimmed)) {
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 1) {
+        this._skipBrevityOnce = true;
+        return `There were **${prior.items.length}** items in that list.`;
+      }
+    }
+
     // --- Explain each: "explain each one in one sentence" / "describe each"
     if (/^(?:please\s+)?(?:explain|describe|tell\s+me\s+about)\s+(?:each|all)(?:\s+(?:one|item|of\s+(?:them|those)))?(?:\s+in\s+(?:one|a)\s+(?:sentence|line))?\.?$/i.test(trimmed)) {
       const prior = extractPriorList();
