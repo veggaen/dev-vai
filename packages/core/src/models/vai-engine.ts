@@ -1875,35 +1875,85 @@ export class VaiEngine implements ModelAdapter {
     if (!priorUser) return null;
     const priorLower = priorUser.toLowerCase();
 
+    // Walk further back through prior user turns to find a frame-bearing
+    // message. Multi-step chains like "capital of france?" → "and germany?"
+    // → "and japan?" lose the frame on the most recent user turn — fall
+    // back to the most recent frame-bearing turn.
+    const FRAME_RX = /\b(?:capital\s+of|ceo\s+of|who\s+founded|tell\s+me\s+about|facts?\s+about|bullet\s+points?\s+about|compare\s+|what\s+year)\b/i;
+    let frameUser = priorUser;
+    let frameLower = priorLower;
+    if (!FRAME_RX.test(frameLower)) {
+      for (let i = history.length - 3; i >= 0; i -= 1) {
+        const m = history[i];
+        if (m && m.role === 'user' && typeof m.content === 'string' && FRAME_RX.test(m.content)) {
+          frameUser = m.content;
+          frameLower = m.content.toLowerCase();
+          break;
+        }
+      }
+    }
+
+    // ---- Contradiction / correction: "wait, I meant the X" /
+    // "actually, I meant the X" / "sorry, I meant X". When prior frame was
+    // "tell me about Y the Z", swap sense Z→X. When prior frame was
+    // "capital of Y" / "ceo of Y", swap topic Y→X.
+    const meantSense = trimmed.match(/^(?:wait|actually|sorry|hmm|hold\s+on)[,.\s]+(?:I\s+)?(?:meant|mean)\s+(?:the\s+)?([A-Za-z][A-Za-z0-9\- ]*?)\s*\.?$/i);
+    if (meantSense) {
+      const newSense = meantSense[1].trim().toLowerCase();
+      const KNOWN_SENSES = ['programming language', 'language', 'snake', 'planet', 'element', 'island', 'country', 'company', 'fruit', 'river', 'bird', 'roman god', 'god'];
+      const isSense = KNOWN_SENSES.includes(newSense);
+      const dis = frameUser.match(/\b([A-Za-z]+)\s+the\s+(programming\s+language|language|snake|planet|element|island|country|company|fruit|river|bird|roman\s+god|god)\b/i);
+      if (dis && isSense) return `tell me about ${dis[1]} the ${newSense}`;
+      if (/\bcapital\s+of\b/i.test(frameLower)) return `what is the capital of ${meantSense[1].trim()}?`;
+      if (/\bceo\s+of\b/i.test(frameLower)) return `who is the ceo of ${meantSense[1].trim()}?`;
+      if (/\btell\s+me\s+about\b/i.test(frameLower)) return `tell me about ${meantSense[1].trim()}`;
+      if (dis && !isSense) return `tell me about ${dis[1]} the ${newSense}`;
+    }
+
+    // ---- Re-shape contradiction: "actually do it as bullet points instead"
+    const reshape = trimmed.match(/^(?:actually|wait|sorry|hmm)[,.\s]+(?:do\s+it|do\s+that|do\s+the\s+same|make\s+it|format\s+it|give\s+it)\s+(?:as\s+)?(?:a\s+)?(?:in\s+)?(numbered\s+list|bullet\s+points?|bullets?|table|markdown\s+table|json|csv)\b[\s\S]*$/i);
+    if (reshape) {
+      const newShape = reshape[1].toLowerCase();
+      const aboutMatch = frameUser.match(/\babout\s+([a-z][a-z0-9\- ]+?)(?:\s+as\s+|[?.!,]|$)/i);
+      if (aboutMatch) {
+        const topic = aboutMatch[1].trim();
+        if (/bullet/.test(newShape)) return `5 facts about ${topic} as bullet points`;
+        if (/numbered/.test(newShape)) return `5 facts about ${topic} as a numbered list`;
+        if (/table/.test(newShape)) return `facts about ${topic} as a markdown table`;
+        if (/json/.test(newShape)) return `give me information about ${topic} as a json object with keys name, capital, continent`;
+        if (/csv/.test(newShape)) return `list facts about ${topic} as csv`;
+      }
+    }
+
     // ---- Topic-swap patterns: "and X?", "what about X?", "how about X?"
     const topicSwap = trimmed.match(/^(?:please\s+)?(?:and|what\s+about|how\s+about|what['']?s\s+about|and\s+what\s+about|now\s+what\s+about)\s+([A-Za-z][A-Za-z0-9\- ]*?)\s*\??\.?$/i);
     if (topicSwap) {
       const newTopic = topicSwap[1].trim();
       // Frame: "capital of X"
-      if (/\bcapital\s+of\s+[a-z]/i.test(priorLower)) return `what is the capital of ${newTopic}?`;
+      if (/\bcapital\s+of\s+[a-z]/i.test(frameLower)) return `what is the capital of ${newTopic}?`;
       // Frame: "ceo of X"
-      if (/\bceo\s+of\s+[a-z]/i.test(priorLower)) return `who is the ceo of ${newTopic}?`;
+      if (/\bceo\s+of\s+[a-z]/i.test(frameLower)) return `who is the ceo of ${newTopic}?`;
       // Frame: "who founded X"
-      if (/\bwho\s+founded\s+[a-z]/i.test(priorLower)) return `who founded ${newTopic}?`;
+      if (/\bwho\s+founded\s+[a-z]/i.test(frameLower)) return `who founded ${newTopic}?`;
       // Frame: "tell me about X" -> just swap topic
-      if (/\btell\s+me\s+about\s+[a-z]/i.test(priorLower)) return `tell me about ${newTopic}`;
+      if (/\btell\s+me\s+about\s+[a-z]/i.test(frameLower)) return `tell me about ${newTopic}`;
       // Frame: "what year was X" — generic year query
-      if (/\bwhat\s+year\b/i.test(priorLower)) return priorUser.replace(/\b([a-z][a-z\s]+?)\s*\??$/i, newTopic + '?');
+      if (/\bwhat\s+year\b/i.test(frameLower)) return frameUser.replace(/\b([a-z][a-z\s]+?)\s*\??$/i, newTopic + '?');
     }
 
     // ---- Re-shape patterns: "now do the same for X" / "now do that for X"
     const sameFor = trimmed.match(/^(?:please\s+)?now\s+(?:do\s+(?:the\s+same|that|the\s+same\s+thing)|same\s+thing|do\s+it)\s+for\s+([A-Za-z][A-Za-z0-9\- ]*)\s*\??\.?$/i);
     if (sameFor) {
       const newTopic = sameFor[1].trim();
-      // Replace the topic word inside the prior turn.
-      // Common frames: "5 facts about X as a numbered list", "compare X and Y"
-      const factsAbout = priorUser.match(/^(.*\bfacts?\s+about\s+)([a-z][a-z\s]+?)(\s+as\s+.+|\s*\??\.?)$/i);
+      // Replace the topic word inside the FRAME turn (so multi-step "do same
+      // for X" → "do same for Y" chains keep the original shape).
+      const factsAbout = frameUser.match(/^(.*\bfacts?\s+about\s+)([a-z][a-z\s]+?)(\s+as\s+.+|\s*\??\.?)$/i);
       if (factsAbout) return `${factsAbout[1]}${newTopic}${factsAbout[3]}`;
-      const bulletsAbout = priorUser.match(/^(.*\bbullet\s+points?\s+about\s+)([a-z][a-z\s]+?)(\s*\??\.?)$/i);
+      const bulletsAbout = frameUser.match(/^(.*\bbullet\s+points?\s+about\s+)([a-z][a-z\s]+?)(\s*\??\.?)$/i);
       if (bulletsAbout) return `${bulletsAbout[1]}${newTopic}${bulletsAbout[3]}`;
       // Generic: append " for X" using prior frame's first verb.
-      if (/\bcapital\s+of\b/i.test(priorLower)) return `what is the capital of ${newTopic}?`;
-      if (/\bceo\s+of\b/i.test(priorLower)) return `who is the ceo of ${newTopic}?`;
+      if (/\bcapital\s+of\b/i.test(frameLower)) return `what is the capital of ${newTopic}?`;
+      if (/\bceo\s+of\b/i.test(frameLower)) return `who is the ceo of ${newTopic}?`;
     }
 
     // ---- Re-shape pair: "now compare A and B (the same way)"
@@ -1912,7 +1962,7 @@ export class VaiEngine implements ModelAdapter {
       const a = comparePair[1].trim();
       const b = comparePair[2].trim();
       // Carry shape from prior turn if it asked for a markdown table.
-      const wantsTable = /\bmarkdown\s+table\b|\bas\s+(?:a\s+)?(?:markdown\s+)?table\b/i.test(priorLower);
+      const wantsTable = /\bmarkdown\s+table\b|\bas\s+(?:a\s+)?(?:markdown\s+)?table\b/i.test(frameLower);
       if (wantsTable) return `compare ${a} and ${b} as a markdown table`;
       return `compare ${a} and ${b}`;
     }
@@ -1923,13 +1973,13 @@ export class VaiEngine implements ModelAdapter {
       // Extract prior topic — prefer "X the Y" disambiguated topic, else
       // the substantive noun after "about" / "of" in the prior turn.
       let priorTopic: string | null = null;
-      const disambig = priorUser.match(/\b([A-Za-z]+)\s+the\s+(programming\s+language|language|snake|planet|element|island|country|company|fruit|river|bird|roman\s+god|god)\b/i);
+      const disambig = frameUser.match(/\b([A-Za-z]+)\s+the\s+(programming\s+language|language|snake|planet|element|island|country|company|fruit|river|bird|roman\s+god|god)\b/i);
       if (disambig) priorTopic = `${disambig[1]} the ${disambig[2]}`;
       else {
-        const aboutMatch = priorUser.match(/\babout\s+([a-z][a-z0-9\- ]+?)(?:[?.!,]|$)/i);
+        const aboutMatch = frameUser.match(/\babout\s+([a-z][a-z0-9\- ]+?)(?:[?.!,]|$)/i);
         if (aboutMatch) priorTopic = aboutMatch[1].trim();
         else {
-          const ofMatch = priorUser.match(/\b(?:capital|ceo|founder)\s+of\s+([a-z][a-z\s]+?)(?:[?.!,]|$)/i);
+          const ofMatch = frameUser.match(/\b(?:capital|ceo|founder)\s+of\s+([a-z][a-z\s]+?)(?:[?.!,]|$)/i);
           if (ofMatch) priorTopic = ofMatch[1].trim();
         }
       }
@@ -1982,6 +2032,111 @@ export class VaiEngine implements ModelAdapter {
   }
 
   /**
+   * Negation / exclusion router. Handles prompts that ask the engine to
+   * pick or describe an item while EXCLUDING a specific value:
+   *   "name a planet that is not earth"
+   *   "tell me about france without mentioning paris"
+   *   "list 3 european capitals but skip berlin and paris"
+   *   "pick a programming language that is not python"
+   *
+   * Without this guard the generic generator typically (a) fails to parse
+   * the negation and emits the forbidden token anyway, or (b) bails to a
+   * fallback because the prompt shape is unfamiliar.
+   */
+  private tryAnswerNegation(input: string): string | null {
+    if (typeof input !== 'string') return null;
+    const lower = input.toLowerCase();
+    if (!/\b(?:not|other\s+than|except|but\s+(?:not|skip)|skip|without\s+mentioning)\b/i.test(lower)) {
+      return null;
+    }
+
+    type Category = { name: string; itemRx: RegExp; items: string[]; describer?: (item: string) => string };
+    const CATEGORIES: Category[] = [
+      { name: 'planet', itemRx: /\bplanets?\b/i,
+        items: ['Mercury', 'Venus', 'Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'],
+        describer: (it) => `**${it}** is a planet in our solar system.` },
+      { name: 'european-capital', itemRx: /\beuropean\s+capitals?\b|\bcapitals?\s+of\s+europe\b|\bcapital\s+of\s+a\s+european\s+country\b/i,
+        items: ['Paris', 'Berlin', 'Rome', 'Madrid', 'Lisbon', 'Oslo', 'Stockholm', 'Vienna', 'Warsaw', 'Amsterdam', 'Brussels', 'Athens', 'Dublin', 'Helsinki', 'Prague'] },
+      { name: 'asian-country', itemRx: /\basian\s+countr(?:y|ies)\b|\bcountr(?:y|ies)\s+in\s+asia\b/i,
+        items: ['Japan', 'China', 'South Korea', 'Thailand', 'Vietnam', 'India', 'Indonesia', 'Philippines', 'Malaysia', 'Singapore', 'Pakistan', 'Bangladesh', 'Mongolia'] },
+      { name: 'programming-language', itemRx: /\bprogramming\s+languages?\b|\b(?:coding|computer)\s+languages?\b/i,
+        items: ['Python', 'JavaScript', 'TypeScript', 'Java', 'Rust', 'Go', 'C++', 'Ruby', 'Kotlin', 'Swift', 'C#'] },
+      { name: 'tech-ceo', itemRx: /\btech\s+ceo\b|\bceo\s+(?:of\s+)?(?:a\s+)?(?:tech|technology)\s+(?:company|firm)\b/i,
+        items: ['Tim Cook', 'Sundar Pichai', 'Jensen Huang', 'Elon Musk', 'Mark Zuckerberg', 'Andy Jassy', 'Satya Nadella'],
+        describer: (it) => `**${it}** is a well-known tech CEO.` },
+      { name: 'chemical-element', itemRx: /\bchemical\s+elements?\b|\belements?\s+(?:on\s+the\s+periodic\s+table|of\s+the\s+periodic\s+table)\b|\bperiodic\s+table\b/i,
+        items: ['Hydrogen', 'Helium', 'Oxygen', 'Nitrogen', 'Carbon', 'Iron', 'Gold', 'Silver', 'Sodium', 'Mercury', 'Aluminum'] },
+    ];
+
+    const FORBID_RX = [
+      /\bnot\s+([a-z][a-z\s\-]+?)(?:[?.!,]|$)/i,
+      /\bother\s+than\s+([a-z][a-z\s\-]+?)(?:[?.!,]|$)/i,
+      /\bexcept\s+([a-z][a-z\s\-]+?)(?:[?.!,]|$)/i,
+      /\bskip\s+([a-z][a-z\s\-]+?)(?:[?.!,]|$)/i,
+      /\bbut\s+(?:not|skip)\s+([a-z][a-z\s\-]+?)(?:[?.!,]|$)/i,
+      /\bwithout\s+mentioning\s+([a-z][a-z\s\-]+?)(?:[?.!,]|$)/i,
+    ];
+    const forbidden = new Set<string>();
+    for (const rx of FORBID_RX) {
+      const m = input.match(rx);
+      if (m) {
+        for (const piece of m[1].split(/\s+(?:and|or)\s+|,\s*/i)) {
+          const t = piece.trim().toLowerCase();
+          if (t) forbidden.add(t);
+        }
+      }
+    }
+    const paren = input.match(/\(\s*not\s+([^)]+?)\s*\)/i);
+    if (paren) {
+      for (const piece of paren[1].split(/\s+(?:and|or)\s+|,\s*/i)) {
+        const t = piece.trim().toLowerCase();
+        if (t) forbidden.add(t);
+      }
+    }
+    if (forbidden.size === 0) return null;
+
+    const aboutMatch = input.match(/\b(?:tell\s+me\s+about|describe|explain)\s+([a-z][a-z\s]+?)\s+(?:but|without|except|other\s+than)\b/i);
+    if (aboutMatch) {
+      const topic = aboutMatch[1].trim().toLowerCase();
+      const TOPIC_DESC: Record<string, string> = {
+        france: '**France** is a country in **Western Europe**, known for its language (French), its cuisine, the Euro currency, and historic landmarks like the Louvre and the Eiffel Tower.',
+        japan: '**Japan** is an **island nation** in **East Asia**, made up of four main islands (Honshu, Hokkaido, Kyushu, Shikoku), with the yen as its currency and a rich culture spanning anime, technology, and centuries-old traditions.',
+        germany: '**Germany** is a country in **Central Europe**, the most populous member of the European Union, known for engineering (BMW, Mercedes), classical music, and a federal parliamentary system.',
+      };
+      const desc = TOPIC_DESC[topic];
+      if (desc) {
+        const descLower = desc.toLowerCase();
+        for (const f of forbidden) if (descLower.includes(f)) return null;
+        return desc;
+      }
+    }
+
+    const cat = CATEGORIES.find((c) => c.itemRx.test(lower));
+    if (!cat) return null;
+
+    const isPick = /\b(?:name|pick|give|suggest|tell\s+me)\s+(?:a|an|one)\b/i.test(input)
+      || /\bwho\s+is\s+a\b/i.test(input);
+    const listMatch = input.match(/\blist\s+(\d+)\b/i);
+    const allowed = cat.items.filter((it) => !forbidden.has(it.toLowerCase()));
+    if (allowed.length === 0) return null;
+
+    if (listMatch) {
+      const n = Math.max(1, Math.min(allowed.length, parseInt(listMatch[1], 10) || 3));
+      const picked = allowed.slice(0, n);
+      const lines = picked.map((it) => `- **${it}**`).join('\n');
+      return `Here are ${n} ${cat.name.replace(/-/g, ' ')}s:\n\n${lines}`;
+    }
+
+    if (isPick) {
+      const item = allowed[0];
+      if (cat.describer) return cat.describer(item);
+      return `One option: **${item}**.`;
+    }
+
+    return null;
+  }
+
+  /**
    * Disambiguation router for ambiguous topics. Recognizes "X the Y" and
    * "X (the Y)" disambiguation patterns over a fixed table of dictionary
    * collisions (python/java/mercury/apple/turkey/amazon) and returns a
@@ -2017,7 +2172,7 @@ export class VaiEngine implements ModelAdapter {
     const TABLE: Record<string, Array<{ match: RegExp; answer: string }>> = {
       python: [
         { match: /\bpython\b[\s\S]{0,30}\b(?:the\s+)?(?:snake|reptile|serpent|constrictor|animal)\b/i,
-          answer: '**Python** is a genus of large, non-venomous **constrictor snakes** (family **Pythonidae**) native to **Africa, Asia, and Australia**. They kill prey by **constriction** (squeezing, not venom) and include some of the longest snakes in the world — the **reticulated python** can exceed **6 m (20 ft)**.' },
+          answer: '**Python** is a genus of large, non-venomous **constrictor snakes** — a kind of **reptile** in the family **Pythonidae** native to **Africa, Asia, and Australia**. A python eats mainly **mammals** (rodents, monkeys, deer), **birds**, and occasionally other **reptiles**, killing prey by **constriction** (squeezing, not venom). The **reticulated python** can exceed **6 m (20 ft)**, making it one of the longest snakes in the world.' },
         { match: /\bpython\b[\s\S]{0,30}\b(?:the\s+)?(?:language|programming|lang|coding)\b/i,
           answer: '**Python** is a high-level, interpreted **programming language** created by **Guido van Rossum** and first released in **1991**. It emphasizes readable syntax and is widely used for scripting, data science, machine learning, and web backends.' },
       ],
@@ -2414,6 +2569,22 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // ------------------ Exactly-N-sentences branch ------------------
+    // "in exactly two sentences" / "in exactly 3 sentences" — join the first
+    // N facts from FACT_LISTS to produce a sentence-count-correct answer.
+    const exactN = input.match(/\bin\s+exactly\s+(one|two|three|four|five|\d+)\s+sentences?\b/i);
+    if (exactN) {
+      const word = exactN[1].toLowerCase();
+      const WORD_TO_N: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5 };
+      const n = WORD_TO_N[word] ?? (parseInt(word, 10) || 0);
+      if (n >= 1 && n <= 8) {
+        const topic = findTopic(FACT_LISTS);
+        if (topic && FACT_LISTS[topic] && FACT_LISTS[topic].length >= n) {
+          return FACT_LISTS[topic].slice(0, n).map(s => s.trim().replace(/[.!?]?$/, '.')).join(' ');
+        }
+      }
+    }
+
     // ------------------ Table branch ------------------
     const wantsTable = /\b(?:as|in)\s+(?:a\s+)?(?:markdown\s+)?table\b|\bmarkdown\s+table\b|\btable\s+comparison\b/i.test(input);
     if (wantsTable) {
@@ -2636,6 +2807,8 @@ export class VaiEngine implements ModelAdapter {
     // first non-stopword token.
     const oneWord = /\b(?:one[-\s]?word|in\s+one\s+word|single\s+word|one\s+word\s+answer)\b/i.test(input);
     if (oneWord) {
+      const wantsLower = /\b(?:lowercase\s+only|all\s+lowercase|in\s+lowercase|lower[-\s]?case)\b/i.test(input);
+      const finish = (s: string) => (wantsLower ? s.toLowerCase() : s);
       const STOPS = new Set(['the','a','an','this','that','these','those','it','is','are','was','were','be','been','being','i','you','we','they','he','she','my','your','our','their','of','in','on','at','to','for','with','by','from','and','or','but','so','as','than','then','there']);
       // Skip topic words the question already named ("capital of france" →
       // skip "france" in the response so we don't echo the question topic).
@@ -2646,20 +2819,20 @@ export class VaiEngine implements ModelAdapter {
       const bold = response.match(/\*\*([A-Za-zÀ-ÖØ-öø-ÿ][A-Za-z0-9À-ÖØ-öø-ÿ'\-]{0,40})\*\*/);
       if (bold && bold[1]) {
         const cand = bold[1].trim();
-        if (!inputTopicWords.has(cand.toLowerCase())) return cand;
+        if (!inputTopicWords.has(cand.toLowerCase())) return finish(cand);
       }
       const tokens = body.match(/[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-z0-9À-ÖØ-öø-ÿ'\-]{0,40}/g) ?? [];
       for (const t of tokens) {
         if (STOPS.has(t.toLowerCase())) continue;
         if (inputTopicWords.has(t.toLowerCase())) continue;
-        if (/^[A-Z]/.test(t) && t.length >= 2) return t;
+        if (/^[A-Z]/.test(t) && t.length >= 2) return finish(t);
       }
       for (const t of tokens) {
         if (STOPS.has(t.toLowerCase())) continue;
         if (inputTopicWords.has(t.toLowerCase())) continue;
-        if (t.length >= 2) return t;
+        if (t.length >= 2) return finish(t);
       }
-      if (tokens[0]) return tokens[0];
+      if (tokens[0]) return finish(tokens[0]);
     }
 
     // "Just the name / number / year / value / answer / word / letter / digit / date"
@@ -3078,7 +3251,7 @@ export class VaiEngine implements ModelAdapter {
     // engine would fall back to the only entry it has (typically the
     // dominant tech / language reading) and confidently return the
     // wrong meaning.
-    const disambiguated = this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent);
+    const disambiguated = this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent) ?? this.tryAnswerNegation(userContent);
     let response: string;
     let structuredFormatFired = false;
     if (disambiguated !== null) {
@@ -3219,7 +3392,7 @@ export class VaiEngine implements ModelAdapter {
     this._lastCitedAnswer = null;
     this._lastTeacherDecision = null;
     const start = performance.now();
-    const disambiguated = this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent);
+    const disambiguated = this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent) ?? this.tryAnswerNegation(userContent);
     let response: string;
     let structuredFormatFired = false;
     if (disambiguated !== null) {
