@@ -2670,6 +2670,78 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- First/last N: "show the first 3" / "give me the last 2"
+    const firstLastM = trimmed.match(/^(?:please\s+)?(?:show|give\s+me|list)\s+(?:me\s+)?(?:the\s+)?(first|last|top|bottom)\s+(\d+)\.?$/i);
+    if (firstLastM) {
+      const mode = firstLastM[1].toLowerCase();
+      const k = parseInt(firstLastM[2], 10);
+      const prior = extractPriorList();
+      if (prior && k >= 1 && prior.items.length >= 1) {
+        const isLast = mode === 'last' || mode === 'bottom';
+        const slice = isLast ? prior.items.slice(-k) : prior.items.slice(0, k);
+        const lines = prior.numbered
+          ? slice.map((it, i) => `${i + 1}. **${it}**`)
+          : slice.map((it) => `- **${it}**`);
+        return `${isLast ? 'Last' : 'First'} ${slice.length}:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Negative filter: "remove the ones starting with M"
+    const negFilterM = trimmed.match(/^(?:please\s+)?(?:remove|drop|exclude|kick\s+out|filter\s+out)\s+(?:the\s+)?ones?\s+(?:starting|beginning)\s+with\s+([A-Za-z])\.?$/i);
+    if (negFilterM) {
+      const letter = negFilterM[1].toLowerCase();
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 2) {
+        const kept = prior.items.filter((it) => !it.toLowerCase().startsWith(letter));
+        const lines = prior.numbered
+          ? kept.map((it, i) => `${i + 1}. **${it}**`)
+          : kept.map((it) => `- **${it}**`);
+        return `Removed items starting with **${letter.toUpperCase()}**:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Index lookup: "what was at position 3?"
+    const idxLookupM = trimmed.match(/^(?:please\s+)?what(?:'s|\s+(?:was|is))\s+(?:at\s+)?(?:position|index|spot|number|item|slot)\s+(\d+)\s*\??\.?$/i);
+    if (idxLookupM) {
+      const pos = parseInt(idxLookupM[1], 10);
+      const prior = extractPriorList();
+      if (prior && pos >= 1 && pos <= prior.items.length) {
+        this._skipBrevityOnce = true;
+        return `At position ${pos}: **${prior.items[pos - 1]}**.`;
+      }
+    }
+
+    // --- Length query: "which is the longest one?" / "shortest"
+    const lqM = trimmed.match(/^(?:please\s+)?which(?:\s+(?:one|item))?\s+is\s+the\s+(longest|shortest)(?:\s+(?:one|item|name))?\s*\??\.?$/i);
+    if (lqM) {
+      const mode = lqM[1].toLowerCase();
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 2) {
+        let pick = prior.items[0];
+        let pickLen = pick.replace(/\s+/g, '').length;
+        for (let i = 1; i < prior.items.length; i++) {
+          const cur = prior.items[i];
+          const curLen = cur.replace(/\s+/g, '').length;
+          if (mode === 'longest' && curLen > pickLen) { pick = cur; pickLen = curLen; }
+          else if (mode === 'shortest' && curLen < pickLen) { pick = cur; pickLen = curLen; }
+        }
+        this._skipBrevityOnce = true;
+        return `The ${mode} one is **${pick}** (${pickLen} letters).`;
+      }
+    }
+
+    // --- First letters: "list just the first letter of each"
+    if (/^(?:please\s+)?(?:list|show|give\s+me|just\s+show)\s+(?:me\s+)?(?:just\s+)?(?:the\s+)?(?:first|initial|starting)\s+letters?\s+(?:of\s+)?(?:each|all|every|them)?(?:\s+(?:one|item))?\.?$/i.test(trimmed)) {
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 2) {
+        const initials = prior.items.map(it => it.trim()[0]?.toUpperCase() ?? '?');
+        const lines = prior.numbered
+          ? initials.map((c, i) => `${i + 1}. **${c}**`)
+          : initials.map((c) => `- **${c}**`);
+        return `First letters:\n${lines.join('\n')}`;
+      }
+    }
+
     // --- Explain each: "explain each one in one sentence" / "describe each"
     if (/^(?:please\s+)?(?:explain|describe|tell\s+me\s+about)\s+(?:each|all)(?:\s+(?:one|item|of\s+(?:them|those)))?(?:\s+in\s+(?:one|a)\s+(?:sentence|line))?\.?$/i.test(trimmed)) {
       const prior = extractPriorList();
