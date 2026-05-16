@@ -2573,6 +2573,103 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- Replace item: "replace the 2nd one with Saturn"
+    const replaceM = trimmed.match(/^(?:please\s+)?replace\s+(?:the\s+)?(\d+|first|second|third|fourth|fifth|sixth|1st|2nd|3rd|4th|5th|6th)(?:\s+(?:one|item))?\s+with\s+([A-Za-z][A-Za-z0-9\-']*(?:\s+[A-Za-z][A-Za-z0-9\-']*){0,2})\.?$/i);
+    if (replaceM) {
+      const ordMap: Record<string, number> = { first: 0, second: 1, third: 2, fourth: 3, fifth: 4, sixth: 5, '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '1st': 0, '2nd': 1, '3rd': 2, '4th': 3, '5th': 4, '6th': 5 };
+      const idx = ordMap[replaceM[1].toLowerCase()];
+      const newItem = replaceM[2].trim();
+      const prior = extractPriorList();
+      if (prior && idx !== undefined && idx < prior.items.length) {
+        const items = [...prior.items];
+        items[idx] = newItem;
+        const lines = prior.numbered
+          ? items.map((it, i) => `${i + 1}. **${it}**`)
+          : items.map((it) => `- **${it}**`);
+        return `Replaced item ${idx + 1} with **${newItem}**:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Duplicate item: "duplicate the 1st one" / "repeat the third"
+    const dupM = trimmed.match(/^(?:please\s+)?(?:duplicate|repeat|copy)\s+(?:the\s+)?(\d+|first|second|third|fourth|fifth|sixth|1st|2nd|3rd|4th|5th|6th)(?:\s+(?:one|item))?\.?$/i);
+    if (dupM) {
+      const ordMap: Record<string, number> = { first: 0, second: 1, third: 2, fourth: 3, fifth: 4, sixth: 5, '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '1st': 0, '2nd': 1, '3rd': 2, '4th': 3, '5th': 4, '6th': 5 };
+      const idx = ordMap[dupM[1].toLowerCase()];
+      const prior = extractPriorList();
+      if (prior && idx !== undefined && idx < prior.items.length) {
+        const items = [...prior.items];
+        items.splice(idx + 1, 0, prior.items[idx]);
+        const lines = prior.numbered
+          ? items.map((it, i) => `${i + 1}. **${it}**`)
+          : items.map((it) => `- **${it}**`);
+        return `Duplicated item ${idx + 1}:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Merge two lists: "combine those two lists" / "merge the two lists"
+    if (/^(?:please\s+)?(?:combine|merge|join|concat(?:enate)?)\s+(?:those|the|both)\s+(?:two\s+)?lists?(?:\s+into\s+one)?\.?$/i.test(trimmed)
+        || /^(?:please\s+)?(?:combine|merge)\s+(?:them|both)\.?$/i.test(trimmed)) {
+      // Walk back to find TWO most recent assistant list turns.
+      const collected: Array<{ items: string[]; numbered: boolean }> = [];
+      for (let i = history.length - 2; i >= 0 && collected.length < 2; i -= 1) {
+        const m = history[i];
+        if (!m || m.role !== 'assistant' || typeof m.content !== 'string') continue;
+        const lines = m.content.split(/\r?\n/);
+        const items: string[] = [];
+        let numbered = false;
+        for (const ln of lines) {
+          const nm = ln.match(/^\s*\d+[.)]\s+(.+?)\s*$/);
+          const bm = ln.match(/^\s*[-*]\s+(.+?)\s*$/);
+          const raw = nm ? nm[1] : (bm ? bm[1] : '');
+          if (!raw) continue;
+          if (nm) numbered = true;
+          items.push(raw.replace(/^\*+|\*+$/g, '').replace(/\s+[—\-:].*$/, '').trim());
+        }
+        if (items.length >= 2) collected.push({ items, numbered });
+      }
+      if (collected.length === 2) {
+        // collected[0] = most recent (B), collected[1] = older (A). Order A then B.
+        const merged = [...collected[1].items, ...collected[0].items];
+        const numbered = collected[0].numbered || collected[1].numbered;
+        const lines = numbered
+          ? merged.map((it, i) => `${i + 1}. **${it}**`)
+          : merged.map((it) => `- **${it}**`);
+        return `Combined list:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Filter by length: "keep only ones longer than 5 letters"
+    const flenM = trimmed.match(/^(?:please\s+)?(?:only\s+)?keep\s+(?:only\s+)?(?:the\s+)?ones?\s+(?:longer\s+than|with\s+more\s+than|over)\s+(\d+)\s+(?:letters?|characters?|chars?)\.?$/i);
+    if (flenM) {
+      const threshold = parseInt(flenM[1], 10);
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 2 && !isNaN(threshold)) {
+        const kept = prior.items.filter((it) => it.replace(/\s+/g, '').length > threshold);
+        if (kept.length > 0) {
+          const lines = prior.numbered
+            ? kept.map((it, i) => `${i + 1}. **${it}**`)
+            : kept.map((it) => `- **${it}**`);
+          return `Filtered to items longer than ${threshold} letters:\n${lines.join('\n')}`;
+        }
+        return `No items in that list have more than ${threshold} letters.`;
+      }
+    }
+
+    // --- Range recall: "show items 2-4" / "items 1 to 3" / "the first 3"
+    const rangeM = trimmed.match(/^(?:please\s+)?(?:show|give\s+me|list)\s+(?:me\s+)?items?\s+(\d+)\s*(?:[-–]|to)\s*(\d+)\.?$/i);
+    if (rangeM) {
+      const from = parseInt(rangeM[1], 10);
+      const to = parseInt(rangeM[2], 10);
+      const prior = extractPriorList();
+      if (prior && from >= 1 && to >= from && from <= prior.items.length) {
+        const slice = prior.items.slice(from - 1, Math.min(to, prior.items.length));
+        const lines = prior.numbered
+          ? slice.map((it, i) => `${from + i}. **${it}**`)
+          : slice.map((it) => `- **${it}**`);
+        return `Items ${from}–${Math.min(to, prior.items.length)}:\n${lines.join('\n')}`;
+      }
+    }
+
     // --- Explain each: "explain each one in one sentence" / "describe each"
     if (/^(?:please\s+)?(?:explain|describe|tell\s+me\s+about)\s+(?:each|all)(?:\s+(?:one|item|of\s+(?:them|those)))?(?:\s+in\s+(?:one|a)\s+(?:sentence|line))?\.?$/i.test(trimmed)) {
       const prior = extractPriorList();
