@@ -3532,6 +3532,129 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- Matrix ops (v23): transpose / row sums / largest value of [[…],[…]]
+    {
+      const parseMat = (s: string): number[][] | null => {
+        try {
+          const v = JSON.parse(s);
+          if (Array.isArray(v) && v.every(r => Array.isArray(r) && r.every(c => typeof c === 'number'))) return v as number[][];
+        } catch { /* */ }
+        return null;
+      };
+      let moM = trimmed.match(/^(?:please\s+)?transpose\s+(\[\[.+?\]\])\s*\.?$/i);
+      if (moM) {
+        const mat = parseMat(moM[1]);
+        if (mat && mat.length > 0) {
+          const rows = mat.length, cols = mat[0].length;
+          const t: number[][] = [];
+          for (let c = 0; c < cols; c++) {
+            const row: number[] = [];
+            for (let r = 0; r < rows; r++) row.push(mat[r][c]);
+            t.push(row);
+          }
+          this._skipBrevityOnce = true;
+          return `Transposed:\n${t.map(r => `[${r.join(', ')}]`).join('\n')}`;
+        }
+      }
+      moM = trimmed.match(/^(?:please\s+)?what\s+are\s+the\s+row\s+sums\s+of\s+(\[\[.+?\]\])\s*\??\.?$/i);
+      if (moM) {
+        const mat = parseMat(moM[1]);
+        if (mat) {
+          const sums = mat.map(r => r.reduce((a, b) => a + b, 0));
+          this._skipBrevityOnce = true;
+          return `Row sums: ${sums.join(', ')}`;
+        }
+      }
+      moM = trimmed.match(/^(?:please\s+)?what'?s\s+the\s+(largest|smallest|maximum|minimum|max|min)\s+value\s+in\s+(\[\[.+?\]\])\s*\??\.?$/i);
+      if (moM) {
+        const mat = parseMat(moM[2]);
+        if (mat) {
+          const flat = mat.flat();
+          const kind = moM[1].toLowerCase();
+          const isMax = kind === 'largest' || kind === 'maximum' || kind === 'max';
+          const v = isMax ? Math.max(...flat) : Math.min(...flat);
+          return `**${v}**`;
+        }
+      }
+    }
+
+    // --- Caesar cipher (v23)
+    {
+      const cipher = (s: string, shift: number) => s.split('').map(ch => {
+        const c = ch.charCodeAt(0);
+        if (c >= 97 && c <= 122) return String.fromCharCode(((c - 97 + shift % 26 + 26) % 26) + 97);
+        if (c >= 65 && c <= 90) return String.fromCharCode(((c - 65 + shift % 26 + 26) % 26) + 65);
+        return ch;
+      }).join('');
+      let ccM = trimmed.match(/^(?:please\s+)?apply\s+a?\s*caesar\s+cipher\s+with\s+shift\s+(-?\d+)\s+to\s+["']([^"']+)["']\s*\.?$/i);
+      if (ccM) {
+        const shift = parseInt(ccM[1], 10), word = ccM[2];
+        return `**${cipher(word, shift)}**`;
+      }
+      ccM = trimmed.match(/^(?:please\s+)?decode\s+the\s+caesar\s+cipher\s+["']([^"']+)["']\s+with\s+shift\s+(-?\d+)\s*\.?$/i);
+      if (ccM) {
+        const word = ccM[1], shift = parseInt(ccM[2], 10);
+        return `**${cipher(word, -shift)}**`;
+      }
+      ccM = trimmed.match(/^(?:please\s+)?apply\s+rot13\s+to\s+["']([^"']+)["']\s*\.?$/i);
+      if (ccM) return `**${cipher(ccM[1], 13)}**`;
+    }
+
+    // --- Graph reachability (v23): "edges: A->B, B->C. can A reach C?"
+    {
+      const grM = trimmed.match(/^(?:please\s+)?edges:\s*(.+?)\.\s*can\s+([A-Za-z][A-Za-z0-9]*)\s+reach\s+([A-Za-z][A-Za-z0-9]*)\s*\??\.?$/i);
+      if (grM) {
+        const edgeStr = grM[1], start = grM[2], end = grM[3];
+        const adj = new Map<string, string[]>();
+        const edgeRe = /([A-Za-z][A-Za-z0-9]*)\s*->\s*([A-Za-z][A-Za-z0-9]*)/g;
+        let em: RegExpExecArray | null;
+        while ((em = edgeRe.exec(edgeStr)) !== null) {
+          if (!adj.has(em[1])) adj.set(em[1], []);
+          adj.get(em[1])!.push(em[2]);
+        }
+        if (adj.size > 0) {
+          const visited = new Set<string>([start]);
+          const queue = [start];
+          let found = false;
+          while (queue.length) {
+            const cur = queue.shift()!;
+            if (cur === end) { found = true; break; }
+            for (const nx of (adj.get(cur) || [])) if (!visited.has(nx)) { visited.add(nx); queue.push(nx); }
+          }
+          return found ? `**Yes** — ${start} can reach ${end}.` : `**No** — ${start} cannot reach ${end}.`;
+        }
+      }
+    }
+
+    // --- Regex extract (v23)
+    {
+      let rxM = trimmed.match(/^(?:please\s+)?extract\s+all\s+digits\s+from\s+["']([^"']+)["']\s*\.?$/i);
+      if (rxM) {
+        const digits = (rxM[1].match(/\d/g) || []).join('');
+        return digits ? `**${digits}**` : `**(none)**`;
+      }
+      rxM = trimmed.match(/^(?:please\s+)?extract\s+all\s+uppercase\s+letters?\s+from\s+["']([^"']+)["']\s*\.?$/i);
+      if (rxM) {
+        const ups = (rxM[1].match(/[A-Z]/g) || []).join('');
+        return ups ? `**${ups}**` : `**(none)**`;
+      }
+      rxM = trimmed.match(/^(?:please\s+)?count\s+vowels\s+in\s+["']([^"']+)["']\s*\??\.?$/i);
+      if (rxM) {
+        const n = (rxM[1].match(/[aeiouAEIOU]/g) || []).length;
+        return `**${n}** vowels.`;
+      }
+    }
+
+    // --- Anagram check (v23)
+    {
+      const anM = trimmed.match(/^(?:please\s+)?is\s+["']([^"']+)["']\s+an\s+anagram\s+of\s+["']([^"']+)["']\s*\??\.?$/i);
+      if (anM) {
+        const a = anM[1].toLowerCase().replace(/\s+/g, '').split('').sort().join('');
+        const b = anM[2].toLowerCase().replace(/\s+/g, '').split('').sort().join('');
+        return a === b ? `**Yes** — they're anagrams.` : `**No** — they're not anagrams.`;
+      }
+    }
+
     if (/^(?:now\s+)?reverse(?:\s+(?:the\s+)?(?:order|list|them))?\.?$/i.test(trimmed)
         || /^(?:show|list|give)\s+(?:them|it|that|the\s+list)\s+(?:in\s+)?reversed?(?:\s+order)?\.?$/i.test(trimmed)
         || /^(?:in\s+)?reverse\s+order\.?$/i.test(trimmed)) {
