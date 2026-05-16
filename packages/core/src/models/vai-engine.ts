@@ -3197,6 +3197,163 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- Conditional if-then (v21): "if N is even, say A, else say B" etc.
+    {
+      const evalPred = (n: number, kind: string, threshold?: number): boolean => {
+        switch (kind) {
+          case 'even': return n % 2 === 0;
+          case 'odd': return n % 2 !== 0;
+          case 'gt': return threshold !== undefined && n > threshold;
+          case 'lt': return threshold !== undefined && n < threshold;
+          case 'gte': return threshold !== undefined && n >= threshold;
+          case 'lte': return threshold !== undefined && n <= threshold;
+        }
+        return false;
+      };
+      // Form 1: if N is even/odd, say "A", [otherwise|else] say "B"
+      let cM = trimmed.match(/^(?:please\s+)?if\s+(-?\d+)\s+is\s+(even|odd)\s*[,]?\s+say\s+["']([^"']+)["']\s*[,]?\s*(?:otherwise|else)\s+say\s+["']([^"']+)["']\s*\.?$/i);
+      if (cM) {
+        const n = parseInt(cM[1], 10), kind = cM[2].toLowerCase(), a = cM[3], b = cM[4];
+        return evalPred(n, kind) ? a : b;
+      }
+      // Form 2: if N is greater than/less than M, say "A", else say "B"
+      cM = trimmed.match(/^(?:please\s+)?if\s+(-?\d+)\s+is\s+(greater|less|bigger|smaller|larger)\s+than\s+(-?\d+)\s*[,]?\s+(?:then\s+)?say\s+["']([^"']+)["']\s*[,]?\s*(?:otherwise|else)\s+say\s+["']([^"']+)["']\s*\.?$/i);
+      if (cM) {
+        const n = parseInt(cM[1], 10), op = cM[2].toLowerCase(), t = parseInt(cM[3], 10), a = cM[4], b = cM[5];
+        const kind = (op === 'greater' || op === 'bigger' || op === 'larger') ? 'gt' : 'lt';
+        return evalPred(n, kind, t) ? a : b;
+      }
+      // Form 3: say "A" if N is even/odd, otherwise say "B"
+      cM = trimmed.match(/^(?:please\s+)?say\s+["']([^"']+)["']\s+if\s+(-?\d+)\s+is\s+(even|odd)\s*[,]?\s*(?:otherwise|else)\s+say\s+["']([^"']+)["']\s*\.?$/i);
+      if (cM) {
+        const a = cM[1], n = parseInt(cM[2], 10), kind = cM[3].toLowerCase(), b = cM[4];
+        return evalPred(n, kind) ? a : b;
+      }
+    }
+
+    // --- List filter compose (v21): "from [list], …"
+    {
+      // a) "from [list], take items longer than N letters then sort them alphabetically"
+      let lfM = trimmed.match(/^(?:please\s+)?from\s+\[([^\]]+)\][,]?\s+take\s+items\s+longer\s+than\s+(\d+)\s+letters?\s+(?:then\s+sort\s+them(?:\s+alphabetically)?|and\s+sort)\s*\.?$/i);
+      if (lfM) {
+        const items = lfM[1].split(/\s*,\s*/).map(s => s.trim()).filter(Boolean);
+        const minLen = parseInt(lfM[2], 10);
+        const filtered = items.filter(w => w.length > minLen).sort();
+        this._skipBrevityOnce = true;
+        if (filtered.length === 0) return `No items match.`;
+        return `Filtered & sorted:\n${filtered.map(f => `- **${f}**`).join('\n')}`;
+      }
+      // b) "from [list], how many items start with X?"
+      lfM = trimmed.match(/^(?:please\s+)?from\s+\[([^\]]+)\][,]?\s+how\s+many\s+items?\s+start\s+with\s+([a-z])\s*\??\.?$/i);
+      if (lfM) {
+        const items = lfM[1].split(/\s*,\s*/).map(s => s.trim()).filter(Boolean);
+        const letter = lfM[2].toLowerCase();
+        const count = items.filter(w => w[0]?.toLowerCase() === letter).length;
+        return `**${count}** items.`;
+      }
+      // c) "from [list], what's the shortest item?"
+      lfM = trimmed.match(/^(?:please\s+)?from\s+\[([^\]]+)\][,]?\s+what(?:'s|\s+is)?\s+the\s+(shortest|longest)\s+item\s*\??\.?$/i);
+      if (lfM) {
+        const items = lfM[1].split(/\s*,\s*/).map(s => s.trim()).filter(Boolean);
+        const kind = lfM[2].toLowerCase();
+        const sorted = items.slice().sort((a, b) => a.length - b.length);
+        const pick2 = kind === 'shortest' ? sorted[0] : sorted[sorted.length - 1];
+        return `**${pick2}**`;
+      }
+    }
+
+    // --- Arithmetic word problems (v21)
+    {
+      // a) "NAME has X items. NAME gives Y to OTHER, then buys Z more. how many items does NAME have now?"
+      let awM = trimmed.match(/^([A-Za-z]+)\s+has\s+(\d+)\s+([a-z]+)\.\s+\1\s+gives\s+(\d+)\s+to\s+[A-Za-z]+[,]?\s+then\s+buys\s+(\d+)\s+more\.\s+how\s+many\s+\3\s+does\s+\1\s+have\s+now\s*\??\.?$/i);
+      if (awM) {
+        const start = parseInt(awM[2], 10), given = parseInt(awM[4], 10), bought = parseInt(awM[5], 10);
+        return `**${start - given + bought}** ${awM[3]}.`;
+      }
+      // b) "NAME has X boxes with Y items each. how many items total?"
+      awM = trimmed.match(/^([A-Za-z]+)\s+has\s+(\d+)\s+(?:boxes|bags|groups|piles)\s+with\s+(\d+)\s+([a-z]+)\s+each\.\s+how\s+many\s+\4\s+total\s*\??\.?$/i);
+      if (awM) {
+        const boxes = parseInt(awM[2], 10), per = parseInt(awM[3], 10);
+        return `**${boxes * per}** ${awM[4]}.`;
+      }
+      // c) "if NAME splits X items into groups of Y, how many full groups?"
+      awM = trimmed.match(/^if\s+([A-Za-z]+)\s+splits\s+(\d+)\s+([a-z]+)\s+into\s+groups\s+of\s+(\d+)[,]?\s+how\s+many\s+full\s+groups\s*\??\.?$/i);
+      if (awM) {
+        const total = parseInt(awM[2], 10), per = parseInt(awM[4], 10);
+        return `**${Math.floor(total / per)}** full groups.`;
+      }
+    }
+
+    // --- Time arithmetic (v21)
+    {
+      const parseTime = (s: string): number | null => {
+        const m = s.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
+        if (!m) return null;
+        let h = parseInt(m[1], 10); const mi = parseInt(m[2], 10);
+        const ap = m[3].toLowerCase();
+        if (h === 12) h = 0;
+        if (ap === 'pm') h += 12;
+        return h * 60 + mi;
+      };
+      const fmt12 = (totalMin: number): string => {
+        totalMin = ((totalMin % 1440) + 1440) % 1440;
+        const h24 = Math.floor(totalMin / 60);
+        const mi = totalMin % 60;
+        const ap = h24 < 12 ? 'am' : 'pm';
+        let h = h24 % 12; if (h === 0) h = 12;
+        return `${h}:${String(mi).padStart(2, '0')}${ap}`;
+      };
+      // a) "if it's now H:Mam and I wait Xh, what time is it?" — variants Xh, Xm, XhYm
+      let taM = trimmed.match(/^if\s+it'?s\s+now\s+(\d{1,2}:\d{2}\s*(?:am|pm))\s+and\s+i\s+wait\s+(.+?)[,]?\s+what\s+time\s+is\s+it\s*\??\.?$/i);
+      if (taM) {
+        const start = parseTime(taM[1].replace(/\s+/g, ''));
+        const w = taM[2].trim();
+        let waitMin = 0;
+        const wmHm = w.match(/^(\d+)\s*h\s*(\d+)\s*m$/i);
+        const wmH = w.match(/^(\d+)\s*hours?$/i);
+        const wmM = w.match(/^(\d+)\s*(?:minutes?|m)$/i);
+        if (wmHm) waitMin = parseInt(wmHm[1], 10) * 60 + parseInt(wmHm[2], 10);
+        else if (wmH) waitMin = parseInt(wmH[1], 10) * 60;
+        else if (wmM) waitMin = parseInt(wmM[1], 10);
+        if (start !== null && waitMin > 0) {
+          return `**${fmt12(start + waitMin)}**`;
+        }
+      }
+      // b) "how many minutes between H:Mam and H:Mam?"
+      taM = trimmed.match(/^how\s+many\s+minutes\s+between\s+(\d{1,2}:\d{2}\s*(?:am|pm))\s+and\s+(\d{1,2}:\d{2}\s*(?:am|pm))\s*\??\.?$/i);
+      if (taM) {
+        const a = parseTime(taM[1].replace(/\s+/g, ''));
+        const b = parseTime(taM[2].replace(/\s+/g, ''));
+        if (a !== null && b !== null) {
+          const diff = ((b - a) % 1440 + 1440) % 1440;
+          return `**${diff}** minutes.`;
+        }
+      }
+      // c) "what's H:Mam minus X minutes?"
+      taM = trimmed.match(/^what'?s\s+(\d{1,2}:\d{2}\s*(?:am|pm))\s+minus\s+(\d+)\s+minutes?\s*\??\.?$/i);
+      if (taM) {
+        const start = parseTime(taM[1].replace(/\s+/g, ''));
+        const sub = parseInt(taM[2], 10);
+        if (start !== null) return `**${fmt12(start - sub)}**`;
+      }
+    }
+
+    // --- Base conversion (v21)
+    {
+      // "convert N to binary/hex"
+      let bcM = trimmed.match(/^(?:please\s+)?convert\s+(\d+)\s+to\s+(binary|hex|hexadecimal)\s*\.?$/i);
+      if (bcM) {
+        const n = parseInt(bcM[1], 10);
+        const base = bcM[2].toLowerCase().startsWith('bin') ? 2 : 16;
+        return `**${n.toString(base)}**`;
+      }
+      // "what's 0bXXX in decimal?" / "what's 0xXX in decimal?"
+      bcM = trimmed.match(/^(?:please\s+)?what'?s\s+0b([01]+)\s+in\s+decimal\s*\??\.?$/i);
+      if (bcM) return `**${parseInt(bcM[1], 2)}**`;
+      bcM = trimmed.match(/^(?:please\s+)?what'?s\s+0x([0-9a-f]+)\s+in\s+decimal\s*\??\.?$/i);
+      if (bcM) return `**${parseInt(bcM[1], 16)}**`;
+    }
+
     if (/^(?:now\s+)?reverse(?:\s+(?:the\s+)?(?:order|list|them))?\.?$/i.test(trimmed)
         || /^(?:show|list|give)\s+(?:them|it|that|the\s+list)\s+(?:in\s+)?reversed?(?:\s+order)?\.?$/i.test(trimmed)
         || /^(?:in\s+)?reverse\s+order\.?$/i.test(trimmed)) {
