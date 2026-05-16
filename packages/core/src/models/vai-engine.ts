@@ -1545,11 +1545,13 @@ export class VaiEngine implements ModelAdapter {
       || /\b(?:who|what|where|when|why|how|which|is|are|does|do|did|can|could|should|would)\b/i.test(inputLower);
     if (!looksLikeQuestion) return response;
 
-    const topicLabel = topic.trim().length > 0
-      ? topic.trim().slice(0, 60)
-      : tokens.slice(0, 4).join(' ');
+    // Only show a bolded topic label when we have a real extracted topic
+    // string — never echo a slice of the user's raw tokens, which produces
+    // nonsense like "**name three european**" for "name three european capitals".
+    const cleanTopic = topic.trim().slice(0, 60);
+    const label = cleanTopic.length > 0 ? `**${cleanTopic}**` : 'that';
 
-    return `I don't have a solid answer for **${topicLabel || 'that'}** yet.\n\nYou can teach me with the source you trust, or hook up an external model in settings and I'll hand it off automatically.`;
+    return `I don't have a confident answer for ${label} yet.\n\nYou can teach me with the source you trust, or hook up an external model in settings and I'll hand it off automatically.`;
   }
 
   /**
@@ -42652,10 +42654,90 @@ function topKLargest(nums, k) {
 
     // Format based on whether it was decomposed or direct
     if (result.strategy === 'decomposed' && result.subAnswers.length > 1) {
+      // Reject decompositions whose synthesized sub-questions look like raw
+      // prompt fragments (too long, or contain em-dashes / commas / question
+      // marks mid-fragment). These produce the "**What is <user phrase>?**"
+      // headers followed by unrelated content paste — a high-visibility
+      // failure mode for casual multi-clause prompts.
+      const looksLikeBadSplit = result.subAnswers.some((sa) => {
+        const q = (sa.question || '').trim();
+        if (q.length > 50) return true;
+        if (/[—–,;]|\.\s+\S|\?\s+\S/.test(q)) return true;
+        // Sub-questions should look like questions or noun phrases starting
+        // with content words. Garbage interior fragments often start with
+        // possessives or pure prepositional fillers ("its own line", "of the
+        // country").
+        if (/^(?:its?|their|his|her|the\s+(?:one|other|same|first|second|third)|of\s+|on\s+|in\s+|at\s+|for\s+|with\s+|by\s+|to\s+|from\s+|just\s+|only\s+|please\s+|prefixed\s+|separated\s+)/i.test(q)) return true;
+        // Reject when the sub-question is built entirely from format-spec
+        // / formatting-instruction tokens — that means the decomposer split
+        // the user's *format* clause and tried to look up an answer for it.
+        const qContentTokens = (q.toLowerCase().match(/[a-zà-öø-ÿ]{4,}/g) ?? [])
+          .filter((w) => !KnowledgeStore.STOP_WORDS.has(w))
+          .filter((w) => !/^(?:what|when|where|which|whose|whom)$/i.test(w));
+        const FORMAT_SPEC_TOKENS = new Set([
+          'line','lines','prefixed','separated','numbered','comma','json','csv','list','bullet','single','question','number','format','symbol','character','word','words','letter','letters','sentence','paragraph','column','columns','row','rows','table','one','two','three','four','five','six','seven','eight','nine','ten',
+        ]);
+        if (qContentTokens.length > 0 && qContentTokens.every((t) => FORMAT_SPEC_TOKENS.has(t))) return true;
+        // Require each sub-answer to share at least one meaningful (4+ char,
+        // non-stopword) token with its sub-question — otherwise the synthesized
+        // header "**What is <fragment>?**" gets paired with unrelated content.
+        const qTokens = new Set(qContentTokens);
+        if (qTokens.size > 0) {
+          const aLower = (sa.answer || '').toLowerCase();
+          let sharedTok = 0;
+          for (const tok of qTokens) if (aLower.includes(tok)) sharedTok += 1;
+          if (sharedTok === 0) return true;
+        }
+        return false;
+      });
+      if (looksLikeBadSplit) return null;
+      // Also reject when the synthesized answer doesn't share any meaningful
+      // token with the user's original input — that's the classic "intelligent
+      // answer drifts to unrelated topic" failure mode (Mona Lisa → compression;
+      // M-series → Anthropic; Drammen pickleball → Nansen biography).
+      const inputTokens = new Set(
+        input.toLowerCase().match(/[a-zà-öø-ÿ]{4,}/g)?.filter((w) => !KnowledgeStore.STOP_WORDS.has(w)) ?? []
+      );
+      if (inputTokens.size >= 2) {
+        const answerLower = result.subAnswers.map((sa) => sa.answer).join(' ').toLowerCase();
+        let overlap = 0;
+        for (const tok of inputTokens) if (answerLower.includes(tok)) overlap += 1;
+        if (overlap === 0) return null;
+      }
       const parts = result.subAnswers.map(sa =>
         `**${sa.question}**\n${sa.answer}`
       );
       return parts.join('\n\n');
+    }
+
+    // Direct (non-decomposed) result — apply the same token-overlap sanity
+    // check so loose retrieval can't return an unrelated article (Drammen
+    // pickleball → Nansen, M-series chips → Anthropic, "NOT Germany" → Nazi
+    // Germany article).
+    {
+      const inputTokens = new Set(
+        input.toLowerCase().match(/[a-zà-öø-ÿ]{4,}/g)?.filter((w) => !KnowledgeStore.STOP_WORDS.has(w)) ?? []
+      );
+      // Drop excluded tokens — when the user writes "not paris, london or
+      // berlin" we don't want the answer to be ABOUT paris/london/berlin.
+      const excludedTokens = new Set<string>();
+      for (const m of input.toLowerCase().matchAll(/\bnot\s+([a-z][a-z\s,]+?)(?:[.?!]|$)/gi)) {
+        for (const tok of (m[1] || '').match(/[a-zà-öø-ÿ]{4,}/g) ?? []) excludedTokens.add(tok);
+      }
+      for (const tok of excludedTokens) inputTokens.delete(tok);
+      if (inputTokens.size >= 2) {
+        const answerLower = (result.text || '').toLowerCase();
+        let overlap = 0;
+        for (const tok of inputTokens) if (answerLower.includes(tok)) overlap += 1;
+        const required = Math.max(2, Math.ceil(inputTokens.size * 0.2));
+        if (overlap < required) return null;
+        // Reject when the answer is dominated by an explicitly-excluded token
+        // ("NOT Germany" → article about Nazi Germany).
+        for (const ex of excludedTokens) {
+          const occurrences = (answerLower.match(new RegExp(`\\b${ex}\\b`, 'g')) ?? []).length;
+          if (occurrences >= 2) return null;
+        }
+      }
     }
 
     return result.text;
@@ -46475,7 +46557,11 @@ Want me to customize it with your actual links, change the color scheme, add ani
     const hasDateQuestion = /\b(?:what\s+day|which\s+day|what\s+date|which\s+date|day\s+is\s+it|date\s+is\s+it|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(lower);
     if (offset && hasDateQuestion) {
       parts.push(this.formatRelativeDateAnswer(offset));
-    } else if (!offset && /\b(?:today|what\s+(?:is\s+)?(?:the\s+)?(?:current\s+)?date|what\s+day\s+is\s+(?:it|today))\b/i.test(lower)) {
+    } else if (!offset && /\b(?:what(?:'s|\s+is)\s+(?:the\s+)?(?:current\s+)?date|what\s+day\s+is\s+(?:it|today)|today'?s\s+date|date\s+today)\b/i.test(lower)) {
+      // Only fire when "today" appears inside a date-question phrasing, not as
+      // a sentential adverb ("I would like today to know...") which previously
+      // caused this handler to swallow unrelated factual prompts and return
+      // just the greeting.
       const target = new Date(this._nowMs());
       const dateStr = target.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
       parts.push(`Today is **${dateStr}**.`);
@@ -48241,6 +48327,7 @@ Want me to customize it with your actual links, change the color scheme, add ani
     const teachGateBlocks = /^(?:hello|hi|hey|hei|yo|sup|greetings|good\s+(?:morning|afternoon|evening))\b/i.test(input)
       || /\b(?:please|kindly|could\s+you|can\s+you|would\s+you|will\s+you)\b/i.test(input)
       || /\b(?:tell|give|show|reply|respond|answer|explain|describe|list|find|search|look\s+up|teach\s+me|help\s+me|let\s+me\s+know|i\s+want\s+to\s+(?:know|learn|see|find|build|make|create))\b/i.test(input)
+      || /^(?:name|pick|choose|select|suggest)\s+(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|some|the|me)\b/i.test(input)
       || wordCount > 18;
     if (!teachGateBlocks && !/^(what|who|how|why|when|where|which|can|do|does|did|is\s+(it|there)|are\s+(you|there)|explain|describe|tell|show|list|compare|give|write|create|build|make|generate|set\s?up|implement)\b/i.test(input) && !input.includes('?') && !/\b(?:vs\.?|versus|compare|difference|which\s+(?:is|are|one))\b/i.test(input)) {
       // Short teaching: "X is Y"
@@ -48250,7 +48337,12 @@ Want me to customize it with your actual links, change the color scheme, add ani
         const response = teachMatch[2].trim();
         // Don't treat personal introductions as facts to learn ("my name is X", "i am X")
         const isPersonalIntro = /^(?:my\s+name|i|my\s+(?:age|job|role|project)|our\s+project)$/i.test(pattern);
+        // Don't treat exclusion semantics as teaching: "X that is NOT Y", "X is not Y" used
+        // inside a request shape ("name a country that is not France") — the "response" half
+        // begins with a negation marker that signals constraint, not factual definition.
+        const isExclusionResponse = /^(?:not|no|never|none\s+of)\b/i.test(response);
         if (!isPersonalIntro
+          && !isExclusionResponse
           && !/^(it|this|that|the|a|an|my|your|so|now|here|there|also|just)$/i.test(pattern)
           && !/\b(?:function|class|method|implement|algorithm|program|script|code|module|interface|struct|enum)\b/i.test(pattern)) {
           this.knowledge.addEntry(pattern, response, 'user-taught', 'en');
@@ -48657,10 +48749,15 @@ Want me to customize it with your actual links, change the color scheme, add ani
       if (msg.role !== 'user') continue;
       const lower = msg.content.toLowerCase();
       if (lower.includes('?') || /^(what|who|how|why|when|where|which)\b/i.test(lower)) continue;
+      // Skip exclusion / imperative shapes — "name a X that is not Y" is a
+      // request with a constraint, not a teaching statement.
+      if (/^(?:name|pick|choose|select|suggest|list|give|tell|show)\s+(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|some|the|me)\b/i.test(lower)) continue;
 
       const teachMatch = lower.match(/^([a-z][a-z0-9 _-]{2,40})\s+(?:is|means)\s+(.{3,})$/);
       if (teachMatch) {
         const pattern = teachMatch[1].trim();
+        const response = teachMatch[2].trim();
+        if (/^(?:not|no|never|none\s+of)\b/i.test(response)) continue;
         if (input.includes(pattern) && pattern.length > 2 && !/^(it|this|that|the|so|now)$/i.test(pattern)) {
           return `Based on what you told me earlier: "${msg.content}"`;
         }
@@ -48797,13 +48894,32 @@ Want me to customize it with your actual links, change the color scheme, add ani
       const prevTopic = this.isUsableAnchor(prevTopicRaw) ? prevTopicRaw : '';
 
       const cleanedTopic = this.cleanTopicFromInput(input);
+      // Guard against ugly stitched topics like "currency symbol Norway Just
+      // symbol character" — cap to first three words and reject if the result
+      // doesn't look like a noun phrase (>4 tokens is almost always garbage
+      // sentence fragments).
+      const topicTokens = cleanedTopic.split(/\s+/).filter((w) => w.length > 0);
+      const topicForLabel = topicTokens.length <= 3 ? cleanedTopic : '';
 
       // Intent-aware variant pools. Each variant is a self-contained string
       // so pickVariant() can compare openers and skip recently-used shapes.
       const intent = this._lastIntent;
-      const t = cleanedTopic;
+      const t = topicForLabel || 'that';
       const prev = prevTopic;
       const buildVariants = (): string[] => {
+        if (t === 'that') {
+          // No clean topic — return generic, never-stitched phrasings.
+          if (intent === 'casual') {
+            return [
+              `Honestly, I don't have a confident answer for that yet.${prev ? ` Want to keep on **${prev}** instead?` : ''}`,
+              `I don't have a real answer for that in me right now.${prev ? ` We were on **${prev}** — keep going there?` : ''}`,
+            ];
+          }
+          return [
+            `I don't have a confident answer for that yet.${prev ? ` We were on **${prev}** — keep going?` : ' Want to rephrase or give me one anchor (a name, a date, a link) to ground from?'}`,
+            `That isn't in my knowledge yet.${prev ? ` Stay on **${prev}** or pivot fully?` : ' One link or sentence of context and I can try again.'}`,
+          ];
+        }
         if (intent === 'casual') {
           return [
             `Honestly, **${t}** isn't something I can speak to with confidence yet.${prev ? ` Want to keep on **${prev}** instead?` : ''}`,
@@ -48921,14 +49037,15 @@ Want me to customize it with your actual links, change the color scheme, add ani
       return groundedBestEffort;
     }
 
+    // Both fallback branches: never echo a slice of the user's raw tokens
+    // as if it were a topic — "name three european" / "won nba last" is
+    // worse than no label at all.
     if (knownSources.size > 0) {
-      const topicHint = topicWords.slice(0, 3).join(' ') || 'that';
-      return `I don't have a solid answer for **${topicHint}** yet.\n\n**What I can do:**\n- Build projects: "build me a Next.js app", "build a Rust CLI", "build a Node.js API"\n- Diagnose errors: paste an error message or stack trace\n- Write tests: "write tests for this component"\n- Refactor code: "how should I split this component?"\n- Explain tech: Docker, TypeScript, React hooks, Tailwind, etc.\n\nIf this is something I should know, you can teach me directly or I'll get smarter over time as I handle more requests.`;
+      return `I don't have a confident answer for that yet.\n\n**What I can do:**\n- Build projects: "build me a Next.js app", "build a Rust CLI", "build a Node.js API"\n- Diagnose errors: paste an error message or stack trace\n- Write tests: "write tests for this component"\n- Refactor code: "how should I split this component?"\n- Explain tech: Docker, TypeScript, React hooks, Tailwind, etc.\n\nIf this is something I should know, you can teach me directly or I'll get smarter over time as I handle more requests.`;
     }
 
     // Completely unknown — be direct and useful
-    const topicHint = topicWords.slice(0, 3).join(' ') || 'that';
-    return `I don't know about **${topicHint}** yet.\n\n**What Vai can do right now:**\n- **Build:** "build me a Next.js todo app", "build a Vite React app", "build a Rust CLI"\n- **Debug:** paste an error or stack trace and I'll diagnose it\n- **Test:** "write unit tests for this function"\n- **Refactor:** "how do I split this component?"\n- **Explain:** Docker, TypeScript, React, Tailwind, Express, Next.js, Rust, C#, C++\n\nI track questions I can't answer. Ask "what do you need to learn?" to see my gaps.`;
+    return `I don't know that yet.\n\n**What Vai can do right now:**\n- **Build:** "build me a Next.js todo app", "build a Vite React app", "build a Rust CLI"\n- **Debug:** paste an error or stack trace and I'll diagnose it\n- **Test:** "write unit tests for this function"\n- **Refactor:** "how do I split this component?"\n- **Explain:** Docker, TypeScript, React, Tailwind, Express, Next.js, Rust, C#, C++\n\nI track questions I can't answer. Ask "what do you need to learn?" to see my gaps.`;
   }
 
   /**
