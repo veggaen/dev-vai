@@ -1849,6 +1849,139 @@ export class VaiEngine implements ModelAdapter {
   }
 
   /**
+   * Follow-up rewriter. Short context-dependent follow-ups ("and germany?",
+   * "what about its capital?", "who created it?", "now compare ts and js the
+   * same way") only make sense given the previous turn. This rewrites them
+   * into a fully-specified standalone query by extracting the prior frame
+   * (capital of X, ceo of X, N facts about X, compare X and Y as a table)
+   * and substituting the new topic. Returns null when nothing fires; the
+   * normal pipeline then runs on the original input.
+   */
+  private rewriteFollowupQuery(input: string, history: readonly Message[]): string | null {
+    if (typeof input !== 'string') return null;
+    const trimmed = input.trim();
+    if (trimmed.length === 0 || trimmed.length > 120) return null;
+
+    // Pull the prior USER message (look back through history, skipping the
+    // current one which is appended last).
+    let priorUser: string | null = null;
+    for (let i = history.length - 2; i >= 0; i--) {
+      const m = history[i];
+      if (m && m.role === 'user' && typeof m.content === 'string') {
+        priorUser = m.content;
+        break;
+      }
+    }
+    if (!priorUser) return null;
+    const priorLower = priorUser.toLowerCase();
+
+    // ---- Topic-swap patterns: "and X?", "what about X?", "how about X?"
+    const topicSwap = trimmed.match(/^(?:please\s+)?(?:and|what\s+about|how\s+about|what['']?s\s+about|and\s+what\s+about|now\s+what\s+about)\s+([A-Za-z][A-Za-z0-9\- ]*?)\s*\??\.?$/i);
+    if (topicSwap) {
+      const newTopic = topicSwap[1].trim();
+      // Frame: "capital of X"
+      if (/\bcapital\s+of\s+[a-z]/i.test(priorLower)) return `what is the capital of ${newTopic}?`;
+      // Frame: "ceo of X"
+      if (/\bceo\s+of\s+[a-z]/i.test(priorLower)) return `who is the ceo of ${newTopic}?`;
+      // Frame: "who founded X"
+      if (/\bwho\s+founded\s+[a-z]/i.test(priorLower)) return `who founded ${newTopic}?`;
+      // Frame: "tell me about X" -> just swap topic
+      if (/\btell\s+me\s+about\s+[a-z]/i.test(priorLower)) return `tell me about ${newTopic}`;
+      // Frame: "what year was X" — generic year query
+      if (/\bwhat\s+year\b/i.test(priorLower)) return priorUser.replace(/\b([a-z][a-z\s]+?)\s*\??$/i, newTopic + '?');
+    }
+
+    // ---- Re-shape patterns: "now do the same for X" / "now do that for X"
+    const sameFor = trimmed.match(/^(?:please\s+)?now\s+(?:do\s+(?:the\s+same|that|the\s+same\s+thing)|same\s+thing|do\s+it)\s+for\s+([A-Za-z][A-Za-z0-9\- ]*)\s*\??\.?$/i);
+    if (sameFor) {
+      const newTopic = sameFor[1].trim();
+      // Replace the topic word inside the prior turn.
+      // Common frames: "5 facts about X as a numbered list", "compare X and Y"
+      const factsAbout = priorUser.match(/^(.*\bfacts?\s+about\s+)([a-z][a-z\s]+?)(\s+as\s+.+|\s*\??\.?)$/i);
+      if (factsAbout) return `${factsAbout[1]}${newTopic}${factsAbout[3]}`;
+      const bulletsAbout = priorUser.match(/^(.*\bbullet\s+points?\s+about\s+)([a-z][a-z\s]+?)(\s*\??\.?)$/i);
+      if (bulletsAbout) return `${bulletsAbout[1]}${newTopic}${bulletsAbout[3]}`;
+      // Generic: append " for X" using prior frame's first verb.
+      if (/\bcapital\s+of\b/i.test(priorLower)) return `what is the capital of ${newTopic}?`;
+      if (/\bceo\s+of\b/i.test(priorLower)) return `who is the ceo of ${newTopic}?`;
+    }
+
+    // ---- Re-shape pair: "now compare A and B (the same way)"
+    const comparePair = trimmed.match(/^(?:please\s+)?now\s+compare\s+([A-Za-z][A-Za-z0-9+#./\-]*)\s+(?:and|vs\.?|versus)\s+([A-Za-z][A-Za-z0-9+#./\-]*)\b(?:[^?]*?)\s*\??\.?$/i);
+    if (comparePair) {
+      const a = comparePair[1].trim();
+      const b = comparePair[2].trim();
+      // Carry shape from prior turn if it asked for a markdown table.
+      const wantsTable = /\bmarkdown\s+table\b|\bas\s+(?:a\s+)?(?:markdown\s+)?table\b/i.test(priorLower);
+      if (wantsTable) return `compare ${a} and ${b} as a markdown table`;
+      return `compare ${a} and ${b}`;
+    }
+
+    // ---- Coreference: input contains "it" / "its" referring to prior topic.
+    // Examples: "who created it?", "what does it eat?", "what about its capital?"
+    if (/\b(?:it|its|that)\b/i.test(trimmed)) {
+      // Extract prior topic — prefer "X the Y" disambiguated topic, else
+      // the substantive noun after "about" / "of" in the prior turn.
+      let priorTopic: string | null = null;
+      const disambig = priorUser.match(/\b([A-Za-z]+)\s+the\s+(programming\s+language|language|snake|planet|element|island|country|company|fruit|river|bird|roman\s+god|god)\b/i);
+      if (disambig) priorTopic = `${disambig[1]} the ${disambig[2]}`;
+      else {
+        const aboutMatch = priorUser.match(/\babout\s+([a-z][a-z0-9\- ]+?)(?:[?.!,]|$)/i);
+        if (aboutMatch) priorTopic = aboutMatch[1].trim();
+        else {
+          const ofMatch = priorUser.match(/\b(?:capital|ceo|founder)\s+of\s+([a-z][a-z\s]+?)(?:[?.!,]|$)/i);
+          if (ofMatch) priorTopic = ofMatch[1].trim();
+        }
+      }
+      if (priorTopic) {
+        // "what does it eat?" / "who created it?" / "what about its capital?"
+        let rewritten = trimmed
+          .replace(/\bits\b/gi, `${priorTopic}'s`)
+          .replace(/\bit\b/gi, priorTopic);
+        // "what about X's capital?" → "what is X's capital?"
+        rewritten = rewritten.replace(/^what\s+about\b/i, 'what is');
+        return rewritten;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Bare-ambiguous topic detector. When the user asks about a topic that has
+   * multiple legitimate readings ("tell me about python", "what is mercury")
+   * with NO disambiguator and NO modifying context, return a short clarify
+   * question listing the known readings. Returning a half-committed mash-up
+   * is worse than asking which reading they want.
+   */
+  private tryAnswerBareAmbiguous(input: string): string | null {
+    if (typeof input !== 'string') return null;
+    const trimmed = input.trim();
+    if (trimmed.length === 0 || trimmed.length > 60) return null;
+    // Skip when input already disambiguates ("X the Y") or has other context
+    // (numbers, format keywords, conjunctions). We only catch the bare form.
+    if (/\bthe\s+(programming\s+language|language|snake|planet|element|island|country|company|fruit|river|bird|god)\b/i.test(trimmed)) return null;
+    if (/\b(?:numbered|bullet|csv|json|table|facts?|points?|list|compare)\b/i.test(trimmed)) return null;
+
+    const TOPICS: Record<string, string[]> = {
+      python:  ['the **programming language** (Guido van Rossum, 1991)', 'the **snake** (non-venomous constrictor)'],
+      mercury: ['the **planet** (closest to the Sun)', 'the **element** (Hg, liquid metal)', 'the **Roman god** (messenger of the gods)'],
+      java:    ['the **programming language** (JVM, Sun Microsystems 1995)', 'the **island** (most populous in Indonesia)'],
+      apple:   ['the **company** (iPhone, Mac, Cupertino)', 'the **fruit** (Malus domestica)'],
+      turkey:  ['the **country** (capital Ankara, in Anatolia)', 'the **bird** (Galliformes, eaten at Thanksgiving)'],
+      amazon:  ['the **company** (e-commerce, AWS, Bezos)', 'the **river** (South America, rainforest)'],
+    };
+
+    const bareMatch = trimmed.match(/^(?:please\s+|quick\s*[\u2014\u2013\-:]\s*|hey\s+|hi\s+|so\s+)?(?:what\s+is|what['']?s|tell\s+me\s+about|describe|explain)\s+([a-z]+)\s*\.?\s*\??$/i);
+    if (!bareMatch) return null;
+    const topic = bareMatch[1].toLowerCase();
+    if (!(topic in TOPICS)) return null;
+    const readings = TOPICS[topic];
+    const lines = readings.map((r) => `- ${r}`).join('\n');
+    return `Which sense of **${topic}** do you mean? It could be:\n\n${lines}\n\nWhich one would you like me to answer about?`;
+  }
+
+  /**
    * Disambiguation router for ambiguous topics. Recognizes "X the Y" and
    * "X (the Y)" disambiguation patterns over a fixed table of dictionary
    * collisions (python/java/mercury/apple/turkey/amazon) and returns a
@@ -2029,6 +2162,16 @@ export class VaiEngine implements ModelAdapter {
         answer: 'The capital of Norway is **Oslo**.' },
       { match: /\b(?:what\s+is\s+)?(?:the\s+)?capital\s+of\s+brazil\b/i,
         answer: 'The capital of Brazil is **Brasília**.' },
+      // Coreference targets — rewriter expands "who created it?" / "what does
+      // it eat?" using the prior user topic, and these facts answer them.
+      { match: /\bwho\s+created\s+python(?:\s+the\s+programming\s+language)?\b/i,
+        answer: '**Guido van Rossum** created Python and first released it in 1991.' },
+      { match: /\bwho\s+created\s+java(?:\s+the\s+programming\s+language)?\b/i,
+        answer: '**James Gosling** at Sun Microsystems created Java, first released in 1995.' },
+      { match: /\bwhat\s+(?:do|does)\s+(?:the\s+)?python(?:s|\s+the\s+snake)?(?:'s)?\s+eat\b/i,
+        answer: 'Pythons are non-venomous constrictors that eat mostly **mammals** (rodents, rabbits, small deer) and occasionally **birds** — they ambush prey and squeeze it before swallowing whole.' },
+      { match: /\bwhat\s+is\s+(?:the\s+)?(?:python(?:s)?(?:'s)?\s+(?:the\s+snake\s+)?)?diet\b/i,
+        answer: 'Pythons eat **mammals** (rodents, rabbits, small deer) and **birds** — they are constrictors that ambush prey.' },
     ];
     for (const entry of FACTS) {
       if (entry.match.test(input)) return entry.answer;
@@ -2124,6 +2267,98 @@ export class VaiEngine implements ModelAdapter {
     const TITLE: Record<string, string> = {
       france: 'France', japan: 'Japan', germany: 'Germany', brazil: 'Brazil',
       norway: 'Norway', aristotle: 'Aristotle', plato: 'Plato', react: 'React',
+      'python-language': 'Python (programming language)',
+      'python-snake': 'Python (snake)',
+      'mercury-planet': 'Mercury (planet)',
+      'mercury-element': 'Mercury (element)',
+      'mercury-god': 'Mercury (Roman god)',
+      'java-language': 'Java (programming language)',
+      'java-island': 'Java (island)',
+      'apple-company': 'Apple (company)',
+      'apple-fruit': 'Apple (fruit)',
+    };
+
+    // Disambiguated topic facts — used by list emitters when the user
+    // explicitly disambiguates ("python the snake", "mercury the element").
+    const DISAMBIG_LISTS: Record<string, string[]> = {
+      'python-language': [
+        '**Python** is a high-level, interpreted **programming language** created by Guido van Rossum and first released in 1991.',
+        'It emphasizes readable syntax, dynamic typing, and a "batteries included" standard library.',
+        'Python is widely used for web development, data science, machine learning, scripting, and automation.',
+        'Popular implementations include CPython (the reference), PyPy (JIT), and MicroPython (embedded).',
+        'It is one of the most popular programming languages in the world by usage and ecosystem size.',
+      ],
+      'python-snake': [
+        'A **python** is a non-venomous **snake** in the family Pythonidae, native to Africa, Asia, and Australia.',
+        'Pythons are **constrictors** — they kill prey by coiling around it and squeezing until it suffocates.',
+        'They eat mostly **mammals** (rodents, rabbits, small deer) and birds, swallowing prey whole.',
+        'The reticulated python is the longest snake in the world, sometimes reaching over 6 metres.',
+        'Pythons lay eggs (oviparous) and the females coil around the clutch to incubate them.',
+      ],
+      'mercury-planet': [
+        '**Mercury** is the smallest **planet** in the Solar System and the closest one to the Sun.',
+        'It has no atmosphere to speak of and experiences extreme temperature swings between day and night.',
+        'A year on Mercury (one orbit around the Sun) takes only 88 Earth days.',
+        'Its surface is heavily cratered, similar in appearance to the Moon.',
+        'Mercury has no moons and no rings.',
+      ],
+      'mercury-element': [
+        '**Mercury** (chemical symbol **Hg**, atomic number 80) is a heavy, silvery **element** that is liquid at room temperature.',
+        'It is the only **metal** that is liquid under standard conditions — hence its old name "quicksilver".',
+        'Mercury is highly toxic and bioaccumulates as methylmercury in fish.',
+        'Historically it was used in thermometers, barometers, and dental amalgams.',
+        'Most mercury is mined from cinnabar (HgS) ore.',
+      ],
+      'mercury-god': [
+        '**Mercury** is the Roman **messenger god** — the equivalent of the Greek Hermes.',
+        'In Roman **mythology** he served as the herald of the gods and the guide of souls to the underworld.',
+        'He was also the patron of commerce, travelers, thieves, and eloquence.',
+        'He is typically depicted with winged sandals, a winged cap, and the caduceus.',
+      ],
+      'java-language': [
+        '**Java** is a class-based, object-oriented **programming language** released in 1995 by Sun Microsystems (now Oracle).',
+        'It runs on the **JVM** (Java Virtual Machine), enabling "write once, run anywhere" portability.',
+        'Java is widely used for enterprise backends, Android development, and large-scale systems.',
+        'It has automatic memory management via garbage collection and a strong type system.',
+      ],
+      'java-island': [
+        '**Java** is the most populous **island** of **Indonesia** and one of the most populous in the world.',
+        'The capital city Jakarta is located on Java\'s northwest coast.',
+        'It has been a centre of Indonesian culture, politics, and economy for centuries.',
+        'The island is dominated by volcanic mountains and fertile soil.',
+      ],
+      'apple-company': [
+        '**Apple** is a multinational technology **company** headquartered in Cupertino, California.',
+        'It was founded by Steve Jobs, Steve Wozniak, and Ronald Wayne in 1976.',
+        'Its flagship products include the **iPhone**, Mac, iPad, Apple Watch, and AirPods.',
+        'Apple is one of the most valuable companies in the world by market capitalization.',
+      ],
+      'apple-fruit': [
+        'An **apple** is a sweet, edible **fruit** produced by the apple tree (Malus domestica).',
+        'Apples grow in **orchards** in temperate climates around the world.',
+        'They come in thousands of cultivars varying in colour, size, sweetness, and tartness.',
+        'Apples are eaten fresh, baked, juiced, or fermented into cider and vinegar.',
+      ],
+    };
+
+    // Detect disambiguated topic in input ("python the snake", "mercury the
+    // element"). Returns the DISAMBIG_LISTS key when present.
+    const findDisambigTopic = (): string | null => {
+      const m = input.match(/\b(python|mercury|java|apple)\s+the\s+(programming\s+language|language|snake|planet|element|island|company|fruit|roman\s+god|god)\b/i);
+      if (!m) return null;
+      const base = m[1].toLowerCase();
+      const sense = m[2].toLowerCase();
+      const key =
+        sense.includes('language') ? `${base}-language` :
+        sense.includes('snake')    ? 'python-snake' :
+        sense.includes('planet')   ? 'mercury-planet' :
+        sense.includes('element')  ? 'mercury-element' :
+        sense.includes('island')   ? 'java-island' :
+        sense.includes('company')  ? 'apple-company' :
+        sense.includes('fruit')    ? 'apple-fruit' :
+        sense.includes('god')      ? 'mercury-god' : null;
+      if (key && key in DISAMBIG_LISTS) return key;
+      return null;
     };
 
     const findTopic = (table: Record<string, unknown>): string | null => {
@@ -2141,7 +2376,7 @@ export class VaiEngine implements ModelAdapter {
       const topic = findTopic(TOPIC_ATTRS);
       if (topic) {
         const attrs = TOPIC_ATTRS[topic];
-        const keysMatch = input.match(/with\s+keys?\s+([A-Za-z,_\s]+?)(?:\s+only|\s*[.?!]?\s*$|\s+\(no\s+extra)/i);
+        const keysMatch = input.match(/with\s+keys?\s+([A-Za-z,_\s]+?)(?:\s+only|\s*[.?!,]?\s*(?:thanks?|please)?\s*[.?!]?\s*$|\s+\(no\s+extra)/i);
         let keys: string[] = [];
         if (keysMatch) {
           keys = keysMatch[1]
@@ -2164,6 +2399,18 @@ export class VaiEngine implements ModelAdapter {
         if (ok && Object.keys(out).length > 0) {
           return '```json\n' + JSON.stringify(out, null, 2) + '\n```';
         }
+      }
+    }
+
+    // ------------------ One-sentence branch ------------------
+    // "tell me about X in one sentence" / "X in one sentence" / "describe X
+    // in a sentence" — return the curated lead sentence from FACT_LISTS,
+    // which is already a clean one-line summary.
+    const wantsOneSentence = /\b(?:in|as)\s+(?:just\s+)?(?:one|a\s+single|a)\s+sentence\b|\bone[-\s]sentence\b/i.test(input);
+    if (wantsOneSentence) {
+      const topic = findTopic(FACT_LISTS);
+      if (topic && FACT_LISTS[topic] && FACT_LISTS[topic].length > 0) {
+        return FACT_LISTS[topic][0];
       }
     }
 
@@ -2229,21 +2476,25 @@ export class VaiEngine implements ModelAdapter {
     const isBullet = /\bbullet\s+(?:points?|items?|list)\b/i.test(input);
 
     if ((numMatch || numberedListMatch || bulletMatch) && (isNumbered || isBullet)) {
-      const topic = findTopic(FACT_LISTS);
-      if (topic) {
-        const facts = FACT_LISTS[topic];
+      // Prefer disambiguated topic when present ("python the snake" over
+      // bare "python"), then fall back to bare topic.
+      const disambigKey = findDisambigTopic();
+      const facts = disambigKey ? DISAMBIG_LISTS[disambigKey] : null;
+      const topic = disambigKey ?? findTopic(FACT_LISTS);
+      const list = facts ?? (topic && topic in FACT_LISTS ? FACT_LISTS[topic] : null);
+      if (topic && list) {
         let nRaw: string | undefined;
         if (bulletMatch) nRaw = bulletMatch[1];
         else if (numberedListMatch) nRaw = numberedListMatch[1];
         else if (numMatch) nRaw = numMatch[1];
-        const n = Math.max(1, Math.min(facts.length, parseInt(nRaw ?? '3', 10) || 3));
-        const title = TITLE[topic] ?? topic;
+        const n = Math.max(1, Math.min(list.length, parseInt(nRaw ?? '3', 10) || 3));
+        const title = TITLE[topic] ?? (topic[0].toUpperCase() + topic.slice(1));
         if (isBullet && !isNumbered) {
-          const list = facts.slice(0, n).map((f) => `- ${f}`).join('\n');
-          return `Bullet points about **${title}**:\n\n${list}`;
+          const out = list.slice(0, n).map((f) => `- ${f}`).join('\n');
+          return `Bullet points about **${title}**:\n\n${out}`;
         }
-        const list = facts.slice(0, n).map((f, i) => `${i + 1}. ${f}`).join('\n');
-        return `Numbered facts about **${title}**:\n\n${list}`;
+        const out = list.slice(0, n).map((f, i) => `${i + 1}. ${f}`).join('\n');
+        return `Numbered facts about **${title}**:\n\n${out}`;
       }
     }
 
@@ -2798,7 +3049,17 @@ export class VaiEngine implements ModelAdapter {
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
     const lastMessage = request.messages[request.messages.length - 1];
-    const userContent = (lastMessage && typeof lastMessage.content === 'string') ? lastMessage.content : '';
+    let userContent = (lastMessage && typeof lastMessage.content === 'string') ? lastMessage.content : '';
+    // Follow-up rewriter — short context-dependent follow-ups ("and germany?",
+    // "who created it?", "now compare ts and js the same way") are expanded
+    // into fully-specified standalone queries using the prior user message as
+    // the frame. The downstream router then handles them like any other turn.
+    {
+      const rewritten = this.rewriteFollowupQuery(userContent, request.messages);
+      if (rewritten !== null && rewritten !== userContent) {
+        userContent = rewritten;
+      }
+    }
     // Apply feedback to the PREVIOUS topic before this turn overwrites _lastMeta.
     // If the new user message is corrective/affirmative and we have a prior topic,
     // route the signal to the ledger so it scores the previous answer.
@@ -2817,7 +3078,7 @@ export class VaiEngine implements ModelAdapter {
     // engine would fall back to the only entry it has (typically the
     // dominant tech / language reading) and confidently return the
     // wrong meaning.
-    const disambiguated = this.tryAnswerDisambiguatedTopic(userContent);
+    const disambiguated = this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent);
     let response: string;
     let structuredFormatFired = false;
     if (disambiguated !== null) {
@@ -2947,12 +3208,18 @@ export class VaiEngine implements ModelAdapter {
 
   async *chatStream(request: ChatRequest): AsyncIterable<ChatChunk> {
     const lastMessage = request.messages[request.messages.length - 1];
-    const userContent = (lastMessage && typeof lastMessage.content === 'string') ? lastMessage.content : '';
+    let userContent = (lastMessage && typeof lastMessage.content === 'string') ? lastMessage.content : '';
+    {
+      const rewritten = this.rewriteFollowupQuery(userContent, request.messages);
+      if (rewritten !== null && rewritten !== userContent) {
+        userContent = rewritten;
+      }
+    }
     this._lastSearchResponse = null; // reset before each response
     this._lastCitedAnswer = null;
     this._lastTeacherDecision = null;
     const start = performance.now();
-    const disambiguated = this.tryAnswerDisambiguatedTopic(userContent);
+    const disambiguated = this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent);
     let response: string;
     let structuredFormatFired = false;
     if (disambiguated !== null) {
