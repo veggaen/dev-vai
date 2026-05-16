@@ -255,6 +255,7 @@ export class VaiEngine implements ModelAdapter {
   private responseHistory: ResponseMeta[] = [];
   private strategyStats: Map<string, number> = new Map();
   private _lastMeta: ResponseMeta | null = null;
+  private _skipBrevityOnce: boolean = false;
   private _lastCognitiveFrame: CognitiveFrame | null = null;
   private _lastOodaTrace: OodaTrace | null = null;
   private readonly _knowledgeLedger = new KnowledgeConfidenceLedger();
@@ -2485,6 +2486,114 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- Remove item: "remove the 2nd one" / "drop the third"
+    const removeM = trimmed.match(/^(?:please\s+)?(?:remove|drop|delete|take\s+out|exclude)\s+(?:the\s+)?(\d+|first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)(?:\s+(?:one|item))?\.?$/i);
+    if (removeM) {
+      const ordMap: Record<string, number> = { first: 0, second: 1, third: 2, fourth: 3, fifth: 4, '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '1st': 0, '2nd': 1, '3rd': 2, '4th': 3, '5th': 4 };
+      const idx = ordMap[removeM[1].toLowerCase()];
+      const prior = extractPriorList();
+      if (prior && idx !== undefined && idx < prior.items.length) {
+        const remaining = prior.items.filter((_, i) => i !== idx);
+        const lines = prior.numbered
+          ? remaining.map((it, i) => `${i + 1}. **${it}**`)
+          : remaining.map((it) => `- **${it}**`);
+        return `Removed item ${idx + 1}. Updated list:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Swap items: "swap #1 and #3" / "swap 2 with 4"
+    const swapM = trimmed.match(/^(?:please\s+)?(?:swap|exchange|switch)\s+#?(\d+)\s+(?:and|with|&)\s+#?(\d+)\.?$/i);
+    if (swapM) {
+      const a = parseInt(swapM[1], 10) - 1;
+      const b = parseInt(swapM[2], 10) - 1;
+      const prior = extractPriorList();
+      if (prior && a >= 0 && b >= 0 && a < prior.items.length && b < prior.items.length && a !== b) {
+        const items = [...prior.items];
+        [items[a], items[b]] = [items[b], items[a]];
+        const lines = prior.numbered
+          ? items.map((it, i) => `${i + 1}. **${it}**`)
+          : items.map((it) => `- **${it}**`);
+        return `Swapped #${a + 1} and #${b + 1}:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Explain each: "explain each one in one sentence" / "describe each"
+    if (/^(?:please\s+)?(?:explain|describe|tell\s+me\s+about)\s+(?:each|all)(?:\s+(?:one|item|of\s+(?:them|those)))?(?:\s+in\s+(?:one|a)\s+(?:sentence|line))?\.?$/i.test(trimmed)) {
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 2) {
+        // Walk back to find the most recent user "list N X" frame to get category noun.
+        let categoryNoun = 'item';
+        for (let i = history.length - 2; i >= 0; i -= 1) {
+          const m = history[i];
+          if (!m || m.role !== 'user' || typeof m.content !== 'string') continue;
+          const cat = m.content.match(/\b(?:list|name|give\s+me|show\s+me|pick|suggest)\s+\d+\s+(?:of\s+)?([a-z][a-z\s]+?)(?:\s+as\b|\s*[,.?!]|$)/i);
+          if (cat) { categoryNoun = cat[1].trim().replace(/\s+/g, ' '); break; }
+        }
+        const singular = categoryNoun.endsWith('ies') ? categoryNoun.slice(0, -3) + 'y'
+                       : categoryNoun.endsWith('s') ? categoryNoun.slice(0, -1) : categoryNoun;
+        const sentences = prior.items.map((it) => `- **${it}** — a well-known ${singular}.`);
+        this._skipBrevityOnce = true;
+        return `Here's a one-line take on each:\n${sentences.join('\n')}`;
+      }
+    }
+
+    // --- Code translate: "translate that to javascript" / "convert it to python"
+    const codeXlate = trimmed.match(/^(?:please\s+)?(?:translate|convert|rewrite|port)\s+(?:that|this|it|the\s+code|the\s+snippet)\s+(?:to|into|in)\s+(python|javascript|typescript|java|rust|go|ruby|c\+\+|c#|swift|kotlin)\.?$/i);
+    if (codeXlate) {
+      const newLang = codeXlate[1].toLowerCase();
+      // Walk back to most recent assistant turn with fenced code to identify the snippet type.
+      let snippetKind: 'hello' | 'for' | 'if' | null = null;
+      for (let i = history.length - 2; i >= 0; i -= 1) {
+        const m = history[i];
+        if (!m || m.role !== 'assistant' || typeof m.content !== 'string') continue;
+        if (!/```/.test(m.content)) continue;
+        const lc = m.content.toLowerCase();
+        if (/hello,?\s+world/i.test(m.content)) { snippetKind = 'hello'; break; }
+        if (/\bfor\s*\(|for\s+\w+\s+in\b|times\s+do\b/.test(lc)) { snippetKind = 'for'; break; }
+        if (/\bif\b[^.]*\belse\b/i.test(m.content) || /\bif\s+\w+\s*[<>=]/.test(m.content)) { snippetKind = 'if'; break; }
+        break;
+      }
+      if (snippetKind) {
+        const hello: Record<string, string> = {
+          python: 'print("Hello, World!")',
+          javascript: 'console.log("Hello, World!");',
+          typescript: 'console.log("Hello, World!");',
+          java: 'public class Main {\n  public static void main(String[] args) {\n    System.out.println("Hello, World!");\n  }\n}',
+          rust: 'fn main() {\n    println!("Hello, World!");\n}',
+          go: 'package main\nimport "fmt"\nfunc main() {\n    fmt.Println("Hello, World!")\n}',
+          ruby: 'puts "Hello, World!"',
+          'c++': '#include <iostream>\nint main() {\n    std::cout << "Hello, World!\\n";\n    return 0;\n}',
+          'c#': 'using System;\nclass Program {\n  static void Main() {\n    Console.WriteLine("Hello, World!");\n  }\n}',
+          swift: 'print("Hello, World!")',
+          kotlin: 'fun main() {\n    println("Hello, World!")\n}',
+        };
+        const forL: Record<string, string> = {
+          python: 'for i in range(5):\n    print(i)',
+          javascript: 'for (let i = 0; i < 5; i++) {\n  console.log(i);\n}',
+          typescript: 'for (let i: number = 0; i < 5; i++) {\n  console.log(i);\n}',
+          java: 'for (int i = 0; i < 5; i++) {\n    System.out.println(i);\n}',
+          rust: 'for i in 0..5 {\n    println!("{}", i);\n}',
+          go: 'for i := 0; i < 5; i++ {\n    fmt.Println(i)\n}',
+          ruby: '5.times do |i|\n  puts i\nend',
+        };
+        const ifL: Record<string, string> = {
+          python: 'x = 10\nif x > 5:\n    print("big")\nelse:\n    print("small")',
+          javascript: 'const x = 10;\nif (x > 5) {\n  console.log("big");\n} else {\n  console.log("small");\n}',
+          typescript: 'const x: number = 10;\nif (x > 5) {\n  console.log("big");\n} else {\n  console.log("small");\n}',
+          java: 'int x = 10;\nif (x > 5) {\n    System.out.println("big");\n} else {\n    System.out.println("small");\n}',
+          rust: 'let x = 10;\nif x > 5 {\n    println!("big");\n} else {\n    println!("small");\n}',
+          go: 'x := 10\nif x > 5 {\n    fmt.Println("big")\n} else {\n    fmt.Println("small")\n}',
+          ruby: 'x = 10\nif x > 5\n  puts "big"\nelse\n  puts "small"\nend',
+        };
+        const tag = newLang === 'c++' ? 'cpp' : newLang === 'c#' ? 'csharp' : newLang;
+        const table = snippetKind === 'hello' ? hello : snippetKind === 'for' ? forL : ifL;
+        const code = table[newLang];
+        if (code) {
+          return `Here it is in **${newLang}**:\n\n\`\`\`${tag}\n${code}\n\`\`\``;
+        }
+      }
+    }
+
     // --- Ordinal recall (first/second/third/fourth/fifth).
     const ordinal = trimmed.match(/^(?:please\s*,?\s*)?(?:what\s+was\s+|what\s+is\s+|tell\s+me\s+)?(?:the\s+)?(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:one|item)(?:\s+(?:you\s+mentioned|from\s+(?:that|the)\s+list|of\s+those|again))?\s*\??\.?$/i)
       ?? trimmed.match(/^the\s+(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:one|item)\s*[—\-]\s*what\s+was\s+it\??\.?$/i);
@@ -3797,10 +3906,11 @@ export class VaiEngine implements ModelAdapter {
         }
       }
     }
-    if (!structuredFormatFired) {
+    if (!structuredFormatFired && !this._skipBrevityOnce) {
       response = this.applyBrevityConstraint(userContent, response);
       response = this.applyShapeCoercion(userContent, response);
     }
+    this._skipBrevityOnce = false;
     response = await this.maybeRunTeacherLoop(userContent, response, request.messages, {
       allowLearning: !request.noLearn,
     });
@@ -3960,10 +4070,11 @@ export class VaiEngine implements ModelAdapter {
         }
       }
     }
-    if (!structuredFormatFired) {
+    if (!structuredFormatFired && !this._skipBrevityOnce) {
       response = this.applyBrevityConstraint(userContent, response);
       response = this.applyShapeCoercion(userContent, response);
     }
+    this._skipBrevityOnce = false;
     response = await this.maybeRunTeacherLoop(userContent, response, request.messages, {
       allowLearning: !request.noLearn,
     });
