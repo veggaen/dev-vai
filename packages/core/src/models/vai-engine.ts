@@ -1980,7 +1980,8 @@ export class VaiEngine implements ModelAdapter {
     // Resolve to "list N <category-plural> ..." using the prior frame, and
     // collect prior exclusions ("one that is not X") so the new list
     // respects the chain's accumulated forbid set.
-    const ofThem = trimmed.match(/^(?:please\s+)?(list|give\s+me|give|name|show\s+me|show)\s+(\d{1,2})\s+of\s+them\b\s*(.*)$/i);
+    const ofThem = trimmed.match(/^(?:please\s+)?(list|give\s+me|give|name|show\s+me|show)\s+(\d{1,2})\s+of\s+them\b\s*(.*)$/i)
+      ?? trimmed.match(/^(?:please\s+)?(list|give\s+me|give|name|show\s+me|show)\s+(\d{1,2})\s+again\b\s*(.*)$/i);
     if (ofThem) {
       const count = ofThem[2];
       const tail = (ofThem[3] || '').trim();
@@ -2056,6 +2057,35 @@ export class VaiEngine implements ModelAdapter {
       if (/\btell\s+me\s+about\s+[a-z]/i.test(frameLower)) return `tell me about ${newTopic}`;
       // Frame: "what year was X" — generic year query
       if (/\bwhat\s+year\b/i.test(frameLower)) return frameUser.replace(/\b([a-z][a-z\s]+?)\s*\??$/i, newTopic + '?');
+    }
+
+    // ---- Bare topic with "?" — single token(s) ending in ? inheriting the
+    // most recent picker verb across noise turns. e.g. "germany?" after
+    // "what is the capital of france?" → "what is the capital of germany?".
+    // Walk back through ALL prior user turns (skipping affirmations/noise)
+    // to find a frame with a known picker verb.
+    const bareTopic = trimmed.match(/^([A-Za-z][A-Za-z0-9\-]*(?:\s+[A-Za-z][A-Za-z0-9\-]*){0,2})\s*\?\.?$/);
+    if (bareTopic) {
+      const newTopic = bareTopic[1].trim();
+      // Reject any topic containing question/auxiliary words — those are
+      // full questions, not bare topic inheritance. Single-token noise
+      // words are also skipped.
+      const hasVerby = /\b(?:is|are|was|were|am|be|been|being|do|does|did|will|would|should|could|can|may|might|has|have|had|who|what|when|where|why|how|which)\b/i.test(newTopic);
+      const isNoise = /^(?:and|what|how|why|who|when|where|which|the|a|an|please|sorry|wait|actually|hmm|cool|thanks|ok|okay|yes|no|sure|right|nice|interesting|got|alright)$/i.test(newTopic);
+      if (!hasVerby && !isNoise) {
+        for (let i = history.length - 2; i >= 0; i -= 1) {
+          const m = history[i];
+          if (!m || m.role !== 'user' || typeof m.content !== 'string') continue;
+          const cand = m.content.toLowerCase();
+          if (/\bcapital\s+of\s+[a-z]/i.test(cand)) return `what is the capital of ${newTopic}?`;
+          if (/\bceo\s+of\s+[a-z]/i.test(cand)) return `who is the ceo of ${newTopic}?`;
+          if (/\bwho\s+founded\s+[a-z]/i.test(cand)) return `who founded ${newTopic}?`;
+          if (/\bwhat\s+year\b/i.test(cand) && /\b(?:released|came\s+out|first|invented|created|founded|born)\b/i.test(cand)) {
+            return `what year was ${newTopic} first released?`;
+          }
+          if (/\btell\s+me\s+about\s+[a-z]/i.test(cand)) return `tell me about ${newTopic}`;
+        }
+      }
     }
 
     // ---- Re-shape patterns: "now do the same for X" / "now do that for X"
@@ -2145,10 +2175,35 @@ export class VaiEngine implements ModelAdapter {
       if (/\b(?:name|pick|give|suggest|list)\s+(?:a|an|one|\d+)\b/i.test(frameLower)) return frameUser;
     }
 
+    // ---- Lowercase undo: re-emit the most recent list/pick frame so the
+    // engine produces a fresh response in normal caps. The chat() flow's
+    // lowercase post-pass already detects undo cues and skips lowering.
+    if (/\b(?:never\s+mind|scratch|skip|forget|drop|cancel|wait,?\s*no|undo)\b[^.!?]*\blower[-\s]?case\b/i.test(trimmed)
+        || /\b(?:use|with)\s+(?:normal|proper|regular)\s+(?:caps?|capitalization|case)\b/i.test(trimmed)
+        || /^\s*(?:in\s+)?normal\s+caps\s*(?:now)?\.?$/i.test(trimmed)
+        || /^\s*use\s+normal\s+caps\s*(?:now)?\.?$/i.test(trimmed)) {
+      // Walk back to most recent list/pick frame and re-emit it.
+      for (let i = history.length - 2; i >= 0; i -= 1) {
+        const m = history[i];
+        if (!m || m.role !== 'user' || typeof m.content !== 'string') continue;
+        if (/\b(?:list|name|give\s+me|pick|suggest)\s+\d+\b/i.test(m.content)) return m.content;
+      }
+    }
+
+    // ---- Ordinal recall is handled by tryAnswerEarlyHooks (direct answer).
+
+    // ---- Mid-chain reset: "forget that — start over with X. name one." /
+    // "let's start fresh with Y" — strip the reset preamble so downstream
+    // routes only see the fresh request.
+    const reset = trimmed.match(/^(?:forget\s+(?:that|all\s+that)|let'?s\s+start\s+(?:over|fresh)|start\s+over)[\s,\-—.]+(?:with\s+)?(.+)$/i);
+    if (reset) {
+      return reset[1].trim();
+    }
+
     // ---- Pick-chain negation: "one that is not X" / "one other than X" /
     // "one except X" / "one more, not X" — stitch onto the prior pick frame
     // so the negation handler sees both the category and the forbidden items.
-    const pickNeg = trimmed.match(/^(?:one\s+more|another\s+one|one|another)(?:[,\s]+(?:that\s+(?:is\s+)?not|other\s+than|except|excluding|but\s+not|not))\s+(.+?)\.?\??$/i);
+    const pickNeg = trimmed.match(/^(?:and\s+)?(?:one\s+more|another\s+one|one|another)(?:[,\s]+(?:that\s+(?:is\s+)?not|other\s+than|except|excluding|but\s+not|not))\s+(.+?)\.?\??$/i);
     if (pickNeg) {
       // Prefer a "name a/an/one CATEGORY" frame even if a more recent
       // "list N of them" frame was found by the generic walker — the
@@ -2378,6 +2433,41 @@ export class VaiEngine implements ModelAdapter {
   }
 
   /**
+   * Early hooks dispatched before any other answerer. Currently handles:
+   * - Ordinal recall ("what was the second one you mentioned?") — walks
+   *   back to the most recent assistant list response and returns the Nth
+   *   item directly as a one-line answer.
+   */
+  private tryAnswerEarlyHooks(input: string, history: readonly Message[]): string | null {
+    if (typeof input !== 'string' || input.trim().length === 0) return null;
+    const trimmed = input.trim();
+    const ordinal = trimmed.match(/^(?:please\s*,?\s*)?(?:what\s+was\s+|what\s+is\s+|tell\s+me\s+)?(?:the\s+)?(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:one|item)(?:\s+(?:you\s+mentioned|from\s+(?:that|the)\s+list|of\s+those|again))?\s*\??\.?$/i)
+      ?? trimmed.match(/^the\s+(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:one|item)\s*[—\-]\s*what\s+was\s+it\??\.?$/i);
+    if (!ordinal) return null;
+    const map: Record<string, number> = { first: 0, second: 1, third: 2, fourth: 3, fifth: 4, '1st': 0, '2nd': 1, '3rd': 2, '4th': 3, '5th': 4 };
+    const idx = map[ordinal[1].toLowerCase()];
+    if (idx === undefined) return null;
+    for (let i = history.length - 2; i >= 0; i -= 1) {
+      const m = history[i];
+      if (!m || m.role !== 'assistant' || typeof m.content !== 'string') continue;
+      const lines = m.content.split(/\r?\n/);
+      const items: string[] = [];
+      for (const ln of lines) {
+        const bm = ln.match(/^\s*[-*]\s+(.+?)\s*$/);
+        const nm = ln.match(/^\s*\d+[.)]\s+(.+?)\s*$/);
+        const raw = bm ? bm[1] : (nm ? nm[1] : '');
+        if (!raw) continue;
+        items.push(raw.replace(/^\*+|\*+$/g, '').replace(/\s+[—\-:].*$/, '').trim());
+      }
+      if (items.length >= 2 && idx < items.length) {
+        const item = items[idx];
+        return `The ${ordinal[1].toLowerCase()} one was **${item}**.`;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Disambiguation router for ambiguous topics. Recognizes "X the Y" and
    * "X (the Y)" disambiguation patterns over a fixed table of dictionary
    * collisions (python/java/mercury/apple/turkey/amazon) and returns a
@@ -2507,6 +2597,16 @@ export class VaiEngine implements ModelAdapter {
       // Years
       { match: /\bwhat\s+year\s+was\s+python\s+(?:first\s+)?released\b/i,
         answer: 'Python was first released in **1991**.' },
+      { match: /\bwhat\s+year\s+was\s+javascript\s+(?:first\s+)?released\b/i,
+        answer: 'JavaScript was first released in **1995**.' },
+      { match: /\bwhat\s+year\s+was\s+java\s+(?:first\s+)?released\b/i,
+        answer: 'Java was first released in **1995**.' },
+      { match: /\bwhat\s+year\s+was\s+typescript\s+(?:first\s+)?released\b/i,
+        answer: 'TypeScript was first released in **2012**.' },
+      { match: /\bwhat\s+year\s+was\s+rust\s+(?:first\s+)?released\b/i,
+        answer: 'Rust was first released in **2010** (1.0 in 2015).' },
+      { match: /\bwhat\s+year\s+was\s+go(?:lang)?\s+(?:first\s+)?released\b/i,
+        answer: 'Go was first released in **2009**.' },
       { match: /\bwhat\s+year\s+(?:did|was)\s+(?:the\s+)?soviet\s+union\s+(?:dissolve|collapse|end|broken?\s+up)\b/i,
         answer: 'The Soviet Union dissolved in **1991**.' },
       { match: /\bwhat\s+year\s+was\s+(?:the\s+)?(?:eu|european\s+union)\s+founded\b/i,
@@ -3572,7 +3672,7 @@ export class VaiEngine implements ModelAdapter {
     // engine would fall back to the only entry it has (typically the
     // dominant tech / language reading) and confidently return the
     // wrong meaning.
-    const disambiguated = this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent) ?? this.tryAnswerNegation(userContent);
+    const disambiguated = this.tryAnswerEarlyHooks(userContent, request.messages) ?? this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent) ?? this.tryAnswerNegation(userContent);
     let response: string;
     let structuredFormatFired = false;
     if (disambiguated !== null) {
@@ -3612,9 +3712,15 @@ export class VaiEngine implements ModelAdapter {
     response = this.applyChatHardenings(userContent, request.messages, response);
     // Lowercase-only post-pass: applies after all curated handlers and
     // teacher loop have settled — so disambig / structured / canonical /
-    // fact answers all respect "lowercase only" / "in lowercase".
-    if (/\b(?:lowercase\s+only|all\s+lowercase|in\s+lowercase|lower[-\s]?case)\b/i.test(userContent)) {
-      response = response.toLowerCase();
+    // fact answers all respect "lowercase only" / "in lowercase". Skip when
+    // the user is explicitly undoing the lowercase constraint.
+    {
+      const isUndoingLower = /\b(?:never\s+mind|scratch|skip|forget|drop|remove|undo|cancel|wait,?\s*no)\b[^.!?]*\blower[-\s]?case\b/i.test(userContent)
+        || /\b(?:normal|proper|regular)\s+(?:caps?|capitalization|case)\b/i.test(userContent)
+        || /\buse\s+caps\b/i.test(userContent);
+      if (!isUndoingLower && /\b(?:lowercase\s+only|all\s+lowercase|in\s+lowercase|lower[-\s]?case)\b/i.test(userContent)) {
+        response = response.toLowerCase();
+      }
     }
     // Echo guard — if the model produced something almost identical to the
     // user's own message (very close to a verbatim parrot), substitute an
@@ -3719,7 +3825,7 @@ export class VaiEngine implements ModelAdapter {
     this._lastCitedAnswer = null;
     this._lastTeacherDecision = null;
     const start = performance.now();
-    const disambiguated = this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent) ?? this.tryAnswerNegation(userContent);
+    const disambiguated = this.tryAnswerEarlyHooks(userContent, request.messages) ?? this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent) ?? this.tryAnswerNegation(userContent);
     let response: string;
     let structuredFormatFired = false;
     if (disambiguated !== null) {
