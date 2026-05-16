@@ -1931,6 +1931,115 @@ export class VaiEngine implements ModelAdapter {
         if (/json/.test(newShape)) return `give me information about ${topic} as a json object with keys name, capital, continent`;
         if (/csv/.test(newShape)) return `list facts about ${topic} as csv`;
       }
+      // Fallback: when prior frame was a pick set ("name a planet" /
+      // "name a european capital"), rewrite to a list-of-N over that
+      // category so the negation/list router can render the new shape.
+      const PICK_PLURAL: Array<{rx: RegExp; phrase: string}> = [
+        { rx: /\bplanets?\b/i, phrase: 'planets' },
+        { rx: /\beuropean\s+capital/i, phrase: 'european capitals' },
+        { rx: /\basian\s+countr/i, phrase: 'asian countries' },
+        { rx: /\bprogramming\s+language/i, phrase: 'programming languages' },
+        { rx: /\btech\s+ceo|ceo\s+of\s+(?:a\s+)?tech/i, phrase: 'tech CEOs' },
+        { rx: /\bchemical\s+element|periodic\s+table/i, phrase: 'chemical elements' },
+      ];
+      // Search prior user turns (not just frame) for a category-bearing
+      // anchor. Prior turn might be "list 3 of them ..." which lost the
+      // category itself — walk back further.
+      let categoryPhrase: string | null = null;
+      for (let i = history.length - 2; i >= 0; i -= 1) {
+        const m = history[i];
+        if (!m || m.role !== 'user' || typeof m.content !== 'string') continue;
+        const lc = m.content.toLowerCase();
+        for (const p of PICK_PLURAL) {
+          if (p.rx.test(lc)) { categoryPhrase = p.phrase; break; }
+        }
+        if (categoryPhrase) break;
+      }
+      if (categoryPhrase) {
+        // Collect accumulated exclusions.
+        const excludes = new Set<string>();
+        for (let i = 0; i < history.length; i += 1) {
+          const m = history[i];
+          if (!m || m.role !== 'user' || typeof m.content !== 'string') continue;
+          const negM = m.content.match(/\b(?:not|other\s+than|except|excluding|but\s+not)\s+([a-z][a-z\s,]+?)(?:[?.!]|$)/i);
+          if (negM) {
+            for (const piece of negM[1].split(/,| or /i)) {
+              const v = piece.trim();
+              if (v && v.length < 30) excludes.add(v);
+            }
+          }
+        }
+        const exclList = Array.from(excludes);
+        const exclTail = exclList.length > 0 ? ` excluding ${exclList.join(' and ')}` : '';
+        const fmt = /bullet/.test(newShape) ? 'as bullet points' : /numbered/.test(newShape) ? 'as a numbered list' : '';
+        if (fmt) return `list 3 ${categoryPhrase}${exclTail} ${fmt}`;
+      }
+    }
+
+    // ---- "list/give N of them ..." — "them" refers to a prior pick set.
+    // Resolve to "list N <category-plural> ..." using the prior frame, and
+    // collect prior exclusions ("one that is not X") so the new list
+    // respects the chain's accumulated forbid set.
+    const ofThem = trimmed.match(/^(?:please\s+)?(list|give\s+me|give|name|show\s+me|show)\s+(\d{1,2})\s+of\s+them\b\s*(.*)$/i);
+    if (ofThem) {
+      const count = ofThem[2];
+      const tail = (ofThem[3] || '').trim();
+      const PICK_PLURAL: Array<{rx: RegExp; phrase: string}> = [
+        { rx: /\bplanets?\b/i, phrase: 'planets' },
+        { rx: /\beuropean\s+capital/i, phrase: 'european capitals' },
+        { rx: /\basian\s+countr/i, phrase: 'asian countries' },
+        { rx: /\bprogramming\s+language/i, phrase: 'programming languages' },
+        { rx: /\btech\s+ceo|ceo\s+of\s+(?:a\s+)?tech/i, phrase: 'tech CEOs' },
+        { rx: /\bchemical\s+element|periodic\s+table/i, phrase: 'chemical elements' },
+      ];
+      // Walk all prior user turns to find a category-bearing frame.
+      let categoryPhrase: string | null = null;
+      for (let i = history.length - 2; i >= 0; i -= 1) {
+        const m = history[i];
+        if (!m || m.role !== 'user' || typeof m.content !== 'string') continue;
+        const lc = m.content.toLowerCase();
+        for (const p of PICK_PLURAL) {
+          if (p.rx.test(lc)) { categoryPhrase = p.phrase; break; }
+        }
+        if (categoryPhrase) break;
+      }
+      if (categoryPhrase) {
+        // Collect accumulated exclusions from prior user turns.
+        const excludes = new Set<string>();
+        for (let i = 0; i < history.length; i += 1) {
+          const m = history[i];
+          if (!m || m.role !== 'user' || typeof m.content !== 'string') continue;
+          const negM = m.content.match(/\b(?:not|other\s+than|except|excluding|but\s+not)\s+([a-z][a-z\s,]+?)(?:[?.!]|$)/i);
+          if (negM) {
+            for (const piece of negM[1].split(/,| or /i)) {
+              const v = piece.trim();
+              if (v && v.length < 30) excludes.add(v);
+            }
+          }
+        }
+        const exclList = Array.from(excludes);
+        const exclTail = exclList.length > 0 ? ` excluding ${exclList.join(' and ')}` : '';
+        return `list ${count} ${categoryPhrase}${exclTail}${tail ? ' ' + tail : ''}`.trim();
+      }
+    }
+
+    // ---- Count revision: "actually make it 5 instead" — keep prior shape,
+    // swap the count. Walks back to the most recent user turn that has an
+    // explicit count (\d+) and replaces it with the new number.
+    const reviseCount = trimmed.match(/^(?:actually|wait|hmm|sorry)[,.\s]*(?:make|do)\s+it\s+(\d{1,2})(?:\s+instead)?\.?\s*$/i);
+    if (reviseCount) {
+      const newCount = reviseCount[1];
+      let countFrame: string | null = null;
+      for (let i = history.length - 2; i >= 0; i -= 1) {
+        const m = history[i];
+        if (m && m.role === 'user' && typeof m.content === 'string' && /\b\d+\b/.test(m.content) && /\b(?:list|name|give|pick|show|suggest|facts?\s+about)\b/i.test(m.content)) {
+          countFrame = m.content;
+          break;
+        }
+      }
+      if (countFrame) {
+        return countFrame.replace(/\b\d{1,2}\b/, newCount);
+      }
     }
 
     // ---- Topic-swap patterns: "and X?", "what about X?", "how about X?"
@@ -2004,16 +2113,20 @@ export class VaiEngine implements ModelAdapter {
     if (/\b(?:it|its|that)\b/i.test(trimmed)) {
       // Extract prior topic — prefer "X the Y" disambiguated topic, else
       // the substantive noun after "about" / "of" in the prior turn.
+      // Walk back through ALL prior user turns to find the first frame
+      // that yields a concrete topic (the most recent frame may itself
+      // be coreferential, e.g. "what year was it released?").
       let priorTopic: string | null = null;
-      const disambig = frameUser.match(/\b([A-Za-z]+)\s+the\s+(programming\s+language|language|snake|planet|element|island|country|company|fruit|river|bird|roman\s+god|god)\b/i);
-      if (disambig) priorTopic = `${disambig[1]} the ${disambig[2]}`;
-      else {
-        const aboutMatch = frameUser.match(/\babout\s+([a-z][a-z0-9\- ]+?)(?:[?.!,]|$)/i);
-        if (aboutMatch) priorTopic = aboutMatch[1].trim();
-        else {
-          const ofMatch = frameUser.match(/\b(?:capital|ceo|founder)\s+of\s+([a-z][a-z\s]+?)(?:[?.!,]|$)/i);
-          if (ofMatch) priorTopic = ofMatch[1].trim();
-        }
+      for (let i = history.length - 2; i >= 0 && !priorTopic; i -= 1) {
+        const m = history[i];
+        if (!m || m.role !== 'user' || typeof m.content !== 'string') continue;
+        const candidate = m.content;
+        const disambig = candidate.match(/\b([A-Za-z]+)\s+the\s+(programming\s+language|language|snake|planet|element|island|country|company|fruit|river|bird|roman\s+god|god)\b/i);
+        if (disambig) { priorTopic = `${disambig[1]} the ${disambig[2]}`; break; }
+        const aboutMatch = candidate.match(/\babout\s+([a-z][a-z0-9\- ]+?)(?:[?.!,]|$)/i);
+        if (aboutMatch) { priorTopic = aboutMatch[1].trim(); break; }
+        const ofMatch = candidate.match(/\b(?:capital|ceo|founder|president|chancellor)\s+of\s+([a-z][a-z\s]+?)(?:[?.!,]|$)/i);
+        if (ofMatch) { priorTopic = ofMatch[1].trim(); break; }
       }
       if (priorTopic) {
         // "what does it eat?" / "who created it?" / "what about its capital?"
@@ -2033,11 +2146,62 @@ export class VaiEngine implements ModelAdapter {
     }
 
     // ---- Pick-chain negation: "one that is not X" / "one other than X" /
-    // "one except X" — stitch onto the prior pick frame so the negation
-    // handler sees both the category and the forbidden items.
-    const pickNeg = trimmed.match(/^(?:one|another)\s+(?:that\s+(?:is\s+)?not|other\s+than|except|excluding|but\s+not)\s+(.+?)\.?\??$/i);
-    if (pickNeg && /\b(?:name|pick|give|suggest|list)\s+(?:a|an|one|\d+)\b/i.test(frameLower)) {
-      return `${frameUser.replace(/[?.!]\s*$/, '')} that is not ${pickNeg[1].trim()}`;
+    // "one except X" / "one more, not X" — stitch onto the prior pick frame
+    // so the negation handler sees both the category and the forbidden items.
+    const pickNeg = trimmed.match(/^(?:one\s+more|another\s+one|one|another)(?:[,\s]+(?:that\s+(?:is\s+)?not|other\s+than|except|excluding|but\s+not|not))\s+(.+?)\.?\??$/i);
+    if (pickNeg) {
+      // Prefer a "name a/an/one CATEGORY" frame even if a more recent
+      // "list N of them" frame was found by the generic walker — the
+      // category-bearing pick frame is what the negation handler needs.
+      let pickFrame: string | null = null;
+      const PICK_FRAME_RX = /\b(?:name|pick|give(?:\s+me)?|suggest)\s+(?:a|an|one)\b/i;
+      for (let i = history.length - 2; i >= 0; i -= 1) {
+        const m = history[i];
+        if (m && m.role === 'user' && typeof m.content === 'string' && PICK_FRAME_RX.test(m.content)) {
+          pickFrame = m.content;
+          break;
+        }
+      }
+      const target = pickFrame ?? frameUser;
+      if (/\b(?:name|pick|give|suggest|list)\s+(?:a|an|one|\d+)\b/i.test(target.toLowerCase())) {
+        // Accumulate exclusions from the entire chain so a 10-turn pick
+        // sequence doesn't re-suggest items already used or rejected.
+        const excludes = new Set<string>();
+        const addExcludes = (s: string): void => {
+          const re = /(?:not|other\s+than|except|excluding|but\s+not)\s+([a-z][a-z0-9+#\s.,]*?)(?=[?.!]|$)/gi;
+          let m: RegExpExecArray | null;
+          while ((m = re.exec(s)) !== null) {
+            const raw = m[1].trim();
+            for (const part of raw.split(/\s*(?:,|\bor\b|\band\b)\s*/i)) {
+              const v = part.trim().toLowerCase();
+              if (v && v.length < 40) excludes.add(v);
+            }
+          }
+        };
+        for (let i = 0; i < history.length - 1; i += 1) {
+          const m = history[i];
+          if (m && m.role === 'user' && typeof m.content === 'string') addExcludes(m.content);
+          // Also exclude items that prior assistant turns already named, so a
+          // pick chain steadily expands the forbidden set across turns.
+          if (m && m.role === 'assistant' && typeof m.content === 'string') {
+            const boldRe = /\*\*([A-Z][A-Za-z0-9+#.\- ]{1,30})\*\*/g;
+            let bm: RegExpExecArray | null;
+            while ((bm = boldRe.exec(m.content)) !== null) {
+              excludes.add(bm[1].trim().toLowerCase());
+            }
+          }
+        }
+        addExcludes(pickNeg[1]);
+        // pickNeg[1] is the bare forbidden text from the CURRENT turn
+        // (e.g. "earth", "jupiter or saturn"); addExcludes only matches
+        // explicit negators so add the raw split here.
+        for (const part of pickNeg[1].split(/\s*(?:,|\bor\b|\band\b)\s*/i)) {
+          const v = part.trim().toLowerCase();
+          if (v && v.length < 40) excludes.add(v);
+        }
+        const list = Array.from(excludes).join(' or ');
+        return `${target.replace(/[?.!]\s*$/, '')} that is not ${list || pickNeg[1].trim()}`;
+      }
     }
 
     return null;
@@ -2116,20 +2280,22 @@ export class VaiEngine implements ModelAdapter {
     ];
 
     const FORBID_RX = [
-      /\bnot\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
-      /\bother\s+than\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
-      /\bexcept\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
-      /\bexcluding\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
-      /\bskip\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
-      /\bbut\s+(?:not|skip|excluding)\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
-      /\bwithout\s+mentioning\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
+      /\bnot\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/gi,
+      /\bother\s+than\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/gi,
+      /\bexcept\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/gi,
+      /\bexcluding\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/gi,
+      /\bskip\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/gi,
+      /\bbut\s+(?:not|skip|excluding)\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/gi,
+      /\bwithout\s+mentioning\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/gi,
     ];
     const forbidden = new Set<string>();
     for (const rx of FORBID_RX) {
-      const m = input.match(rx);
-      if (m) {
+      let m: RegExpExecArray | null;
+      while ((m = rx.exec(input)) !== null) {
         for (const piece of m[1].split(/\s*,\s*(?:and\s+|or\s+)?|\s+(?:and|or)\s+/i)) {
-          const t = piece.trim().replace(/^(?:and|or)\s+/i, '').toLowerCase();
+          const t = piece.trim()
+            .replace(/^(?:and|or|not|other\s+than|except|excluding|skip|but\s+not)\s+/i, '')
+            .toLowerCase();
           if (t) forbidden.add(t);
         }
       }
@@ -2169,7 +2335,15 @@ export class VaiEngine implements ModelAdapter {
       const il = it.toLowerCase();
       for (const f of forbidden) {
         if (!f) continue;
-        if (il === f || il.includes(f) || f.includes(il)) return false;
+        if (il === f) return false;
+        // Word-boundary check: "korea" forbids "South Korea" but "java"
+        // does NOT forbid "javascript" (no boundary inside the token).
+        try {
+          const fEsc = f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          if (new RegExp(`\\b${fEsc}\\b`, 'i').test(il)) return false;
+        } catch {
+          // ignore regex compile errors
+        }
       }
       return true;
     });
@@ -2417,6 +2591,18 @@ export class VaiEngine implements ModelAdapter {
       // Python the snake — kill mechanism
       { match: /\bhow\s+(?:do(?:es)?\s+)?(?:the\s+)?python(?:s)?(?:\s+the\s+snake)?\s+(?:kill|catch)\s+(?:its\s+|their\s+)?prey\b/i,
         answer: 'Pythons are **non-venomous constrictors** — they kill prey by **wrapping** their coils around it and **squeezing** until blood flow stops (constriction), then swallow it whole.' },
+      // Python the programming language — usage
+      { match: /\b(?:what|why)\s+is\s+python(?:\s+the\s+programming\s+language)?\s+used\s+for\b/i,
+        answer: '**Python** is widely used for **data science**, **machine learning**, **web backends** (Django, Flask, FastAPI), **scripting** and automation, scientific computing, and general-purpose programming.' },
+      // Python the snake — habitat
+      { match: /\bwhere\s+(?:do(?:es)?\s+)?python(?:s)?(?:\s+the\s+snake)?\s+live\b/i,
+        answer: 'Pythons live in tropical and subtropical regions of **Africa, Asia, and Australia** — they inhabit rainforests, grasslands, swamps, woodlands, and rocky outcrops, often near water.' },
+      // Mercury the planet — size
+      { match: /\bhow\s+big\s+is\s+mercury(?:\s+the\s+planet)?\b/i,
+        answer: '**Mercury** is the **smallest** planet in the Solar System, with a diameter of about **4,879 km** (3,032 miles) — only about 38% the size of Earth.' },
+      // Mercury the planet — distance from sun
+      { match: /\bhow\s+far\s+(?:from\s+the\s+sun|is\s+mercury\s+from\s+the\s+sun)\b/i,
+        answer: '**Mercury** orbits about **57.9 million km** (36 million miles) from the Sun on average — that\'s **0.39 AU**, making it the **closest** planet to the Sun.' },
     ];
     for (const entry of FACTS) {
       if (entry.match.test(input)) return entry.answer;
