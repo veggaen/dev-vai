@@ -2464,6 +2464,167 @@ export class VaiEngine implements ModelAdapter {
       return null;
     };
 
+    // --- Echo a user-supplied numbered list back as a numbered list.
+    // Trigger phrases: "echo this list back as a numbered list",
+    // "consider this list ... please echo this list back".
+    if (/\b(echo|repeat|return)\s+(?:this|that|the)\s+list\s+back\b/i.test(trimmed)) {
+      const lines = trimmed.split(/\r?\n/);
+      const items: string[] = [];
+      for (const ln of lines) {
+        const m = ln.match(/^\s*\d+[.)]\s+(.+?)\s*$/);
+        if (m) items.push(m[1].trim());
+      }
+      if (items.length >= 2) {
+        this._skipBrevityOnce = true;
+        return `Here it is:\n${items.map((it, i) => `${i + 1}. **${it}**`).join('\n')}`;
+      }
+    }
+
+    // --- Rotate list: "rotate left by 2" / "rotate right by 1" / "shift left 2"
+    const rotM = trimmed.match(/^(?:please\s+)?(?:rotate|shift|cycle)\s+(left|right)\s+(?:by\s+)?(\d+)\.?$/i);
+    if (rotM) {
+      const dir = rotM[1].toLowerCase() as 'left' | 'right';
+      const k = parseInt(rotM[2], 10);
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 2 && k > 0) {
+        const len = prior.items.length;
+        const off = ((k % len) + len) % len;
+        const rotated = dir === 'left'
+          ? [...prior.items.slice(off), ...prior.items.slice(0, off)]
+          : [...prior.items.slice(len - off), ...prior.items.slice(0, len - off)];
+        const lines = prior.numbered
+          ? rotated.map((it, i) => `${i + 1}. **${it}**`)
+          : rotated.map((it) => `- **${it}**`);
+        return `Rotated ${dir} by ${k}:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Dedupe: "remove duplicates" / "dedupe" / "make it unique"
+    if (/^(?:please\s+)?(?:remove|drop|strip)\s+duplicates?\.?$/i.test(trimmed)
+        || /^(?:please\s+)?dedupe(?:\s+(?:the\s+)?(?:list|them|it))?\.?$/i.test(trimmed)
+        || /^(?:please\s+)?(?:make|keep)\s+(?:it|them|the\s+list)\s+unique\.?$/i.test(trimmed)) {
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 2) {
+        const seen = new Set<string>();
+        const uniques: string[] = [];
+        for (const it of prior.items) {
+          const k = it.toLowerCase();
+          if (seen.has(k)) continue;
+          seen.add(k);
+          uniques.push(it);
+        }
+        const lines = prior.numbered
+          ? uniques.map((it, i) => `${i + 1}. **${it}**`)
+          : uniques.map((it) => `- **${it}**`);
+        return `Deduped:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Synonym request: "give me 3 synonyms for fast"
+    const synM = trimmed.match(/^(?:please\s+)?(?:give\s+me\s+|list\s+|name\s+|show\s+me\s+)?(\d+)?\s*synonyms?\s+(?:for|of)\s+["'“”‘’]?([a-z][a-z\-]*)["'“”‘’]?\s*\??\.?$/i);
+    if (synM) {
+      const want = synM[1] ? parseInt(synM[1], 10) : 3;
+      const word = synM[2].toLowerCase();
+      const synonyms: Record<string, string[]> = {
+        fast: ['quick','rapid','swift','speedy','brisk','hasty','fleet'],
+        quick: ['fast','rapid','swift','speedy','brisk','hasty'],
+        slow: ['sluggish','leisurely','unhurried','plodding','gradual','tardy'],
+        big: ['large','huge','enormous','massive','great','sizeable','immense'],
+        small: ['tiny','little','miniature','petite','compact','minute'],
+        happy: ['joyful','glad','content','cheerful','pleased','delighted','elated'],
+        sad: ['unhappy','sorrowful','downcast','gloomy','miserable','melancholy'],
+        smart: ['intelligent','clever','bright','sharp','wise','brilliant','astute'],
+        stupid: ['dumb','foolish','dim','dense','obtuse','unintelligent'],
+        quiet: ['silent','calm','still','peaceful','hushed','muted','tranquil'],
+        loud: ['noisy','boisterous','raucous','blaring','thunderous','clamorous'],
+        good: ['great','fine','excellent','superb','quality','solid','decent'],
+        bad: ['poor','awful','terrible','dreadful','lousy','subpar','inferior'],
+        easy: ['simple','straightforward','effortless','painless','uncomplicated'],
+        hard: ['difficult','tough','challenging','demanding','arduous','tricky'],
+        new: ['fresh','novel','recent','modern','current','brand-new'],
+        old: ['ancient','aged','elderly','antique','vintage','outdated'],
+        beautiful: ['lovely','gorgeous','stunning','attractive','pretty','exquisite'],
+        ugly: ['unattractive','hideous','unsightly','plain','homely'],
+        rich: ['wealthy','affluent','prosperous','well-off','moneyed'],
+        poor: ['needy','destitute','impoverished','broke','penniless'],
+        strong: ['powerful','sturdy','robust','tough','solid','hardy'],
+        weak: ['feeble','frail','flimsy','fragile','delicate','puny'],
+      };
+      const pool = synonyms[word];
+      if (pool && pool.length >= want) {
+        const picks = pool.slice(0, want);
+        return `${want} synonyms for **${word}**: ${picks.map(p => `**${p}**`).join(', ')}.`;
+      }
+    }
+
+    // --- Antonym request: "what's the opposite of X" / "antonym of X"
+    const antM = trimmed.match(/^(?:please\s+)?(?:what(?:'s|\s+is)\s+the\s+opposite\s+of|opposite\s+of|antonym\s+(?:for|of))\s+["'“”‘’]?([a-z][a-z\-]*)["'“”‘’]?\s*\??\.?$/i);
+    if (antM) {
+      const word = antM[1].toLowerCase();
+      const antonyms: Record<string, string> = {
+        hot: 'cold', cold: 'hot', warm: 'cool', cool: 'warm',
+        big: 'small', small: 'big', large: 'small', little: 'big',
+        tall: 'short', short: 'tall', long: 'short',
+        fast: 'slow', slow: 'fast', quick: 'slow',
+        happy: 'sad', sad: 'happy', glad: 'sad',
+        smart: 'dumb', dumb: 'smart', clever: 'foolish', wise: 'foolish',
+        quiet: 'loud', loud: 'quiet', silent: 'loud',
+        good: 'bad', bad: 'good', great: 'terrible',
+        easy: 'hard', hard: 'easy', simple: 'complex',
+        new: 'old', old: 'new', young: 'old', fresh: 'stale',
+        beautiful: 'ugly', ugly: 'beautiful', pretty: 'ugly',
+        rich: 'poor', poor: 'rich', wealthy: 'poor',
+        strong: 'weak', weak: 'strong', powerful: 'weak',
+        up: 'down', down: 'up', high: 'low', low: 'high',
+        light: 'dark', dark: 'light', bright: 'dark',
+        open: 'closed', closed: 'open', shut: 'open',
+        full: 'empty', empty: 'full',
+        wet: 'dry', dry: 'wet',
+        clean: 'dirty', dirty: 'clean',
+        true: 'false', false: 'true', yes: 'no', no: 'yes',
+        love: 'hate', hate: 'love',
+        always: 'never', never: 'always', everywhere: 'nowhere', everyone: 'no one',
+        north: 'south', south: 'north', east: 'west', west: 'east',
+        in: 'out', inside: 'outside', above: 'below', over: 'under',
+        first: 'last', last: 'first', begin: 'end', start: 'finish',
+        win: 'lose', accept: 'reject', remember: 'forget',
+        question: 'answer', male: 'female', day: 'night', summer: 'winter',
+      };
+      const opp = antonyms[word];
+      if (opp) {
+        return `The opposite of **${word}** is **${opp}**.`;
+      }
+    }
+
+    // --- Number in words: "write 47 in words" / "spell out 100"
+    const numM = trimmed.match(/^(?:please\s+)?(?:write|spell(?:\s+out)?|convert)\s+(\d+)\s+(?:in|to|into|as)\s+words?\.?$/i);
+    if (numM) {
+      const n = parseInt(numM[1], 10);
+      if (!Number.isNaN(n) && n >= 0 && n <= 999999) {
+        const ones = ['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
+        const tens = ['','','twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
+        const sub1000 = (x: number): string => {
+          if (x === 0) return '';
+          if (x < 20) return ones[x];
+          if (x < 100) {
+            const t = Math.floor(x / 10), o = x % 10;
+            return o === 0 ? tens[t] : `${tens[t]}-${ones[o]}`;
+          }
+          const h = Math.floor(x / 100), r = x % 100;
+          return r === 0 ? `${ones[h]} hundred` : `${ones[h]} hundred ${sub1000(r)}`;
+        };
+        let w: string;
+        if (n === 0) w = 'zero';
+        else if (n < 1000) w = sub1000(n);
+        else {
+          const th = Math.floor(n / 1000), r = n % 1000;
+          const head = `${sub1000(th)} thousand`;
+          w = r === 0 ? head : `${head} ${sub1000(r)}`;
+        }
+        return `**${n}** in words is **${w}**.`;
+      }
+    }
+
     // --- Reverse list: "now reverse the order" / "reverse them" / "in reverse"
     if (/^(?:now\s+)?reverse(?:\s+(?:the\s+)?(?:order|list|them))?\.?$/i.test(trimmed)
         || /^(?:show|list|give)\s+(?:them|it|that|the\s+list)\s+(?:in\s+)?reversed?(?:\s+order)?\.?$/i.test(trimmed)
