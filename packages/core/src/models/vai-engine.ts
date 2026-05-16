@@ -3655,6 +3655,95 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- Knapsack small (v24): "given items as (weight,value): (w1,v1), …, with max weight W, what's the maximum value?"
+    {
+      const ksM = trimmed.match(/^(?:please\s+)?given\s+items\s+as\s+\(weight,\s*value\):\s*(.+?)\s*[,]?\s*with\s+max(?:imum)?\s+weight\s+(\d+)\s*[,]?\s*what'?s?\s+the\s+max(?:imum)?\s+value\s*\??\.?$/i);
+      if (ksM) {
+        const items: Array<[number, number]> = [];
+        const itemRe = /\(\s*(\d+)\s*,\s*(\d+)\s*\)/g;
+        let im: RegExpExecArray | null;
+        while ((im = itemRe.exec(ksM[1])) !== null) items.push([parseInt(im[1], 10), parseInt(im[2], 10)]);
+        const W = parseInt(ksM[2], 10);
+        if (items.length > 0 && W > 0) {
+          const dp = new Array(W + 1).fill(0);
+          for (const [w, v] of items) for (let j = W; j >= w; j--) dp[j] = Math.max(dp[j], dp[j - w] + v);
+          return `**${dp[W]}**`;
+        }
+      }
+    }
+
+    // --- Regex match (v24): does "X" match regex /pattern/ ?
+    {
+      const rmM = trimmed.match(/^(?:please\s+)?does\s+["']([^"']+)["']\s+match\s+(?:the\s+)?regex\s+\/(.+?)\/\s*\??\.?$/i);
+      if (rmM) {
+        try {
+          const re = new RegExp(rmM[2]);
+          const yes = re.test(rmM[1]);
+          return yes ? `**Yes** — it matches.` : `**No** — it doesn't match.`;
+        } catch { /* ignore */ }
+      }
+    }
+
+    // --- State machine (v24): "starts in X. transitions on each tick: A->B, B->C, …. after N ticks, what state?"
+    {
+      const smM = trimmed.match(/^(?:please\s+)?state\s+machine\s+starts\s+in\s+([A-Za-z][A-Za-z0-9]*)\.\s*transitions\s+on\s+each\s+tick:\s*(.+?)\.\s*after\s+(\d+)\s+ticks?,\s*what\s+state\s*\??\.?$/i);
+      if (smM) {
+        const start = smM[1], tickStr = smM[2], n = parseInt(smM[3], 10);
+        const map = new Map<string, string>();
+        const tr = /([A-Za-z][A-Za-z0-9]*)\s*->\s*([A-Za-z][A-Za-z0-9]*)/g;
+        let tm: RegExpExecArray | null;
+        while ((tm = tr.exec(tickStr)) !== null) map.set(tm[1], tm[2]);
+        if (map.size > 0 && map.has(start)) {
+          let cur = start;
+          for (let i = 0; i < n; i++) {
+            const nx = map.get(cur);
+            if (!nx) break;
+            cur = nx;
+          }
+          return `**${cur}**`;
+        }
+      }
+    }
+
+    // --- Truth table (v24): "evaluate (T AND F) OR (NOT T)"
+    {
+      const ttM = trimmed.match(/^(?:please\s+)?evaluate\s+(.+?)\s*\.?$/i);
+      if (ttM && /\b(?:AND|OR|NOT)\b/i.test(ttM[1]) && /\b[TF]\b/.test(ttM[1])) {
+        // Translate to JS expression
+        try {
+          let expr = ttM[1];
+          // Order matters: NOT before AND/OR
+          expr = expr.replace(/\bNOT\s+/gi, '!');
+          expr = expr.replace(/\bAND\b/gi, '&&');
+          expr = expr.replace(/\bOR\b/gi, '||');
+          expr = expr.replace(/\bT\b/g, 'true');
+          expr = expr.replace(/\bF\b/g, 'false');
+          // Validate: only allow safe chars
+          if (/^[\s!&|()truefals]+$/i.test(expr)) {
+            // eslint-disable-next-line no-new-func
+            const result = new Function(`return (${expr});`)() as boolean;
+            return result ? `**true**` : `**false**`;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    // --- Edit distance (v24): "what's the edit distance between 'a' and 'b'?"
+    {
+      const edM = trimmed.match(/^(?:please\s+)?what'?s\s+the\s+(?:edit|levenshtein)\s+distance\s+between\s+["']([^"']+)["']\s+and\s+["']([^"']+)["']\s*\??\.?$/i);
+      if (edM) {
+        const a = edM[1], b = edM[2];
+        const m = a.length, n = b.length;
+        const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+        for (let i = 0; i <= m; i++) dp[i][0] = i;
+        for (let j = 0; j <= n; j++) dp[0][j] = j;
+        for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) {
+          dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+        }
+        return `**${dp[m][n]}**`;
+      }
+    }
+
     if (/^(?:now\s+)?reverse(?:\s+(?:the\s+)?(?:order|list|them))?\.?$/i.test(trimmed)
         || /^(?:show|list|give)\s+(?:them|it|that|the\s+list)\s+(?:in\s+)?reversed?(?:\s+order)?\.?$/i.test(trimmed)
         || /^(?:in\s+)?reverse\s+order\.?$/i.test(trimmed)) {
