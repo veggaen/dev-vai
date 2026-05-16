@@ -2625,7 +2625,150 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
-    // --- Reverse list: "now reverse the order" / "reverse them" / "in reverse"
+    // --- Partition by letter: "split into ones starting with vowel/consonant"
+    if (/(?:split|partition|divide|group|separate)\s+(?:them\s+|the\s+(?:list|items)\s+)?into\s+(?:ones?|items?|words?)?\s*(?:that\s+)?(?:start|begin)(?:ing)?\s+with\s+(?:a\s+)?vowels?\s+(?:and|or|vs\.?|versus)\s+(?:ones?|items?|words?)?\s*(?:that\s+)?(?:start|begin)(?:ing)?\s+with\s+(?:a\s+)?consonants?/i.test(trimmed)
+        || /(?:split|partition|divide|group|separate).*\bvowel.*\bconsonant/i.test(trimmed)) {
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 2) {
+        const vowels = new Set(['a','e','i','o','u']);
+        const vGroup: string[] = [], cGroup: string[] = [];
+        for (const it of prior.items) {
+          const ch = it.trim()[0]?.toLowerCase();
+          if (ch && vowels.has(ch)) vGroup.push(it);
+          else if (ch) cGroup.push(it);
+        }
+        const fmt = (arr: string[]) => arr.length === 0 ? '_(none)_' : arr.map(it => `- **${it}**`).join('\n');
+        this._skipBrevityOnce = true;
+        return `**Vowel-start:**\n${fmt(vGroup)}\n\n**Consonant-start:**\n${fmt(cGroup)}`;
+      }
+    }
+
+    // --- Interleave two prior lists: "interleave them" / "interleave the two lists"
+    if (/^(?:please\s+)?interleave(?:\s+(?:them|the\s+two|both)(?:\s+lists?)?)?\.?$/i.test(trimmed)) {
+      // Collect TWO most recent assistant lists (older first as A, newer as B; result = A0,B0,A1,B1,...)
+      const lists: { items: string[]; numbered: boolean }[] = [];
+      for (let i = history.length - 2; i >= 0 && lists.length < 2; i -= 1) {
+        const m = history[i];
+        if (!m || m.role !== 'assistant' || typeof m.content !== 'string') continue;
+        const items: string[] = [];
+        let numbered = false;
+        for (const ln of m.content.split(/\r?\n/)) {
+          const nm = ln.match(/^\s*\d+[.)]\s+(.+?)\s*$/);
+          const bm = ln.match(/^\s*[-*]\s+(.+?)\s*$/);
+          const raw = nm ? nm[1] : (bm ? bm[1] : '');
+          if (!raw) continue;
+          if (nm) numbered = true;
+          items.push(raw.replace(/^\*+|\*+$/g, '').replace(/\s+[—\-:].*$/, '').trim());
+        }
+        if (items.length >= 2) lists.push({ items, numbered });
+      }
+      if (lists.length === 2) {
+        // lists[0] is the more recent (B), lists[1] is older (A). Want A first then B.
+        const A = lists[1].items, B = lists[0].items;
+        const out: string[] = [];
+        for (let i = 0; i < Math.max(A.length, B.length); i++) {
+          if (i < A.length) out.push(A[i]);
+          if (i < B.length) out.push(B[i]);
+        }
+        const lines = out.map((it, i) => `${i + 1}. **${it}**`);
+        this._skipBrevityOnce = true;
+        return `Interleaved:\n${lines.join('\n')}`;
+      }
+    }
+
+    // --- Time math: "what time is N hours after Hh am/pm?"
+    const tmM = trimmed.match(/^(?:please\s+)?what(?:'s|\s+is|\s+time\s+is)\s+(?:it\s+)?(\d+)\s+hours?\s+(after|before|past|prior\s+to)\s+(\d{1,2})\s*(am|pm)\s*\??\.?$/i)
+      ?? trimmed.match(/^(?:please\s+)?(\d+)\s+hours?\s+(after|before|past|prior\s+to)\s+(\d{1,2})\s*(am|pm)(?:\s+is)?\s*\??\.?$/i);
+    if (tmM) {
+      const dh = parseInt(tmM[1], 10);
+      const dir = tmM[2].toLowerCase();
+      const baseH = parseInt(tmM[3], 10);
+      const baseAmpm = tmM[4].toLowerCase();
+      if (baseH >= 1 && baseH <= 12 && dh >= 1 && dh <= 48) {
+        // To 24h, then add/subtract.
+        let h24 = baseH % 12 + (baseAmpm === 'pm' ? 12 : 0);
+        const sign = (dir === 'after' || dir === 'past') ? +1 : -1;
+        h24 = ((h24 + sign * dh) % 24 + 24) % 24;
+        const newAmpm = h24 >= 12 ? 'pm' : 'am';
+        const new12 = h24 % 12 === 0 ? 12 : h24 % 12;
+        return `That's **${new12}${newAmpm}**.`;
+      }
+    }
+
+    // --- Unit convert: "convert N <unit> to <unit>"
+    const ucM = trimmed.match(/^(?:please\s+)?convert\s+(-?\d+(?:\.\d+)?)\s+([a-z]+)\s+(?:to|into|in)\s+([a-z]+)\s*\??\.?$/i);
+    if (ucM) {
+      const value = parseFloat(ucM[1]);
+      const from = ucM[2].toLowerCase().replace(/s$/, '');
+      const to = ucM[3].toLowerCase().replace(/s$/, '');
+      // Normalize aliases.
+      const norm = (u: string): string => {
+        if (['kilometer','kilometre','km'].includes(u)) return 'km';
+        if (['meter','metre','m'].includes(u)) return 'm';
+        if (['centimeter','centimetre','cm'].includes(u)) return 'cm';
+        if (['millimeter','millimetre','mm'].includes(u)) return 'mm';
+        if (['mile','mi'].includes(u)) return 'mi';
+        if (['foot','feet','ft'].includes(u)) return 'ft';
+        if (['inch','inche','in'].includes(u)) return 'in';
+        if (['yard','yd'].includes(u)) return 'yd';
+        if (['kilogram','kilogramme','kg'].includes(u)) return 'kg';
+        if (['gram','gramme','g'].includes(u)) return 'g';
+        if (['pound','lb','lbs'].includes(u)) return 'lb';
+        if (['ounce','oz'].includes(u)) return 'oz';
+        if (['fahrenheit','f'].includes(u)) return 'f';
+        if (['celsius','centigrade','c'].includes(u)) return 'c';
+        if (['kelvin','k'].includes(u)) return 'k';
+        if (['hour','hr'].includes(u)) return 'hr';
+        if (['minute','min'].includes(u)) return 'min';
+        if (['second','sec','s'].includes(u)) return 's';
+        if (['day','d'].includes(u)) return 'day';
+        if (['week','wk'].includes(u)) return 'wk';
+        if (['liter','litre','l'].includes(u)) return 'l';
+        if (['milliliter','millilitre','ml'].includes(u)) return 'ml';
+        if (['gallon','gal'].includes(u)) return 'gal';
+        return u;
+      };
+      const f = norm(from), t = norm(to);
+      // length to meters
+      const toMeters: Record<string, number> = { km: 1000, m: 1, cm: 0.01, mm: 0.001, mi: 1609.344, ft: 0.3048, in: 0.0254, yd: 0.9144 };
+      // mass to grams
+      const toGrams: Record<string, number> = { kg: 1000, g: 1, lb: 453.59237, oz: 28.349523125 };
+      // time to seconds
+      const toSecs: Record<string, number> = { s: 1, min: 60, hr: 3600, day: 86400, wk: 604800 };
+      // volume to liters
+      const toLiters: Record<string, number> = { l: 1, ml: 0.001, gal: 3.785411784 };
+      let result: number | null = null;
+      let unitOut = t;
+      if (toMeters[f] !== undefined && toMeters[t] !== undefined) {
+        result = (value * toMeters[f]) / toMeters[t];
+      } else if (toGrams[f] !== undefined && toGrams[t] !== undefined) {
+        result = (value * toGrams[f]) / toGrams[t];
+      } else if (toSecs[f] !== undefined && toSecs[t] !== undefined) {
+        result = (value * toSecs[f]) / toSecs[t];
+      } else if (toLiters[f] !== undefined && toLiters[t] !== undefined) {
+        result = (value * toLiters[f]) / toLiters[t];
+      } else if (f === 'f' && t === 'c') { result = (value - 32) * 5 / 9; }
+      else if (f === 'c' && t === 'f') { result = value * 9 / 5 + 32; }
+      else if (f === 'c' && t === 'k') { result = value + 273.15; }
+      else if (f === 'k' && t === 'c') { result = value - 273.15; }
+      else if (f === 'f' && t === 'k') { result = (value - 32) * 5 / 9 + 273.15; }
+      else if (f === 'k' && t === 'f') { result = (value - 273.15) * 9 / 5 + 32; }
+      if (result !== null && Number.isFinite(result)) {
+        // Friendly unit label.
+        const label: Record<string, string> = {
+          km: 'kilometers', m: 'meters', cm: 'centimeters', mm: 'millimeters',
+          mi: 'miles', ft: 'feet', in: 'inches', yd: 'yards',
+          kg: 'kilograms', g: 'grams', lb: 'pounds', oz: 'ounces',
+          s: 'seconds', min: 'minutes', hr: 'hours', day: 'days', wk: 'weeks',
+          l: 'liters', ml: 'milliliters', gal: 'gallons',
+          f: 'Fahrenheit', c: 'Celsius', k: 'Kelvin',
+        };
+        const rounded = Math.round(result * 1000) / 1000;
+        return `${value} ${label[f] ?? from} = **${rounded} ${label[unitOut] ?? to}**.`;
+      }
+    }
+
+
     if (/^(?:now\s+)?reverse(?:\s+(?:the\s+)?(?:order|list|them))?\.?$/i.test(trimmed)
         || /^(?:show|list|give)\s+(?:them|it|that|the\s+list)\s+(?:in\s+)?reversed?(?:\s+order)?\.?$/i.test(trimmed)
         || /^(?:in\s+)?reverse\s+order\.?$/i.test(trimmed)) {
