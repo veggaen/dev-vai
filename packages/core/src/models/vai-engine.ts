@@ -1933,6 +1933,89 @@ export class VaiEngine implements ModelAdapter {
   }
 
   /**
+   * Canonical-fact router for short factual lookups the curated knowledge
+   * base doesn't otherwise cover. Each entry returns a short prose answer;
+   * the literal-output constraint / shape coercion downstream will reduce
+   * it to the requested atom (name only, year only, symbol only, etc.)
+   * for terse asks, or keep it as prose for normal asks. Without this,
+   * the engine bails with "I don't have a solid answer for ..." on basic
+   * facts where there's a single right answer.
+   */
+  private tryAnswerCanonicalFact(input: string): string | null {
+    if (typeof input !== 'string' || input.trim().length === 0) return null;
+    const FACTS: Array<{ match: RegExp; answer: string }> = [
+      // CEOs
+      { match: /\b(?:current\s+)?ceo\s+of\s+microsoft\b/i,
+        answer: '**Satya Nadella** is the CEO of Microsoft.' },
+      { match: /\b(?:current\s+)?ceo\s+of\s+apple\b/i,
+        answer: '**Tim Cook** is the CEO of Apple.' },
+      { match: /\b(?:current\s+)?ceo\s+of\s+google\b/i,
+        answer: '**Sundar Pichai** is the CEO of Google (and Alphabet).' },
+      { match: /\b(?:current\s+)?ceo\s+of\s+(?:meta|facebook)\b/i,
+        answer: '**Mark Zuckerberg** is the CEO of Meta.' },
+      { match: /\b(?:current\s+)?ceo\s+of\s+(?:amazon|aws)\b/i,
+        answer: '**Andy Jassy** is the CEO of Amazon.' },
+      { match: /\b(?:current\s+)?ceo\s+of\s+nvidia\b/i,
+        answer: '**Jensen Huang** is the CEO of NVIDIA.' },
+      { match: /\b(?:current\s+)?ceo\s+of\s+tesla\b/i,
+        answer: '**Elon Musk** is the CEO of Tesla.' },
+      // Authors / painters / creators (literal-output friendly)
+      { match: /\bwho\s+(?:wrote|authored)\s+(?:the\s+)?(?:novel\s+)?1984\b/i,
+        answer: '**George Orwell** wrote 1984.' },
+      { match: /\bwho\s+painted\s+(?:the\s+)?mona\s+lisa\b/i,
+        answer: '**Leonardo da Vinci** painted the Mona Lisa.' },
+      { match: /\bwho\s+(?:founded|started|created)\s+apple(?:\s+inc)?\b/i,
+        answer: '**Steve Jobs** (with Steve Wozniak and Ronald Wayne) founded Apple Inc. in 1976.' },
+      { match: /\bwho\s+(?:founded|started|created)\s+microsoft\b/i,
+        answer: '**Bill Gates** (with Paul Allen) founded Microsoft in 1975.' },
+      { match: /\bwho\s+invented\s+(?:the\s+)?(?:world\s+wide\s+)?web\b/i,
+        answer: '**Tim Berners-Lee** invented the World Wide Web in 1989.' },
+      // Years
+      { match: /\bwhat\s+year\s+was\s+python\s+(?:first\s+)?released\b/i,
+        answer: 'Python was first released in **1991**.' },
+      { match: /\bwhat\s+year\s+(?:did|was)\s+(?:the\s+)?soviet\s+union\s+(?:dissolve|collapse|end|broken?\s+up)\b/i,
+        answer: 'The Soviet Union dissolved in **1991**.' },
+      { match: /\bwhat\s+year\s+was\s+(?:the\s+)?(?:eu|european\s+union)\s+founded\b/i,
+        answer: 'The European Union was founded in **1993** (Maastricht Treaty).' },
+      { match: /\bwhat\s+year\s+was\s+(?:the\s+)?berlin\s+wall\s+(?:built|erected)\b/i,
+        answer: 'The Berlin Wall was built in **1961**.' },
+      { match: /\bwhat\s+year\s+(?:did|was)\s+(?:the\s+)?berlin\s+wall\s+(?:fall|come\s+down|torn\s+down)\b/i,
+        answer: 'The Berlin Wall fell in **1989**.' },
+      // Numbers / atoms
+      { match: /\bhow\s+many\s+continents\s+are\s+there\b/i,
+        answer: 'There are **7** continents.' },
+      { match: /\bhow\s+many\s+planets\s+are\s+(?:there\s+)?in\s+(?:the\s+)?solar\s+system\b/i,
+        answer: 'There are **8** planets in the Solar System.' },
+      { match: /\bhow\s+many\s+oceans\s+are\s+there\b/i,
+        answer: 'There are **5** oceans (Pacific, Atlantic, Indian, Southern, Arctic).' },
+      // Symbols / formulas
+      { match: /\b(?:chemical\s+)?symbol\s+(?:for|of)\s+gold\b/i,
+        answer: 'The chemical symbol for gold is **Au**.' },
+      { match: /\b(?:chemical\s+)?symbol\s+(?:for|of)\s+silver\b/i,
+        answer: 'The chemical symbol for silver is **Ag**.' },
+      { match: /\b(?:chemical\s+)?symbol\s+(?:for|of)\s+iron\b/i,
+        answer: 'The chemical symbol for iron is **Fe**.' },
+      { match: /\b(?:chemical\s+)?formula\s+(?:for|of)\s+water\b/i,
+        answer: 'The chemical formula for water is **H2O**.' },
+      // Capitals
+      { match: /\b(?:what\s+is\s+)?(?:the\s+)?capital\s+of\s+france\b/i,
+        answer: 'The capital of France is **Paris**.' },
+      { match: /\b(?:what\s+is\s+)?(?:the\s+)?capital\s+of\s+(?:germany|deutschland)\b/i,
+        answer: 'The capital of Germany is **Berlin**.' },
+      { match: /\b(?:what\s+is\s+)?(?:the\s+)?capital\s+of\s+japan\b/i,
+        answer: 'The capital of Japan is **Tokyo**.' },
+      { match: /\b(?:what\s+is\s+)?(?:the\s+)?capital\s+of\s+norway\b/i,
+        answer: 'The capital of Norway is **Oslo**.' },
+      { match: /\b(?:what\s+is\s+)?(?:the\s+)?capital\s+of\s+brazil\b/i,
+        answer: 'The capital of Brazil is **Brasília**.' },
+    ];
+    for (const entry of FACTS) {
+      if (entry.match.test(input)) return entry.answer;
+    }
+    return null;
+  }
+
+  /**
    * CSV coercion. If the response already has a comma-separated line with
    * ≥3 commas, return as-is. Otherwise convert bullet/numbered list items
    * into a single comma-separated line (cleaning leading bullets and
@@ -2424,7 +2507,12 @@ export class VaiEngine implements ModelAdapter {
     if (disambiguated !== null) {
       response = disambiguated;
     } else {
-      response = await this.generateResponse(userContent, request.messages);
+      const canonical = this.tryAnswerCanonicalFact(userContent);
+      if (canonical !== null) {
+        response = canonical;
+      } else {
+        response = await this.generateResponse(userContent, request.messages);
+      }
     }
     response = this.applyBrevityConstraint(userContent, response);
     response = this.applyShapeCoercion(userContent, response);
@@ -2545,7 +2633,12 @@ export class VaiEngine implements ModelAdapter {
     if (disambiguated !== null) {
       response = disambiguated;
     } else {
-      response = await this.generateResponse(userContent, request.messages);
+      const canonical = this.tryAnswerCanonicalFact(userContent);
+      if (canonical !== null) {
+        response = canonical;
+      } else {
+        response = await this.generateResponse(userContent, request.messages);
+      }
     }
     response = this.applyBrevityConstraint(userContent, response);
     response = this.applyShapeCoercion(userContent, response);
@@ -8682,6 +8775,22 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
    * "make me a javascript calculator", "build a todo list in python", etc.
    */
   private tryCreativeCodeProject(input: string, history: readonly Message[] = []): string | null {
+    // Output-format directives ("as JSON", "as csv", "markdown table",
+    // "bullet points", "numbered facts/list") are presentation asks, not
+    // project build requests. Without this guard, phrases like
+    //   "return the capital of france as JSON"
+    //   "give me information about norway as a json object"
+    //   "list 5 facts about france as a numbered list"
+    // get parsed as build prompts and route to the REST API / scaffold
+    // generators, returning Express boilerplate instead of the answer.
+    if (
+      /\bas\s+(?:csv|json|a\s+(?:markdown\s+)?table)\b/i.test(input)
+      || /\b(?:as\s+a\s+|in\s+a\s+)?json\s+object\b/i.test(input)
+      || /\b(?:bullet\s+points?|numbered\s+(?:list|facts?)|comma[-\s]separated)\b/i.test(input)
+      || /\bmarkdown\s+table\b/i.test(input)
+    ) {
+      return null;
+    }
     if (
       /^(?:how\s+do\s+i|how\s+to)\b/i.test(input)
       && /\b(?:add|implement|set\s*up|setup|configure|integrate)\b/i.test(input)
@@ -23585,7 +23694,15 @@ Classic number guessing game with hints and attempt tracking.`;
     }
 
     // JSON (exclude "javascript object" and "xml" — handled by specific FU patterns)
-    if (/(?:what\s+is\s+|hva\s+er\s+)?json\b/i.test(input) && !/jwt|web\s+token|javascript\s+object|js\s+object|xml/i.test(input)) {
+    // Also exclude format-directive prompts like "return X as JSON" or "X as a json object"
+    // where the user wants data formatted as JSON, not a JSON tutorial.
+    if (
+      /(?:what\s+is\s+|hva\s+er\s+)?json\b/i.test(input)
+      && !/jwt|web\s+token|javascript\s+object|js\s+object|xml/i.test(input)
+      && !/\bas\s+(?:a\s+)?json\b/i.test(input)
+      && !/\bjson\s+(?:object|with\s+keys?|format)\b/i.test(input)
+      && !/\breturn\s+.*\s+as\b/i.test(input)
+    ) {
       return '**JSON (JavaScript Object Notation):**\n\n' +
         'JSON is a lightweight data format for storing and exchanging data.\n\n' +
         '```json\n{\n  "name": "Vegga",\n  "age": 25,\n  "skills": ["JavaScript", "TypeScript"],\n  "active": true\n}\n```\n\n' +
