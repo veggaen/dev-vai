@@ -14,6 +14,7 @@
  *   - Conversation history (what users ask and what works)
  *   - Code repositories (structure, patterns, syntax)
  *   - Bilingual data (English <-> Norwegian mappings)
+ *   - Interacting with external Ai
  *
  * ---------------------------------------------------------------------------
  * TEST MODE - deterministic-engine controls
@@ -1755,7 +1756,14 @@ export class VaiEngine implements ModelAdapter {
     // Format constraint: list with optional count.
     if (shape.format === 'list') {
       const want = shape.count && shape.count > 0 ? shape.count : 3;
-      out = this.coerceToNumberedList(out, want);
+      // Respect explicit bullet directives: if the user asked for bullet
+      // points and the response already has the right number of bullets,
+      // do not rewrite them as a numbered list.
+      const wantsBullets = /\b(?:bullet(?:ed)?\s+(?:list|points?)|in\s+bullet\s+points?|as\s+bullets?)\b/i.test(input);
+      const bulletLineCount = (out.match(/^\s*[-*•]\s+/gm) || []).length;
+      if (!(wantsBullets && bulletLineCount >= want)) {
+        out = this.coerceToNumberedList(out, want);
+      }
     } else if (shape.format === 'csv') {
       out = this.coerceToCsv(out);
     } else if (shape.format === 'table') {
@@ -1879,7 +1887,7 @@ export class VaiEngine implements ModelAdapter {
     // message. Multi-step chains like "capital of france?" → "and germany?"
     // → "and japan?" lose the frame on the most recent user turn — fall
     // back to the most recent frame-bearing turn.
-    const FRAME_RX = /\b(?:capital\s+of|ceo\s+of|who\s+founded|tell\s+me\s+about|facts?\s+about|bullet\s+points?\s+about|compare\s+|what\s+year)\b/i;
+    const FRAME_RX = /\b(?:capital\s+of|ceo\s+of|who\s+founded|tell\s+me\s+about|facts?\s+about|bullet\s+points?\s+about|compare\s+|what\s+year|name\s+(?:a|an|one)\b|pick\s+(?:a|an|one)\b|give\s+(?:me\s+)?(?:a|an|one)\b|suggest\s+(?:a|an|one)\b|list\s+\d+\b|name\s+\d+\b)/i;
     let frameUser = priorUser;
     let frameLower = priorLower;
     if (!FRAME_RX.test(frameLower)) {
@@ -1994,6 +2002,20 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // ---- Pick-chain coreference: "another one" / "one more" / "another"
+    // re-emits the framing turn so the negation/pick handler can pick again.
+    if (/^(?:another\s+one|another|one\s+more|give\s+me\s+another|another\s+please)\.?\??$/i.test(trimmed)) {
+      if (/\b(?:name|pick|give|suggest|list)\s+(?:a|an|one|\d+)\b/i.test(frameLower)) return frameUser;
+    }
+
+    // ---- Pick-chain negation: "one that is not X" / "one other than X" /
+    // "one except X" — stitch onto the prior pick frame so the negation
+    // handler sees both the category and the forbidden items.
+    const pickNeg = trimmed.match(/^(?:one|another)\s+(?:that\s+(?:is\s+)?not|other\s+than|except|excluding|but\s+not)\s+(.+?)\.?\??$/i);
+    if (pickNeg && /\b(?:name|pick|give|suggest|list)\s+(?:a|an|one|\d+)\b/i.test(frameLower)) {
+      return `${frameUser.replace(/[?.!]\s*$/, '')} that is not ${pickNeg[1].trim()}`;
+    }
+
     return null;
   }
 
@@ -2046,9 +2068,10 @@ export class VaiEngine implements ModelAdapter {
   private tryAnswerNegation(input: string): string | null {
     if (typeof input !== 'string') return null;
     const lower = input.toLowerCase();
-    if (!/\b(?:not|other\s+than|except|but\s+(?:not|skip)|skip|without\s+mentioning)\b/i.test(lower)) {
-      return null;
-    }
+    const hasNegTrigger = /\b(?:not|other\s+than|except|excluding|but\s+(?:not|skip)|skip|without\s+mentioning)\b/i.test(lower);
+    const hasPickTrigger = /\b(?:name|pick|give|suggest|tell\s+me)\s+(?:a|an|one)\b/i.test(input)
+      || /\b(?:list|name|pick|give(?:\s+me)?|suggest)\s+\d+\b/i.test(input);
+    if (!hasNegTrigger && !hasPickTrigger) return null;
 
     type Category = { name: string; itemRx: RegExp; items: string[]; describer?: (item: string) => string };
     const CATEGORIES: Category[] = [
@@ -2072,8 +2095,9 @@ export class VaiEngine implements ModelAdapter {
       /\bnot\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
       /\bother\s+than\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
       /\bexcept\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
+      /\bexcluding\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
       /\bskip\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
-      /\bbut\s+(?:not|skip)\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
+      /\bbut\s+(?:not|skip|excluding)\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
       /\bwithout\s+mentioning\s+([a-z][a-z\s,\-]+?)(?:[?.!]|$)/i,
     ];
     const forbidden = new Set<string>();
@@ -2093,7 +2117,7 @@ export class VaiEngine implements ModelAdapter {
         if (t) forbidden.add(t);
       }
     }
-    if (forbidden.size === 0) return null;
+    if (forbidden.size === 0 && !hasPickTrigger) return null;
 
     const aboutMatch = input.match(/\b(?:tell\s+me\s+about|describe|explain)\s+([a-z][a-z\s]+?)\s+(?:but|without|except|other\s+than)\b/i);
     if (aboutMatch) {
@@ -2116,7 +2140,7 @@ export class VaiEngine implements ModelAdapter {
 
     const isPick = /\b(?:name|pick|give|suggest|tell\s+me)\s+(?:a|an|one)\b/i.test(input)
       || /\bwho\s+is\s+a\b/i.test(input);
-    const listMatch = input.match(/\blist\s+(\d+)\b/i);
+    const listMatch = input.match(/\b(?:list|name|pick|give(?:\s+me)?|suggest)\s+(\d+)\b/i);
     const allowed = cat.items.filter((it) => {
       const il = it.toLowerCase();
       for (const f of forbidden) {
@@ -2130,8 +2154,20 @@ export class VaiEngine implements ModelAdapter {
     if (listMatch) {
       const n = Math.max(1, Math.min(allowed.length, parseInt(listMatch[1], 10) || 3));
       const picked = allowed.slice(0, n);
-      const lines = picked.map((it) => `- **${it}**`).join('\n');
-      return `Here are ${n} ${cat.name.replace(/-/g, ' ')}s:\n\n${lines}`;
+      const wantsNumbered = /\bnumbered\s+(?:list|points?)\b|\bas\s+a\s+numbered\b|\bordered\s+list\b/i.test(input);
+      const lines = wantsNumbered
+        ? picked.map((it, i) => `${i + 1}. **${it}**`).join('\n')
+        : picked.map((it) => `- **${it}**`).join('\n');
+      const PLURAL: Record<string, string> = {
+        planet: 'planets',
+        'european-capital': 'european capitals',
+        'asian-country': 'asian countries',
+        'programming-language': 'programming languages',
+        'tech-ceo': 'tech CEOs',
+        'chemical-element': 'chemical elements',
+      };
+      const label = PLURAL[cat.name] ?? `${cat.name.replace(/-/g, ' ')}s`;
+      return `Here are ${n} ${label}:\n\n${lines}`;
     }
 
     if (isPick) {
@@ -2220,8 +2256,13 @@ export class VaiEngine implements ModelAdapter {
     };
     for (const [topic, entries] of Object.entries(TABLE)) {
       if (!lower.includes(topic)) continue;
+      // Strip "not the X" / ", not the X" / "— not the X" clauses so the
+      // chosen-sense ("the snake") wins over the rejected-sense ("not the
+      // language") in mid-sentence disambiguations like
+      //   "talk about python, the language not the snake".
+      const scrubbed = input.replace(/[,\-—–]?\s*(?:and\s+)?not\s+the\s+[a-z\s\-]+?(?:[?.!,]|$)/gi, ' ');
       for (const entry of entries) {
-        if (entry.match.test(input)) return entry.answer;
+        if (entry.match.test(scrubbed)) return entry.answer;
       }
     }
     return null;
@@ -3341,6 +3382,12 @@ export class VaiEngine implements ModelAdapter {
     }
     // Surgical chat hardenings — high-precision behavioral guards.
     response = this.applyChatHardenings(userContent, request.messages, response);
+    // Lowercase-only post-pass: applies after all curated handlers and
+    // teacher loop have settled — so disambig / structured / canonical /
+    // fact answers all respect "lowercase only" / "in lowercase".
+    if (/\b(?:lowercase\s+only|all\s+lowercase|in\s+lowercase|lower[-\s]?case)\b/i.test(userContent)) {
+      response = response.toLowerCase();
+    }
     // Echo guard — if the model produced something almost identical to the
     // user's own message (very close to a verbatim parrot), substitute an
     // honest fallback so the user never sees their words mirrored back as

@@ -366,6 +366,22 @@ export function detectShapeIntent(input: string): ShapeIntent | null {
   if (/\b(?:as|in)\s+csv\b|\bcomma[-\s]separated\s+values?\b|\bas\s+csv\s+values?\b/.test(lower)) intent.format = 'csv';
   if (/\b(?:as|in)\s+(?:a\s+)?json\b|\bjson\s+(?:object|with\s+keys?)\b/.test(lower)) intent.format = 'json';
 
+  // Generic count signal for explicit pick/list directives ("name 3 X",
+  // "list 5 X", "give me 4 X") regardless of the trailing noun. Pairs with
+  // the format='list' rules above so multi-item answers survive the
+  // brevity firewall even when the noun is not in the canonical suffix set
+  // (e.g. "asian countries", "european capitals", "programming languages").
+  if (!intent.count) {
+    const pickCount = lower.match(/\b(?:list|name|pick|give(?:\s+me)?|suggest|show(?:\s+me)?)\s+(\d{1,3})\b/);
+    if (pickCount) {
+      const n = Number(pickCount[1]);
+      if (n > 0 && n <= 50) {
+        intent.count = n;
+        intent.format = intent.format ?? 'list';
+      }
+    }
+  }
+
   if (intent.length || intent.format || intent.count) return intent;
   return null;
 }
