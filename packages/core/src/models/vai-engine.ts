@@ -2887,6 +2887,53 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- Opposite direction: "what's the opposite direction of north?"
+    const oppDirM = trimmed.match(/^(?:please\s+)?what(?:'s|\s+is)\s+the\s+opposite(?:\s+direction)?\s+of\s+([a-z]+)\s*\??\.?$/i)
+      ?? trimmed.match(/^(?:please\s+)?opposite\s+of\s+([a-z]+)\s*\??\.?$/i);
+    if (oppDirM) {
+      const d = oppDirM[1].toLowerCase();
+      const oppDirs: Record<string, string> = {
+        north: 'south', south: 'north', east: 'west', west: 'east',
+        up: 'down', down: 'up', left: 'right', right: 'left',
+        forward: 'backward', backward: 'forward', forwards: 'backwards', backwards: 'forwards',
+        inside: 'outside', outside: 'inside',
+        front: 'back', back: 'front', top: 'bottom', bottom: 'top',
+        northeast: 'southwest', southwest: 'northeast', northwest: 'southeast', southeast: 'northwest',
+        clockwise: 'counterclockwise', counterclockwise: 'clockwise',
+      };
+      const opp = oppDirs[d];
+      if (opp) {
+        return `The opposite of **${d}** is **${opp}**.`;
+      }
+    }
+
+    // --- Month days: "how many days are in February?"
+    const mdM = trimmed.match(/^(?:please\s+)?how\s+many\s+days?\s+(?:are\s+)?(?:there\s+)?in\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s*\??\.?$/i);
+    if (mdM) {
+      const m = mdM[1].toLowerCase();
+      const days: Record<string, number> = {
+        january: 31, february: 28, march: 31, april: 30, may: 31, june: 30,
+        july: 31, august: 31, september: 30, october: 31, november: 30, december: 31,
+      };
+      const d = days[m];
+      if (d !== undefined) {
+        const note = m === 'february' ? ' (29 in a leap year)' : '';
+        return `**${m.charAt(0).toUpperCase() + m.slice(1)}** has **${d}** days${note}.`;
+      }
+    }
+
+    // --- Word reverse: "reverse the word elephant" / "spell elephant backwards"
+    const wrM = trimmed.match(/^(?:please\s+)?(?:reverse|flip)\s+(?:the\s+)?(?:word|string|letters?\s+(?:in|of))\s+([a-z]+)\s*\??\.?$/i)
+      ?? trimmed.match(/^(?:please\s+)?spell\s+([a-z]+)\s+(?:backward|backwards|in\s+reverse)\s*\??\.?$/i)
+      ?? trimmed.match(/^(?:please\s+)?write\s+([a-z]+)\s+backwards?\s*\??\.?$/i);
+    if (wrM) {
+      const w = wrM[1].toLowerCase();
+      if (w.length >= 2 && w.length <= 40) {
+        const rev = w.split('').reverse().join('');
+        return `**${w}** reversed is **${rev}**.`;
+      }
+    }
+
     if (/^(?:now\s+)?reverse(?:\s+(?:the\s+)?(?:order|list|them))?\.?$/i.test(trimmed)
         || /^(?:show|list|give)\s+(?:them|it|that|the\s+list)\s+(?:in\s+)?reversed?(?:\s+order)?\.?$/i.test(trimmed)
         || /^(?:in\s+)?reverse\s+order\.?$/i.test(trimmed)) {
