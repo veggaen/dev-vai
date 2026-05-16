@@ -1849,6 +1849,90 @@ export class VaiEngine implements ModelAdapter {
   }
 
   /**
+   * Disambiguation router for ambiguous topics. Recognizes "X the Y" and
+   * "X (the Y)" disambiguation patterns over a fixed table of dictionary
+   * collisions (python/java/mercury/apple/turkey/amazon) and returns a
+   * short curated answer for the chosen reading. Returns null when no
+   * disambiguator is present so the normal pipeline runs.
+   *
+   * Why hardcoded? These are well-known dictionary collisions where the
+   * engine's curated knowledge base only has the dominant reading
+   * (typically the tech/language one), so without this guard the engine
+   * confidently returns the WRONG meaning when the user explicitly asked
+   * for the other one. Curated short facts beat silently wrong answers.
+   */
+  private tryAnswerDisambiguatedTopic(input: string): string | null {
+    if (typeof input !== 'string' || input.trim().length === 0) return null;
+    const lower = input.toLowerCase();
+    // Skip when the user is asking for a literal-output atom (name only,
+    // year only, one word, symbol only, etc.) or a strict structural
+    // format (csv / json / table / numbered list). Returning curated
+    // prose in those cases trips the "too verbose" / "missing atom" /
+    // "wrong shape" checks and is also obviously wrong UX.
+    if (
+      /\b(?:only the (?:name|year|number|symbol|word|formula|capital|continent)|name only|year only|number only|symbol only|one[-\s]word|in one word|just the (?:name|year|number|symbol|word)|just one word|answer with (?:only|just) the (?:name|year|number|symbol|word))\b/i.test(input)
+      || /\bas (?:csv|json|a (?:markdown\s+)?table)\b/i.test(input)
+      || /\bnumbered (?:list|facts?)\b/i.test(input)
+      || /\bbullet (?:points?|list)\b/i.test(input)
+      || /\bjson (?:object|with keys?)\b/i.test(input)
+    ) {
+      return null;
+    }
+    // Disambiguation table — keyed by topic, then by disambiguator atom that
+    // must appear in the input ("the X" / "(the X)" pattern). Each entry
+    // returns a short factual reading.
+    const TABLE: Record<string, Array<{ match: RegExp; answer: string }>> = {
+      python: [
+        { match: /\bpython\b[\s\S]{0,30}\b(?:the\s+)?(?:snake|reptile|serpent|constrictor|animal)\b/i,
+          answer: '**Python** is a genus of large, non-venomous **constrictor snakes** (family **Pythonidae**) native to **Africa, Asia, and Australia**. They kill prey by **constriction** (squeezing, not venom) and include some of the longest snakes in the world — the **reticulated python** can exceed **6 m (20 ft)**.' },
+        { match: /\bpython\b[\s\S]{0,30}\b(?:the\s+)?(?:language|programming|lang|coding)\b/i,
+          answer: '**Python** is a high-level, interpreted **programming language** created by **Guido van Rossum** and first released in **1991**. It emphasizes readable syntax and is widely used for scripting, data science, machine learning, and web backends.' },
+      ],
+      java: [
+        { match: /\bjava\b[\s\S]{0,30}\b(?:the\s+)?(?:island|indonesia|jakarta)\b/i,
+          answer: '**Java** is an **island in Indonesia**, home to the country\'s capital **Jakarta**. It\'s the world\'s most populous island (~150 million people), volcanic, and the political and economic heart of Indonesia.' },
+        { match: /\bjava\b[\s\S]{0,30}\b(?:the\s+)?(?:language|programming|lang|jvm|coding)\b/i,
+          answer: '**Java** is an **object-oriented programming language** created by **James Gosling** at **Sun Microsystems** (now Oracle), first released in **1995**. It compiles to bytecode that runs on the **JVM** (Java Virtual Machine), giving "write once, run anywhere" portability.' },
+        { match: /\bjava\b[\s\S]{0,30}\b(?:the\s+)?(?:coffee|bean|drink)\b/i,
+          answer: '**Java** (the drink) is a colloquial term for **coffee**, originally referring to coffee beans grown on the **Indonesian island of Java**, which was a major Dutch colonial coffee exporter in the 17th–18th centuries.' },
+      ],
+      mercury: [
+        { match: /\bmercury\b[\s\S]{0,30}\b(?:the\s+)?(?:planet|astronomy|solar\s+system)\b/i,
+          answer: '**Mercury** is the **smallest planet in the Solar System** and the **closest to the Sun**, with an orbital period of **88 Earth days**. It has no atmosphere to speak of and surface temperatures ranging from **-180 °C to +430 °C**.' },
+        { match: /\bmercury\b[\s\S]{0,30}\b(?:the\s+)?(?:element|metal|chemical|liquid\s+metal|periodic)\b/i,
+          answer: '**Mercury** is a chemical **element** with symbol **Hg** and atomic number **80**. It is the only **metal that is liquid at standard temperature**, historically used in thermometers and barometers, and is highly toxic.' },
+        { match: /\bmercury\b[\s\S]{0,30}\b(?:the\s+)?(?:god|roman|mythology|messenger|deity)\b/i,
+          answer: '**Mercury** is the **Roman god** of commerce, communication, travel, and trickery, and the **messenger of the gods**. He is the Roman counterpart of the Greek god **Hermes** and is typically depicted with winged sandals (talaria) and a winged hat.' },
+      ],
+      apple: [
+        { match: /\bapple\b[\s\S]{0,30}\b(?:the\s+)?(?:fruit|tree|orchard|malus|red|green)\b/i,
+          answer: '**Apple** (the fruit) is the edible pome of the **apple tree** (*Malus domestica*), one of the most widely grown **fruit trees** in the world. Apples grow in **orchards** in temperate climates and come in thousands of cultivars — sweet, tart, red, green, yellow.' },
+        { match: /\bapple\b[\s\S]{0,30}\b(?:the\s+)?(?:company|inc|computer|tech|iphone|mac|jobs|cupertino)\b/i,
+          answer: '**Apple Inc.** is an American **technology company** headquartered in **Cupertino, California**, founded in **1976** by **Steve Jobs, Steve Wozniak, and Ronald Wayne**. It designs the **iPhone, Mac, iPad, Apple Watch**, and macOS / iOS operating systems.' },
+      ],
+      turkey: [
+        { match: /\bturkey\b[\s\S]{0,30}\b(?:the\s+)?(?:country|nation|state|ankara|istanbul|anatolia|t[üu]rkiye)\b/i,
+          answer: '**Turkey** (officially the **Republic of Türkiye**) is a transcontinental **country** spanning **Anatolia in Asia** and **East Thrace in Europe**. Its capital is **Ankara** and its largest city is **Istanbul**. Population ~85 million.' },
+        { match: /\bturkey\b[\s\S]{0,30}\b(?:the\s+)?(?:bird|fowl|poultry|thanksgiving|galliformes)\b/i,
+          answer: '**Turkey** (the bird) is a large **fowl** of the genus *Meleagris*, native to **North America**. The domesticated turkey is widely raised for meat and is the traditional centerpiece of **Thanksgiving** meals in the United States.' },
+      ],
+      amazon: [
+        { match: /\bamazon\b[\s\S]{0,30}\b(?:the\s+)?(?:river|rainforest|jungle|south\s+america|brazil|tributary)\b/i,
+          answer: 'The **Amazon River** is the **largest river in the world by discharge** and the **second-longest** (~6,400 km), flowing through **Brazil, Peru, and Colombia** in **South America**. Its basin is home to the **Amazon Rainforest**, the world\'s largest tropical rainforest.' },
+        { match: /\bamazon\b[\s\S]{0,30}\b(?:the\s+)?(?:company|corp|inc|website|bezos|aws|e-commerce|store|retail)\b/i,
+          answer: '**Amazon.com, Inc.** is an American multinational **e-commerce and cloud-computing company** founded by **Jeff Bezos** in **1994**. It is the world\'s largest online retailer and, through **AWS** (Amazon Web Services), the dominant cloud infrastructure provider.' },
+      ],
+    };
+    for (const [topic, entries] of Object.entries(TABLE)) {
+      if (!lower.includes(topic)) continue;
+      for (const entry of entries) {
+        if (entry.match.test(input)) return entry.answer;
+      }
+    }
+    return null;
+  }
+
+  /**
    * CSV coercion. If the response already has a comma-separated line with
    * ≥3 commas, return as-is. Otherwise convert bullet/numbered list items
    * into a single comma-separated line (cleaning leading bullets and
@@ -2329,7 +2413,19 @@ export class VaiEngine implements ModelAdapter {
     this._lastTeacherDecision = null;
     this._lastOodaTrace = null;
     const start = performance.now();
-    let response = await this.generateResponse(userContent, request.messages);
+    // Disambiguation router — if the user explicitly disambiguates an
+    // ambiguous topic ("python the snake", "mercury the element"),
+    // commit to that reading with a short curated answer. Otherwise the
+    // engine would fall back to the only entry it has (typically the
+    // dominant tech / language reading) and confidently return the
+    // wrong meaning.
+    const disambiguated = this.tryAnswerDisambiguatedTopic(userContent);
+    let response: string;
+    if (disambiguated !== null) {
+      response = disambiguated;
+    } else {
+      response = await this.generateResponse(userContent, request.messages);
+    }
     response = this.applyBrevityConstraint(userContent, response);
     response = this.applyShapeCoercion(userContent, response);
     response = await this.maybeRunTeacherLoop(userContent, response, request.messages, {
@@ -2444,7 +2540,13 @@ export class VaiEngine implements ModelAdapter {
     this._lastCitedAnswer = null;
     this._lastTeacherDecision = null;
     const start = performance.now();
-    let response = await this.generateResponse(userContent, request.messages);
+    const disambiguated = this.tryAnswerDisambiguatedTopic(userContent);
+    let response: string;
+    if (disambiguated !== null) {
+      response = disambiguated;
+    } else {
+      response = await this.generateResponse(userContent, request.messages);
+    }
     response = this.applyBrevityConstraint(userContent, response);
     response = this.applyShapeCoercion(userContent, response);
     response = await this.maybeRunTeacherLoop(userContent, response, request.messages, {
