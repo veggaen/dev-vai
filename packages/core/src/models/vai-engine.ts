@@ -2934,6 +2934,129 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- Compare numbers (v19): bigger/larger/greater/higher/more of A and B
+    {
+      const numTok = '-?\\d+(?:\\.\\d+)?';
+      // Shape A: which/what is bigger/larger/greater, A or B
+      let cmpM = trimmed.match(new RegExp(`^(?:please\\s+)?(?:which|what)(?:'s|\\s+is)\\s+(?:the\\s+)?(?:bigger|larger|greater|higher|more|biggest|largest|greatest)(?:\\s+number)?[,:]?\\s+(${numTok})\\s+or\\s+(${numTok})\\s*\\??\\.?$`, 'i'))
+        // Shape B: between A and B, which is bigger?
+        ?? trimmed.match(new RegExp(`^(?:please\\s+)?between\\s+(${numTok})\\s+and\\s+(${numTok})[,]?\\s+which\\s+(?:is|one\\s+is)\\s+(?:bigger|larger|greater|higher|more)\\s*\\??\\.?$`, 'i'))
+        // Shape C: tell me / pick / compare …  A or B / A and B
+        ?? trimmed.match(new RegExp(`^(?:please\\s+)?(?:tell\\s+me\\s+the\\s+)?(?:bigger|larger|greater|higher)(?:\\s+number)?[:,]?\\s+(${numTok})\\s+or\\s+(${numTok})\\s*\\.?$`, 'i'))
+        ?? trimmed.match(new RegExp(`^(?:please\\s+)?pick\\s+the\\s+(?:bigger|larger|greater|higher)(?:\\s+one)?\\s+of\\s+(${numTok})\\s+and\\s+(${numTok})\\s*\\.?$`, 'i'))
+        ?? trimmed.match(new RegExp(`^(?:please\\s+)?compare\\s+(${numTok})\\s+and\\s+(${numTok})\\s*[—\\-:,]?\\s*which\\s+(?:one\\s+)?is\\s+(?:bigger|larger|greater|higher|more)\\s*\\??\\.?$`, 'i'));
+      if (cmpM) {
+        const a = parseFloat(cmpM[1]), b = parseFloat(cmpM[2]);
+        if (Number.isFinite(a) && Number.isFinite(b)) {
+          if (a === b) return `They're equal: both are **${a}**.`;
+          const bigger = a > b ? a : b;
+          return `**${bigger}** is larger.`;
+        }
+      }
+      // Shape D yes/no: is A greater than B? / is A bigger than B?
+      const cmpYn = trimmed.match(new RegExp(`^(?:please\\s+)?is\\s+(${numTok})\\s+(?:greater|bigger|larger|higher|more)\\s+than\\s+(${numTok})\\s*\\??\\.?$`, 'i'));
+      if (cmpYn) {
+        const a = parseFloat(cmpYn[1]), b = parseFloat(cmpYn[2]);
+        if (Number.isFinite(a) && Number.isFinite(b)) {
+          if (a === b) return `No — they're equal (${a}).`;
+          return a > b ? `Yes — **${a}** is greater than **${b}**.` : `No — **${a}** is less than **${b}**.`;
+        }
+      }
+      const cmpYnLess = trimmed.match(new RegExp(`^(?:please\\s+)?is\\s+(${numTok})\\s+(?:less|smaller|lower)\\s+than\\s+(${numTok})\\s*\\??\\.?$`, 'i'));
+      if (cmpYnLess) {
+        const a = parseFloat(cmpYnLess[1]), b = parseFloat(cmpYnLess[2]);
+        if (Number.isFinite(a) && Number.isFinite(b)) {
+          if (a === b) return `No — they're equal (${a}).`;
+          return a < b ? `Yes — **${a}** is less than **${b}**.` : `No — **${a}** is greater than **${b}**.`;
+        }
+      }
+    }
+
+    // --- Is palindrome (v19): algorithmic check
+    {
+      const palM = trimmed.match(/^(?:please\s+)?(?:is|check\s+(?:if|whether)|tell\s+me\s+(?:if|whether))\s+(?:the\s+word\s+)?["']?([a-z]+)["']?\s+(?:is\s+)?(?:a\s+palindrome|the\s+same\s+(?:forwards?\s+and\s+backwards?|backwards?\s+and\s+forwards?))\s*\??\.?$/i)
+        ?? trimmed.match(/^(?:please\s+)?does\s+(?:the\s+word\s+)?["']?([a-z]+)["']?\s+read\s+the\s+same\s+(?:backwards?|forwards?\s+and\s+backwards?)\s*\??\.?$/i);
+      if (palM) {
+        const w = palM[1].toLowerCase();
+        if (w.length >= 2 && w.length <= 40) {
+          const rev = w.split('').reverse().join('');
+          const isP = w === rev;
+          return isP
+            ? `Yes — **${w}** is a palindrome (reads the same backwards).`
+            : `No — **${w}** is not a palindrome (backwards it's **${rev}**).`;
+        }
+      }
+    }
+
+    // --- Alphabet position (v19): both directions
+    {
+      // pos -> letter
+      const apPos = trimmed.match(/^(?:please\s+)?(?:what(?:'s|\s+is)\s+(?:the\s+)?|which\s+letter\s+(?:is\s+(?:in\s+|at\s+)?|comes\s+))(\d+)(?:st|nd|rd|th)?\s+(?:letter\s+of\s+the\s+alphabet|in\s+the\s+alphabet|in\s+position\s+of\s+the\s+alphabet|position\s+(?:of|in)\s+the\s+alphabet)\s*\??\.?$/i)
+        ?? trimmed.match(/^(?:please\s+)?(?:give\s+me\s+)?the\s+letter\s+at\s+(?:index|position)\s+(\d+)\s+(?:in|of)\s+the\s+alphabet\s*\??\.?$/i)
+        ?? trimmed.match(/^(?:please\s+)?which\s+letter\s+(?:is\s+)?in\s+position\s+(\d+)\s+of\s+the\s+alphabet\s*\??\.?$/i)
+        ?? trimmed.match(/^(?:please\s+)?what\s+letter\s+comes\s+(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|(\d+)(?:st|nd|rd|th)?)\s+in\s+the\s+alphabet\s*\??\.?$/i);
+      if (apPos) {
+        const wordToNum: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10 };
+        let p: number;
+        if (apPos[1]) p = parseInt(apPos[1], 10);
+        else {
+          const w = trimmed.toLowerCase().match(/\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b/);
+          p = w ? wordToNum[w[1]] : NaN;
+        }
+        if (Number.isFinite(p) && p >= 1 && p <= 26) {
+          const letter = 'abcdefghijklmnopqrstuvwxyz'[p - 1];
+          const ordSuf = ((): string => { const s = ['th','st','nd','rd']; const v = p % 100; return p + (s[(v - 20) % 10] || s[v] || s[0]); })();
+          return `The ${ordSuf} letter of the alphabet is **${letter}**.`;
+        }
+      }
+      // letter -> pos
+      const apLet = trimmed.match(/^(?:please\s+)?what(?:'s|\s+is)?\s+(?:the\s+)?position\s+(?:is\s+|of\s+)?([a-z])\s+in\s+the\s+alphabet\s*\??\.?$/i)
+        ?? trimmed.match(/^(?:please\s+)?what(?:'s|\s+is)?\s+(?:the\s+)?index\s+(?:is\s+|of\s+)?([a-z])\s+in\s+the\s+alphabet\s*\??\.?$/i)
+        ?? trimmed.match(/^(?:please\s+)?which\s+(?:number|position)\s+in\s+the\s+alphabet\s+is\s+([a-z])\s*\??\.?$/i);
+      if (apLet) {
+        const ch = apLet[1].toLowerCase();
+        const idx = 'abcdefghijklmnopqrstuvwxyz'.indexOf(ch);
+        if (idx >= 0) {
+          const pos = idx + 1;
+          return `**${ch}** is at position **${pos}** in the alphabet.`;
+        }
+      }
+    }
+
+    // --- Math expression (v19): safe evaluator for arithmetic
+    {
+      const meM = trimmed.match(/^(?:please\s+)?(?:what\s+(?:is|does)|compute|evaluate|calculate)\s+(.+?)(?:\s+equal)?\s*\??\.?$/i)
+        ?? trimmed.match(/^(.+?)\s+equals?\s+what\s*\??\.?$/i);
+      if (meM) {
+        const raw = meM[1].trim();
+        // Only allow safe arithmetic chars; reject if other letters present.
+        if (/^[\d\s+\-*/().^]+$/.test(raw)) {
+          const expr = raw.replace(/\^/g, '**');
+          try {
+            // eslint-disable-next-line no-new-func
+            const v = Function(`"use strict"; return (${expr});`)() as number;
+            if (Number.isFinite(v)) {
+              const out = Number.isInteger(v) ? v.toString() : (Math.round(v * 10000) / 10000).toString();
+              return `${raw} = **${out}**.`;
+            }
+          } catch { /* fall through */ }
+        }
+      }
+    }
+
+    // --- Count words in quoted text (v19)
+    {
+      const cwM = trimmed.match(/^(?:please\s+)?(?:how\s+many\s+words\s+(?:are\s+(?:there\s+)?in\s+|in\s+)|count\s+the\s+words\s+(?:in\s+)?|what(?:'s|\s+is)\s+the\s+word\s+count\s+(?:of\s+)?|tell\s+me\s+the\s+number\s+of\s+words\s+(?:in\s+)?|word\s+count[:\s]+|how\s+many\s+words[:\s]+)["']([^"']+)["']\s*\??\.?$/i)
+        ?? trimmed.match(/^(?:please\s+)?how\s+many\s+words\s+does\s+["']([^"']+)["']\s+have\s*\??\.?$/i);
+      if (cwM) {
+        const text = cwM[1].trim();
+        if (text) {
+          const count = text.split(/\s+/).filter(Boolean).length;
+          return `**${count}** words.`;
+        }
+      }
+    }
+
     if (/^(?:now\s+)?reverse(?:\s+(?:the\s+)?(?:order|list|them))?\.?$/i.test(trimmed)
         || /^(?:show|list|give)\s+(?:them|it|that|the\s+list)\s+(?:in\s+)?reversed?(?:\s+order)?\.?$/i.test(trimmed)
         || /^(?:in\s+)?reverse\s+order\.?$/i.test(trimmed)) {
