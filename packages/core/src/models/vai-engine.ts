@@ -2819,6 +2819,158 @@ export class VaiEngine implements ModelAdapter {
       }
     }
 
+    // --- Acronym build: "make an acronym from those" / "form an acronym"
+    if (/^(?:please\s+)?(?:make|build|form|create|give\s+me)\s+(?:an?\s+)?acronym(?:\s+(?:from|of|using|out\s+of))?\s+(?:those|them|that\s+list|these|the\s+list|the\s+items)?\.?$/i.test(trimmed)) {
+      const prior = extractPriorList();
+      if (prior && prior.items.length >= 2) {
+        const letters = prior.items.map(it => {
+          // First letter of the first word (skip leading non-letters).
+          const m = it.trim().match(/[A-Za-z]/);
+          return m ? m[0].toUpperCase() : '';
+        }).filter(Boolean);
+        if (letters.length >= 2) {
+          const acro = letters.join('');
+          return `Acronym: **${acro}**.`;
+        }
+      }
+    }
+
+    // --- Letter count: "how many letters are in 'X'?"
+    const letterCntM = trimmed.match(/^(?:please\s+)?how\s+many\s+letters?\s+(?:are\s+|is\s+)?(?:there\s+)?(?:in|does)\s+["'“”‘’]?([A-Za-z][A-Za-z\-']*)["'“”‘’]?(?:\s+have)?\s*\??\.?$/i);
+    if (letterCntM) {
+      const word = letterCntM[1];
+      const count = word.replace(/[^A-Za-z]/g, '').length;
+      this._skipBrevityOnce = true;
+      return `**${word}** has **${count}** letters.`;
+    }
+
+    // --- Abbreviation expansion: "what does NASA stand for?"
+    const abbrM = trimmed.match(/^(?:please\s+)?(?:what\s+does|what\s+do)\s+([A-Z]{2,8})\s+stand\s+for\s*\??\.?$/);
+    if (abbrM) {
+      const ab = abbrM[1].toUpperCase();
+      const expansions: Record<string, string> = {
+        NASA: 'National Aeronautics and Space Administration',
+        HTML: 'HyperText Markup Language',
+        CSS: 'Cascading Style Sheets',
+        JS: 'JavaScript',
+        TS: 'TypeScript',
+        CPU: 'Central Processing Unit',
+        GPU: 'Graphics Processing Unit',
+        RAM: 'Random Access Memory',
+        ROM: 'Read-Only Memory',
+        SSD: 'Solid State Drive',
+        HDD: 'Hard Disk Drive',
+        URL: 'Uniform Resource Locator',
+        URI: 'Uniform Resource Identifier',
+        API: 'Application Programming Interface',
+        DNA: 'Deoxyribonucleic Acid',
+        RNA: 'Ribonucleic Acid',
+        FBI: 'Federal Bureau of Investigation',
+        CIA: 'Central Intelligence Agency',
+        NATO: 'North Atlantic Treaty Organization',
+        UNESCO: 'United Nations Educational, Scientific and Cultural Organization',
+        WHO: 'World Health Organization',
+        UN: 'United Nations',
+        EU: 'European Union',
+        USA: 'United States of America',
+        UK: 'United Kingdom',
+        SQL: 'Structured Query Language',
+        HTTP: 'HyperText Transfer Protocol',
+        HTTPS: 'HyperText Transfer Protocol Secure',
+        FTP: 'File Transfer Protocol',
+        TCP: 'Transmission Control Protocol',
+        UDP: 'User Datagram Protocol',
+        IP: 'Internet Protocol',
+        DNS: 'Domain Name System',
+        VPN: 'Virtual Private Network',
+        LAN: 'Local Area Network',
+        WAN: 'Wide Area Network',
+        USB: 'Universal Serial Bus',
+        PDF: 'Portable Document Format',
+        JSON: 'JavaScript Object Notation',
+        XML: 'Extensible Markup Language',
+        YAML: 'YAML Ain\u2019t Markup Language',
+        REST: 'Representational State Transfer',
+        SOAP: 'Simple Object Access Protocol',
+        CRUD: 'Create, Read, Update, Delete',
+        SDK: 'Software Development Kit',
+        IDE: 'Integrated Development Environment',
+        OS: 'Operating System',
+        AI: 'Artificial Intelligence',
+        ML: 'Machine Learning',
+        NLP: 'Natural Language Processing',
+        IoT: 'Internet of Things',
+        VR: 'Virtual Reality',
+        AR: 'Augmented Reality',
+        ATM: 'Automated Teller Machine',
+        GPS: 'Global Positioning System',
+        LED: 'Light-Emitting Diode',
+        LCD: 'Liquid Crystal Display',
+        OLED: 'Organic Light-Emitting Diode',
+        PIN: 'Personal Identification Number',
+        ASAP: 'As Soon As Possible',
+        FAQ: 'Frequently Asked Questions',
+        ETA: 'Estimated Time of Arrival',
+        DIY: 'Do It Yourself',
+        CEO: 'Chief Executive Officer',
+        CFO: 'Chief Financial Officer',
+        CTO: 'Chief Technology Officer',
+        COO: 'Chief Operating Officer',
+      };
+      const exp = expansions[ab];
+      if (exp) {
+        return `**${ab}** stands for **${exp}**.`;
+      }
+    }
+
+    // --- Short definition: "define 'X' in one sentence" / "define X"
+    const defM = trimmed.match(/^(?:please\s+)?(?:define|what\s+is|what\s+does)\s+["'“”‘’]?([a-z][a-z\-]*)["'“”‘’]?(?:\s+mean)?(?:\s+in\s+(?:one|a)\s+(?:sentence|line|word))?\s*\??\.?$/i);
+    if (defM) {
+      const word = defM[1].toLowerCase();
+      const defs: Record<string, string> = {
+        algorithm: 'a step-by-step procedure or set of rules for solving a problem or completing a task',
+        database: 'an organized collection of data stored and accessed electronically',
+        compiler: 'a program that translates source code from a high-level language into machine code',
+        interpreter: 'a program that executes source code directly without compiling it ahead of time',
+        function: 'a reusable block of code that takes inputs, performs a task, and may return a value',
+        variable: 'a named storage location that holds a value which can change during program execution',
+        constant: 'a named value that cannot be changed once assigned',
+        array: 'an ordered collection of values stored under a single variable name and accessed by index',
+        object: 'a data structure that groups related values and behaviors together as named properties',
+        class: 'a blueprint for creating objects that share the same properties and methods',
+        loop: 'a control structure that repeats a block of code while a condition holds',
+        recursion: 'a programming technique where a function calls itself to solve smaller subproblems',
+        api: 'a set of rules and endpoints that lets one program request data or actions from another',
+        framework: 'a reusable software platform that provides structure and tools for building applications',
+        library: 'a collection of prewritten code that programs can call to perform common tasks',
+        cache: 'a temporary high-speed storage layer that holds frequently accessed data for fast retrieval',
+        container: 'a lightweight, isolated runtime that packages an application with its dependencies',
+        kernel: 'the core component of an operating system that manages hardware and system resources',
+        thread: 'the smallest unit of execution within a process that can run concurrently with others',
+        process: 'an instance of a running program with its own memory space and resources',
+        protocol: 'a formal set of rules that defines how data is exchanged between systems',
+        encryption: 'the process of converting information into a coded form to prevent unauthorized access',
+        hashing: 'the process of mapping data of arbitrary size to a fixed-size value using a one-way function',
+        debugging: 'the process of finding and fixing errors or unexpected behavior in code',
+        refactoring: 'the process of restructuring existing code without changing its external behavior',
+      };
+      const d = defs[word];
+      if (d) {
+        return `**${word}** — ${d}.`;
+      }
+    }
+
+    // --- Word count of last response: "how many words were in your last response?"
+    if (/^(?:please\s+)?how\s+many\s+words?\s+(?:were|was|are|is)\s+(?:there\s+)?in\s+your\s+(?:last|previous|prior)\s+(?:response|reply|message|answer)\s*\??\.?$/i.test(trimmed)) {
+      // Walk back from history.length-2 (skip current user) for the most recent assistant.
+      for (let i = history.length - 2; i >= 0; i -= 1) {
+        const m = history[i];
+        if (!m || m.role !== 'assistant' || typeof m.content !== 'string') continue;
+        const wc = m.content.split(/\s+/).filter(Boolean).length;
+        return `My last response had **${wc}** words.`;
+      }
+    }
+
     // --- Ordinal recall (first/second/third/fourth/fifth).
     const ordinal = trimmed.match(/^(?:please\s*,?\s*)?(?:what\s+was\s+|what\s+is\s+|tell\s+me\s+)?(?:the\s+)?(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:one|item)(?:\s+(?:you\s+mentioned|from\s+(?:that|the)\s+list|of\s+those|again))?\s*\??\.?$/i)
       ?? trimmed.match(/^the\s+(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:one|item)\s*[—\-]\s*what\s+was\s+it\??\.?$/i);
