@@ -1,6 +1,6 @@
 # VeggaAI
 
-VeggaAI, or **VAI** (**Virtual Apprentice Intelligence**), is a local-first AI apprentice built to help you think, retrieve what you read earlier, build software, and iterate with real evidence instead of vague automation theater.
+VeggaAI, or **VAI** (**Virtual Apprentice Intelligence**), is your own AI engine, built to adapt to you and the projects you build — a local-first apprentice that helps you think, build software, and iterate with real evidence instead of vague automation theater.
 
 The current north star is simple:
 

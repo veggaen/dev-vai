@@ -61,6 +61,10 @@ export type {
   ConversationGroundingDependencies,
   ContextGroundedFollowUpIntent,
 } from './chat/conversation-grounding.js';
+export { classifyTurn } from './chat/turn-classifier.js';
+export type { TurnClass, TurnClassification } from './chat/turn-classifier.js';
+export { extractActiveTopicBrief, hasTopicOverlap } from './chat/active-topic-brief.js';
+export type { ActiveTopicBrief, ExtractActiveTopicBriefOptions } from './chat/active-topic-brief.js';
 export { evaluateChatAnswerQuality } from './chat/chat-answer-quality.js';
 export type {
   ChatAnswerQualityInput,

@@ -618,46 +618,61 @@ function titleCaseEntity(raw: string): string {
   }).join(' ');
 }
 
+// Reject "entities" that are obviously question-template noise leaking into
+// the slot — e.g. when a follow-up prompt like "And the primary language
+// spoken there?" gets crossed with a previous-topic stitch and produces
+// captures like "the primary language spoken there". Real factual entities
+// are short proper nouns ("Norway", "Microsoft", "Einstein"), not phrases
+// containing the very topic words the chip is meant to ask about.
+const FACTUAL_ENTITY_NOISE = /\b(?:language|languages|currency|currencies|capital|capitals|population|populations|founder|founders|headquarters|ceo|speed|symbol|symbols|code|codes|primary|official|main|spoken|there|here|this|that|those|these|same|above|below|previously|earlier)\b/i;
+
+function isLikelyFactualEntity(entity: string): boolean {
+  if (!entity || entity.length < 2) return false;
+  if (entity.split(/\s+/).length > 5) return false;
+  if (FACTUAL_ENTITY_NOISE.test(entity)) return false;
+  return true;
+}
+
 export function detectFactualLookup(rawTopic: string): FactualLookup | null {
   const t = rawTopic.trim().replace(/[?.!]+$/g, '');
   if (!t) return null;
 
   let m = /\bcapital\s+(?:city\s+)?of\s+(.+)$/i.exec(t);
-  if (m) return { kind: 'capital', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'capital', entity: e }; }
   m = /\bpopulation\s+of\s+(.+)$/i.exec(t);
-  if (m) return { kind: 'population', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'population', entity: e }; }
   m = /\bcurrency\s+(?:of|in)\s+(.+)$/i.exec(t);
-  if (m) return { kind: 'currency', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'currency', entity: e }; }
   m = /\b(?:official\s+)?language(?:s)?\s+(?:of|spoken\s+in)\s+(.+)$/i.exec(t);
-  if (m) return { kind: 'language', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'language', entity: e }; }
 
   m = /\b(?:who\s+)?(?:founded|created|started)\s+(.+)$/i.exec(t);
-  if (m) return { kind: 'founder', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'founder', entity: e }; }
   m = /\bfounder(?:s)?\s+of\s+(.+)$/i.exec(t);
-  if (m) return { kind: 'founder', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'founder', entity: e }; }
   m = /\bwhen\s+was\s+(.+?)\s+(?:founded|created|started|established)\b/i.exec(t);
-  if (m) return { kind: 'founded-when', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'founded-when', entity: e }; }
   m = /\b(?:headquarters|hq)\s+of\s+(.+)$/i.exec(t);
-  if (m) return { kind: 'headquarters', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'headquarters', entity: e }; }
   m = /\b(?:ceo|chief\s+executive)\s+of\s+(.+)$/i.exec(t);
-  if (m) return { kind: 'ceo', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'ceo', entity: e }; }
 
   m = /\bspeed\s+of\s+(.+)$/i.exec(t);
-  if (m) return { kind: 'speed', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'speed', entity: e }; }
 
   m = /\bwhen\s+was\s+(.+?)\s+born\b/i.exec(t);
-  if (m) return { kind: 'birth', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'birth', entity: e }; }
   m = /\bwhen\s+(?:did|was)\s+(.+?)\s+die\b/i.exec(t);
-  if (m) return { kind: 'death', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'death', entity: e }; }
   m = /\bwho\s+(?:is|was)\s+(.+)$/i.exec(t);
   if (m) {
     const entity = titleCaseEntity(m[1].replace(/^the\s+/i, ''));
-    if (entity.length >= 2) return { kind: 'who-is', entity };
+    if (entity.length >= 2 && isLikelyFactualEntity(entity)) return { kind: 'who-is', entity };
   }
   m = /\bwhere\s+is\s+(.+)$/i.exec(t);
-  if (m) return { kind: 'where-is', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'where-is', entity: e }; }
   m = /\bwhen\s+was\s+(.+)$/i.exec(t);
-  if (m) return { kind: 'when-was', entity: titleCaseEntity(m[1]) };
+  if (m) { const e = titleCaseEntity(m[1]); if (isLikelyFactualEntity(e)) return { kind: 'when-was', entity: e }; }
 
   return null;
 }
@@ -1044,9 +1059,17 @@ async function fetchSearXNG(query: string, baseUrl: string, timeoutMs: number): 
   return results;
 }
 
+// Module-level reddit rate-limit cooldown. When reddit returns 429 we back
+// off site-wide for 60s so we stop burning per-request timeout budget.
+let redditCooldownUntil = 0;
+
 async function fetchDuckDuckGo(query: string, timeoutMs: number): Promise<RawSearchResult[]> {
   const results: RawSearchResult[] = [];
   const primarySubject = extractPrimarySubject(query, []);
+  // Community/consumer/temporal markers — when present, Wikipedia REST tends
+  // to return greedy generic articles ("Computer keyboard" for "best mech
+  // switch"). We bias toward Wikipedia full-text + Reddit instead.
+  const isCommunityQuery = /\b(best|top|popular|recommend(?:ed|ation)?|review|vs\.?|versus|worth|underrated|overrated|good for|alternative|cheap|budget|favourite|favorite|recommend\s+me|which\s+\w+\s+should)\b|\b20\d{2}\b|\bnow\b|\bcurrent(?:ly)?\b|\blatest\b|\btoday\b/i.test(query);
 
   // 1. DDG Instant Answer API — Wikipedia abstracts, direct answers, related topics
   try {
@@ -1105,8 +1128,10 @@ async function fetchDuckDuckGo(query: string, timeoutMs: number): Promise<RawSea
     }
   } catch { /* continue to fallback */ }
 
-  // 2. Wikipedia REST API — free, reliable, no key needed, high-quality summaries
-  if (results.length < 3) {
+  // 2. Wikipedia REST API — free, reliable, no key needed, high-quality summaries.
+  // Skipped for community/consumer/temporal queries where REST returns greedy
+  // generic articles (e.g. "Computer keyboard" for "best mech switch 2024").
+  if (results.length < 3 && !isCommunityQuery) {
     try {
       const term = primarySubject.split(/\s+/).slice(0, 5).join(' ');
       const wikiUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(term)}`;
@@ -1128,6 +1153,302 @@ async function fetchDuckDuckGo(query: string, timeoutMs: number): Promise<RawSea
         }
       }
     } catch { /* no results */ }
+  }
+
+  // 2.2 Wikipedia full-text search — covers broad / community / entertainment
+  // queries where the REST summary endpoint 404s. Returns matching article
+  // titles with snippets so the synthesizer can cross-reference across them.
+  // Free, no key, no rate-limit pain for occasional use.
+  if (results.length < 3) {
+    try {
+      const wikiSearchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=6&srprop=snippet&format=json&origin=*`;
+      const wsRes = await fetch(wikiSearchUrl, {
+        headers: { 'User-Agent': 'VeggaAI/1.0 (local AI learning agent)' },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (wsRes.ok) {
+        const wsData = await wsRes.json() as {
+          query?: { search?: Array<{ title?: string; snippet?: string }> };
+        };
+        for (const hit of (wsData.query?.search ?? []).slice(0, 6)) {
+          if (!hit.title || !hit.snippet) continue;
+          const cleanSnippet = hit.snippet.replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+          if (cleanSnippet.length < 20) continue;
+          // For community/consumer queries, skip wiki articles whose title
+          // doesn't share at least one significant token with the query
+          // (filters greedy generic matches like "Keyboard technology").
+          if (isCommunityQuery) {
+            const titleTokens = new Set(hit.title.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []);
+            const queryTokens = (query.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [])
+              .filter((t) => !['best', 'good', 'recommend', 'review', 'should', 'which', 'what', 'right', 'better', 'really', 'currently', 'latest', 'today'].includes(t));
+            const overlap = queryTokens.some((t) => titleTokens.has(t));
+            if (!overlap) continue;
+          }
+          results.push({
+            title: hit.title,
+            snippet: cleanSnippet,
+            url: `https://en.wikipedia.org/wiki/${encodeURIComponent(hit.title.replace(/\s+/g, '_'))}`,
+          });
+        }
+      }
+    } catch { /* continue */ }
+  }
+
+  // 2.3 Reddit JSON search — keyless, surfaces real community discussion that
+  // Wikipedia + DDG miss (creators, fandoms, niche communities, current
+  // events). Free, no auth, rate-limited but fine for ad-hoc use.
+  // ALWAYS runs (not gated): Wikipedia + DDG together easily exceed 4 results
+  // for generic queries and starve out high-signal community evidence. We need
+  // reddit for opinion / recommendation / niche-entity queries even when wiki
+  // returned plenty of (often irrelevant) hits.
+  // Run reddit when wiki/DDG returned thin OR when query has community/consumer
+  // markers (recommendations, comparisons, current-events). Gating this keeps
+  // concurrent fetch counts bounded under rapid back-to-back chat traffic.
+  // Skip reddit entirely for ~60s after a 429 — saves budget for other providers.
+  if (Date.now() < redditCooldownUntil) {
+    // suppressed by cooldown
+  } else if (results.length < 4 || isCommunityQuery) {
+    try {
+      // Strip trailing "reddit" from the query before sending to reddit search
+      // — reddit treats it as a topic word and wastes hit slots matching it
+      // inside titles. We also tried appending recommendation intent terms
+      // here, but reddit's relevance ranker degraded with extra synonyms;
+      // the drama filter + anchor re-ranking below proved more effective.
+      const _qForReddit = query.replace(/\breddit\b/gi, '').trim();
+      const redditUrl = `https://www.reddit.com/search.json?q=${encodeURIComponent(_qForReddit)}&limit=8&sort=relevance&t=year`;
+      const rRes = await fetch(redditUrl, {
+        headers: { 'User-Agent': 'VeggaAI/1.0 (local AI learning agent)' },
+        signal: AbortSignal.timeout(Math.min(timeoutMs, 2500)),
+      });
+      if (rRes.status === 429) {
+        redditCooldownUntil = Date.now() + 60_000;
+      } else if (rRes.ok) {
+        const rData = await rRes.json() as {
+          data?: { children?: Array<{ data?: {
+            title?: string; selftext?: string; subreddit?: string;
+            permalink?: string; score?: number; num_comments?: number;
+          } }> };
+        };
+        // First pass: collect candidates so we can pick the top few to enrich
+        // with full post bodies + top comments. Reddit search returns titles
+        // and partial selftext only — for a question like "who is X" the title
+        // alone rarely names X; the actual answer is inside the post body or
+        // the top reply.
+        type RedditHit = {
+          title: string;
+          subreddit: string;
+          permalink: string;
+          selftext: string;
+          score: number;
+          numComments: number;
+        };
+        const hits: RedditHit[] = [];
+        for (const child of (rData.data?.children ?? []).slice(0, 8)) {
+          const d = child.data;
+          if (!d?.title || !d.permalink) continue;
+          if ((d.score ?? 0) < 5 && (d.num_comments ?? 0) < 3) continue;
+          hits.push({
+            title: d.title,
+            subreddit: d.subreddit ?? 'reddit',
+            permalink: d.permalink,
+            selftext: (d.selftext ?? '').replace(/\s+/g, ' ').trim(),
+            score: d.score ?? 0,
+            numComments: d.num_comments ?? 0,
+          });
+        }
+
+        // ── Reco-aware filtering + ranking ────────────────────────────────
+        // When the query has recommendation markers (best/recommend/review/vs),
+        // drop AIO/AITA/relationship/drama threads — they pollute reco results
+        // with off-topic high-engagement personal posts that share a noun with
+        // the query (e.g. "destroyed my $2,000 gaming setup" on a keyboard ask).
+        // Then re-rank by query-anchor overlap in title so the most topically
+        // relevant thread becomes the lead candidate.
+        const _isRecoLike = /\b(?:best|top|recommend|review|favorite|favourite|worth|underrated|overrated|vs\.?|versus|alternative|cheap|budget|good\s+for|which\s+\w+\s+should)\b/i.test(query);
+        if (_isRecoLike && hits.length > 0) {
+          const _dramaRe = /\b(?:aio|aita|am\s+i\s+the|wibta|relationship|girlfriend|boyfriend|husband|wife|toddler|baby[-\s]?proof|sister|brother|family|drama|court|sue|cheating|breakup|divorce|destroyed|trauma|venting)\b/i;
+          const _qTokens = (query.toLowerCase().match(/[a-z][a-z0-9'\-]{3,}/g) ?? [])
+            .filter((t) => !['best','top','what','which','reddit','recommend','review','from','with','this','that','about','should','good','some'].includes(t));
+          const _qTokSet = new Set(_qTokens);
+          const _ranked = hits
+            .filter((h) => !_dramaRe.test(h.title))
+            .map((h) => {
+              const _tlow = h.title.toLowerCase();
+              let _overlap = 0;
+              for (const t of _qTokSet) if (_tlow.includes(t)) _overlap++;
+              const _engagement = Math.log1p(h.score + h.numComments);
+              return { h, _score: _overlap * 5 + _engagement };
+            })
+            .sort((a, b) => b._score - a._score)
+            .map((r) => r.h);
+          // If filter wiped everything, fall back to original hits (better
+          // something than nothing) but at least re-rank by anchor overlap.
+          if (_ranked.length > 0) {
+            hits.length = 0;
+            hits.push(..._ranked);
+          } else {
+            const _byOverlap = hits
+              .map((h) => {
+                const _tlow = h.title.toLowerCase();
+                let _overlap = 0;
+                for (const t of _qTokSet) if (_tlow.includes(t)) _overlap++;
+                return { h, _score: _overlap };
+              })
+              .sort((a, b) => b._score - a._score)
+              .map((r) => r.h);
+            hits.length = 0;
+            hits.push(..._byOverlap);
+          }
+        }
+        // ──────────────────────────────────────────────────────────────────
+
+        // Enrich top 2 by score+comments with full body + a couple top comments.
+        // Hard-capped at 1500ms total so it never blows the chat search budget.
+        const enrichTargets = [...hits]
+          .sort((a, b) => (b.score + b.numComments) - (a.score + a.numComments))
+          .slice(0, 2);
+        const enriched = new Map<string, string>();
+        const enrichmentWork = Promise.all(enrichTargets.map(async (hit) => {
+          try {
+            const detailUrl = `https://www.reddit.com${hit.permalink}.json?limit=8&depth=1`;
+            const dRes = await fetch(detailUrl, {
+              headers: { 'User-Agent': 'VeggaAI/1.0 (local AI learning agent)' },
+              signal: AbortSignal.timeout(1500),
+            });
+            if (!dRes.ok) return;
+            // Reddit returns [postListing, commentListing]
+            const dData = await dRes.json() as Array<{
+              data?: { children?: Array<{ data?: {
+                selftext?: string; body?: string; score?: number;
+              } }> };
+            }>;
+            const postSelftext = (dData[0]?.data?.children?.[0]?.data?.selftext ?? '')
+              .replace(/\s+/g, ' ')
+              .trim();
+            const commentChildren = dData[1]?.data?.children ?? [];
+            const topComments = commentChildren
+              .map((c) => c.data)
+              .filter((c): c is { body: string; score: number } =>
+                !!c && typeof c.body === 'string' && c.body.trim().length > 0)
+              .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+              .slice(0, 3)
+              .map((c) => c.body.replace(/\s+/g, ' ').trim());
+            const parts: string[] = [];
+            const useSelftext = postSelftext.length > hit.selftext.length ? postSelftext : hit.selftext;
+            // Cap selftext so "Top reply:" always survives the 600-char snippet slice downstream.
+            if (useSelftext) parts.push(useSelftext.slice(0, 220));
+            for (const c of topComments) parts.push(`Top reply: ${c.slice(0, 180)}`);
+            const combined = parts.join(' · ');
+            if (combined.length > 0) enriched.set(hit.permalink, combined.slice(0, 1500));
+          } catch { /* per-hit enrichment is best-effort */ }
+        }));
+        // Hard cap so a slow reddit detail fetch can't blow the chat search budget.
+        await Promise.race([
+          enrichmentWork,
+          new Promise((r) => setTimeout(r, 1800)),
+        ]);
+        for (const hit of hits) {
+          const body = enriched.get(hit.permalink) ?? hit.selftext;
+          const snippet = body.length > 30
+            ? `[r/${hit.subreddit}] ${body.slice(0, 600)}`
+            : `[r/${hit.subreddit}] ${hit.title}`;
+          results.push({
+            title: hit.title,
+            snippet,
+            url: `https://www.reddit.com${hit.permalink}`,
+          });
+        }
+      }
+    } catch { /* continue */ }
+  }
+
+  // R14: Reddit-via-DDG fallback. When the community/reco intent is clear but
+  // direct reddit search returned nothing (cooldown, rate-limit, or empty
+  // result set), search DDG-lite with `site:reddit.com` appended. This often
+  // recovers exactly the threads that would have answered the question and
+  // closes the long-standing community-rec score=15 gap.
+  if (isCommunityQuery) {
+    const hasRedditHit = results.some((r) => /reddit\.com/i.test(r.url));
+    if (!hasRedditHit) {
+      try {
+        const _qNoReddit = query.replace(/\breddit\b/gi, '').trim();
+        const liteUrl = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(`${_qNoReddit} site:reddit.com`)}`;
+        const res = await fetch(liteUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; VeggaAI/1.0)' },
+          signal: AbortSignal.timeout(Math.min(timeoutMs, 2500)),
+        });
+        if (res.ok) {
+          const html = await res.text();
+          const linkRe = /<a[^>]+class="result-link"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi;
+          const snippetRe = /<td[^>]+class="result-snippet"[^>]*>([\s\S]*?)<\/td>/gi;
+          const links: Array<{ url: string; title: string }> = [];
+          const snippets: string[] = [];
+          let m: RegExpExecArray | null;
+          while ((m = linkRe.exec(html)) !== null && links.length < 6) {
+            links.push({ url: m[1], title: m[2].trim() });
+          }
+          while ((m = snippetRe.exec(html)) !== null && snippets.length < 6) {
+            snippets.push(m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+          }
+          let added = 0;
+          for (let i = 0; i < Math.min(links.length, snippets.length); i++) {
+            const url = links[i].url;
+            if (!/reddit\.com/i.test(url)) continue;
+            if (snippets[i].length < 30) continue;
+            const sub = url.match(/reddit\.com\/r\/([A-Za-z0-9_]+)/i)?.[1] ?? 'reddit';
+            results.push({
+              title: links[i].title,
+              snippet: `[r/${sub}] ${snippets[i]}`,
+              url,
+            });
+            added++;
+            if (added >= 3) break;
+          }
+        }
+      } catch { /* fallback is best-effort */ }
+    }
+  }
+
+  // R15: HackerNews via Algolia (keyless, generous rate limit). HN discussions
+  // are gold for dev-tool / tech-gear / startup / hardware queries — often
+  // more current than wikipedia and complements reddit. Runs whenever the
+  // query has community/recommendation shape (where wiki dominance hurts) or
+  // when results are thin.
+  if ((isCommunityQuery || results.length < 5) && primarySubject.length > 1) {
+    try {
+      const hnQuery = query.replace(/\b(?:hn|hacker\s*news|reddit)\b/gi, '').trim();
+      const hnUrl = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(hnQuery)}&tags=story&hitsPerPage=5`;
+      const hnRes = await fetch(hnUrl, {
+        headers: { 'User-Agent': 'VeggaAI/1.0' },
+        signal: AbortSignal.timeout(Math.min(timeoutMs, 2500)),
+      });
+      if (hnRes.ok) {
+        const hnData = await hnRes.json() as {
+          hits?: Array<{
+            title?: string;
+            url?: string;
+            story_text?: string;
+            objectID?: string;
+            points?: number;
+            num_comments?: number;
+          }>;
+        };
+        let added = 0;
+        for (const hit of hnData.hits ?? []) {
+          if (!hit.title) continue;
+          if ((hit.points ?? 0) < 5 && (hit.num_comments ?? 0) < 3) continue;
+          const url = hit.url && /^https?:\/\//i.test(hit.url)
+            ? hit.url
+            : `https://news.ycombinator.com/item?id=${hit.objectID}`;
+          const snippet = (hit.story_text && hit.story_text.length > 30)
+            ? `[HN · ${hit.points ?? 0}pts/${hit.num_comments ?? 0}c] ${hit.title}: ${hit.story_text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 400)}`
+            : `[HN · ${hit.points ?? 0}pts/${hit.num_comments ?? 0}c] ${hit.title}`;
+          results.push({ title: hit.title, snippet, url });
+          added++;
+          if (added >= 3) break;
+        }
+      }
+    } catch { /* HN best-effort */ }
   }
 
   // 2.5 GitHub repository search — good zero-key fallback for developer tools
@@ -1240,6 +1561,13 @@ function rankSnippets(
   const hasOfficialPerplexityResult = biasPerplexityProduct
     && rawResults.some((raw) => isPerplexityOfficialResult(raw) && !isPerplexityUnofficialResult(raw));
 
+  // R17: for opinion-shaped queries (best/top/recommend/vs/worth/etc),
+  // give forum domains a rank multiplier so wiki doesn't drown them out of
+  // top-N. Without this, "best mechanical keyboard switch for typing" returns
+  // 6 wiki sources and the Vai-voice forum synth never fires.
+  const _isOpinionShape = /\b(?:best|top|recommend|worth|underrated|overrated|favorite|favourite|prefer|hate|love|why\s+do(?:es)?\s+(?:people|users|gamers|players|folks|everyone|anyone)|opinion|sentiment|thoughts?\s+on|vs\.?|versus|alternative|cheap|budget|good\s+for|reddit)\b/i.test(query);
+  const _forumHostRe = /(?:^|\.)(reddit\.com|news\.ycombinator\.com|stackoverflow\.com|stackexchange\.com|discourse\.org|forum\.|community\.|lemmy\.|tildes\.net|metafilter\.com)/i;
+
   for (const raw of rawResults) {
     // URL safety check
     let domain: string;
@@ -1271,6 +1599,11 @@ function rankSnippets(
     // Relevance boost: earlier queries and earlier results rank higher
     const positionBoost = 1 / (1 + raw.queryIndex * 0.3);
     let rank = trust.score * positionBoost;
+    // R17: opinion-query forum boost. Lifts reddit (0.6) above wiki (0.9)
+    // for recommendation queries so community sentiment survives ranking.
+    if (_isOpinionShape && _forumHostRe.test(domain)) {
+      rank *= 1.9;
+    }
     const wrapperLike = biasPerplexityProduct && isPerplexityWrapperLikeResult(raw);
     const mathLike = biasPerplexityProduct && isPerplexityMathResult(raw);
     const officialDocsLike = biasPerplexityProduct && !wrapperLike && isPerplexityOfficialDocsResult(raw);
@@ -1438,6 +1771,30 @@ function sanitizeSnippetText(text: string): string {
     .trim();
 }
 
+/**
+ * Final render-time pass over a sentence destined for the answer body.
+ * Strips reddit/forum chrome that survived sanitizeSnippetText so the lead
+ * reads as a clean statement rather than "[r/sub] **UPDATE:** I decided…".
+ * Applied only at the point of emission — not used for ranking/scoring so
+ * the chrome can still influence trust-tier and relevance upstream.
+ */
+function cleanLeadText(text: string): string {
+  let cleaned = text;
+  // Strip leading "[r/subreddit] " / "[r/sub] · " forum tags.
+  cleaned = cleaned.replace(/^\s*\[r\/[^\]]+\][\s\u00b7·:,-]*/i, '');
+  // Strip leading "**UPDATE:**", "EDIT:", "TL;DR:", "Top reply:" announcement labels.
+  cleaned = cleaned.replace(/^\s*(?:\*\*)?\s*(?:UPDATE|EDIT|TL;?DR|TLDR|Top reply|Top comment|UPDATED?|FINAL|ANSWER|SOLVED)\s*[:\-]\s*(?:\*\*)?\s*/i, '');
+  // Strip a leading bold title-link block like "**Sony WH-1000XM6**" followed by space.
+  cleaned = cleaned.replace(/^\s*\*\*[^*]{2,80}\*\*\s+/, '$&').replace(/^\s+/, '');
+  // Collapse stray markdown link wrappers around the first phrase so "[**X**](url)" → "**X**".
+  cleaned = cleaned.replace(/\[(\*\*[^*]+\*\*)\s*\]\((?:https?:\/\/)?[^)]+\)/g, '$1');
+  // Drop trailing " · Top reply: ..." appendage if it's just chat-style follow-on noise.
+  cleaned = cleaned.replace(/\s*[·\u00b7]\s*Top\s+reply\s*:\s*.*$/i, '').trim();
+  // Collapse double spaces created by stripping.
+  cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+  return cleaned;
+}
+
 function looksLikeNoisyUiSentence(sentence: string): boolean {
   if (NOISY_SENTENCE_PATTERN.test(sentence)) return true;
   const compact = sentence.replace(/\s+/g, '');
@@ -1553,11 +1910,195 @@ function collectCitationMarks(indices: readonly number[]): string {
   return unique.map((index) => `[${index + 1}]`).join('');
 }
 
+/**
+ * Cross-source consensus: returns the indices of OTHER sources whose text
+ * shares ≥`minShared` distinctive content words with `text`. Used to attach
+ * multi-source citations to a synthesized claim — turning "one source said X"
+ * into "sources [1][2][3] independently confirm X".
+ *
+ * `minShared=3` keeps incidental keyword overlaps from spuriously claiming
+ * agreement. Stopwords are already excluded by extractContentWords.
+ *
+ * Also detects contradictions: returns sources where the same key terms
+ * appear inside a negation context (not/no/never/without/cannot/avoid).
+ */
+function findCrossSourceAgreement(
+  text: string,
+  used: readonly SearchSnippet[],
+  excludeIdx: number,
+  minShared = 3,
+  queryAnchors: ReadonlySet<string> | null = null,
+): { confirming: number[]; contradicting: number[] } {
+  const tokens = extractContentWords(text);
+  if (tokens.size < minShared) return { confirming: [], contradicting: [] };
+  // Pick the 3 most distinctive (longest) tokens as the "topic anchors" we
+  // require co-occurrence on — prevents short common words from inflating overlap.
+  const anchors = [...tokens]
+    .filter((w) => w.length >= 4)
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 6);
+  if (anchors.length < Math.min(minShared, 2)) return { confirming: [], contradicting: [] };
+
+  // Query-relevance gate: when the caller supplied the query's distinctive
+  // tokens, require that AT LEAST ONE anchor also appears in the query. This
+  // prevents claiming "agreement" on generic words shared by off-topic
+  // snippets (e.g. all sources mention "keyboard" but none answer the
+  // "best mechanical switch for typing" question).
+  if (queryAnchors && queryAnchors.size > 0) {
+    const hasQueryAnchor = anchors.some((a) => queryAnchors.has(a));
+    if (!hasQueryAnchor) return { confirming: [], contradicting: [] };
+  }
+
+  const confirming: number[] = [];
+  const contradicting: number[] = [];
+  for (let i = 0; i < used.length; i++) {
+    if (i === excludeIdx) continue;
+    const otherLower = used[i].text.toLowerCase();
+    let shared = 0;
+    for (const a of anchors) if (otherLower.includes(a)) shared++;
+    if (shared < minShared) continue;
+    // Contradiction sniff: if the other source frames the same anchors with
+    // explicit negation, count as contradicting rather than confirming.
+    const negated = anchors.some((a) => {
+      const idx = otherLower.indexOf(a);
+      if (idx === -1) return false;
+      const window = otherLower.slice(Math.max(0, idx - 40), idx);
+      return /\b(?:not|no|never|n['\u2019]t|without|cannot|can't|avoid|isn't|aren't|doesn't|don't|wasn't|weren't)\b/.test(window);
+    });
+    if (negated) contradicting.push(i);
+    else confirming.push(i);
+  }
+  return { confirming, contradicting };
+}
+
+/**
+ * Distinctive content tokens extracted from a raw user query — lowercased,
+ * stopwords removed, length ≥ 4. Used as a relevance gate by
+ * findCrossSourceAgreement so claims of "agreement" actually relate to the
+ * question instead of generic shared vocabulary.
+ */
+function extractQueryAnchors(query: string): Set<string> {
+  const stop = new Set([
+    'best','top','reddit','what','which','where','when','why','how','about',
+    'good','bad','vs','versus','compare','recommend','give','tell','please',
+    'for','from','with','this','that','these','those','some','more','most',
+    'they','them','their','have','has','had','was','were','are','being','been',
+  ]);
+  const out = new Set<string>();
+  const tokens = (query.toLowerCase().match(/[a-z][a-z0-9'\-]{3,}/g) ?? []);
+  for (const t of tokens) {
+    if (!stop.has(t)) out.add(t);
+  }
+  return out;
+}
+
 function joinReasonLabels(labels: readonly string[]): string {
   if (labels.length === 0) return '';
   if (labels.length === 1) return labels[0];
   if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
   return `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]}`;
+}
+
+// R16: Synthesize a Vai-voice paragraph that combines multiple forum sources
+// into a single "here's my read across the threads" framing. Without this, the
+// rendered answer for opinion-shaped queries reads as a stack of verbatim
+// reddit titles with no synthesis tying them together. Returns null when the
+// query isn't opinion-shaped or there aren't enough forum sources to bother.
+function synthesizeVaiTake(
+  query: string,
+  used: readonly SearchSnippet[],
+  primarySubject: string,
+): string | null {
+  const forumRx = /(reddit\.com|news\.ycombinator|stackoverflow|stackexchange|discourse|forum)/i;
+  const forumCount = used.filter((u) => forumRx.test(u.domain ?? '')).length;
+  if (forumCount < 2) return null;
+  const isOpinionShape = /\b(?:best|top|recommend|why\s+do(?:es)?\s+people\s+(?:hate|love|like|dislike|prefer)|hate|love|prefer|favorite|opinion|worth\s+it|overrated|underrated|reddit|sentiment|thoughts?\s+on)\b/i.test(query);
+  if (!isOpinionShape) return null;
+
+  const qAnchors = extractQueryAnchors(query);
+  const STOP = new Set([
+    'just','like','really','people','game','games','thing','things','stuff',
+    'good','bad','great','better','worse','also','about','some','many','much','more',
+    'most','less','very','from','with','that','this','then','than','they','them',
+    'their','there','here','what','when','where','which','because','since','still',
+    'even','only','same','make','makes','made','take','takes','want','wants','need',
+    'needs','know','think','thought','look','looks','feel','feels','seen','saw','say',
+    'says','said','went','goes','come','came','gets','give','given','tell',
+    'told','your','yours','have','having','been','were','will',
+    'would','could','should','might','must','shall','dont','doesnt','wasnt','isnt',
+    'arent','cant','cannot','wont','heres','theres','whats','wheres','play','playing',
+    'time','year','years','day','days','first','last','long','well','update','edit',
+    'guys','guess','genuinely','second','third','fourth',
+    // contraction stems left behind when ' is dropped
+    'didn','wasn','isn','aren','wouldn','couldn','shouldn','haven','hadn','hasn',
+    'doesn','don','won','can','ain',
+    // weak modals / fillers that surface as themes but don't describe anything
+    'probably','maybe','perhaps','obviously','actually','basically','literally',
+    'definitely','honestly','seriously','frankly','pretty','quite','kinda','sorta',
+    'still','always','never','sometimes','often','rarely','barely','almost',
+    // generic words that match across most threads without carrying meaning
+    'brain','idea','point','reason','reasons','part','parts','way','ways','side',
+    'sides','case','cases','kind','kinds','sort','sorts','sense','fact','facts',
+    'lot','lots','bit','bits','one','two','three','many','few','number','set',
+    'place','places','line','lines','top','bottom','end','start','around',
+    'whole','entire','single','double',
+  ]);
+  const counts = new Map<string, { n: number; sources: Set<number> }>();
+  for (let i = 0; i < used.length; i++) {
+    if (!forumRx.test((used[i].domain ?? '').toLowerCase())) continue;
+    const raw = used[i].text.replace(/^\s*\[r\/[^\]]+\]\s*/i, ' ').toLowerCase();
+    const seen = new Set<string>();
+    const toks = raw.match(/[a-z][a-z\-]{3,}/g) ?? [];
+    for (const t of toks) {
+      if (STOP.has(t) || qAnchors.has(t) || seen.has(t)) continue;
+      seen.add(t);
+      const e = counts.get(t) ?? { n: 0, sources: new Set<number>() };
+      e.n++; e.sources.add(i); counts.set(t, e);
+    }
+  }
+  const themes = [...counts.entries()]
+    .filter(([, v]) => v.sources.size >= 2 && v.n >= 2)
+    .sort((a, b) => b[1].sources.size - a[1].sources.size || b[1].n - a[1].n)
+    .slice(0, 3)
+    .map(([w]) => w);
+
+  // Trim leading question-word noise from the subject so the Vai-take reads
+  // as a topic, not as the query restated. Tokenize and drop a small prefix
+  // set rather than one nested regex (avoids ReDoS risk).
+  const SUBJECT_PREFIX_DROP = new Set([
+    'why','how','what','when','where','who','is','are','do','does','did',
+    'should','can','could','would','will','must','may','might',
+    'people','users','gamers','players','folks','everyone','anyone',
+    'i','you','we','they','hate','love','like','dislike','prefer',
+    'recommend','think','feel','about','of','for',
+    'the','a','an','new','old','best','top',
+  ]);
+  let cleanedSubject = (primarySubject || '').trim();
+  if (cleanedSubject) {
+    const toks = cleanedSubject.split(/\s+/);
+    let drop = 0;
+    while (drop < toks.length && drop < 6 && SUBJECT_PREFIX_DROP.has(toks[drop].toLowerCase())) drop++;
+    cleanedSubject = toks.slice(drop).join(' ').trim();
+  }
+  const subj = cleanedSubject
+    ? titleCaseSubject(cleanedSubject)
+    : primarySubject
+      ? titleCaseSubject(primarySubject)
+      : 'this';
+  const hateShape = /\bhate|dislike|why.*hate\b/i.test(query);
+  const loveShape = /\blove|why.*(?:like|love|prefer)\b/i.test(query);
+
+  if (themes.length === 0) {
+    return `Here's my read across ${forumCount} forum threads on **${subj}** — opinions are scattered enough that no single theme dominates. The snippets below are the strongest individual takes I found, not a community consensus.`;
+  }
+  const lead = themes.join(', ');
+  if (hateShape) {
+    return `Reading across ${forumCount} forum threads on **${subj}**, the gripes that keep coming back are **${lead}**. It's not one deal-breaker — it's a cluster of friction points different users hit at different times. The threads below are community sentiment, not a verdict.`;
+  }
+  if (loveShape) {
+    return `Reading across ${forumCount} forum threads on **${subj}**, what people consistently bring up as positives is **${lead}**. The snippets below back this up from different angles — community sentiment, not a verdict.`;
+  }
+  return `Reading across ${forumCount} forum threads on **${subj}**, the recurring talking points are **${lead}**. The snippets below show how different users frame those points — community sentiment, not a verdict.`;
 }
 
 function titleCaseSubject(subject: string): string {
@@ -1597,6 +2138,31 @@ function buildEvidenceSummary(
   const reasons: Array<{ label: string; sourceIndex: number }> = [];
   const seenReasonLabels = new Set<string>();
 
+  // Intent-aware source-trust weighting: for opinion/recommendation queries,
+  // community forums (reddit/HN/SO) are more relevant than encyclopedic
+  // sources. For factual queries, encyclopedic sources beat forums.
+  const _isOpinionQuery = /\b(?:best|top|recommend|should\s+i|which\s+one|favorite|prefer|good\s+for|worth\s+it|underrated|overrated|reddit|opinion|review|honest)\b/i.test(query)
+    || plan.intent === 'recommendation'
+    || plan.intent === 'opinion';
+  const _isFactualQuery = !_isOpinionQuery && (
+    plan.intent === 'definition'
+    || plan.intent === 'explanation'
+    || /\b(?:what\s+is|what\s+are|who\s+is|when\s+(?:did|does|was)|how\s+(?:does|do)|where\s+is|why\s+(?:does|did))\b/i.test(query)
+  );
+  const _sourceIntentBoost = (snippet: SearchSnippet): number => {
+    const dom = (snippet.domain ?? '').toLowerCase();
+    const isWiki = dom.includes('wikipedia') || dom.includes('britannica') || dom.includes('encyclopedia');
+    const isForum = dom.includes('reddit') || dom.includes('news.ycombinator') || dom.includes('stackoverflow') || dom.includes('stackexchange') || dom.includes('quora');
+    if (_isOpinionQuery) {
+      if (isForum) return 4;
+      if (isWiki) return -3;
+    } else if (_isFactualQuery) {
+      if (isWiki) return 3;
+      if (isForum) return -2;
+    }
+    return 0;
+  };
+
   for (let sourceIndex = 0; sourceIndex < used.length; sourceIndex += 1) {
     const snippet = used[sourceIndex];
     const sentences = splitIntoSentences(snippet.text);
@@ -1604,6 +2170,7 @@ function buildEvidenceSummary(
     for (const sentence of sentences) {
       let score = sentenceScore(sentence, query, plan, primarySubject, comparisonSubject);
       score += snippet.trust.tier === 'high' ? 3 : snippet.trust.tier === 'medium' ? 1 : -3;
+      score += _sourceIntentBoost(snippet);
       score += Math.min(snippet.rank, 2.5);
       if (shouldBiasPerplexityToProduct(query, primarySubject) && isPerplexityWrapperSentence(sentence)) {
         score -= 9;
@@ -1623,6 +2190,16 @@ function buildEvidenceSummary(
         }
         if (definitionLike) {
           summaryCandidates.push({ text: sentence, sourceIndex, score: score + 5 });
+        }
+
+        // Release/availability-status lead: when user asks "is X out yet" / "did X release",
+        // prefer sentences that actually describe release status.
+        const _asksReleaseStatus = /\b(?:out\s+yet|released\s+yet|release\s+date|did\s+\S+\s+release|is\s+\S+\s+(?:out|released|available)\s+(?:yet|now)|when\s+(?:does|did|will|is)\s+\S+\s+(?:come\s+out|release|launch|drop))\b/i.test(query);
+        if (_asksReleaseStatus) {
+          const _releaseSentence = /\b(?:released\s+(?:on|in|worldwide|globally)|was\s+released|launched\s+(?:on|in)|came\s+out\s+(?:on|in)|release(?:d)?\s+date|available\s+(?:on|from|now|since)|out\s+now|launch\s+date|scheduled\s+(?:for|to)\s+release|set\s+(?:for|to)\s+release|delayed\s+(?:to|until)|announced\s+for)\b/i.test(sentence);
+          if (_releaseSentence) {
+            summaryCandidates.push({ text: sentence, sourceIndex, score: score + 12 });
+          }
         }
       }
 
@@ -1750,17 +2327,35 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): st
   // query. With ≥2 query content words, require ≥2 hits (in title+text combined)
   // so a single common-word coincidence ("india") cannot pull in an off-topic doc.
   // Also drop README/SEO-style snippets entirely.
+  //
+  // Cross-reference relaxation: pick a "primary topic" word — the longest,
+  // most distinctive content word in the query (usually a proper noun like
+  // "runescape"). A snippet that mentions the primary topic clears the
+  // relevance gate even at 1 hit. This stops listing-style queries
+  // ("famous runescape youtubers") from being killed when sources describe
+  // the topic with related-but-not-identical category nouns
+  // ("creators", "streamers", "content creation").
   const queryWords = extractContentWords(query);
+  const primaryTopicWord = (() => {
+    let best = '';
+    for (const w of queryWords) {
+      // Skip generic category nouns — they're rarely the proper-noun topic.
+      if (/^(famous|popular|best|top|good|great|big|small|new|old|some|many)$/.test(w)) continue;
+      if (w.length > best.length) best = w;
+    }
+    return best;
+  })();
   const minHits = queryWords.size >= 2 ? 2 : 1;
   const relevantUsed = candidatesAll.filter((s) => {
     if (looksLikeJunkSnippet(s.text, s.title || '')) return false;
-    // Body-alone gate: requires minHits-1 (min 1) hit in the snippet text so
-    // JWST-style bodies that say "the telescope uses infrared optics" (1 hit)
-    // aren't blocked even though the TITLE already supplies the second hit.
-    // The combined (title+text) gate below is the strict gate.
+    const combined = `${s.title || ''} \n ${s.text}`.toLowerCase();
+    // Primary-topic shortcut: if the snippet directly names the topic, it's
+    // relevant even if no other query word is present.
+    if (primaryTopicWord.length >= 4 && combined.includes(primaryTopicWord)) {
+      return true;
+    }
     const bodyMinHits = Math.max(1, minHits - 1);
     if (queryWords.size > 0 && !snippetSharesQueryWords(s.text, queryWords, bodyMinHits)) return false;
-    const combined = `${s.title || ''} \n ${s.text}`;
     return snippetSharesQueryWords(combined, queryWords, minHits);
   });
   if (relevantUsed.length === 0) {
@@ -1801,19 +2396,146 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): st
       }
     }
   }
+
+  // Release-status lead override: for "is X out yet" / "did X release" /
+  // "when does X come out" queries, scan ALL retrieved snippets across all
+  // sources for a sentence that actually describes release status, and use
+  // it as the lead. The chunker often returns gameplay/plot paragraphs
+  // even when the article's release-date sentence would be more relevant.
+  const _asksReleaseStatusLead = /\b(?:out\s+yet|released\s+yet|release\s+date|did\s+\S+\s+release|is\s+\S+\s+(?:out|released|available)\s+(?:yet|now)|when\s+(?:does|did|will|is)\s+\S+\s+(?:come\s+out|release|launch|drop))\b/i.test(query);
+  if (_asksReleaseStatusLead) {
+    const _releasePat = /\b(?:released\s+(?:on|in|worldwide|globally)|was\s+released|launched\s+(?:on|in)|came\s+out\s+(?:on|in)|release\s+date|available\s+(?:on|from|now|since)|out\s+now|launch\s+date|scheduled\s+(?:for|to)\s+release|set\s+(?:for|to)\s+release|delayed\s+(?:to|until)|announced\s+for|will\s+(?:be\s+)?release(?:d)?|to\s+release\s+on)\b/i.test.bind(null);
+    const _subj = primarySubject ? primarySubject.toLowerCase() : '';
+    let _releaseBest: { text: string; sourceIndex: number; score: number } | null = null;
+    for (let i = 0; i < used.length; i++) {
+      const sents = splitIntoSentences(used[i].text);
+      for (const s of sents) {
+        if (s.length < 30 || s.length > 500) continue;
+        if (!_releasePat(s)) continue;
+        let sc = 10;
+        // Prefer sentences that name the subject.
+        if (_subj && s.toLowerCase().includes(_subj)) sc += 8;
+        // Prefer sentences with explicit dates (year or month).
+        if (/\b(?:19|20)\d{2}\b/.test(s)) sc += 4;
+        if (/\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/i.test(s)) sc += 3;
+        // Prefer high-trust sources.
+        sc += used[i].trust.tier === 'high' ? 3 : used[i].trust.tier === 'medium' ? 1 : -2;
+        if (!_releaseBest || sc > _releaseBest.score) {
+          _releaseBest = { text: s, sourceIndex: i, score: sc };
+        }
+      }
+    }
+    if (_releaseBest) {
+      if (effectiveSummary) suppressedLeadText = effectiveSummary.text;
+      effectiveSummary = { text: _releaseBest.text, sourceIndex: _releaseBest.sourceIndex };
+    }
+  }
+
   const prefersSimpleFraming = /\b(?:explain|definition|what is|what are|in simple words?)\b/i.test(query)
     || plan.intent === 'definition'
     || plan.intent === 'explanation';
   const asksWhatItDoes = /\bwhat\s+it\s+does\b/i.test(query) || plan.intent === 'definition' || plan.intent === 'explanation';
   const asksWhenToUse = /\b(?:when\s+should\s+i\s+use|when\s+to\s+use|best\s+fit|should\s+use\s+it|when\s+should\s+you\s+use)\b/i.test(query);
 
+  // Recommendation-aware lead override: when the query is shaped like a
+  // recommendation/opinion ask ("best X for Y", "reddit best ...") and the
+  // chosen lead is an encyclopedic definition, prefer a community/forum
+  // snippet that actually addresses the ask. Looks for a non-wiki source
+  // whose snippet text shares ≥2 query-distinctive tokens, has reasonable
+  // length, and isn't an off-topic AIO-style thread.
+  const _recoQuery = /\b(?:best|top|recommend|should\s+i|which\s+one|favorite|prefer|good\s+for|reddit)\b/i.test(query)
+    || plan.intent === 'recommendation'
+    || plan.intent === 'opinion';
+  if (_recoQuery && effectiveSummary) {
+    const _leadDomain = (used[effectiveSummary.sourceIndex]?.domain ?? '').toLowerCase();
+    const _leadHead = effectiveSummary.text.slice(0, 200).toLowerCase();
+    const _leadIsEnc = /\b(?:is\s+(?:a|an|the)\s+(?:built-in|peripheral|input|output|type|kind|form|class|category|device|technology|system|method|process|product)|refers\s+to|is\s+defined\s+as)\b/i.test(_leadHead);
+    if (_leadDomain.includes('wikipedia') || _leadIsEnc) {
+      const _qAnchors = extractQueryAnchors(query);
+      let _best: { text: string; sourceIndex: number; score: number } | null = null;
+      for (let i = 0; i < used.length; i++) {
+        if (i === effectiveSummary.sourceIndex) continue;
+        const _src = used[i];
+        const _dom = (_src.domain ?? '').toLowerCase();
+        if (_dom.includes('wikipedia')) continue;
+        const _txt = _src.text;
+        const _txtLower = _txt.toLowerCase();
+        // Skip obvious off-topic AIO/personal threads.
+        if (/\b(?:aio|am\s+i\s+the|toddler|baby[-\s]?proof|sister|apartment|destroyed)\b/i.test(_txtLower)) continue;
+        let _hits = 0;
+        for (const a of _qAnchors) if (_txtLower.includes(a)) _hits++;
+        if (_hits < 2) continue;
+        if (_txt.length < 60 || _txt.length > 2000) continue;
+        const _score = _hits * 10 + Math.min(_txt.length, 400) / 100;
+        if (!_best || _score > _best.score) {
+          _best = { text: _txt, sourceIndex: i, score: _score };
+        }
+      }
+      if (_best) {
+        suppressedLeadText = effectiveSummary.text;
+        effectiveSummary = { text: _best.text, sourceIndex: _best.sourceIndex };
+      }
+    }
+  }
+
+  // ── Cross-source consensus: compute confirming/contradicting sources for the
+  // lead so the answer reads as a synthesized conclusion, not a quoted snippet.
+  // Multi-source citations on the lead show the reader Vai cross-checked.
+  // queryAnchors gate prevents claiming "agreement" on generic vocabulary
+  // unrelated to the actual question.
+  const queryAnchors = extractQueryAnchors(query);
+  const leadAgreement = effectiveSummary
+    ? findCrossSourceAgreement(effectiveSummary.text, used, effectiveSummary.sourceIndex, 3, queryAnchors)
+    : { confirming: [] as number[], contradicting: [] as number[] };
+  // Compute shape-mismatch early so we can drop misleading cross-source cites.
+  const isRecommendationQuery = /\b(?:best|top|recommend|should\s+i|which\s+one|favorite|prefer|good\s+for|reddit)\b/i.test(query)
+    || plan.intent === 'recommendation'
+    || plan.intent === 'opinion';
+  const _leadHeadEarly = effectiveSummary ? effectiveSummary.text.slice(0, 200).toLowerCase() : '';
+  const leadIsEncyclopedic = /\b(?:is\s+(?:a|an|the)\s+(?:built-in|peripheral|input|output|type|kind|form|class|category|device|technology|system|method|process|product)|refers\s+to|is\s+defined\s+as)\b/i.test(_leadHeadEarly);
+  const shapeMismatch = isRecommendationQuery && leadIsEncyclopedic;
+  const leadCites = effectiveSummary
+    ? (shapeMismatch
+        ? [effectiveSummary.sourceIndex]
+        : [effectiveSummary.sourceIndex, ...leadAgreement.confirming])
+    : [0];
+
+  // R16: For opinion-shaped forum-heavy results, lead with a Vai-voice synth
+  // paragraph that ties the threads together. Without this, the body reads as
+  // a stack of verbatim reddit titles. When the synth fires we skip the
+  // generic cross-check intro line — the synth IS the cross-check.
+  const vaiTake = synthesizeVaiTake(query, used, primarySubject);
+  if (vaiTake) {
+    lines.push(vaiTake);
+    lines.push('');
+  }
+
+  // Vai-voice intro: when consensus exists across multiple sources, signal up
+  // front that the lead is a *cross-checked* finding, not a one-source quote.
+  // Keeps responses from feeling like "here's a reddit snippet I pasted".
+  // (Shape-mismatch already computed above; reuse it here.)
+  const showCrossCheckIntro = !vaiTake
+    && effectiveSummary
+    && leadAgreement.confirming.length >= 1
+    && !shapeMismatch;
+  if (showCrossCheckIntro) {
+    const total = leadAgreement.confirming.length + 1;
+    lines.push(`Cross-checked across ${total} sources — they converge on this:`);
+    lines.push('');
+  } else if (shapeMismatch && !vaiTake) {
+    // Honest hedge: tell the reader the sources didn't actually answer the ask.
+    lines.push(`Heads up — I couldn't find a source that directly answers "${query.trim()}". The best I have is background context; treat the below as starting points, not a recommendation.`);
+    lines.push('');
+  }
+
   if (effectiveSummary) {
-    lines.push(`${effectiveSummary.text} ${collectCitationMarks([effectiveSummary.sourceIndex])}`.trim());
+    const leadText = cleanLeadText(effectiveSummary.text);
+    lines.push(`${leadText} ${collectCitationMarks(leadCites)}`.trim());
   } else {
     const fallbackSource = used[0];
     const fallbackText = sanitizeSnippetText(fallbackSource.text);
     const snippetText = fallbackText.length > 220 ? `${fallbackText.slice(0, 220)}...` : fallbackText;
-    lines.push(`${snippetText} ${collectCitationMarks([0])}`.trim());
+    lines.push(`${cleanLeadText(snippetText)} ${collectCitationMarks([0])}`.trim());
   }
 
   // Filter out the suppressed (off-topic) lead from supporting if it slipped in.
@@ -1821,11 +2543,23 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): st
     ? supporting.filter((entry) => entry.text !== suppressedLeadText)
     : supporting;
 
+  // Pre-compute per-support agreement so we can tag bullets with confirming
+  // sources and decide whether the section reads as "Where sources agree" vs
+  // "Key points" (i.e. uncorroborated highlights).
+  const supportAgreement = supportingFiltered.map((entry) =>
+    findCrossSourceAgreement(entry.text, used, entry.sourceIndex, 3, queryAnchors),
+  );
+  const hasCrossSupport = supportAgreement.some((a) => a.confirming.length > 0);
+  const hasContradiction = leadAgreement.contradicting.length > 0
+    || supportAgreement.some((a) => a.contradicting.length > 0);
+
   if (prefersSimpleFraming && supportingFiltered.length > 0) {
     const simpleLead = supportingFiltered[0];
+    const simpleAgreement = supportAgreement[0];
+    const simpleCites = [simpleLead.sourceIndex, ...simpleAgreement.confirming];
     lines.push('');
     lines.push('In simple words');
-    lines.push(`${simpleLead.text} ${collectCitationMarks([simpleLead.sourceIndex])}`.trim());
+    lines.push(`${cleanLeadText(simpleLead.text)} ${collectCitationMarks(simpleCites)}`.trim());
   }
 
   if (plan.intent === 'comparison' && comparisonSubject) {
@@ -1837,34 +2571,62 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): st
 
     if (supportingFiltered.length > 0) {
       lines.push('');
-      lines.push('Key evidence:');
-      for (const entry of supportingFiltered) {
-        lines.push(`- ${entry.text} ${collectCitationMarks([entry.sourceIndex])}`.trim());
+      lines.push(hasCrossSupport ? 'Where sources agree:' : 'Key evidence:');
+      for (let i = 0; i < supportingFiltered.length; i++) {
+        const entry = supportingFiltered[i];
+        const cites = [entry.sourceIndex, ...supportAgreement[i].confirming];
+        lines.push(`- ${cleanLeadText(entry.text)} ${collectCitationMarks(cites)}`.trim());
       }
     }
   } else if (supportingFiltered.length > 0) {
     lines.push('');
-    const remainingSupport = prefersSimpleFraming ? supportingFiltered.slice(1) : supportingFiltered;
-    const sectionHeading = asksWhatItDoes
-      ? 'What it does:'
-      : asksWhenToUse
-        ? 'Best fit:'
-        : 'Key points:';
+    const remainingStart = prefersSimpleFraming ? 1 : 0;
+    const remainingSupport = supportingFiltered.slice(remainingStart);
+    const remainingAgreement = supportAgreement.slice(remainingStart);
+    const remainingHasCross = remainingAgreement.some((a) => a.confirming.length > 0);
+    const sectionHeading = remainingHasCross
+      ? 'Where sources agree:'
+      : asksWhatItDoes
+        ? 'What it does:'
+        : asksWhenToUse
+          ? 'Best fit:'
+          : 'Key points:';
     if (remainingSupport.length > 0) {
       lines.push(sectionHeading);
-      for (const entry of remainingSupport) {
-        lines.push(`- ${entry.text} ${collectCitationMarks([entry.sourceIndex])}`.trim());
+      for (let i = 0; i < remainingSupport.length; i++) {
+        const entry = remainingSupport[i];
+        const cites = [entry.sourceIndex, ...remainingAgreement[i].confirming];
+        lines.push(`- ${cleanLeadText(entry.text)} ${collectCitationMarks(cites)}`.trim());
       }
     }
   }
 
-  lines.push('');
-  lines.push('**Sources**');
-  for (let i = 0; i < used.length; i++) {
-    const s = used[i];
-    const title = s.title || s.domain;
-    lines.push(`${i + 1}. [${title}](${s.url})`);
+  // Contradiction callout: when other sources negate the lead's anchor terms,
+  // surface it instead of silently picking one side. Reader sees the conflict.
+  if (hasContradiction) {
+    const contradictingIdx = [
+      ...leadAgreement.contradicting,
+      ...supportAgreement.flatMap((a) => a.contradicting),
+    ];
+    const unique = [...new Set(contradictingIdx)];
+    if (unique.length > 0) {
+      lines.push('');
+      lines.push(`Heads up — ${collectCitationMarks(unique)} frame this differently. Worth comparing those pages directly before relying on the takeaway above.`);
+    }
   }
+
+  // Confidence footer: replaces the previous meta "N sources line up" line.
+  // Only when the lead has strong cross-confirmation (≥2 OTHER sources) AND
+  // we have a reasonable evidence base (≥3 used sources). Conveys a calibrated
+  // confidence signal in Vai's voice without restating the cite count.
+  if (effectiveSummary && leadAgreement.confirming.length >= 2 && used.length >= 3) {
+    lines.push('');
+    lines.push('Confidence: high — multiple independent sources told the same story, and I picked the lead from where they agreed.');
+  }
+
+  // Source list is rendered in the sidebar UI — don't duplicate it inside the
+  // message body. Inline citation marks (1, 2, ...) still tie back to the
+  // sidebar entries by index.
 
   return lines.join('\n');
 }
@@ -2168,8 +2930,11 @@ export class SearchPipeline {
       audit,
     };
 
-    // Cache the result
-    this.cache.set(cacheKey, response);
+    // Cache the result (R18: skip caching empty/failed responses so a cold-
+    // start or rate-limit blip doesn't poison the 10-minute cache window).
+    if (verified.length > 0) {
+      this.cache.set(cacheKey, response);
+    }
 
     return response;
   }
@@ -2231,3 +2996,7 @@ export function generateFollowUps(query: string, response: SearchResponse): stri
 
   return generateTopicFollowUps(topicSeed, plan.intent);
 }
+
+// touch for reload
+// r17 touch
+// r18 touch

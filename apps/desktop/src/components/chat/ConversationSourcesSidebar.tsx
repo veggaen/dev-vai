@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useMemo } from 'react';
-import { ExternalLink, Layers, X } from 'lucide-react';
+import { ExternalLink, Layers, Sparkles, X } from 'lucide-react';
 import type { ChatMessage, SearchSourceUI } from '../../stores/chatStore.js';
 
 /**
@@ -42,6 +42,9 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   onJumpToMessage?: (messageIndex: number) => void;
+  /** Latest assistant message's follow-up suggestions. Rendered as a Related section. */
+  relatedFollowUps?: readonly string[];
+  onFollowUp?: (question: string) => void;
 }
 
 /**
@@ -49,13 +52,14 @@ interface Props {
  * opens. Sits as a sibling of the chat column inside ChatWindow's flex row,
  * so it pushes the chat content rather than overlaying it.
  */
-export function ConversationSourcesSidebar({ messages, isOpen, onClose, onJumpToMessage }: Props) {
+export function ConversationSourcesSidebar({ messages, isOpen, onClose, onJumpToMessage, relatedFollowUps, onFollowUp }: Props) {
   const aggregated = useMemo(() => aggregateConversationSources(messages), [messages]);
   const domains = useMemo(() => {
     const set = new Set<string>();
     for (const s of aggregated) set.add(s.domain.replace(/^www\./, ''));
     return Array.from(set);
   }, [aggregated]);
+  const visibleFollowUps = useMemo(() => (relatedFollowUps ?? []).slice(0, 6), [relatedFollowUps]);
 
   return (
     <AnimatePresence initial={false}>
@@ -99,6 +103,29 @@ export function ConversationSourcesSidebar({ messages, isOpen, onClose, onJumpTo
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
+
+          {visibleFollowUps.length > 0 && (
+            <div data-conversation-sources-related className="border-b border-zinc-900/80 px-4 py-3">
+              <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
+                <Sparkles className="h-3 w-3" />
+                <span>Related</span>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {visibleFollowUps.map((q, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => onFollowUp?.(q)}
+                    data-conversation-related-followup={i + 1}
+                    className="group/fu flex w-full items-center gap-2 rounded-lg border border-zinc-800/60 bg-zinc-900/40 px-2.5 py-2 text-left text-[12px] leading-[1.35] text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-900/80 hover:text-zinc-100"
+                  >
+                    <span className="line-clamp-2 flex-1">{q}</span>
+                    <span className="flex-shrink-0 text-zinc-600 transition-colors group-hover/fu:text-zinc-300">→</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {aggregated.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">

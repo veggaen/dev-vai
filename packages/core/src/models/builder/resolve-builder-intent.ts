@@ -17,6 +17,58 @@ export function resolveBuilderIntent(input: BuilderIntentInput): BuilderIntent |
   const isCloneRequest = /\b(?:clone|copy|recreate|replicate|inspired|style|like)\b/i.test(text);
   const requestsRunnableApp = /\b(?:app|application|project|site|website|platform|tool|dashboard|portfolio|gallery|feed)\b/i.test(text);
 
+  // Todo / task list — match before generic dashboard so 'task dashboard' still hits a real todo recipe.
+  if (/\b(?:todo|to-do|to\s+do|task\s+list|task\s+manager|tasks?\s+app|checklist|kanban)\b/i.test(text)) {
+    return {
+      archetype: 'todo',
+      audience,
+      domain: 'productivity',
+      modules: [],
+      prompt: input.input,
+      cleanedPrompt: input.cleanedProjectDesc,
+      isCloneRequest,
+    };
+  }
+
+  // Pomodoro / focus timer.
+  if (/\b(?:pomodoro|focus\s+timer|tomato\s+timer|work\s+timer|productivity\s+timer)\b/i.test(text)) {
+    return {
+      archetype: 'pomodoro',
+      audience,
+      domain: 'productivity',
+      modules: [],
+      prompt: input.input,
+      cleanedPrompt: input.cleanedProjectDesc,
+      isCloneRequest,
+    };
+  }
+
+  // Markdown editor.
+  if (/\b(?:markdown(?:\s+editor|\s+preview)?|md\s+editor)\b/i.test(text)) {
+    return {
+      archetype: 'markdown',
+      audience,
+      domain: 'productivity',
+      modules: [],
+      prompt: input.input,
+      cleanedPrompt: input.cleanedProjectDesc,
+      isCloneRequest,
+    };
+  }
+
+  // Password generator.
+  if (/\b(?:password\s+(?:generator|gen)|generate\s+(?:a\s+)?password|random\s+password)\b/i.test(text)) {
+    return {
+      archetype: 'password',
+      audience,
+      domain: 'security',
+      modules: [],
+      prompt: input.input,
+      cleanedPrompt: input.cleanedProjectDesc,
+      isCloneRequest,
+    };
+  }
+
   if (
     /\b(?:photographer|photography|photo\s+gallery|lightbox|masonry|editorial|portrait|wedding)\b/i.test(text)
     && /\b(?:portfolio|gallery|site|website|app|page)\b/i.test(text)

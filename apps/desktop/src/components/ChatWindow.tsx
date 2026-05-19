@@ -1372,7 +1372,20 @@ export function ChatWindow() {
               <div className="flex min-h-full flex-col justify-start">
                 {messages.map((msg, idx) => {
                   const fb = fallbackDeployMap.get(idx);
-                  const sourceRailHandlesSources = latestResearchContext?.assistantIndex === idx;
+                  const isLatestResearch = latestResearchContext?.assistantIndex === idx;
+                  const isLatestMessage = idx === messages.length - 1;
+                  // Route source detail into the right-side conversation sidebar for EVERY
+                  // assistant message that has sources — not just the latest — so older
+                  // turns don't keep showing the giant inline "Supporting sources" block.
+                  const messageHasSources = msg.role === 'assistant' && Boolean(msg.sources?.length);
+                  const sourceRailHandlesSources = messageHasSources;
+                  // Latest assistant message's follow-ups now render in the sidebar's Related
+                  // section (only when the sidebar can actually show them, i.e. when there are
+                  // sources somewhere in the conversation), so suppress the inline block.
+                  const followUpsHandledBySidebar = isLatestMessage
+                    && msg.role === 'assistant'
+                    && Boolean(msg.followUps?.length)
+                    && messages.some((m) => m.role === 'assistant' && Boolean(m.sources?.length));
                   return (
                     <motion.div
                       key={msg.id}
@@ -1411,10 +1424,11 @@ export function ChatWindow() {
                         isAutoRepair={msg.isAutoRepair}
                         repairAttempt={msg.repairAttempt}
                         compactResearchChrome={compactResearchChrome}
-                        isLatestResearchMessage={sourceRailHandlesSources}
+                        isLatestResearchMessage={isLatestResearch}
                         sourceRailHandlesSources={sourceRailHandlesSources}
-                        sourceRailOpen={sourceRailHandlesSources && isResearchRailOpen}
-                        onOpenSources={sourceRailHandlesSources ? () => setIsResearchRailOpen(true) : undefined}
+                        sourceRailOpen={sourceRailHandlesSources && isConversationSourcesOpen}
+                        onOpenSources={sourceRailHandlesSources ? () => setIsConversationSourcesOpen(true) : undefined}
+                        followUpsHandledBySidebar={followUpsHandledBySidebar}
                       />
                     </motion.div>
                   );
@@ -1975,6 +1989,14 @@ export function ChatWindow() {
       messages={messages}
       isOpen={isConversationSourcesOpen}
       onClose={() => setIsConversationSourcesOpen(false)}
+      relatedFollowUps={(() => {
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+          const m = messages[i];
+          if (m.role === 'assistant' && m.followUps?.length) return m.followUps;
+        }
+        return undefined;
+      })()}
+      onFollowUp={(question) => { void handleSend(question); }}
     />
     </div>
   );

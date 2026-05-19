@@ -29,6 +29,10 @@ import {
 } from './conversation-facts.js';
 import { tryEmitConstrainedCode } from './constrained-code-emitter.js';
 import { tryEmitContinuation } from './chat-continuation.js';
+import { tryEmitFormatStrict } from './format-strict-router.js';
+import { tryEmitFactShim } from './deterministic-facts-router.js';
+import { classifyTurn } from './turn-classifier.js';
+import { extractActiveTopicBrief, hasTopicOverlap } from './active-topic-brief.js';
 import { resolveChatPromptRewriteConfig, rewriteChatPrompt } from './prompt-rewrite.js';
 import { buildTurnKindSystemHint, classifyChatTurn } from './turn-kind.js';
 import { decideVaiFallback, pickFallbackModelId } from './vai-fallback.js';
@@ -482,6 +486,106 @@ export class ChatService {
         modeForDeterministicShortcuts !== 'builder'
         && modeForDeterministicShortcuts !== 'agent'
         && !conv.sandboxProjectId;
+
+      // ── Turn classifier + active-topic brief ────────────────────────
+      // Build once per turn. The brief is what "the conversation is
+      // currently about"; the classifier decides whether this input is a
+      // standalone question, a contextual follow-up, or a product-quality
+      // recommendation. Downstream routers consult these instead of
+      // re-running their own ad-hoc heuristics, so the routing decision
+      // stays observable and consistent.
+      const turnClassification = classifyTurn(content, history);
+      const activeTopicBrief = extractActiveTopicBrief(content, history);
+      const isContextualFollowUp =
+        turnClassification.kind === 'contextual-followup'
+        || turnClassification.kind === 'product-quality-recommendation';
+      // A contextual follow-up that DOES share topic with the prior
+      // assistant turn must not be stolen by a deterministic fact shim
+      // just because the new input happens to contain an acronym or
+      // brand word. We let standalone questions through unchanged.
+      const groundedContextualFollowUp =
+        isContextualFollowUp
+        && activeTopicBrief.hasPriorAssistant
+        && hasTopicOverlap(content, activeTopicBrief);
+
+      // Strict-format pre-router: deterministic answers for prompts that
+      // pin an exact shape (first N primes / fibonacci, JSON-only schema
+      // fills). These were misrouting to article handlers or refusals.
+      const strictResult = allowConstrainedCodeShortcut
+        ? tryEmitFormatStrict({ content })
+        : null;
+      if (strictResult) {
+        const startedAt = Date.now();
+        yield { type: 'text_delta', textDelta: strictResult.reply } as ChatChunk;
+        const strictDurationMs = Date.now() - startedAt;
+        yield {
+          type: 'done',
+          usage: { promptTokens: 0, completionTokens: 0 },
+          durationMs: strictDurationMs,
+        } as ChatChunk;
+
+        const strictAssistantId = ulid();
+        this.db.insert(messages).values({
+          id: strictAssistantId,
+          conversationId,
+          role: 'assistant',
+          content: strictResult.reply,
+          modelId: `chat-format-strict:${strictResult.kind}`,
+          durationMs: strictDurationMs,
+          createdAt: new Date(),
+        }).run();
+
+        const strictUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+        if (conv.title === 'New Chat' && content.length > 0) {
+          strictUpdates.title = this.generateTitle(content);
+        }
+        this.db.update(conversations)
+          .set(strictUpdates)
+          .where(eq(conversations.id, conversationId))
+          .run();
+        return;
+      }
+
+      // Deterministic facts shim: small static knowledge table + howto/
+      // troubleshoot templates that intercept BEFORE the broader engine
+      // refuses on well-known prompts ("Where is BMW headquartered?",
+      // "Best way to deploy Vue in production?", "memory leak — what
+      // should I check first?"). Pure data, no network, no LLM.
+      const factShim = allowConstrainedCodeShortcut && !groundedContextualFollowUp
+        ? tryEmitFactShim({ content })
+        : null;
+      if (factShim) {
+        const startedAt = Date.now();
+        yield { type: 'text_delta', textDelta: factShim.reply } as ChatChunk;
+        const shimDurationMs = Date.now() - startedAt;
+        yield {
+          type: 'done',
+          usage: { promptTokens: 0, completionTokens: 0 },
+          durationMs: shimDurationMs,
+        } as ChatChunk;
+
+        const shimAssistantId = ulid();
+        this.db.insert(messages).values({
+          id: shimAssistantId,
+          conversationId,
+          role: 'assistant',
+          content: factShim.reply,
+          modelId: `chat-fact-shim:${factShim.kind}`,
+          durationMs: shimDurationMs,
+          createdAt: new Date(),
+        }).run();
+
+        const shimUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+        if (conv.title === 'New Chat' && content.length > 0) {
+          shimUpdates.title = this.generateTitle(content);
+        }
+        this.db.update(conversations)
+          .set(shimUpdates)
+          .where(eq(conversations.id, conversationId))
+          .run();
+        return;
+      }
+
       const codeResult = allowConstrainedCodeShortcut
         ? tryEmitConstrainedCode({
           content,

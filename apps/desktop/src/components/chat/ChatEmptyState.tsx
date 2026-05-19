@@ -13,16 +13,14 @@ import {
 import { useLayoutStore, type ChatMode } from '../../stores/layoutStore.js';
 
 const STARTER_PROMPTS = [
-  { label: 'Ship a landing page', prompt: 'Build a polished landing page for a developer tool with strong hierarchy and responsive sections.', icon: Layout, kind: 'build' },
-  { label: 'Create an internal tool', prompt: 'Build an internal operations dashboard with filters, activity cards, and keyboard-friendly controls.', icon: Code, kind: 'build' },
+  { label: 'Build a todo app', prompt: 'Build a todo app with add, edit, delete, filters for all / active / completed, and localStorage persistence.', icon: Layout, kind: 'build' },
   { label: 'Explain this repo', prompt: 'Explain this codebase architecture clearly, identify the weak spots, and tell me what to fix first.', icon: BookOpen, kind: 'chat' },
   { label: 'Debug a rough edge', prompt: 'Help me debug a rough edge in this project. Ask for the fastest high-signal context first.', icon: Shield, kind: 'chat' },
-  { label: 'Research before building', prompt: 'Research the best direction first, then turn the findings into an implementation plan.', icon: Globe, kind: 'chat' },
   { label: 'Recall captured pages', prompt: 'What have I captured recently, and what should I remember from it?', icon: MessageCircle, kind: 'memory' },
 ];
 
 interface ChatEmptyStateProps {
-  onStartBuilding: (description: string) => void;
+  onStartBuilding: (description?: string) => void;
   onPresetClick: (label: string) => void;
   onAskMemoryQuestion: (prompt: string, options?: { forceMode?: ChatMode }) => void;
   onOpenSettings: () => void;
@@ -37,7 +35,7 @@ export function ChatEmptyState({
   const themePreference = useLayoutStore((state) => state.themePreference);
   const isLight = themePreference === 'light';
   const memoryPrompt = 'What have I captured recently, and what should I remember from it?';
-  const visibleStarters = STARTER_PROMPTS.slice(0, 4);
+  const visibleStarters = STARTER_PROMPTS;
 
   const handleStarterClick = (prompt: (typeof STARTER_PROMPTS)[number]) => {
     if (prompt.kind === 'build') {
@@ -102,10 +100,10 @@ export function ChatEmptyState({
         {[
           {
             title: 'Build live',
-            detail: 'Kick straight into builder mode for runnable UI, code, and preview.',
-            cta: 'Start a builder prompt',
+            detail: 'Switch to builder mode and describe the app you want Vai to build.',
+            cta: 'Open builder',
             icon: Code,
-            onClick: () => onStartBuilding('Build a polished landing page for a developer tool with a strong hero, proof section, and mobile-ready layout.'),
+            onClick: () => onStartBuilding(),
           },
           {
             title: 'Get a sharp answer',

@@ -13,7 +13,7 @@ import { API_BASE } from '../lib/api.js';
 import {
   Copy, Check, FileText, Rocket, HelpCircle, X as XIcon,
   ChevronRight, CornerDownRight, User, Bot, ThumbsUp, ThumbsDown,
-  Wrench, Sparkles,
+  Wrench, Sparkles, BookOpen,
 } from 'lucide-react';
 import { useSandboxStore } from '../stores/sandboxStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
@@ -104,6 +104,8 @@ interface MessageBubbleProps {
   sourceRailOpen?: boolean;
   /** Opens the right-side research rail */
   onOpenSources?: () => void;
+  /** When true, suppress inline "Related" follow-ups — sidebar renders them instead */
+  followUpsHandledBySidebar?: boolean;
   /** Light “studio builder” message chrome (pairs with chat + preview split) */
   studioChrome?: boolean;
 }
@@ -514,6 +516,7 @@ export function MessageBubble({
   sourceRailHandlesSources = false,
   sourceRailOpen = false,
   onOpenSources,
+  followUpsHandledBySidebar = false,
   studioChrome = false,
 }: MessageBubbleProps) {
   const isUser = role === 'user';
@@ -674,11 +677,19 @@ export function MessageBubble({
   const sourceRailConfidenceLabel = confidence !== undefined ? `${Math.round(confidence * 100)}% confidence` : null;
   const showCompactResearchMeta = isResearchMessage && (compactResearchMode || sourceRailHandlesSources) && hasStructuredSources && Boolean(sources?.length);
   const showExpandedSources = isResearchMessage && hasStructuredSources && sources && !compactResearchMode && !sourceRailHandlesSources;
-  const showResearchFollowUps = isResearchMessage
+  // Only surface related/follow-up chips on the latest assistant message so older
+  // turns don't sit with stale suggestions wedged between user messages.
+  const showResearchFollowUps = isLatest
+    && isResearchMessage
     && visibleFollowUps.length > 0
     && !isStreaming
+    && !followUpsHandledBySidebar
     && (!compactResearchMode || isLatestResearchMessage || !hasStructuredSources);
-  const showPlainFollowUps = visibleFollowUps.length > 0 && !isStreaming && (hasAppliedFileBlocks || !isResearchMessage);
+  const showPlainFollowUps = isLatest
+    && visibleFollowUps.length > 0
+    && !isStreaming
+    && !followUpsHandledBySidebar
+    && (hasAppliedFileBlocks || !isResearchMessage);
   const plainFollowUpsSection = showPlainFollowUps ? (
     <div className={`border-t pt-3 ${studioChrome ? 'border-zinc-200' : 'border-zinc-800/60'}`}>
       <div className={`mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] ${studioChrome ? 'text-zinc-500' : 'text-zinc-600'}`}>
@@ -941,39 +952,33 @@ export function MessageBubble({
 
                   {showCompactResearchMeta && sources && (
                     sourceRailHandlesSources ? (
-                      <div className="border-t border-zinc-900/80 pt-3">
+                      <div className="mt-2">
                         <button
                           type="button"
                           onClick={() => onOpenSources?.()}
                           data-research-source-summary="button"
                           data-state={sourceRailOpen ? 'open' : 'closed'}
-                          className="group/source-summary flex w-full items-center justify-between rounded-[1rem] border border-zinc-800/60 bg-zinc-950/42 px-3.5 py-3 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900/70"
+                          className="group/source-summary inline-flex max-w-full items-center gap-2 rounded-full border border-zinc-800/60 bg-zinc-950/40 px-2.5 py-1 text-[11px] text-zinc-400 transition-colors hover:border-zinc-700 hover:bg-zinc-900/70 hover:text-zinc-200"
+                          title={sourceRailOpen ? 'Sources open in sidebar' : 'Open sources sidebar'}
                         >
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-2 py-0.5 text-[10px] font-medium text-zinc-200">
-                                {sources.length} source{sources.length === 1 ? '' : 's'}
-                              </span>
-                              {sourceRailDomains.map((domain) => (
-                                <span
-                                  key={domain}
-                                  className="rounded-md border border-zinc-800/80 bg-zinc-900/40 px-2 py-0.5 text-[10px] text-zinc-500"
-                                >
-                                  {domain}
-                                </span>
-                              ))}
-                            </div>
-                            <div className="mt-2 text-[11px] leading-5 text-zinc-500">
-                              {sourceRailOpen
-                                ? 'Sources are open in the sidebar for this answer.'
-                                : 'Open the right-side source rail for the cleaner evidence view.'}
-                            </div>
-                          </div>
-
-                          <span className="ml-4 inline-flex items-center gap-1 text-[11px] font-medium text-zinc-300 transition-colors group-hover/source-summary:text-white">
-                            {sourceRailConfidenceLabel ?? 'Open sources'}
-                            <ChevronRight className="h-3.5 w-3.5" />
+                          <BookOpen className="h-3 w-3 flex-shrink-0 text-zinc-500 group-hover/source-summary:text-zinc-300" />
+                          <span className="font-medium text-zinc-300 group-hover/source-summary:text-zinc-100">
+                            {sources.length}
                           </span>
+                          <span className="text-zinc-500">{sources.length === 1 ? 'source' : 'sources'}</span>
+                          {sourceRailDomains.length > 0 && (
+                            <>
+                              <span className="text-zinc-700">·</span>
+                              <span className="truncate text-zinc-500">{sourceRailDomains.join(', ')}</span>
+                            </>
+                          )}
+                          {sourceRailConfidenceLabel && (
+                            <>
+                              <span className="text-zinc-700">·</span>
+                              <span className="text-zinc-500">{sourceRailConfidenceLabel}</span>
+                            </>
+                          )}
+                          <ChevronRight className="h-3 w-3 flex-shrink-0 text-zinc-600 transition-transform group-hover/source-summary:translate-x-0.5 group-hover/source-summary:text-zinc-400" />
                         </button>
                       </div>
                     ) : (
@@ -1012,13 +1017,39 @@ export function MessageBubble({
                 </div>
 
                 {hasStructuredSources && sources && !isResearchMessage && (
-                  <div className="border-t border-zinc-800/70 pt-3">
-                    <SourceCards
-                      sources={sources}
-                      confidence={confidence}
-                      tone={sourcePresentation === 'supporting' ? 'supporting' : 'research'}
-                    />
-                  </div>
+                  sourceRailHandlesSources ? (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => onOpenSources?.()}
+                        data-research-source-summary="button"
+                        data-state={sourceRailOpen ? 'open' : 'closed'}
+                        className="group/source-summary inline-flex max-w-full items-center gap-2 rounded-full border border-zinc-800/60 bg-zinc-950/40 px-2.5 py-1 text-[11px] text-zinc-400 transition-colors hover:border-zinc-700 hover:bg-zinc-900/70 hover:text-zinc-200"
+                        title={sourceRailOpen ? 'Sources open in sidebar' : 'Open sources sidebar'}
+                      >
+                        <BookOpen className="h-3 w-3 flex-shrink-0 text-zinc-500 group-hover/source-summary:text-zinc-300" />
+                        <span className="font-medium text-zinc-300 group-hover/source-summary:text-zinc-100">
+                          {sources.length}
+                        </span>
+                        <span className="text-zinc-500">{sources.length === 1 ? 'source' : 'sources'}</span>
+                        {sourceRailDomains.length > 0 && (
+                          <>
+                            <span className="text-zinc-700">·</span>
+                            <span className="truncate text-zinc-500">{sourceRailDomains.join(', ')}</span>
+                          </>
+                        )}
+                        <ChevronRight className="h-3 w-3 flex-shrink-0 text-zinc-600 transition-transform group-hover/source-summary:translate-x-0.5 group-hover/source-summary:text-zinc-400" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="border-t border-zinc-800/70 pt-3">
+                      <SourceCards
+                        sources={sources}
+                        confidence={confidence}
+                        tone={sourcePresentation === 'supporting' ? 'supporting' : 'research'}
+                      />
+                    </div>
+                  )
                 )}
 
                 {plainFollowUpsSection}

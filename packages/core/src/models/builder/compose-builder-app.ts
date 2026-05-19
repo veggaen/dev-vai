@@ -1,4 +1,8 @@
 import type { BuilderIntent } from './types.js';
+import { generateTodoApp, todoAppPlan } from './recipes/todo-app.js';
+import { generatePomodoroApp, pomodoroAppPlan } from './recipes/pomodoro-app.js';
+import { generateMarkdownEditorApp, markdownEditorPlan } from './recipes/markdown-editor-app.js';
+import { generatePasswordApp, passwordAppPlan } from './recipes/password-generator-app.js';
 
 export interface BuilderLegacyComposer {
   readonly portfolio: (desc: string) => string;
@@ -7,7 +11,7 @@ export interface BuilderLegacyComposer {
   readonly storefront: (desc: string) => string;
 }
 
-function buildReactViteTsApp(options: {
+export function buildReactViteTsApp(options: {
   packageName: string;
   title: string;
   appTsx: string;
@@ -871,6 +875,14 @@ export function composeBuilderApp(intent: BuilderIntent, legacy: BuilderLegacyCo
       return generateMatchingApp();
     case 'booking':
       return generateBookingApp(intent);
+    case 'todo':
+      return `${todoAppPlan()}\n${generateTodoApp(intent.cleanedPrompt)}`;
+    case 'pomodoro':
+      return `${pomodoroAppPlan()}\n${generatePomodoroApp(intent.cleanedPrompt)}`;
+    case 'markdown':
+      return `${markdownEditorPlan()}\n${generateMarkdownEditorApp(intent.cleanedPrompt)}`;
+    case 'password':
+      return `${passwordAppPlan()}\n${generatePasswordApp(intent.cleanedPrompt)}`;
     default:
       return null;
   }
