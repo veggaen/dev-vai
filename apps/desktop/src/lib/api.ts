@@ -28,10 +28,19 @@ export const WS_BASE = getWsBase();
 
 export function buildChatWebSocketUrl(): string {
   const url = `${WS_BASE}/api/chat`;
-  if (!isDevAuthBypassEnabled()) return url;
+  const params = new URLSearchParams();
 
-  const separator = url.includes('?') ? '&' : '?';
-  return `${url}${separator}${DEV_AUTH_BYPASS_QUERY_PARAM}=1`;
+  // Browsers can't set an Authorization header on a WebSocket, so the session
+  // token rides as a query param. Without this, an authenticated desktop chat
+  // socket connects anonymously and every send fails with
+  // "Sign in to update this conversation".
+  const sessionToken = getApiSessionToken();
+  if (sessionToken) params.set('access_token', sessionToken);
+
+  if (isDevAuthBypassEnabled()) params.set(DEV_AUTH_BYPASS_QUERY_PARAM, '1');
+
+  const query = params.toString();
+  return query ? `${url}?${query}` : url;
 }
 
 export function getApiSessionToken(): string | null {

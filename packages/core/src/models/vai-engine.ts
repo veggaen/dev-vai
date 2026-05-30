@@ -13156,16 +13156,40 @@ export class VaiEngine implements ModelAdapter {
     // The grounding sentence MUST mention at least one content token from the
     // claim; otherwise we'd be emitting a confident "Yes" backed by an
     // unrelated snippet (the bug the A3 fix targets).
+    // Salient claim tokens exclude generic action verbs ("make", "sell", "do",
+    // "have"…) so we don't ground a confident "Yes" on a snippet that merely
+    // shares a common verb with the question — e.g. "does Tine make Rislunsj?"
+    // must not match "where they make sense to". The grounding sentence has to
+    // mention a *distinctive* token from the claim (a subject/object).
+    const GENERIC_YESNO_TOKENS = new Set([
+      'make', 'makes', 'made', 'making', 'sell', 'sells', 'sold', 'selling',
+      'have', 'has', 'had', 'having', 'offer', 'offers', 'serve', 'serves',
+      'produce', 'produces', 'own', 'owns', 'owned', 'does', 'did', 'doing',
+      'work', 'works', 'give', 'gives', 'get', 'gets', 'use', 'uses', 'used',
+      'want', 'wants', 'need', 'needs', 'support', 'supports', 'accept',
+      'cost', 'costs', 'charge', 'charges', 'ship', 'ships', 'deliver',
+      'contain', 'contains', 'include', 'includes', 'really', 'actually',
+    ]);
+    const salientClaimTokens = topicContentTokens(claim).filter((t) => !GENERIC_YESNO_TOKENS.has(t));
+    const concernsClaim = (text: string): boolean => {
+      if (salientClaimTokens.length === 0) return textConcernsTopic(text, claim);
+      const low = (text || '').toLowerCase();
+      return salientClaimTokens.some((t) => {
+        const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`\\b${escaped}\\b`, 'i').test(low);
+      });
+    };
+
     const reasoning = this.extractReasoningSnippet(knowledgeTexts, claim);
     let grounded = reasoning;
-    if (!grounded || !textConcernsTopic(grounded, claim)) {
+    if (!grounded || !concernsClaim(grounded)) {
       grounded = '';
       outer: for (const text of knowledgeTexts) {
         const sentences = text.split(/(?<=[.!?])\s+/);
         for (const s of sentences) {
           const trimmed = s.trim();
           if (trimmed.length < 20 || trimmed.length > 320) continue;
-          if (textConcernsTopic(trimmed, claim)) {
+          if (concernsClaim(trimmed)) {
             grounded = trimmed;
             break outer;
           }

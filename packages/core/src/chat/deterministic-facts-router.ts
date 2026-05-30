@@ -770,6 +770,11 @@ const BRAND_FACTS: Record<string, BrandFact> = {
   },
 };
 
+// "does Starbucks make cappuccino?", "do they sell oat milk?", "does McDonald's
+// serve breakfast?" — these ask whether the brand DOES something, not what it
+// IS. A bare "what is X" definition is the wrong answer, so we defer them.
+const BRAND_ACTION_QUESTION_RE = /^\s*(?:does|do|did|can|could|will|would|is|are)\b[\s\S]*\b(?:make|makes|made|sell|sells|sold|have|has|offer|offers|serve|serves|produce|produces|own|owns|sponsor|sponsors|ship|ships|deliver|delivers|support|supports|accept|accepts|cost|costs|charge|charges|stock|stocks|carry|carries|provide|provides|run|runs|operate|operates)\b/i;
+
 function tryBrand(content: string): FactShimResult | null {
   const lower = content.toLowerCase();
   if (
@@ -803,6 +808,11 @@ function tryBrand(content: string): FactShimResult | null {
     if (wantsFounded && fact.founded) {
       const parent = fact.parent ? fact.parent.replace(/\.$/, '') : null;
       return { reply: `**${display}** was founded in ${fact.founded}${parent ? ` (${parent})` : ''}.`, kind: 'fact-brand' };
+    }
+    // Defer action yes/no questions ("does X make Y?") to the yes/no pipeline
+    // instead of dumping the brand's "what is X" definition.
+    if (BRAND_ACTION_QUESTION_RE.test(lower)) {
+      return null;
     }
     return { reply: fact.oneLiner, kind: 'fact-brand' };
   }

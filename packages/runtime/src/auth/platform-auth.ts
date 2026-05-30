@@ -834,11 +834,45 @@ export class PlatformAuthService {
 
     const cookies = parseCookies(request.headers.cookie);
     const token = cookies[this.config.sessionCookieName];
-    if (!token) return null;
-    return {
-      token,
-      tokenHash: this.hashToken(token),
-    };
+    if (token) {
+      return {
+        token,
+        tokenHash: this.hashToken(token),
+      };
+    }
+
+    // WebSocket upgrade requests cannot set an Authorization header from the
+    // browser/webview, and the desktop shell has no runtime cookie (its session
+    // token lives in localStorage). The chat socket therefore passes the token
+    // via an `access_token` query param. Restricted to WS upgrades so the HTTP
+    // auth surface is unchanged; validation is identical to a Bearer token.
+    const isWebSocketUpgrade = String(request.headers.upgrade ?? '').toLowerCase() === 'websocket';
+    if (isWebSocketUpgrade) {
+      const queryToken = this.getAccessTokenFromQuery(request);
+      if (queryToken) {
+        return {
+          token: queryToken,
+          tokenHash: this.hashToken(queryToken),
+        };
+      }
+    }
+
+    return null;
+  }
+
+  private getAccessTokenFromQuery(request: FastifyRequest): string | null {
+    const query = (request as FastifyRequest & { query?: unknown }).query;
+    if (query && typeof query === 'object' && !Array.isArray(query)) {
+      const value = (query as Record<string, unknown>).access_token;
+      if (typeof value === 'string' && value.trim()) return value.trim();
+      if (Array.isArray(value) && typeof value[0] === 'string' && value[0].trim()) return value[0].trim();
+    }
+
+    const requestUrl = typeof request.url === 'string' ? request.url : '';
+    const queryStart = requestUrl.indexOf('?');
+    if (queryStart === -1) return null;
+    const fromUrl = new URLSearchParams(requestUrl.slice(queryStart + 1)).get('access_token');
+    return fromUrl?.trim() || null;
   }
 
   private getCompanionMetadataFromRequest(request: FastifyRequest): CompanionClientMetadata | null {
