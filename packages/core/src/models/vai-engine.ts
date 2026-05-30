@@ -49,6 +49,7 @@ import { buildGroundedBuildBrief } from './grounded-build-brief.js';
 import { isExplicitWebSearchRequest } from './explicit-web-search.js';
 import { tryEmitFactShim } from '../chat/deterministic-facts-router.js';
 import { classifyQuestionIntent, splitCompoundQuestion, combineCompoundAnswers } from '../chat/question-intent.js';
+import { rewritePronounFollowUp, recallFromConversation } from '../chat/contextual-resolver.js';
 import { tryEmitProductEngineeringMemo } from '../chat/product-engineering-memo.js';
 import { tryEmitBoundaryResponse } from '../chat/boundary-response.js';
 import { bulkFactsLookup } from './curated-facts-bulk.js';
@@ -3003,6 +3004,35 @@ export class VaiEngine implements ModelAdapter {
     const trimmed = input.trim();
     if (trimmed.length === 0 || trimmed.length > 120) return null;
 
+    // ---- Scope correction: "actually i meant the whole country, not the city"
+    // → re-ask the prior question about the country instead of the city.
+    if (/\b(?:i\s+(?:mean|meant)|talking\s+about|asking\s+about|the\s+whole)\b/i.test(trimmed)
+        && /\b(?:whole\s+)?(?:country|nation)\b/i.test(trimmed)
+        && /\bnot\s+(?:the\s+)?(?:city|town|capital)\b/i.test(trimmed)) {
+      const COUNTRY_OF = /\b(?:capital|king|queen|currency|population|people|president|prime\s+minister)\s+(?:city\s+)?of\s+([a-z][a-z\s]{1,30}?)(?:[?.!,]|$)/i;
+      let country: string | null = null;
+      for (let i = history.length - 1; i >= 0; i -= 1) {
+        const m = history[i];
+        if (!m || typeof m.content !== 'string') continue;
+        const cm = m.content.match(COUNTRY_OF);
+        if (cm) { country = cm[1].trim(); break; }
+      }
+      const users = history.filter((m) => m.role === 'user' && typeof m.content === 'string');
+      let priorQ: string | null = null;
+      for (let i = users.length - 2; i >= 0; i -= 1) {
+        const c = users[i].content.trim();
+        if (/^(?:how|what|which|when|where|why|who|is|are|does|do|did|can)\b/i.test(c)) { priorQ = c; break; }
+      }
+      if (country && priorQ) {
+        const base = priorQ
+          .replace(/\b(?:there|here)\b/gi, '')
+          .replace(/\bin\s+[A-Z][a-z]+\b/g, '')
+          .replace(/\s+/g, ' ').replace(/[?.!]+$/g, '').trim();
+        const C = country.charAt(0).toUpperCase() + country.slice(1);
+        return `${base} in ${C}?`;
+      }
+    }
+
     // ---- Currency-symbol follow-up: "And its currency symbol, only the
     // symbol character." / "And the currency symbol of his country?" /
     // "You missed the symbol. Just the symbol character please." Resolve to
@@ -3443,6 +3473,16 @@ export class VaiEngine implements ModelAdapter {
     }
 
     return null;
+  }
+
+  /**
+   * Memory: dynamic conversation recall — "what was my name/job/favorite color
+   * again?", "who am I?". Recalls any attribute the user stated earlier. Runs
+   * ahead of the topic/disambiguation handlers so it doesn't get answered with
+   * the stale active topic.
+   */
+  private tryRecall(input: string, history: readonly Message[]): string | null {
+    return recallFromConversation(input, history);
   }
 
   /**
@@ -8588,7 +8628,7 @@ export class VaiEngine implements ModelAdapter {
       this.tryDirectCorpusTaskResponse(originalUserContent, originalUserContent.toLowerCase().trim(), request.messages)
       ?? this.tryDirectCorpusTaskResponse(userContent, userContent.toLowerCase().trim(), request.messages);
     const earlyFollowUp = directPreflight === null ? this.tryAnswerFollowUp(originalUserContent, request.messages) : null;
-    const disambiguated = earlyFollowUp ?? this.tryAnswerEarlyHooks(userContent, request.messages) ?? this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent) ?? this.tryAnswerNegation(userContent);
+    const disambiguated = this.tryRecall(userContent, request.messages) ?? earlyFollowUp ?? this.tryAnswerEarlyHooks(userContent, request.messages) ?? this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent) ?? this.tryAnswerNegation(userContent);
     // R12: Recency short-circuit — release-status / availability queries must
     // skip extended-fact / canonical handlers (stale local synthesis) and go
     // straight to generateResponse where the freshness-hedge + web-fallback
@@ -8801,7 +8841,7 @@ export class VaiEngine implements ModelAdapter {
       this.tryDirectCorpusTaskResponse(originalUserContent, originalUserContent.toLowerCase().trim(), request.messages)
       ?? this.tryDirectCorpusTaskResponse(userContent, userContent.toLowerCase().trim(), request.messages);
     const earlyFollowUp = directPreflight === null ? this.tryAnswerFollowUp(originalUserContent, request.messages) : null;
-    const disambiguated = earlyFollowUp ?? this.tryAnswerEarlyHooks(userContent, request.messages) ?? this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent) ?? this.tryAnswerNegation(userContent);
+    const disambiguated = this.tryRecall(userContent, request.messages) ?? earlyFollowUp ?? this.tryAnswerEarlyHooks(userContent, request.messages) ?? this.tryAnswerDisambiguatedTopic(userContent) ?? this.tryAnswerBareAmbiguous(userContent) ?? this.tryAnswerNegation(userContent);
     // R12: Recency short-circuit (see chat() for rationale).
     const _recencyShortCircuit = /\b(?:out\s+yet|released\s+yet|release\s+date|when\s+(?:did|does|will|is)\s+\S+\s+(?:come\s+out|release|launch|drop|out)|did\s+\S+\s+(?:release|launch|drop|come\s+out)|is\s+\S+\s+(?:out|released|available)\s+(?:yet|now)|when\s+is\s+\S+\s+coming|when\s+did\s+\S+\s+release)\b/i.test(userContent);
     let response: string;
@@ -9684,6 +9724,16 @@ export class VaiEngine implements ModelAdapter {
     const iterativeRefinement = this.rewriteIterativeRefinementInput(input, history);
     if (iterativeRefinement) {
       input = iterativeRefinement;
+    }
+    // Resolve referential follow-ups ("how many people live there?", "would you
+    // recommend using one?") against the active topic so they route as real
+    // questions instead of being web-searched literally into garbage.
+    {
+      const contextTopic = this.inferRecentFollowUpTopic(history);
+      const pronounRewrite = contextTopic ? rewritePronounFollowUp(input, contextTopic) : null;
+      if (pronounRewrite) {
+        input = pronounRewrite;
+      }
     }
     let lower = input.toLowerCase().trim();
 
@@ -11668,7 +11718,7 @@ export class VaiEngine implements ModelAdapter {
   }
 
   private inferRecentFollowUpTopic(history: readonly Message[]): string | null {
-    const recentAssistant = [...history].reverse().find((message) => message.role === 'assistant' && message.content.trim().length > 0);
+    const recentAssistant = [...history].reverse().find((message) => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim().length > 0);
     const assistantText = recentAssistant?.content ?? '';
 
     const headingMatch = /\*\*([^*]{2,60})\*\*/.exec(assistantText);
@@ -11697,7 +11747,7 @@ export class VaiEngine implements ModelAdapter {
       if (matcher.pattern.test(assistantText)) return matcher.label;
     }
 
-    const previousUsers = [...history].reverse().filter((message) => message.role === 'user' && message.content.trim().length > 0);
+    const previousUsers = [...history].reverse().filter((message) => message.role === 'user' && typeof message.content === 'string' && message.content.trim().length > 0);
     for (const message of previousUsers) {
       for (const matcher of topicMatchers) {
         if (matcher.pattern.test(message.content)) return matcher.label;
@@ -13467,7 +13517,7 @@ export class VaiEngine implements ModelAdapter {
   }
 
   private tryReferentialCompressionFollowUp(original: string, history: readonly Message[]): string | null {
-    const recentAssistant = [...history].reverse().find((message) => message.role === 'assistant' && message.content.trim().length > 0);
+    const recentAssistant = [...history].reverse().find((message) => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim().length > 0);
     if (!recentAssistant) return null;
 
     const normalized = original.replace(/\s+/g, ' ').trim();
@@ -13566,7 +13616,7 @@ export class VaiEngine implements ModelAdapter {
   }
 
   private tryReferentialChangeFollowUp(original: string, history: readonly Message[]): string | null {
-    const recentAssistant = [...history].reverse().find((message) => message.role === 'assistant' && message.content.trim().length > 0);
+    const recentAssistant = [...history].reverse().find((message) => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim().length > 0);
     if (!recentAssistant) return null;
 
     const normalized = original.replace(/\s+/g, ' ').trim();
