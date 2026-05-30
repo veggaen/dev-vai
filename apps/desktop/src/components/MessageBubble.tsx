@@ -36,9 +36,11 @@ import type {
   MessageSender,
   SourcePresentationUI,
   TurnKindUI,
+  TurnThinkingUI,
   IDE_AGENT_COLORS as _Colors,
 } from '../stores/chatStore.js';
 import type { DeployIntent, RecoveryPattern } from '../lib/intent-detector.js';
+import { ThinkingPanel } from './chat/ThinkingPanel.js';
 import { ProjectArtifactCard } from './ProjectArtifactCard.js';
 import { SourceCards } from './SourceCards.js';
 
@@ -80,6 +82,8 @@ interface MessageBubbleProps {
   confidence?: number;
   /** Structured research-to-build handoff */
   groundedBuildBrief?: GroundedBuildBriefUI;
+  /** Vai-native thinking trace for the collapsible Thinking panel */
+  thinking?: TurnThinkingUI;
   /** Feedback state: true=helpful, false=not helpful, undefined=no feedback */
   feedback?: boolean;
   /** Called when user gives thumbs up/down */
@@ -574,7 +578,7 @@ export function MessageBubble({
   fallbackDeploy, recoveryPattern = 'silent', allIntents, onIntentAction,
   isLatest = false, isStreaming = false,
   respondingModelId, fallback,
-  sources, sourcePresentation, turnKind, followUps, confidence, groundedBuildBrief, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
+  sources, sourcePresentation, turnKind, followUps, confidence, groundedBuildBrief, thinking, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
   isAutoRepair = false, repairAttempt,
   compactResearchChrome = false,
   isLatestResearchMessage = false,
@@ -937,6 +941,11 @@ export function MessageBubble({
                   </div>
                 ))}
               </div>
+            )}
+
+            {/* Vai-native Thinking panel — strategy chain + intent + trust, above the answer */}
+            {!isUser && thinking && (
+              <ThinkingPanel thinking={thinking} />
             )}
 
             {/* Source chip row — Perplexity-style, rendered ABOVE the answer for research messages */}

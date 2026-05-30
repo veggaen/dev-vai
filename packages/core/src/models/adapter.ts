@@ -138,6 +138,39 @@ export interface ChatChunk {
     readonly toModelId: string;
     readonly reason: 'low-confidence' | 'no-knowledge';
   };
+  /**
+   * Vai-native "thinking" trace for the turn (Vai is a deterministic engine, not
+   * an LLM — this is the strategy chain it actually walked, not token reasoning).
+   * Attached to the `done` chunk so the UI can render an expandable panel and
+   * flag intent/strategy mismatches (misroutes).
+   */
+  readonly thinking?: TurnThinking;
+}
+
+/**
+ * The observable decision trace for one Vai turn. Canonical shape shared by the
+ * WS protocol and (future) HTTP/gRPC/agent-JSON skins — the "one structured
+ * turn, many transports" contract.
+ */
+export interface TurnThinking {
+  /** Classified question intent (action-yesno | definition | factual-lookup | build | meta | other). */
+  readonly intent: string;
+  /** Winning strategy; may be a teacher-loop chain like "a->b->c". */
+  readonly strategy: string;
+  /** `strategy` split into ordered steps — the chain Vai walked. */
+  readonly strategyChain: readonly string[];
+  /** Provenance/trust badge for the answer. */
+  readonly trustBadge?: string;
+  /** 0–1 confidence in the answer. */
+  readonly confidence?: number;
+  /** Primary topic Vai detected. */
+  readonly topic?: string;
+  /** How deep Vai's knowledge is on this topic. */
+  readonly knowledgeDepth?: 'deep' | 'shallow' | 'none';
+  /** Detected conversational register of the user's input. */
+  readonly register?: string;
+  /** Turn latency in milliseconds. */
+  readonly durationMs?: number;
 }
 
 // ── Model Adapter Interface ──

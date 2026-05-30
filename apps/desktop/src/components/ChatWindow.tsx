@@ -1419,6 +1419,7 @@ export function ChatWindow() {
                         followUps={msg.followUps}
                         confidence={msg.confidence}
                         groundedBuildBrief={msg.groundedBuildBrief}
+                        thinking={msg.thinking}
                         feedback={msg.feedback}
                         onFeedback={(helpful) => useChatStore.getState().setFeedback(msg.id, helpful)}
                         onFollowUp={(question) => { void handleSend(question); }}

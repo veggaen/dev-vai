@@ -43,6 +43,7 @@ import type {
   ChatResponse,
   ChatChunk,
   Message,
+  TurnThinking,
 } from './adapter.js';
 import { buildGroundedBuildBrief } from './grounded-build-brief.js';
 import { isExplicitWebSearchRequest } from './explicit-web-search.js';
@@ -8958,6 +8959,29 @@ export class VaiEngine implements ModelAdapter {
         promptTokens: this.tokenizer.encode(userContent).length,
         completionTokens: this.tokenizer.encode(response).length,
       },
+      durationMs,
+      thinking: this.buildTurnThinking(userContent, durationMs),
+    };
+  }
+
+  /**
+   * Build the Vai-native thinking trace for the just-finished turn from the
+   * live response meta. Vai is deterministic, so this surfaces the strategy
+   * chain it actually walked + intent/trust/confidence — the diagnostic lens.
+   */
+  private buildTurnThinking(userContent: string, durationMs: number): TurnThinking | undefined {
+    const meta = this._lastMeta;
+    if (!meta) return undefined;
+    const strategy = meta.strategy ?? '';
+    return {
+      intent: classifyQuestionIntent(userContent),
+      strategy,
+      strategyChain: strategy.split(/\s*->\s*/).map((s) => s.trim()).filter(Boolean),
+      trustBadge: meta.trustBadge,
+      confidence: meta.confidence,
+      topic: meta.topicDetected,
+      knowledgeDepth: meta.knowledgeDepth,
+      register: meta.register,
       durationMs,
     };
   }
