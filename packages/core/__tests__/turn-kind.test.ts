@@ -42,6 +42,22 @@ describe('classifyChatTurn', () => {
     })).toBe('builder');
   });
 
+  it('does not classify hardware product planning prompts as builder', () => {
+    expect(classifyChatTurn({
+      userContent: 'I want to build a temperature humidity sensor with ESP32 hardware, casing, firmware, and a SaaS dashboard. What should I order and how should I plan this?',
+      mode: 'chat',
+      hasActiveSandbox: false,
+    })).toBe('analysis');
+  });
+
+  it('still classifies explicit software prototypes for hardware products as builder', () => {
+    expect(classifyChatTurn({
+      userContent: 'Prototype the web dashboard UI for my ESP32 humidity sensor in React now.',
+      mode: 'chat',
+      hasActiveSandbox: false,
+    })).toBe('builder');
+  });
+
   it('leaves normal factual questions in analysis mode', () => {
     expect(classifyChatTurn({
       userContent: 'what is bun?',

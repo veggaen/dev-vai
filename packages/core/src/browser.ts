@@ -12,3 +12,9 @@ export type * from './sessions/types.js';
 export type * from './sessions/analyzer.js';
 export type * from './eval/conversation-scorer.js';
 export type * from './eval/learning-extractor.js';
+
+export {
+  hasExplicitSoftwareExecutionAnchor,
+  hasProductEngineeringSignal,
+  isProductEngineeringPlanningPrompt,
+} from './chat/product-engineering-intent.js';

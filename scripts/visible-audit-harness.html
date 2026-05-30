@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Vai Format Audit Harness</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 14px/1.45 ui-sans-serif, system-ui, sans-serif; background:#0b0d12; color:#e7e9ee; }
+  header { padding: 12px 18px; background:#11141b; border-bottom: 1px solid #1c2230; display:flex; gap:12px; align-items:center; }
+  header h1 { margin:0; font-size:14px; font-weight:600; letter-spacing:.2px; }
+  header .meta { color:#8a93a6; font-size:12px; }
+  main { display:grid; grid-template-columns: 360px 1fr; gap:0; height: calc(100vh - 49px); }
+  aside { border-right:1px solid #1c2230; padding:14px; overflow:auto; background:#0d1018; }
+  aside h2 { margin: 0 0 8px; font-size:12px; text-transform:uppercase; color:#8a93a6; letter-spacing:.6px; }
+  .case { padding:8px 10px; border:1px solid #1c2230; border-radius:8px; margin-bottom:8px; cursor:pointer; }
+  .case:hover { border-color:#2a3245; background:#11141b; }
+  .case.active { border-color:#4c7afa; background:#15203a; }
+  .case .id { font-size:11px; color:#8a93a6; }
+  .case .p  { font-size:13px; color:#e7e9ee; }
+  .case .v  { font-size:11px; margin-top:4px; }
+  .pass { color:#7be0a6; }
+  .fail { color:#ff7a90; }
+  .pending { color:#8a93a6; }
+  section.chat { display:flex; flex-direction:column; min-width:0; }
+  .transcript { flex:1; overflow:auto; padding:18px 22px; }
+  .msg { margin-bottom:14px; padding:10px 14px; border-radius:10px; max-width:920px; white-space:pre-wrap; word-wrap:break-word; }
+  .msg.user { background:#15203a; border:1px solid #243456; }
+  .msg.assistant { background:#11141b; border:1px solid #1c2230; }
+  .msg .role { font-size:11px; color:#8a93a6; text-transform:uppercase; letter-spacing:.6px; margin-bottom:4px; }
+  .composer { border-top:1px solid #1c2230; padding:12px 18px; display:flex; gap:8px; background:#0d1018; }
+  textarea { flex:1; background:#11141b; color:#e7e9ee; border:1px solid #1c2230; border-radius:8px; padding:8px 10px; font: inherit; resize:none; }
+  button { background:#4c7afa; color:white; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; font-weight:600; }
+  button.secondary { background:#1c2230; color:#e7e9ee; }
+  .summary { padding:10px 14px; background:#11141b; border:1px solid #1c2230; border-radius:8px; margin-bottom:10px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Vai Format Audit Harness</h1>
+  <span class="meta" id="meta">runtime: http://localhost:3006</span>
+  <button id="runAll">Run all</button>
+  <button class="secondary" id="reset">Reset</button>
+</header>
+<main>
+  <aside>
+    <h2>Cases</h2>
+    <div class="summary" id="summary">— / — passed</div>
+    <div id="cases"></div>
+  </aside>
+  <section class="chat">
+    <div class="transcript" id="transcript"></div>
+    <div class="composer">
+      <textarea id="input" rows="2" placeholder="Type a prompt and press Enter…"></textarea>
+      <button id="send">Send</button>
+    </div>
+  </section>
+</main>
+
+<script>
+const REST = 'http://localhost:3006';
+const WS   = 'ws://localhost:3006/api/chat';
+
+const CASES = [
+  { id: 'capital-japan',    prompt: 'capital of japan in one word',                         expect: /\btokyo\b/i },
+  { id: 'ceo-spacex',       prompt: 'who is the CEO of SpaceX — only the name please',     expect: /\bmusk\b/i },
+  { id: 'date-www',         prompt: 'when was the world wide web invented — date only',    expect: /1989|1990|1991/ },
+  { id: 'city-colosseum',   prompt: 'where is the colosseum — city only',                  expect: /\brome\b/i },
+  { id: 'colors-comma',     prompt: 'list the three primary colors comma separated',        expect: /red.*yellow.*blue/i },
+  { id: 'headline-spacex',  prompt: 'write a one-line headline about a SpaceX launch',      expect: /spacex|launch|rocket|satellite/i },
+  { id: 'json-todo',        prompt: 'return JSON only (no prose) with {id, task, done} for a sample todo', expect: /\{[\s\S]*"id"[\s\S]*\}/ },
+  { id: 'bul-rust',         prompt: 'three benefits of rust as bullets',                    expect: /^\s*[-•]\s+/m },
+];
+
+const state = CASES.map(c => ({ ...c, status: 'pending', response: '' }));
+
+function renderCases() {
+  const html = state.map((c, i) => `
+    <div class="case ${c.status}" data-i="${i}">
+      <div class="id">${c.id}</div>
+      <div class="p">${c.prompt}</div>
+      <div class="v ${c.status === 'pass' ? 'pass' : c.status === 'fail' ? 'fail' : 'pending'}">
+        ${c.status === 'pending' ? '—' : c.status === 'pass' ? '✓ pass' : '✗ fail'}
+      </div>
+    </div>`).join('');
+  document.getElementById('cases').innerHTML = html;
+  const pass = state.filter(c => c.status === 'pass').length;
+  const done = state.filter(c => c.status !== 'pending').length;
+  document.getElementById('summary').textContent = `${pass} / ${done} passed (${state.length} total)`;
+}
+renderCases();
+
+function append(role, text) {
+  const t = document.getElementById('transcript');
+  const d = document.createElement('div');
+  d.className = `msg ${role}`;
+  d.innerHTML = `<div class="role">${role}</div>`;
+  const body = document.createElement('div');
+  body.textContent = text;
+  d.appendChild(body);
+  t.appendChild(d);
+  t.scrollTop = t.scrollHeight;
+  return body;
+}
+
+async function newConversation() {
+  const r = await fetch(`${REST}/api/conversations`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'audit' }),
+  });
+  if (!r.ok) throw new Error('conversation create failed: ' + r.status);
+  const j = await r.json();
+  return j.id || j.conversationId || j.conversation?.id;
+}
+
+function askChat(convId, prompt, onDelta) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(WS);
+    let acc = '';
+    let to = setTimeout(() => { try { ws.close(); } catch {} reject(new Error('timeout')); }, 45000);
+    ws.onopen = () => ws.send(JSON.stringify({ conversationId: convId, content: prompt }));
+    ws.onmessage = (e) => {
+      try {
+        const m = JSON.parse(e.data);
+        if (m.type === 'text_delta' || m.type === 'delta') {
+          const piece = m.text ?? m.delta ?? m.content ?? '';
+          if (piece) { acc += piece; onDelta && onDelta(acc); }
+        } else if (m.type === 'message' || m.type === 'final') {
+          if (m.text) acc = m.text;
+        } else if (m.type === 'done' || m.type === 'end' || m.type === 'complete') {
+          clearTimeout(to); try { ws.close(); } catch {} resolve(acc);
+        }
+      } catch {}
+    };
+    ws.onerror = (e) => { clearTimeout(to); reject(new Error('ws error')); };
+    ws.onclose = () => { clearTimeout(to); resolve(acc); };
+  });
+}
+
+async function runCase(i) {
+  const c = state[i];
+  append('user', c.prompt);
+  const target = append('assistant', '…');
+  try {
+    const convId = await newConversation();
+    const text = await askChat(convId, c.prompt, (acc) => { target.textContent = acc; });
+    target.textContent = text;
+    c.response = text;
+    c.status = c.expect.test(text) ? 'pass' : 'fail';
+  } catch (e) {
+    target.textContent = '[error] ' + e.message;
+    c.status = 'fail';
+  }
+  renderCases();
+}
+
+document.getElementById('runAll').addEventListener('click', async () => {
+  for (let i = 0; i < state.length; i++) await runCase(i);
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  state.forEach(c => { c.status = 'pending'; c.response = ''; });
+  document.getElementById('transcript').innerHTML = '';
+  renderCases();
+});
+
+document.getElementById('send').addEventListener('click', async () => {
+  const i = document.getElementById('input');
+  const v = i.value.trim();
+  if (!v) return;
+  i.value = '';
+  append('user', v);
+  const target = append('assistant', '…');
+  try {
+    const convId = await newConversation();
+    const text = await askChat(convId, v, (acc) => { target.textContent = acc; });
+    target.textContent = text;
+  } catch (e) {
+    target.textContent = '[error] ' + e.message;
+  }
+});
+
+document.getElementById('input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    document.getElementById('send').click();
+  }
+});
+
+document.getElementById('cases').addEventListener('click', (e) => {
+  const el = e.target.closest('.case');
+  if (!el) return;
+  runCase(Number(el.dataset.i));
+});
+</script>
+</body>
+</html>

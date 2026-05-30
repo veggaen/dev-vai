@@ -8,6 +8,14 @@ describe('conversation mode prompts', () => {
     expect(prompt).toMatch(/only emit sandbox template deploy markers when the user explicitly asks/i);
   });
 
+  it('makes builder UI quality a product contract, not just decoration', () => {
+    const prompt = CONVERSATION_MODE_SYSTEM_PROMPTS.builder;
+    expect(prompt).toMatch(/PRODUCT CONTRACT/i);
+    expect(prompt).toMatch(/first viewport must immediately communicate the product name, domain, primary workflow, and main action/i);
+    expect(prompt).toMatch(/Every primary button must change state/i);
+    expect(prompt).toMatch(/Empty, loading, and error states/i);
+  });
+
   it('keeps a verified lucide-react icon shortlist in builder mode', () => {
     const prompt = CONVERSATION_MODE_SYSTEM_PROMPTS.builder;
     expect(prompt).toMatch(/LUCIDE-REACT ICONS \(v1\.7\)/i);
@@ -33,6 +41,12 @@ describe('conversation mode prompts', () => {
     const prompt = CONVERSATION_MODE_SYSTEM_PROMPTS.chat;
     expect(prompt).toMatch(/do not stop at advice or planning/i);
     expect(prompt).toMatch(/emit either sandbox action markers or complete runnable files using title="path\/to\/file" code blocks/i);
+  });
+
+  it('keeps hardware product planning out of default sandbox build flow', () => {
+    const prompt = CONVERSATION_MODE_SYSTEM_PROMPTS.chat;
+    expect(prompt).toMatch(/physical product, hardware device, BOM, enclosure, firmware, sourcing/i);
+    expect(prompt).toMatch(/do not treat that as a sandbox build by default/i);
   });
 
   it('appends sandbox deploy/template context to agent and builder modes', () => {

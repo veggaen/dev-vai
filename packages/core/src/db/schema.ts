@@ -444,3 +444,30 @@ export const usageRecords = sqliteTable('usage_records', {
   finishReason: text('finish_reason').notNull().default('stop'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
+
+export const sandboxRevisions = sqliteTable('sandbox_revisions', {
+  id: text('id').primaryKey(),
+  sandboxProjectId: text('sandbox_project_id').notNull(),
+  conversationId: text('conversation_id').references(() => conversations.id),
+  messageId: text('message_id').references(() => messages.id),
+  actorUserId: text('actor_user_id').references(() => platformUsers.id),
+  baseVersion: integer('base_version').notNull(),
+  version: integer('version').notNull(),
+  summary: text('summary'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+}, (table) => ({
+  sandboxIdx: index('idx_sandbox_revisions_sandbox').on(table.sandboxProjectId),
+  createdAtIdx: index('idx_sandbox_revisions_created_at').on(table.createdAt),
+}));
+
+export const sandboxRevisionFiles = sqliteTable('sandbox_revision_files', {
+  id: text('id').primaryKey(),
+  revisionId: text('revision_id').notNull().references(() => sandboxRevisions.id),
+  path: text('path').notNull(),
+  changeType: text('change_type', { enum: ['create', 'update', 'delete'] }).notNull(),
+  beforeContent: text('before_content'),
+  afterContent: text('after_content'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+}, (table) => ({
+  revisionIdx: index('idx_sandbox_revision_files_revision').on(table.revisionId),
+}));

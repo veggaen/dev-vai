@@ -1,5 +1,6 @@
 import type { ConversationMode } from './modes.js';
 import { detectInstructionConstraint, isGenerationIntent } from './chat-quality.js';
+import { hasExplicitSoftwareExecutionAnchor, isProductEngineeringPlanningPrompt } from './product-engineering-intent.js';
 import { isExplicitWebSearchRequest } from '../models/explicit-web-search.js';
 
 export type ChatTurnKind = 'conversational' | 'research' | 'builder' | 'analysis';
@@ -31,8 +32,13 @@ export function classifyChatTurn(input: ClassifyChatTurnInput): ChatTurnKind {
     return 'conversational';
   }
 
+  if (isProductEngineeringPlanningPrompt(trimmed)) {
+    return 'analysis';
+  }
+
   if (
     isGenerationIntent(trimmed)
+    || hasExplicitSoftwareExecutionAnchor(trimmed)
     || ((input.mode === 'builder' || input.mode === 'agent') && SANDBOX_EDIT_PATTERN.test(trimmed))
     || (input.hasActiveSandbox && SANDBOX_EDIT_PATTERN.test(trimmed))
   ) {

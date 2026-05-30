@@ -1,3 +1,5 @@
+import { isProductEngineeringPlanningPrompt } from '@vai/core/browser';
+
 const AUTH_SIGNALS = /\b(?:auth(?:entication)?|login|sign[\s-]?in|sign[\s-]?up|session|middleware|protected|account|user)\b/i;
 const VISUAL_SIGNALS = /\b(?:spacing|typography|font|hero|headline|heading|cta|theme|color|palette|button|layout|landing|page|ui|visual|style|polish|refine|motions?|animations?|animate|kinetic|transitions?|entrance|reveal|body)\b/i;
 const FILE_REFERENCE_SIGNALS = /(?:\b[\w./-]+\.(?:tsx|ts|jsx|js|css|scss|sass|json|html|md|py|sh|yml|yaml|toml|sql)\b|`[^`]+\.(?:tsx|ts|jsx|js|css|scss|sass|json|html|md|py|sh|yml|yaml|toml|sql)`)/i;
@@ -62,6 +64,7 @@ export function pickSandboxContextPaths(files: string[], userPrompt: string, lim
 export function shouldAttachSandboxContext(userPrompt: string): boolean {
   const prompt = userPrompt.trim();
   if (!prompt) return false;
+  if (isProductEngineeringPlanningPrompt(prompt)) return false;
   if (FILE_REFERENCE_SIGNALS.test(prompt)) return true;
   if (PROJECT_REFERENCE_SIGNALS.test(prompt)) return true;
   if (SANDBOX_REFERENCE_SIGNALS.test(prompt)) return true;

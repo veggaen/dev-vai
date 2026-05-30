@@ -35,5 +35,6 @@ export const sandboxCreateBodySchema = z
 export const sandboxWriteFilesBodySchema = z
   .object({
     files: z.array(fileWriteSchema),
+    baseVersion: z.number().int().nonnegative().optional(),
   })
   .strict();

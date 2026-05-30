@@ -64,12 +64,23 @@ export interface SandboxProject {
   /** Last ~50 stderr lines from the current dev server process — reset on each startDev(). */
   devStderr: string[];
   status: 'idle' | 'writing' | 'installing' | 'building' | 'running' | 'failed';
+  version: number;
   createdAt: Date;
 }
 
 export interface FileWrite {
   path: string;   // relative to project root, e.g. "src/App.tsx"
   content: string;
+}
+
+export interface WriteFilesOptions {
+  callerUserId?: string | null;
+  baseVersion?: number;
+}
+
+export interface FileRestore {
+  path: string;
+  content: string | null;
 }
 
 /** Check if a port is available by attempting to listen on it */
@@ -179,6 +190,7 @@ export class SandboxManager {
       logs: [],
       devStderr: [],
       status: 'idle',
+      version: 0,
       createdAt: new Date(),
     };
 
@@ -301,6 +313,7 @@ export class SandboxManager {
       logs: ['Scaffolded a fresh Next.js App Router baseline'],
       devStderr: [],
       status: 'idle',
+      version: 0,
       createdAt: new Date(),
     };
 
@@ -331,6 +344,7 @@ export class SandboxManager {
       logs: ['[system] Restored from persisted project metadata'],
       devStderr: [],
       status: project.status ?? 'idle',
+      version: 0,
       createdAt: new Date(),
     };
 
@@ -373,11 +387,14 @@ export class SandboxManager {
   }
 
   /** Write files to the sandbox project */
-  async writeFiles(projectId: string, files: FileWrite[], callerUserId?: string | null): Promise<void> {
+  async writeFiles(projectId: string, files: FileWrite[], options: WriteFilesOptions = {}): Promise<number> {
     const project = this.projects.get(projectId);
     if (!project) throw new Error(`Sandbox project not found: ${projectId}`);
-    if (callerUserId !== undefined && !this.canWrite(projectId, callerUserId)) {
-      throw new Error(`Access denied: user ${callerUserId ?? 'anonymous'} cannot write to project ${projectId}`);
+    if (options.callerUserId !== undefined && !this.canWrite(projectId, options.callerUserId)) {
+      throw new Error(`Access denied: user ${options.callerUserId ?? 'anonymous'} cannot write to project ${projectId}`);
+    }
+    if (options.baseVersion !== undefined && options.baseVersion !== project.version) {
+      throw new Error(`Sandbox version conflict: expected ${options.baseVersion}, current ${project.version}`);
     }
 
     project.status = 'writing';
@@ -397,6 +414,41 @@ export class SandboxManager {
     }
 
     project.status = project.devProcess && project.devPort ? 'running' : 'idle';
+    project.version += 1;
+    return project.version;
+  }
+
+  /** Restore files to prior contents; null content deletes a file created by the reverted revision. */
+  async restoreFiles(projectId: string, files: FileRestore[], options: WriteFilesOptions = {}): Promise<number> {
+    const project = this.projects.get(projectId);
+    if (!project) throw new Error(`Sandbox project not found: ${projectId}`);
+    if (options.callerUserId !== undefined && !this.canWrite(projectId, options.callerUserId)) {
+      throw new Error(`Access denied: user ${options.callerUserId ?? 'anonymous'} cannot write to project ${projectId}`);
+    }
+    if (options.baseVersion !== undefined && options.baseVersion !== project.version) {
+      throw new Error(`Sandbox version conflict: expected ${options.baseVersion}, current ${project.version}`);
+    }
+
+    project.status = 'writing';
+    this.pushLog(project, `Restoring ${files.length} file(s)...`);
+    for (const file of files) {
+      const fullPath = this.safePath(project.rootDir, file.path);
+      if (file.content === null) {
+        await rm(fullPath, { force: true });
+        delete project.files[file.path];
+        this.pushLog(project, `  - ${file.path}`);
+        continue;
+      }
+
+      await mkdir(dirname(fullPath), { recursive: true });
+      await writeFile(fullPath, file.content, 'utf-8');
+      project.files[file.path] = file.content;
+      this.pushLog(project, `  ↩ ${file.path}`);
+    }
+
+    project.status = project.devProcess && project.devPort ? 'running' : 'idle';
+    project.version += 1;
+    return project.version;
   }
 
   /** Read a file from the sandbox project */

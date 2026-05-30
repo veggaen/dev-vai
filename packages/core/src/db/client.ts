@@ -196,8 +196,11 @@ const CREATE_TABLES_SQL = `
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     model_id TEXT NOT NULL,
+    owner_user_id TEXT,
     sandbox_project_id TEXT,
     mode TEXT NOT NULL DEFAULT 'chat',
+    visibility TEXT NOT NULL DEFAULT 'private',
+    share_slug TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -227,6 +230,7 @@ const CREATE_TABLES_SQL = `
     tool_call_id TEXT,
     token_count INTEGER,
     model_id TEXT,
+    duration_ms INTEGER,
     feedback INTEGER,
     created_at INTEGER NOT NULL
   );
@@ -272,6 +276,10 @@ const CREATE_TABLES_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
+  CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_conversations_owner_updated ON conversations(owner_user_id, updated_at);
+  CREATE INDEX IF NOT EXISTS idx_conversations_visibility_updated ON conversations(visibility, updated_at);
+  CREATE INDEX IF NOT EXISTS idx_conversations_sandbox ON conversations(sandbox_project_id);
   CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source_id);
   CREATE INDEX IF NOT EXISTS idx_eval_scores_run ON eval_scores(run_id);
   CREATE INDEX IF NOT EXISTS idx_images_conversation ON images(conversation_id);
@@ -303,6 +311,31 @@ const CREATE_TABLES_SQL = `
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_taught_entries_source ON taught_entries(source);
+
+  CREATE TABLE IF NOT EXISTS sandbox_revisions (
+    id TEXT PRIMARY KEY,
+    sandbox_project_id TEXT NOT NULL,
+    conversation_id TEXT REFERENCES conversations(id),
+    message_id TEXT REFERENCES messages(id),
+    actor_user_id TEXT REFERENCES platform_users(id),
+    base_version INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    summary TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sandbox_revisions_sandbox ON sandbox_revisions(sandbox_project_id);
+  CREATE INDEX IF NOT EXISTS idx_sandbox_revisions_created_at ON sandbox_revisions(created_at);
+
+  CREATE TABLE IF NOT EXISTS sandbox_revision_files (
+    id TEXT PRIMARY KEY,
+    revision_id TEXT NOT NULL REFERENCES sandbox_revisions(id),
+    path TEXT NOT NULL,
+    change_type TEXT NOT NULL CHECK(change_type IN ('create', 'update', 'delete')),
+    before_content TEXT,
+    after_content TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sandbox_revision_files_revision ON sandbox_revision_files(revision_id);
 `;
 
 /**
@@ -497,6 +530,10 @@ const MIGRATION_SQL = [
   `CREATE INDEX IF NOT EXISTS idx_platform_project_audit_requests_status ON platform_project_audit_requests(status)`,
   `CREATE INDEX IF NOT EXISTS idx_platform_project_audit_results_project ON platform_project_audit_results(project_id)`,
   `CREATE INDEX IF NOT EXISTS idx_platform_project_audit_results_audit ON platform_project_audit_results(audit_request_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_conversations_owner_updated ON conversations(owner_user_id, updated_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_conversations_visibility_updated ON conversations(visibility, updated_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_conversations_sandbox ON conversations(sandbox_project_id)`,
   `ALTER TABLE platform_device_codes ADD COLUMN installation_key TEXT`,
   `ALTER TABLE platform_device_codes ADD COLUMN launch_target TEXT`,
   `ALTER TABLE platform_device_codes ADD COLUMN capabilities TEXT`,
@@ -517,6 +554,29 @@ const MIGRATION_SQL = [
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_taught_entries_source ON taught_entries(source)`,
+  `CREATE TABLE IF NOT EXISTS sandbox_revisions (
+    id TEXT PRIMARY KEY,
+    sandbox_project_id TEXT NOT NULL,
+    conversation_id TEXT REFERENCES conversations(id),
+    message_id TEXT REFERENCES messages(id),
+    actor_user_id TEXT REFERENCES platform_users(id),
+    base_version INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    summary TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sandbox_revisions_sandbox ON sandbox_revisions(sandbox_project_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_sandbox_revisions_created_at ON sandbox_revisions(created_at)`,
+  `CREATE TABLE IF NOT EXISTS sandbox_revision_files (
+    id TEXT PRIMARY KEY,
+    revision_id TEXT NOT NULL REFERENCES sandbox_revisions(id),
+    path TEXT NOT NULL,
+    change_type TEXT NOT NULL CHECK(change_type IN ('create', 'update', 'delete')),
+    before_content TEXT,
+    after_content TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sandbox_revision_files_revision ON sandbox_revision_files(revision_id)`,
   // Agent session logger tables
   `CREATE TABLE IF NOT EXISTS agent_sessions (
     id TEXT PRIMARY KEY,
@@ -620,13 +680,19 @@ function ensureDbParentDir(path?: string): void {
   mkdirSync(dirname(path), { recursive: true });
 }
 
+function applySqlitePragmas(sqlite: InstanceType<typeof Database>): void {
+  sqlite.pragma('journal_mode = WAL');
+  sqlite.pragma('synchronous = NORMAL');
+  sqlite.pragma('busy_timeout = 5000');
+  sqlite.pragma('foreign_keys = ON');
+}
+
 export function getDb(path?: string): VaiDatabase {
   if (dbInstance) return dbInstance;
 
   ensureDbParentDir(path);
   const sqlite = new Database(path ?? ':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
+  applySqlitePragmas(sqlite);
   sqlite.exec(CREATE_TABLES_SQL);
   runMigrations(sqlite);
   migrateEvalRunsTrackConstraint(sqlite);
@@ -639,8 +705,7 @@ export function getDb(path?: string): VaiDatabase {
 export function createDb(path?: string): VaiDatabase {
   ensureDbParentDir(path);
   const sqlite = new Database(path ?? ':memory:');
-  sqlite.pragma('journal_mode = WAL');
-  sqlite.pragma('foreign_keys = ON');
+  applySqlitePragmas(sqlite);
   sqlite.exec(CREATE_TABLES_SQL);
   runMigrations(sqlite);
   migrateEvalRunsTrackConstraint(sqlite);

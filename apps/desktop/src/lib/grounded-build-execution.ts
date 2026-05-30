@@ -8,6 +8,8 @@ export interface GroundedExecutionBrief {
   readonly sourceDomains: readonly string[];
   readonly sourceCount: number;
   readonly confidence: number;
+  readonly qualityTier?: 'minimal' | 'standard' | 'advanced';
+  readonly qualityBrief?: string;
 }
 
 export interface GroundedExecutionIntentContext {
@@ -75,6 +77,7 @@ export function buildGroundedExecutionRepairPlan(input: {
     `- Supporting domains: ${renderDomains(groundedBrief.sourceDomains)}`,
     '- Reasons:',
     renderReasons(groundedBrief.reasons),
+    ...(groundedBrief.qualityBrief ? ['', groundedBrief.qualityBrief] : []),
     '',
     'Convert that brief into execution now.',
     outputDirective,

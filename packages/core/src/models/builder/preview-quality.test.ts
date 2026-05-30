@@ -6,7 +6,7 @@ describe('evaluateBuilderPreviewQuality', () => {
     const report = evaluateBuilderPreviewQuality({
       prompt: 'Build a neon fitness page with exact heading Kinetic Pulse, a CTA button labeled Start Training, hot pink #ff2ea6, deep navy #020617, and kinetic animation.',
       renderedText: 'Kinetic Pulse Start Training Elite training plans',
-      sourceText: '<h1 className="kinetic-heading">Kinetic Pulse</h1><button>Start Training</button>',
+      sourceText: 'import { useState } from "react"; <h1 className="kinetic-heading">Kinetic Pulse</h1><button onClick={() => setStarted(true)}>Start Training</button>',
       cssText: ':root { --accent: #ff2ea6; --page-bg: #020617; } .kinetic-heading { animation: kineticHeadline 4s infinite; } @keyframes kineticHeadline {}',
     });
 
@@ -28,5 +28,19 @@ describe('evaluateBuilderPreviewQuality', () => {
       'Household',
       'Activity Chat',
     ]);
+  });
+
+  it('flags placeholder copy and inert app surfaces', () => {
+    const report = evaluateBuilderPreviewQuality({
+      prompt: 'Build a task app for an operations team.',
+      renderedText: 'Template App Card title Item 1 View',
+      sourceText: '<main><h1>Template App</h1><button>View</button></main>',
+    });
+
+    expect(report.verdict).toBe('fail');
+    expect(report.missing.map((requirement) => requirement.label)).toEqual(expect.arrayContaining([
+      'no template language',
+      'stateful interaction',
+    ]));
   });
 });

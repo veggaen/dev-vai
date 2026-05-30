@@ -172,4 +172,39 @@ describe('Eval Routes', () => {
     expect(body.tasks.every((task) => task.passed)).toBe(true);
     expect(body.tasks.map((task) => task.taskId)).toEqual(['complex-layered-answer-engine-design', 'complex-vai-eval-rubric']);
   });
+
+  it('hides eval routes when the framework is disabled', async () => {
+    const disabledApp = Fastify({ logger: false });
+    registerEvalRoutes(disabledApp, new EvalRunner(db, new ModelRegistry()), { enabled: false });
+    await disabledApp.ready();
+
+    try {
+      const res = await disabledApp.inject({ method: 'GET', url: '/api/eval/tracks' });
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error).toMatch(/disabled/i);
+    } finally {
+      await disabledApp.close();
+    }
+  });
+
+  it('enforces the run authorization policy for eval execution', async () => {
+    const guardedApp = Fastify({ logger: false });
+    registerEvalRoutes(guardedApp, new EvalRunner(db, new ModelRegistry()), {
+      enabled: true,
+      authorizeRun: () => ({ allowed: false, statusCode: 403, error: 'No evals for you' }),
+    });
+    await guardedApp.ready();
+
+    try {
+      const res = await guardedApp.inject({
+        method: 'POST',
+        url: '/api/eval/run',
+        payload: { modelId: 'test:mock', track: 'creative' },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toBe('No evals for you');
+    } finally {
+      await guardedApp.close();
+    }
+  });
 });

@@ -54,7 +54,7 @@ export const projectAuditPollConsumeBodySchema = z
 /** POST /api/projects/:id/share-links */
 export const projectShareLinkBodySchema = z
   .object({
-    role: projectRoleSchema.optional(),
+    role: z.enum(['editor', 'viewer', 'tester']).optional(),
     expiresInHours: z.number().optional(),
     maxUses: z.number().optional(),
   })

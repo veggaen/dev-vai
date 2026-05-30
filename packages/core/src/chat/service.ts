@@ -1,4 +1,4 @@
-import { eq, desc, or, isNull } from 'drizzle-orm';
+import { eq, desc, or } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import type { VaiDatabase } from '../db/client.js';
 import type {
@@ -7,7 +7,7 @@ import type {
   ChatPromptRewriteResponseDepth,
 } from '../config/types.js';
 import { conversations, messages, images } from '../db/schema.js';
-import type { ModelRegistry, ChatChunk, Message } from '../models/adapter.js';
+import type { ModelRegistry, ChatChunk, Message, TokenUsage } from '../models/adapter.js';
 import { SkillRouter } from '../models/skill-router.js';
 import type { ThorsenAdaptiveController } from '../thorsen/types.js';
 import {
@@ -36,6 +36,10 @@ import { extractActiveTopicBrief, hasTopicOverlap } from './active-topic-brief.j
 import { resolveChatPromptRewriteConfig, rewriteChatPrompt } from './prompt-rewrite.js';
 import { buildTurnKindSystemHint, classifyChatTurn } from './turn-kind.js';
 import { decideVaiFallback, pickFallbackModelId } from './vai-fallback.js';
+import { calculateCost } from '../usage/service.js';
+import { isProductEngineeringPlanningPrompt } from './product-engineering-intent.js';
+import { tryEmitProductEngineeringMemo } from './product-engineering-memo.js';
+import { tryEmitBoundaryResponse } from './boundary-response.js';
 
 export interface ImageInput {
   data: string;      // base64
@@ -60,6 +64,19 @@ export interface ChatServiceOptions {
    * When unset or empty, vai:v0 responses are streamed as-is.
    */
   readonly vaiFallbackChain?: readonly string[];
+  /** Optional hook for recording final usage/cost after a streamed turn completes. */
+  readonly onUsage?: (entry: {
+    id: string;
+    modelId: string;
+    provider: string;
+    conversationId: string;
+    tokensIn: number;
+    tokensOut: number;
+    cachedTokens: number;
+    costUsd: number;
+    durationMs: number;
+    finishReason: string;
+  }) => void;
 }
 
 export interface ChatPromptRewriteOverrides {
@@ -76,6 +93,7 @@ function isChatServiceOptions(value: unknown): value is ChatServiceOptions {
       'promptRewrite' in value
       || 'retrieveKnowledge' in value
       || 'vaiFallbackChain' in value
+      || 'onUsage' in value
     );
 }
 
@@ -85,6 +103,8 @@ const ACTIVE_SANDBOX_EXECUTION_HINT = [
   'Exception: if this is the first substantive build/create request and no current file snapshots or prior assistant file blocks exist, treat it as the first runnable build for the auto-created sandbox.',
   'When the user asks for a feature, polish pass, or fix, emit the concrete changed files needed to update the current app.',
   'Prefer the smallest working diff that preserves the current preview.',
+  'Keep the product contract intact: preserve real user flows, real domain labels, working controls, responsive layout, and visible empty/error states.',
+  'If you add a button, filter, tab, form, or destructive action, wire it to observable state or navigation.',
   'Do not switch into research notes, citations, or generic troubleshooting unless the user explicitly asks for them or you are blocked on a specific missing fact.',
 ].join(' ');
 
@@ -94,6 +114,7 @@ export class ChatService {
   private readonly retrieveKnowledge?: (query: string, topK?: number) => Array<{ text: string; source: string; score: number }>;
   private readonly skillRouter = new SkillRouter();
   private readonly vaiFallbackChain: readonly string[];
+  private readonly onUsage?: ChatServiceOptions['onUsage'];
 
   constructor(
     private db: VaiDatabase,
@@ -106,6 +127,7 @@ export class ChatService {
     this.promptRewriteConfig = resolveChatPromptRewriteConfig(resolvedOptions?.promptRewrite);
     this.retrieveKnowledge = resolvedOptions?.retrieveKnowledge;
     this.vaiFallbackChain = resolvedOptions?.vaiFallbackChain ?? [];
+    this.onUsage = resolvedOptions?.onUsage;
   }
 
   createConversation(modelId: string, title?: string, mode: ConversationMode = DEFAULT_CONVERSATION_MODE, ownerUserId?: string | null): string {
@@ -199,7 +221,6 @@ export class ChatService {
           or(
             eq(conversations.ownerUserId, ownerUserId),
             eq(conversations.visibility, 'public'),
-            isNull(conversations.ownerUserId),
           ),
         )
         .orderBy(desc(conversations.updatedAt))
@@ -482,10 +503,100 @@ export class ChatService {
         break;
       }
       const modeForDeterministicShortcuts = isConversationMode(conv.mode) ? conv.mode : DEFAULT_CONVERSATION_MODE;
+      const productEngineeringPlanning = isProductEngineeringPlanningPrompt(content);
       const allowConstrainedCodeShortcut =
         modeForDeterministicShortcuts !== 'builder'
         && modeForDeterministicShortcuts !== 'agent'
-        && !conv.sandboxProjectId;
+        && !conv.sandboxProjectId
+        && !productEngineeringPlanning;
+
+      const productEngineeringMemo = productEngineeringPlanning
+        ? tryEmitProductEngineeringMemo({ content })
+        : null;
+      if (productEngineeringMemo) {
+        const startedAt = Date.now();
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'understand',
+            label: 'Understanding product constraints',
+            detail: 'Hardware, enclosure, firmware, and SaaS scope',
+            status: 'running',
+          },
+        } as ChatChunk;
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'structure',
+            label: 'Structuring product-engineering memo',
+            detail: 'BOM, sourcing, risks, roadmap, and next options',
+            status: 'running',
+          },
+        } as ChatChunk;
+        yield { type: 'turn_kind', turnKind: 'analysis' } as ChatChunk;
+        yield { type: 'text_delta', textDelta: productEngineeringMemo } as ChatChunk;
+        const memoDurationMs = Date.now() - startedAt;
+        yield {
+          type: 'done',
+          usage: { promptTokens: 0, completionTokens: 0 },
+          durationMs: memoDurationMs,
+        } as ChatChunk;
+
+        const memoAssistantId = ulid();
+        this.db.insert(messages).values({
+          id: memoAssistantId,
+          conversationId,
+          role: 'assistant',
+          content: productEngineeringMemo,
+          modelId: 'chat-product-engineering',
+          durationMs: memoDurationMs,
+          createdAt: new Date(),
+        }).run();
+
+        const memoUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+        if (conv.title === 'New Chat' && content.length > 0) {
+          memoUpdates.title = this.generateTitle(content);
+        }
+        this.db.update(conversations)
+          .set(memoUpdates)
+          .where(eq(conversations.id, conversationId))
+          .run();
+        return;
+      }
+
+      const boundaryResponse = tryEmitBoundaryResponse({ content });
+      if (boundaryResponse) {
+        const startedAt = Date.now();
+        yield { type: 'turn_kind', turnKind: 'analysis' } as ChatChunk;
+        yield { type: 'text_delta', textDelta: boundaryResponse } as ChatChunk;
+        const boundaryDurationMs = Date.now() - startedAt;
+        yield {
+          type: 'done',
+          usage: { promptTokens: 0, completionTokens: 0 },
+          durationMs: boundaryDurationMs,
+        } as ChatChunk;
+
+        const boundaryAssistantId = ulid();
+        this.db.insert(messages).values({
+          id: boundaryAssistantId,
+          conversationId,
+          role: 'assistant',
+          content: boundaryResponse,
+          modelId: 'chat-boundary-response',
+          durationMs: boundaryDurationMs,
+          createdAt: new Date(),
+        }).run();
+
+        const boundaryUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+        if (conv.title === 'New Chat' && content.length > 0) {
+          boundaryUpdates.title = this.generateTitle(content);
+        }
+        this.db.update(conversations)
+          .set(boundaryUpdates)
+          .where(eq(conversations.id, conversationId))
+          .run();
+        return;
+      }
 
       // ── Turn classifier + active-topic brief ────────────────────────
       // Build once per turn. The brief is what "the conversation is
@@ -494,8 +605,15 @@ export class ChatService {
       // recommendation. Downstream routers consult these instead of
       // re-running their own ad-hoc heuristics, so the routing decision
       // stays observable and consistent.
-      const turnClassification = classifyTurn(content, history);
-      const activeTopicBrief = extractActiveTopicBrief(content, history);
+      // classifyTurn / extractActiveTopicBrief are pure and only read
+      // role + content; adapt the persisted DB rows (whose `role`/`toolCalls`
+      // columns are wider than the domain Message) to the minimal shape.
+      const classifierHistory = history.map((m) => ({
+        role: m.role as 'user' | 'assistant' | 'system' | 'tool',
+        content: m.content,
+      }));
+      const turnClassification = classifyTurn(content, classifierHistory);
+      const activeTopicBrief = extractActiveTopicBrief(content, classifierHistory);
       const isContextualFollowUp =
         turnClassification.kind === 'contextual-followup'
         || turnClassification.kind === 'product-quality-recommendation';
@@ -723,6 +841,26 @@ export class ChatService {
     if (turnKindHint) {
       systemMessages.push({ role: 'system', content: turnKindHint });
     }
+    if (isProductEngineeringPlanningPrompt(content)) {
+      yield {
+        type: 'progress',
+        progress: {
+          stage: 'understand',
+          label: 'Understanding product constraints',
+          detail: 'Hardware, enclosure, firmware, and SaaS scope',
+          status: 'running',
+        },
+      } as ChatChunk;
+      yield {
+        type: 'progress',
+        progress: {
+          stage: 'structure',
+          label: 'Structuring product-engineering memo',
+          detail: 'BOM, sourcing, risks, roadmap, and next options',
+          status: 'running',
+        },
+      } as ChatChunk;
+    }
     const temporaryTurnMode = isTerminalHarness || turnKind === 'conversational'
       ? null
       : resolveTemporaryTurnMode(resolvedMode, content);
@@ -861,9 +999,10 @@ export class ChatService {
     // Stream from model
     const adapter = this.models.get(primaryModelId);
     let fullText = '';
-    let totalUsage = { promptTokens: 0, completionTokens: 0 };
+    let totalUsage: TokenUsage = { promptTokens: 0, completionTokens: 0 };
     let durationMs: number | undefined;
     let responseModelId = primaryModelId;
+    const streamStartedAt = Date.now();
 
     yield { type: 'turn_kind', turnKind } as ChatChunk;
 
@@ -871,10 +1010,11 @@ export class ChatService {
       const bufferedChunks: ChatChunk[] = [];
       const bufferedSourceChunks: ChatChunk[] = [];
       let bufferedText = '';
-      let bufferedUsage = { promptTokens: 0, completionTokens: 0 };
+      let bufferedUsage: TokenUsage = { promptTokens: 0, completionTokens: 0 };
       let bufferedDurationMs: number | undefined;
       let bufferedModelId = primaryModelId;
       let latestConfidence: number | undefined;
+      let bufferedSawDone = false;
 
       for await (const chunk of adapter.chatStream({ messages: primaryMessages, noLearn })) {
         if (chunk.modelId) bufferedModelId = chunk.modelId;
@@ -891,9 +1031,18 @@ export class ChatService {
           bufferedText += chunk.textDelta;
         }
         if (chunk.type === 'done') {
+          bufferedSawDone = true;
           if (chunk.usage) bufferedUsage = chunk.usage;
           if (chunk.durationMs !== undefined) bufferedDurationMs = chunk.durationMs;
         }
+      }
+      if (!bufferedSawDone) {
+        bufferedDurationMs = bufferedDurationMs ?? (Date.now() - streamStartedAt);
+        bufferedChunks.push({
+          type: 'done',
+          usage: bufferedUsage,
+          durationMs: bufferedDurationMs,
+        } as ChatChunk);
       }
 
       const hasPrimaryBuilderFileOutput = (resolvedMode === 'builder' || resolvedMode === 'agent')
@@ -925,6 +1074,7 @@ export class ChatService {
         const fallbackAdapter = this.models.get(fallbackModelId);
         const fallbackMessages = buildMessagesForModel(fallbackModelId);
         let fallbackDurationMs: number | undefined;
+        let fallbackSawDone = false;
         responseModelId = fallbackModelId;
 
         for await (const chunk of fallbackAdapter.chatStream({ messages: fallbackMessages, noLearn })) {
@@ -940,12 +1090,21 @@ export class ChatService {
             fullText += chunk.textDelta;
           }
           if (chunk.type === 'done') {
+            fallbackSawDone = true;
             if (chunk.usage) totalUsage = chunk.usage;
             if (chunk.durationMs !== undefined) {
               fallbackDurationMs = chunk.durationMs;
             }
           }
           yield chunk;
+        }
+        if (!fallbackSawDone) {
+          fallbackDurationMs = fallbackDurationMs ?? (Date.now() - streamStartedAt);
+          yield {
+            type: 'done',
+            usage: totalUsage,
+            durationMs: fallbackDurationMs,
+          } as ChatChunk;
         }
 
         if (bufferedDurationMs !== undefined && fallbackDurationMs !== undefined) {
@@ -955,6 +1114,7 @@ export class ChatService {
         }
       }
     } else {
+      let primarySawDone = false;
       for await (const chunk of adapter.chatStream({ messages: primaryMessages, noLearn })) {
         if (chunk.modelId) responseModelId = chunk.modelId;
         if (chunk.type === 'sources') {
@@ -968,16 +1128,49 @@ export class ChatService {
           fullText += chunk.textDelta;
         }
         if (chunk.type === 'done') {
+          primarySawDone = true;
           if (chunk.usage) totalUsage = chunk.usage;
           if (chunk.durationMs !== undefined) durationMs = chunk.durationMs;
         }
         yield chunk;
+      }
+      if (!primarySawDone) {
+        durationMs = durationMs ?? (Date.now() - streamStartedAt);
+        yield {
+          type: 'done',
+          usage: totalUsage,
+          durationMs,
+        } as ChatChunk;
       }
     }
 
     // Feed streaming latency back to the adaptive controller
     if (durationMs !== undefined && this.controller) {
       this.controller.observe(durationMs);
+    }
+
+    if (this.onUsage) {
+      try {
+        const usageAdapter = this.models.tryGet(responseModelId) ?? adapter;
+        const cachedTokens = totalUsage.cachedTokens ?? 0;
+        this.onUsage({
+          id: ulid(),
+          modelId: responseModelId,
+          provider: usageAdapter.provider ?? responseModelId.split(':')[0] ?? 'unknown',
+          conversationId,
+          tokensIn: totalUsage.promptTokens,
+          tokensOut: totalUsage.completionTokens,
+          cachedTokens,
+          costUsd: usageAdapter.cost
+            ? calculateCost(totalUsage.promptTokens, totalUsage.completionTokens, cachedTokens, usageAdapter.cost)
+            : 0,
+          durationMs: durationMs ?? Date.now() - streamStartedAt,
+          finishReason: 'stop',
+        });
+      } catch (err) {
+        // Usage telemetry should never block the user's chat response.
+        console.warn('[chat-service] failed to record usage', err);
+      }
     }
 
     // Persist assistant message

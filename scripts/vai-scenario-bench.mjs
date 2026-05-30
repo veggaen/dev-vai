@@ -118,10 +118,26 @@ function toWsUrl(url) {
   return url.replace(/^http/i, 'ws').replace(/\/$/, '');
 }
 
+function isLocalBaseUrl(baseUrl) {
+  try {
+    const parsed = new URL(baseUrl);
+    return ['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function buildScenarioHeaders(baseUrl, extra = {}) {
+  return {
+    ...extra,
+    ...(isLocalBaseUrl(baseUrl) ? { 'x-vai-dev-auth-bypass': '1' } : {}),
+  };
+}
+
 async function createConversation(baseUrl, modelId, mode, title) {
   const res = await fetch(`${baseUrl}/api/conversations`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: buildScenarioHeaders(baseUrl, { 'content-type': 'application/json' }),
     body: JSON.stringify({ modelId, mode, title }),
   });
   if (!res.ok) throw new Error(`createConversation failed (${res.status}): ${await res.text()}`);
@@ -131,7 +147,7 @@ async function createConversation(baseUrl, modelId, mode, title) {
 async function askChat({ baseUrl, conversationId, prompt, systemPrompt }) {
   const wsUrl = `${toWsUrl(baseUrl)}/api/chat`;
   return await new Promise((resolve, reject) => {
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl, { headers: buildScenarioHeaders(baseUrl) });
     let text = '';
     let strategy;
     let confidence;
@@ -210,7 +226,7 @@ function evaluateAssertions(text, strategy, assertSpec) {
     const anyMatch = assertSpec.anyOfContains.some((p) => makeRegex(p).test(text));
     if (!anyMatch) failures.push(`no anyOfContains matched: ${assertSpec.anyOfContains.join(' | ')}`);
   }
-  for (const pat of assertSpec.notContains ?? []) {
+  for (const pat of [...(assertSpec.notContains ?? []), ...(assertSpec.mustNotContain ?? [])]) {
     if (makeRegex(pat).test(text)) failures.push(`forbidden present: ${pat}`);
   }
 

@@ -29,6 +29,7 @@ export interface BuildActivityItem {
 }
 
 const MAX_BUILD_ACTIVITY = 120;
+const MAX_CLIENT_LOG_ENTRIES = 500;
 
 export interface DeployStepState {
   id: string;
@@ -66,6 +67,7 @@ interface SandboxState {
   projectId: string | null;
   persistentProjectId: string | null;
   projectName: string | null;
+  projectVersion: number | null;
   status: SandboxStatus;
   devPort: number | null;
   previewReady: boolean;
@@ -124,7 +126,7 @@ if (typeof window !== 'undefined') {
       // Push to sandbox store logs
       const state = useSandboxStore.getState();
       if (state.projectId) {
-        useSandboxStore.setState({ logs: [...state.logs, line] });
+        useSandboxStore.setState({ logs: [...state.logs, line].slice(-MAX_CLIENT_LOG_ENTRIES) });
       }
     }
   });
@@ -137,6 +139,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
   projectId: null,
   persistentProjectId: null,
   projectName: null,
+  projectVersion: null,
   status: 'idle',
 
   deployPhase: 'idle' as DeployPhase,
@@ -164,8 +167,8 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
       });
-      const data = await res.json() as { id: string; name: string };
-      set({ projectId: data.id, persistentProjectId: null, projectName: data.name });
+      const data = await res.json() as { id: string; name: string; version?: number };
+      set({ projectId: data.id, persistentProjectId: null, projectName: data.name, projectVersion: data.version ?? 0 });
       return data.id;
     } catch (err) {
       set({ status: 'failed', error: (err as Error).message });
@@ -174,18 +177,24 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
   },
 
   writeFiles: async (files: SandboxFile[]) => {
-    const { projectId } = get();
+    const { projectId, projectVersion } = get();
     if (!projectId) throw new Error('No project');
     set({ status: 'writing' });
     try {
-      await apiFetch(`/api/sandbox/${projectId}/files`, {
+      const res = await apiFetch(`/api/sandbox/${projectId}/files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files }),
+        body: JSON.stringify({ files, baseVersion: projectVersion ?? undefined }),
       });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(payload?.error ?? 'Unable to write files');
+      }
+      const data = await res.json() as { version?: number };
       await get().fetchFiles();
       const now = Date.now();
       set((state) => ({
+        projectVersion: data.version ?? state.projectVersion,
         buildActivity: [
           ...state.buildActivity,
           ...files.map((f, i) => ({
@@ -235,6 +244,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
             name: string;
             status: SandboxStatus;
             devPort: number | null;
+            version?: number;
             files: string[];
             logs: string[];
             persistentProjectId: string | null;
@@ -245,6 +255,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
             projectId: projectData.id,
             persistentProjectId: projectData.persistentProjectId,
             projectName: projectData.name,
+            projectVersion: projectData.version ?? get().projectVersion,
             status: projectData.status,
             devPort: projectData.devPort,
             previewReady: projectData.status === 'running' && get().previewReady && get().lastPreviewPort === projectData.devPort,
@@ -282,7 +293,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
     try {
       const res = await apiFetch(`/api/sandbox/${projectId}/logs`);
       const data = await res.json() as { logs: string[] };
-      set({ logs: data.logs });
+      set({ logs: data.logs.slice(-MAX_CLIENT_LOG_ENTRIES) });
     } catch { /* ok */ }
   },
 
@@ -315,7 +326,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       await apiFetch(`/api/sandbox/${projectId}`, { method: 'DELETE' }).catch(() => {});
     }
     set({
-      projectId: null, persistentProjectId: null, projectName: null, status: 'idle', devPort: null,
+      projectId: null, persistentProjectId: null, projectName: null, projectVersion: null, status: 'idle', devPort: null,
       previewReady: false, lastPreviewPort: null, files: [], logs: [], buildActivity: [], error: null,
       deployPhase: 'idle', deploySteps: [], deployStartTime: 0,
       deployStackName: '', deployTierName: '',
@@ -331,7 +342,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
     set({
       deployPhase: 'idle', deploySteps: [], deployStartTime: 0,
       deployStackName: '', deployTierName: '',
-      status: 'idle', error: null, projectId: null, persistentProjectId: null, projectName: null,
+      status: 'idle', error: null, projectId: null, persistentProjectId: null, projectName: null, projectVersion: null,
       devPort: null, previewReady: false, lastPreviewPort: null, files: [], logs: [], buildActivity: [],
     });
     useLayoutStore.getState().setBuildStatus({ step: 'idle' });
@@ -343,7 +354,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       deployAbortController = null;
     }
     set({
-      projectId: null, persistentProjectId: null, projectName: null, status: 'idle', devPort: null,
+      projectId: null, persistentProjectId: null, projectName: null, projectVersion: null, status: 'idle', devPort: null,
       previewReady: false, lastPreviewPort: null, files: [], logs: [], buildActivity: [], error: null,
       deployPhase: 'idle', deploySteps: [], deployStartTime: 0,
       deployStackName: '', deployTierName: '',
@@ -373,6 +384,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       name: string;
       status: SandboxStatus;
       devPort: number | null;
+      version?: number;
       hasNodeModules?: boolean;
       files: string[];
       logs: string[];
@@ -383,6 +395,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       projectId: data.id,
       persistentProjectId: data.persistentProjectId,
       projectName: data.name,
+      projectVersion: data.version ?? 0,
       status: data.status,
       devPort: data.devPort,
       previewReady: false,
@@ -466,8 +479,8 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ templateId, name }),
       });
-      const data = await res.json() as { id: string; name: string; files: string[]; depsInstalled?: boolean };
-      set({ projectId: data.id, persistentProjectId: null, projectName: data.name, files: data.files });
+      const data = await res.json() as { id: string; name: string; version?: number; files: string[]; depsInstalled?: boolean };
+      set({ projectId: data.id, persistentProjectId: null, projectName: data.name, projectVersion: data.version ?? 0, files: data.files });
 
       // Skip install if CLI already installed deps (e.g. create-next-app)
       if (!data.depsInstalled) {
@@ -500,6 +513,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       projectId: null,
       persistentProjectId: null,
       projectName: null,
+      projectVersion: null,
       devPort: null,
     });
 
@@ -562,7 +576,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
 
             // Capture projectId and port when available
             if (event.projectId) {
-              set({ projectId: event.projectId, persistentProjectId: null, projectName: stackName || stackId });
+              set({ projectId: event.projectId, persistentProjectId: null, projectName: stackName || stackId, projectVersion: null });
             }
             if (event.port) {
               set({ devPort: event.port });

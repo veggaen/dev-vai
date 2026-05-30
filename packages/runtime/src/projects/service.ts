@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { and, eq, gt, inArray, lt, or } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, lt, or } from 'drizzle-orm';
 import { schema, type VaiDatabase } from '@vai/core';
 import type { SandboxManager, SandboxProject } from '../sandbox/manager.js';
 
@@ -28,6 +28,23 @@ export interface AuditResultInput {
   rationale?: string | null;
   claimedByUserId?: string | null;
   claimedByClientId?: string | null;
+}
+
+export interface SandboxRevisionFileInput {
+  path: string;
+  beforeContent: string | null;
+  afterContent: string | null;
+}
+
+export interface SandboxRevisionInput {
+  sandboxProjectId: string;
+  conversationId?: string | null;
+  messageId?: string | null;
+  actorUserId?: string | null;
+  baseVersion: number;
+  version: number;
+  summary?: string | null;
+  files: SandboxRevisionFileInput[];
 }
 
 export interface PollAuditWorkOptions {
@@ -71,6 +88,12 @@ function normalizeRole(role?: string): ProjectRole {
     default:
       return 'viewer';
   }
+}
+
+function normalizeShareLinkRole(role?: string): Exclude<ProjectRole, 'owner' | 'admin'> {
+  const normalized = normalizeRole(role);
+  if (normalized === 'owner' || normalized === 'admin') return 'viewer';
+  return normalized;
 }
 
 function normalizeHandoffTarget(target?: string | null): HandoffTarget {
@@ -263,13 +286,13 @@ export class ProjectService {
 
   canReadSandbox(sandboxProjectId: string, userId: string | null): boolean {
     const project = this.getProjectBySandboxId(sandboxProjectId);
-    if (!project) return true;
+    if (!project) return false;
     return this.canReadProject(project.id, userId);
   }
 
   canWriteSandbox(sandboxProjectId: string, userId: string | null): boolean {
     const project = this.getProjectBySandboxId(sandboxProjectId);
-    if (!project) return true;
+    if (!project) return false;
     return this.canWriteProject(project.id, userId);
   }
 
@@ -280,6 +303,61 @@ export class ProjectService {
       ...project,
       role: this.getProjectRole(project.id, userId),
     };
+  }
+
+  recordSandboxRevision(input: SandboxRevisionInput) {
+    const now = new Date();
+    const revisionId = randomUUID();
+    this.db.insert(schema.sandboxRevisions).values({
+      id: revisionId,
+      sandboxProjectId: input.sandboxProjectId,
+      conversationId: input.conversationId ?? null,
+      messageId: input.messageId ?? null,
+      actorUserId: input.actorUserId ?? null,
+      baseVersion: input.baseVersion,
+      version: input.version,
+      summary: input.summary ?? null,
+      createdAt: now,
+    }).run();
+
+    for (const file of input.files) {
+      const changeType = file.beforeContent === null
+        ? 'create'
+        : file.afterContent === null
+          ? 'delete'
+          : 'update';
+      this.db.insert(schema.sandboxRevisionFiles).values({
+        id: randomUUID(),
+        revisionId,
+        path: file.path,
+        changeType,
+        beforeContent: file.beforeContent,
+        afterContent: file.afterContent,
+        createdAt: now,
+      }).run();
+    }
+
+    return this.getSandboxRevision(revisionId);
+  }
+
+  getSandboxRevision(revisionId: string) {
+    const revision = this.db.select().from(schema.sandboxRevisions)
+      .where(eq(schema.sandboxRevisions.id, revisionId))
+      .get();
+    if (!revision) return null;
+    const files = this.db.select().from(schema.sandboxRevisionFiles)
+      .where(eq(schema.sandboxRevisionFiles.revisionId, revisionId))
+      .all();
+    return { ...revision, files };
+  }
+
+  listSandboxRevisions(sandboxProjectId: string, limit = 50) {
+    const rows = this.db.select().from(schema.sandboxRevisions)
+      .where(eq(schema.sandboxRevisions.sandboxProjectId, sandboxProjectId))
+      .orderBy(desc(schema.sandboxRevisions.createdAt))
+      .limit(limit)
+      .all();
+    return rows.map((row) => this.getSandboxRevision(row.id)).filter((row): row is NonNullable<typeof row> => Boolean(row));
   }
 
   listMembers(projectId: string) {
@@ -740,11 +818,12 @@ export class ProjectService {
     const expiresAt = typeof expiresInHours === 'number' && expiresInHours > 0
       ? new Date(now.getTime() + expiresInHours * 60 * 60 * 1000)
       : new Date(now.getTime() + 72 * 60 * 60 * 1000);
-    const resolvedRole = normalizeRole(role);
+    const resolvedRole = normalizeShareLinkRole(role);
+    const id = randomUUID();
 
     this.db.insert(schema.platformProjectShareLinks)
       .values({
-        id: randomUUID(),
+        id,
         projectId,
         tokenHash: hashToken(token),
         role: resolvedRole,
@@ -758,6 +837,7 @@ export class ProjectService {
       .run();
 
     return {
+      id,
       token,
       role: resolvedRole,
       expiresAt: expiresAt.toISOString(),
@@ -780,7 +860,7 @@ export class ProjectService {
     return {
       projectId: project.id,
       projectName: project.name,
-      role: normalizeRole(row.role),
+      role: normalizeShareLinkRole(row.role),
       expiresAt: row.expiresAt?.toISOString() ?? null,
       remainingUses: Math.max(0, row.maxUses - row.useCount),
     };
@@ -795,13 +875,29 @@ export class ProjectService {
     if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) throw new Error('Share link expired');
     if (row.useCount >= row.maxUses) throw new Error('Share link has no remaining uses');
 
-    this.upsertMember(row.projectId, userId, normalizeRole(row.role), row.createdByUserId ?? userId);
+    this.upsertMember(row.projectId, userId, normalizeShareLinkRole(row.role), row.createdByUserId ?? userId);
     this.db.update(schema.platformProjectShareLinks)
       .set({ useCount: row.useCount + 1 })
       .where(eq(schema.platformProjectShareLinks.id, row.id))
       .run();
 
     return this.getProject(row.projectId);
+  }
+
+  revokeShareLink(projectId: string, linkId: string): boolean {
+    const existing = this.db.select().from(schema.platformProjectShareLinks)
+      .where(and(
+        eq(schema.platformProjectShareLinks.id, linkId),
+        eq(schema.platformProjectShareLinks.projectId, projectId),
+      ))
+      .get();
+    if (!existing || existing.revokedAt) return false;
+
+    this.db.update(schema.platformProjectShareLinks)
+      .set({ revokedAt: new Date() })
+      .where(eq(schema.platformProjectShareLinks.id, linkId))
+      .run();
+    return true;
   }
 
   createHandoffIntent(projectId: string, creatorUserId: string | null, target: HandoffTarget, clientInfo?: string) {

@@ -20,6 +20,7 @@ interface AssertSpec {
   contains?: string[];
   anyOfContains?: string[];
   notContains?: string[];
+  mustNotContain?: string[];
   strategyIn?: string[];
   strategyNotIn?: string[];
 }
@@ -88,7 +89,7 @@ function evaluateAssertions(text: string, strategy: string | null, spec: AssertS
     const anyMatch = spec.anyOfContains.some((p) => makeRegex(p).test(text));
     if (!anyMatch) failures.push(`no anyOfContains matched: ${spec.anyOfContains.join(' | ')}`);
   }
-  for (const pat of spec.notContains ?? []) {
+  for (const pat of [...(spec.notContains ?? []), ...(spec.mustNotContain ?? [])]) {
     if (makeRegex(pat).test(text)) failures.push(`forbidden present: ${pat}`);
   }
   if (Array.isArray(spec.strategyIn) && spec.strategyIn.length > 0) {

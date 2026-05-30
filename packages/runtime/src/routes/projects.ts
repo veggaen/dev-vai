@@ -298,12 +298,32 @@ export function registerProjectRoutes(
       );
 
       return {
+        id: link.id,
         role: link.role,
         expiresAt: link.expiresAt,
         maxUses: link.maxUses,
         token: link.token,
         redeemUrl: `/api/projects/share/${encodeURIComponent(link.token)}`,
       };
+    },
+  );
+
+  app.delete<{ Params: { id: string; linkId: string } }>(
+    '/api/projects/:id/share-links/:linkId',
+    async (request, reply) => {
+      const viewer = await requireViewer(auth, request, reply);
+      if (!viewer) return { error: 'Sign in to revoke share links' };
+      if (!projects.canWriteProject(request.params.id, viewer.user.id)) {
+        reply.code(403);
+        return { error: 'You do not have permission to revoke project share links' };
+      }
+
+      const revoked = projects.revokeShareLink(request.params.id, request.params.linkId);
+      if (!revoked) {
+        reply.code(404);
+        return { error: 'Share link not found' };
+      }
+      return { ok: true };
     },
   );
 

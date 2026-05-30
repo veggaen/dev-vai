@@ -114,6 +114,38 @@ describe('resolveAutoSandboxIntent', () => {
     expect(result.requestSystemPrompt).toBeUndefined();
   });
 
+  it('does not prime builder for hardware product engineering prompts that mention dashboards', () => {
+    const prompt = 'I want to make a temperature and humidity sensor for the wall with a screen, casing, hardware from China, and a SaaS dashboard for graphs. What should I order and how should I structure the product?';
+    const auto = resolveAutoSandboxIntent({
+      userPrompt: prompt,
+      mode: 'chat',
+      hasActiveProject: false,
+      hasPackageJsonOutput: false,
+    });
+    const sendTime = resolveSendTimeWorkIntent({
+      userPrompt: prompt,
+      mode: 'chat',
+      hasActiveProject: false,
+    });
+
+    expect(auto.explicitChatBuildRequest).toBe(false);
+    expect(auto.canAutoApplyFiles).toBe(false);
+    expect(auto.shouldReportMissingAction).toBe(false);
+    expect(sendTime.intent).toBe('none');
+    expect(sendTime.shouldPrimeBuilder).toBe(false);
+  });
+
+  it('still primes builder when the hardware user explicitly asks for a web dashboard prototype', () => {
+    const result = resolveSendTimeWorkIntent({
+      userPrompt: 'Prototype the web dashboard UI for my ESP32 humidity sensor in React now.',
+      mode: 'chat',
+      hasActiveProject: false,
+    });
+
+    expect(result.intent).toBe('build');
+    expect(result.shouldPrimeBuilder).toBe(true);
+  });
+
   it('treats clean starter requests as send-time app work', () => {
     const result = resolveSendTimeWorkIntent({
       userPrompt: 'Set up a fresh Next.js app for me.',

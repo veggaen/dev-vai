@@ -143,6 +143,37 @@ describe('SandboxManager', () => {
         manager.writeFiles('bad-id', [{ path: 'x.ts', content: '' }]),
       ).rejects.toThrow('Sandbox project not found');
     });
+
+    it('rejects stale base versions to avoid lost updates', async () => {
+      const project = await manager.create('versioned-app');
+
+      const firstVersion = await manager.writeFiles(project.id, [
+        { path: 'src/App.tsx', content: 'export default function App() { return null; }' },
+      ], { baseVersion: 0 });
+
+      expect(firstVersion).toBe(1);
+      await expect(manager.writeFiles(project.id, [
+        { path: 'src/App.tsx', content: 'stale write' },
+      ], { baseVersion: 0 })).rejects.toThrow(/version conflict/i);
+      expect(manager.get(project.id)?.version).toBe(1);
+    });
+
+    it('restores files and deletes files with null restore content', async () => {
+      const project = await manager.create('restore-app');
+      await manager.writeFiles(project.id, [
+        { path: 'keep.txt', content: 'new' },
+        { path: 'created.txt', content: 'created' },
+      ]);
+
+      const version = await manager.restoreFiles(project.id, [
+        { path: 'keep.txt', content: 'old' },
+        { path: 'created.txt', content: null },
+      ], { baseVersion: 1 });
+
+      expect(version).toBe(2);
+      expect(await manager.readFile(project.id, 'keep.txt')).toBe('old');
+      await expect(manager.readFile(project.id, 'created.txt')).rejects.toThrow();
+    });
   });
 
   describe('list()', () => {

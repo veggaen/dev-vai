@@ -112,6 +112,7 @@ const DEVICE_CODE_TTL_MS = 10 * 60 * 1000;
 const DEVICE_POLL_INTERVAL_SECONDS = 2;
 const USER_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const DEV_AUTH_BYPASS_HEADER = 'x-vai-dev-auth-bypass';
+const DEV_AUTH_BYPASS_QUERY_PARAM = 'devAuthBypass';
 const LOCAL_DEV_USER_ID = '__local_dev_user__';
 const LOCAL_DEV_USER_EMAIL = 'dev@localhost';
 const LOCAL_DEV_USER_NAME = 'Local Dev';
@@ -354,7 +355,23 @@ export class PlatformAuthService {
       return false;
     }
 
-    return this.getSingleHeader(request.headers[DEV_AUTH_BYPASS_HEADER]) === '1';
+    return this.getSingleHeader(request.headers[DEV_AUTH_BYPASS_HEADER]) === '1'
+      || this.hasDevAuthBypassQuery(request);
+  }
+
+  private hasDevAuthBypassQuery(request: FastifyRequest): boolean {
+    const query = (request as FastifyRequest & { query?: unknown }).query;
+    if (query && typeof query === 'object' && !Array.isArray(query)) {
+      const value = (query as Record<string, unknown>)[DEV_AUTH_BYPASS_QUERY_PARAM];
+      if (value === '1') return true;
+      if (Array.isArray(value) && value.includes('1')) return true;
+    }
+
+    const requestUrl = typeof request.url === 'string' ? request.url : '';
+    const queryStart = requestUrl.indexOf('?');
+    if (queryStart === -1) return false;
+
+    return new URLSearchParams(requestUrl.slice(queryStart + 1)).get(DEV_AUTH_BYPASS_QUERY_PARAM) === '1';
   }
 
   private getLocalDevViewer(request: FastifyRequest): PlatformViewer {

@@ -144,4 +144,55 @@ describe('buildGroundedBuildBrief', () => {
 
     expect(brief).toBeNull();
   });
+
+  it('skips hardware product planning prompts that mention SaaS dashboards', () => {
+    const brief = buildGroundedBuildBrief(
+      'I want to build a wall-mounted temperature and humidity sensor with ESP32 hardware, casing, firmware, and a SaaS dashboard. What should I order and how should I plan this?',
+      'builder',
+      makeSearchResponse({
+        plan: {
+          originalQuery: 'temperature humidity sensor hardware bom saas dashboard',
+          intent: 'how-to',
+          entities: ['ESP32', 'humidity sensor', 'SaaS dashboard'],
+          constraints: {},
+          fanOutQueries: ['ESP32 humidity sensor BOM'],
+        },
+      }),
+    );
+
+    expect(brief).toBeNull();
+  });
+
+  it('carries the deliberate quality contract on the brief', () => {
+    const brief = buildGroundedBuildBrief(
+      'Build me a base44 style app builder mixed with perplexity style research',
+      'builder',
+      makeSearchResponse(),
+    );
+
+    expect(brief).not.toBeNull();
+    expect(brief?.qualityTier).toBe('standard');
+    expect(brief?.qualityBrief).toContain('Quality bar (standard)');
+    expect(brief?.qualityBrief).toContain('Must satisfy:');
+    expect(brief?.qualityBrief).toContain('Deliberately avoid:');
+  });
+
+  it('escalates the quality tier when the prompt asks for production-grade builds', () => {
+    const brief = buildGroundedBuildBrief(
+      'Build a production-ready, scalable analytics dashboard with observability',
+      'builder',
+      makeSearchResponse({
+        plan: {
+          originalQuery: 'production scalable analytics dashboard observability',
+          intent: 'build',
+          entities: ['analytics dashboard'],
+          constraints: {},
+          fanOutQueries: ['production analytics dashboard'],
+        },
+      }),
+    );
+
+    expect(brief?.qualityTier).toBe('advanced');
+    expect(brief?.qualityBrief).toContain('Quality bar (advanced)');
+  });
 });

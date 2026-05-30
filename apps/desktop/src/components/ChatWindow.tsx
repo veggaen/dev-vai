@@ -903,6 +903,9 @@ export function ChatWindow() {
   const charCount = input.length;
   const canSend = input.trim().length > 0 && !isStreaming && (!pastedImage || imageDescription.trim().length > 0);
 
+  const streamingProgressSteps = isStreaming
+    ? messages[messages.length - 1]?.progressSteps ?? []
+    : [];
   const showTypingIndicator = isStreaming && messages.length > 0 && messages[messages.length - 1]?.content === '';
   const activeDeployStep = useMemo(
     () => deploySteps.find((step) => step.status === 'running')
@@ -1435,7 +1438,7 @@ export function ChatWindow() {
                 })}
 
                 <AnimatePresence>
-                  {showTypingIndicator && <TypingIndicator />}
+                  {showTypingIndicator && <TypingIndicator progressSteps={streamingProgressSteps} />}
                 </AnimatePresence>
 
                 <div className="h-2 flex-shrink-0" />

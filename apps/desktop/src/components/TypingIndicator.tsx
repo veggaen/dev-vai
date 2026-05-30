@@ -9,6 +9,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, Search, Sparkles, Brain } from 'lucide-react';
+import type { ChatProgressStep } from '../stores/chatStore.js';
 
 const THINKING_STEPS = [
   { label: 'Understanding...', icon: Brain, delay: 0 },
@@ -16,7 +17,7 @@ const THINKING_STEPS = [
   { label: 'Generating answer...', icon: Sparkles, delay: 3000 },
 ];
 
-export function TypingIndicator() {
+export function TypingIndicator({ progressSteps = [] }: { progressSteps?: ChatProgressStep[] }) {
   const [activeStep, setActiveStep] = useState(0);
   const [elapsed, setElapsed] = useState(0);
 
@@ -31,6 +32,8 @@ export function TypingIndicator() {
   }, [elapsed]);
 
   const completedCount = activeStep;
+  const hasRealProgress = progressSteps.length > 0;
+  const activeProgress = progressSteps[progressSteps.length - 1];
 
   return (
     <motion.div
@@ -47,7 +50,7 @@ export function TypingIndicator() {
 
       {/* Steps indicator */}
       <div className="min-w-0 flex-1">
-        <div className="inline-flex items-center gap-2 rounded-xl bg-zinc-800/40 px-3.5 py-2 ring-1 ring-zinc-700/30">
+        <div className="inline-flex max-w-xl items-center gap-2 rounded-xl bg-zinc-800/40 px-3.5 py-2 ring-1 ring-zinc-700/30">
           {/* Animated spinner */}
           <motion.div
             animate={{ rotate: 360 }}
@@ -58,7 +61,7 @@ export function TypingIndicator() {
           {/* Step label with crossfade */}
           <AnimatePresence mode="wait">
             <motion.div
-              key={activeStep}
+              key={hasRealProgress ? activeProgress?.stage ?? 'progress' : activeStep}
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
@@ -66,23 +69,28 @@ export function TypingIndicator() {
               className="flex items-center gap-1.5"
             >
               {(() => {
-                const StepIcon = THINKING_STEPS[activeStep].icon;
+                const StepIcon = hasRealProgress ? Search : THINKING_STEPS[activeStep].icon;
                 return <StepIcon className="h-3 w-3 text-violet-400/70" />;
               })()}
-              <span className="text-xs text-zinc-400">
-                {THINKING_STEPS[activeStep].label}
+              <span className="min-w-0 truncate text-xs text-zinc-400">
+                {hasRealProgress ? activeProgress?.label : THINKING_STEPS[activeStep].label}
               </span>
+              {hasRealProgress && activeProgress?.detail ? (
+                <span className="hidden min-w-0 truncate text-xs text-zinc-600 sm:inline">
+                  · {activeProgress.detail}
+                </span>
+              ) : null}
             </motion.div>
           </AnimatePresence>
 
           {/* Step count badge */}
-          {completedCount > 0 && (
+          {(hasRealProgress || completedCount > 0) && (
             <motion.span
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               className="rounded-full bg-violet-500/10 px-1.5 py-px text-[9px] font-medium tabular-nums text-violet-400/70"
             >
-              {completedCount}/{THINKING_STEPS.length}
+              {hasRealProgress ? progressSteps.length : `${completedCount}/${THINKING_STEPS.length}`}
             </motion.span>
           )}
         </div>

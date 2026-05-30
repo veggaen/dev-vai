@@ -1,5 +1,6 @@
 import type { ConversationMode } from './modes.js';
 import type { Message } from '../models/adapter.js';
+import { isProductEngineeringPlanningPrompt } from './product-engineering-intent.js';
 
 /**
  * Extra system guidance when the user message likely needs a structured, scannable answer.
@@ -240,6 +241,7 @@ export function buildChatTurnQualitySystemHint(
   const isVagueBroad = VAGUE_BROAD_PATTERN.test(trimmed);
   const isContextualFollowup = hasPriorAssistantTurn && CONTEXTUAL_FOLLOWUP_PATTERN.test(trimmed);
   const isInstructionConstrained = isInstructionConstrainedEarly;
+  const isProductEngineering = isProductEngineeringPlanningPrompt(trimmed);
 
   const lines = [
     'Turn quality contract for this answer:',
@@ -285,6 +287,12 @@ export function buildChatTurnQualitySystemHint(
     lines.push('- This is a broad/vague prompt. Pick the most useful interpretation and answer concretely. State your interpretation in one phrase ("Assuming you mean X..."), then give a focused answer. Do not dump everything you know about the topic.');
   }
 
+  if (isProductEngineering) {
+    lines.push('- This is a product-engineering / physical-product planning prompt, not an immediate sandbox build. Do NOT emit files, deploy markers, or preview instructions unless the user explicitly asks for a software prototype.');
+    lines.push('- Structure the answer as a product-engineering memo when relevant: executive takeaway, product framing, hardware/BOM, enclosure/mechanical constraints, firmware/device UI, SaaS/admin architecture, risks/unknowns, roadmap, and next deeper options.');
+    lines.push('- Label uncertainty honestly. Use phrasing like Known, Likely, Unknown, or Needs current sourcing quote when hardware availability, prices, compliance, or manufacturing assumptions matter.');
+  }
+
   if (needsRecommendation) {
     lines.push('- State the recommendation in the first sentence, then give the tradeoffs and the assumption that matters most.');
   }
@@ -298,7 +306,11 @@ export function buildChatTurnQualitySystemHint(
   }
 
   if (needsStructure) {
-    lines.push('- Keep it scannable with short headings or short bullets instead of one wall of prose.');
+    lines.push('- Keep it scannable with short headings or short bullets instead of one wall of prose. Use labels like Recommendation, Why, Steps, Tradeoffs, Risks, or Verify only when they fit the prompt.');
+  }
+
+  if (!isShortFactual && (debugLike || needsRecommendation || needsStructure || isHowTo || isExplanation || isProductEngineering)) {
+    lines.push('- If the answer has an action, include a concrete verification signal: command to run, UI behavior to check, failing symptom to watch, or decision criterion.');
   }
 
   // Precision reminder for all quality-hinted turns

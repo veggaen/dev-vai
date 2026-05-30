@@ -4,6 +4,7 @@ import { DEFAULT_CONVERSATION_MODE, type ChatPromptRewriteOverrides, type ChatSe
 import type { PlatformAuthService } from '../auth/platform-auth.js';
 import type { SandboxManager } from '../sandbox/manager.js';
 import type { ProjectService } from '../projects/service.js';
+import { authorizeConversationAccess } from '../access/conversations.js';
 import {
   assistantNoteBodySchema,
   createConversationBodySchema,
@@ -65,6 +66,10 @@ function getSandboxProject(projects: ProjectService, sandbox: SandboxManager, sa
   });
 }
 
+function isPlatformAuthEnabled(auth: PlatformAuthService): boolean {
+  return typeof auth.isEnabled === 'function' ? auth.isEnabled() : true;
+}
+
 function decorateConversation(
   conversation: Record<string, unknown> | null | undefined,
   viewerId: string | null,
@@ -100,17 +105,6 @@ function decorateConversation(
   };
 }
 
-function canMutateConversation(
-  conversation: { ownerUserId?: string | null },
-  viewer: Awaited<ReturnType<PlatformAuthService['getViewer']>>,
-) {
-  if (!conversation.ownerUserId) {
-    return true;
-  }
-
-  return Boolean(viewer.authenticated && viewer.user && conversation.ownerUserId === viewer.user.id);
-}
-
 export function registerConversationRoutes(
   app: FastifyInstance,
   chatService: ChatService,
@@ -126,6 +120,9 @@ export function registerConversationRoutes(
       const limit = Math.min(Number(request.query.limit) || 50, 200);
       const offset = Number(request.query.offset) || 0;
       const viewer = await auth.getViewer(request);
+      if (isPlatformAuthEnabled(auth) && !viewer.authenticated) {
+        return [];
+      }
       const userId = viewer.user?.id ?? null;
       const conversations = chatService.listConversations(limit, offset, userId);
       return conversations.map((conversation) => decorateConversation(conversation, userId, projects));
@@ -144,6 +141,10 @@ export function registerConversationRoutes(
       const resolvedMode: ConversationMode = mode ?? DEFAULT_CONVERSATION_MODE;
 
       const viewer = await auth.getViewer(request);
+      if (isPlatformAuthEnabled(auth) && !viewer.authenticated) {
+        reply.code(401);
+        return { error: 'Sign in to create a conversation' };
+      }
       const ownerUserId = viewer.user?.id ?? null;
 
       let sandboxProjectId: string | null = null;
@@ -154,12 +155,12 @@ export function registerConversationRoutes(
           return { error: 'Sandbox project not found' };
         }
 
+        syncSandboxProject(projects, existingSandbox);
         if (!canReadSandbox(projects, requestedSandboxProjectId, ownerUserId)) {
           reply.code(viewer.authenticated ? 403 : 401);
           return { error: viewer.authenticated ? 'You do not have access to this sandbox project' : 'Sign in to attach this sandbox project' };
         }
 
-        syncSandboxProject(projects, existingSandbox);
         sandboxProjectId = requestedSandboxProjectId;
       }
 
@@ -204,9 +205,16 @@ export function registerConversationRoutes(
       // Verify ownership for writes
       const viewer = await auth.getViewer(request);
       const userId = viewer.user?.id ?? null;
-      if (!canMutateConversation(conversation, viewer)) {
-        reply.code(viewer.authenticated ? 403 : 401);
-        return { error: viewer.authenticated ? 'Not your conversation' : 'Sign in to update this conversation' };
+      const access = authorizeConversationAccess({
+        conversation,
+        viewer,
+        projects,
+        access: 'write',
+        authEnabled: isPlatformAuthEnabled(auth),
+      });
+      if (!access.allowed) {
+        reply.code(access.statusCode ?? 403);
+        return { error: access.error ?? 'Not your conversation' };
       }
 
       if (mode !== undefined) {
@@ -229,12 +237,11 @@ export function registerConversationRoutes(
             return { error: 'Sandbox project not found' };
           }
 
+          syncSandboxProject(projects, existingSandbox);
           if (!canReadSandbox(projects, sandboxProjectId, userId)) {
             reply.code(viewer.authenticated ? 403 : 401);
             return { error: viewer.authenticated ? 'You do not have access to this sandbox project' : 'Sign in to attach this sandbox project' };
           }
-
-          syncSandboxProject(projects, existingSandbox);
         }
 
         conversation = chatService.updateConversationSandbox(request.params.id, sandboxProjectId);
@@ -267,7 +274,20 @@ export function registerConversationRoutes(
   /** Get messages for a conversation */
   app.get<{ Params: { id: string } }>(
     '/api/conversations/:id/messages',
-    async (request) => {
+    async (request, reply) => {
+      const conversation = chatService.getConversation(request.params.id);
+      const viewer = await auth.getViewer(request);
+      const access = authorizeConversationAccess({
+        conversation,
+        viewer,
+        projects,
+        access: 'read',
+        authEnabled: isPlatformAuthEnabled(auth),
+      });
+      if (!access.allowed) {
+        reply.code(access.statusCode ?? 403);
+        return { error: access.error ?? 'You do not have access to this conversation' };
+      }
       return chatService.getMessages(request.params.id);
     },
   );
@@ -288,9 +308,16 @@ export function registerConversationRoutes(
       }
 
       const viewer = await auth.getViewer(request);
-      if (!canMutateConversation(conversation, viewer)) {
-        reply.code(viewer.authenticated ? 403 : 401);
-        return { error: viewer.authenticated ? 'Not your conversation' : 'Sign in to update this conversation' };
+      const access = authorizeConversationAccess({
+        conversation,
+        viewer,
+        projects,
+        access: 'write',
+        authEnabled: isPlatformAuthEnabled(auth),
+      });
+      if (!access.allowed) {
+        reply.code(access.statusCode ?? 403);
+        return { error: access.error ?? 'Not your conversation' };
       }
 
       const content = parsed.data.content.trim();
@@ -312,6 +339,19 @@ export function registerConversationRoutes(
       }
       const { id } = request.params;
       const { content, profile, responseDepth, skipPromptRewrite } = parsed.data;
+      const conversation = chatService.getConversation(id);
+      const viewer = await auth.getViewer(request);
+      const access = authorizeConversationAccess({
+        conversation,
+        viewer,
+        projects,
+        access: 'write',
+        authEnabled: isPlatformAuthEnabled(auth),
+      });
+      if (!access.allowed) {
+        reply.code(access.statusCode ?? 403);
+        return { error: access.error ?? 'Not your conversation' };
+      }
       const promptRewriteOverrides =
         profile !== undefined || responseDepth !== undefined || skipPromptRewrite === true
           ? {
@@ -353,9 +393,16 @@ export function registerConversationRoutes(
 
       // Verify ownership
       const viewer = await auth.getViewer(request);
-      if (!canMutateConversation(conversation, viewer)) {
-        reply.code(viewer.authenticated ? 403 : 401);
-        return { error: viewer.authenticated ? 'Not your conversation' : 'Sign in to delete this conversation' };
+      const access = authorizeConversationAccess({
+        conversation,
+        viewer,
+        projects,
+        access: 'write',
+        authEnabled: isPlatformAuthEnabled(auth),
+      });
+      if (!access.allowed) {
+        reply.code(access.statusCode ?? 403);
+        return { error: access.error ?? 'Not your conversation' };
       }
 
       // Clean up linked sandbox

@@ -1,5 +1,7 @@
 import type { GroundedBuildBrief } from './adapter.js';
 import type { SearchResponse } from '../search/types.js';
+import { isProductEngineeringPlanningPrompt } from '../chat/product-engineering-intent.js';
+import { decideCodePolicy, renderQualityBrief } from './code-quality-policy.js';
 
 const BUILD_ACTION_RE = /\b(?:build|create|make|start|launch|scaffold|generate|ship|prototype|remake|implement)\b/i;
 const EDIT_ACTION_RE = /\b(?:edit|update|upgrade|improve|extend|fix|change|refactor|add|polish)\b/i;
@@ -141,6 +143,7 @@ function normalizeFocusEntity(entity: string, sourceLabels: readonly string[]): 
 }
 
 function looksLikeGroundedBuildRequest(input: string, activeMode: string): boolean {
+  if (isProductEngineeringPlanningPrompt(input)) return false;
   const hasAction = BUILD_ACTION_RE.test(input) || EDIT_ACTION_RE.test(input);
   const hasGoalFraming = GOAL_RE.test(input) && PRODUCT_TARGET_RE.test(input);
   const hasProductShape = PRODUCT_TARGET_RE.test(input) && COMPARISON_RE.test(input);
@@ -229,6 +232,11 @@ export function buildGroundedBuildBrief(
       : `Confidence is ${confidenceLabel}, so keep the first slice small, testable, and easy to revise.`,
   );
 
+  // Decide the deliberate quality bar for this build and carry the full
+  // rendered contract on the brief, so the downstream execution prompt gets
+  // the must-haves/avoids — not just the optional scope note.
+  const policy = decideCodePolicy(normalizedInput);
+
   return {
     intent,
     focusLabel,
@@ -239,5 +247,7 @@ export function buildGroundedBuildBrief(
     sourceDomains,
     sourceCount: searchResult.sources.length,
     confidence: roundedConfidence,
+    qualityTier: policy.tier,
+    qualityBrief: renderQualityBrief(policy),
   };
 }

@@ -1458,7 +1458,7 @@ export function PreviewPanel() {
                   }`}
                   style={{ width: breakpoint === 'desktop' ? '100%' : BREAKPOINTS[breakpoint].width, maxWidth: '100%' }}
                 >
-                  <iframe ref={iframeRef} src={previewUrl} className="h-full w-full"
+                  <iframe ref={iframeRef} src={previewUrl} className="h-full w-full" data-testid="preview-iframe"
                     onLoad={() => setTimeout(() => {
                       if (previewCacheKey) {
                         seenPreviewKeysRef.current.add(previewCacheKey);

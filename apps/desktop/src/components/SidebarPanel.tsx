@@ -660,6 +660,34 @@ function ControlPanel() {
   const { status, stats } = useEngineStore();
   const startOwnerTrainingSession = useChatStore((state) => state.startOwnerTrainingSession);
   const [startingTraining, setStartingTraining] = useState(false);
+  const [scaleRuns, setScaleRuns] = useState<Array<{
+    id: string;
+    manifest?: {
+      status?: string;
+      startedAt?: string;
+      finishedAt?: string | null;
+      config?: { n?: number; builderRate?: number; dryRun?: boolean };
+    } | null;
+    summary?: { summary?: { total?: number; failed?: number }; total?: number; failed?: number } | null;
+    auditBytes?: number;
+    responseBytes?: number;
+  }>>([]);
+
+  useEffect(() => {
+    if (!isOwner || ownerFeaturesHidden) return;
+    let cancelled = false;
+    void apiFetch('/api/scale-eval/runs')
+      .then(async (res) => (res.ok ? res.json() : { runs: [] }))
+      .then((data: { runs?: typeof scaleRuns }) => {
+        if (!cancelled) setScaleRuns((data.runs ?? []).slice(0, 5));
+      })
+      .catch(() => {
+        if (!cancelled) setScaleRuns([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOwner, ownerFeaturesHidden]);
 
   if (!isOwner || ownerFeaturesHidden) {
     return (
@@ -747,6 +775,38 @@ function ControlPanel() {
         <div className="mt-2 flex items-center justify-between gap-3">
           <span>Indexed documents</span>
           <span className="text-zinc-200">{stats?.documentsIndexed ?? 0}</span>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">Scale eval</div>
+          <span className="text-[11px] text-zinc-500">{scaleRuns.length} recent</span>
+        </div>
+        <div className="mt-3 space-y-2">
+          {scaleRuns.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-zinc-800 px-3 py-2 text-xs text-zinc-500">
+              No scale-eval artifacts found yet. Run `pnpm vai:scale:eval --dry-run` to create a smoke artifact.
+            </div>
+          ) : scaleRuns.map((run) => {
+            const config = run.manifest?.config;
+            const total = run.summary?.summary?.total ?? run.summary?.total ?? config?.n ?? 0;
+            const failed = run.summary?.summary?.failed ?? run.summary?.failed ?? 0;
+            return (
+              <div key={run.id} className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="truncate text-xs font-medium text-zinc-200">{run.id}</div>
+                  <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-400">
+                    {run.manifest?.status ?? 'unknown'}
+                  </span>
+                </div>
+                <div className="mt-1 text-[11px] text-zinc-500">
+                  {total} conversations · {failed} failed · builder {Math.round((config?.builderRate ?? 0) * 100)}%
+                  {config?.dryRun ? ' · dry run' : ''}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

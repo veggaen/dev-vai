@@ -72,6 +72,14 @@ export interface GroundedBuildBrief {
   readonly sourceDomains: readonly string[];
   readonly sourceCount: number;
   readonly confidence: number;
+  /** Deliberate complexity tier decided for this build (minimal | standard | advanced). */
+  readonly qualityTier?: 'minimal' | 'standard' | 'advanced';
+  /**
+   * Rendered quality contract (tier summary + must-haves + deliberate avoids).
+   * Carried on the brief so the full contract — not just a scope note — reaches
+   * the build composition / execution prompt downstream.
+   */
+  readonly qualityBrief?: string;
 }
 
 export type SourcePresentation = 'research' | 'supporting';
@@ -81,6 +89,7 @@ export interface ChatChunk {
     | 'text_delta'
     | 'reasoning_delta'
     | 'tool_call_delta'
+    | 'progress'
     | 'turn_kind'
     | 'sources'
     | 'done'
@@ -89,6 +98,13 @@ export interface ChatChunk {
   readonly textDelta?: string;
   readonly reasoningDelta?: string;
   readonly toolCallDelta?: { readonly id: string; readonly name: string; readonly argumentsDelta: string };
+  /** User-visible activity/progress for long-running research, analysis, and builder turns. */
+  readonly progress?: {
+    readonly stage: string;
+    readonly label: string;
+    readonly detail?: string;
+    readonly status: 'running' | 'done';
+  };
   /** High-level routing classification for the current assistant turn. */
   readonly turnKind?: ChatTurnKind;
   /** Search sources — sent before text when a web search was performed */

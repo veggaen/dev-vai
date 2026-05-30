@@ -27,10 +27,11 @@ function createPlatformAuthConfig(): VaiConfig['platformAuth'] {
   };
 }
 
-function makeRequest(headers: Record<string, string>, ip: string): FastifyRequest {
+function makeRequest(headers: Record<string, string>, ip: string, url = '/'): FastifyRequest {
   return {
     headers,
     ip,
+    url,
   } as FastifyRequest;
 }
 
@@ -72,6 +73,20 @@ describe('PlatformAuthService local dev auth bypass', () => {
 
   it('ignores the bypass header for non-local requests', async () => {
     const viewer = await auth.getViewer(makeRequest({ 'x-vai-dev-auth-bypass': '1' }, '8.8.8.8'));
+
+    expect(viewer.authenticated).toBe(false);
+    expect(viewer.user).toBeNull();
+  });
+
+  it('accepts the dev auth bypass query on local websocket requests', async () => {
+    const viewer = await auth.getViewer(makeRequest({}, '127.0.0.1', '/api/chat?devAuthBypass=1'));
+
+    expect(viewer.authenticated).toBe(true);
+    expect(viewer.user?.id).toBe('__local_dev_user__');
+  });
+
+  it('ignores the dev auth bypass query for non-local websocket requests', async () => {
+    const viewer = await auth.getViewer(makeRequest({}, '8.8.8.8', '/api/chat?devAuthBypass=1'));
 
     expect(viewer.authenticated).toBe(false);
     expect(viewer.user).toBeNull();

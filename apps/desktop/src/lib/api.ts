@@ -3,7 +3,7 @@
  * - Dev (Vite on 5173/5174): empty string → requests go through Vite proxy (no CORS)
  * - Tauri / production: direct to localhost:3006
  */
-import { isDevAuthBypassEnabled } from './dev-auth-bypass.js';
+import { DEV_AUTH_BYPASS_QUERY_PARAM, isDevAuthBypassEnabled } from './dev-auth-bypass.js';
 
 const SESSION_TOKEN_KEY = 'vai-platform-session-token';
 const DEV_AUTH_BYPASS_HEADER = 'x-vai-dev-auth-bypass';
@@ -25,6 +25,14 @@ function getWsBase(): string {
 
 export const API_BASE = getApiBase();
 export const WS_BASE = getWsBase();
+
+export function buildChatWebSocketUrl(): string {
+  const url = `${WS_BASE}/api/chat`;
+  if (!isDevAuthBypassEnabled()) return url;
+
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}${DEV_AUTH_BYPASS_QUERY_PARAM}=1`;
+}
 
 export function getApiSessionToken(): string | null {
   if (typeof window === 'undefined') return null;

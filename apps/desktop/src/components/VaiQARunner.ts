@@ -16,13 +16,15 @@ import { useCursorStore } from '../stores/cursorStore.js';
 import { useSandboxStore } from '../stores/sandboxStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { apiFetch } from '../lib/api.js';
 
-const API_BASE = 'http://localhost:3006';
+const ASSISTANT_MESSAGE_SELECTOR = '[data-chat-message-role="assistant"]';
+const STREAMING_MESSAGE_SELECTOR = '[data-streaming="true"]';
 
 /** Attach to a running sandbox — always picks the RUNNING one, even if store already has a stale project */
 async function ensureSandboxAttached(): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/sandbox`);
+    const res = await apiFetch('/api/sandbox');
     const projects = await res.json() as { id: string; status: string; devPort: number | null }[];
     const running = projects.find(p => p.status === 'running' && p.devPort);
 
@@ -44,7 +46,7 @@ async function ensureConversationLoaded(): Promise<boolean> {
   if (!sandboxId) return false;
 
   try {
-    const res = await fetch(`${API_BASE}/api/conversations?limit=20`);
+    const res = await apiFetch('/api/conversations?limit=20');
     const convs = await res.json() as { id: string; mode: string; sandboxProjectId?: string }[];
     // Find the conversation linked to the current sandbox
     const linked = convs.find(c => c.sandboxProjectId === sandboxId);
@@ -259,8 +261,8 @@ export async function runVisualQA(
       const elapsed = (i + 1) * 2;
 
       // Check for assistant message in the DOM
-      const messages = document.querySelectorAll('[data-role="assistant"]');
-      const streamingEl = document.querySelector('[data-streaming="true"]');
+      const messages = document.querySelectorAll(ASSISTANT_MESSAGE_SELECTOR);
+      const streamingEl = document.querySelector(STREAMING_MESSAGE_SELECTOR);
 
       if (messages.length > 0 || streamingEl) {
         if (streamingEl) {
@@ -282,10 +284,10 @@ export async function runVisualQA(
       // Also check via API
       if (i > 5 && i % 3 === 0) {
         try {
-          const res = await fetch(`${API_BASE}/api/conversations?limit=1`);
+          const res = await apiFetch('/api/conversations?limit=1');
           const convs = await res.json() as { id: string; mode: string }[];
           if (convs.length > 0 && convs[0].mode === 'builder') {
-            const msgsRes = await fetch(`${API_BASE}/api/conversations/${convs[0].id}/messages`);
+            const msgsRes = await apiFetch(`/api/conversations/${convs[0].id}/messages`);
             const msgs = await msgsRes.json() as { role: string; content: string }[];
             const lastAssistant = [...msgs].reverse().find(m => m.role === 'assistant');
             if (lastAssistant && lastAssistant.content.length > 100) {
@@ -527,7 +529,7 @@ export async function runFullBuildFlow(
     const elapsed = (i + 1) * 2;
 
     // Visual feedback — move cursor near streaming content
-    const streamingEl = document.querySelector('[data-streaming="true"]');
+    const streamingEl = document.querySelector(STREAMING_MESSAGE_SELECTOR);
     if (streamingEl) {
       const rect = streamingEl.getBoundingClientRect();
       c.moveTo(rect.left + Math.random() * 200, rect.top + rect.height * 0.7);
@@ -540,7 +542,7 @@ export async function runFullBuildFlow(
 
     // Check if sandbox spun up via API
     try {
-      const res = await fetch(`${API_BASE}/api/sandbox`);
+      const res = await apiFetch('/api/sandbox');
       const projects = await res.json() as { id: string; status: string; devPort: number | null }[];
       const running = projects.filter(p => p.status === 'running' && p.devPort);
       if (running.length > 0) {
@@ -552,14 +554,14 @@ export async function runFullBuildFlow(
 
     // Also check if response is done (no more streaming)
     if (elapsed > 20) {
-      const msgs = document.querySelectorAll('[data-role="assistant"]');
+      const msgs = document.querySelectorAll(ASSISTANT_MESSAGE_SELECTOR);
       if (msgs.length > 0 && !streamingEl) {
         // Response done but no sandbox yet — wait a bit more for auto-sandbox
         c.log('info', 'Response complete, waiting for auto-sandbox...');
         await sleep(8000);
         // Check one more time
         try {
-          const res = await fetch(`${API_BASE}/api/sandbox`);
+          const res = await apiFetch('/api/sandbox');
           const projects = await res.json() as { id: string; status: string; devPort: number | null }[];
           const running = projects.filter(p => p.status === 'running' && p.devPort);
           if (running.length > 0) {
@@ -695,9 +697,9 @@ export async function runFullBuildFlow(
       await sleep(2000);
       const elapsed = (i + 1) * 2;
 
-      const streaming = document.querySelector('[data-streaming="true"]');
+      const streaming = document.querySelector(STREAMING_MESSAGE_SELECTOR);
       if (!streaming && i > 3) {
-        const msgs = document.querySelectorAll('[data-role="assistant"]');
+        const msgs = document.querySelectorAll(ASSISTANT_MESSAGE_SELECTOR);
         if (msgs.length >= 2) {
           step('Iteration response', true, `Got response after ${elapsed}s`);
           break;

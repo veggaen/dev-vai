@@ -1,4 +1,4 @@
-export type BuilderArchetype = 'tracker' | 'social-feed' | 'matching' | 'portfolio' | 'storefront' | 'dashboard' | 'booking' | 'todo' | 'pomodoro' | 'markdown' | 'password';
+export type BuilderArchetype = 'tracker' | 'habit' | 'social-feed' | 'matching' | 'portfolio' | 'storefront' | 'dashboard' | 'booking' | 'todo' | 'pomodoro' | 'markdown' | 'password';
 
 export type BuilderModule =
   | 'activity-feed'

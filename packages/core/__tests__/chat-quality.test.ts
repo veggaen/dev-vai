@@ -72,6 +72,30 @@ describe('buildChatTurnQualitySystemHint', () => {
     expect(hint).toMatch(/latest official source/i);
   });
 
+  it('adds verification guidance for structured actionable answers', () => {
+    const hint = buildChatTurnQualitySystemHint(
+      'chat',
+      'Walk me through how to debug flaky websocket streaming and what should I change first?',
+      [],
+    );
+
+    expect(hint).toMatch(/concrete verification signal/i);
+    expect(hint).toMatch(/command to run|UI behavior to check|decision criterion/i);
+  });
+
+  it('adds a product-engineering memo contract for hardware product prompts', () => {
+    const hint = buildChatTurnQualitySystemHint(
+      'chat',
+      'I want to make a temperature humidity wall sensor with ESP32 hardware, enclosure, firmware, SaaS dashboard, alerts, and product roadmap. What should I order and how should I plan this?',
+      [],
+    );
+
+    expect(hint).toMatch(/product-engineering \/ physical-product planning/i);
+    expect(hint).toMatch(/hardware\/BOM/i);
+    expect(hint).toMatch(/Needs current sourcing quote/i);
+    expect(hint).toMatch(/Do NOT emit files/i);
+  });
+
   it('injects a strict minimal-output contract for instruction-constrained turns', () => {
     const hint = buildChatTurnQualitySystemHint(
       'chat',

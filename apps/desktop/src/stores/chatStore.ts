@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { ConversationSummary, CreateConversationResponse } from '@vai/api-types/responses';
-import { WS_BASE, apiFetch } from '../lib/api.js';
+import { apiFetch, buildChatWebSocketUrl } from '../lib/api.js';
 import { getActiveCapture, startSessionCapture } from '../lib/sessionCapture.js';
 import type { SessionCapture } from '../lib/sessionCapture.js';
 import { mergeProjectUpdateMessage } from '../lib/project-update-message.js';
@@ -42,6 +42,13 @@ export interface GroundedBuildBriefUI {
   sourceDomains: string[];
   sourceCount: number;
   confidence: number;
+}
+
+export interface ChatProgressStep {
+  stage: string;
+  label: string;
+  detail?: string;
+  status: 'running' | 'done';
 }
 
 /** IDE agent identity for group chat messages */
@@ -96,6 +103,8 @@ export interface ChatMessage {
   isAutoRepair?: boolean;
   /** Repair attempt number (1-based) when isAutoRepair is true */
   repairAttempt?: number;
+  /** Real server-side activity/progress stages for long turns */
+  progressSteps?: ChatProgressStep[];
 }
 
 /** Server list row — kept in sync via @vai/api-types/responses (compile-time contract). */
@@ -171,12 +180,57 @@ async function readApiError(response: Response, fallback: string): Promise<strin
   }
 }
 
+export function resolveConversationSandboxProjectIdOption(
+  options: { sandboxProjectId?: string | null } | undefined,
+  activeSandboxProjectId: string | null | undefined,
+): string | null {
+  if (options && Object.prototype.hasOwnProperty.call(options, 'sandboxProjectId')) {
+    return options.sandboxProjectId ?? null;
+  }
+  return activeSandboxProjectId ?? null;
+}
+
 /** Active broadcast response poller */
 let broadcastPollTimer: ReturnType<typeof setInterval> | null = null;
 
 /** Currently active streaming WebSocket. Only one may be open at a time. */
 let activeWs: WebSocket | null = null;
 let activeStreamingAssistantId: string | null = null;
+let pendingStreamDelta = '';
+let streamDeltaFlushScheduled = false;
+
+function flushPendingStreamDelta(): void {
+  if (!pendingStreamDelta) {
+    streamDeltaFlushScheduled = false;
+    return;
+  }
+
+  const text = pendingStreamDelta;
+  pendingStreamDelta = '';
+  streamDeltaFlushScheduled = false;
+
+  useChatStore.setState((state) => {
+    const msgs = [...state.messages];
+    const targetIndex = activeStreamingAssistantId
+      ? msgs.findIndex((message) => message.id === activeStreamingAssistantId)
+      : msgs.length - 1;
+    const target = targetIndex >= 0 ? msgs[targetIndex] : null;
+    if (target && target.role === 'assistant') {
+      msgs[targetIndex] = { ...target, content: target.content + text };
+    }
+    return { messages: msgs };
+  });
+}
+
+function scheduleStreamDeltaFlush(): void {
+  if (streamDeltaFlushScheduled) return;
+  streamDeltaFlushScheduled = true;
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(() => flushPendingStreamDelta());
+    return;
+  }
+  setTimeout(() => flushPendingStreamDelta(), 16);
+}
 
 function isProjectUpdateContent(content: string): boolean {
   const trimmed = content.trim();
@@ -266,7 +320,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   createConversation: async (modelId: string, mode: ChatMode = 'chat', options) => {
-    const resolvedSandboxProjectId = options?.sandboxProjectId ?? useSandboxStore.getState().projectId ?? null;
+    const resolvedSandboxProjectId = resolveConversationSandboxProjectIdOption(
+      options,
+      useSandboxStore.getState().projectId,
+    );
     const res = await apiFetch('/api/conversations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -519,7 +576,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     // Use a local reference so callbacks always target *this* socket, not a later replacement.
-    const ws = new WebSocket(`${WS_BASE}/api/chat`);
+    const ws = new WebSocket(buildChatWebSocketUrl());
     activeWs = ws;
 
     ws.onopen = () => {
@@ -578,6 +635,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         followUps?: string[];
         confidence?: number;
         groundedBrief?: GroundedBuildBriefUI;
+        progress?: ChatProgressStep;
         modelId?: string;
         fallback?: {
           fromModelId: string;
@@ -591,12 +649,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Server auto-created a conversation because our id was unknown — adopt
       // the new id locally and refresh the list so subsequent turns use it.
       if (chunk.type === 'conversation_resolved' && chunk.conversationId) {
+        flushPendingStreamDelta();
         set({ activeConversationId: chunk.conversationId });
         void get().fetchConversations();
         return;
       }
 
-      if (chunk.type === 'turn_kind' && chunk.turnKind) {
+      if (chunk.type === 'progress' && chunk.progress) {
+        set((state) => {
+          const msgs = [...state.messages];
+          const targetIndex = activeStreamingAssistantId
+            ? msgs.findIndex((message) => message.id === activeStreamingAssistantId)
+            : msgs.length - 1;
+          const target = targetIndex >= 0 ? msgs[targetIndex] : null;
+          if (target && target.role === 'assistant') {
+            const existing = target.progressSteps ?? [];
+            const next = [
+              ...existing.filter((step) => step.stage !== chunk.progress?.stage),
+              chunk.progress,
+            ].filter((step): step is ChatProgressStep => Boolean(step)).slice(-6);
+            msgs[targetIndex] = {
+              ...target,
+              progressSteps: next,
+            };
+          }
+          return { messages: msgs };
+        });
+      } else if (chunk.type === 'turn_kind' && chunk.turnKind) {
         set((state) => {
           const msgs = [...state.messages];
           const targetIndex = activeStreamingAssistantId
@@ -658,6 +737,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Accumulate reasoning text for dev logs capture
         reasoningText += chunk.reasoningDelta;
       } else if (chunk.type === 'done') {
+        flushPendingStreamDelta();
         set({ isStreaming: false });
         // Capture assistant response + reasoning in dev logs
         const capture = getActiveCapture();
@@ -692,8 +772,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Refresh conversations to get updated titles/timestamps
         get().fetchConversations();
       } else if (chunk.type === 'error') {
+        flushPendingStreamDelta();
         set({ isStreaming: false });
         get().appendToLastMessage(`\n\nError: ${chunk.error}`);
+        flushPendingStreamDelta();
         // Log error in dev logs
         const capture = getActiveCapture();
         if (capture) {
@@ -707,8 +789,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     ws.onerror = () => {
       if (activeWs !== ws) return;
+      flushPendingStreamDelta();
       set({ isStreaming: false });
       get().appendToLastMessage('\n\nConnection error');
+      flushPendingStreamDelta();
       const capture = getActiveCapture();
       if (capture) {
         capture.error('WebSocket connection error', { errorType: 'connection' });
@@ -719,6 +803,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   stopStreaming: () => {
+    flushPendingStreamDelta();
     if (activeWs) {
       activeWs.close();
       activeWs = null;
@@ -981,17 +1066,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   appendToLastMessage: (text: string) => {
-    set((state) => {
-      const msgs = [...state.messages];
-      const targetIndex = activeStreamingAssistantId
-        ? msgs.findIndex((message) => message.id === activeStreamingAssistantId)
-        : msgs.length - 1;
-      const target = targetIndex >= 0 ? msgs[targetIndex] : null;
-      if (target && target.role === 'assistant') {
-        msgs[targetIndex] = { ...target, content: target.content + text };
-      }
-      return { messages: msgs };
-    });
+    pendingStreamDelta += text;
+    scheduleStreamDeltaFlush();
   },
 
   setFeedback: (messageId: string, helpful: boolean) => {
@@ -1029,4 +1105,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 }));
 
 // Expose store for demo system (injectResponse needs setState access)
-(window as unknown as Record<string, unknown>).__vai_chat_store = useChatStore;
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__vai_chat_store = useChatStore;
+}

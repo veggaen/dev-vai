@@ -46,4 +46,24 @@ describe('grounded build brief actions', () => {
     expect(prompt).toContain('Update the current app if one exists');
     expect(prompt).toContain('changed files');
   });
+
+  it('threads the quality contract into the execution prompt when present', () => {
+    const prompt = buildGroundedBuildBriefExecutionPrompt({
+      ...baseBrief,
+      qualityTier: 'standard',
+      qualityBrief: 'Quality bar (standard): production-lean.\nMust satisfy:\n  - Handle obvious failure modes',
+    });
+
+    expect(prompt).toContain('Quality bar (standard)');
+    expect(prompt).toContain('Handle obvious failure modes');
+    // Quality contract sits before the runnable-output handoff.
+    expect(prompt.indexOf('Quality bar (standard)')).toBeLessThan(
+      prompt.indexOf('Now convert that into runnable output.'),
+    );
+  });
+
+  it('omits the quality section when no contract is provided', () => {
+    const prompt = buildGroundedBuildBriefExecutionPrompt(baseBrief);
+    expect(prompt).not.toContain('Quality bar');
+  });
 });

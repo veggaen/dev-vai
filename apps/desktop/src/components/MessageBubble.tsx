@@ -426,6 +426,71 @@ function stripProjectUpdatePrefix(content: string): string {
   return content.replace(/^\s*Project update:?\s*/i, '').trim();
 }
 
+function ImplementationPackageCard({
+  summary,
+  files,
+  remainingFileCount,
+  studioChrome,
+}: {
+  summary: React.ReactNode;
+  files: Array<{ path: string }>;
+  remainingFileCount: number;
+  studioChrome: boolean;
+}) {
+  const frame = studioChrome
+    ? 'border-zinc-200 bg-white text-zinc-900'
+    : 'border-zinc-800/70 bg-zinc-950/62 text-zinc-100';
+  const chip = studioChrome
+    ? 'border-zinc-200 bg-zinc-50 text-zinc-600'
+    : 'border-zinc-800 bg-zinc-900/70 text-zinc-300';
+
+  return (
+    <div className={`overflow-hidden rounded-[0.95rem] border ${frame}`}>
+      <div className={`border-b px-4 py-3 ${studioChrome ? 'border-zinc-200' : 'border-zinc-800/70'}`}>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${chip}`}>
+            <Rocket className="h-3 w-3" />
+            Implementation package
+          </span>
+          <span className={`inline-flex items-center rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${chip}`}>
+            {files.length + remainingFileCount} file{files.length + remainingFileCount === 1 ? '' : 's'}
+          </span>
+          <span className={`inline-flex items-center rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${chip}`}>
+            sandbox apply
+          </span>
+        </div>
+        <div className={`mt-3 text-sm leading-6 ${studioChrome ? 'text-zinc-700' : 'text-zinc-200'}`}>
+          {summary}
+        </div>
+      </div>
+
+      <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_13rem]">
+        <div>
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Changed files</div>
+          <div className="grid gap-1.5">
+            {files.map((file) => (
+              <div key={file.path} className={`flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 text-[12px] ${studioChrome ? 'border-zinc-200 bg-zinc-50 text-zinc-800' : 'border-zinc-800 bg-zinc-900/55 text-zinc-200'}`}>
+                <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                <span className="truncate font-mono">{file.path}</span>
+              </div>
+            ))}
+            {remainingFileCount > 0 && (
+              <div className="px-2 text-[12px] text-zinc-500">
+                +{remainingFileCount} more file{remainingFileCount === 1 ? '' : 's'}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className={`rounded-lg border px-3 py-3 text-[12px] leading-5 ${studioChrome ? 'border-zinc-200 bg-zinc-50 text-zinc-600' : 'border-zinc-800 bg-zinc-900/40 text-zinc-400'}`}>
+          <div className={`mb-1.5 font-semibold ${studioChrome ? 'text-zinc-900' : 'text-zinc-100'}`}>What happens next</div>
+          Vai applies these blocks to the attached sandbox. Use Preview for behavior and Code for exact files; verification details appear as a project update after the write.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GroundedBuildBriefCard({
   brief,
   onExecute,
@@ -677,6 +742,19 @@ export function MessageBubble({
   const sourceRailConfidenceLabel = confidence !== undefined ? `${Math.round(confidence * 100)}% confidence` : null;
   const showCompactResearchMeta = isResearchMessage && (compactResearchMode || sourceRailHandlesSources) && hasStructuredSources && Boolean(sources?.length);
   const showExpandedSources = isResearchMessage && hasStructuredSources && sources && !compactResearchMode && !sourceRailHandlesSources;
+  const messageKindLabel = isUser
+    ? null
+    : isProjectUpdate
+      ? 'applied'
+      : hasAppliedFileBlocks
+        ? 'implementation'
+        : isResearchMessage
+          ? 'research'
+          : turnKind === 'builder'
+            ? 'builder'
+            : turnKind === 'analysis'
+              ? 'analysis'
+              : 'answer';
   // Only surface related/follow-up chips on the latest assistant message so older
   // turns don't sit with stale suggestions wedged between user messages.
   const showResearchFollowUps = isLatest
@@ -772,6 +850,15 @@ export function MessageBubble({
                   : 'text-zinc-500'
           }`}>
             <span>{isUser ? 'You' : isProjectUpdate ? 'Project update' : sender?.name || 'Vai'}</span>
+            {messageKindLabel && (
+              <span className={`inline-flex items-center rounded-md border px-1.5 py-px text-[9px] font-semibold uppercase tracking-[0.14em] ${
+                studioChrome
+                  ? 'border-zinc-200 bg-zinc-50 text-zinc-500'
+                  : 'border-zinc-800 bg-zinc-900/70 text-zinc-500'
+              }`}>
+                {messageKindLabel}
+              </span>
+            )}
             {sender?.model && !isUser && (
               <span className={`text-[10px] font-normal ${studioChrome ? 'text-zinc-400' : 'text-zinc-700'}`}>· {sender.model}</span>
             )}
@@ -887,39 +974,21 @@ export function MessageBubble({
               <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{content}</p>
             ) : hasAppliedFileBlocks ? (
               <div className="space-y-2">
-                {compactSummary ? (
-                  <div className="text-sm leading-relaxed transition-opacity duration-300">
+                <ImplementationPackageCard
+                  files={visibleFiles}
+                  remainingFileCount={remainingFileCount}
+                  studioChrome={studioChrome}
+                  summary={compactSummary ? (
                     <CitedMarkdown
                       content={citedContent}
                       sources={sources}
                       hoveredCitationKey={hoveredCitationKey}
                       onHoverCitation={setHoveredCitationKey}
                     />
-                  </div>
-                ) : (
-                  <p className="text-sm leading-relaxed text-zinc-300">
-                    Updated the current project in sandbox. Open Preview or Code to inspect the result directly.
-                  </p>
-                )}
-
-                <div className="space-y-1 text-xs text-zinc-500">
-                  <div>
-                    Updated {extractedFiles.length} file{extractedFiles.length === 1 ? '' : 's'} in the current project.
-                  </div>
-                  <div className="space-y-0.5">
-                    {visibleFiles.map((file) => (
-                      <div key={file.path} className="truncate">
-                        {file.path}
-                      </div>
-                    ))}
-                    {remainingFileCount > 0 && (
-                      <div>
-                        +{remainingFileCount} more file{remainingFileCount === 1 ? '' : 's'}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
+                  ) : (
+                    <span>Updated the current project in sandbox. Open Preview or Code to inspect the result directly.</span>
+                  )}
+                />
                 {plainFollowUpsSection}
               </div>
             ) : (

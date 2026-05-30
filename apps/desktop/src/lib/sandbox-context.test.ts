@@ -61,4 +61,10 @@ describe('pickSandboxContextPaths', () => {
     expect(shouldAttachSandboxContext('What is Redis and when should I use it?')).toBe(false);
     expect(shouldAttachSandboxContext('Explain the difference between OAuth and session auth.')).toBe(false);
   });
+
+  it('does not attach sandbox context for hardware product planning prompts', () => {
+    expect(shouldAttachSandboxContext(
+      'Help me plan a wall-mounted temperature humidity sensor with casing, ESP32 hardware, firmware, and a SaaS dashboard.',
+    )).toBe(false);
+  });
 });

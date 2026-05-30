@@ -40,6 +40,11 @@ export { ChatService } from './chat/service.js';
 export type { ImageInput, ChatServiceOptions, ChatPromptRewriteOverrides } from './chat/service.js';
 export type { ConversationRecord, MessageRecord, ImageRecord } from './chat/types.js';
 export {
+  hasExplicitSoftwareExecutionAnchor,
+  hasProductEngineeringSignal,
+  isProductEngineeringPlanningPrompt,
+} from './chat/product-engineering-intent.js';
+export {
   CONVERSATION_MODE_SYSTEM_PROMPTS,
   DEFAULT_CONVERSATION_MODE,
   ENGINEERING_DISCIPLINE_PROMPT,

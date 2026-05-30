@@ -143,6 +143,16 @@ function buildUpdateArtifact(input: {
   };
 }
 
+function hasMeaningfulActiveSandbox(input: {
+  conversationSandboxId?: string | null;
+  attachedProjectId?: string | null;
+  attachedFiles?: readonly string[] | null;
+}): boolean {
+  const sandboxId = input.conversationSandboxId ?? input.attachedProjectId ?? null;
+  if (!sandboxId) return false;
+  return input.attachedProjectId === sandboxId && (input.attachedFiles?.length ?? 0) > 0;
+}
+
 /** Poll dev server until it responds or times out */
 async function waitForDevServer(port: number, timeoutMs = VERIFY_TIMEOUT_MS): Promise<boolean> {
   const start = Date.now();
@@ -1294,7 +1304,12 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
     const templateActions = extractTemplateActions(lastMsg.content);
     const deployActions = extractDeployActions(lastMsg.content);
     const files = extractFilesFromMarkdown(lastMsg.content);
-    const hasActiveProject = Boolean(activeConversation?.sandboxProjectId ?? useSandboxStore.getState().projectId);
+    const sandboxState = useSandboxStore.getState();
+    const hasActiveProject = hasMeaningfulActiveSandbox({
+      conversationSandboxId: activeConversation?.sandboxProjectId ?? null,
+      attachedProjectId: sandboxState.projectId,
+      attachedFiles: sandboxState.files,
+    });
     const sandboxIntent = resolveAutoSandboxIntent({
       userPrompt,
       mode: effectiveMode,
@@ -1308,7 +1323,7 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
       layoutMode: mode,
       activeConversationId,
       sandboxProjectId: activeConversation?.sandboxProjectId ?? null,
-      attachedProjectId: useSandboxStore.getState().projectId,
+      attachedProjectId: sandboxState.projectId,
       hasActiveProject,
       fileCount: files.length,
       templateCount: templateActions.length,

@@ -10,19 +10,43 @@
  *   GET  /api/eval/tracks/:track/tasks — List tasks in a track
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { EvalRunner, getEvalTracks, getEvalTasks, type EvalTrack, type EvalRunConfig } from '@vai/core';
+
+export interface EvalRouteAuthorization {
+  allowed: boolean;
+  statusCode?: 401 | 403;
+  error?: string;
+}
+
+export interface RegisterEvalRoutesOptions {
+  /** Keep eval endpoints dark unless explicitly enabled by runtime config. */
+  enabled?: boolean;
+  /** Optional policy for expensive/mutating eval runs. */
+  authorizeRun?: (request: FastifyRequest) => Promise<EvalRouteAuthorization> | EvalRouteAuthorization;
+}
 
 export function registerEvalRoutes(
   app: FastifyInstance,
   evalRunner: EvalRunner,
+  options: RegisterEvalRoutesOptions = {},
 ) {
+  const enabled = options.enabled ?? true;
+
+  function disabledResponse() {
+    return { error: 'Eval framework is disabled' };
+  }
+
   /**
    * GET /api/eval/tracks
    *
    * List all registered eval tracks with their task counts.
    */
-  app.get('/api/eval/tracks', async () => {
+  app.get('/api/eval/tracks', async (_request, reply) => {
+    if (!enabled) {
+      reply.code(404);
+      return disabledResponse();
+    }
     const tracks = getEvalTracks();
     return {
       tracks: tracks.map(track => ({
@@ -39,7 +63,11 @@ export function registerEvalRoutes(
    */
   app.get<{ Params: { track: string } }>(
     '/api/eval/tracks/:track/tasks',
-    async (request) => {
+    async (request, reply) => {
+      if (!enabled) {
+        reply.code(404);
+        return disabledResponse();
+      }
       const track = request.params.track as EvalTrack;
       const tasks = getEvalTasks(track);
       return {
@@ -63,7 +91,17 @@ export function registerEvalRoutes(
    */
   app.post<{ Body: EvalRunConfig }>(
     '/api/eval/run',
-    async (request) => {
+    async (request, reply) => {
+      if (!enabled) {
+        reply.code(404);
+        return disabledResponse();
+      }
+      const authorization = await options.authorizeRun?.(request);
+      if (authorization && !authorization.allowed) {
+        reply.code(authorization.statusCode ?? 403);
+        return { error: authorization.error ?? 'Not allowed to run evals' };
+      }
+
       const config = request.body;
 
       // Validate track has tasks

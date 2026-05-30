@@ -73,6 +73,7 @@ async function getAuthorizedProject(
 
   const viewer = await auth.getViewer(request);
   const viewerId = viewer.user?.id ?? null;
+  projects.syncSandboxProject(project);
   const allowed = access === 'write'
     ? projects.canWriteSandbox(projectId, viewerId)
     : projects.canReadSandbox(projectId, viewerId);
@@ -222,6 +223,7 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
         name: project.name,
         rootDir: project.rootDir,
         status: project.status,
+        version: project.version,
         files: Object.keys(project.files),
         depsInstalled: cliScaffolded,
       };
@@ -243,6 +245,7 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
         name: project.name,
         rootDir: project.rootDir,
         status: project.status,
+        version: project.version,
       };
     },
   );
@@ -250,14 +253,21 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
   /** List all sandbox projects */
   app.get('/api/sandbox', async (request) => {
     const ownerUserId = await getViewerUserId(auth, request);
-    return sandbox.list().filter((project) => projects.canReadSandbox(project.id, ownerUserId)).map((p) => ({
-      id: p.id,
-      name: p.name,
-      status: p.status,
-      devPort: p.devPort,
-      createdAt: p.createdAt,
-      owned: Boolean(p.ownerUserId),
-    }));
+    return sandbox.list()
+      .map((project) => {
+        projects.syncSandboxProject(project);
+        return project;
+      })
+      .filter((project) => projects.canReadSandbox(project.id, ownerUserId))
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        status: p.status,
+        devPort: p.devPort,
+      version: p.version,
+        createdAt: p.createdAt,
+        owned: Boolean(p.ownerUserId),
+      }));
   });
 
   /** Get sandbox project details */
@@ -286,6 +296,7 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
         files: fileList,
         status: project.status,
         devPort: project.devPort,
+        version: project.version,
         hasNodeModules,
         logs: project.logs.slice(-30),
         devStderr: project.devStderr.slice(-20),
@@ -307,9 +318,98 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
       if ('error' in project) {
         return project;
       }
-      await sandbox.writeFiles(request.params.id, parsed.data.files);
-      projects.syncSandboxProject(sandbox.get(request.params.id)!);
-      return { ok: true, filesWritten: parsed.data.files.length };
+      const viewer = await auth.getViewer(request);
+      const baseVersion = project.version;
+      const beforeFiles = await Promise.all(parsed.data.files.map(async (file) => ({
+        path: file.path,
+        beforeContent: await sandbox.readFile(request.params.id, file.path).catch(() => null),
+        afterContent: file.content,
+      })));
+      try {
+        const version = await sandbox.writeFiles(request.params.id, parsed.data.files, {
+          baseVersion: parsed.data.baseVersion,
+        });
+        projects.syncSandboxProject(sandbox.get(request.params.id)!);
+        const revision = projects.recordSandboxRevision({
+          sandboxProjectId: request.params.id,
+          actorUserId: viewer.user?.id ?? null,
+          baseVersion,
+          version,
+          summary: `Wrote ${parsed.data.files.length} file(s)`,
+          files: beforeFiles,
+        });
+        return { ok: true, filesWritten: parsed.data.files.length, version, revisionId: revision?.id ?? null };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unable to write files';
+        if (/version conflict/i.test(message)) {
+          reply.code(409);
+          return { error: message, code: 'version_conflict' };
+        }
+        throw err;
+      }
+    },
+  );
+
+  /** List durable file revisions for a sandbox project */
+  app.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
+    '/api/sandbox/:id/revisions',
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'read');
+      if ('error' in project) {
+        return project;
+      }
+      const limit = Math.min(Math.max(Number(request.query.limit) || 50, 1), 200);
+      return { revisions: projects.listSandboxRevisions(request.params.id, limit) };
+    },
+  );
+
+  /** Revert a recorded sandbox revision */
+  app.post<{ Params: { id: string; revisionId: string } }>(
+    '/api/sandbox/:id/revisions/:revisionId/revert',
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'write');
+      if ('error' in project) {
+        return project;
+      }
+
+      const revision = projects.getSandboxRevision(request.params.revisionId);
+      if (!revision || revision.sandboxProjectId !== request.params.id) {
+        reply.code(404);
+        return { error: 'Revision not found' };
+      }
+
+      const viewer = await auth.getViewer(request);
+      const baseVersion = project.version;
+      const currentFiles = await Promise.all(revision.files.map(async (file) => ({
+        path: file.path,
+        beforeContent: await sandbox.readFile(request.params.id, file.path).catch(() => null),
+        afterContent: file.beforeContent,
+      })));
+
+      try {
+        const version = await sandbox.restoreFiles(
+          request.params.id,
+          revision.files.map((file) => ({ path: file.path, content: file.beforeContent })),
+          { baseVersion },
+        );
+        projects.syncSandboxProject(sandbox.get(request.params.id)!);
+        const revertRevision = projects.recordSandboxRevision({
+          sandboxProjectId: request.params.id,
+          actorUserId: viewer.user?.id ?? null,
+          baseVersion,
+          version,
+          summary: `Reverted revision ${request.params.revisionId}`,
+          files: currentFiles,
+        });
+        return { ok: true, version, revisionId: revertRevision?.id ?? null };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unable to revert revision';
+        if (/version conflict/i.test(message)) {
+          reply.code(409);
+          return { error: message, code: 'version_conflict' };
+        }
+        throw err;
+      }
     },
   );
 
@@ -416,6 +516,7 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
         rootDir: project.rootDir,
         devPort: project.devPort,
         devUrl: project.devPort ? `http://localhost:${project.devPort}` : null,
+        version: project.version,
         fileCount: Object.keys(project.files).length,
         owned: Boolean(project.ownerUserId),
         role: persistedProject?.role ?? null,

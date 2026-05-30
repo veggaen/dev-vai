@@ -32,6 +32,7 @@ import { registerDockerRoutes } from './routes/docker.js';
 import { registerVaiGymRoutes } from './routes/vai-gym.js';
 import { registerThorsenRoutes } from './routes/thorsen.js';
 import { registerEvalRoutes } from './routes/eval.js';
+import { registerScaleEvalRoutes } from './routes/scale-eval.js';
 import { registerSearchRoutes } from './routes/search.js';
 import { registerSkillRoutes } from './routes/skills.js';
 import { registerFeedbackRoutes } from './routes/feedback.js';
@@ -160,7 +161,10 @@ export async function createServer(options?: ServerOptions) {
     db,
     models,
     adaptiveController,
-    buildChatServiceOptions(config, vaiEngine, pipeline),
+    {
+      ...buildChatServiceOptions(config, vaiEngine, pipeline),
+      onUsage: config.enableUsageTracking ? (entry) => usageService.record(entry) : undefined,
+    },
   );
   const sandboxManager = new SandboxManager();
   const platformAuth = new PlatformAuthService(db, config.platformAuth);
@@ -274,7 +278,7 @@ export async function createServer(options?: ServerOptions) {
   registerConversationRoutes(app, chatService, config.defaultModelId, platformAuth, sandboxManager, projectService);
   registerModelRoutes(app, models);
   registerPlatformRoutes(app, config, models, sandboxManager, platformAuth);
-  registerChatRoutes(app, chatService, platformAuth, { ownerEmail: config.ownerEmail });
+  registerChatRoutes(app, chatService, platformAuth, projectService, { ownerEmail: config.ownerEmail });
   registerIngestRoutes(app, pipeline);
   registerImageRoutes(app, pipeline, chatService);
   registerSandboxRoutes(app, sandboxManager, platformAuth, projectService);
@@ -286,7 +290,26 @@ export async function createServer(options?: ServerOptions) {
 
   seedVaiEvalTasks();
   const evalRunner = new EvalRunner(db, models);
-  registerEvalRoutes(app, evalRunner);
+  registerEvalRoutes(app, evalRunner, {
+    enabled: config.enableEval,
+    authorizeRun: async (request) => {
+      if (!platformAuth.isEnabled()) {
+        return { allowed: true };
+      }
+      const viewer = await platformAuth.getViewer(request);
+      const ownerEmail = config.ownerEmail.trim().toLowerCase();
+      const viewerEmail = viewer.user?.email.trim().toLowerCase();
+      if (viewer.authenticated && viewerEmail === ownerEmail) {
+        return { allowed: true };
+      }
+      return {
+        allowed: false,
+        statusCode: viewer.authenticated ? 403 : 401,
+        error: viewer.authenticated ? 'Only the owner can run evals' : 'Sign in to run evals',
+      };
+    },
+  });
+  registerScaleEvalRoutes(app, platformAuth, { ownerEmail: config.ownerEmail });
 
   const searchPipeline = new SearchPipeline({
     braveApiKey: process.env.BRAVE_SEARCH_API_KEY || undefined,
@@ -339,6 +362,9 @@ export async function createServer(options?: ServerOptions) {
       finish_reason TEXT NOT NULL DEFAULT 'stop',
       created_at INTEGER NOT NULL
     )`);
+    db.run(/* sql */ `CREATE INDEX IF NOT EXISTS idx_usage_records_created_at ON usage_records(created_at)`);
+    db.run(/* sql */ `CREATE INDEX IF NOT EXISTS idx_usage_records_model_created ON usage_records(model_id, created_at)`);
+    db.run(/* sql */ `CREATE INDEX IF NOT EXISTS idx_usage_records_conversation ON usage_records(conversation_id)`);
   } catch {
     // Table may already exist.
   }

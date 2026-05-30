@@ -16,6 +16,21 @@ export function resolveBuilderIntent(input: BuilderIntentInput): BuilderIntent |
   const audience = inferAudience(text);
   const isCloneRequest = /\b(?:clone|copy|recreate|replicate|inspired|style|like)\b/i.test(text);
   const requestsRunnableApp = /\b(?:app|application|project|site|website|platform|tool|dashboard|portfolio|gallery|feed)\b/i.test(text);
+  const requestsRunnableBuild = requestsRunnableApp || /\b(?:build|make|create|generate|scaffold|set\s+up)\b/i.test(text);
+  const isFitnessTrackerRequest = requestsRunnableBuild
+    && /\b(?:training|workout|fitness|gym|exercise|program|split|running|lift(?:ing)?|strength)\b/i.test(text);
+
+  if (isFitnessTrackerRequest) {
+    return {
+      archetype: 'tracker',
+      audience,
+      domain: 'fitness',
+      modules: getDefaultBuilderModules('tracker'),
+      prompt: input.input,
+      cleanedPrompt: input.cleanedProjectDesc,
+      isCloneRequest,
+    };
+  }
 
   // Todo / task list — match before generic dashboard so 'task dashboard' still hits a real todo recipe.
   if (/\b(?:todo|to-do|to\s+do|task\s+list|task\s+manager|tasks?\s+app|checklist|kanban)\b/i.test(text)) {
@@ -150,7 +165,7 @@ export function resolveBuilderIntent(input: BuilderIntentInput): BuilderIntent |
   }
 
   if (
-    requestsRunnableApp
+    requestsRunnableBuild
     && /\b(?:booking|appointment|appointments|calendar|scheduler|schedule\s+meetings|bookings|reservation|consultation|client\s+booking)\b/i.test(text)
   ) {
     return {
@@ -166,13 +181,17 @@ export function resolveBuilderIntent(input: BuilderIntentInput): BuilderIntent |
 
   if (
     requestsRunnableApp
-    && /\b(?:training|workout|fitness|gym|exercise|routine|program|split|habit|running|lift(?:ing)?|strength)\b/i.test(text)
+    && (
+      /\b(?:habit|habits|routine|routines|daily\s+rhythm|weekly\s+rhythm|mood|sleep\s+debt|sleep|streak|wellness|self\s+care|self-care)\b/i.test(text)
+      || /\b(?:visible\s+labels?|exact\s+(?:visible\s+)?labels?)\b/i.test(text)
+        && /\b(?:Mood|Sleep\s+debt|Weekly\s+rhythm|Streak|Today)\b/i.test(text)
+    )
   ) {
     return {
-      archetype: 'tracker',
+      archetype: 'habit',
       audience,
-      domain: 'fitness',
-      modules: getDefaultBuilderModules('tracker'),
+      domain: 'wellness',
+      modules: getDefaultBuilderModules('habit'),
       prompt: input.input,
       cleanedPrompt: input.cleanedProjectDesc,
       isCloneRequest,

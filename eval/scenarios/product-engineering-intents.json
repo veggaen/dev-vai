@@ -1,0 +1,48 @@
+{
+  "id": "product-engineering-intents",
+  "label": "Physical product / hardware + SaaS planning — must not emit sandbox build output",
+  "scenarios": [
+    {
+      "id": "temperature-humidity-sensor-product",
+      "messages": [{
+        "role": "user",
+        "content": "I want to make a temperature + humidity sensor and wire this into my wall. I want my own hardware with a screen and UI to display graphs over time, date-vs-date comparison, leak alerts, admin SaaS dashboard, hardware sourcing from China, casing/enclosure, and a path to sell this as a product. What hardware can I order and how should I plan this?"
+      }],
+      "assert": {
+        "minLength": 160,
+        "anyOfContains": [
+          "/BOM|bill of materials|ESP32|SHT|sensor|hardware/i",
+          "/enclosure|casing|wall.?mount|airflow|3D.?print|mechanical/i",
+          "/SaaS|admin dashboard|MQTT|backend|time.?series|alerts/i",
+          "/roadmap|prototype|pilot|MVP|phase/i",
+          "/risk|unknown|verify|quote|certification|CE|FCC/i"
+        ],
+        "mustNotContain": [
+          "```",
+          "{{template:",
+          "{{deploy:"
+        ]
+      }
+    },
+    {
+      "id": "electronics-bom-sourcing",
+      "messages": [{
+        "role": "user",
+        "content": "Compare sensor and MCU options for a Wi-Fi indoor air-quality monitor. I need a rough BOM, sourcing notes, enclosure risks, and what to validate before ordering 50 prototype units."
+      }],
+      "assert": {
+        "minLength": 120,
+        "anyOfContains": [
+          "/BOM|component|MCU|sensor|module/i",
+          "/sourcing|supplier|lead time|quote|MOQ|prototype units/i",
+          "/validate|test|calibration|risk|unknown/i"
+        ],
+        "mustNotContain": [
+          "```",
+          "{{template:",
+          "{{deploy:"
+        ]
+      }
+    }
+  ]
+}

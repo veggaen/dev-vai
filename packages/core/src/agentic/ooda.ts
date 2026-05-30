@@ -164,10 +164,7 @@ export function orient(obs: ObserveStep, frame: CognitiveFrame): OrientStep {
     foundations.push('compression', 'precision-communication');
   }
   if (obs.hasConstraints) {
-    foundations.push('precision-communication', 'literal-interpreter-guard');
-    // Strip the placeholder pseudo-foundation; we used it only as a comment
-    // hook. Real Foundations are the ten in Master.md §7.
-    foundations.pop();
+    foundations.push('precision-communication');
   }
   if (obs.kind === 'causal') {
     foundations.push('first-principles', 'systems-thinking');

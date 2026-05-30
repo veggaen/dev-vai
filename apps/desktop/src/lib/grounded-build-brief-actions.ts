@@ -7,6 +7,8 @@ export interface GroundedBuildBriefActionInput {
   readonly reasons: readonly string[];
   readonly sourceDomains: readonly string[];
   readonly confidence: number;
+  readonly qualityTier?: 'minimal' | 'standard' | 'advanced';
+  readonly qualityBrief?: string;
 }
 
 export function getGroundedBuildBriefActionLabel(brief: GroundedBuildBriefActionInput): string {
@@ -24,6 +26,10 @@ export function buildGroundedBuildBriefExecutionPrompt(brief: GroundedBuildBrief
     ? 'Update the current app if one exists and emit only the changed files using title="path/to/file" code blocks.'
     : 'Create the first grounded slice now. Continue the current preview if one exists; otherwise emit the runnable files or the fastest honest starter action needed to launch it.';
 
+  const qualitySection = brief.qualityBrief
+    ? ['', brief.qualityBrief]
+    : [];
+
   return [
     'Use the grounded build brief above as the execution contract.',
     `Focus: ${brief.focusLabel}`,
@@ -34,6 +40,7 @@ export function buildGroundedBuildBriefExecutionPrompt(brief: GroundedBuildBrief
     `Supporting domains: ${domains}`,
     'Reasons:',
     reasons,
+    ...qualitySection,
     '',
     'Now convert that into runnable output.',
     executionLine,

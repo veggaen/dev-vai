@@ -24,6 +24,8 @@ import { registerConversationRoutes } from '../src/routes/conversations.js';
 class TestAdapter implements ModelAdapter {
   readonly id = 'test:mock';
   readonly displayName = 'Test Mock';
+  readonly provider = 'openai' as const;
+  readonly cost = { inputPer1M: 1, outputPer1M: 2 };
   readonly supportsStreaming = true;
   readonly supportsToolUse = false;
   lastStreamRequest?: ChatRequest;
@@ -49,6 +51,14 @@ describe('Conversation Routes', () => {
   let db: VaiDatabase;
   let chatService: ChatService;
   let adapter: TestAdapter;
+  let usageRecords: Array<{
+    modelId: string;
+    provider: string;
+    conversationId: string;
+    tokensIn: number;
+    tokensOut: number;
+    costUsd: number;
+  }>;
   let mockSandbox: {
     create: (name: string) => Promise<{
       id: string;
@@ -84,12 +94,16 @@ describe('Conversation Routes', () => {
     const registry = new ModelRegistry();
     adapter = new TestAdapter();
     registry.register(adapter);
-    chatService = new ChatService(db, registry);
+    usageRecords = [];
+    chatService = new ChatService(db, registry, {
+      onUsage: (entry) => usageRecords.push(entry),
+    });
 
     app = Fastify({ logger: false });
 
     // Mock dependencies for the updated route signature
     const mockAuth = {
+      isEnabled: () => false,
       getViewer: async () => ({ authenticated: false, user: null }),
     } as unknown as import('../src/auth/platform-auth.js').PlatformAuthService;
 
@@ -318,6 +332,16 @@ describe('Conversation Routes', () => {
       expect(body.role).toBe('assistant');
       expect(body.content).toBe('Hello world');
       expect(body.usage.promptTokens).toBe(5);
+      expect(usageRecords).toMatchObject([
+        {
+          modelId: 'test:mock',
+          provider: 'openai',
+          conversationId: id,
+          tokensIn: 5,
+          tokensOut: 2,
+          costUsd: 0.000009,
+        },
+      ]);
     });
 
     it('forwards request-level prompt-hardening overrides', async () => {

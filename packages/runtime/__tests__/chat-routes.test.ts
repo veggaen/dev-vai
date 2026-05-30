@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import { createDb, ChatService, ModelRegistry, type ChatChunk, type ChatRequest, type ChatResponse, type ModelAdapter, type VaiDatabase } from '@vai/core';
 import { PlatformAuthService } from '../src/auth/platform-auth.js';
+import type { ProjectService } from '../src/projects/service.js';
 import { registerChatRoutes } from '../src/routes/chat.js';
 
 class TestAdapter implements ModelAdapter {
@@ -22,6 +23,10 @@ class TestAdapter implements ModelAdapter {
 
   async *chatStream(request: ChatRequest): AsyncIterable<ChatChunk> {
     this.lastStreamRequest = request;
+    const lastUserMessage = [...request.messages].reverse().find((message) => message.role === 'user')?.content ?? '';
+    if (lastUserMessage.includes('slow')) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
     yield { type: 'text_delta', textDelta: 'Hello ' };
     yield { type: 'text_delta', textDelta: 'world' };
     yield { type: 'done', usage: { promptTokens: 5, completionTokens: 2 } };
@@ -59,7 +64,11 @@ describe('Chat Routes', () => {
 
     app = Fastify({ logger: false });
     await app.register(websocket);
-    registerChatRoutes(app, chatService, auth, { ownerEmail: 'owner@test.dev' });
+    const projects = {
+      canReadSandbox: () => false,
+      canWriteSandbox: () => false,
+    };
+    registerChatRoutes(app, chatService, auth, projects as unknown as ProjectService, { ownerEmail: 'owner@test.dev' });
     baseUrl = await app.listen({ port: 0, host: '127.0.0.1' });
   });
 
@@ -182,6 +191,86 @@ describe('Chat Routes', () => {
     expect(chatService.getConversation(result.resolvedId!)?.modelId).toBe('test:mock');
   });
 
+  it('accepts local dev auth bypass over websocket query when platform auth is enabled', async () => {
+    const localDb = createDb(':memory:');
+    const registry = new ModelRegistry();
+    const localAdapter = new TestAdapter();
+    registry.register(localAdapter);
+    const localChatService = new ChatService(localDb, registry);
+    const auth = new PlatformAuthService(localDb, {
+      enabled: true,
+      publicUrl: 'http://localhost:3006',
+      appUrl: 'http://localhost:5173',
+      sessionCookieName: 'vai_session',
+      sessionTtlHours: 24 * 30,
+      sessionSecret: 'test-session-secret',
+      providers: {
+        google: {
+          enabled: false,
+          scopes: ['openid', 'email', 'profile'],
+        },
+      },
+    });
+    const localApp = Fastify({ logger: false });
+    await localApp.register(websocket);
+    const projects = {
+      canReadSandbox: () => false,
+      canWriteSandbox: () => false,
+    };
+    registerChatRoutes(localApp, localChatService, auth, projects as unknown as ProjectService, { ownerEmail: 'owner@test.dev' });
+    const localBaseUrl = await localApp.listen({ port: 0, host: '127.0.0.1' });
+
+    try {
+      const conversationId = localChatService.createConversation('test:mock', undefined, 'chat', '__local_dev_user__');
+      const wsUrl = `${localBaseUrl.replace('http://', 'ws://')}/api/chat?devAuthBypass=1`;
+      const fullText = await new Promise<string>((resolve, reject) => {
+        const ws = new WebSocket(wsUrl);
+        let response = '';
+        const timeout = setTimeout(() => {
+          ws.close();
+          reject(new Error('Timed out waiting for websocket response'));
+        }, 5_000);
+
+        ws.addEventListener('open', () => {
+          ws.send(JSON.stringify({
+            conversationId,
+            content: 'hello',
+          }));
+        });
+
+        ws.addEventListener('message', (event) => {
+          const chunk = JSON.parse(String(event.data)) as
+            | { type: 'text_delta'; textDelta?: string }
+            | { type: 'done' }
+            | { type: 'error'; error: string };
+
+          if (chunk.type === 'text_delta' && chunk.textDelta) {
+            response += chunk.textDelta;
+          }
+          if (chunk.type === 'error') {
+            clearTimeout(timeout);
+            ws.close();
+            reject(new Error(chunk.error));
+          }
+          if (chunk.type === 'done') {
+            clearTimeout(timeout);
+            ws.close();
+            resolve(response);
+          }
+        });
+
+        ws.addEventListener('error', () => {
+          clearTimeout(timeout);
+          reject(new Error('WebSocket error'));
+        });
+      });
+
+      expect(fullText).toBe('Hello world');
+    } finally {
+      await localApp.close();
+    }
+  });
+
   it('returns validation error for strict-schema violations over websocket', async () => {
     const conversationId = chatService.createConversation('test:mock');
     const wsUrl = `${baseUrl.replace('http://', 'ws://')}/api/chat`;
@@ -217,5 +306,47 @@ describe('Chat Routes', () => {
 
     expect(err.code).toBe('validation');
     expect(err.error).toBeTruthy();
+  });
+
+  it('rejects overlapping websocket turns for the same conversation', async () => {
+    const conversationId = chatService.createConversation('test:mock');
+    const wsUrl = `${baseUrl.replace('http://', 'ws://')}/api/chat`;
+    const err = await new Promise<{ error?: string; code?: string }>((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      const timeout = setTimeout(() => {
+        ws.close();
+        reject(new Error('Timed out waiting for conflict response'));
+      }, 5_000);
+
+      ws.addEventListener('open', () => {
+        ws.send(JSON.stringify({
+          conversationId,
+          content: 'slow first message',
+        }));
+        setTimeout(() => {
+          ws.send(JSON.stringify({
+            conversationId,
+            content: 'second message',
+          }));
+        }, 10);
+      });
+
+      ws.addEventListener('message', (event) => {
+        const chunk = JSON.parse(String(event.data)) as { type?: string; error?: string; code?: string };
+        if (chunk.type === 'error' && chunk.code === 'conflict') {
+          clearTimeout(timeout);
+          ws.close();
+          resolve(chunk);
+        }
+      });
+
+      ws.addEventListener('error', () => {
+        clearTimeout(timeout);
+        reject(new Error('WebSocket error'));
+      });
+    });
+
+    expect(err.code).toBe('conflict');
+    expect(err.error).toMatch(/already in progress/i);
   });
 });
