@@ -12,7 +12,14 @@ export function tryEmitBoundaryResponse(input: { content: string }): string | nu
     ].join('\n');
   }
 
-  if (/\b(?:contract|agreement|customer refuses to pay|enforceable|legal)\b/i.test(text)) {
+  // Only treat this as a legal-dispute question when there's an actual dispute
+  // signal — not just the bare word "agreement". Otherwise "what was the Paris
+  // Agreement?" (a historical treaty) misroutes to contract-dispute advice.
+  const mentionsLegal = /\b(?:contract|agreement|enforceable|legally|liable|lawsuit|sue|small\s+claims|terms\s+of\s+service)\b/i.test(text);
+  const hasDispute = /\b(?:refus\w*|owe[ds]?|unpaid|won'?t\s+pay|doesn'?t\s+pay|breach\w*|enforce\w*|dispute|sue|lawsuit|terminat\w*|my\s+rights|liable|liability|small\s+claims|demand\s+letter)\b/i.test(text);
+  const isDefinitional = /^\s*(?:what|who|when|which|where)\b/i.test(text)
+    && !/\b(?:should\s+i|can\s+i|do\s+i|are\s+my\s+rights|can\s+i\s+do)\b/i.test(text);
+  if (mentionsLegal && hasDispute && !isDefinitional) {
     return [
       'It depends on the contract terms and jurisdiction, so treat this as issue-spotting, not legal advice.',
       '',

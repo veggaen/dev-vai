@@ -47,6 +47,7 @@ import type {
 import { buildGroundedBuildBrief } from './grounded-build-brief.js';
 import { isExplicitWebSearchRequest } from './explicit-web-search.js';
 import { tryEmitFactShim } from '../chat/deterministic-facts-router.js';
+import { classifyQuestionIntent, splitCompoundQuestion, combineCompoundAnswers } from '../chat/question-intent.js';
 import { tryEmitProductEngineeringMemo } from '../chat/product-engineering-memo.js';
 import { tryEmitBoundaryResponse } from '../chat/boundary-response.js';
 import { bulkFactsLookup } from './curated-facts-bulk.js';
@@ -314,6 +315,8 @@ export class VaiEngine implements ModelAdapter {
   private _lastIntent: 'fact' | 'explore' | 'build' | 'pushback' | 'casual' | 'meta' | 'unknown' = 'unknown';
   /** When set, applyShapeCoercion and applyHardConstraints return as-is. */
   private _fastTemplateLock: boolean = false;
+  /** Guards the compound-question splitter against recursing into itself. */
+  private _compoundSplitActive: boolean = false;
   /** Ring buffer of normalized openers (first ~24 chars) for the last few responses. */
   private _recentOpeners: string[] = [];
   private static readonly OPENER_MEMORY = 4;
@@ -8572,7 +8575,8 @@ export class VaiEngine implements ModelAdapter {
     const start = performance.now();
     const productEngineeringMemo = tryEmitProductEngineeringMemo({ content: userContent });
     const boundaryResponse = productEngineeringMemo ? null : tryEmitBoundaryResponse({ content: userContent });
-    const codeSnippetShim = productEngineeringMemo || boundaryResponse ? null : tryEmitFactShim({ content: userContent });
+    const questionIntent = classifyQuestionIntent(userContent);
+    const codeSnippetShim = productEngineeringMemo || boundaryResponse ? null : tryEmitFactShim({ content: userContent, intent: questionIntent });
     // Disambiguation router — if the user explicitly disambiguates an
     // ambiguous topic ("python the snake", "mercury the element"),
     // commit to that reading with a short curated answer. Otherwise the
@@ -9671,6 +9675,27 @@ export class VaiEngine implements ModelAdapter {
       if (fast) {
         this._fastTemplateLock = true;
         return fast;
+      }
+    }
+
+    // ── Compound questions ("A and B?") ──────────────────────────────
+    // Answer each sub-question independently and combine, so the engine stops
+    // dropping the second clause. Recursion-guarded; the splitter is
+    // conservative and only fires on clear multi-question inputs.
+    if (!this._compoundSplitActive) {
+      const compoundParts = splitCompoundQuestion(input);
+      if (compoundParts) {
+        this._compoundSplitActive = true;
+        try {
+          const partAnswers: string[] = [];
+          for (const part of compoundParts) {
+            partAnswers.push((await this.generateResponse(part, history)).trim());
+          }
+          const combined = combineCompoundAnswers(partAnswers);
+          if (combined) return combined;
+        } finally {
+          this._compoundSplitActive = false;
+        }
       }
     }
 

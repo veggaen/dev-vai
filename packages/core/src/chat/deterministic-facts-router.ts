@@ -1643,11 +1643,13 @@ function tryDefinition(content: string): FactShimResult | null {
 }
 
 // ── public entry point ───────────────────────────────────────────────────
-export function tryEmitFactShim(input: { content: string }): FactShimResult | null {
+export function tryEmitFactShim(input: { content: string; intent?: string }): FactShimResult | null {
   const content = (input.content || '').trim();
   if (!content) return null;
-  // Order matters: more specific patterns first.
-  return (
+
+  // Always-on handlers: safety, runnable code, troubleshooting, comparisons,
+  // meta, casual, how-to. These are appropriate regardless of question intent.
+  const early = (
     trySafetyRefusal(content)
     || trySingleton(content)
     || tryCodeSnippet(content)
@@ -1656,7 +1658,17 @@ export function tryEmitFactShim(input: { content: string }): FactShimResult | nu
     || tryMeta(content)
     || tryCasualCheer(content)
     || tryHowto(content)
-    || tryAcronym(content)
+  );
+  if (early) return early;
+
+  // Intent gate: the handlers below all answer "what is X" definitionally. That
+  // is the wrong answer for an action yes/no question ("does X make Y?"), which
+  // must be answered yes/no — so we defer those to the yes/no pipeline instead
+  // of dumping an entity definition.
+  if (input.intent === 'action-yesno') return null;
+
+  return (
+    tryAcronym(content)
     || tryDefinition(content)
     || tryCompany(content)
     || tryBrand(content)
