@@ -13381,10 +13381,16 @@ export class VaiEngine implements ModelAdapter {
     const concernsClaim = (text: string): boolean => {
       if (salientClaimTokens.length === 0) return textConcernsTopic(text, claim);
       const low = (text || '').toLowerCase();
-      return salientClaimTokens.some((t) => {
+      const hits = salientClaimTokens.filter((t) => {
         const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         return new RegExp(`\\b${escaped}\\b`, 'i').test(low);
-      });
+      }).length;
+      // A "does X make Y?" claim has two salient entities (X and Y). A grounding
+      // snippet that only mentions X ("starbucks to roll out thousands") cannot
+      // support the answer — require BOTH the subject and the object so we stop
+      // stapling a confident "Yes" onto an off-topic snippet. Single-entity
+      // claims still need their one entity.
+      return hits >= Math.min(2, salientClaimTokens.length);
     };
 
     const reasoning = this.extractReasoningSnippet(knowledgeTexts, claim);

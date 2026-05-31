@@ -13,6 +13,7 @@ const args = process.argv.slice(2);
 function arg(name, def) { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : def; }
 const WS = arg('--ws', 'ws://127.0.0.1:3006/api/chat?devAuthBypass=1');
 const onlyTags = (arg('--only', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
+const full = args.includes('--full'); // print the full answer for every question
 
 // ── Question bank ────────────────────────────────────────────────────────────
 // intent: action-yesno | definition | factual | compound | trap | refusal-test
@@ -118,9 +119,10 @@ async function main() {
     results.push({ ...item, turnKind, text, pass, reasons });
     const tag = pass ? 'PASS' : 'FAIL';
     console.log(`[${tag}] (${item.intent}) ${item.q}`);
-    if (!pass) {
-      console.log(`        reasons: ${reasons.join(', ')}`);
-      console.log(`        got: ${text.slice(0, 160).replace(/\n/g, ' ')}`);
+    if (!pass) console.log(`        reasons: ${reasons.join(', ')}`);
+    if (full || !pass) {
+      const body = full ? text.replace(/\n+/g, ' ⏎ ') : text.slice(0, 160).replace(/\n/g, ' ');
+      console.log(`        got: ${body}`);
     }
   }
   ws.close();
