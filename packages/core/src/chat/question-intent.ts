@@ -76,7 +76,15 @@ const COMPARISON_MARKER_RE = /\b(?:over|versus|vs\.?|compared\s+to|rather\s+than
  * split. Returns null when the input is not a clear compound question.
  */
 export function splitCompoundQuestion(rawInput: string): string[] | null {
-  const input = (rawInput || '').trim().replace(/\?+\s*$/, '');
+  if (typeof rawInput !== 'string') return null;
+  // Strip a short conversational lead-in ("okay then —", "so", "and also")
+  // so "okay then — what is X and which is Y" still splits into its two
+  // questions instead of failing the question-start check.
+  const input = rawInput
+    .trim()
+    .replace(/\?+\s*$/, '')
+    .replace(/^(?:(?:okay|ok|so|well|alright|right|also|actually|now|hmm|umm?|and|but|then|hey|yeah)[\s,]+){1,2}(?:[—–\-:]\s*)?/i, '')
+    .trim();
   if (!input) return null;
   if (/```|title=|\bpath=/.test(input)) return null; // never split code/build payloads
   if (COMPARISON_MARKER_RE.test(input)) return null; // single comparison question

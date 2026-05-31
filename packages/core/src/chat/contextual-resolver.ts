@@ -168,6 +168,25 @@ export function recallFromConversation(input: string, history: readonly Message[
     : `You haven't told me your ${q.attribute} yet — tell me and I'll remember it for this chat.`;
 }
 
+/**
+ * True when the input is EPISODIC — about this chat or this user (greetings,
+ * "i'm X", "my name is", "i'm building Y", small talk) rather than a durable
+ * world fact. The learning flywheel uses this to avoid writing conversational
+ * content into semantic knowledge, which otherwise pollutes recall over time.
+ */
+export function isEpisodicOrPersonalInput(input: string): boolean {
+  if (typeof input !== 'string') return true;
+  const t = input.trim().toLowerCase();
+  if (!t) return true;
+  // A genuine interrogative or question mark → it's a real question; learn its answer.
+  if (/\b(?:who|what|where|when|why|how|which|whose|whom)\b/.test(t) || /\?/.test(t)) return false;
+  // Greetings / thanks / small-talk openers.
+  if (/^(?:hi|hey|hello|yo|sup|hiya|heya|good\s+(?:morning|afternoon|evening|night)|thanks?|thank\s+you|thx|cheers|cool|nice|great|awesome|ok(?:ay)?|lol|haha|hmm|yeah|yep|nope)\b/.test(t)) return true;
+  // Personal self-description (no question) — name, what they're doing, prefs.
+  if (/\b(?:i'?m|i\s+am|my\s+name|call\s+me|i'?m\s+building|i'?m\s+working|i\s+(?:like|love|want|need|prefer|have|own|use|hate|enjoy|live|study|build))\b/.test(t)) return true;
+  return false;
+}
+
 /** Convenience: resolve a follow-up using the topic inferred from the last assistant turn's bold entity. */
 export function inferBoldTopic(history: readonly Message[]): string | null {
   const text = lastAssistantText(history);

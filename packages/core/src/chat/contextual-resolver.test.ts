@@ -6,6 +6,7 @@ import {
   detectRecallQuestion,
   recallUserAttribute,
   recallFromConversation,
+  isEpisodicOrPersonalInput,
   inferBoldTopic,
   cleanTopic,
 } from './contextual-resolver.js';
@@ -90,6 +91,21 @@ describe('dynamic recall', () => {
     expect(recallFromConversation('what was my name again?', h)).toBe('Your name is **Vetle**.');
     expect(recallFromConversation('what is my job?', h)).toMatch(/haven't told me your job/i);
     expect(recallFromConversation('what is the capital of france?', h)).toBeNull();
+  });
+});
+
+describe('isEpisodicOrPersonalInput (episodic↔semantic guard)', () => {
+  it('flags greetings + personal statements as episodic (do NOT learn as facts)', () => {
+    expect(isEpisodicOrPersonalInput("hey, i'm vetle")).toBe(true);
+    expect(isEpisodicOrPersonalInput('i am building a todo app')).toBe(true);
+    expect(isEpisodicOrPersonalInput('thanks!')).toBe(true);
+    expect(isEpisodicOrPersonalInput('i like dark mode')).toBe(true);
+  });
+
+  it('does NOT flag real knowledge questions (their answers should be learned)', () => {
+    expect(isEpisodicOrPersonalInput('what is docker?')).toBe(false);
+    expect(isEpisodicOrPersonalInput('i want to know who is king in norway')).toBe(false);
+    expect(isEpisodicOrPersonalInput('does starbucks make cappuccino?')).toBe(false);
   });
 });
 

@@ -61,6 +61,13 @@ describe('splitCompoundQuestion', () => {
     expect(splitCompoundQuestion('what is the difference between react and vue?')).toBeNull();
   });
 
+  it('strips a conversational lead-in before splitting', () => {
+    // Replaces the removed hard-coded tryMixedMathPlanetCompound shim.
+    expect(splitCompoundQuestion('okay then — what is 144 divided by 12 and which planet is closest to the sun')).toEqual([
+      'what is 144 divided by 12?', 'which planet is closest to the sun?',
+    ]);
+  });
+
   it('never splits code/build payloads', () => {
     expect(splitCompoundQuestion('```ts title="a.ts" and ```')).toBeNull();
   });

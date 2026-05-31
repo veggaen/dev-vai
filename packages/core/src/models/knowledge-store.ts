@@ -391,7 +391,7 @@ export class KnowledgeStore {
     }
     this.topicFilter.add(pattern);
 
-    const responseWords = response.toLowerCase().split(/\s+/).filter(word => word.length > 1);
+    const responseWords = `${pattern} ${response}`.toLowerCase().split(/\s+/).filter(word => word.length > 1);
     if (responseWords.length > 5) {
       const wordSet = new Set(responseWords);
       const docIdx = this.documents.length;
@@ -403,6 +403,15 @@ export class KnowledgeStore {
         this.wordToDocIndices.get(word)!.add(docIdx);
       }
     }
+  }
+
+  findEntriesForSource(source: string): KnowledgeEntry[] {
+    const normalized = source.startsWith('entry:') ? source.slice('entry:'.length) : source;
+    return this.entries.filter((entry) =>
+      entry.source === source
+      || entry.source === normalized
+      || entry.source.startsWith(normalized),
+    );
   }
 
   findExactEntry(patterns: readonly string[]): KnowledgeEntry | null {
@@ -867,7 +876,8 @@ export class KnowledgeStore {
       if (text.startsWith('[no transcript available')) continue;
       if (KnowledgeStore.isJunkContent(text)) continue;
 
-      scored.push({ text, source: doc.source, score });
+      const publicSource = doc.source.startsWith('entry:') ? doc.source.slice('entry:'.length) : doc.source;
+      scored.push({ text, source: publicSource, score });
     }
 
     const results = scored
@@ -967,7 +977,8 @@ export class KnowledgeStore {
       if (definitionBoostRe && definitionBoostRe.test(text)) {
         score *= 1.6;
       }
-      scored.push({ text, source, score });
+      const publicSource = source.startsWith('entry:') ? source.slice('entry:'.length) : source;
+      scored.push({ text, source: publicSource, score });
     }
 
     return scored.sort((left, right) => right.score - left.score).slice(0, topK);

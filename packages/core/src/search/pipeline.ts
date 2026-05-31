@@ -2257,17 +2257,168 @@ function extractContentWords(text: string): Set<string> {
   for (const t of tokens) if (!SEARCH_STOPWORDS.has(t)) out.add(t);
   return out;
 }
-function snippetSharesQueryWords(snippetText: string, queryWords: Set<string>, minHits = 1): boolean {
-  if (queryWords.size === 0) return true; // nothing to gate on
-  const lower = snippetText.toLowerCase();
-  let hits = 0;
-  for (const w of queryWords) {
-    if (lower.includes(w)) {
-      hits++;
-      if (hits >= minHits) return true;
-    }
+type RelevanceShape =
+  | 'population'
+  | 'recommendation'
+  | 'comparison'
+  | 'temporal'
+  | 'definition'
+  | 'how-to'
+  | 'generic';
+
+export interface SnippetRelevanceAssessment {
+  readonly score: number;
+  readonly matched: boolean;
+  readonly shape: RelevanceShape;
+  readonly topicHits: number;
+  readonly queryHits: number;
+  readonly shapeMatched: boolean;
+}
+
+const RELEVANCE_TOPIC_NOISE = new Set([
+  'many','much','people','person','live','lives','living','population','inhabitants','residents',
+  'recommend','recommended','recommendation','using','use','uses','should','would','could','good',
+  'best','top','worth','bigger','larger','smaller','compare','compared','than','difference',
+  'when','date','year','latest','current','release','released','version','what','which','where',
+  'explain','briefly','simple','simply','words','there','that','this','one',
+]);
+
+function inferRelevanceShape(query: string, plan: VaiSearchPlan): RelevanceShape {
+  const q = query.toLowerCase();
+  if (/\b(?:how\s+many\s+people|population|inhabitants?|residents?|people\s+live|lives?\s+there)\b/.test(q)) return 'population';
+  if (/\b(?:recommend|should\s+i|would\s+you|worth\s+it|good\s+(?:idea|for)|which\s+one|best|top)\b/.test(q) || plan.intent === 'recommendation') return 'recommendation';
+  if (/\b(?:bigger|larger|smaller|higher|lower|more\s+than|less\s+than|vs\.?|versus|compare|compared|difference\s+between)\b/.test(q) || plan.intent === 'comparison') return 'comparison';
+  if (/\b(?:when|what\s+(?:year|date)|latest|current|release(?:d)?|version|today|now|202[4-9])\b/.test(q) || plan.intent === 'temporal' || plan.intent === 'current') return 'temporal';
+  if (/^(?:what(?:'s|\s+is|\s+are)|who(?:\s+is|\s+are)|define|hva\s+er)\b/i.test(query) || plan.intent === 'definition' || plan.intent === 'person') return 'definition';
+  if (/\bhow\s+(?:to|do|can|does)\b/i.test(query) || plan.intent === 'how-to' || plan.intent === 'troubleshoot') return 'how-to';
+  return 'generic';
+}
+
+function answerShapeMatches(shape: RelevanceShape, combined: string): boolean {
+  switch (shape) {
+    case 'population':
+      return /\b(?:population|inhabitants?|residents?|census|metro\s+area|urban\s+area|municipality|people\s+(?:live|living)|lives?\s+in|\d[\d.,]*\s*(?:million|thousand|residents?|inhabitants?|people))\b/i.test(combined);
+    case 'recommendation':
+      return /\b(?:recommend|should|worth|useful|good\s+(?:choice|idea|for)|depends?|trade-?offs?|pros?|cons?|privacy|security|trust|risk|benefit|drawback|alternative|avoid|choose|prefer)\b/i.test(combined);
+    case 'comparison':
+      return /\b(?:bigger|larger|smaller|higher|lower|more\s+than|less\s+than|compared?|difference|versus|vs\.?|whereas|unlike|instead|advantage|trade-?off|area|population|rank|size|larger\s+than|smaller\s+than|privacy|metasearch|aggregates?|multiple\s+search\s+services|instant\s+answer|zero-click|api|not\s+a\s+general)\b/i.test(combined);
+    case 'temporal':
+      return /\b(?:released?|release\s+date|launched?|came\s+out|available|latest|current|version|changelog|announced|scheduled|20\d{2}|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i.test(combined);
+    case 'definition':
+      return /\b(?:is|are|was|were|refers\s+to|means|describes|known\s+as|defined\s+as|type\s+of|kind\s+of|creator|founded|born)\b/i.test(combined);
+    case 'how-to':
+      return /\b(?:step|steps|use|using|install|configure|setup|fix|debug|solve|works?|example|guide|tutorial|command|option)\b/i.test(combined);
+    case 'generic':
+      return true;
   }
-  return false;
+}
+
+function countWordHits(words: ReadonlySet<string>, text: string): number {
+  const lower = text.toLowerCase();
+  let hits = 0;
+  for (const word of words) {
+    if (lower.includes(word)) hits += 1;
+  }
+  return hits;
+}
+
+function extractTopicAnchorsForRelevance(query: string, plan: VaiSearchPlan): Set<string> {
+  const anchors = new Set<string>();
+  const add = (value: string): void => {
+    const cleaned = sanitizeEntityToken(value).toLowerCase();
+    if (cleaned.length < 3) return;
+    if (SEARCH_STOPWORDS.has(cleaned) || RELEVANCE_TOPIC_NOISE.has(cleaned)) return;
+    anchors.add(cleaned);
+  };
+
+  for (const entity of plan.entities.slice(0, 8)) {
+    for (const token of entity.split(/\s+/)) add(token);
+  }
+  for (const token of query.match(/\b[A-Z][A-Za-z0-9.+#-]{1,}\b/g) ?? []) {
+    add(token);
+  }
+  for (const word of extractQueryAnchors(query)) {
+    add(word);
+  }
+  return anchors;
+}
+
+function hasWrongShapePopulationNoise(combined: string): boolean {
+  return /\b(?:shooting|shot|killed|injured|attack|crime|police|suspect|arrested|victims?|dead|death|massacre)\b/i.test(combined)
+    && !answerShapeMatches('population', combined);
+}
+
+export function scoreSnippetRelevanceForQuery(
+  query: string,
+  snippet: Pick<SearchSnippet, 'text' | 'title' | 'domain'>,
+): SnippetRelevanceAssessment {
+  const plan = buildSearchPlan(query);
+  const shape = inferRelevanceShape(query, plan);
+  const combined = `${snippet.title || ''}\n${snippet.text || ''}`;
+  const lower = combined.toLowerCase();
+  const queryWords = extractContentWords(query);
+  const topicAnchors = extractTopicAnchorsForRelevance(query, plan);
+  const topicHits = countWordHits(topicAnchors, lower);
+  const queryHits = countWordHits(queryWords, lower);
+  const shapeMatched = answerShapeMatches(shape, combined);
+
+  let score = 0;
+  if (topicAnchors.size > 0) score += Math.min(topicHits / topicAnchors.size, 1) * 0.45;
+  else if (queryWords.size > 0) score += Math.min(queryHits / queryWords.size, 1) * 0.35;
+  else score += 0.35;
+
+  if (queryWords.size > 0) score += Math.min(queryHits / Math.max(queryWords.size, 1), 1) * 0.2;
+  score += shapeMatched ? 0.3 : (shape === 'generic' ? 0 : -0.2);
+
+  if (snippet.domain && /(reddit\.com|news\.ycombinator|stackoverflow|stackexchange|discourse|forum)/i.test(snippet.domain) && shape === 'recommendation') {
+    score += 0.08;
+  }
+  if (shape === 'comparison' && topicHits > 0 && shapeMatched) {
+    // Comparison answers can be assembled from side-specific evidence: one
+    // source may explain SearXNG, another DuckDuckGo. Do not require every
+    // compared entity to appear in every individual snippet.
+    score += 0.12;
+  }
+  const packageSupportSource = shape === 'temporal'
+    && /\bpypi\b/i.test(query)
+    && /^(?:github\.com|gitlab\.com)$/i.test(snippet.domain ?? '')
+    && topicHits > 0;
+  if (packageSupportSource) {
+    score += 0.12;
+  }
+  if (shape === 'population' && hasWrongShapePopulationNoise(combined)) {
+    score -= 0.35;
+  }
+
+  const requiresTopic = topicAnchors.size > 0;
+  const topicOk = !requiresTopic || topicHits > 0;
+  const shapeOk = shape === 'generic' || shapeMatched || packageSupportSource;
+  const threshold = shape === 'definition' || shape === 'generic' ? 0.38 : 0.5;
+  const matched = packageSupportSource || (topicOk && shapeOk && score >= threshold);
+
+  return {
+    score: Math.max(0, Math.min(1, score)),
+    matched,
+    shape,
+    topicHits,
+    queryHits,
+    shapeMatched,
+  };
+}
+
+export function filterRelevantSnippetsForQuery(
+  query: string,
+  snippets: readonly SearchSnippet[],
+): SearchSnippet[] {
+  return snippets
+    .map((snippet) => ({ snippet, relevance: scoreSnippetRelevanceForQuery(query, snippet) }))
+    .filter(({ snippet, relevance }) => relevance.matched && !looksLikeJunkSnippet(snippet.text, snippet.title || ''))
+    .sort((a, b) => {
+      const relevanceDelta = b.relevance.score - a.relevance.score;
+      if (Math.abs(relevanceDelta) > 0.001) return relevanceDelta;
+      return b.snippet.rank - a.snippet.rank;
+    })
+    .map(({ snippet }) => snippet);
 }
 
 // Honest-audit fix: README/SEO-style snippet detector. Web results sometimes
@@ -2309,8 +2460,11 @@ function looksLikeJunkSnippet(text: string, title: string): boolean {
   return false;
 }
 
-function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): string {
+function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[], hadFilteredCandidates = false): string {
   if (snippets.length === 0) {
+    if (hadFilteredCandidates) {
+      return `I searched for "${query}" but didn't find anything that actually matches the question shape. The web results were off-topic, so I'm not going to invent an answer. Try rephrasing or being more specific.`;
+    }
     return `I searched for "${query}" but couldn't find useful results. Try rephrasing or being more specific.`;
   }
 
@@ -2323,41 +2477,7 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): st
   const ordered = [...highTrust, ...medTrust, ...otherTrust];
   const candidatesAll = ordered.slice(0, 8);
 
-  // Honest-audit gate: drop snippets that share too few content words with the
-  // query. With ≥2 query content words, require ≥2 hits (in title+text combined)
-  // so a single common-word coincidence ("india") cannot pull in an off-topic doc.
-  // Also drop README/SEO-style snippets entirely.
-  //
-  // Cross-reference relaxation: pick a "primary topic" word — the longest,
-  // most distinctive content word in the query (usually a proper noun like
-  // "runescape"). A snippet that mentions the primary topic clears the
-  // relevance gate even at 1 hit. This stops listing-style queries
-  // ("famous runescape youtubers") from being killed when sources describe
-  // the topic with related-but-not-identical category nouns
-  // ("creators", "streamers", "content creation").
-  const queryWords = extractContentWords(query);
-  const primaryTopicWord = (() => {
-    let best = '';
-    for (const w of queryWords) {
-      // Skip generic category nouns — they're rarely the proper-noun topic.
-      if (/^(famous|popular|best|top|good|great|big|small|new|old|some|many)$/.test(w)) continue;
-      if (w.length > best.length) best = w;
-    }
-    return best;
-  })();
-  const minHits = queryWords.size >= 2 ? 2 : 1;
-  const relevantUsed = candidatesAll.filter((s) => {
-    if (looksLikeJunkSnippet(s.text, s.title || '')) return false;
-    const combined = `${s.title || ''} \n ${s.text}`.toLowerCase();
-    // Primary-topic shortcut: if the snippet directly names the topic, it's
-    // relevant even if no other query word is present.
-    if (primaryTopicWord.length >= 4 && combined.includes(primaryTopicWord)) {
-      return true;
-    }
-    const bodyMinHits = Math.max(1, minHits - 1);
-    if (queryWords.size > 0 && !snippetSharesQueryWords(s.text, queryWords, bodyMinHits)) return false;
-    return snippetSharesQueryWords(combined, queryWords, minHits);
-  });
+  const relevantUsed = filterRelevantSnippetsForQuery(query, candidatesAll);
   if (relevantUsed.length === 0) {
     return `I searched for "${query}" but didn't find anything that actually matches. The web results were off-topic, so I'm not going to invent an answer. Try rephrasing or being more specific.`;
   }
@@ -2624,9 +2744,18 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[]): st
     lines.push('Confidence: high — multiple independent sources told the same story, and I picked the lead from where they agreed.');
   }
 
-  // Source list is rendered in the sidebar UI — don't duplicate it inside the
-  // message body. Inline citation marks (1, 2, ...) still tie back to the
-  // sidebar entries by index.
+  // Also render a compact footer so copied/logged answers remain
+  // self-contained outside the UI source sidebar.
+
+  if (used.length > 0) {
+    lines.push('');
+    lines.push('**Sources**');
+    for (let i = 0; i < Math.min(used.length, 5); i++) {
+      const source = used[i];
+      const label = (source.title || source.domain || source.url).trim();
+      lines.push(`[${i + 1}] ${label} - ${source.url}`);
+    }
+  }
 
   return lines.join('\n');
 }
@@ -2888,14 +3017,26 @@ export class SearchPipeline {
     const verified = crossCheck(enriched);
     audit.push({ step: 'cross-check', detail: `${verified.length} snippets after cross-check`, durationMs: Date.now() - crossStart });
 
+    // Gate synthesis on relevance to the user's actual ask, not just domain
+    // trust. This prevents same-entity but wrong-shape snippets (for example
+    // Oslo shooting news for an Oslo population question) from reaching the
+    // answer body or the UI source list.
+    const relevanceStart = Date.now();
+    const relevant = filterRelevantSnippetsForQuery(query, verified);
+    audit.push({
+      step: 'rank',
+      detail: `${relevant.length}/${verified.length} snippets survived relevance + answer-shape gate`,
+      durationMs: Date.now() - relevanceStart,
+    });
+
     // Step 7: CONCLUDE — synthesize answer with citations
     const concludeStart = Date.now();
-    const answer = synthesizeAnswer(query, verified);
-    audit.push({ step: 'conclude', detail: `Answer synthesized from ${verified.length} sources`, durationMs: Date.now() - concludeStart });
+    const answer = synthesizeAnswer(query, relevant, verified.length > 0);
+    audit.push({ step: 'conclude', detail: `Answer synthesized from ${relevant.length} relevant sources`, durationMs: Date.now() - concludeStart });
 
     // Notify learn callback with top results
     if (this.onLearn) {
-      for (const s of verified.slice(0, 3)) {
+      for (const s of relevant.slice(0, 3)) {
         if (s.text.length > 50 && s.trust.tier !== 'untrusted') {
           this.onLearn(s.text.slice(0, 2000), s.url);
         }
@@ -2914,10 +3055,10 @@ export class SearchPipeline {
 
     const response: SearchResponse = {
       answer,
-      sources: verified,
+      sources: relevant,
       plan,
       rawResultCount: allRaw.length,
-      confidence: computeConfidence(verified),
+      confidence: computeConfidence(relevant),
       durationMs,
       sync: {
         state: syncState,
@@ -2932,7 +3073,7 @@ export class SearchPipeline {
 
     // Cache the result (R18: skip caching empty/failed responses so a cold-
     // start or rate-limit blip doesn't poison the 10-minute cache window).
-    if (verified.length > 0) {
+    if (relevant.length > 0) {
       this.cache.set(cacheKey, response);
     }
 
