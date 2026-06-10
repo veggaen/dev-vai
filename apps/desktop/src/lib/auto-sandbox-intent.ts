@@ -39,13 +39,14 @@ export interface ResolvedSendTimeWorkIntent {
 const BUILD_MODES = new Set<AutoSandboxMode>(['builder', 'agent']);
 const EXPLICIT_STARTER_REQUEST = /\b(?:next(?:\.js|\s*js)?|vinext)\b/i;
 const EXPLICIT_STARTER_ACTION = /\b(?:install|set\s*up|setup|fresh|from\s+scratch|new|default|plain|vanilla|clean)\b/i;
-const EXPLICIT_BUILD_ACTION = /\b(?:build|create|make|start|spin\s*up|launch|scaffold|generate|ship|prototype)\b/i;
 const EXPLICIT_BUILD_TARGET = /\b(?:app|application|project|site|website|dashboard|tool|mvp|workspace|shell|preview|page|landing|portfolio|gallery|blog)\b/i;
 const EXPLICIT_TRY_INTENT = /\b(?:try|preview|open|run|use|test)\b/i;
 const FRESH_PROJECT_REQUEST = /\b(?:fresh|from\s+scratch|new\s+app|new\s+project|start\s+over|clean)\b/i;
 const CURRENT_APP_REFERENCE = /\b(?:current|existing|active|this|same)\b/i;
 const NEW_BUILD_REQUEST = /^(?:now\s+)?(?:can\s+you\s+|could\s+you\s+|please\s+)?(?:make|build|create|generate|design|develop|scaffold|start|prototype)\b/i;
-const DISCUSSION_OR_RECOMMENDATION_REQUEST = /\b(?:what\s+(?:is|are|would|should|could)|which\s+(?:is|are|would|should)|why\s+(?:is|are|would|should)|how\s+(?:would|should|could)\s+(?:i|we|you)|single\s+best|best\s+next|engineering\s+task|recommend|recommendation|advice|strategy|plan|explain|go\s+deeper|tell\s+me\s+exactly\s+what\s+you\s+would\s+implement)\b/i;
+const EXPLICIT_BUILD_REQUEST =
+  /^(?:now\s+)?(?:(?:can|could|would|will)\s+you\s+|please\s+|let['â€™]?s\s+)?(?:make|build|create|generate|design|develop|scaffold|start|spin\s*up|launch|ship|prototype)\b|\b(?:i\s+(?:want|need|would\s+like)\s+(?:you\s+)?to)\s+(?:make|build|create|generate|design|develop|scaffold|start|spin\s*up|launch|ship|prototype)\b/i;
+const DISCUSSION_OR_RECOMMENDATION_REQUEST = /\b(?:what\s+(?:is|are|would|should|could)|which\s+(?:is|are|would|should)|why\s+(?:is|are|would|should)|(?:how|where)\s+(?:would|should|could|can)\s+(?:i|we|you)|single\s+best|best\s+next|engineering\s+task|recommend|recommendation|advice|strategy|plan|explain|help\s+(?:me|us)\b|go\s+deeper|tell\s+me\s+exactly\s+what\s+you\s+would\s+implement)\b/i;
 
 export function resolveAutoSandboxIntent(input: ResolveAutoSandboxIntentInput): ResolvedAutoSandboxIntent {
   const { userPrompt, mode, hasActiveProject, hasPackageJsonOutput } = input;
@@ -57,7 +58,7 @@ export function resolveAutoSandboxIntent(input: ResolveAutoSandboxIntentInput): 
   const explicitChatBuildRequest = mode === 'chat'
     && !productEngineeringPlanning
     && !DISCUSSION_OR_RECOMMENDATION_REQUEST.test(userPrompt)
-    && EXPLICIT_BUILD_ACTION.test(userPrompt)
+    && EXPLICIT_BUILD_REQUEST.test(userPrompt)
     && (EXPLICIT_BUILD_TARGET.test(userPrompt) || EXPLICIT_TRY_INTENT.test(userPrompt));
   const explicitChatEditRequest = mode === 'chat' && !productEngineeringPlanning && Boolean(detectEditIntent(userPrompt, {
     hasActiveProject,

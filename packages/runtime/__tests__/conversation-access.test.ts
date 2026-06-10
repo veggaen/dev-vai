@@ -4,12 +4,14 @@ import type { PlatformViewer } from '../src/auth/platform-auth.js';
 
 const anonymousViewer: PlatformViewer = {
   authenticated: false,
+  role: 'builder',
   user: null,
   companionClient: null,
 };
 
 const aliceViewer: PlatformViewer = {
   authenticated: true,
+  role: 'builder',
   user: {
     id: 'user-alice',
     email: 'alice@example.com',

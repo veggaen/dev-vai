@@ -1,39 +1,20 @@
 /**
- * TypingIndicator — Perplexity-inspired multi-step thinking indicator.
+ * TypingIndicator — live reasoning stream.
  *
- * Shows animated processing steps ("Understanding...", "Searching knowledge...",
- * "Generating answer...") that cycle as Vai thinks, giving the user a sense
- * of progress rather than just pulsing dots.
+ * Renders the server's `progress` steps as they arrive (Codex-style): the
+ * latest step is active with a spinner, earlier ones settle as completed and
+ * dim. Flat throughout — a quiet left rail, no rounded box, no pill counter —
+ * so it reads like "here's what I'm doing right now", then hands off to the
+ * answer + the Thinking panel's settled narrative.
  */
 
-import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, Search, Sparkles, Brain } from 'lucide-react';
+import { Loader2, Check } from 'lucide-react';
 import type { ChatProgressStep } from '../stores/chatStore.js';
 
-const THINKING_STEPS = [
-  { label: 'Understanding...', icon: Brain, delay: 0 },
-  { label: 'Searching knowledge...', icon: Search, delay: 1200 },
-  { label: 'Generating answer...', icon: Sparkles, delay: 3000 },
-];
-
 export function TypingIndicator({ progressSteps = [] }: { progressSteps?: ChatProgressStep[] }) {
-  const [activeStep, setActiveStep] = useState(0);
-  const [elapsed, setElapsed] = useState(0);
-
-  useEffect(() => {
-    const t = setInterval(() => setElapsed((e) => e + 200), 200);
-    return () => clearInterval(t);
-  }, []);
-
-  useEffect(() => {
-    const next = [...THINKING_STEPS].reverse().find((s) => elapsed >= s.delay);
-    if (next) setActiveStep(THINKING_STEPS.indexOf(next));
-  }, [elapsed]);
-
-  const completedCount = activeStep;
-  const hasRealProgress = progressSteps.length > 0;
-  const activeProgress = progressSteps[progressSteps.length - 1];
+  const steps = progressSteps.slice(-5);
+  const hasSteps = steps.length > 0;
 
   return (
     <motion.div
@@ -42,58 +23,49 @@ export function TypingIndicator({ progressSteps = [] }: { progressSteps?: ChatPr
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
       className="mb-4 flex items-start gap-3"
+      data-testid="typing-indicator"
     >
-      {/* Avatar */}
-      <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-zinc-800/80 ring-1 ring-zinc-700/50 mt-0.5">
-        <Bot className="h-3.5 w-3.5 text-zinc-400" />
+      {/* Avatar — brand mark with a soft breathing glow while working */}
+      <div className="relative mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-blue-600">
+        <span className="absolute inset-0 animate-ping rounded-full bg-violet-500/20" style={{ animationDuration: '2.4s' }} />
+        <span className="relative text-[10px] font-bold text-white">V</span>
       </div>
 
-      {/* Steps indicator */}
-      <div className="min-w-0 flex-1">
-        <div className="inline-flex max-w-xl items-center gap-2 rounded-xl bg-zinc-800/40 px-3.5 py-2 ring-1 ring-zinc-700/30">
-          {/* Animated spinner */}
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
-            className="h-3.5 w-3.5 rounded-full border-2 border-violet-500/30 border-t-violet-400"
-          />
-
-          {/* Step label with crossfade */}
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={hasRealProgress ? activeProgress?.stage ?? 'progress' : activeStep}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.15 }}
-              className="flex items-center gap-1.5"
-            >
-              {(() => {
-                const StepIcon = hasRealProgress ? Search : THINKING_STEPS[activeStep].icon;
-                return <StepIcon className="h-3 w-3 text-violet-400/70" />;
-              })()}
-              <span className="min-w-0 truncate text-xs text-zinc-400">
-                {hasRealProgress ? activeProgress?.label : THINKING_STEPS[activeStep].label}
-              </span>
-              {hasRealProgress && activeProgress?.detail ? (
-                <span className="hidden min-w-0 truncate text-xs text-zinc-600 sm:inline">
-                  · {activeProgress.detail}
-                </span>
-              ) : null}
-            </motion.div>
-          </AnimatePresence>
-
-          {/* Step count badge */}
-          {(hasRealProgress || completedCount > 0) && (
-            <motion.span
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="rounded-full bg-violet-500/10 px-1.5 py-px text-[9px] font-medium tabular-nums text-violet-400/70"
-            >
-              {hasRealProgress ? progressSteps.length : `${completedCount}/${THINKING_STEPS.length}`}
-            </motion.span>
-          )}
-        </div>
+      {/* Live steps — quiet left rail, flat rows */}
+      <div className="min-w-0 flex-1 border-l border-white/10 pl-3 text-xs">
+        {!hasSteps ? (
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-3 w-3 animate-spin text-violet-400/70" />
+            <span className="thinking-sheen font-medium">Thinking…</span>
+          </div>
+        ) : (
+          <ol className="space-y-1.5">
+            <AnimatePresence initial={false}>
+              {steps.map((step, index) => {
+                const isActive = index === steps.length - 1 && step.status !== 'done';
+                return (
+                  <motion.li
+                    key={step.stage}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className={`flex items-center gap-2 leading-5 ${isActive ? 'text-zinc-300' : 'text-zinc-600'}`}
+                  >
+                    {isActive ? (
+                      <Loader2 className="h-3 w-3 shrink-0 animate-spin text-violet-400/80" />
+                    ) : (
+                      <Check className="h-3 w-3 shrink-0 text-zinc-600" />
+                    )}
+                    <span className={`min-w-0 truncate ${isActive ? 'thinking-sheen font-medium' : ''}`}>{step.label}</span>
+                    {isActive && step.detail && (
+                      <span className="hidden min-w-0 truncate text-zinc-600 sm:inline">· {step.detail}</span>
+                    )}
+                  </motion.li>
+                );
+              })}
+            </AnimatePresence>
+          </ol>
+        )}
       </div>
     </motion.div>
   );

@@ -133,7 +133,7 @@ export function UserPopover({ open, onClose, anchorRect }: UserPopoverProps) {
                     ? authStatus === 'authenticated'
                       ? accountName
                       : 'Not signed in'
-                    : 'Local mode'}
+                    : 'Workspace'}
                 </div>
                 <div className="truncate text-xs text-zinc-500">
                   {authStatus === 'authenticated' ? authUser?.email : effectiveAuthEnabled ? 'Sign in required' : 'No auth enforcement'}
@@ -154,7 +154,7 @@ export function UserPopover({ open, onClose, anchorRect }: UserPopoverProps) {
                     ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
                     : 'border-zinc-700 bg-zinc-800 text-zinc-500'
               }`}>
-                {authStatus === 'authenticated' ? 'Signed in' : effectiveAuthEnabled ? 'Needs auth' : 'Local'}
+                {authStatus === 'authenticated' ? 'Signed in' : effectiveAuthEnabled ? 'Needs auth' : 'Ready'}
               </span>
             </div>
 

@@ -57,6 +57,7 @@ describe('Platform Routes', () => {
       maxSandboxes: 5,
       sandboxDocker: false,
       ownerEmail: 'owner@test.dev',
+      adminEmails: [],
       apiKeys: [],
       authEnabled: false,
       rateLimitPerMinute: 60,

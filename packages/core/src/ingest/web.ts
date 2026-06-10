@@ -4,9 +4,10 @@
  */
 
 import type { RawCapture } from './pipeline.js';
+import { safeFetch } from '../network/safe-fetch.js';
 
 export async function scrapeWebPage(url: string): Promise<RawCapture> {
-  const res = await fetch(url, {
+  const res = await safeFetch(url, {
     headers: {
       'User-Agent': 'VeggaAI/0.1 (Local AI Learning Agent)',
       Accept: 'text/html,application/xhtml+xml',

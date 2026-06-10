@@ -7,7 +7,7 @@
  * and would make CI slow — that's better suited for E2E tests.
  */
 import { EventEmitter } from 'node:events';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { existsSync } from 'node:fs';
@@ -142,6 +142,23 @@ describe('SandboxManager', () => {
       await expect(
         manager.writeFiles('bad-id', [{ path: 'x.ts', content: '' }]),
       ).rejects.toThrow('Sandbox project not found');
+    });
+
+    it('blocks traversal into sibling directories with a shared prefix', async () => {
+      const project = await manager.create('prefix-check');
+      const siblingDir = `${project.rootDir}-escape`;
+      await mkdir(siblingDir, { recursive: true });
+
+      await expect(
+        manager.writeFiles(project.id, [
+          {
+            path: `../${basename(siblingDir)}/owned.txt`,
+            content: 'should not be written',
+          },
+        ]),
+      ).rejects.toThrow('Path traversal blocked');
+
+      expect(existsSync(join(siblingDir, 'owned.txt'))).toBe(false);
     });
 
     it('rejects stale base versions to avoid lost updates', async () => {

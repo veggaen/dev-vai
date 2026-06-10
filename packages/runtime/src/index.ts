@@ -3,6 +3,11 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
 import { createServer } from './server.js';
+import { startLocalDirectChatListener } from './local-pipe-chat.js';
+import {
+  assertSecureRuntimeExposure,
+  resolveRuntimeHost,
+} from './security/runtime-exposure.js';
 
 const isWindows = process.platform === 'win32';
 const runtimeFile = typeof globalThis.__filename === 'string'
@@ -72,7 +77,9 @@ function killPortHolder(port: number): boolean {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
-  const { app, port, vaiEngine, chatService, config } = await createServer();
+  const { app, port, vaiEngine, chatService, config, localSteeringWorker } = await createServer();
+  const host = resolveRuntimeHost();
+  assertSecureRuntimeExposure(host, config.authEnabled && config.apiKeys.length > 0);
 
   // Flush knowledge persistence on shutdown.
   process.on('SIGINT', () => { vaiEngine.flushPersist(); process.exit(0); });
@@ -81,8 +88,8 @@ async function main() {
   async function startWithRetry(maxRetries = 2) {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        await app.listen({ port, host: '0.0.0.0' });
-        console.log(`VAI runtime listening on http://localhost:${port}`);
+        await app.listen({ port, host });
+        console.log(`VAI runtime listening on http://${host}:${port}`);
         return;
       } catch (err: unknown) {
         const isAddrInUse = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'EADDRINUSE';
@@ -101,6 +108,13 @@ async function main() {
   }
 
   await startWithRetry();
+
+  // Direct local channel (private 127.0.0.1 high port) for fast Grok (this .grok window) <-> Vai friendship.
+  // Lighter than main server, local-only, reuses full ChatService (all intelligence).
+  // This is the direct link — no heavy script + main auth/TCP for every turn.
+  const directListener = startLocalDirectChatListener({ chatService, localSteeringWorker });
+  // keep reference so it stays alive
+  (globalThis as any).__vaiDirectListener = directListener;
 
   // Pre-warm: fire a synthetic templated message so the constrained-code-emitter,
   // intent matcher, and any lazy modules are hot before the first real request.

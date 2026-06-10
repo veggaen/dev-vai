@@ -19,7 +19,7 @@ import {
   EvalRunner,
   SearchPipeline,
 } from '@vai/core';
-import type { ChatServiceOptions, VaiConfig } from '@vai/core';
+import type { ChatServiceOptions, ResponseReviewInput, VaiConfig } from '@vai/core';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerConversationRoutes } from './routes/conversations.js';
 import { registerModelRoutes } from './routes/models.js';
@@ -36,7 +36,13 @@ import { registerScaleEvalRoutes } from './routes/scale-eval.js';
 import { registerSearchRoutes } from './routes/search.js';
 import { registerSkillRoutes } from './routes/skills.js';
 import { registerFeedbackRoutes } from './routes/feedback.js';
+import { registerSteeringRoutes } from './routes/steering.js';
+import { createGuidanceStore } from './steering/guidance-store.js';
+import { computeSteeringLift } from './steering/analyze-steering.js';
+import { LocalSteeringWorker, localSteeringOptionsFromEnv } from './steering/local-steering-worker.js';
+import { friendReviewReviewersFromEnv } from './friend-review/panel-from-env.js';
 import { registerBroadcastRoutes } from './routes/broadcast.js';
+import { registerCompanionContextRoutes } from './routes/companion-context.js';
 import { seedVaiEvalTasks } from './eval/vai-tasks.js';
 import { SandboxManager } from './sandbox/manager.js';
 import { warmPnpmStore } from './sandbox/store-warmer.js';
@@ -46,6 +52,9 @@ import { PlatformAuthService } from './auth/platform-auth.js';
 import { registerPlatformAuthRoutes } from './routes/platform-auth.js';
 import { ProjectService } from './projects/service.js';
 import { registerProjectRoutes } from './routes/projects.js';
+import { CompanionContextBroker } from './companion-context/broker.js';
+import { GrokFriendClient } from './grok-friend/client.js';
+import { WorkspaceStatusReader } from './workspace-status/reader.js';
 
 export interface ServerOptions {
   port?: number;
@@ -65,6 +74,9 @@ export function getDefaultAllowedOrigins(port: number): string[] {
     'http://127.0.0.1:5173',
     'http://0.0.0.0:5173',
     'http://[::1]:5173',
+    // Vite preview server (production-bundle smoke tests) — loopback only.
+    'http://localhost:4173',
+    'http://127.0.0.1:4173',
     ...runtimeOrigins,
     'http://tauri.localhost',
     'tauri://localhost',
@@ -85,6 +97,8 @@ export function buildChatServiceOptions(
       return results;
     },
     vaiFallbackChain: config.fallbackChain.models,
+    extraDeclineMarkers: config.fallbackChain.declineMarkers,
+    verification: config.fallbackChain.verification,
   };
 }
 
@@ -157,6 +171,16 @@ export async function createServer(options?: ServerOptions) {
     `[VAI] Vocab: ${stats.vocabSize} | Knowledge: ${stats.knowledgeEntries} entries | Docs: ${stats.documentsIndexed} | Concepts: ${stats.conceptsExtracted} | N-grams: ${stats.ngramContexts}`,
   );
 
+  const guidanceStore = createGuidanceStore(db);
+  const localSteeringWorker = new LocalSteeringWorker(localSteeringOptionsFromEnv());
+  // Constructed early so the friend-review panel can optionally enlist it as a reviewer.
+  const grokFriendClient = new GrokFriendClient();
+  // Vai's friend panel: Qwen + other AIs review each draft before release and
+  // return a consolidated notice. Default-off; opt in via VAI_FRIEND_REVIEW_ENABLED.
+  // See docs/capabilities/friend-review-panel.md.
+  const friendReviewReviewers = friendReviewReviewersFromEnv({
+    grokAsk: (prompt) => grokFriendClient.ask(prompt),
+  });
   const chatService = new ChatService(
     db,
     models,
@@ -164,11 +188,26 @@ export async function createServer(options?: ServerOptions) {
     {
       ...buildChatServiceOptions(config, vaiEngine, pipeline),
       onUsage: config.enableUsageTracking ? (entry) => usageService.record(entry) : undefined,
+      guidanceStore,
+      responseReviewers: [
+        ...(localSteeringWorker.isEnabled()
+          ? [{
+            id: `local:${localSteeringWorker.modelId}`,
+            review: (input: ResponseReviewInput) => localSteeringWorker.reviewCandidate(input),
+          }]
+          : []),
+        ...friendReviewReviewers,
+      ],
     },
   );
   const sandboxManager = new SandboxManager();
-  const platformAuth = new PlatformAuthService(db, config.platformAuth);
+  const platformAuth = new PlatformAuthService(db, config.platformAuth, {
+    ownerEmail: config.ownerEmail,
+    adminEmails: config.adminEmails,
+  });
   const projectService = new ProjectService(db);
+  const companionContextBroker = new CompanionContextBroker();
+  const workspaceStatusReader = new WorkspaceStatusReader();
   projectService.hydrateSandboxs(sandboxManager);
 
   warmPnpmStore();
@@ -222,6 +261,7 @@ export async function createServer(options?: ServerOptions) {
     async (request) => {
       const { text, source, language } = request.body;
       vaiEngine.train(text, source, (language as 'en' | 'no' | 'code' | 'mixed') ?? 'en');
+      vaiEngine.refreshIntelligence();
       return { ok: true, stats: vaiEngine.getStats() };
     },
   );
@@ -260,6 +300,7 @@ export async function createServer(options?: ServerOptions) {
         added += 1;
       }
 
+      vaiEngine.refreshIntelligence();
       return { ok: true, added, stats: vaiEngine.getStats() };
     },
   );
@@ -275,10 +316,17 @@ export async function createServer(options?: ServerOptions) {
   });
 
   registerPlatformAuthRoutes(app, platformAuth);
+  registerCompanionContextRoutes(app, platformAuth, companionContextBroker);
   registerConversationRoutes(app, chatService, config.defaultModelId, platformAuth, sandboxManager, projectService);
   registerModelRoutes(app, models);
   registerPlatformRoutes(app, config, models, sandboxManager, platformAuth);
-  registerChatRoutes(app, chatService, platformAuth, projectService, { ownerEmail: config.ownerEmail });
+  registerChatRoutes(app, chatService, platformAuth, projectService, {
+    ownerEmail: config.ownerEmail,
+    contextBroker: companionContextBroker,
+    grokFriendClient,
+    workspaceStatusReader,
+    localSteeringWorker,
+  });
   registerIngestRoutes(app, pipeline);
   registerImageRoutes(app, pipeline, chatService);
   registerSandboxRoutes(app, sandboxManager, platformAuth, projectService);
@@ -319,6 +367,7 @@ export async function createServer(options?: ServerOptions) {
 
   registerSkillRoutes(app);
   registerFeedbackRoutes(app, db);
+  registerSteeringRoutes(app, guidanceStore);
 
   app.get('/api/usage', async (request) => {
     const query = request.query as { from?: string; to?: string };
@@ -428,6 +477,41 @@ export async function createServer(options?: ServerOptions) {
     // Table may already exist.
   }
 
+  // Steering reference data (RouteGuidance persistence + plan snapshots on messages for benefit analysis)
+  try {
+    db.run(/* sql */ `CREATE TABLE IF NOT EXISTS route_guidances (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT REFERENCES conversations(id),
+      "from" TEXT NOT NULL CHECK("from" IN ('human','ai')),
+      author TEXT,
+      signal TEXT NOT NULL CHECK(signal IN ('avoid','prefer')),
+      handler TEXT NOT NULL,
+      note TEXT,
+      scope TEXT NOT NULL CHECK(scope IN ('class','conversation','global')),
+      match_tokens TEXT,
+      intent TEXT,
+      weight REAL NOT NULL DEFAULT 1.0,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER,
+      origin_message_id TEXT REFERENCES messages(id),
+      applied_count INTEGER NOT NULL DEFAULT 0,
+      last_applied_at INTEGER
+    )`);
+    db.run(/* sql */ `CREATE INDEX IF NOT EXISTS idx_route_guidances_convo ON route_guidances(conversation_id)`);
+    db.run(/* sql */ `CREATE INDEX IF NOT EXISTS idx_route_guidances_active_scope ON route_guidances(active, scope)`);
+    db.run(/* sql */ `CREATE INDEX IF NOT EXISTS idx_route_guidances_created ON route_guidances(created_at)`);
+  } catch {
+    // Table may already exist.
+  }
+
+  // Add plan column to messages for steering reference data (if missing on old dbs)
+  try {
+    db.run(/* sql */ `ALTER TABLE messages ADD COLUMN plan TEXT`);
+  } catch {
+    // Column already exists or table newer.
+  }
+
   app.get('/api/intelligence/stats', async () => {
     const intelligenceStats = vaiEngine.intelligence.getStats();
     return {
@@ -436,6 +520,16 @@ export async function createServer(options?: ServerOptions) {
       ngramCount: vaiEngine.knowledge.ngramCount,
       documentCount: vaiEngine.knowledge.documentCount,
     };
+  });
+
+  // Steering effectiveness reference stats (computed from the data we write on every guided turn)
+  app.get('/api/steering/stats', async () => {
+    try {
+      const summary = computeSteeringLift(db);
+      return { ok: true, ...summary, note: 'Use as signal for whether current steering (weights, scopes, actors) is net beneficial or needs re-calibration.' };
+    } catch (e) {
+      return { ok: false, error: 'analysis_failed' };
+    }
   });
 
   app.get('/api/intelligence/hygiene', async () => {
@@ -470,5 +564,6 @@ export async function createServer(options?: ServerOptions) {
     usageService,
     toolExecutor,
     tools,
+    localSteeringWorker,
   };
 }

@@ -8,17 +8,19 @@ import { DEV_AUTH_BYPASS_QUERY_PARAM, isDevAuthBypassEnabled } from './dev-auth-
 const SESSION_TOKEN_KEY = 'vai-platform-session-token';
 const DEV_AUTH_BYPASS_HEADER = 'x-vai-dev-auth-bypass';
 
+/** Ports served by Vite (dev 5173/5174, preview 4173) — these proxy the runtime, so relative URLs avoid CORS. */
+const VITE_PROXIED_PORTS = new Set(['5173', '5174', '4173']);
+
 function getApiBase(): string {
   if (typeof window === 'undefined') return 'http://localhost:3006';
-  const port = window.location.port;
-  // In Vite dev mode, use relative URLs (proxied)
-  if (port === '5173' || port === '5174') return '';
+  if (VITE_PROXIED_PORTS.has(window.location.port)) return '';
   return 'http://localhost:3006';
 }
 
 function getWsBase(): string {
   if (typeof window === 'undefined') return 'ws://localhost:3006';
   const port = window.location.port;
+  // `vite preview` (4173) proxies HTTP but not WebSockets — connect WS directly.
   if (port === '5173' || port === '5174') return `ws://${window.location.host}`;
   return 'ws://localhost:3006';
 }
@@ -45,6 +47,8 @@ export function buildChatWebSocketUrl(): string {
 
 export function getApiSessionToken(): string | null {
   if (typeof window === 'undefined') return null;
+  // Browser OAuth uses the httpOnly cookie. This persisted bearer token is
+  // reserved for desktop device-link sessions until native secure storage lands.
   return window.localStorage.getItem(SESSION_TOKEN_KEY);
 }
 

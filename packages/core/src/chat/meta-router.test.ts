@@ -57,6 +57,53 @@ describe('tryHandleChatMeta', () => {
     });
   });
 
+  describe('ordinal-message intent', () => {
+    it('recalls the third earlier user message from a natural follow-up', () => {
+      const third = 'Can you tell me what the first message I wrote to you in this chat was?';
+      const content = 'Yes nice, that was correct. Can you now tell me what the third message was?';
+      const history = [
+        turn('user', 'what are the roles in 5v5 League of Legends?'),
+        turn('assistant', 'There are five roles.'),
+        turn('user', 'Can you list the mid-lane champions?'),
+        turn('assistant', 'Here is the list.'),
+        turn('user', third),
+        turn('assistant', 'Your first message was about League roles.'),
+        turn('user', content),
+      ];
+
+      const result = tryHandleChatMeta(content, history);
+
+      expect(result?.intent).toBe('ordinal-user');
+      expect(result?.reply).toContain(`"${third}"`);
+    });
+
+    it('supports an explicit assistant ordinal', () => {
+      const history = [
+        turn('user', 'one'),
+        turn('assistant', 'first reply'),
+        turn('user', 'two'),
+        turn('assistant', 'second reply'),
+        turn('user', 'What was your second response?'),
+      ];
+
+      const result = tryHandleChatMeta('What was your second response?', history);
+
+      expect(result?.intent).toBe('ordinal-assistant');
+      expect(result?.reply).toContain('"second reply"');
+    });
+
+    it('answers honestly when the requested ordinal does not exist', () => {
+      const content = 'What was my fifth message?';
+      const history = [turn('user', 'one'), turn('user', 'two'), turn('user', content)];
+
+      const result = tryHandleChatMeta(content, history);
+
+      expect(result?.intent).toBe('ordinal-user');
+      expect(result?.reply).toMatch(/only find 2 earlier messages/i);
+      expect(result?.reply).toMatch(/isn't a fifth/i);
+    });
+  });
+
   describe('last-user intent', () => {
     it('detects "what did I just say" and excludes the current question', () => {
       const history = [

@@ -14,6 +14,7 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useCursorStore } from '../stores/cursorStore.js';
 
 /* ── Interactive element selectors ── */
 const INTERACTIVE_SELECTOR = [
@@ -32,6 +33,7 @@ interface FocusRect {
 }
 
 export function CursorFocusBox() {
+  const overlayVisible = useCursorStore((s) => s.overlayVisible);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [focusRect, setFocusRect] = useState<FocusRect | null>(null);
   const [isOverInteractive, setIsOverInteractive] = useState(false);
@@ -80,6 +82,13 @@ export function CursorFocusBox() {
   }, []);
 
   useEffect(() => {
+    if (!overlayVisible) {
+      lastElementRef.current = null;
+      setFocusRect(null);
+      setIsOverInteractive(false);
+      return;
+    }
+
     const handleMouseMove = (e: MouseEvent) => {
       setMousePos({ x: e.clientX, y: e.clientY });
       cancelAnimationFrame(rafRef.current);
@@ -93,7 +102,9 @@ export function CursorFocusBox() {
       window.removeEventListener('mousemove', handleMouseMove);
       cancelAnimationFrame(rafRef.current);
     };
-  }, [updateFocus]);
+  }, [updateFocus, overlayVisible]);
+
+  if (!overlayVisible) return null;
 
   return (
     <>
@@ -112,8 +123,8 @@ export function CursorFocusBox() {
             width: isOverInteractive ? '40px' : '8px',
             height: isOverInteractive ? '40px' : '8px',
             background: isOverInteractive
-              ? 'radial-gradient(circle, rgba(139,92,246,0.15) 0%, transparent 70%)'
-              : 'radial-gradient(circle, rgba(139,92,246,0.25) 0%, transparent 70%)',
+              ? 'radial-gradient(circle, color-mix(in srgb, var(--accent) 15%, transparent) 0%, transparent 70%)'
+              : 'radial-gradient(circle, color-mix(in srgb, var(--accent) 25%, transparent) 0%, transparent 70%)',
             transition: 'width 0.2s ease, height 0.2s ease',
           }}
         />
@@ -142,17 +153,18 @@ export function CursorFocusBox() {
           >
             {/* Border box */}
             <div
-              className="h-full w-full rounded-xl border border-violet-500/30 shadow-[0_0_15px_-3px_rgba(139,92,246,0.15)]"
+              className="h-full w-full rounded-xl border shadow-[0_0_15px_-3px_color-mix(in_srgb,var(--accent)_15%,transparent)]"
               style={{
-                background: 'linear-gradient(135deg, rgba(139,92,246,0.04) 0%, rgba(59,130,246,0.03) 100%)',
+                borderColor: 'color-mix(in srgb, var(--accent) 30%, transparent)',
+                background: 'color-mix(in srgb, var(--accent) 4%, transparent)',
               }}
             />
 
             {/* Animated corner dots */}
-            <div className="absolute -left-[2px] -top-[2px] h-1.5 w-1.5 rounded-full bg-violet-500/60" />
-            <div className="absolute -right-[2px] -top-[2px] h-1.5 w-1.5 rounded-full bg-violet-500/60" />
-            <div className="absolute -bottom-[2px] -left-[2px] h-1.5 w-1.5 rounded-full bg-violet-500/60" />
-            <div className="absolute -bottom-[2px] -right-[2px] h-1.5 w-1.5 rounded-full bg-violet-500/60" />
+            <div className="absolute -left-[2px] -top-[2px] h-1.5 w-1.5 rounded-full bg-[color:var(--accent)] opacity-60" />
+            <div className="absolute -right-[2px] -top-[2px] h-1.5 w-1.5 rounded-full bg-[color:var(--accent)] opacity-60" />
+            <div className="absolute -bottom-[2px] -left-[2px] h-1.5 w-1.5 rounded-full bg-[color:var(--accent)] opacity-60" />
+            <div className="absolute -bottom-[2px] -right-[2px] h-1.5 w-1.5 rounded-full bg-[color:var(--accent)] opacity-60" />
           </motion.div>
         )}
       </AnimatePresence>

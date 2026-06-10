@@ -18,7 +18,7 @@ const MODE_KEYS: Record<string, ChatMode> = {
  *   Ctrl+,          — Settings sidebar (same tier as Ctrl+K / palette-style power user flow)
  *   Ctrl+S          — Cycle sidebar: expanded → rail → hidden
  *   Ctrl+Shift+L    — Toggle Dev Logs panel
- *   Ctrl+Shift+F    — Toggle Search panel
+ *   Ctrl+Shift+F    — Focus chat search in sidebar
  *   Ctrl+Shift+K    — Toggle Knowledge Base panel
  *   Ctrl+Shift+M    — Toggle layout mode (compact ↔ open)
  *   Ctrl+J          — Toggle debug console (paired with Ctrl+K: pick chat vs inspect logs)
@@ -74,10 +74,11 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Ctrl+Shift+F — Search panel
+      // Ctrl+Shift+F — focus integrated chat search in sidebar
       if (ctrl && shift && key.toLowerCase() === 'f') {
         e.preventDefault();
-        setActivePanel('search');
+        setActivePanel('chats');
+        window.dispatchEvent(new CustomEvent('vai:focus-chat-search'));
         return;
       }
 

@@ -21,7 +21,8 @@ interface SourceCardsProps {
 /** Compact favicon chip — shown in the horizontal row at top of research answers */
 function SourceChip({ source, index }: { source: SearchSourceUI; index: number }) {
   const [tooltipVisible, setTooltipVisible] = useState(false);
-  const label = source.domain.replace(/^www\./, '');
+  const domainLabel = source.domain.replace(/^www\./, '');
+  const label = source.title.trim() || domainLabel;
 
   return (
     <div className="relative flex-shrink-0">
@@ -34,7 +35,7 @@ function SourceChip({ source, index }: { source: SearchSourceUI; index: number }
         onFocus={() => setTooltipVisible(true)}
         onBlur={() => setTooltipVisible(false)}
         className="group/chip flex items-center gap-1.5 rounded-lg border border-zinc-800/80 bg-zinc-900/60 px-2.5 py-1 text-[11px] text-zinc-400 transition-all hover:border-zinc-600/80 hover:bg-zinc-800/70 hover:text-zinc-200"
-        aria-label={`Source ${index + 1}: ${source.title || label}`}
+        aria-label={`Source ${index + 1}: ${label}`}
       >
         <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center">
           {source.favicon ? (
@@ -45,7 +46,7 @@ function SourceChip({ source, index }: { source: SearchSourceUI; index: number }
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
           ) : (
-            <span className="text-[9px] font-bold uppercase text-zinc-500">{label.slice(0, 1)}</span>
+            <span className="text-[9px] font-bold uppercase text-zinc-500">{domainLabel.slice(0, 1)}</span>
           )}
         </span>
         <span className="max-w-[80px] truncate font-medium">{label}</span>
@@ -61,7 +62,7 @@ function SourceChip({ source, index }: { source: SearchSourceUI; index: number }
             )}
             <span className="mt-2 inline-flex items-center gap-1 text-[10px] text-zinc-600">
               <ExternalLink className="h-2.5 w-2.5" />
-              {label}
+              {domainLabel}
             </span>
           </div>
         </div>
@@ -72,8 +73,8 @@ function SourceChip({ source, index }: { source: SearchSourceUI; index: number }
 
 /** Horizontal chip row — rendered above the answer text (Perplexity-style) */
 function SourceChipRow({ sources, confidence }: { sources: SearchSourceUI[]; confidence?: number }) {
-  const visible = sources.slice(0, 5);
-  const overflow = Math.max(0, sources.length - 5);
+  const visible = sources.slice(0, 3);
+  const overflow = Math.max(0, sources.length - 3);
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-1.5">

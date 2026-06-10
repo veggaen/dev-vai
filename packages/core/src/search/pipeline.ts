@@ -25,8 +25,13 @@ import type {
 } from './types.js';
 import { DEFAULT_SEARCH_CONFIG } from './types.js';
 import { validateSearchUrl, scoreDomain, scanContentSafety, contentFingerprint } from './safety.js';
+import { safeFetch } from '../network/safe-fetch.js';
 import { classifySyncState, ThorsenAdaptiveController } from '../thorsen/types.js';
 import { normalizeInputForUnderstanding } from '../input-normalization.js';
+import {
+  isFreshLocalBusinessContactRequest,
+  isFreshLocalRecommendationRequest,
+} from '../models/web-conclude-policy.js';
 
 // ── Query Normalization (Step 1: CLARIFY) ──
 
@@ -38,6 +43,7 @@ const INTENT_PATTERNS: ReadonlyArray<{ pattern: RegExp; intent: string }> = [
   { pattern: /^(hvordan|korleis)\b/i, intent: 'how-to' },
   { pattern: /^(why|why does|why is|why are|explain|describe)\b/i, intent: 'explanation' },
   { pattern: /^(forklar|beskriv|hvorfor)\b/i, intent: 'explanation' },
+  { pattern: /^(?:what\s+(?:caused|led\s+to|triggered|drove)|causes?\s+of|reasons?\s+for)\b/i, intent: 'causal' },
   { pattern: /^(compare|versus|vs\.?|difference between)\b/i, intent: 'comparison' },
   { pattern: /^(best|top|recommend|alternatives)\b/i, intent: 'recommendation' },
   { pattern: /^(when|what year|what date|timeline)\b/i, intent: 'temporal' },
@@ -51,7 +57,7 @@ const ENTITY_STOP_WORDS = new Set([
   'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
   'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
   'should', 'may', 'might', 'shall', 'can', 'to', 'of', 'in', 'for',
-  'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
+  'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during', 'per',
   'before', 'after', 'above', 'below', 'between', 'out', 'off', 'over',
   'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when',
   'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more',
@@ -61,7 +67,8 @@ const ENTITY_STOP_WORDS = new Set([
   'those', 'i', 'me', 'my', 'it', 'its', 'we', 'they', 'search', 'find',
   'look', 'up', 'tell', 'give', 'show', 'get', 'know', 'please', 'explain',
   'describe', 'explained', 'simple', 'words', 'simply', 'include', 'sources',
-  'source', 'citation', 'citations', 'references', 'reference',
+  'source', 'citation', 'citations', 'references', 'reference', 'cause', 'causes',
+  'caused', 'led', 'trigger', 'triggered', 'drove', 'reason', 'reasons',
   'hva', 'hvordan', 'hvorfor', 'forklar', 'beskriv', 'kan', 'du', 'meg',
   'om', 'er', 'og', 'på', 'i', 'til', 'med', 'for', 'en', 'et', 'det', 'den',
 ]);
@@ -136,7 +143,10 @@ function normalizeCommonTypos(query: string): string {
 }
 
 function normalizeSearchQuery(query: string): string {
-  const trimmed = normalizeCommonTypos(query.trim());
+  const trimmed = normalizeCommonTypos(query.trim())
+    .replace(/^(?:please\s+)?provide\s+(?:a\s+)?(?:(?:concise|brief|short)\s+)?(?:explanation|answer|summary)\s*:?\s*/i, '')
+    .replace(/^verify\s*:\s*/i, '')
+    .trim();
   const withoutLead = trimmed
     .replace(/^(?:please\s+)?(?:use|do)\s+web\s+search(?:\s+(?:and|to))?\s+(?:(?:study|research|investigate|explore|look\s+into)\s+)?/i, '')
     .replace(/^(?:please\s+)?(?:study|research|investigate|explore|look\s+into)\s+/i, '')
@@ -171,7 +181,9 @@ function normalizeSearchQuery(query: string): string {
 
 function extractPrimarySubject(query: string, entities: readonly string[]): string {
   const stripped = query
-    .replace(/^(?:what\s+(?:is|are|was|were)|what's|what\s+do\s+you\s+know(?:\s+(?:about|of|on|regarding))?|do\s+you\s+know(?:\s+(?:about|of|on|regarding))?|have\s+you\s+heard\s+(?:of|about)|define|explain|describe|tell\s+me\s+about|who\s+(?:is|are|was|were)|how\s+(?:does|do)|why\s+(?:does|is|are|would|should)|hva\s+er|forklar|beskriv|fortell\s+meg\s+om|hvordan(?:\s+fungerer)?)\s+/i, '')
+    .replace(/^(?:what\s+(?:is|are|was|were|caused|led\s+to|triggered|drove)|what's|what\s+do\s+you\s+know(?:\s+(?:about|of|on|regarding))?|do\s+you\s+know(?:\s+(?:about|of|on|regarding))?|have\s+you\s+heard\s+(?:of|about)|causes?\s+(?:of|for)|reasons?\s+(?:of|for)|define|explain|describe|tell\s+me\s+about|who\s+(?:is|are|was|were)|how\s+(?:does|do)|why\s+(?:does|is|are|would|should)|hva\s+er|forklar|beskriv|fortell\s+meg\s+om|hvordan(?:\s+fungerer)?)\s+/i, '')
+    .replace(/\s+(?:root\s+)?causes?\s*$/i, '')
+    .replace(/\s+reasons?\s*$/i, '')
     .replace(/^(?:of|about|on|regarding)\s+/i, '')
     .trim();
 
@@ -211,7 +223,13 @@ export function buildSearchPlan(query: string): VaiSearchPlan {
 
   // Detect intent
   const matched = INTENT_PATTERNS.find(p => p.pattern.test(lower));
-  const intent = hasComparisonMarkers(lower) ? 'comparison' : (matched?.intent ?? 'general');
+  const intent = hasComparisonMarkers(lower)
+    ? 'comparison'
+    : isFreshLocalRecommendationRequest(normalizedQuery)
+      ? 'recommendation'
+      : isFreshLocalBusinessContactRequest(normalizedQuery)
+        ? 'current'
+      : (matched?.intent ?? 'general');
 
   // Extract entities (meaningful words)
   const words = normalizedQuery.split(/\s+/);
@@ -859,10 +877,15 @@ export function generateTopicFollowUps(rawTopic: string, intent = 'general'): st
         `What trade-offs would rule out ${subject}?`,
       ]);
     default:
+      // Subject-anchored, not subject-less boilerplate. The old default emitted
+      // "Narrow this to the strongest recommendation" / "Show the key trade-offs"
+      // — generic noise the user rightly read as irrelevant because it named
+      // nothing. These name the actual subject, so they stay on-topic and the
+      // client relevance filter keeps them only when they overlap the answer.
       return finalizeFollowUps([
-        'Narrow this to the strongest recommendation',
-        'Show the key trade-offs',
-        'Give me the shortest useful version',
+        `What's the most important thing to know about ${subject}?`,
+        `Can you give a concrete example of ${subject}?`,
+        `What do people most often get wrong about ${subject}?`,
       ]);
   }
 }
@@ -890,6 +913,11 @@ function generateFanOutQueries(query: string, intent: string, entities: readonly
       queries.push(biasPerplexityToProduct ? 'what is Perplexity AI' : `what is ${primarySubject}`);
       queries.push(biasPerplexityToProduct ? 'Perplexity AI search engine' : `${primarySubject} official site`);
       break;
+    case 'causal':
+      queries.push(`${primarySubject} causes explained`);
+      queries.push(`${primarySubject} root causes analysis`);
+      queries.push(`${primarySubject} causes wikipedia`);
+      break;
     case 'comparison':
       if (comparisonSubject) {
         queries.push(`${primarySubject} vs ${comparisonSubject}`);
@@ -899,8 +927,14 @@ function generateFanOutQueries(query: string, intent: string, entities: readonly
       queries.push(`${primarySubject} pros cons comparison`);
       break;
     case 'recommendation':
-      queries.push(`best ${entityStr} 2025`);
-      queries.push(`${entityStr} alternatives comparison`);
+      if (isFreshLocalRecommendationRequest(query)) {
+        queries.push(`${query} reviews menu`);
+        queries.push(`${query} official opening hours`);
+        queries.push(`${query} local guide`);
+      } else {
+        queries.push(`best ${entityStr} 2026`);
+        queries.push(`${entityStr} alternatives comparison`);
+      }
       break;
     case 'troubleshoot':
       queries.push(`${entityStr} solution fix`);
@@ -934,6 +968,325 @@ const PACKAGE_QUERY_NOISE = new Set([
 ]);
 
 const REGISTRY_METADATA_HOSTS = new Set(['pypi.org', 'registry.npmjs.org', 'crates.io']);
+const STRUCTURED_METADATA_HOSTS = new Set(['openstreetmap.org']);
+
+interface LocalVenueCategory {
+  readonly label: string;
+  readonly filters: readonly {
+    readonly key: string;
+    readonly pattern: string;
+  }[];
+}
+
+const LOCAL_VENUE_CATEGORIES: ReadonlyArray<{
+  readonly pattern: RegExp;
+  readonly category: LocalVenueCategory;
+}> = [
+  {
+    pattern: /\b(?:restaurants?|resturants?|restuarants?|places?\s+to\s+eat|eater(?:y|ies)|caf(?:e|é)s?|coffee\s+shops?|bars?|pubs?)\b/iu,
+    category: {
+      label: 'dining',
+      filters: [{ key: 'amenity', pattern: '^(restaurant|cafe|fast_food|bar|pub)$' }],
+    },
+  },
+  {
+    pattern: /\b(?:hotels?|hostels?)\b/iu,
+    category: {
+      label: 'accommodation',
+      filters: [{ key: 'tourism', pattern: '^(hotel|guest_house|hostel|motel)$' }],
+    },
+  },
+  {
+    pattern: /\b(?:gyms?|fitness\s+cent(?:er|re)s?)\b/iu,
+    category: {
+      label: 'fitness',
+      filters: [{ key: 'leisure', pattern: '^fitness_centre$' }],
+    },
+  },
+  {
+    pattern: /\b(?:dentists?|doctors?|clinics?|pharmacies?|hospitals?)\b/iu,
+    category: {
+      label: 'healthcare',
+      filters: [{ key: 'amenity', pattern: '^(dentist|doctors|clinic|pharmacy|hospital)$' }],
+    },
+  },
+  {
+    pattern: /\b(?:shops?|stores?|grocer(?:y|ies)|supermarkets?)\b/iu,
+    category: {
+      label: 'shopping',
+      filters: [{ key: 'shop', pattern: '^(supermarket|convenience|department_store|general)$' }],
+    },
+  },
+  {
+    pattern: /\b(?:hairdressers?|barbers?|salons?)\b/iu,
+    category: {
+      label: 'hair and beauty',
+      filters: [{ key: 'shop', pattern: '^(hairdresser|beauty)$' }],
+    },
+  },
+  {
+    pattern: /\b(?:mechanics?|car\s+repair)\b/iu,
+    category: {
+      label: 'car repair',
+      filters: [{ key: 'shop', pattern: '^car_repair$' }],
+    },
+  },
+  {
+    pattern: /\b(?:cinemas?|movie\s+theaters?|attractions?|things?\s+to\s+do)\b/iu,
+    category: {
+      label: 'attractions',
+      filters: [
+        { key: 'amenity', pattern: '^cinema$' },
+        { key: 'tourism', pattern: '^(attraction|museum|gallery|theme_park|viewpoint)$' },
+      ],
+    },
+  },
+];
+
+const localVenueRequestCache = new Map<string, Promise<RawSearchResult[]>>();
+const localBusinessContactCache = new Map<string, Promise<RawSearchResult[]>>();
+
+function extractLocalRecommendationLocation(query: string): string | null {
+  const normalized = normalizeCommonTypos(query)
+    .replace(/\b(?:reviews?|menus?|official|opening\s+hours?|local\s+guide|current|latest|nearby)\b.*$/iu, '')
+    .replace(/[?.!,;:]+$/g, '')
+    .trim();
+  const match = normalized.match(/\b(?:in|near|around|close\s+to|i|nær|rundt)\s+([\p{L}\d][\p{L}\d .,'’\-]{1,80})$/iu);
+  if (!match?.[1]) return null;
+  return match[1].trim().replace(/\s+/g, ' ');
+}
+
+function classifyLocalVenueCategory(query: string): LocalVenueCategory | null {
+  return LOCAL_VENUE_CATEGORIES.find(({ pattern }) => pattern.test(query))?.category ?? null;
+}
+
+function escapeOverpassString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function humanizeOsmValue(value: string): string {
+  return value.replace(/_/g, ' ').replace(/;/g, ', ');
+}
+
+function firstHttpUrl(tags: Record<string, string>): string | null {
+  for (const key of ['website', 'contact:website']) {
+    const value = tags[key]?.trim();
+    if (value && /^https?:\/\//i.test(value)) return value;
+  }
+  return null;
+}
+
+function buildLocalVenueSnippet(
+  name: string,
+  category: LocalVenueCategory,
+  requestedLocation: string,
+  resolvedLocation: string,
+  tags: Record<string, string>,
+): string {
+  const details: string[] = [
+    `${name} is listed as a ${humanizeOsmValue(tags.amenity ?? tags.tourism ?? tags.shop ?? category.label)} near ${requestedLocation}`,
+  ];
+  if (resolvedLocation.toLowerCase() !== requestedLocation.toLowerCase()) {
+    details[0] += ` (${resolvedLocation})`;
+  }
+  details[0] += '.';
+
+  if (tags.cuisine) details.push(`Cuisine: ${humanizeOsmValue(tags.cuisine)}.`);
+  if (tags.opening_hours) details.push(`Opening hours: ${tags.opening_hours}.`);
+  if (tags.delivery) details.push(`Delivery: ${humanizeOsmValue(tags.delivery)}.`);
+  if (tags.outdoor_seating) details.push(`Outdoor seating: ${humanizeOsmValue(tags.outdoor_seating)}.`);
+  if (tags.phone) details.push(`Phone: ${tags.phone}.`);
+  const website = firstHttpUrl(tags);
+  if (website) details.push(`Website: ${website}.`);
+  details.push('OpenStreetMap confirms the listing details but does not provide a quality rating.');
+  return details.join(' ');
+}
+
+async function fetchOpenStreetMapLocalRecommendation(
+  query: string,
+  timeoutMs: number,
+): Promise<RawSearchResult[]> {
+  if (!isFreshLocalRecommendationRequest(query)) return [];
+  const requestedLocation = extractLocalRecommendationLocation(query);
+  const category = classifyLocalVenueCategory(query);
+  if (!requestedLocation || !category) return [];
+
+  const cacheKey = `${category.label}:${requestedLocation.toLowerCase()}`;
+  const cached = localVenueRequestCache.get(cacheKey);
+  if (cached) return cached;
+
+  const request = (async (): Promise<RawSearchResult[]> => {
+    const headers = {
+      'User-Agent': 'VeggaAI/1.0 (local recommendation research)',
+      'Accept-Language': 'en,no;q=0.9',
+    };
+    const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(requestedLocation)}`;
+    const geocodeResponse = await fetch(geocodeUrl, {
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!geocodeResponse.ok) return [];
+
+    const geocoded = await geocodeResponse.json() as Array<{
+      lat?: string;
+      lon?: string;
+      display_name?: string;
+    }>;
+    const place = geocoded[0];
+    const latitude = Number(place?.lat);
+    const longitude = Number(place?.lon);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
+
+    const selectors = category.filters
+      .map(({ key, pattern }) => `nwr["${escapeOverpassString(key)}"~"${escapeOverpassString(pattern)}"](around:7000,${latitude},${longitude});`)
+      .join('');
+    const overpassQuery = `[out:json][timeout:18];(${selectors});out center tags 50;`;
+    const overpassUrl = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`;
+    const overpassResponse = await fetch(overpassUrl, {
+      headers,
+      signal: AbortSignal.timeout(Math.max(timeoutMs, 20_000)),
+    });
+    if (!overpassResponse.ok) return [];
+
+    const data = await overpassResponse.json() as {
+      elements?: Array<{
+        type?: 'node' | 'way' | 'relation';
+        id?: number;
+        tags?: Record<string, string>;
+      }>;
+    };
+    const resolvedLocation = place?.display_name?.split(',').slice(0, 3).join(',').trim() || requestedLocation;
+    const results: RawSearchResult[] = [];
+    for (const element of data.elements ?? []) {
+      const tags = element.tags ?? {};
+      const name = tags.name?.trim() || tags.brand?.trim();
+      if (!name || !element.type || !element.id) continue;
+      results.push({
+        title: name,
+        snippet: buildLocalVenueSnippet(name, category, requestedLocation, resolvedLocation, tags),
+        url: `https://www.openstreetmap.org/${element.type}/${element.id}`,
+      });
+      if (results.length >= 12) break;
+    }
+    return results;
+  })().catch(() => [] as RawSearchResult[]);
+
+  localVenueRequestCache.set(cacheKey, request);
+  void request.finally(() => {
+    setTimeout(() => localVenueRequestCache.delete(cacheKey), 5 * 60_000).unref?.();
+  });
+  return request;
+}
+
+function extractLocalBusinessSearchSubject(query: string): string | null {
+  const normalized = normalizeCommonTypos(query)
+    .replace(/^(?:(?:you\s+should|please|can\s+you)\s+)?(?:find|look\s+up|search(?:\s+for)?|check|verify)\s+/i, '')
+    .replace(/^(?:it|that|this)\s+(?:online|on\s+the\s+web|the\s+web|google)\s*/i, '')
+    .replace(/^(?:the\s+)?(?:phone(?:\s+number)?|telephone(?:\s+number)?|contact(?:\s+details?)?|address|opening\s+hours?|website|email)\s*(?:online\s*)?(?:for|of|to)?\s*/i, '')
+    .replace(/[?.!,;:]+$/g, '')
+    .trim();
+  return normalized.length >= 3 ? normalized : null;
+}
+
+function firstContactValue(tags: Record<string, string>, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    const value = tags[key]?.trim();
+    if (value) return value;
+  }
+  return null;
+}
+
+function buildLocalBusinessContactSnippet(
+  name: string,
+  displayName: string,
+  tags: Record<string, string>,
+): string {
+  const details = [`${name} is currently listed at ${displayName}.`];
+  const phone = firstContactValue(tags, ['phone', 'contact:phone']);
+  const website = firstContactValue(tags, ['website', 'contact:website']);
+  const email = firstContactValue(tags, ['email', 'contact:email']);
+  if (phone) details.push(`Phone: ${phone}.`);
+  if (website) details.push(`Website: ${website}.`);
+  if (email) details.push(`Email: ${email}.`);
+  if (tags.opening_hours) details.push(`Opening hours: ${tags.opening_hours}.`);
+  return details.join(' ');
+}
+
+async function fetchOpenStreetMapBusinessContact(
+  query: string,
+  timeoutMs: number,
+): Promise<RawSearchResult[]> {
+  if (!isFreshLocalBusinessContactRequest(query)) return [];
+  const subject = extractLocalBusinessSearchSubject(query);
+  if (!subject) return [];
+
+  const cacheKey = subject.toLowerCase();
+  const cached = localBusinessContactCache.get(cacheKey);
+  if (cached) return cached;
+
+  const request = (async (): Promise<RawSearchResult[]> => {
+    const headers = {
+      'User-Agent': 'VeggaAI/1.0 (public business contact research)',
+      'Accept-Language': 'en,no;q=0.9',
+    };
+    const searchUrl = [
+      'https://nominatim.openstreetmap.org/search?format=jsonv2',
+      'limit=5',
+      'addressdetails=1',
+      'extratags=1',
+      'namedetails=1',
+      `q=${encodeURIComponent(subject)}`,
+    ].join('&');
+    const response = await fetch(searchUrl, {
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) return [];
+
+    const results = await response.json() as Array<{
+      osm_type?: 'node' | 'way' | 'relation';
+      osm_id?: number;
+      name?: string;
+      display_name?: string;
+      extratags?: Record<string, string>;
+      namedetails?: Record<string, string>;
+    }>;
+
+    const requestedPhone = /\b(?:phone|telephone)\b/i.test(query);
+    const requestedWebsite = /\bwebsite\b/i.test(query);
+    const requestedEmail = /\bemail\b/i.test(query);
+    const requestedHours = /\bopening\s+hours?\b/i.test(query);
+
+    return results.flatMap((result): RawSearchResult[] => {
+      if (!result.osm_type || !result.osm_id) return [];
+      const tags = result.extratags ?? {};
+      const phone = firstContactValue(tags, ['phone', 'contact:phone']);
+      const website = firstContactValue(tags, ['website', 'contact:website']);
+      const email = firstContactValue(tags, ['email', 'contact:email']);
+      if (requestedPhone && !phone) return [];
+      if (requestedWebsite && !website) return [];
+      if (requestedEmail && !email) return [];
+      if (requestedHours && !tags.opening_hours) return [];
+
+      const name = result.name?.trim()
+        || result.namedetails?.name?.trim()
+        || result.namedetails?.brand?.trim();
+      if (!name) return [];
+      const displayName = result.display_name?.trim() || subject;
+      return [{
+        title: name,
+        snippet: buildLocalBusinessContactSnippet(name, displayName, tags),
+        url: `https://www.openstreetmap.org/${result.osm_type}/${result.osm_id}`,
+      }];
+    });
+  })().catch(() => [] as RawSearchResult[]);
+
+  localBusinessContactCache.set(cacheKey, request);
+  void request.finally(() => {
+    setTimeout(() => localBusinessContactCache.delete(cacheKey), 5 * 60_000).unref?.();
+  });
+  return request;
+}
 
 function normalizePackageToken(value: string): string {
   return value.replace(/^[^a-z0-9]+|[^a-z0-9._-]+$/gi, '').trim();
@@ -1516,6 +1869,14 @@ async function fetchProviderChain(query: string, config: SearchPipelineConfig, p
   const providers: Array<() => Promise<RawSearchResult[]>> = [];
   const pypiPackage = extractPyPIPackageName(query, packageHints);
 
+  if (isFreshLocalBusinessContactRequest(query)) {
+    providers.push(() => fetchOpenStreetMapBusinessContact(query, config.fetchTimeoutMs));
+  }
+
+  if (isFreshLocalRecommendationRequest(query)) {
+    providers.push(() => fetchOpenStreetMapLocalRecommendation(query, config.fetchTimeoutMs));
+  }
+
   if (pypiPackage) {
     providers.push(() => fetchPyPI(pypiPackage, config.fetchTimeoutMs));
   }
@@ -1792,11 +2153,41 @@ function cleanLeadText(text: string): string {
   cleaned = cleaned.replace(/\s*[·\u00b7]\s*Top\s+reply\s*:\s*.*$/i, '').trim();
   // Collapse double spaces created by stripping.
   cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+  // Repair a common snippet-boundary fragment: a clipped copula before
+  // "the ..." should render as a direct statement, not a lowercase clause.
+  cleaned = cleaned.replace(/^(?:is|are|was|were)\s+the\s+/i, 'The ');
+  cleaned = cleaned.replace(/^([a-z])/, (letter) => letter.toUpperCase());
   return cleaned;
+}
+
+function looksLikePromotionalCopy(text: string): boolean {
+  const signals = [
+    /\bstart for free\b/i,
+    /\bget started\b/i,
+    /\bfastest path\b/i,
+    /\bself-serve\b/i,
+    /\blaunch and manage\b/i,
+    /\bwithout the complexity\b/i,
+    /\bcontact sales\b/i,
+    /\bbook a demo\b/i,
+  ];
+  return signals.filter((pattern) => pattern.test(text)).length >= 2;
+}
+
+function looksLikeWeakStandaloneLead(text: string): boolean {
+  return /^(?:however|but|and|so|also|instead|meanwhile|therefore|thus|first of all|in turn|of)\b[\s,:-]*/i.test(text.trim())
+    || /^(?:it|this|that|they|these|those)\b/i.test(text.trim())
+    || looksLikePromotionalCopy(text);
 }
 
 function looksLikeNoisyUiSentence(sentence: string): boolean {
   if (NOISY_SENTENCE_PATTERN.test(sentence)) return true;
+  if (/^from wikipedia, the free encyclopedia\b/i.test(sentence)) return true;
+  if (/^this article is about\b/i.test(sentence)) return true;
+  if (/\bfor other uses, see\b/i.test(sentence)) return true;
+  if (/\bdisambiguation\b/i.test(sentence) && sentence.length < 220) return true;
+  if (/\binterval of 1\s+\d{3}(?:\s+\d{3})+\s+seconds?\b/i.test(sentence)) return true;
+  if (looksLikePromotionalCopy(sentence)) return true;
   const compact = sentence.replace(/\s+/g, '');
   const punctuationCount = (compact.match(/[^a-zA-Z0-9]/g) ?? []).length;
   return compact.length > 0 && (punctuationCount / compact.length) > 0.22;
@@ -2133,10 +2524,12 @@ function buildEvidenceSummary(
   const normalizedQuery = normalizeSearchQuery(query);
   const primarySubject = extractPrimarySubject(normalizedQuery, plan.entities);
   const comparisonSubject = extractComparisonSubject(normalizedQuery);
+  const relevanceShape = inferRelevanceShape(query, plan);
   const candidates: Array<{ text: string; sourceIndex: number; score: number }> = [];
   const summaryCandidates: Array<{ text: string; sourceIndex: number; score: number }> = [];
   const reasons: Array<{ label: string; sourceIndex: number }> = [];
   const seenReasonLabels = new Set<string>();
+  const actionQuestion = extractActionQuestionParts(query);
 
   // Intent-aware source-trust weighting: for opinion/recommendation queries,
   // community forums (reddit/HN/SO) are more relevant than encyclopedic
@@ -2165,10 +2558,26 @@ function buildEvidenceSummary(
 
   for (let sourceIndex = 0; sourceIndex < used.length; sourceIndex += 1) {
     const snippet = used[sourceIndex];
+    if (actionQuestion) {
+      const actionEvidence = extractActionEvidenceSentence(query, snippet.text, snippet.title);
+      if (actionEvidence) {
+        const score = 20
+          + (snippet.trust.tier === 'high' ? 3 : snippet.trust.tier === 'medium' ? 1 : -3)
+          + Math.min(snippet.rank, 2.5);
+        const candidate = { text: actionEvidence, sourceIndex, score };
+        candidates.push(candidate);
+        summaryCandidates.push(candidate);
+      }
+      continue;
+    }
     const sentences = splitIntoSentences(snippet.text);
 
     for (const sentence of sentences) {
+      if (relevanceShape === 'causal' && !causalSentenceAnswersQuery(sentence, primarySubject)) {
+        continue;
+      }
       let score = sentenceScore(sentence, query, plan, primarySubject, comparisonSubject);
+      if (relevanceShape === 'causal') score += causalSentenceStrength(sentence);
       score += snippet.trust.tier === 'high' ? 3 : snippet.trust.tier === 'medium' ? 1 : -3;
       score += _sourceIntentBoost(snippet);
       score += Math.min(snippet.rank, 2.5);
@@ -2214,16 +2623,26 @@ function buildEvidenceSummary(
 
   candidates.sort((a, b) => b.score - a.score);
   summaryCandidates.sort((a, b) => b.score - a.score);
-  const summary = summaryCandidates[0] ?? candidates[0] ?? null;
+  const summary = relevanceShape === 'causal'
+    ? candidates.find((candidate) => !looksLikeWeakStandaloneLead(candidate.text)) ?? null
+    : summaryCandidates.find((candidate) => !looksLikeWeakStandaloneLead(candidate.text))
+      ?? candidates.find((candidate) => !looksLikeWeakStandaloneLead(candidate.text))
+      ?? null;
   const supporting: Array<{ text: string; sourceIndex: number }> = [];
 
+  const directCausalSupport = relevanceShape === 'causal'
+    ? candidates.filter((candidate) => causalSentenceStrength(candidate.text) >= 8)
+    : [];
   const preferredSupport = plan.intent === 'comparison'
     ? candidates.filter((candidate) => /\b(?:privacy|tracked|profiled|metasearch|aggregates?|self-host|search providers|instant-answer|instant answer|results)\b/i.test(candidate.text) && hasExplanatoryVerb(candidate.text))
-    : candidates;
+    : relevanceShape === 'causal' && directCausalSupport.length > 0
+      ? directCausalSupport
+      : candidates;
 
   for (const candidate of preferredSupport) {
     if (supporting.length >= 2) break;
     if (summary && candidate.text === summary.text) continue;
+    if (looksLikeWeakStandaloneLead(candidate.text)) continue;
     if (supporting.some((entry) => entry.text === candidate.text)) continue;
     supporting.push({ text: candidate.text, sourceIndex: candidate.sourceIndex });
   }
@@ -2248,7 +2667,7 @@ const SEARCH_STOPWORDS = new Set([
   'what','who','where','when','why','how','which','whom',
   'do','does','did','doing','done','have','has','had','having',
   'can','could','should','would','will','shall','may','might','must',
-  'me','us','them','him','so','just','very','really','about','tell','give','show','say','said','please','some','any','all','no','not','yes',
+  'me','us','them','him','so','just','very','really','about','tell','give','show','say','said','please','some','any','all','no','not','yes','per',
   'thing','things','stuff','okay','ok','well','um','uh','hey','hi','hello','yo','vai',
 ]);
 function extractContentWords(text: string): Set<string> {
@@ -2259,9 +2678,11 @@ function extractContentWords(text: string): Set<string> {
 }
 type RelevanceShape =
   | 'population'
+  | 'yes-no'
   | 'recommendation'
   | 'comparison'
   | 'temporal'
+  | 'causal'
   | 'definition'
   | 'how-to'
   | 'generic';
@@ -2271,6 +2692,7 @@ export interface SnippetRelevanceAssessment {
   readonly matched: boolean;
   readonly shape: RelevanceShape;
   readonly topicHits: number;
+  readonly topicCoverage: number;
   readonly queryHits: number;
   readonly shapeMatched: boolean;
 }
@@ -2279,18 +2701,26 @@ const RELEVANCE_TOPIC_NOISE = new Set([
   'many','much','people','person','live','lives','living','population','inhabitants','residents',
   'recommend','recommended','recommendation','using','use','uses','should','would','could','good',
   'best','top','worth','bigger','larger','smaller','compare','compared','than','difference',
-  'when','date','year','latest','current','release','released','version','what','which','where',
-  'explain','briefly','simple','simply','words','there','that','this','one',
+  'when','date','year','latest','current','stable','release','released','version','what','which','where',
+  'explain','briefly','simple','simply','words','facts','there','that','this','one',
+  'cause','causes','caused','reason','reasons',
+  'phone','telephone','number','contact','details','online','website','email','address',
+]);
+
+const SHORT_TOPIC_ACRONYMS = new Set([
+  'ai', 'ar', 'db', 'ev', 'ml', 'os', 'ui', 'ux', 'vr',
 ]);
 
 function inferRelevanceShape(query: string, plan: VaiSearchPlan): RelevanceShape {
-  const q = query.toLowerCase();
+  const q = normalizeCommonTypos(query).toLowerCase();
   if (/\b(?:how\s+many\s+people|population|inhabitants?|residents?|people\s+live|lives?\s+there)\b/.test(q)) return 'population';
+  if (/^(?:does|do|did|can|could|will|would|has|have|had|should|is|are)\b/.test(q)) return 'yes-no';
   if (/\b(?:recommend|should\s+i|would\s+you|worth\s+it|good\s+(?:idea|for)|which\s+one|best|top)\b/.test(q) || plan.intent === 'recommendation') return 'recommendation';
   if (/\b(?:bigger|larger|smaller|higher|lower|more\s+than|less\s+than|vs\.?|versus|compare|compared|difference\s+between)\b/.test(q) || plan.intent === 'comparison') return 'comparison';
   if (/\b(?:when|what\s+(?:year|date)|latest|current|release(?:d)?|version|today|now|202[4-9])\b/.test(q) || plan.intent === 'temporal' || plan.intent === 'current') return 'temporal';
-  if (/^(?:what(?:'s|\s+is|\s+are)|who(?:\s+is|\s+are)|define|hva\s+er)\b/i.test(query) || plan.intent === 'definition' || plan.intent === 'person') return 'definition';
-  if (/\bhow\s+(?:to|do|can|does)\b/i.test(query) || plan.intent === 'how-to' || plan.intent === 'troubleshoot') return 'how-to';
+  if (/\b(?:causes?|caused\s+by|what\s+(?:caused|led\s+to|triggered|drove)|reasons?\s+for|why\s+(?:did|does|is|are|was|were))\b/.test(q)) return 'causal';
+  if (/^(?:what(?:'s|\s+is|\s+are)|who(?:\s+is|\s+are)|define|explain|describe|hva\s+er|forklar|beskriv)\b/i.test(q) || plan.intent === 'definition' || plan.intent === 'person') return 'definition';
+  if (/\bhow\s+(?:to|do|can|does)\b/i.test(q) || plan.intent === 'how-to' || plan.intent === 'troubleshoot') return 'how-to';
   return 'generic';
 }
 
@@ -2298,12 +2728,16 @@ function answerShapeMatches(shape: RelevanceShape, combined: string): boolean {
   switch (shape) {
     case 'population':
       return /\b(?:population|inhabitants?|residents?|census|metro\s+area|urban\s+area|municipality|people\s+(?:live|living)|lives?\s+in|\d[\d.,]*\s*(?:million|thousand|residents?|inhabitants?|people))\b/i.test(combined);
+    case 'yes-no':
+      return /\b(?:yes|no|has|have|had|makes?|made|sells?|sold|offers?|serves?|produces?|stocks?|carr(?:y|ies)|provides?|supports?|includes?|contains?|eats?|drinks?|available|menu|products?|manufactured?\s+by)\b/i.test(combined);
     case 'recommendation':
-      return /\b(?:recommend|should|worth|useful|good\s+(?:choice|idea|for)|depends?|trade-?offs?|pros?|cons?|privacy|security|trust|risk|benefit|drawback|alternative|avoid|choose|prefer)\b/i.test(combined);
+      return /\b(?:recommend|should|worth|useful|good\s+(?:choice|idea|for)|depends?|trade-?offs?|pros?|cons?|privacy|security|trust|risk|benefit|drawback|alternative|avoid|choose|prefer|restaurant|dining|eatery|cafe|café|menu|cuisine|food|reviews?|ratings?|stars?|address|located|opening\s+hours?|open\s+(?:now|today))\b/i.test(combined);
     case 'comparison':
       return /\b(?:bigger|larger|smaller|higher|lower|more\s+than|less\s+than|compared?|difference|versus|vs\.?|whereas|unlike|instead|advantage|trade-?off|area|population|rank|size|larger\s+than|smaller\s+than|privacy|metasearch|aggregates?|multiple\s+search\s+services|instant\s+answer|zero-click|api|not\s+a\s+general)\b/i.test(combined);
     case 'temporal':
-      return /\b(?:released?|release\s+date|launched?|came\s+out|available|latest|current|version|changelog|announced|scheduled|20\d{2}|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i.test(combined);
+      return /\b(?:released?|release\s+date|launched?|came\s+out|available|latest|current(?:ly)?|version|changelog|announced|scheduled|20\d{2}|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i.test(combined);
+    case 'causal':
+      return /\b(?:because(?:\s+of)?|caused?\s+by|causes?\s+(?:include|included|are|were)|due\s+to|led\s+to|result(?:ed|s)?\s+from|driven\s+by|triggered\s+by|contributed\s+to|root\s+causes?|reasons?\s+(?:include|included|are|were|for)|factors?\s+(?:include|included|are|were|behind|contributed))\b/i.test(combined);
     case 'definition':
       return /\b(?:is|are|was|were|refers\s+to|means|describes|known\s+as|defined\s+as|type\s+of|kind\s+of|creator|founded|born)\b/i.test(combined);
     case 'how-to':
@@ -2313,34 +2747,241 @@ function answerShapeMatches(shape: RelevanceShape, combined: string): boolean {
   }
 }
 
+function causalSentenceStrength(sentence: string): number {
+  if (/\b(?:caused?\s+by|result(?:ed|s)?\s+from|because(?:\s+of)?|due\s+to)\b/i.test(sentence)) return 12;
+  if (/\b(?:led\s+to|driven\s+by|triggered\s+by|root\s+causes?|factors?\s+(?:include|included|are|were|behind))\b/i.test(sentence)) return 8;
+  if (/\b(?:contributed\s+to|contributor\s+to)\b/i.test(sentence)) return 2;
+  return 0;
+}
+
+function causalSentenceAnswersQuery(sentence: string, primarySubject: string): boolean {
+  if (!answerShapeMatches('causal', sentence)) return false;
+  if (!primarySubject) return true;
+
+  const target = primarySubject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const targetBeforeCause = new RegExp(
+    `\\b${target}\\b.{0,100}\\b(?:caused?\\s+by|result(?:ed|s)?\\s+from|due\\s+to|driven\\s+by|triggered\\s+by|root\\s+causes?|reasons?\\s+(?:include|included|are|were)|factors?\\s+(?:include|included|are|were|behind))\\b`,
+    'i',
+  );
+  const causeBeforeTarget = new RegExp(
+    `\\b(?:led\\s+to|caused?|triggered|contributed\\s+to|contributor\\s+to)\\b.{0,120}\\b${target}\\b`,
+    'i',
+  );
+  return targetBeforeCause.test(sentence) || causeBeforeTarget.test(sentence);
+}
+
 function countWordHits(words: ReadonlySet<string>, text: string): number {
-  const lower = text.toLowerCase();
   let hits = 0;
   for (const word of words) {
-    if (lower.includes(word)) hits += 1;
+    if (textHasTopicAnchor(text, word)) hits += 1;
   }
   return hits;
 }
 
-function extractTopicAnchorsForRelevance(query: string, plan: VaiSearchPlan): Set<string> {
-  const anchors = new Set<string>();
+interface WeightedTopicAnchor {
+  readonly value: string;
+  readonly weight: number;
+}
+
+interface ActionQuestionParts {
+  readonly subject: readonly string[];
+  readonly predicate: string;
+  readonly object: readonly string[];
+}
+
+const ACTION_QUESTION_PREDICATE =
+  'make|makes|made|making|manufacture|manufactures|manufactured|produce|produces|produced|sell|sells|sold|selling|stock|stocks|stocked|carry|carries|carried|have|has|had|offer|offers|offered|serve|serves|served|provide|provides|provided|support|supports|supported|include|includes|included|contain|contains|contained|eat|eats|ate|eating|drink|drinks|drank|drinking';
+
+function extractActionQuestionParts(query: string): ActionQuestionParts | null {
+  const normalized = normalizeCommonTypos(query)
+    .toLowerCase()
+    .replace(/[?.!]+$/g, '')
+    .trim();
+  const match = normalized.match(
+    new RegExp(`^(?:does|do|did|can|could|will|would|has|have|had|should|is|are)\\s+(.+?)\\s+(${ACTION_QUESTION_PREDICATE})\\s+(.+)$`, 'i'),
+  );
+  if (!match) return null;
+
+  const extract = (value: string): string[] => value
+    .split(/\s+/)
+    .map(sanitizeEntityToken)
+    .filter((token) => token.length >= 3)
+    .filter((token) => !SEARCH_STOPWORDS.has(token) && !RELEVANCE_TOPIC_NOISE.has(token));
+  const subject = extract(match[1]);
+  const object = extract(match[3]);
+  if (subject.length === 0 || object.length === 0) return null;
+  return { subject, predicate: match[2].toLowerCase(), object };
+}
+
+function topicAnchorWeight(value: string): number {
+  const compactLength = value.replace(/[^a-z0-9]/gi, '').length;
+  let weight = 1;
+  if (compactLength >= 8) weight += 0.4;
+  else if (compactLength >= 5) weight += 0.2;
+  if (/[.+#-]/.test(value)) weight += 0.35;
+  return weight;
+}
+
+function topicAnchorVariants(value: string): string[] {
+  const variants = new Set([value.toLowerCase()]);
+  if (value.length >= 5 && value.endsWith('ies')) variants.add(`${value.slice(0, -3)}y`);
+  else if (value.length >= 5 && value.endsWith('s') && !value.endsWith('ss')) variants.add(value.slice(0, -1));
+  else if (value.length >= 4) variants.add(`${value}s`);
+  return [...variants];
+}
+
+function textHasTopicAnchor(text: string, value: string): boolean {
+  const lower = text.toLowerCase();
+  return topicAnchorVariants(value).some((variant) => {
+    const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, 'i').test(lower);
+  });
+}
+
+function extractTopicAnchorsForRelevance(query: string, plan: VaiSearchPlan): WeightedTopicAnchor[] {
+  const anchors = new Map<string, WeightedTopicAnchor>();
   const add = (value: string): void => {
-    const cleaned = sanitizeEntityToken(value).toLowerCase();
-    if (cleaned.length < 3) return;
+    const raw = sanitizeEntityToken(value);
+    const cleaned = raw.toLowerCase();
+    const shortAcronym = /^[A-Z0-9]{2,6}$/.test(raw) || SHORT_TOPIC_ACRONYMS.has(cleaned);
+    if (cleaned.length < 3 && !shortAcronym) return;
     if (SEARCH_STOPWORDS.has(cleaned) || RELEVANCE_TOPIC_NOISE.has(cleaned)) return;
-    anchors.add(cleaned);
+    anchors.set(cleaned, { value: cleaned, weight: topicAnchorWeight(cleaned) + (shortAcronym ? 1.4 : 0) });
   };
+
+  const actionQuestion = extractActionQuestionParts(query);
+  if (actionQuestion) {
+    for (const token of [...actionQuestion.subject, ...actionQuestion.object]) add(token);
+    return [...anchors.values()];
+  }
 
   for (const entity of plan.entities.slice(0, 8)) {
     for (const token of entity.split(/\s+/)) add(token);
   }
+  if (anchors.size > 0) return [...anchors.values()];
+
+  // The planner normally owns topic extraction. Fall back to lexical anchors
+  // only when it found no entities at all, so filler words cannot dilute a
+  // valid single-entity definition such as "explain perplexity simply".
   for (const token of query.match(/\b[A-Z][A-Za-z0-9.+#-]{1,}\b/g) ?? []) {
     add(token);
   }
   for (const word of extractQueryAnchors(query)) {
     add(word);
   }
-  return anchors;
+  return [...anchors.values()];
+}
+
+function relevanceTextWindows(text: string): string[] {
+  const chunks = text
+    .split(/\n+|(?<=[.!?])\s+/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+  const windows: string[] = [];
+  for (const chunk of chunks) {
+    if (chunk.length <= 500) {
+      windows.push(chunk);
+      continue;
+    }
+    for (let start = 0; start < chunk.length; start += 350) {
+      windows.push(chunk.slice(start, start + 500));
+    }
+  }
+  return windows.length > 0 ? windows : [text];
+}
+
+function actionAnchorPattern(tokens: readonly string[]): string {
+  const variants = tokens.flatMap((token) => topicAnchorVariants(token));
+  const escaped = variants.map((variant) => variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return `(?:${escaped.join('|')})`;
+}
+
+function actionRelationshipPattern(parts: ActionQuestionParts): RegExp {
+  const subject = actionAnchorPattern(parts.subject);
+  const object = actionAnchorPattern(parts.object);
+  const forward = (verb: string): string => `\\b${subject}\\b.{0,100}\\b${verb}\\b.{0,100}\\b${object}\\b`;
+  const reverse = (verb: string, connector: string): string => `\\b${object}\\b.{0,100}\\b${verb}\\b.{0,30}\\b${connector}\\b.{0,80}\\b${subject}\\b`;
+
+  if (/^(?:make|makes|made|making|manufacture|manufactures|manufactured|produce|produces|produced)$/.test(parts.predicate)) {
+    return new RegExp(`${forward('(?:make|makes|made|making|manufacture|manufactures|manufactured|produce|produces|produced)')}|${reverse('(?:made|manufactured|produced)', 'by')}`, 'i');
+  }
+  if (/^(?:sell|sells|sold|selling|stock|stocks|stocked|carry|carries|carried)$/.test(parts.predicate)) {
+    return new RegExp(`${forward('(?:sell|sells|sold|selling|stock|stocks|stocked|carry|carries|carried|offer|offers|offered|include|includes|included)')}|${reverse('(?:sold|offered|available)', '(?:by|at|from|on)')}`, 'i');
+  }
+  if (/^(?:have|has|had|offer|offers|offered|serve|serves|served|provide|provides|provided|support|supports|supported|include|includes|included|contain|contains|contained)$/.test(parts.predicate)) {
+    return new RegExp(`${forward('(?:have|has|had|offer|offers|offered|serve|serves|served|provide|provides|provided|support|supports|supported|include|includes|included|contain|contains|contained|feature|features|featured)')}|${reverse('(?:available|featured)', '(?:by|at|from|on)')}|\\b${object}\\b.{0,40}\\bon\\b.{0,60}\\b${subject}\\b`, 'i');
+  }
+  if (/^(?:eat|eats|ate|eating|drink|drinks|drank|drinking)$/.test(parts.predicate)) {
+    return new RegExp(`${forward('(?:eat|eats|ate|eating|drink|drinks|drank|drinking)')}|\\b${object}\\b.{0,80}\\b(?:toxic|harmful|poisonous|unsafe)\\b.{0,40}\\b(?:for|to)\\b.{0,40}\\b${subject}\\b`, 'i');
+  }
+
+  const escaped = parts.predicate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(forward(escaped), 'i');
+}
+
+function extractActionEvidenceSentence(query: string, text: string, title = ''): string | null {
+  const actionQuestion = extractActionQuestionParts(query);
+  if (!actionQuestion) return null;
+  const relation = actionRelationshipPattern(actionQuestion);
+  return [title, ...relevanceTextWindows(text)].find((candidate) => {
+    if (!candidate || candidate.includes('?')) return false;
+    if (!actionQuestion.subject.every((token) => textHasTopicAnchor(candidate, token))) return false;
+    if (!actionQuestion.object.every((token) => textHasTopicAnchor(candidate, token))) return false;
+    return relation.test(candidate);
+  }) ?? null;
+}
+
+function actionEvidenceMatches(query: string, text: string, title = ''): boolean {
+  const actionQuestion = extractActionQuestionParts(query);
+  if (!actionQuestion) return answerShapeMatches('yes-no', `${title}\n${text}`);
+  return extractActionEvidenceSentence(query, text, title) !== null;
+}
+
+function assessTopicAnchorCoverage(anchors: readonly WeightedTopicAnchor[], text: string, title = ''): {
+  hits: number;
+  coverage: number;
+} {
+  const totalWeight = anchors.reduce((sum, anchor) => sum + anchor.weight, 0);
+  let bestHits = 0;
+  let bestMatchedWeight = 0;
+  for (const window of relevanceTextWindows(text)) {
+    const localText = title ? `${title}\n${window}` : window;
+    let hits = 0;
+    let matchedWeight = 0;
+    for (const anchor of anchors) {
+      if (!textHasTopicAnchor(localText, anchor.value)) continue;
+      hits += 1;
+      matchedWeight += anchor.weight;
+    }
+    if (matchedWeight <= bestMatchedWeight) continue;
+    bestHits = hits;
+    bestMatchedWeight = matchedWeight;
+  }
+  return {
+    hits: bestHits,
+    coverage: totalWeight > 0 ? bestMatchedWeight / totalWeight : 1,
+  };
+}
+
+function topicAnchorGateMatches(
+  anchors: readonly WeightedTopicAnchor[],
+  topicHits: number,
+  topicCoverage: number,
+  shape: RelevanceShape,
+): boolean {
+  if (anchors.length === 0) return true;
+  if (anchors.length === 1) return topicHits === 1;
+  // Comparison synthesis intentionally combines side-specific evidence: one
+  // source may describe SearXNG and another DuckDuckGo.
+  if (shape === 'comparison') return topicHits >= 1;
+  return topicHits >= 2 && topicCoverage >= 0.55;
+}
+
+function extractEntityQueryAnchors(query: string): Set<string> {
+  const plan = buildSearchPlan(query);
+  const anchors = extractTopicAnchorsForRelevance(query, plan);
+  if (anchors.length > 0) return new Set(anchors.map((anchor) => anchor.value));
+  return extractQueryAnchors(query);
 }
 
 function hasWrongShapePopulationNoise(combined: string): boolean {
@@ -2358,12 +2999,17 @@ export function scoreSnippetRelevanceForQuery(
   const lower = combined.toLowerCase();
   const queryWords = extractContentWords(query);
   const topicAnchors = extractTopicAnchorsForRelevance(query, plan);
-  const topicHits = countWordHits(topicAnchors, lower);
+  const { hits: topicHits, coverage: topicCoverage } = assessTopicAnchorCoverage(topicAnchors, snippet.text || '', snippet.title || '');
   const queryHits = countWordHits(queryWords, lower);
-  const shapeMatched = answerShapeMatches(shape, combined);
+  const primarySubject = extractPrimarySubject(normalizeSearchQuery(query), plan.entities);
+  const shapeMatched = shape === 'yes-no'
+    ? actionEvidenceMatches(query, snippet.text || '', snippet.title || '')
+    : shape === 'causal'
+      ? relevanceTextWindows(snippet.text || '').some((window) => causalSentenceAnswersQuery(window, primarySubject))
+    : answerShapeMatches(shape, combined);
 
   let score = 0;
-  if (topicAnchors.size > 0) score += Math.min(topicHits / topicAnchors.size, 1) * 0.45;
+  if (topicAnchors.length > 0) score += topicCoverage * 0.45;
   else if (queryWords.size > 0) score += Math.min(queryHits / queryWords.size, 1) * 0.35;
   else score += 0.35;
 
@@ -2390,8 +3036,7 @@ export function scoreSnippetRelevanceForQuery(
     score -= 0.35;
   }
 
-  const requiresTopic = topicAnchors.size > 0;
-  const topicOk = !requiresTopic || topicHits > 0;
+  const topicOk = topicAnchorGateMatches(topicAnchors, topicHits, topicCoverage, shape);
   const shapeOk = shape === 'generic' || shapeMatched || packageSupportSource;
   const threshold = shape === 'definition' || shape === 'generic' ? 0.38 : 0.5;
   const matched = packageSupportSource || (topicOk && shapeOk && score >= threshold);
@@ -2401,6 +3046,7 @@ export function scoreSnippetRelevanceForQuery(
     matched,
     shape,
     topicHits,
+    topicCoverage,
     queryHits,
     shapeMatched,
   };
@@ -2483,8 +3129,50 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[], had
   }
   const used = relevantUsed.slice(0, 5);
 
+  if (isFreshLocalBusinessContactRequest(query) && used.some((snippet) => snippet.domain === 'openstreetmap.org')) {
+    const listing = used.find((snippet) => snippet.domain === 'openstreetmap.org');
+    if (listing) {
+      const phone = /\bPhone:\s*((?:\+?\d[\d ()-]{5,}\d))/i.exec(listing.text)?.[1]?.trim();
+      const website = /\bWebsite:\s*(https?:\/\/\S+?)(?:\.\s|$)/i.exec(listing.text)?.[1]?.trim();
+      const email = /\bEmail:\s*(\S+@\S+?)(?:\.\s|$)/i.exec(listing.text)?.[1]?.trim();
+      const hours = /\bOpening hours:\s*(.+?)(?:\.\s|$)/i.exec(listing.text)?.[1]?.trim();
+      const sourceIndex = used.indexOf(listing);
+      const lines: string[] = [];
+      if (phone) lines.push(`The phone number for **${listing.title}** is **${phone}**. ${collectCitationMarks([sourceIndex])}`);
+      if (website) lines.push(`Website: ${website}. ${collectCitationMarks([sourceIndex])}`);
+      if (email) lines.push(`Email: ${email}. ${collectCitationMarks([sourceIndex])}`);
+      if (hours) lines.push(`Opening hours: ${hours}. ${collectCitationMarks([sourceIndex])}`);
+      if (lines.length > 0) {
+        lines.push('', 'This is the current public listing; contact details can change.');
+        return lines.join('\n');
+      }
+    }
+  }
+
+  if (isFreshLocalRecommendationRequest(query) && used.some((snippet) => snippet.domain === 'openstreetmap.org')) {
+    const location = extractLocalRecommendationLocation(query) ?? 'the requested area';
+    const venueListings = used.filter((snippet) => snippet.domain === 'openstreetmap.org').slice(0, 6);
+    const lines = [
+      `I found these currently listed options near ${location}. I can verify that the places are listed, but OpenStreetMap does not provide review scores, so I cannot honestly rank which one is "best":`,
+      '',
+    ];
+    for (let index = 0; index < venueListings.length; index++) {
+      const listing = venueListings[index];
+      const sourceIndex = used.indexOf(listing);
+      const detail = sanitizeSnippetText(listing.text)
+        .replace(new RegExp(`^${listing.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+is\\s+listed\\s+as\\s+`, 'i'), '')
+        .replace(/\s*OpenStreetMap confirms the listing details but does not provide a quality rating\.?\s*$/i, '')
+        .trim();
+      lines.push(`- **${listing.title}** - ${detail} ${collectCitationMarks([sourceIndex])}`.trim());
+    }
+    lines.push('');
+    lines.push('Check the linked listing, menu, and recent reviews before travelling; hours and ownership can change.');
+    return lines.join('\n');
+  }
+
   const lines: string[] = [];
   const { plan, primarySubject, comparisonSubject, summary, supporting, reasons } = buildEvidenceSummary(query, used);
+  const actionQuestion = extractActionQuestionParts(query);
   // Iter-17 guard: for "what is X" / "who is X" definition prompts, the lead
   // sentence must start with the entity + copula. Without this, retrieval
   // sometimes leads with a third-party mention fragment ("swift community
@@ -2603,7 +3291,7 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[], had
   // Multi-source citations on the lead show the reader Vai cross-checked.
   // queryAnchors gate prevents claiming "agreement" on generic vocabulary
   // unrelated to the actual question.
-  const queryAnchors = extractQueryAnchors(query);
+  const queryAnchors = extractEntityQueryAnchors(query);
   const leadAgreement = effectiveSummary
     ? findCrossSourceAgreement(effectiveSummary.text, used, effectiveSummary.sourceIndex, 3, queryAnchors)
     : { confirming: [] as number[], contradicting: [] as number[] };
@@ -2650,12 +3338,24 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[], had
 
   if (effectiveSummary) {
     const leadText = cleanLeadText(effectiveSummary.text);
-    lines.push(`${leadText} ${collectCitationMarks(leadCites)}`.trim());
+    if (actionQuestion) {
+      const isNegative = /\b(?:no|not|never|doesn'?t|don'?t|cannot|can'?t|shouldn'?t|mustn'?t|avoid|toxic|harmful|poisonous|unsafe)\b/i.test(leadText);
+      lines.push(`**${isNegative ? 'No' : 'Yes'}** - ${leadText} ${collectCitationMarks(leadCites)}`.trim());
+    } else {
+      lines.push(`${leadText} ${collectCitationMarks(leadCites)}`.trim());
+    }
   } else {
+    if (inferRelevanceShape(query, plan) === 'causal') {
+      return `I searched for "${query}" but the sources did not contain a direct explanation of the cause. I found related material, but I am not going to present it as a conclusion. Try rephrasing or being more specific.`;
+    }
     const fallbackSource = used[0];
     const fallbackText = sanitizeSnippetText(fallbackSource.text);
     const snippetText = fallbackText.length > 220 ? `${fallbackText.slice(0, 220)}...` : fallbackText;
-    lines.push(`${cleanLeadText(snippetText)} ${collectCitationMarks([0])}`.trim());
+    const fallbackLead = cleanLeadText(snippetText);
+    if (looksLikeWeakStandaloneLead(fallbackLead)) {
+      return `I searched for "${query}" but the sources did not contain a direct, useful answer. I found related material, but I am not going to present it as a conclusion. Try rephrasing or being more specific.`;
+    }
+    lines.push(`${fallbackLead} ${collectCitationMarks([0])}`.trim());
   }
 
   // Filter out the suppressed (off-topic) lead from supporting if it slipped in.
@@ -2742,19 +3442,13 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[], had
   if (effectiveSummary && leadAgreement.confirming.length >= 2 && used.length >= 3) {
     lines.push('');
     lines.push('Confidence: high — multiple independent sources told the same story, and I picked the lead from where they agreed.');
-  }
-
-  // Also render a compact footer so copied/logged answers remain
-  // self-contained outside the UI source sidebar.
-
-  if (used.length > 0) {
+  } else if (used.length > 0 && leadAgreement.confirming.length === 0) {
     lines.push('');
-    lines.push('**Sources**');
-    for (let i = 0; i < Math.min(used.length, 5); i++) {
-      const source = used[i];
-      const label = (source.title || source.domain || source.url).trim();
-      lines.push(`[${i + 1}] ${label} - ${source.url}`);
-    }
+    lines.push(
+      used.length === 1
+        ? 'Confidence: limited - I found one entity-relevant source, so treat this as sourced evidence rather than a cross-checked conclusion.'
+        : 'Confidence: limited - the sources are relevant, but I did not find a second source confirming the same claim.',
+    );
   }
 
   return lines.join('\n');
@@ -2769,14 +3463,14 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[], had
  */
 async function readPage(url: string, timeoutMs: number, maxChars: number): Promise<string | null> {
   try {
-    validateSearchUrl(url); // SSRF check
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
       headers: {
         'User-Agent': 'VeggaAI/0.1 (Local AI Learning Agent)',
         'Accept': 'text/html,application/xhtml+xml',
       },
       signal: AbortSignal.timeout(timeoutMs),
-      redirect: 'follow',
+    }, {
+      checkDns: process.env.NODE_ENV !== 'test',
     });
     if (!res.ok) return null;
 
@@ -2844,7 +3538,7 @@ async function readTopPages(
     if (s.url.includes('duckduckgo.com')) continue;
     try {
       const hostname = new URL(s.url).hostname.replace(/^www\./, '');
-      if (REGISTRY_METADATA_HOSTS.has(hostname)) continue;
+      if (REGISTRY_METADATA_HOSTS.has(hostname) || STRUCTURED_METADATA_HOSTS.has(hostname)) continue;
     } catch {
       continue;
     }
@@ -2962,7 +3656,28 @@ export class SearchPipeline {
     // Check cache first
     const cacheKey = contentFingerprint(query.toLowerCase());
     const cached = this.cache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      return {
+        ...cached,
+        durationMs: 0,
+        sync: {
+          ...cached.sync,
+          latencyMs: 0,
+        },
+        audit: [
+          {
+            step: 'fetch',
+            detail: `Cache hit: reused ${cached.sources.length} recently verified source${cached.sources.length === 1 ? '' : 's'}`,
+            durationMs: 0,
+          },
+          {
+            step: 'conclude',
+            detail: 'Reused the recent sourced answer; no new network request was made',
+            durationMs: 0,
+          },
+        ],
+      };
+    }
 
     const start = Date.now();
     const audit: AuditEntry[] = [];
@@ -3022,12 +3737,27 @@ export class SearchPipeline {
     // Oslo shooting news for an Oslo population question) from reaching the
     // answer body or the UI source list.
     const relevanceStart = Date.now();
-    const relevant = filterRelevantSnippetsForQuery(query, verified);
+    let relevant = filterRelevantSnippetsForQuery(query, verified);
     audit.push({
       step: 'rank',
       detail: `${relevant.length}/${verified.length} snippets survived relevance + answer-shape gate`,
       durationMs: Date.now() - relevanceStart,
     });
+
+    // Soft fallback: strict gate can drop every snippet (common on DDG-only
+    // runs). Prefer a cautious answer from top verified hits over empty sources.
+    if (relevant.length === 0 && verified.length > 0) {
+      const soft = verified.slice(0, Math.min(3, verified.length));
+      const softAnswer = synthesizeAnswer(query, soft, true);
+      if (!/didn't find anything|couldn't find useful/i.test(softAnswer)) {
+        relevant = soft;
+        audit.push({
+          step: 'rank',
+          detail: `soft-fallback: using ${relevant.length} top verified snippet(s) after strict gate`,
+          durationMs: 0,
+        });
+      }
+    }
 
     // Step 7: CONCLUDE — synthesize answer with citations
     const concludeStart = Date.now();

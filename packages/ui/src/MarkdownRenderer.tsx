@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { codeToHtml } from 'shiki';
 
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function normalizeLanguage(language: string): string {
@@ -84,10 +85,10 @@ function CodeBlock({ code, language, title }: { code: string; language: string; 
 
     setHighlightedCode(fallbackHighlightedHtml(code));
 
-    codeToHtml(code, {
+    import('shiki').then(({ codeToHtml }) => codeToHtml(code, {
       lang: normalizedLanguage,
       theme: 'dark-plus',
-    }).then((html) => {
+    })).then((html) => {
       if (cancelled) return;
       highlightCache.set(cacheKey, html);
       setHighlightedCode(html);
@@ -194,12 +195,21 @@ function parseMarkdown(content: string): Segment[] {
 }
 
 /** Apply inline token formatting (bold, italic, code, links) to a plain text string */
+function sanitizeHref(href: string): string {
+  const trimmed = href.trim();
+  return /^(https?:|mailto:)/i.test(trimmed) ? trimmed : '#';
+}
+
 function applyInlineStyles(text: string): string {
-  return text
+  return escapeHtml(text)
     .replace(/`([^`]+)`/g, '<code class="inline-code rounded px-1.5 py-0.5 text-[13px] font-mono">$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-zinc-50">$1</strong>')
     .replace(/\*([^*]+)\*/g, '<em class="italic">$1</em>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-violet-300 transition-colors hover:text-violet-200 hover:underline" target="_blank" rel="noopener">$1</a>');
+    .replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      (_match, label: string, href: string) =>
+        `<a href="${sanitizeHref(href)}" class="text-violet-300 transition-colors hover:text-violet-200 hover:underline" target="_blank" rel="noopener">${label}</a>`,
+    );
 }
 
 /**
@@ -270,7 +280,7 @@ function renderBlock(block: string): string {
   return parts.join('\n');
 }
 
-function renderInlineMarkdown(text: string): string {
+export function renderInlineMarkdown(text: string): string {
   // Split on paragraph breaks (2+ newlines), render each block, rejoin
   return text
     .split(/\n{2,}/)

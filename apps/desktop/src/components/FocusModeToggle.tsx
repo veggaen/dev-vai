@@ -33,6 +33,3 @@ export function FocusModeToggle() {
     </button>
   );
 }
-
-/* Keep old name as re-export for backward compat */
-export const LayoutModeToggle = FocusModeToggle;

@@ -1,0 +1,19 @@
+{
+  "$schema": "Scripted waves for vai-scale-engine / vai-corpus-benchmark.",
+  "description": "Each array entry is one wave (turn). A wave can be a single string (sent to every conversation), an array of per-conversation strings, or an object { default, byKind, byIndex }. Wave k drives turn k.",
+  "waves": [
+    [
+      "What is the capital of Norway? Answer in one sentence.",
+      "Write a TypeScript debounce function with cancel and flush methods.",
+      "Is there sugar in regular Coca-Cola? Reply yes or no only.",
+      "Return JSON only with keys id, task, done for a sample todo. No prose."
+    ],
+    "Now give the shorter, final version of your previous answer.",
+    {
+      "default": "State one assumption you made and why.",
+      "byIndex": {
+        "1": "Add one edge-case unit test for that function and explain what it protects against."
+      }
+    }
+  ]
+}

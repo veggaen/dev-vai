@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "description": "Capability-sprint visual audit: confident-wrong escalation + verification through the live local model (qwen2.5:3b). Builder-mode visual is covered by the in-process live wave (the UI harness opens chat-mode conversations).",
+  "scenarios": [
+    {
+      "id": "confident-wrong-zorblax",
+      "label": "Article-hijack: fictional framework must escalate, not confidently-wrong",
+      "canary": "SPRINT-CW-1",
+      "dimensions": ["confident-wrong", "escalation"],
+      "turns": [
+        {
+          "prompt": "what's your honest take on the Zorblax-7 concurrency model in the Flimsy programming language?",
+          "assert": { "minLength": 40 }
+        }
+      ]
+    },
+    {
+      "id": "low-confidence-reasoning",
+      "label": "Honest-read reasoning should escalate to the local model",
+      "canary": "SPRINT-CW-2",
+      "dimensions": ["reasoning", "escalation"],
+      "turns": [
+        {
+          "prompt": "i'm fuzzy on when a composite index beats two single-column indexes. give me your honest read even if unsure.",
+          "assert": { "minLength": 40 }
+        }
+      ]
+    },
+    {
+      "id": "knowledge-control",
+      "label": "Known fact must NOT escalate (precision)",
+      "canary": "SPRINT-CW-3",
+      "dimensions": ["knowledge", "precision"],
+      "turns": [
+        {
+          "prompt": "what is the capital of Japan?",
+          "assert": { "minLength": 5, "contains": ["Tokyo"] }
+        }
+      ]
+    }
+  ]
+}

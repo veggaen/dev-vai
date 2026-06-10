@@ -1,7 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { and, desc, eq, gt, inArray, lt, or } from 'drizzle-orm';
-import { schema, type VaiDatabase } from '@vai/core';
+import { and, desc, eq, gt, inArray, isNull, lt, or, schema, type VaiDatabase } from '@vai/core';
 import type { SandboxManager, SandboxProject } from '../sandbox/manager.js';
 
 export type ProjectRole = 'owner' | 'admin' | 'editor' | 'viewer' | 'tester';
@@ -57,6 +56,16 @@ export const HANDOFF_TARGETS: readonly HandoffTarget[] = ['desktop', 'vscode', '
 
 const WRITE_ROLES = new Set<ProjectRole>(['owner', 'admin', 'editor']);
 const READ_ROLES = new Set<ProjectRole>(['owner', 'admin', 'editor', 'viewer', 'tester']);
+const MANAGE_ROLES = new Set<ProjectRole>(['owner', 'admin']);
+const AUDIT_CONTRIBUTOR_ROLES = new Set<ProjectRole>(['owner', 'admin', 'editor', 'tester']);
+const ROLE_PRIORITY: Record<ProjectRole, number> = {
+  viewer: 0,
+  tester: 1,
+  editor: 2,
+  admin: 3,
+  owner: 4,
+};
+const PROJECT_SYNC_HEARTBEAT_MS = 60 * 1000;
 const HANDOFF_TTL_MS = 5 * 60 * 1000;
 const AUDIT_CLAIM_TTL_MS = 10 * 60 * 1000;
 
@@ -180,17 +189,26 @@ export class ProjectService {
     const slug = existing?.slug ?? `${slugify(project.name)}-${project.id}`;
 
     if (existing) {
-      this.db.update(schema.platformProjects)
-        .set({
-          ownerUserId: project.ownerUserId,
-          name: project.name,
-          rootDir: project.rootDir,
-          status: project.status,
-          lastSyncedAt: now,
-          updatedAt: now,
-        })
-        .where(eq(schema.platformProjects.id, projectId))
-        .run();
+      const metadataChanged = existing.ownerUserId !== project.ownerUserId
+        || existing.name !== project.name
+        || existing.rootDir !== project.rootDir
+        || existing.status !== project.status;
+      const heartbeatDue = !existing.lastSyncedAt
+        || now.getTime() - existing.lastSyncedAt.getTime() >= PROJECT_SYNC_HEARTBEAT_MS;
+
+      if (metadataChanged || heartbeatDue) {
+        this.db.update(schema.platformProjects)
+          .set({
+            ownerUserId: project.ownerUserId,
+            name: project.name,
+            rootDir: project.rootDir,
+            status: project.status,
+            lastSyncedAt: now,
+            updatedAt: now,
+          })
+          .where(eq(schema.platformProjects.id, projectId))
+          .run();
+      }
     } else {
       this.db.insert(schema.platformProjects)
         .values({
@@ -236,11 +254,35 @@ export class ProjectService {
   }
 
   listProjectsForUser(userId: string | null) {
-    const rows = this.db.select().from(schema.platformProjects).all();
-    return rows.filter((row) => this.canReadProject(row.id, userId)).map((row) => ({
-      ...row,
-      role: this.getProjectRole(row.id, userId),
-    }));
+    if (!userId) {
+      return this.db.select()
+        .from(schema.platformProjects)
+        .where(isNull(schema.platformProjects.ownerUserId))
+        .all()
+        .map((project) => ({ ...project, role: 'owner' as const }));
+    }
+
+    return this.db.select({
+      project: schema.platformProjects,
+      memberRole: schema.platformProjectMembers.role,
+    })
+      .from(schema.platformProjects)
+      .leftJoin(
+        schema.platformProjectMembers,
+        and(
+          eq(schema.platformProjectMembers.projectId, schema.platformProjects.id),
+          eq(schema.platformProjectMembers.userId, userId),
+        ),
+      )
+      .where(or(
+        eq(schema.platformProjects.ownerUserId, userId),
+        eq(schema.platformProjectMembers.userId, userId),
+      ))
+      .all()
+      .map(({ project, memberRole }) => ({
+        ...project,
+        role: project.ownerUserId === userId ? 'owner' as const : normalizeRole(memberRole ?? ''),
+      }));
   }
 
   getProject(projectId: string) {
@@ -282,6 +324,16 @@ export class ProjectService {
   canWriteProject(projectId: string, userId: string | null): boolean {
     const role = this.getProjectRole(projectId, userId);
     return role ? WRITE_ROLES.has(role) : false;
+  }
+
+  canManageProject(projectId: string, userId: string | null): boolean {
+    const role = this.getProjectRole(projectId, userId);
+    return role ? MANAGE_ROLES.has(role) : false;
+  }
+
+  canContributeAudit(projectId: string, userId: string | null): boolean {
+    const role = this.getProjectRole(projectId, userId);
+    return role ? AUDIT_CONTRIBUTOR_ROLES.has(role) : false;
   }
 
   canReadSandbox(sandboxProjectId: string, userId: string | null): boolean {
@@ -555,6 +607,13 @@ export class ProjectService {
     const nextKeys = new Set<string>();
 
     for (const input of peers) {
+      const preferredClientId = input.preferredClientId?.trim();
+      if (preferredClientId && !this.isCompanionClientAvailableToProject(projectId, preferredClientId)) {
+        throw new Error('Preferred companion client is not available to this project');
+      }
+    }
+
+    for (const input of peers) {
       const peerKey = toPeerKey(input);
       nextKeys.add(peerKey);
       const current = existingMap.get(peerKey);
@@ -678,7 +737,7 @@ export class ProjectService {
       .innerJoin(schema.platformProjects, eq(schema.platformProjectAuditResults.projectId, schema.platformProjects.id))
       .all()
       .filter(({ project, result, peer }) => {
-        if (!this.canReadProject(project.id, userId)) return false;
+        if (!this.canContributeAudit(project.id, userId)) return false;
         if (options.peerKey && result.peerKey !== options.peerKey) return false;
         if (!options.peerKey && target && peer.launchTarget !== target) return false;
         if (peer.preferredClientId && peer.preferredClientId !== (options.clientId ?? null)) return false;
@@ -739,8 +798,11 @@ export class ProjectService {
         eq(schema.platformProjectAuditResults.peerKey, input.peerKey),
       ))
       .get();
+    if (!result) {
+      throw new Error('Audit peer was not invited to this request');
+    }
 
-    if (result?.status === 'claimed') {
+    if (result.status === 'claimed') {
       if (result.claimedByUserId && result.claimedByUserId !== (input.claimedByUserId ?? null)) {
         throw new Error('This audit claim belongs to a different user');
       }
@@ -752,43 +814,21 @@ export class ProjectService {
       }
     }
 
-    if (result) {
-      this.db.update(schema.platformProjectAuditResults)
-        .set({
-          status: 'submitted',
-          claimedByUserId: result.claimedByUserId ?? input.claimedByUserId ?? null,
-          claimedByClientId: result.claimedByClientId ?? input.claimedByClientId ?? null,
-          claimedAt: result.claimedAt ?? now,
-          claimExpiresAt: null,
-          verdict: input.verdict.trim(),
-          confidence,
-          rationale: input.rationale?.trim() || null,
-          submittedAt: now,
-          updatedAt: now,
-        })
-        .where(eq(schema.platformProjectAuditResults.id, result.id))
-        .run();
-    } else {
-      this.db.insert(schema.platformProjectAuditResults)
-        .values({
-          id: randomUUID(),
-          auditRequestId,
-          projectId,
-          peerKey: input.peerKey,
-          status: 'submitted',
-          claimedByUserId: input.claimedByUserId ?? null,
-          claimedByClientId: input.claimedByClientId ?? null,
-          claimedAt: input.claimedByUserId || input.claimedByClientId ? now : null,
-          claimExpiresAt: null,
-          verdict: input.verdict.trim(),
-          confidence,
-          rationale: input.rationale?.trim() || null,
-          submittedAt: now,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .run();
-    }
+    this.db.update(schema.platformProjectAuditResults)
+      .set({
+        status: 'submitted',
+        claimedByUserId: result.claimedByUserId ?? input.claimedByUserId ?? null,
+        claimedByClientId: result.claimedByClientId ?? input.claimedByClientId ?? null,
+        claimedAt: result.claimedAt ?? now,
+        claimExpiresAt: null,
+        verdict: input.verdict.trim(),
+        confidence,
+        rationale: input.rationale?.trim() || null,
+        submittedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(schema.platformProjectAuditResults.id, result.id))
+      .run();
 
     const results = this.listAuditResults(auditRequestId);
     const submitted = results.filter((item) => item.status === 'submitted' && item.verdict);
@@ -873,9 +913,14 @@ export class ProjectService {
       .get();
     if (!row || row.revokedAt) throw new Error('Share link is invalid');
     if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) throw new Error('Share link expired');
+    const resolvedRole = normalizeShareLinkRole(row.role);
+    const existingRole = this.getProjectRole(row.projectId, userId);
+    if (existingRole && ROLE_PRIORITY[existingRole] >= ROLE_PRIORITY[resolvedRole]) {
+      return this.getProject(row.projectId);
+    }
     if (row.useCount >= row.maxUses) throw new Error('Share link has no remaining uses');
 
-    this.upsertMember(row.projectId, userId, normalizeShareLinkRole(row.role), row.createdByUserId ?? userId);
+    this.upsertMember(row.projectId, userId, resolvedRole, row.createdByUserId ?? userId);
     this.db.update(schema.platformProjectShareLinks)
       .set({ useCount: row.useCount + 1 })
       .where(eq(schema.platformProjectShareLinks.id, row.id))
@@ -941,6 +986,9 @@ export class ProjectService {
     if (target && row.target !== target) throw new Error('Handoff target mismatch');
     if (row.status !== 'pending') throw new Error('Handoff intent has already been used');
     if (row.expiresAt.getTime() <= Date.now()) throw new Error('Handoff intent expired');
+    if (claimedByUserId && !this.canReadProject(row.projectId, claimedByUserId)) {
+      throw new Error('Handoff intent belongs to a project this user cannot access');
+    }
 
     this.db.update(schema.platformProjectHandoffIntents)
       .set({
@@ -1090,6 +1138,10 @@ export class ProjectService {
       .get();
 
     if (existing) {
+      if (existing.role === role && existing.invitedByUserId === invitedByUserId) {
+        return;
+      }
+
       this.db.update(schema.platformProjectMembers)
         .set({ role, invitedByUserId, updatedAt: now })
         .where(eq(schema.platformProjectMembers.id, existing.id))
@@ -1108,6 +1160,14 @@ export class ProjectService {
         updatedAt: now,
       })
       .run();
+  }
+
+  private isCompanionClientAvailableToProject(projectId: string, clientId: string): boolean {
+    const client = this.db.select({ userId: schema.platformCompanionClients.userId })
+      .from(schema.platformCompanionClients)
+      .where(eq(schema.platformCompanionClients.id, clientId))
+      .get();
+    return client ? this.canReadProject(projectId, client.userId) : false;
   }
 
   private purgeExpiredHandoffs() {

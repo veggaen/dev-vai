@@ -73,6 +73,8 @@ describe('Project Route Validation', () => {
     listProjectsForUser: vi.fn(() => []),
     canReadProject: vi.fn(() => true),
     canWriteProject: vi.fn(() => true),
+    canManageProject: vi.fn(() => true),
+    canContributeAudit: vi.fn(() => true),
     getProject: vi.fn(() => null),
     getProjectRole: vi.fn(() => 'owner'),
     listMembers: vi.fn(() => []),
@@ -86,6 +88,7 @@ describe('Project Route Validation', () => {
     createShareLink: vi.fn(),
     getShareLinkPreview: vi.fn(() => null),
     redeemShareLink: vi.fn(),
+    revokeShareLink: vi.fn(() => true),
     createHandoffIntent: vi.fn(),
     consumeHandoffIntent: vi.fn(),
     pollPendingHandoff: vi.fn(() => null),
@@ -153,5 +156,55 @@ describe('Project Route Validation', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ code: 'validation' });
     expect(projects.consumeHandoffIntent).not.toHaveBeenCalled();
+  });
+
+  it('does not let editors manage share links', async () => {
+    projects.canManageProject.mockReturnValueOnce(false);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/proj_1/share-links',
+      payload: { role: 'viewer' },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(projects.createShareLink).not.toHaveBeenCalled();
+  });
+
+  it('does not let read-only viewers create project audits', async () => {
+    projects.canContributeAudit.mockReturnValueOnce(false);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/proj_1/audits',
+      payload: { prompt: 'Review the build' },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(projects.createAuditRequest).not.toHaveBeenCalled();
+  });
+
+  it('does not expose server filesystem roots in ordinary browser project responses', async () => {
+    projects.getProject.mockReturnValueOnce({
+      id: 'proj_1',
+      sandboxProjectId: 'sandbox_1',
+      name: 'Project',
+      slug: 'project',
+      rootDir: 'C:\\private\\sandbox',
+      status: 'idle',
+      visibility: 'private',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastOpenedAt: null,
+      lastSyncedAt: null,
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/projects/proj_1',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).not.toHaveProperty('rootDir');
   });
 });

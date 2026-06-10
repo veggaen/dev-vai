@@ -83,6 +83,19 @@ describe('buildChatTurnQualitySystemHint', () => {
     expect(hint).toMatch(/command to run|UI behavior to check|decision criterion/i);
   });
 
+  it('keeps debugging guidance focused on evidence from the existing system', () => {
+    const hint = buildChatTurnQualitySystemHint(
+      'chat',
+      'I am overwhelmed debugging a blank React page. Where should I start?',
+      [],
+    );
+
+    expect(hint).toMatch(/Diagnose the existing system before changing it/i);
+    expect(hint).toMatch(/browser-console error|terminal stack trace/i);
+    expect(hint).toMatch(/Do not invent package versions/i);
+    expect(hint).toMatch(/Do not emit full project files unless/i);
+  });
+
   it('adds a product-engineering memo contract for hardware product prompts', () => {
     const hint = buildChatTurnQualitySystemHint(
       'chat',

@@ -12,6 +12,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "bench": "tsx bench/run-bench.mts",
+    "bench:conv-loop": "tsx bench/conv-loop.mts --n=1000 --turns=4",
+    "bench:conv-loop:smoke": "tsx bench/conv-loop.mts --n=40 --turns=3",
+    "bench:conv-loop:offline": "tsx bench/conv-loop.mts --offline --n=200 --turns=4",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },

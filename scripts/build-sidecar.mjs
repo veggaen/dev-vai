@@ -31,7 +31,7 @@ const FILE_URI_TO_PATH_DIR = resolve(require.resolve('file-uri-to-path/package.j
 
 // 1. Always rebuild the runtime bundle so packaged desktop stays in sync with runtime source changes.
 console.log('[sidecar] Building runtime bundle...');
-execSync('pnpm --filter @vai/runtime build:bundle', { cwd: ROOT, stdio: 'inherit' });
+execSync('corepack pnpm --filter @vai/runtime build:bundle', { cwd: ROOT, stdio: 'inherit' });
 
 // 2. Ensure output dirs exist
 if (!existsSync(BINARIES_DIR)) {

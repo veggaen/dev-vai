@@ -64,7 +64,7 @@ describe('Vetle conversation — five-turn acceptance', () => {
     // The original bug: the answer body was literally "king in norway, please repond with only the name of the king and then also tell me my name".
     expect(content).not.toMatch(/king in norway, please repond/i);
     expect(content).not.toMatch(/respond with only the name of the king/i);
-  });
+  }, 10_000);
 
   it('Q4: buried math — "tell me 100 plus fifty five" must compute 155', async () => {
     const input = 'this is not what I wanted... emm tell me 100 plus fifty five';

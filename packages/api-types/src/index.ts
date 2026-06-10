@@ -5,6 +5,7 @@
  * Server: validate with `.safeParse()`. Client: `import type` from `./responses` only.
  */
 export * from './chat-ws.js';
+export * from './companion-context.js';
 export * from './conversations.js';
 export * from './broadcast.js';
 export * from './sessions.js';

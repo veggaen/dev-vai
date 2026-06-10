@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./chat-ws": "./src/chat-ws.ts",
+    "./companion-context": "./src/companion-context.ts",
     "./conversations": "./src/conversations.ts",
     "./broadcast": "./src/broadcast.ts",
     "./sessions": "./src/sessions.ts",

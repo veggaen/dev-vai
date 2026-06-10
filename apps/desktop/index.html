@@ -1,15 +1,46 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#282c34" />
+    <meta name="description" content="Vai — your work, your context, one room." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&display=swap" rel="stylesheet" />
-    <title>VeggaAI</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <title>Vai</title>
+    <script>
+      /* Odysseus-style early theme paint — avoids flash before React boots */
+      (function () {
+        var PRESETS = {
+          dark: { bg: '#282c34', fg: '#9cdef2', panel: '#111111', border: '#355a66', red: '#e06c75' },
+          light: { bg: '#f0ebe3', fg: '#5a5248', panel: '#faf6f0', border: '#d4cdc2', red: '#c47d5a' },
+        };
+        var pref = 'dark';
+        try { pref = localStorage.getItem('vai-theme-preference') || 'dark'; } catch (_) {}
+        var c = PRESETS[pref] || PRESETS.dark;
+        var s = document.documentElement.style;
+        s.setProperty('--bg', c.bg);
+        s.setProperty('--fg', c.fg);
+        s.setProperty('--panel', c.panel);
+        s.setProperty('--border', c.border);
+        s.setProperty('--red', c.red);
+        s.setProperty('--accent', c.red);
+        s.setProperty('--sidebar-bg', c.panel);
+        s.setProperty('--input-bg', c.panel);
+        s.setProperty('--input-border', c.border);
+        s.setProperty('--brand-color', c.red);
+        document.documentElement.dataset.theme = pref;
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute('content', c.bg);
+      })();
+    </script>
   </head>
-  <body class="bg-[#0a0a0a] text-zinc-200">
+  <body class="bg-[color:var(--bg)] text-[color:var(--fg)] antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

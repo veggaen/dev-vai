@@ -166,4 +166,27 @@ describe('classifyTurn', () => {
       expect(explicit.confidence).toBeGreaterThanOrEqual(bare.confidence);
     });
   });
+
+  describe('Vai self-improvement / chat-quality prompts (for Grok-Vai collaboration)', () => {
+    it.each([
+      'improve Vai chat responses against the current conversation',
+      'make the chat quality stronger with better context grounding',
+      'how can we evolve Vai\'s routing to be more Thorsen-configurable',
+      'augment the intelligence for voice compound questions in Vai',
+    ])('classifies %j as product-quality-recommendation with self-improvement signal', (input) => {
+      const r = classifyTurn(input, priorWithAssistant);
+      expect(r.kind).toBe('product-quality-recommendation');
+      expect(r.signals).toContain('self-improvement');
+    });
+  });
+
+  describe('vai-chat-quality-direction (direct Grok-Vai link collaboration)', () => {
+    it('classifies explicit collaboration prompt as vai-chat-quality-direction', () => {
+      const input = 'Grok + Vai collaboration prompts for self-referential improvement via vai-collab';
+      const r = classifyTurn(input, priorWithAssistant);
+      expect(r.kind).toBe('vai-chat-quality-direction');
+      expect(r.signals).toContain('vai-chat-quality-direction');
+      expect(r.confidence).toBeGreaterThan(0.9);
+    });
+  });
 });

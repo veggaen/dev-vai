@@ -51,7 +51,7 @@ const COMPANION_CLIENT_ID_STATE = 'vai.platformCompanionClientId';
 const CLIENT_NAME = 'VS Code Extension';
 const CLIENT_TYPE = 'vscode-extension';
 const LAUNCH_TARGET = 'vscode';
-const CLIENT_CAPABILITIES = ['audit-consume', 'handoff-consume', 'broadcast-consume'];
+const CLIENT_CAPABILITIES = ['audit-consume', 'handoff-consume', 'broadcast-consume', 'context-capture'];
 
 let extensionContext: vscode.ExtensionContext | null = null;
 let sessionToken: string | undefined;

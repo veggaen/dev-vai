@@ -34,6 +34,164 @@ function lastAssistantText(history: readonly Message[]): string {
   return '';
 }
 
+export interface AssistantContactDetail {
+  readonly entity: string;
+  readonly phone: string;
+}
+
+const CONTACT_QUERY_NOISE = new Set([
+  'what', 'was', 'is', 'the', 'phone', 'number', 'telephone', 'contact', 'to', 'for',
+  'of', 'at', 'from', 'please', 'tell', 'give', 'me', 'again', 'online', 'web', 'find',
+  'look', 'search', 'check', 'verify', 'it', 'that', 'this', 'you', 'should',
+]);
+
+function normalizeLookupText(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function orderedSubsequence(needle: string, haystack: string): boolean {
+  let index = 0;
+  for (const character of haystack) {
+    if (character === needle[index]) index += 1;
+    if (index === needle.length) return true;
+  }
+  return false;
+}
+
+function extractPhone(value: string): string | null {
+  const match = value.match(/(?:\+?\d[\d ()-]{5,}\d)/);
+  if (!match) return null;
+  const phone = match[0].replace(/\s+/g, ' ').trim();
+  return (phone.match(/\d/g)?.length ?? 0) >= 7 ? phone : null;
+}
+
+function extractAssistantContactDetails(history: readonly Message[]): AssistantContactDetail[] {
+  const details: AssistantContactDetail[] = [];
+  const seen = new Set<string>();
+
+  const add = (entity: string, phoneCandidate: string): void => {
+    const cleanedEntity = cleanTopic(entity);
+    const phone = extractPhone(phoneCandidate);
+    if (!cleanedEntity || !phone) return;
+    const key = `${normalizeLookupText(cleanedEntity)}:${phone.replace(/\D/g, '')}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    details.push({ entity: cleanedEntity, phone });
+  };
+
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const message = history[i];
+    if (message.role !== 'assistant' || !message.content.trim()) continue;
+
+    for (const line of message.content.split(/\n+/)) {
+      const boldEntity = /\*\*([^*\n]{2,100})\*\*/.exec(line);
+      const phoneLabel = /\bPhone:\s*((?:\+?\d[\d ()-]{5,}\d))/i.exec(line);
+      if (boldEntity?.[1] && phoneLabel?.[1]) {
+        add(boldEntity[1], phoneLabel[1]);
+      }
+
+      const prose = /\bphone\s+number\s+for\s+(.{2,100}?)\s+is\s+((?:\+?\d[\d ()-]{5,}\d))/i.exec(line);
+      if (prose?.[1] && prose?.[2]) {
+        add(prose[1], prose[2]);
+      }
+    }
+  }
+
+  return details;
+}
+
+function matchAssistantContactDetail(
+  input: string,
+  details: readonly AssistantContactDetail[],
+): AssistantContactDetail | null {
+  if (details.length === 0) return null;
+  const normalizedInput = normalizeLookupText(input);
+  const compactInput = normalizedInput.replace(/\s+/g, '');
+  const queryTokens = normalizedInput
+    .split(/\s+/)
+    .filter((token) => token.length >= 2 && !CONTACT_QUERY_NOISE.has(token));
+
+  if (queryTokens.length === 0) {
+    return details.length === 1 ? details[0] : null;
+  }
+
+  const ranked = details.map((detail) => {
+    const normalizedEntity = normalizeLookupText(detail.entity);
+    const compactEntity = normalizedEntity.replace(/\s+/g, '');
+    const entityTokens = normalizedEntity.split(/\s+/);
+    let score = compactInput.includes(compactEntity) || compactEntity.includes(compactInput) ? 8 : 0;
+
+    for (const token of queryTokens) {
+      if (entityTokens.includes(token)) {
+        score += 3;
+      } else if (token.length >= 4 && compactEntity.includes(token)) {
+        score += 2;
+      } else if (token.length <= 4 && orderedSubsequence(token, compactEntity)) {
+        score += 1;
+      }
+    }
+    return { detail, score };
+  }).sort((a, b) => b.score - a.score);
+
+  if ((ranked[0]?.score ?? 0) < 3) return null;
+  if (ranked[1] && ranked[1].score === ranked[0].score) return null;
+  return ranked[0].detail;
+}
+
+/** Recall a public business phone number that was already shown in this chat. */
+export function recallAssistantContactDetail(
+  input: string,
+  history: readonly Message[],
+): AssistantContactDetail | null {
+  if (!/\b(?:phone|telephone|contact)\b[\s\S]{0,24}\b(?:number|details?)?\b|\bnumber\b[\s\S]{0,20}\b(?:phone|contact)\b/i.test(input)) {
+    return null;
+  }
+  return matchAssistantContactDetail(input, extractAssistantContactDetails(history));
+}
+
+/**
+ * Carry the requested contact field into an explicit online correction:
+ * "find it online pizza bakeren hommersak" after a phone-number question
+ * becomes "find the phone number online for Pizzabakeren Hommersak".
+ */
+export function rewriteBusinessContactLookupFollowUp(
+  input: string,
+  history: readonly Message[],
+): string | null {
+  const trimmed = input.trim();
+  const explicitOnlineLookup =
+    /\b(?:find|look\s+up|search|check|verify)\b[\s\S]{0,35}\b(?:online|web|google)\b/i.test(trimmed)
+    || /\b(?:online|web|google)\b[\s\S]{0,35}\b(?:find|look\s+up|search|check|verify)\b/i.test(trimmed);
+  if (!explicitOnlineLookup) return null;
+
+  const userMessages = history.filter((message) => message.role === 'user' && message.content.trim());
+  let previousUser = '';
+  for (let i = userMessages.length - 1; i >= 0; i -= 1) {
+    if (normalizeLookupText(userMessages[i].content) === normalizeLookupText(trimmed)) continue;
+    previousUser = userMessages[i].content;
+    break;
+  }
+  if (!/\b(?:phone|telephone|contact)\b[\s\S]{0,24}\b(?:number|details?)?\b|\bnumber\b[\s\S]{0,20}\b(?:phone|contact)\b/i.test(previousUser)) {
+    return null;
+  }
+
+  const subject = trimmed
+    .replace(/^(?:yes[,.]?\s*)?(?:you\s+should\s+|please\s+|can\s+you\s+)?/i, '')
+    .replace(/^(?:find|look\s+up|search(?:\s+for)?|check|verify)\s+(?:it|that|this)?\s*(?:online|on\s+the\s+web|the\s+web|google)\s*(?:for\s+)?/i, '')
+    .replace(/^(?:online|on\s+the\s+web|the\s+web|google)\s*/i, '')
+    .replace(/[?.!]+$/g, '')
+    .trim();
+  if (!subject) return null;
+
+  const canonical = matchAssistantContactDetail(subject, extractAssistantContactDetails(history));
+  return `find the phone number online for ${canonical?.entity ?? subject}`;
+}
+
 /** Clean a bolded entity for substitution: "VPN (Virtual Private Network)" -> "VPN". */
 export function cleanTopic(raw: string): string {
   if (typeof raw !== 'string') return '';
@@ -83,14 +241,37 @@ export function rewritePronounFollowUp(input: string, topic: string): string | n
     return trimmed.replace(THING_REF, cleanedTopic);
   }
 
-  // Bare follow-up with no pronoun but clearly partial (very short) -> attach topic.
-  if (words.length <= 6 && !restHasOtherProperNoun) {
+  // Bare follow-up with no pronoun but clearly missing a subject -> attach
+  // topic. Do not treat every short lowercase question as contextual:
+  // "does spotify have podcasts?" is a complete standalone question.
+  if (
+    words.length <= 6
+    && !restHasOtherProperNoun
+    && /^(?:(?:and\s+)?(?:why|when|where|how\s+(?:many|much|big|large|small|old|long|high|tall|far|fast|deep|wide))|(?:what|anything)\s+else)[?.!]*$/i.test(trimmed)
+  ) {
     return `${trimmed.replace(/[?.!]+$/, '')} (about ${cleanedTopic})?`;
   }
   return null;
 }
 
-const NAME_NON_NAMES = /^(?:asking|here|not|sure|good|fine|trying|looking|wondering|just|going|done|back|okay|ok|sorry|curious|happy|glad|new|the|a|an)$/i;
+const NAME_NON_NAMES = /^(?:asking|here|not|sure|good|fine|fuzzy|unclear|trying|looking|wondering|just|going|done|back|okay|ok|sorry|curious|happy|glad|new|overwhelmed|frustrated|anxious|stressed|exhausted|worried|panicking|struggling|debugging|blocked|stuck|confused|lost|unsure|the|a|an)$/i;
+
+function isCredibleNameMatch(content: string, hit: RegExpMatchArray): boolean {
+  const matchedText = hit[0] ?? '';
+  if (/\b(?:my\s+name\s+is|my\s+name's|call\s+me|this\s+is)\b/i.test(matchedText)) {
+    return true;
+  }
+
+  const rawName = hit[1] ?? '';
+  const matchEnd = (hit.index ?? 0) + matchedText.length;
+  const remainder = content.slice(matchEnd).trim();
+  if (!remainder || /^[.!?]+$/.test(remainder)) {
+    return true;
+  }
+
+  return /^[A-Z]/.test(rawName)
+    && /^(?:[,;.!?-]\s*|\b(?:and|but)\b)/i.test(remainder);
+}
 
 /**
  * The user's stated name. Scans user turns for "i'm X" / "i am X" /
@@ -103,7 +284,7 @@ export function detectUserName(history: readonly Message[]): string | null {
     const m = history[i];
     if (m.role !== 'user' || typeof m.content !== 'string' || !m.content.trim()) continue;
     const hit = m.content.match(NAME) || m.content.match(NAME_LOOSE);
-    if (hit) {
+    if (hit && isCredibleNameMatch(m.content, hit)) {
       const name = hit[1].trim();
       if (NAME_NON_NAMES.test(name)) continue;
       return name.charAt(0).toUpperCase() + name.slice(1);

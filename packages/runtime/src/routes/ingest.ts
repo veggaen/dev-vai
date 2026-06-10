@@ -1,6 +1,8 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
+  assertPublicHostname,
   IngestPipeline,
+  safeFetch,
   scrapeWebPage,
   extractLinks,
   fetchYouTubeTranscript,
@@ -8,6 +10,7 @@ import {
   deepFetchGitHubRepo,
   createYouTubeCapture,
   createGitHubCapture,
+  validatePublicUrl,
 } from '@vai/core';
 import type { RawCapture } from '@vai/core';
 import {
@@ -31,21 +34,20 @@ function sanitizeCapturedContent(text: string): string {
     .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, '[EMAIL]');
 }
 
-/** Validate a URL is safe to fetch (no SSRF). */
-function validateUrl(raw: string): URL {
-  const url = new URL(raw);
-  if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new Error(`Only HTTP/HTTPS URLs allowed, got ${url.protocol}`);
+export function validateUrl(raw: string): URL {
+  return validatePublicUrl(raw);
+}
+
+async function validateUrlOrReply(raw: string, reply: FastifyReply): Promise<string | null> {
+  try {
+    return (await assertPublicHostname(raw)).toString();
+  } catch (error) {
+    reply.code(400).send({
+      error: error instanceof Error ? error.message : 'Unsafe URL',
+      code: 'unsafe_url',
+    });
+    return null;
   }
-  const host = url.hostname.toLowerCase();
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1'
-      || host === '0.0.0.0' || host.endsWith('.local')
-      || host.startsWith('10.') || host.startsWith('192.168.')
-      || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-      || host === '169.254.169.254') {
-    throw new Error(`Private/internal URLs are not allowed: ${host}`);
-  }
-  return url;
 }
 
 export function registerIngestRoutes(
@@ -59,8 +61,9 @@ export function registerIngestRoutes(
       return invalidRequestBody(reply, parsed.error);
     }
     const { url } = parsed.data;
-    validateUrl(url);
-    const capture = await scrapeWebPage(url);
+    const safeUrl = await validateUrlOrReply(url, reply);
+    if (!safeUrl) return;
+    const capture = await scrapeWebPage(safeUrl);
     const result = pipeline.ingest(capture);
     return result;
   });
@@ -72,8 +75,9 @@ export function registerIngestRoutes(
       return invalidRequestBody(reply, parsed.error);
     }
     const { url } = parsed.data;
-    validateUrl(url);
-    const capture = await fetchYouTubeTranscript(url);
+    const safeUrl = await validateUrlOrReply(url, reply);
+    if (!safeUrl) return;
+    const capture = await fetchYouTubeTranscript(safeUrl);
     const result = pipeline.ingest(capture);
     return result;
   });
@@ -85,8 +89,9 @@ export function registerIngestRoutes(
       return invalidRequestBody(reply, parsed.error);
     }
     const { url } = parsed.data;
-    validateUrl(url);
-    const capture = await fetchGitHubRepo(url);
+    const safeUrl = await validateUrlOrReply(url, reply);
+    if (!safeUrl) return;
+    const capture = await fetchGitHubRepo(safeUrl);
     const result = pipeline.ingest(capture);
     return result;
   });
@@ -99,8 +104,9 @@ export function registerIngestRoutes(
       return invalidRequestBody(reply, parsed.error);
     }
     const { url, maxFiles } = parsed.data;
-    validateUrl(url);
-    const captures = await deepFetchGitHubRepo(url, {
+    const safeUrl = await validateUrlOrReply(url, reply);
+    if (!safeUrl) return;
+    const captures = await deepFetchGitHubRepo(safeUrl, {
       maxFiles: maxFiles ?? 60,
       onProgress: (msg) => console.log(`[DeepIngest] ${msg}`),
     });
@@ -112,10 +118,10 @@ export function registerIngestRoutes(
     }
 
     const totalTokens = results.reduce((s, r) => s + r.tokens, 0);
-    console.log(`[DeepIngest] ${url}: ${captures.length} groups, ${totalTokens} total tokens`);
+    console.log(`[DeepIngest] ${safeUrl}: ${captures.length} groups, ${totalTokens} total tokens`);
 
     return {
-      repo: url,
+      repo: safeUrl,
       groups: results,
       totalGroups: results.length,
       totalTokens,
@@ -222,7 +228,11 @@ export function registerIngestRoutes(
 
   // Re-process all existing sources with improved text cleaning
   // This re-cleans, re-chunks, re-summarizes, and re-trains on all existing content
-  app.post('/api/reprocess', async (_request, _reply) => {
+  app.post('/api/reprocess', async (request, reply) => {
+    if (!hasTrustedCaptureAccess(request)) {
+      reply.code(403);
+      return { error: 'Reprocessing is restricted to local clients.' };
+    }
     const result = pipeline.reprocessAll((done, total, title) => {
       if (done % 50 === 0 || done === total) {
         console.log(`[VAI] Reprocessing: ${done}/${total} — "${title}"`);
@@ -233,7 +243,11 @@ export function registerIngestRoutes(
   });
 
   // Fix YouTube hasTranscript meta based on actual content
-  app.post('/api/fix-youtube-meta', async () => {
+  app.post('/api/fix-youtube-meta', async (request, reply) => {
+    if (!hasTrustedCaptureAccess(request)) {
+      reply.code(403);
+      return { error: 'Metadata repair is restricted to local clients.' };
+    }
     const result = pipeline.fixYouTubeMeta();
     console.log(`[VAI] YouTube meta fix: ${result.fixed} fixed, ${result.alreadyCorrect} already correct`);
     return result;
@@ -248,19 +262,29 @@ export function registerIngestRoutes(
         return invalidRequestBody(reply, parsed.error);
       }
       const { url, maxPages = 5 } = parsed.data;
+      const safeUrl = await validateUrlOrReply(url, reply);
+      if (!safeUrl) return;
       const existingUrls = new Set(pipeline.listSources().map(s => s.url));
 
       // Fetch the seed page and extract links
-      const res = await fetch(url, {
+      const res = await safeFetch(safeUrl, {
         headers: { 'User-Agent': 'VeggaAI/0.1 (Local AI Learning Agent)', Accept: 'text/html' },
       });
-      if (!res.ok) return { discovered: 0, ingested: 0, error: `Failed to fetch ${url}` };
+      if (!res.ok) return { discovered: 0, ingested: 0, error: `Failed to fetch ${safeUrl}` };
 
       const html = await res.text();
-      const links = extractLinks(html, url);
+      const links = extractLinks(html, safeUrl);
 
-      // Filter out already-known URLs
-      const newLinks = links.filter(l => !existingUrls.has(l));
+      // Filter out already-known URLs and reject internal destinations.
+      const newLinks = links.filter((link) => {
+        if (existingUrls.has(link)) return false;
+        try {
+          validateUrl(link);
+          return true;
+        } catch {
+          return false;
+        }
+      });
       const toIngest = newLinks.slice(0, maxPages);
 
       const results = [];

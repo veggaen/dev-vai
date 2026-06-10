@@ -211,7 +211,7 @@ async function autoCapturePage(tabId: number, url: string, title: string) {
 
 async function handleCaptureMessage(
   message: Record<string, unknown>,
-  sender: browser.Runtime.MessageSender,
+  sender: Browser.runtime.MessageSender,
 ) {
   const url = (message.url as string) ?? sender.url ?? '';
   const policy = await getPolicyForUrl(url);
@@ -342,7 +342,7 @@ async function tryServerScrapeCapture(
 
 async function handleMessage(
   message: Record<string, unknown>,
-  sender: browser.Runtime.MessageSender,
+  sender: Browser.runtime.MessageSender,
 ) {
   const type = message.type as string;
 

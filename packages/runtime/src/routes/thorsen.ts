@@ -23,6 +23,7 @@ import {
   quickHealth,
   type ThorsenIntent,
 } from '@vai/core';
+import { isLocalDevMutationAllowed } from '../security/request-trust.js';
 
 export function registerThorsenRoutes(app: FastifyInstance) {
   /**
@@ -37,8 +38,12 @@ export function registerThorsenRoutes(app: FastifyInstance) {
    */
   app.post<{ Body: ThorsenIntent & { traceMode?: boolean; skipVerify?: boolean } }>(
     '/api/thorsen/synthesize',
-    async (request) => {
+    async (request, reply) => {
       const { traceMode, skipVerify, ...intentBody } = request.body;
+      if (skipVerify && !isLocalDevMutationAllowed(request)) {
+        reply.code(403);
+        return { error: 'Verification bypass is restricted to local development clients.' };
+      }
       const intent: ThorsenIntent = {
         ...intentBody,
         timestampUs: intentBody.timestampUs ?? Date.now() * 1000,
@@ -127,7 +132,11 @@ export function registerThorsenRoutes(app: FastifyInstance) {
    * Run the full self-improvement cycle: benchmark all templates,
    * analyze gaps, generate suggestions. Returns a complete report.
    */
-  app.post('/api/thorsen/self-improve', async () => {
+  app.post('/api/thorsen/self-improve', async (request, reply) => {
+    if (!isLocalDevMutationAllowed(request)) {
+      reply.code(403);
+      return { error: 'Self-improvement is restricted to local development clients.' };
+    }
     const apiKey = process.env.ANTHROPIC_API_KEY ?? null;
     return runSelfImprovement({ apiKey, traceMode: true });
   });

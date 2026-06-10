@@ -9,6 +9,8 @@
    ═══════════════════════════════════════════════════════════════ */
 
 :root {
+  color-scheme: dark;
+
   /* Layout mode variables — compact defaults (edge-to-edge) */
   --layout-gap: 0px;
   --layout-radius: 0px;
@@ -48,39 +50,138 @@
   --vinext-panel-opacity: 1;
   --vinext-trust-ring: rgba(63, 63, 70, 0.28);
 
-  /* Shell theme defaults */
-  --shell-bg: #09090b;
-  --shell-bg-elevated: #111827;
-  --shell-surface: rgba(9, 11, 20, 0.78);
-  --shell-surface-strong: rgba(15, 23, 42, 0.92);
-  --shell-surface-muted: rgba(24, 24, 27, 0.82);
-  --shell-line: rgba(63, 63, 70, 0.72);
-  --shell-line-soft: rgba(63, 63, 70, 0.42);
-  --shell-text: #f4f4f5;
-  --shell-text-muted: #a1a1aa;
-  --shell-chip-bg: rgba(24, 24, 27, 0.82);
-  --shell-chip-text: #d4d4d8;
-  --shell-shadow-soft: rgba(0, 0, 0, 0.22);
-  --shell-accent: #8b5cf6;
-  --shell-accent-soft: rgba(139, 92, 246, 0.14);
+  /* ── Odysseus theme system ───────────────────────────────────────────────────
+     CORE (5 colors — theme.js applyColors writes these on <html>):
+       --bg      Page canvas, main workspace background, user bubble fill
+       --fg      Primary text, icons, hamburger, body copy
+       --panel   Sidebar, inputs, AI bubbles, cards, elevated surfaces
+       --border  Lines, input borders, dividers, bubble outlines
+       --red     Accent — buttons, active states, brand mark (alias --accent)
+
+     ADVANCED (derived from core unless overridden in custom theme):
+       --sidebar-bg, --input-bg, --input-border
+       --user-bubble-bg, --ai-bubble-bg, --bubble-border
+       --send-btn-bg, --send-btn-hover, --brand-color, --toggle-active
+       --code-bg, --code-fg  (+ --hl-* syntax tokens)
+
+     Vai aliases (--shell-*, --composer-*, --panel-*) map to the above so
+     existing components pick up Odysseus colors without a full rewrite. */
+
+  /* Defaults = Odysseus "dark" preset (overridden at runtime by odysseus-theme.ts) */
+  --bg: #282c34;
+  --fg: #9cdef2;
+  --panel: #111111;
+  --border: #355a66;
+  --red: #e06c75;
+  --accent: var(--red);
+
+  --sidebar-bg: var(--panel);
+  --input-bg: var(--panel);
+  --input-border: var(--border);
+  --user-bubble-bg: var(--bg);
+  --ai-bubble-bg: var(--panel);
+  --bubble-border: var(--border);
+  --send-btn-bg: var(--red);
+  --send-btn-hover: var(--red);
+  --brand-color: var(--red);
+  --hamburger-color: var(--fg);
+  --toggle-active: var(--red);
+  --code-bg: #1e2228;
+  --code-fg: var(--fg);
+
+  --hl-bg: #1e2228;
+  --hl-fg: var(--fg);
+  --hl-keyword: #c678dd;
+  --hl-string: #e5c07b;
+  --hl-comment: #828997;
+  --hl-function: #61afef;
+
+  --color-muted: #888888;
+  --color-muted-alt: #6b7280;
+  --color-subheader: #6b8a94;
+  --color-accent: #00aaff;
+
+  --app-chrome-background: var(--bg);
+  --app-surface: var(--bg);
+  --sidebar-surface: var(--sidebar-bg);
+
+  --shell-bg: var(--bg);
+  --shell-bg-elevated: var(--bg);
+  --shell-surface: color-mix(in srgb, var(--panel) 82%, var(--bg));
+  --shell-surface-strong: var(--panel);
+  --shell-surface-muted: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  --shell-line: var(--border);
+  --shell-line-soft: color-mix(in srgb, var(--border) 55%, transparent);
+  --shell-text: var(--fg);
+  --shell-text-muted: var(--color-muted);
+  --shell-chip-bg: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  --shell-chip-text: var(--fg);
+  --shell-shadow-soft: color-mix(in srgb, var(--bg) 50%, #000000);
+  --shell-accent: var(--accent);
+  --shell-accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --shell-radius-pill: 12px;
+
+  --accent-strong: var(--red);
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-softer: color-mix(in srgb, var(--accent) 8%, transparent);
+  --accent-text: var(--accent);
+  --accent-ring: color-mix(in srgb, var(--accent) 55%, transparent);
+
+  --chat-body: var(--fg);
+  --chat-strong: var(--fg);
+  --chat-muted: var(--color-muted);
+  --chat-eyebrow: var(--color-subheader);
+  --chat-inline-code-bg: var(--code-bg);
+  --chat-inline-code-text: var(--hl-keyword);
+  --chat-table-line: var(--border);
+  --chat-table-head-bg: var(--panel);
+  --chat-table-stripe: color-mix(in srgb, var(--panel) 50%, var(--bg));
+
+  /* Motion tokens */
+  --ease-out-expo: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Semantic status tones */
+  --tone-good: #50fa7b;
+  --tone-warn: #f0ad4e;
+  --tone-info: #61afef;
+  --tone-bad: #e06c75;
+
+  /* Process panel layering — recess toward --bg, lift toward --panel */
+  --panel-bg: color-mix(in srgb, var(--panel) 88%, var(--bg));
+  --panel-bg-inset: color-mix(in srgb, var(--panel) 42%, var(--bg));
+  --panel-bg-muted: color-mix(in srgb, var(--panel) 65%, var(--bg));
+  --panel-bg-elevated: color-mix(in srgb, var(--panel) 92%, var(--fg) 8%);
+  --panel-border: var(--border);
+  --panel-border-soft: color-mix(in srgb, var(--border) 65%, transparent);
+  --panel-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 6%, transparent);
+
+  --composer-bg: var(--input-bg);
+  --composer-bg-muted: color-mix(in srgb, var(--input-bg) 85%, var(--bg));
+  --composer-border: var(--input-border);
+  --composer-border-soft: color-mix(in srgb, var(--input-border) 60%, transparent);
+  --composer-ring: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 [data-theme="light"] {
-  --shell-bg: #f5f5f5;
-  --shell-bg-elevated: #ffffff;
-  --shell-surface: rgba(255, 255, 255, 0.9);
-  --shell-surface-strong: rgba(250, 250, 250, 0.98);
-  --shell-surface-muted: rgba(244, 244, 245, 0.92);
-  --shell-line: rgba(212, 212, 216, 0.95);
-  --shell-line-soft: rgba(212, 212, 216, 0.58);
-  --shell-text: #111827;
-  --shell-text-muted: #6b7280;
-  --shell-chip-bg: rgba(250, 250, 250, 0.96);
-  --shell-chip-text: #374151;
-  --shell-shadow-soft: rgba(15, 23, 42, 0.08);
-  --shell-accent: #7c3aed;
-  --shell-accent-soft: rgba(124, 58, 237, 0.1);
+  color-scheme: light;
+  /* Core values applied via odysseus-theme.ts — only color-scheme stays in CSS */
+}
+
+/* ── Seamless theme switching ──────────────────────────────────────────────
+   App.tsx sets [data-theme-switching] on the root for ~350ms when the theme
+   flips, so background / border / text colors cross-fade instead of snapping.
+   Scoped to the switch window so it never fights component transitions. */
+[data-theme-switching] *,
+[data-theme-switching] *::before,
+[data-theme-switching] *::after {
+  transition:
+    background-color 300ms ease,
+    border-color 300ms ease,
+    color 300ms ease,
+    fill 300ms ease,
+    stroke 300ms ease,
+    box-shadow 300ms ease !important;
 }
 
 [data-thorsen-sync="wormhole"] {
@@ -213,16 +314,31 @@ html, body, #root {
   animation: vai-cursor-blink 0.75s ease-in-out infinite;
 }
 
+html {
+  background-color: var(--app-chrome-background);
+}
+
 body {
   margin: 0;
-  font-family: 'DM Sans', 'Inter', system-ui, sans-serif;
+  font-family: 'Instrument Sans', system-ui, sans-serif;
   font-size: 15px;
   line-height: 1.6;
   letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: var(--shell-bg);
-  color: var(--shell-text);
+  background-color: var(--bg);
+  color: var(--fg);
+  transition:
+    background-color 160ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    color 160ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+h1, h2, h3, .font-display {
+  font-family: 'Bricolage Grotesque', 'Instrument Sans', system-ui, sans-serif;
+}
+
+code, pre, kbd {
+  font-family: 'JetBrains Mono', Consolas, monospace;
 }
 
 .shell-atmosphere {
@@ -329,8 +445,8 @@ body {
   }
 }
 
-/* Tall portrait screens (height > 2×width — phone/tablet portrait) */
-@media (orientation: portrait) and (min-height: 2000px) {
+/* Tall portrait phones/tablets only — not portrait desktop monitors (e.g. 1440×3440) */
+@media (orientation: portrait) and (max-width: 1023px) and (min-height: 2000px) {
   :root {
     --layout-sidebar-max-cap: 100dvw;
     --layout-sidebar-width: calc(
@@ -354,6 +470,359 @@ body {
 /* ── Selection color ── */
 ::selection {
   background: rgba(139, 92, 246, 0.25);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Kinetic text + ambient motion utilities
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Animated gradient text — background-clip kinetic headline */
+@keyframes kinetic-gradient-pan {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.kinetic-text {
+  background-image: linear-gradient(
+    100deg,
+    var(--shell-text) 0%,
+    var(--shell-text) 38%,
+    var(--shell-accent) 50%,
+    #38bdf8 58%,
+    var(--shell-text) 72%,
+    var(--shell-text) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: kinetic-gradient-pan 9s ease-in-out infinite;
+}
+
+/* Word-level staggered rise for hero copy */
+@keyframes word-rise {
+  from { opacity: 0; transform: translateY(0.6em) rotate(2deg); filter: blur(4px); }
+  to { opacity: 1; transform: translateY(0) rotate(0); filter: blur(0); }
+}
+
+.word-rise {
+  display: inline-block;
+  animation: word-rise 0.7s var(--ease-out-expo) both;
+}
+
+/* Both effects on one element — the animation shorthands would otherwise clobber each other */
+.kinetic-text.word-rise {
+  animation:
+    word-rise 0.7s var(--ease-out-expo) both,
+    kinetic-gradient-pan 9s ease-in-out infinite;
+}
+
+/* Aurora blobs behind the empty state */
+@keyframes aurora-a {
+  0%, 100% { transform: translate(-8%, -4%) scale(1); }
+  50% { transform: translate(6%, 8%) scale(1.15); }
+}
+@keyframes aurora-b {
+  0%, 100% { transform: translate(8%, 6%) scale(1.1); }
+  50% { transform: translate(-6%, -8%) scale(0.92); }
+}
+
+.aurora-field {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.aurora-field::before,
+.aurora-field::after {
+  content: '';
+  position: absolute;
+  width: 55vmin;
+  height: 55vmin;
+  border-radius: 9999px;
+  filter: blur(90px);
+  opacity: 0.16;
+  will-change: transform;
+}
+
+.aurora-field::before {
+  top: 4%;
+  left: 18%;
+  background: radial-gradient(circle, var(--shell-accent), transparent 65%);
+  animation: aurora-a 22s ease-in-out infinite;
+}
+
+.aurora-field::after {
+  bottom: 4%;
+  right: 14%;
+  background: radial-gradient(circle, #0ea5e9, transparent 65%);
+  animation: aurora-b 26s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vai-welcome-pulse {
+    animation: none;
+    opacity: 0.25;
+  }
+}
+
+[data-theme="light"] .aurora-field::before,
+[data-theme="light"] .aurora-field::after {
+  opacity: 0.1;
+}
+
+/* ── Thinking panel + composer surfaces — 1:1 light/dark parity ── */
+.thinking-surface {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--panel-shadow);
+}
+
+.thinking-surface-soft {
+  background: var(--panel-bg-inset);
+  border: 1px solid var(--panel-border-soft);
+}
+
+.thinking-chip {
+  background: var(--panel-bg-inset);
+  border: 1px solid var(--panel-border-soft);
+}
+
+.thinking-hover { transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease; }
+.thinking-hover:hover { background: var(--panel-bg-inset); }
+
+.thinking-stat {
+  background: var(--panel-bg-elevated);
+  border: 1px solid var(--panel-border-soft);
+  border-radius: 0.625rem;
+  padding: 0.625rem 0.75rem;
+}
+
+.thinking-callout {
+  background: color-mix(in srgb, var(--tone-info) 8%, var(--panel-bg-inset));
+  border: 1px solid color-mix(in srgb, var(--tone-info) 22%, var(--panel-border-soft));
+  border-radius: 0.625rem;
+}
+
+.thinking-callout-warn {
+  background: color-mix(in srgb, var(--tone-warn) 10%, var(--panel-bg-inset));
+  border: 1px solid color-mix(in srgb, var(--tone-warn) 24%, var(--panel-border-soft));
+  border-radius: 0.625rem;
+}
+
+/* Nested row inside an inset block — theme-tuned lift/recess */
+.thinking-inset-row {
+  border: 1px solid var(--panel-border-soft);
+  border-radius: 0.5rem;
+}
+
+[data-theme="light"] .thinking-inset-row {
+  background: var(--panel-bg-elevated);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.92) inset, 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+:not([data-theme="light"]) .thinking-inset-row {
+  background: color-mix(in srgb, var(--shell-bg) 82%, var(--panel-bg-inset));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+
+[data-theme="light"] .thinking-surface-soft {
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06), inset 0 0 0 1px rgba(15, 23, 42, 0.03);
+}
+
+:not([data-theme="light"]) .thinking-surface-soft {
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.22), inset 0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
+.composer-shell {
+  background: var(--composer-bg);
+  border: 1px solid var(--composer-border);
+  box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.45);
+  border-radius: 1.25rem;
+  overflow: hidden;
+}
+.composer-shell:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--composer-border));
+  box-shadow: 0 0 0 2.5px var(--composer-ring), 0 20px 60px -20px rgba(0, 0, 0, 0.45);
+}
+[data-theme="light"] .composer-shell {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 28px -8px rgba(15, 23, 42, 0.14);
+}
+[data-theme="light"] .composer-shell:focus-within {
+  box-shadow: 0 0 0 2.5px var(--composer-ring), 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 28px -8px rgba(15, 23, 42, 0.12);
+}
+
+[data-theme="light"] .thinking-surface {
+  box-shadow: var(--panel-shadow);
+}
+
+/* Light mode: stat tiles pop forward; inset blocks recess toward canvas tone */
+[data-theme="light"] .thinking-stat {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .thinking-panel-expanded .thinking-panel-trigger {
+  background: transparent;
+}
+
+[data-theme="light"] .thinking-panel-trigger:hover {
+  background: color-mix(in srgb, var(--panel-bg-muted) 65%, transparent);
+}
+
+.shell-canvas {
+  background: var(--app-chrome-background);
+  color: var(--shell-text);
+}
+
+.app-surface {
+  background: var(--app-surface);
+  color: var(--shell-text);
+}
+
+.sidebar-surface {
+  background: var(--sidebar-surface);
+  color: var(--shell-text);
+}
+
+/* Welcome empty-state — pulsing orbital ring */
+@keyframes vai-welcome-pulse {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.55;
+  }
+  70% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+.vai-welcome-mark {
+  isolation: isolate;
+}
+
+.vai-welcome-pulse {
+  position: absolute;
+  inset: -6px;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 35%, transparent);
+  animation: vai-welcome-pulse 2.8s var(--ease-out-expo) infinite;
+  pointer-events: none;
+}
+
+.vai-welcome-pulse-b {
+  animation-delay: 1.4s;
+}
+
+.vai-welcome-glyph {
+  filter: drop-shadow(0 2px 8px color-mix(in srgb, var(--accent) 28%, transparent));
+}
+
+.shell-header {
+  background: var(--shell-surface-strong);
+  border-bottom: 1px solid var(--shell-line);
+}
+
+.shell-chip {
+  background: var(--shell-chip-bg);
+  border: 1px solid var(--shell-line-soft);
+  color: var(--shell-chip-text);
+}
+
+.composer-stack {
+  --composer-scroll-pad: 11.5rem;
+}
+
+.composer-scroll {
+  padding-bottom: var(--composer-scroll-pad);
+  scroll-padding-bottom: var(--composer-scroll-pad);
+}
+
+.composer-dock {
+  pointer-events: none;
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 30;
+  background: linear-gradient(
+    to top,
+    var(--shell-bg) 0%,
+    color-mix(in srgb, var(--shell-bg) 88%, transparent) 42%,
+    transparent 100%
+  );
+}
+
+.composer-dock-inner {
+  pointer-events: auto;
+}
+
+.composer-toolbar {
+  background: transparent;
+}
+
+.thinking-code {
+  border: 1px solid var(--panel-border);
+  background: rgba(0, 0, 0, 0.3);
+  color: #d4d4d8;
+}
+[data-theme="light"] .thinking-code {
+  background: #fafafa;
+  color: #3f3f46;
+}
+
+/* Hover micro-interaction: lift + glow ring */
+.hover-lift {
+  transition: transform 200ms var(--ease-out-expo), box-shadow 200ms ease, border-color 200ms ease;
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.4), 0 0 0 1px color-mix(in srgb, var(--shell-accent) 35%, transparent);
+}
+
+/* Shimmer sweep for "thinking" labels */
+@keyframes thinking-sheen {
+  0% { background-position: 200% 50%; }
+  100% { background-position: -200% 50%; }
+}
+
+.thinking-sheen {
+  background-image: linear-gradient(
+    90deg,
+    var(--shell-text-muted) 0%,
+    var(--shell-text-muted) 35%,
+    var(--shell-text) 50%,
+    var(--shell-text-muted) 65%,
+    var(--shell-text-muted) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: thinking-sheen 2.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kinetic-text,
+  .thinking-sheen,
+  .word-rise,
+  .aurora-field::before,
+  .aurora-field::after {
+    animation: none !important;
+  }
+  .kinetic-text,
+  .thinking-sheen {
+    -webkit-text-fill-color: currentColor;
+    color: var(--shell-text);
+    background: none;
+  }
 }
 
 /* ── Shimmer animation for boot screen ── */
@@ -627,7 +1096,7 @@ body {
 .chat-code-shell .shiki code {
   display: block;
   min-width: max-content;
-  font-family: Consolas, 'SFMono-Regular', 'Cascadia Code', 'Fira Code', monospace;
+  font-family: 'JetBrains Mono', Consolas, 'SFMono-Regular', 'Cascadia Code', 'Fira Code', monospace;
 }
 
 .chat-code-shell .shiki code span {
@@ -674,12 +1143,16 @@ pre code {
   word-break: normal;
 }
 .chat-markdown code.inline-code {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+  background: var(--chat-inline-code-bg);
   border: 0;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-  color: #e7e4b7;
+  color: var(--chat-inline-code-text);
   font-size: 0.825rem;
   overflow-wrap: break-word;
+}
+
+[data-theme="light"] .chat-markdown code.inline-code {
+  box-shadow: inset 0 0 0 1px rgba(9, 9, 11, 0.08);
 }
 
 @media (min-width: 1800px) {
@@ -709,10 +1182,10 @@ pre code {
 }
 .chat-markdown .prose p,
 .chat-markdown p {
-  color: #e4e4e7;
+  color: var(--chat-body);
 }
 .chat-markdown__segment {
-  color: #e4e4e7;
+  color: var(--chat-body);
 }
 .prose p:first-child {
   margin-top: 0;
@@ -735,7 +1208,7 @@ pre code {
   gap: 0.3rem;
 }
 .chat-markdown li {
-  color: #e4e4e7;
+  color: var(--chat-body);
   line-height: 1.7;
 }
 .chat-markdown__segment ul,
@@ -753,14 +1226,14 @@ pre code {
   list-style-type: decimal;
 }
 .chat-markdown__segment li {
-  color: #e4e4e7;
+  color: var(--chat-body);
   line-height: 1.7;
 }
 .chat-markdown__segment li::marker {
-  color: #71717a;
+  color: var(--chat-muted);
 }
 .prose strong {
-  color: #f4f4f5;
+  color: var(--chat-strong);
   font-weight: 600;
 }
 .prose ul, .prose ol {
@@ -769,7 +1242,7 @@ pre code {
 }
 .prose li {
   margin: 0.25em 0;
-  color: #e4e4e7;
+  color: var(--chat-body);
 }
 .prose a {
   color: #c4b5fd;
@@ -789,14 +1262,25 @@ pre code {
   font-size: 13px;
 }
 .prose th, .prose td {
-  border: 1px solid #27272a;
+  border: 1px solid var(--chat-table-line);
   padding: 6px 10px;
   text-align: left;
 }
 .prose th {
-  background: #18181b;
+  background: var(--chat-table-head-bg);
   font-weight: 600;
 }
 .prose tr:nth-child(even) {
-  background: rgba(24, 24, 27, 0.5);
+  background: var(--chat-table-stripe);
+}
+
+/* Settings drawer — phone: full width, close via X / Esc */
+@media (max-width: 767px) {
+  .settings-drawer {
+    flex: 1 1 100% !important;
+  }
+
+  .settings-drawer-backdrop {
+    display: none;
+  }
 }

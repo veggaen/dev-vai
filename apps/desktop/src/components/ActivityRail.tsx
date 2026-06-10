@@ -1,13 +1,11 @@
 import {
   MessageSquare,
   Brain,
-  Search,
   Settings,
   BookOpen,
   Container,
   Dumbbell,
   Orbit,
-  FolderKanban,
   Shield,
   UserRound,
   Sparkles,
@@ -21,12 +19,8 @@ import { useRef, useState } from 'react';
 import { UserPopover } from './UserPopover.js';
 
 /**
- * ActivityRail — left icon rail with Chat History, Projects, Knowledge,
- * plus owner-only advanced tools in a collapsed bottom group.
- *
- * Design: slim, flat icon stack. Active item shows a violet glyph + left
- * accent bar. Advanced owner-only entries (Dev Logs, Gym, Thorsen, Docker,
- * Control) sit below a subtle separator so the primary flow stays uncluttered.
+ * ActivityRail — left icon rail. Primary entry is Chats; owner/admin tools
+ * sit in a collapsed bottom group.
  */
 
 interface RailItem {
@@ -36,16 +30,14 @@ interface RailItem {
   shortcut?: string;
 }
 
-/** Core items every role sees (order matters for muscle memory). */
+/** Core sidebar entry — chat history only. Search lives inside the chats panel. */
 const CORE_ITEMS: RailItem[] = [
-  { id: 'chats', icon: MessageSquare, label: 'Chat History', shortcut: 'Ctrl+Shift+C' },
-  { id: 'projects', icon: FolderKanban, label: 'Projects', shortcut: 'Ctrl+Shift+P' },
-  { id: 'knowledge', icon: BookOpen, label: 'Knowledge Base', shortcut: 'Ctrl+Shift+K' },
-  { id: 'search', icon: Search, label: 'Search', shortcut: 'Ctrl+Shift+F' },
+  { id: 'chats', icon: MessageSquare, label: 'Chats', shortcut: 'Ctrl+Shift+C' },
 ];
 
 /** Advanced owner/admin tools — shown below a separator when the role allows. */
 const ADVANCED_ITEMS: RailItem[] = [
+  { id: 'knowledge', icon: BookOpen, label: 'Knowledge Base', shortcut: 'Ctrl+Shift+K' },
   { id: 'docker', icon: Container, label: 'Docker Sandboxes', shortcut: 'Ctrl+Shift+D' },
   { id: 'devlogs', icon: Brain, label: 'Dev Logs', shortcut: 'Ctrl+Shift+L' },
   { id: 'vaigym', icon: Dumbbell, label: 'Vai Gym', shortcut: 'Ctrl+Shift+G' },
@@ -82,6 +74,7 @@ export function ActivityRail() {
   const allowedPanels = new Set(ROLE_NAV_ITEMS[role]);
 
   const coreItems = CORE_ITEMS.filter((item) => allowedPanels.has(item.id));
+
   const advancedItems: RailItem[] = [];
   if (role === 'owner') {
     advancedItems.push(CONTROL_ITEM);
@@ -99,31 +92,29 @@ export function ActivityRail() {
         : 'bg-zinc-500';
 
   const engineLabel = engineStatus === 'ready' ? 'online' : engineStatus;
+  const accountLabel = authStatus === 'authenticated'
+    ? `Account${authUser?.email ? ` - ${authUser.email}` : ''}`
+    : 'Account';
 
   return (
     <div
-      className={`relative flex h-full min-w-0 flex-shrink-0 flex-col items-center overflow-visible py-3 ${
-        isLight ? 'bg-white/95' : 'bg-zinc-950/88'
-      }`}
+      className={`relative flex h-full min-w-0 flex-shrink-0 flex-col items-center overflow-visible border-r border-[color:var(--shell-line-soft)] bg-[color:var(--sidebar-surface)] py-3`}
       style={{ width: 'var(--layout-rail-width)' }}
     >
       {/* Vertical hairline separator on the right side — the rail reads as a
           quiet sliver, not a heavy boxed panel */}
-      <div
-        aria-hidden
-        className={`pointer-events-none absolute inset-y-3 right-0 w-px ${
-          isLight ? 'bg-zinc-200' : 'bg-zinc-800/70'
-        }`}
-      />
-
       {/* Logo / Quick Switch trigger */}
       <button
         onClick={() => setShowQuickSwitch(true)}
-        className="group relative mb-3 flex h-9 w-9 items-center justify-center rounded-xl transition-colors"
+        className="group relative mb-3 flex h-9 w-9 touch-manipulation items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
         title="Quick Switch (Ctrl+K)"
+        aria-label="Open quick switch"
       >
-        <div className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-blue-600 shadow-sm shadow-violet-500/20 transition-transform duration-150 group-hover:scale-105">
-          <span className="text-xs font-bold text-white">V</span>
+        <div
+          aria-hidden="true"
+          className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-[color:var(--brand-color)] shadow-[0_2px_8px_color-mix(in_srgb,var(--brand-color)_40%,transparent)] transition-all duration-200 group-hover:scale-105 group-hover:shadow-[0_4px_16px_color-mix(in_srgb,var(--brand-color)_50%,transparent)]"
+        >
+          <span className="text-xs font-bold text-[color:var(--bg)]">V</span>
         </div>
       </button>
 
@@ -142,12 +133,7 @@ export function ActivityRail() {
         </div>
 
         {advancedItems.length > 0 && (
-          <>
-            <div
-              aria-hidden
-              className={`my-2 h-px w-6 ${isLight ? 'bg-zinc-200' : 'bg-zinc-800/70'}`}
-            />
-            <div className="flex flex-col items-center gap-0.5 opacity-80 hover:opacity-100">
+          <div className="mt-3 flex flex-col items-center gap-0.5 opacity-70 hover:opacity-100">
               {advancedItems.map((item) => (
                 <RailIconButton
                   key={item.id}
@@ -158,34 +144,27 @@ export function ActivityRail() {
                   subdued
                 />
               ))}
-            </div>
-          </>
+          </div>
         )}
       </div>
 
       {/* Bottom cluster: overlay, settings, status dot, account */}
       <div className="mt-auto flex flex-col items-center gap-1 pt-2">
-        <div
-          aria-hidden
-          className={`mb-1 h-px w-6 ${isLight ? 'bg-zinc-200' : 'bg-zinc-800/70'}`}
-        />
 
         {/* Vai overlay toggle (demo cursor + action log) */}
         <button
           onClick={() => setOverlayVisible(!overlayVisible)}
           title={overlayVisible ? 'Hide Vai overlays' : 'Show Vai overlays'}
-          className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+          className={`flex h-8 w-8 touch-manipulation items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)] ${
             overlayVisible
-              ? isLight
-                ? 'bg-violet-50 text-violet-700'
-                : 'bg-violet-500/15 text-violet-300'
+              ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]'
               : isLight
                 ? 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-800'
                 : 'text-zinc-600 hover:bg-zinc-900/70 hover:text-zinc-300'
           }`}
           aria-label="Toggle Vai overlay"
         >
-          <Sparkles className="h-3.5 w-3.5" />
+          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
 
         {/* Settings — bottom aligned for traditional shell muscle memory */}
@@ -193,8 +172,8 @@ export function ActivityRail() {
           <button
             onClick={() => setActivePanel('settings')}
             title="Settings (Ctrl+,)"
-            className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
-              activePanel === 'settings' && isExpanded
+            className={`flex h-8 w-8 touch-manipulation items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)] ${
+              activePanel === 'settings'
                 ? isLight
                   ? 'bg-zinc-100 text-zinc-900'
                   : 'bg-zinc-900 text-zinc-100'
@@ -204,7 +183,7 @@ export function ActivityRail() {
             }`}
             aria-label="Open settings"
           >
-            <Settings className="h-3.5 w-3.5" />
+            <Settings className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         )}
 
@@ -222,7 +201,7 @@ export function ActivityRail() {
         <button
           ref={userButtonRef}
           onClick={() => setUserPopoverOpen((prev) => !prev)}
-          className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+          className={`relative flex h-8 w-8 touch-manipulation items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)] ${
             userPopoverOpen
               ? isLight
                 ? 'bg-zinc-100 text-zinc-900'
@@ -235,11 +214,10 @@ export function ActivityRail() {
                   ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800'
                   : 'text-zinc-500 hover:bg-zinc-900/70 hover:text-zinc-300'
           }`}
-          title={authStatus === 'authenticated'
-            ? `Account${authUser?.email ? ` · ${authUser.email}` : ''}`
-            : 'Account'}
+          title={accountLabel}
+          aria-label={accountLabel}
         >
-          <UserRound className="h-3.5 w-3.5" />
+          <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
           <span
             className={`absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full ${
               authStatus === 'authenticated'
@@ -270,9 +248,7 @@ interface RailIconButtonProps {
 function RailIconButton({ item, isActive, onClick, isLight, subdued = false }: RailIconButtonProps) {
   const Icon = item.icon;
 
-  const activeClass = isLight
-    ? 'text-violet-700'
-    : 'text-violet-200';
+  const activeClass = 'text-[color:var(--accent-text)] bg-[color:var(--accent-softer)]';
   const idleBase = subdued
     ? isLight
       ? 'text-zinc-400 hover:text-zinc-800'
@@ -292,22 +268,18 @@ function RailIconButton({ item, isActive, onClick, isLight, subdued = false }: R
       whileHover={{ scale: 1.04 }}
       whileTap={{ scale: 0.94 }}
       transition={{ type: 'spring', stiffness: 420, damping: 28 }}
-      className={`group/rail relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+      className={`group/rail relative flex h-9 w-9 touch-manipulation items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)] ${
         isActive ? activeClass : idleBase
       } ${hoverBg}`}
     >
       {isActive && (
         <motion.span
           layoutId="rail-active-accent"
-          className="absolute -left-[5px] top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-r-full bg-violet-500 shadow-[0_0_8px_rgba(139,92,246,0.5)]"
+          className="absolute -left-[5px] top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-r-full bg-[color:var(--accent)]"
           transition={{ type: 'spring', stiffness: 380, damping: 28 }}
         />
       )}
-      <Icon
-        className={`h-[17px] w-[17px] transition-all ${
-          isActive ? 'drop-shadow-[0_0_4px_rgba(139,92,246,0.45)]' : ''
-        }`}
-      />
+      <Icon aria-hidden="true" className="h-[17px] w-[17px]" />
     </motion.button>
   );
 }

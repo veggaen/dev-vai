@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { Toaster } from 'sonner';
 import { Group, Panel, Separator } from 'react-resizable-panels';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -6,12 +6,6 @@ import { ActivityRail } from './components/ActivityRail.js';
 import { SidebarPanel } from './components/SidebarPanel.js';
 import { QuickSwitch } from './components/QuickSwitch.js';
 import { ChatWindow } from './components/ChatWindow.js';
-import { PreviewPanel } from './components/PreviewPanel.js';
-import { DebugConsole } from './components/DebugConsole.js';
-import { SessionViewer } from './components/SessionViewer.js';
-import { KnowledgePanel } from './components/KnowledgePanel.js';
-import { VaiGym } from './components/VaiGym.js';
-import { ThorsenPanel } from './components/ThorsenPanel.js';
 import { useEngineStore } from './stores/engineStore.js';
 import { useAuthStore } from './stores/authStore.js';
 import { useChatStore } from './stores/chatStore.js';
@@ -21,33 +15,21 @@ import { useSettingsStore } from './stores/settingsStore.js';
 import { useVinextStore } from './stores/vinextStore.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useAutoSandbox } from './hooks/useAutoSandbox.js';
-import { FileExplorer } from './components/FileExplorer.js';
 import { VaiOverlaySystem } from './components/VaiOverlaySystem.js';
-import { LayoutModeToggle as _LayoutModeToggle } from './components/LayoutModeToggle.js';
 import { CursorFocusBox } from './components/CursorFocusBox.js';
+import { SettingsDrawer } from './components/panels/SettingsDrawer.js';
 import { AuthGate } from './components/AuthGate.js';
 import { toast } from 'sonner';
-import { setApiSessionToken } from './lib/api.js';
 import { isDevAuthBypassEnabled } from './lib/dev-auth-bypass.js';
+import { applyThemePreference } from './lib/odysseus-theme.js';
 
-/**
- * Check for a session token passed as a URL hash fragment after platform auth
- * callback. Store it in localStorage and clean the URL.
- */
-function consumeHashToken(): boolean {
-  if (typeof window === 'undefined') return false;
-  const hash = window.location.hash;
-  if (!hash.startsWith('#vai_token=')) return false;
-
-  const token = decodeURIComponent(hash.slice('#vai_token='.length));
-  if (token) {
-    setApiSessionToken(token);
-  }
-
-  // Remove the hash from the URL without triggering a navigation
-  window.history.replaceState(null, '', window.location.pathname + window.location.search);
-  return !!token;
-}
+const DebugConsole = lazy(async () => ({ default: (await import('./components/DebugConsole.js')).DebugConsole }));
+const FileExplorer = lazy(async () => ({ default: (await import('./components/FileExplorer.js')).FileExplorer }));
+const KnowledgePanel = lazy(async () => ({ default: (await import('./components/KnowledgePanel.js')).KnowledgePanel }));
+const PreviewPanel = lazy(async () => ({ default: (await import('./components/PreviewPanel.js')).PreviewPanel }));
+const SessionViewer = lazy(async () => ({ default: (await import('./components/SessionViewer.js')).SessionViewer }));
+const ThorsenPanel = lazy(async () => ({ default: (await import('./components/ThorsenPanel.js')).ThorsenPanel }));
+const VaiGym = lazy(async () => ({ default: (await import('./components/VaiGym.js')).VaiGym }));
 
 /* ── Boot screen — shown only on first ever connection ── */
 function BootScreen() {
@@ -62,7 +44,7 @@ function BootScreen() {
             <span className="text-2xl font-bold text-white">V</span>
           </div>
         </div>
-        <h1 className="mb-1 text-3xl font-bold text-zinc-100">VeggaAI</h1>
+        <h1 className="mb-1 font-display text-3xl font-bold text-zinc-100">Vai</h1>
         <p className="mb-6 text-sm text-zinc-500">Type. Create. Ship.</p>
 
         {(status === 'starting' || status === 'idle') && (
@@ -82,7 +64,7 @@ function BootScreen() {
             </p>
             <button
               onClick={retry}
-              className="mt-2 rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition-all hover:border-violet-500/50 hover:bg-zinc-800 hover:shadow-lg hover:shadow-violet-500/10"
+              className="mt-2 touch-manipulation rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition-colors hover:border-violet-500/50 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
             >
               Retry
             </button>
@@ -113,6 +95,14 @@ function ResizeHandle({ direction = 'vertical' }: { direction?: 'vertical' | 'ho
   );
 }
 
+function PanelLoading() {
+  return (
+    <div className="layout-panel flex min-h-0 flex-1 items-center justify-center bg-[var(--shell-bg)] text-sm text-zinc-500">
+      Loading workspace panel...
+    </div>
+  );
+}
+
 /* PanelControls removed — toggles moved to ActivityRail + PreviewPanel toolbar */
 
 /* ── Main app ── */
@@ -133,7 +123,7 @@ export function App() {
   const {
     showDebugConsole, showFileExplorer, showBuilderPanel,
     sidebarState, focusMode, previewExpanded, expandBuilder, view, activePanel,
-    layoutMode, themePreference, updateScreenClass,
+    layoutMode, themePreference, updateScreenClass, screenClass,
   } = useLayoutStore();
   const { projectId, deployPhase, status: sandboxStatus } = useSandboxStore();
   const showOwnerFeatures = isOwner && !ownerFeaturesHidden;
@@ -153,19 +143,11 @@ export function App() {
     return () => stopVinextPolling();
   }, [startVinextPolling, stopVinextPolling]);
   useEffect(() => {
-    // Capture session token from URL hash (set by platform auth callback redirect)
-    const hadToken = consumeHashToken();
-
     void useSettingsStore.getState().fetchBootstrap().then((bootstrap) => {
       useAuthStore.getState().syncBootstrap(bootstrap?.auth);
       const defaultMode = useSettingsStore.getState().defaultConversationMode;
       useLayoutStore.getState().setMode(defaultMode);
       return useAuthStore.getState().fetchSession();
-    }).then(() => {
-      if (hadToken) {
-        const providerLabel = useAuthStore.getState().providerLabel ?? 'platform auth';
-        toast.success(`Signed in with ${providerLabel}`);
-      }
     });
   }, []);
   useEffect(() => {
@@ -205,16 +187,20 @@ export function App() {
     if (!qaMode) return;
     // Wait for app to settle, then trigger
     const timer = setTimeout(() => {
-      const qa = (window as unknown as Record<string, unknown>).__vai_qa as
-        { run?: () => unknown; build?: () => unknown; verify?: () => unknown } | undefined;
-      if (!qa) return;
-      if (qaMode === 'build' && qa.build) qa.build();
-      else if (qaMode === 'verify' && qa.verify) qa.verify();
-      else if (qa.run) qa.run();
-      // Clean URL param so it doesn't re-trigger on HMR
-      const url = new URL(window.location.href);
-      url.searchParams.delete('qa');
-      window.history.replaceState({}, '', url.toString());
+      const globals = window as unknown as Record<string, unknown>;
+      const loadAutomation = globals.__vai_load_automation as (() => Promise<void>) | undefined;
+      void loadAutomation?.().then(() => {
+        const qa = globals.__vai_qa as
+          { run?: () => unknown; build?: () => unknown; verify?: () => unknown } | undefined;
+        if (!qa) return;
+        if (qaMode === 'build' && qa.build) qa.build();
+        else if (qaMode === 'verify' && qa.verify) qa.verify();
+        else if (qa.run) qa.run();
+        // Clean URL param so it doesn't re-trigger on HMR
+        const url = new URL(window.location.href);
+        url.searchParams.delete('qa');
+        window.history.replaceState({}, '', url.toString());
+      });
     }, 3000);
     return () => clearTimeout(timer);
   }, []);
@@ -234,9 +220,19 @@ export function App() {
     };
   }, [updateScreenClass]);
 
+  const themeSwitchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousTheme = useRef(themePreference);
   useEffect(() => {
-    document.documentElement.dataset.theme = themePreference;
-    document.body.dataset.theme = themePreference;
+    // Cross-fade colors during a theme flip (see [data-theme-switching] in index.css).
+    applyThemePreference(themePreference);
+    if (previousTheme.current !== themePreference) {
+      previousTheme.current = themePreference;
+      document.documentElement.setAttribute('data-theme-switching', 'true');
+      if (themeSwitchTimer.current) clearTimeout(themeSwitchTimer.current);
+      themeSwitchTimer.current = setTimeout(() => {
+        document.documentElement.removeAttribute('data-theme-switching');
+      }, 350);
+    }
   }, [themePreference]);
 
   const hasActiveSandbox = projectId !== null;
@@ -310,11 +306,14 @@ export function App() {
   }
 
   const isReconnecting = status === 'reconnecting' || status === 'offline';
-  const showRail = sidebarState !== 'hidden' && !focusMode && !previewExpanded;
-  const showPanel = sidebarState === 'expanded' && !focusMode && !previewExpanded;
+  const isPhoneViewport = screenClass === 'phone';
+  const showRail = !isPhoneViewport && sidebarState !== 'hidden' && !focusMode && !previewExpanded;
+  const showPanel = !isPhoneViewport && sidebarState === 'expanded' && !focusMode && !previewExpanded;
+  const showBuilderWorkspace = showBuilderPanel && (!isPhoneViewport || previewExpanded);
 
   // DevLogs view — activated when sidebar panel is 'devlogs'
   const isDevLogsView = view === 'devlogs' || activePanel === 'devlogs';
+  const isSettingsOpen = activePanel === 'settings';
 
   return (
     <>
@@ -346,7 +345,7 @@ export function App() {
         data-thorsen-sync={syncState}
         data-vinext-motion={motionBudget}
         data-vinext-trust={trustLevel}
-        className="relative isolate flex min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--shell-bg)]"
+        className="relative isolate flex min-h-0 min-w-0 flex-col overflow-hidden bg-[color:var(--app-chrome-background)]"
         style={{
           padding: 'var(--layout-margin)',
           paddingTop: `calc(var(--layout-margin) + var(--safe-top))`,
@@ -384,17 +383,27 @@ export function App() {
             </div>
           )}
 
-          {/* Sidebar Panel — only in expanded state */}
+          {/* Settings drawer — ~80% width + click-outside backdrop */}
           <AnimatePresence mode="popLayout">
-            {showPanel && (
+            {isSettingsOpen && (
+              <div className="layout-panel flex min-h-0 min-w-0 flex-1 overflow-hidden" key="settings-drawer-wrap">
+                <SettingsDrawer />
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* Sidebar Panel — only in expanded state (not for settings) */}
+          <AnimatePresence mode="popLayout">
+            {showPanel && !isSettingsOpen && (
               <div className="layout-panel" key="sidebar-panel-wrap">
                 <SidebarPanel key="sidebar-panel" />
               </div>
             )}
           </AnimatePresence>
 
-          {/* Main content area */}
-          {isDevLogsView && showPanel ? (
+          {/* Main content area — hidden while settings drawer is open */}
+          <Suspense fallback={<PanelLoading />}>
+          {!isSettingsOpen && (isDevLogsView && showPanel ? (
             /* Dev Logs: session viewer fills the main area */
             <div className="layout-panel flex-1 min-w-0">
               <SessionViewer />
@@ -422,7 +431,7 @@ export function App() {
                 {!previewExpanded && (
                 <Panel
                   id="chat"
-                  defaultSize={showBuilderPanel ? '55' : '100'}
+                  defaultSize={showBuilderWorkspace ? '55' : '100'}
                   minSize="30"
                 >
                   <ChatWindow />
@@ -430,7 +439,7 @@ export function App() {
                 )}
 
                 {/* ── Builder panel — collapsible right side, or full width when expanded ── */}
-                {showBuilderPanel && (
+                {showBuilderWorkspace && (
                   <>
                     {!previewExpanded && <ResizeHandle direction="vertical" />}
                     <Panel
@@ -480,7 +489,8 @@ export function App() {
                 )}
               </Group>
             </div>
-          )}
+          ))}
+          </Suspense>
           </div>
         </div>
       </div>

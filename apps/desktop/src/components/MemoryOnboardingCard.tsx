@@ -75,10 +75,10 @@ export function MemoryOnboardingCard({
             Memory Workflow
           </div>
           <h2 className="mt-3 text-lg font-semibold tracking-[-0.03em] text-zinc-100">
-            Capture a page, then ask VAI what you read.
+            Capture a page, then ask what you read.
           </h2>
           <p className="mt-2 max-w-2xl text-[13px] leading-6 text-zinc-400">
-            This is the fastest way to feel the product: keep the runtime online, capture one real page with the browser extension, then ask a grounded memory question in chat.
+            Keep the runtime running, capture a real page (or other source) with the browser extension or workspace tools, then ask a question that uses that captured context. The answer can reference the actual captured content.
           </p>
         </div>
 
@@ -135,9 +135,9 @@ export function MemoryOnboardingCard({
         <div className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/[0.06] px-3.5 py-3">
           <Download className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
           <div className="min-w-0 flex-1">
-            <div className="text-[12px] font-medium text-amber-200">Browser extension not set up</div>
+            <div className="text-[12px] font-medium text-amber-200">No captured sources yet</div>
             <div className="mt-0.5 text-[11px] leading-5 text-zinc-400">
-              No captured pages yet. Install the VAI browser extension to start capturing pages, YouTube transcripts, and GitHub repos.
+              Capture pages, transcripts, or other sources (via the browser extension or other tools) to enable grounded recall questions that reference the actual captured content.
             </div>
           </div>
           <a

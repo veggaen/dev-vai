@@ -1,7 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { and, eq, gt, lt } from 'drizzle-orm';
 import { WorkOS } from '@workos-inc/node';
-import { schema, type VaiConfig, type VaiDatabase } from '@vai/core';
+import { and, eq, gt, lt, schema, type VaiConfig, type VaiDatabase } from '@vai/core';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { isLocalDevMutationAllowed } from '../security/request-trust.js';
 
@@ -83,6 +82,7 @@ interface CompanionClientMetadata {
 
 export interface PlatformViewer {
   authenticated: boolean;
+  role: PlatformAppRole;
   user: null | {
     id: string;
     email: string;
@@ -90,6 +90,13 @@ export interface PlatformViewer {
     avatarUrl: string | null;
   };
   companionClient: CompanionClientSummary | null;
+}
+
+export type PlatformAppRole = 'builder' | 'admin' | 'owner';
+
+export interface PlatformAuthServiceOptions {
+  ownerEmail?: string;
+  adminEmails?: readonly string[];
 }
 
 export interface DeviceLinkStartResult {
@@ -108,14 +115,23 @@ export interface DeviceLinkPollResult {
   companionClientId?: string;
 }
 
+export interface LoginHandoffExchangeResult {
+  sessionToken: string;
+  role: PlatformAppRole;
+  user: NonNullable<PlatformViewer['user']>;
+}
+
 const DEVICE_CODE_TTL_MS = 10 * 60 * 1000;
 const DEVICE_POLL_INTERVAL_SECONDS = 2;
+const LOGIN_HANDOFF_TTL_MS = 60 * 1000;
+const SESSION_TOUCH_INTERVAL_MS = 60 * 1000;
+const COMPANION_TOUCH_INTERVAL_MS = 60 * 1000;
 const USER_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const DEV_AUTH_BYPASS_HEADER = 'x-vai-dev-auth-bypass';
 const DEV_AUTH_BYPASS_QUERY_PARAM = 'devAuthBypass';
 const LOCAL_DEV_USER_ID = '__local_dev_user__';
 const LOCAL_DEV_USER_EMAIL = 'dev@localhost';
-const LOCAL_DEV_USER_NAME = 'Local Dev';
+const LOCAL_DEV_USER_NAME: string | null = null;
 
 function encodeBase64Url(input: Buffer): string {
   return input.toString('base64url');
@@ -177,6 +193,14 @@ function getRequestIp(request: FastifyRequest): string | null {
 
 function isAbsoluteHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === 'localhost'
+    || hostname === '127.0.0.1'
+    || hostname === '0.0.0.0'
+    || hostname === '[::1]'
+    || hostname === '::1';
 }
 
 function normalizeClientName(clientName?: string): string {
@@ -257,11 +281,21 @@ function normalizeUnixTimestamp(value: number | null | undefined): Date | null {
 
 export class PlatformAuthService {
   private workosClient: WorkOS | null = null;
+  private readonly ownerEmail: string;
+  private readonly adminEmails: Set<string>;
 
   constructor(
     private readonly db: VaiDatabase,
     private readonly config: VaiConfig['platformAuth'],
-  ) {}
+    options: PlatformAuthServiceOptions = {},
+  ) {
+    this.ownerEmail = options.ownerEmail?.trim().toLowerCase() ?? '';
+    this.adminEmails = new Set(
+      (options.adminEmails ?? [])
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean),
+    );
+  }
 
   isEnabled(): boolean {
     return this.config.enabled;
@@ -322,24 +356,22 @@ export class PlatformAuthService {
 
     const session = this.getSessionFromRequest(request);
     if (!session) {
-      return { authenticated: false, user: null, companionClient: null };
+      return { authenticated: false, role: 'builder', user: null, companionClient: null };
     }
 
     const row = this.getViewerRowByTokenHash(session.tokenHash);
 
     if (!row) {
-      return { authenticated: false, user: null, companionClient: null };
+      return { authenticated: false, role: 'builder', user: null, companionClient: null };
     }
 
-    this.db.update(schema.platformSessions)
-      .set({ lastSeenAt: new Date() })
-      .where(eq(schema.platformSessions.id, row.sessionId))
-      .run();
+    this.touchSessionIfStale(row.sessionId, row.lastSeenAt);
 
     const companionClient = this.upsertCompanionClientFromRequest(request, row.userId);
 
     return {
       authenticated: true,
+      role: this.getRoleForEmail(row.email),
       user: {
         id: row.userId,
         email: row.email,
@@ -380,9 +412,17 @@ export class PlatformAuthService {
 
     return {
       authenticated: true,
+      role: this.getRoleForEmail(user.email),
       user,
       companionClient,
     };
+  }
+
+  private getRoleForEmail(email: string): PlatformAppRole {
+    const normalized = email.trim().toLowerCase();
+    if (this.ownerEmail && normalized === this.ownerEmail) return 'owner';
+    if (this.adminEmails.has(normalized)) return 'admin';
+    return 'builder';
   }
 
   startDeviceLink(input?: DeviceLinkStartInput): DeviceLinkStartResult {
@@ -557,6 +597,7 @@ export class PlatformAuthService {
   private getViewerRowByTokenHash(tokenHash: string) {
     return this.db.select({
       sessionId: schema.platformSessions.id,
+      lastSeenAt: schema.platformSessions.lastSeenAt,
       userId: schema.platformUsers.id,
       email: schema.platformUsers.email,
       name: schema.platformUsers.name,
@@ -569,6 +610,27 @@ export class PlatformAuthService {
         gt(schema.platformSessions.expiresAt, new Date()),
       ))
       .get();
+  }
+
+  private touchSessionIfStale(sessionId: string, lastSeenAt: Date): void {
+    const now = new Date();
+    if (now.getTime() - lastSeenAt.getTime() < SESSION_TOUCH_INTERVAL_MS) {
+      return;
+    }
+
+    // Sliding expiration: each active use pushes the expiry forward by the full
+    // TTL, so an actively-used session never hard-expires at the original
+    // sign-in + sessionTtlHours. Previously only `lastSeenAt` was bumped, which
+    // logged a daily user out exactly sessionTtlHours after they signed in
+    // (the "every now and then" re-auth). Expiry now only lapses after a full
+    // idle TTL with no requests.
+    this.db.update(schema.platformSessions)
+      .set({
+        lastSeenAt: now,
+        expiresAt: new Date(now.getTime() + this.config.sessionTtlHours * 60 * 60 * 1000),
+      })
+      .where(eq(schema.platformSessions.id, sessionId))
+      .run();
   }
 
   async buildProviderStartUrl(provider: PlatformAuthProviderId, request: FastifyRequest, returnTo?: string): Promise<string> {
@@ -592,6 +654,82 @@ export class PlatformAuthService {
       case 'workos':
         return this.handleWorkOSCallback(code, state, request);
     }
+  }
+
+  shouldIssueLoginHandoff(returnTo: string): boolean {
+    const targetOrigin = new URL(returnTo).origin;
+    const appOrigin = new URL(this.config.appUrl ?? this.config.publicUrl).origin;
+    const runtimeOrigin = new URL(this.config.publicUrl).origin;
+    return targetOrigin !== appOrigin && targetOrigin !== runtimeOrigin;
+  }
+
+  issueLoginHandoff(sessionToken: string, targetOrigin: string): string {
+    const session = this.db.select({
+      userId: schema.platformSessions.userId,
+    })
+      .from(schema.platformSessions)
+      .where(and(
+        eq(schema.platformSessions.tokenHash, this.hashToken(sessionToken)),
+        gt(schema.platformSessions.expiresAt, new Date()),
+      ))
+      .get();
+
+    if (!session) {
+      throw new Error('Unable to create login handoff for an expired session.');
+    }
+
+    const code = encodeBase64Url(randomBytes(32));
+    const now = new Date();
+    this.db.insert(schema.platformLoginHandoffs)
+      .values({
+        id: randomUUID(),
+        codeHash: this.hashToken(code),
+        userId: session.userId,
+        targetOrigin: new URL(targetOrigin).origin,
+        expiresAt: new Date(now.getTime() + LOGIN_HANDOFF_TTL_MS),
+        createdAt: now,
+      })
+      .run();
+
+    return code;
+  }
+
+  exchangeLoginHandoff(code: string, request: FastifyRequest): LoginHandoffExchangeResult {
+    this.purgeExpiredRecords();
+
+    const handoff = this.db.select({
+      id: schema.platformLoginHandoffs.id,
+      userId: schema.platformUsers.id,
+      email: schema.platformUsers.email,
+      name: schema.platformUsers.name,
+      avatarUrl: schema.platformUsers.avatarUrl,
+    })
+      .from(schema.platformLoginHandoffs)
+      .innerJoin(schema.platformUsers, eq(schema.platformLoginHandoffs.userId, schema.platformUsers.id))
+      .where(and(
+        eq(schema.platformLoginHandoffs.codeHash, this.hashToken(code.trim())),
+        gt(schema.platformLoginHandoffs.expiresAt, new Date()),
+      ))
+      .get();
+
+    if (!handoff) {
+      throw new Error('Login handoff is missing or expired.');
+    }
+
+    this.db.delete(schema.platformLoginHandoffs)
+      .where(eq(schema.platformLoginHandoffs.id, handoff.id))
+      .run();
+
+    return {
+      sessionToken: this.createSession(handoff.userId, request, 'browser-handoff'),
+      role: this.getRoleForEmail(handoff.email),
+      user: {
+        id: handoff.userId,
+        email: handoff.email,
+        name: handoff.name,
+        avatarUrl: handoff.avatarUrl,
+      },
+    };
   }
 
   private buildGoogleStartUrl(request: FastifyRequest, returnTo?: string): string {
@@ -906,19 +1044,7 @@ export class PlatformAuthService {
     // Check if this installation key already has a client (possibly with a real user)
     const existing = this.findCompanionClient(metadata.installationKey, metadata.providedClientId ?? null);
     if (existing) {
-      // Update lastSeenAt without changing userId
-      this.db.update(schema.platformCompanionClients)
-        .set({ lastSeenAt: new Date(), updatedAt: new Date() })
-        .where(eq(schema.platformCompanionClients.id, existing.id))
-        .run();
-      return {
-        id: existing.id,
-        installationKey: metadata.installationKey,
-        clientName: metadata.clientName,
-        clientType: metadata.clientType,
-        launchTarget: metadata.launchTarget,
-        capabilities: metadata.capabilities,
-      };
+      return this.upsertCompanionClient(existing.userId, metadata, { markPolled: false });
     }
     // Ensure local system user exists for the foreign key
     const localUserId = this.ensureLocalSystemUser();
@@ -1030,25 +1156,48 @@ export class PlatformAuthService {
   ): CompanionClientSummary {
     const now = new Date();
     const existing = this.findCompanionClient(metadata.installationKey, metadata.providedClientId ?? null);
+    const capabilities = serializeCapabilities(metadata.capabilities);
     const values = {
       userId,
       installationKey: metadata.installationKey,
       clientName: metadata.clientName,
       clientType: metadata.clientType,
       launchTarget: metadata.launchTarget,
-      capabilities: serializeCapabilities(metadata.capabilities),
+      capabilities,
       lastSeenAt: now,
       lastPolledAt: options?.markPolled ? now : existing?.lastPolledAt ?? null,
       createdViaDeviceCodeId: existing?.createdViaDeviceCodeId ?? options?.createdViaDeviceCodeId ?? null,
       updatedAt: now,
     };
 
-    const clientId = existing?.id ?? metadata.providedClientId ?? randomUUID();
+    const providedClientIdAvailable = metadata.providedClientId
+      ? !this.db.select({ id: schema.platformCompanionClients.id })
+        .from(schema.platformCompanionClients)
+        .where(eq(schema.platformCompanionClients.id, metadata.providedClientId))
+        .get()
+      : false;
+    const clientId = existing?.id
+      ?? (providedClientIdAvailable ? metadata.providedClientId! : randomUUID());
     if (existing) {
-      this.db.update(schema.platformCompanionClients)
-        .set(values)
-        .where(eq(schema.platformCompanionClients.id, existing.id))
-        .run();
+      const heartbeatDue = !existing.lastSeenAt
+        || now.getTime() - existing.lastSeenAt.getTime() >= COMPANION_TOUCH_INTERVAL_MS;
+      const pollHeartbeatDue = options?.markPolled && (
+        !existing.lastPolledAt
+        || now.getTime() - existing.lastPolledAt.getTime() >= COMPANION_TOUCH_INTERVAL_MS
+      );
+      const metadataChanged = existing.userId !== userId
+        || existing.clientName !== metadata.clientName
+        || existing.clientType !== metadata.clientType
+        || existing.launchTarget !== metadata.launchTarget
+        || existing.capabilities !== capabilities
+        || (!existing.createdViaDeviceCodeId && Boolean(options?.createdViaDeviceCodeId));
+
+      if (metadataChanged || heartbeatDue || pollHeartbeatDue) {
+        this.db.update(schema.platformCompanionClients)
+          .set(values)
+          .where(eq(schema.platformCompanionClients.id, existing.id))
+          .run();
+      }
     } else {
       this.db.insert(schema.platformCompanionClients)
         .values({
@@ -1075,7 +1224,7 @@ export class PlatformAuthService {
         .from(schema.platformCompanionClients)
         .where(eq(schema.platformCompanionClients.id, providedClientId))
         .get();
-      if (byId) return byId;
+      if (byId?.installationKey === installationKey) return byId;
     }
 
     return this.db.select()
@@ -1213,6 +1362,9 @@ export class PlatformAuthService {
     this.db.delete(schema.platformOauthStates)
       .where(lt(schema.platformOauthStates.expiresAt, now))
       .run();
+    this.db.delete(schema.platformLoginHandoffs)
+      .where(lt(schema.platformLoginHandoffs.expiresAt, now))
+      .run();
     this.db.delete(schema.platformDeviceCodes)
       .where(lt(schema.platformDeviceCodes.expiresAt, now))
       .run();
@@ -1248,18 +1400,19 @@ export class PlatformAuthService {
     if (this.config.appUrl) {
       allowedOrigins.add(new URL(this.config.appUrl).origin);
     }
-    const referer = request.headers.referer;
-    if (referer && isAbsoluteHttpUrl(referer)) {
-      allowedOrigins.add(new URL(referer).origin);
-    }
-
     try {
       const parsed = isAbsoluteHttpUrl(requested)
         ? new URL(requested)
         : new URL(requested, this.config.appUrl ?? fallback);
 
       if (allowedOrigins.size > 0 && !allowedOrigins.has(parsed.origin)) {
-        return fallback;
+        const runtimeUrl = new URL(this.config.publicUrl);
+        const isAllowedLocalPreview = isLocalDevMutationAllowed(request)
+          && isLoopbackHostname(runtimeUrl.hostname)
+          && isLoopbackHostname(parsed.hostname);
+        if (!isAllowedLocalPreview) {
+          return fallback;
+        }
       }
 
       return parsed.toString();

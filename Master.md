@@ -495,6 +495,41 @@ From those logs, VeggaAI should extract:
 
 The point is not archival for its own sake. The point is compounding improvement.
 
+## 12.5 Architecture Direction — The Orchestrator / Bridge
+
+*Added 2026-06-01 by Vegga Thorsen. Additive direction; it does not override any rule above. It records the durable architectural intent for how Vai grows beyond a deterministic engine.*
+
+### 12.5.1 Identity As A Bridge
+
+Vai is the bridge between humans and every kind of intelligence: software, agentic systems, computer intelligence, and — over time — robotic and embodied systems. Vai's job is not to *be* every capability. Vai's job is to **understand intent and orchestrate the right capability**, then verify the result.
+
+### 12.5.2 Deterministic Core Stays The Heart
+
+The deterministic core (intent understanding, context carry-forward, routing, normalization, curated facts and idioms, safety, sandboxing, memory, and verification) remains the fast, predictable, verifiable heart of Vai. It is the part computer-science techniques are genuinely good at, and it always runs first.
+
+### 12.5.3 Generation Is A Gated Tool, Not The Brain
+
+Reasoning, creative generation, and multimodal understanding (voice, sound, images) cannot come from deterministic retrieval alone. These are provided by **pluggable capability modules** invoked only when the deterministic core cannot answer well:
+
+- The curated/idiom/fact path always wins first.
+- A generative module fires only on genuine decline or low-confidence routing — never to override a confident curated answer.
+- Generative output passes back through the deterministic layer for verification and sanitization before it reaches the user. "Always correct" is replaced by the honest target: calibrated, verified, and transparent about uncertainty (consistent with §6.4 and §6.6).
+
+### 12.5.4 Local Open-Weight First
+
+The default capability modules are **open-weight and local-first**, so Vai stays free for end users and free of any proprietary training data Vegga must collect:
+
+- Reasoning / code generation: a local open-weight LLM (e.g. Qwen, Llama, Mistral) behind the existing provider interface.
+- Speech-to-text: an open local model (e.g. Whisper).
+- Text-to-speech: an open local model (e.g. Piper / Coqui).
+- Vision / images: an open local model (e.g. LLaVA / CLIP).
+
+Cloud providers remain optional accelerators, added only by Vegga, never required for Vai to function.
+
+### 12.5.5 Why This Direction
+
+This is the only architecture that satisfies Vai's real constraints at once: computer-science-first core, free for end users, no proprietary training-data dependency, multimodal, and genuinely able to generate — while keeping the Template Matcher and Confident Bullshitter anti-patterns (§8) out of the system. It also satisfies §10.9: future capability modules can be added without rewriting the core.
+
 ## 13. Final Reminders
 
 - `Master.md` is the supreme authority.

@@ -26,6 +26,7 @@ export type TurnClass =
   | 'standalone-question'
   | 'contextual-followup'
   | 'product-quality-recommendation'
+  | 'vai-chat-quality-direction'  // for Grok <-> Vai collaboration / self-improvement prompts on chat intelligence
   | 'unknown';
 
 export interface TurnClassification {
@@ -57,6 +58,12 @@ const QUALITY_HARDENING_RE =
 
 const PRODUCT_RECOMMENDATION_HINT_RE =
   /\b(?:product|feature|ux|ui|design|architecture|system|pipeline|workflow|onboarding|prompt|chat|app|build|ship|launch|release)\b/i;
+
+const VAI_SELF_IMPROVEMENT_RE =
+  /\b(?:improve|better|stronger|enhance|augment|fix|upgrade|evolve)\b[\s\S]{0,30}\b(?:Vai|you|yourself|chat|intelligence|quality|responses|engine|routing|brief|classifier|grounding)\b|\b(?:Vai|chat)\s+(?:quality|intelligence|self-improvement|better|stronger)\b/i;
+
+const VAI_CHAT_QUALITY_DIRECTION_RE =
+  /\b(?:grok.*vai|vai.*grok|vai-collab|vai-chat-quality-direction|collaboration.*prompts|self-referential improvement)\b/i;
 
 function countWords(input: string): number {
   return input
@@ -112,6 +119,31 @@ export function classifyTurn(
   // context words OR a best-next/hardening phrase with a prior assistant
   // anchor. Bare hardening verbs with no prior context and no product
   // noun are too weak to commit ("make it better" alone is just unknown).
+  const isVaiSelfImprovement = VAI_SELF_IMPROVEMENT_RE.test(lower);
+  if (isVaiSelfImprovement) {
+    signals.push('self-improvement');
+    return {
+      kind: 'product-quality-recommendation',
+      confidence: 0.92,
+      signals,
+      referencesPriorTurn,
+      isShortAnaphoric,
+      wordCount,
+    };
+  }
+
+  if (VAI_CHAT_QUALITY_DIRECTION_RE.test(lower)) {
+    signals.push('vai-chat-quality-direction');
+    return {
+      kind: 'vai-chat-quality-direction',
+      confidence: 0.95,
+      signals,
+      referencesPriorTurn,
+      isShortAnaphoric,
+      wordCount,
+    };
+  }
+
   const strongProductQuality =
     productContextual
     || ((looksBestNext || looksHardening) && hasPriorAssistant && !isShortAnaphoric);
@@ -133,12 +165,13 @@ export function classifyTurn(
   }
 
   // ── product-quality recommendation ──────────────────────────────────
-  if (strongProductQuality && (looksBestNext || looksHardening)) {
+  if (strongProductQuality && (looksBestNext || looksHardening || isVaiSelfImprovement)) {
     if (looksBestNext) signals.push('best-next');
     if (looksHardening) signals.push('quality-hardening');
+    if (isVaiSelfImprovement) signals.push('self-improvement');
     return {
       kind: 'product-quality-recommendation',
-      confidence: 0.85,
+      confidence: isVaiSelfImprovement ? 0.9 : 0.85,
       signals,
       referencesPriorTurn,
       isShortAnaphoric,

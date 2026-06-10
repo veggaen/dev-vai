@@ -256,14 +256,14 @@ function cleanDescription(text: string): string {
 async function tryExtractCaptionsFromPageData(): Promise<string> {
   try {
     // Try the global variable first
-    const playerResponse = (window as Record<string, unknown>).ytInitialPlayerResponse as Record<string, unknown> | undefined;
+    const playerResponse = (window as unknown as Record<string, unknown>).ytInitialPlayerResponse as Record<string, unknown> | undefined;
     if (playerResponse) {
       const result = await extractCaptionsFromPlayerResponse(playerResponse);
       if (result) return result;
     }
 
     // Also try extracting from ytInitialData (sometimes captions are here too)
-    const initialData = (window as Record<string, unknown>).ytInitialData as Record<string, unknown> | undefined;
+    const initialData = (window as unknown as Record<string, unknown>).ytInitialData as Record<string, unknown> | undefined;
     if (initialData) {
       // Walk through the engagement panels to find transcript data
       const panels = getNestedValue(initialData, 'engagementPanels') as unknown[];

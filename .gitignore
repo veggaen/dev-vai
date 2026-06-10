@@ -25,6 +25,18 @@ apps/extension/.web-extension/
 # Local diagnostics / scratch dumps
 _*.txt
 _*.json
+/_*.jsonl
+/_*.partial
+/_*.cjs
+/_*.mjs
+/_*.report.md
+/_*.review.md
+/bench-round*.jsonl
+/_visible_audit/
+/tmp-vai-audit-test/
+/reports/
+/sample-ifm.cjs
+/cluster-ifm.cjs
 _*_debug.mjs
 test-out.txt
 test-result.txt
@@ -38,6 +50,9 @@ scripts/dogfood-send*.mjs
 scripts/iter*-probe.mjs
 scripts/probe-*.mjs
 scripts/probe-set-*.txt
+packages/core/_coverage_probe*.mts
+packages/core/_probe_*.mts
+packages/core/bench/_probe_*.mts
 *.log
 
 # Coverage / package manager noise

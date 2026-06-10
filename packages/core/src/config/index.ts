@@ -11,7 +11,7 @@
  */
 
 import { isConversationMode } from '../chat/modes.js';
-import type { VaiConfig, ProviderConfig, ProviderId, PlatformAuthConfig, PlatformAuthProviderId, ChatPromptRewriteConfig } from './types.js';
+import type { VaiConfig, ProviderConfig, ProviderId, PlatformAuthConfig, PlatformAuthProviderId, ChatPromptRewriteConfig, FallbackChain } from './types.js';
 
 export type { VaiConfig, ProviderConfig, ProviderId, ModelProfile, ModelCapabilities, ModelCost, RoutingRule, FallbackChain, PlatformAuthConfig, PlatformAuthProviderId, PlatformAuthProviderConfig, GoogleOAuthConfig, WorkOSAuthConfig, ChatPromptRewriteConfig, ChatPromptRewriteProfile, ChatPromptRewriteResponseDepth, ChatPromptRewriteRulesConfig } from './types.js';
 export { MODEL_PROFILES, getModelProfile, getProviderProfiles, listModelIds } from './model-profiles.js';
@@ -131,19 +131,57 @@ function buildDefaultModel(_providers: Record<ProviderId, ProviderConfig>, env: 
 function buildFallbackChain(providers: Record<ProviderId, ProviderConfig>, env: NodeJS.ProcessEnv): string[] {
   const chain: string[] = [];
   const enableExternalChatFallback = envBool(env, 'VAI_ENABLE_EXTERNAL_CHAT_FALLBACK', false);
-  if (!enableExternalChatFallback) return ['vai:v0'];
 
-  // Optional operator override: let external models take over only when this
-  // explicit flag is enabled. This keeps Vai-first chat semantics by default.
-  if (providers.anthropic.enabled) pushUniqueModel(chain, `anthropic:${providers.anthropic.defaultModel}`);
-  if (providers.openai.enabled) {
-    pushUniqueModel(chain, `openai:${providers.openai.defaultModel}`);
-    pushUniqueModel(chain, 'openai:gpt-5.3-codex');
-    pushUniqueModel(chain, 'openai:gpt-5.4');
+  // Local-first generative escalation (Master.md §12.5). The open-weight local
+  // model is free and runs on the operator's own hardware, so it joins the
+  // escalation chain whenever the local provider is enabled — no external
+  // opt-in flag required. It only fires when vai:v0 declines or is
+  // low-confidence (see decideVaiFallback), so the deterministic core still
+  // always answers first and curated facts/idioms always win.
+  if (providers.local.enabled && providers.local.defaultModel) {
+    pushUniqueModel(chain, `local:${providers.local.defaultModel}`);
   }
-  if (providers.google.enabled) pushUniqueModel(chain, `google:${providers.google.defaultModel}`);
+
+  // Cloud providers are optional accelerators, gated behind an explicit flag so
+  // Vai-first chat stays free and local by default.
+  if (enableExternalChatFallback) {
+    if (providers.anthropic.enabled) pushUniqueModel(chain, `anthropic:${providers.anthropic.defaultModel}`);
+    if (providers.openai.enabled) {
+      pushUniqueModel(chain, `openai:${providers.openai.defaultModel}`);
+      pushUniqueModel(chain, 'openai:gpt-5.3-codex');
+      pushUniqueModel(chain, 'openai:gpt-5.4');
+    }
+    if (providers.google.enabled) pushUniqueModel(chain, `google:${providers.google.defaultModel}`);
+  }
+
+  // Terminal safety net: vai:v0 always remains in the chain so a declined turn
+  // with no reachable generative module still returns the deterministic answer.
   pushUniqueModel(chain, 'vai:v0');
+
+  // No generative escalation target configured → preserve the historical
+  // single-entry chain so behavior is unchanged when nothing is enabled.
+  if (chain.length === 1) return ['vai:v0'];
   return chain;
+}
+
+/** Comma/semicolon-separated localized decline phrasings, e.g. VAI_DECLINE_MARKERS="det vet jeg ikke;no lo sé". */
+function buildDeclineMarkers(env: NodeJS.ProcessEnv): readonly string[] | undefined {
+  const raw = env.VAI_DECLINE_MARKERS?.trim();
+  if (!raw) return undefined;
+  const markers = raw.split(/[;,]/).map((m) => m.trim()).filter(Boolean);
+  return markers.length ? markers : undefined;
+}
+
+/** Exit-gate (post-generation verification) tuning from env. Conservative defaults; evidence requirement is opt-in. */
+function buildVerificationConfig(env: NodeJS.ProcessEnv): FallbackChain['verification'] {
+  const requireEvidence = envBool(env, 'VAI_VERIFY_REQUIRE_EVIDENCE', false);
+  const ceilingRaw = env.VAI_VERIFY_CALIBRATE_CEILING?.trim();
+  const calibrateCeiling = ceilingRaw && Number.isFinite(Number(ceilingRaw)) ? Number(ceilingRaw) : undefined;
+  if (!requireEvidence && calibrateCeiling === undefined) return undefined;
+  return {
+    ...(requireEvidence ? { requireEvidenceForFactualClaims: true } : {}),
+    ...(calibrateCeiling !== undefined ? { calibrateCeiling } : {}),
+  };
 }
 
 function buildPlatformAuthConfig(env: NodeJS.ProcessEnv): PlatformAuthConfig {
@@ -246,7 +284,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): VaiConfig {
 
     // Model Selection
     defaultModelId: buildDefaultModel(providers, env),
-    fallbackChain: { models: buildFallbackChain(providers, env) },
+    fallbackChain: {
+      models: buildFallbackChain(providers, env),
+      declineMarkers: buildDeclineMarkers(env),
+      verification: buildVerificationConfig(env),
+    },
     routingRules: [
       // Default routing — can be overridden by VAI_ROUTING_RULES env (future)
       { condition: 'default', modelId: buildDefaultModel(providers, env) },
@@ -263,6 +305,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): VaiConfig {
 
     // Auth
     ownerEmail: envStr(env, 'VAI_OWNER_EMAIL', 'v3ggat@gmail.com'),
+    adminEmails: envCsv(env, 'VAI_ADMIN_EMAILS', []),
     apiKeys: (env.VAI_API_KEYS?.trim() || '')
       .split(',')
       .map((k) => k.trim())

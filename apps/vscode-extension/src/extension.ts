@@ -55,6 +55,7 @@ import {
   getPlatformAuthState,
   onDidChangePlatformAuthState,
 } from './platform-auth.js';
+import { startCompanionContextPoller, stopCompanionContextPoller } from './companion-context.js';
 
 /* ── Runtime Server Auto-Start ─────────────────────────────────── */
 
@@ -913,12 +914,14 @@ export function activate(context: vscode.ExtensionContext) {
   // Always start the broadcast poller — the runtime supports anonymous poll-consume
   // via x-vai-installation-key header, so auth is not required for message delivery.
   startBroadcastPoller();
+  startCompanionContextPoller();
 
   console.log('[vai] VeggaAI Dev Logs v0.6.0 activated');
 }
 
 export function deactivate() {
   stopBroadcastPoller();
+  stopCompanionContextPoller();
   const session = getActiveSession();
   if (session) {
     // DON'T end the session — just flush and disconnect.

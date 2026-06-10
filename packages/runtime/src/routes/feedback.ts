@@ -6,8 +6,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { type VaiDatabase, schema } from '@vai/core';
-import { eq } from 'drizzle-orm';
+import { eq, type VaiDatabase, schema } from '@vai/core';
 import { feedbackBodySchema } from '@vai/api-types/feedback';
 import { invalidRequestBody } from '../validation/http-validation.js';
 

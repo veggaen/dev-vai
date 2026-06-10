@@ -427,6 +427,16 @@ export function bulkFactsLookup(lower: string): string | null {
   const isDefQuestion = /^(?:\s*(?:hey|hi|hello|yo)[,!\s]+)?\s*(?:what(?:'s| is| are)|tell me (?:about|more about)|describe|explain|who (?:is|are|was|were)|info(?:rmation)? (?:on|about)|give me (?:info|facts|the rundown) (?:on|about)|facts about)\b/i.test(lower);
   if (!isDefQuestion) return null;
 
+  // Comparison / contrast guard. "What's the difference between X and Y", "X vs
+  // Y", "compare X and Y" all satisfy the def-question prefix above ("what's…"),
+  // but the real subject is a *contrast*, not a single entity. Returning one
+  // entity's fact-card silently drops the other half and ignores the question
+  // (e.g. "difference between deep and shallow copy in JavaScript" must not emit
+  // the JavaScript language card). Defer these to the reasoning path.
+  if (/\bvs\.?\b|\bversus\b|\bcompared?\s+to\b|\bcomparison\b|\bdifference[s]?\b|\bdiffers?\b|\btrade[\s-]?offs?\b|\bpros\s+and\s+cons\b/i.test(lower)) {
+    return null;
+  }
+
   // Reject build / debug intents even if they begin with a question word.
   // Note: do NOT add bare verbs like `what`/`whats` here — they would block
   // every legitimate definitional question. Typo-corrected prompts (e.g.

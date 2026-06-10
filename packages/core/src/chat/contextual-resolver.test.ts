@@ -6,6 +6,8 @@ import {
   detectRecallQuestion,
   recallUserAttribute,
   recallFromConversation,
+  recallAssistantContactDetail,
+  rewriteBusinessContactLookupFollowUp,
   isEpisodicOrPersonalInput,
   inferBoldTopic,
   cleanTopic,
@@ -52,6 +54,16 @@ describe('rewritePronounFollowUp', () => {
     expect(rewritePronounFollowUp('do it', 'commerce store')).toBeNull();
   });
 
+  it('does NOT attach a stale topic to complete short standalone questions', () => {
+    expect(rewritePronounFollowUp('does spotify have podcasts?', 'Vetle')).toBeNull();
+    expect(rewritePronounFollowUp('what is docker?', 'Vetle')).toBeNull();
+  });
+
+  it('attaches the topic to a genuinely subjectless short follow-up', () => {
+    expect(rewritePronounFollowUp('how many?', 'Podcast titles'))
+      .toBe('how many (about Podcast titles)?');
+  });
+
   it('tolerates non-string input without throwing', () => {
     expect(rewritePronounFollowUp(null as unknown as string, 'Oslo')).toBeNull();
     expect(rewritePronounFollowUp(123 as unknown as string, 'Oslo')).toBeNull();
@@ -65,6 +77,8 @@ describe('detectUserName', () => {
   });
   it('ignores false positives like "i\'m asking"', () => {
     expect(detectUserName([turn('user', "i'm asking about docker")])).toBeNull();
+    expect(detectUserName([turn('user', "i'm fuzzy on CAP theorem tradeoffs")])).toBeNull();
+    expect(detectUserName([turn('user', 'I am overwhelmed debugging a blank React page.')])).toBeNull();
   });
 });
 
@@ -106,6 +120,46 @@ describe('isEpisodicOrPersonalInput (episodic↔semantic guard)', () => {
     expect(isEpisodicOrPersonalInput('what is docker?')).toBe(false);
     expect(isEpisodicOrPersonalInput('i want to know who is king in norway')).toBe(false);
     expect(isEpisodicOrPersonalInput('does starbucks make cappuccino?')).toBe(false);
+  });
+});
+
+describe('assistant contact detail recall', () => {
+  const restaurantAnswer = [
+    'I found these currently listed options:',
+    '- **Pizzabakeren Hommersåk** - pizza. Phone: +47 51 62 74 00. [1]',
+    '- **Al Forno** - italian. Phone: +47 41 77 77 17. [2]',
+  ].join('\n');
+
+  it('resolves a compact business abbreviation against prior assistant evidence', () => {
+    const history = [
+      turn('assistant', restaurantAnswer),
+      turn('user', 'what was the phone number to pb hommersåk?'),
+    ];
+
+    expect(recallAssistantContactDetail('what was the phone number to pb hommersåk?', history)).toEqual({
+      entity: 'Pizzabakeren Hommersåk',
+      phone: '+47 51 62 74 00',
+    });
+  });
+
+  it('does not guess when a contact question is ambiguous', () => {
+    expect(recallAssistantContactDetail('what was the phone number?', [
+      turn('assistant', restaurantAnswer),
+    ])).toBeNull();
+  });
+
+  it('carries the prior phone request into an explicit online correction', () => {
+    const history = [
+      turn('assistant', restaurantAnswer),
+      turn('user', 'what was the phone number to pb hommersåk?'),
+      turn('assistant', 'I am not sure.'),
+      turn('user', 'you should find it online pizza bakeren hommersåk'),
+    ];
+
+    expect(rewriteBusinessContactLookupFollowUp(
+      'you should find it online pizza bakeren hommersåk',
+      history,
+    )).toBe('find the phone number online for Pizzabakeren Hommersåk');
   });
 });
 

@@ -216,12 +216,12 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
         parsed.data.name,
         ownerUserId,
       );
+      projects.syncSandboxProject(project);
       // CLI-scaffolded projects (e.g. create-next-app) already have deps installed
       const cliScaffolded = project.logs.some((l: string) => /Scaffolded via.*real CLI/i.test(l));
       return {
         id: project.id,
         name: project.name,
-        rootDir: project.rootDir,
         status: project.status,
         version: project.version,
         files: Object.keys(project.files),
@@ -240,10 +240,10 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
       }
       const ownerUserId = await getViewerUserId(auth, request);
       const project = await sandbox.create(parsed.data.name, ownerUserId);
+      projects.syncSandboxProject(project);
       return {
         id: project.id,
         name: project.name,
-        rootDir: project.rootDir,
         status: project.status,
         version: project.version,
       };
@@ -253,18 +253,22 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
   /** List all sandbox projects */
   app.get('/api/sandbox', async (request) => {
     const ownerUserId = await getViewerUserId(auth, request);
-    return sandbox.list()
-      .map((project) => {
-        projects.syncSandboxProject(project);
-        return project;
-      })
-      .filter((project) => projects.canReadSandbox(project.id, ownerUserId))
+    const sandboxProjects = sandbox.list();
+    for (const project of sandboxProjects) {
+      projects.syncSandboxProject(project);
+    }
+    const readableSandboxIds = new Set(
+      projects.listProjectsForUser(ownerUserId).map((project) => project.sandboxProjectId),
+    );
+
+    return sandboxProjects
+      .filter((project) => readableSandboxIds.has(project.id))
       .map((p) => ({
         id: p.id,
         name: p.name,
         status: p.status,
         devPort: p.devPort,
-      version: p.version,
+        version: p.version,
         createdAt: p.createdAt,
         owned: Boolean(p.ownerUserId),
       }));
@@ -292,7 +296,6 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
       return {
         id: project.id,
         name: project.name,
-        rootDir: project.rootDir,
         files: fileList,
         status: project.status,
         devPort: project.devPort,

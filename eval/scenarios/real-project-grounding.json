@@ -1,0 +1,71 @@
+{
+  "id": "real-project-grounding",
+  "label": "Honest grounding and dynamic synthesis using V3gga's actual projects (dev-smartfolks question compiler, ARK_2026 server work, etc.) as the sole knowledge source. No reliance on curated bulk facts or templates. Tests research, instruction extraction, code understanding, and natural synthesis across real user artifacts.",
+  "scenarios": [
+    {
+      "id": "dev-smartfolks-understand-dsl",
+      "messages": [
+        { "role": "user", "content": "I have a project at C:\\Users\\v3gga\\Documents\\dev-smartfolks\\question_compiler. Study its core DSL and renderer. Explain in plain language how one would add a new question type that generates distractors for algebra problems." }
+      ],
+      "assert": {
+        "minLength": 150,
+        "anyOfContains": [
+          "/dsl|renderer|distractor|algebra|template|schema|generate/i"
+        ],
+        "notContains": [
+          "/I don't have information about that project|curated|from my built-in knowledge/i"
+        ],
+        "notes": "Must demonstrate actual parsing of the real Python files, not generic advice. Should reference specific modules like dsl.py, renderer.py, distractors.py."
+      }
+    },
+    {
+      "id": "dev-smartfolks-extract-instructions",
+      "messages": [
+        { "role": "user", "content": "From the dev-smartfolks question compiler codebase, extract the step-by-step process for creating a new math template pack. Then give me a concrete example of what files I would need to touch and what the minimal code changes would look like." }
+      ],
+      "assert": {
+        "minLength": 200,
+        "anyOfContains": [
+          "/template|pack|math|basic_algebra|renderer|register|distractors/i"
+        ],
+        "notes": "Answer must be grounded in the actual directory structure and code patterns found in the real project at the time of ingestion."
+      }
+    },
+    {
+      "id": "cross-project-synthesis",
+      "messages": [
+        { "role": "user", "content": "I have work in both dev-smartfolks (question generation DSL) and ARK_2026 (server plugins and configs). Find conceptual overlaps in how they handle configuration, templating, or plugin/extension systems. Propose one concrete idea for cross-pollination that respects the actual code in both places." }
+      ],
+      "assert": {
+        "minLength": 180,
+        "notes": "Requires ingesting and reasoning across two distinct real user projects. Penalize generic advice or reliance on pre-seeded knowledge."
+      }
+    },
+    {
+      "id": "dev-smartfolks-safe-eval-restrictions",
+      "messages": [
+        { "role": "user", "content": "In the dev-smartfolks question_compiler, look at the safe_eval function and SAFE_GLOBALS. Explain exactly what it allows and what it deliberately blocks. Then give a concrete example of an expression that would be rejected and why that design choice exists for a question generator." }
+      ],
+      "assert": {
+        "minLength": 120,
+        "anyOfContains": [
+          "/SAFE_GLOBALS|__builtins__|eval|safe_eval|random|restricted/i"
+        ],
+        "notes": "Must reference the actual implementation details (the dict, the eval call, the comment about production alternatives). No generic 'don't use eval' advice."
+      }
+    },
+    {
+      "id": "dev-smartfolks-extend-dsltemplate",
+      "messages": [
+        { "role": "user", "content": "Study DSLTemplate in dev-smartfolks/question_compiler/core/dsl.py. Walk through exactly what generate_semantics does with variables, evaluations, and post_evaluations. Then describe the minimal changes needed to support a new 'post_choices' step that can filter or transform the final choices list." }
+      ],
+      "assert": {
+        "minLength": 180,
+        "anyOfContains": [
+          "/generate_semantics|variables|evaluations|post_evaluations|choices|DSLTemplate/i"
+        ],
+        "notes": "Answer must be traceable to the specific methods and data flow in the real dsl.py file the user has."
+      }
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import type { ModelCapabilities, ModelCost, ModelProfile, ProviderId } from '../config/types.js';
 import type { ChatTurnKind } from '../chat/turn-kind.js';
+import type { CouncilThinking } from '../consensus/types.js';
 
 // ── Messages ──
 
@@ -84,6 +85,26 @@ export interface GroundedBuildBrief {
 
 export type SourcePresentation = 'research' | 'supporting';
 
+export interface ResearchTraceStage {
+  readonly step: 'clarify' | 'fan-out' | 'fetch' | 'rank' | 'read' | 'cross-check' | 'conclude';
+  readonly label: string;
+  readonly detail: string;
+  readonly durationMs: number;
+}
+
+/** Structured provenance for one web-search run, suitable for UI inspection. */
+export interface ResearchTrace {
+  readonly mode: 'linear' | 'parallel' | 'wormhole';
+  readonly latencyMs: number;
+  readonly recommendedConcurrency: number;
+  readonly rawResultCount: number;
+  readonly sourceCount: number;
+  readonly intent: string;
+  readonly entities: readonly string[];
+  readonly fanOutQueries: readonly string[];
+  readonly stages: readonly ResearchTraceStage[];
+}
+
 export interface ChatChunk {
   readonly type:
     | 'text_delta'
@@ -94,7 +115,8 @@ export interface ChatChunk {
     | 'sources'
     | 'done'
     | 'conversation_resolved'
-    | 'fallback_notice';
+    | 'fallback_notice'
+    | 'verification';
   readonly textDelta?: string;
   readonly reasoningDelta?: string;
   readonly toolCallDelta?: { readonly id: string; readonly name: string; readonly argumentsDelta: string };
@@ -117,6 +139,8 @@ export interface ChatChunk {
   readonly confidence?: number;
   /** Structured evidence-to-build handoff for build-oriented grounded replies */
   readonly groundedBrief?: GroundedBuildBrief;
+  /** Inspectable search execution trace for research turns, including empty-result searches. */
+  readonly researchTrace?: ResearchTrace;
   readonly usage?: TokenUsage;
   readonly durationMs?: number;
   /** Which specific model handled this request */
@@ -137,6 +161,18 @@ export interface ChatChunk {
     readonly fromModelId: string;
     readonly toModelId: string;
     readonly reason: 'low-confidence' | 'no-knowledge';
+  };
+  /**
+   * Populated on `verification` chunks emitted by the post-generation
+   * verification arm (Master.md §12.5.3). Lets the UI badge a calibrated turn
+   * and lets audits score the exit gate (sanitize / calibrate / decline).
+   */
+  readonly verification?: {
+    readonly action: 'pass' | 'sanitize' | 'calibrate' | 'decline';
+    /** Typed-grounding classification: grounded / ungrounded / contradicted / complementary. */
+    readonly grounding?: 'grounded' | 'ungrounded' | 'contradicted' | 'complementary';
+    readonly reasons: readonly string[];
+    readonly calibrationNote?: string;
   };
   /**
    * Vai-native "thinking" trace for the turn (Vai is a deterministic engine, not
@@ -171,6 +207,54 @@ export interface TurnThinking {
   readonly register?: string;
   /** Turn latency in milliseconds. */
   readonly durationMs?: number;
+  /** Cumulative deterministic process checkpoints for this turn. */
+  readonly processTrace?: readonly TurnProcessTraceStage[];
+  /**
+   * The scored routing decision for this turn — surfaced so friends (human
+   * and AI) can SEE why Vai answered the way it did, and steer it. Present on
+   * deterministic dispatched turns.
+   */
+  readonly routePlan?: TurnRoutePlan;
+  /**
+   * The SCIS consensus council's ephemeral view of this turn — who reviewed the
+   * draft, the consensus (ship/act/escalate), the read intent, and what method
+   * was missing. Present when a council convened. Carries no member-authored
+   * facts (see docs/capabilities/scis-consensus-council.md).
+   */
+  readonly council?: CouncilThinking;
+}
+
+export interface TurnProcessTraceStage {
+  readonly stage: string;
+  readonly durationMs: number;
+  /** Authentic per-step fact (e.g. "single question", "deep knowledge · matched \"greeting\""). */
+  readonly detail?: string;
+}
+
+/** A friend-readable record of how the scored dispatcher chose its answer. */
+export interface TurnRoutePlan {
+  /** Winning handler, or null when nothing cleared the confidence floor. */
+  readonly chosen: string | null;
+  /** True when no candidate cleared the floor — an honest "I don't know". */
+  readonly belowFloor: boolean;
+  /** Candidates ranked best→worst, each with its fit and outcome. */
+  readonly candidates: readonly TurnRouteCandidate[];
+}
+
+export interface TurnRouteCandidate {
+  readonly name: string;
+  /** Fit 0..1 after any friend guidance was applied. */
+  readonly score: number;
+  /** Fit 0..1 before friend guidance — shows how a hint moved the value. */
+  readonly baseScore?: number;
+  /** This candidate won the turn. */
+  readonly chosen: boolean;
+  /** Scored high enough but declined — couldn't ground its answer. */
+  readonly declined: boolean;
+  /** Friend guidance note that moved this candidate's score, if any. */
+  readonly guidance?: string;
+  /** Why this handler valued the turn as it did — the reviewable rationale. */
+  readonly reason?: string;
 }
 
 // ── Model Adapter Interface ──

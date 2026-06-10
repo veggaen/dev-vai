@@ -1,15 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createHash } from 'node:crypto';
-import { eq } from 'drizzle-orm';
 import type { FastifyRequest } from 'fastify';
-import { createDb, schema, type VaiConfig, type VaiDatabase } from '@vai/core';
+import { createDb, eq, schema, type VaiConfig, type VaiDatabase } from '@vai/core';
 import { PlatformAuthService } from '../src/auth/platform-auth.js';
 
 function hashSessionToken(secret: string, token: string): string {
   return createHash('sha256').update(`${secret}:${token}`).digest('hex');
 }
 
-function seedSession(db: VaiDatabase, token: string): string {
+function seedSession(db: VaiDatabase, token: string, lastSeenAt = new Date()): string {
   const now = new Date();
   const userId = 'ws-user-1';
   db.insert(schema.platformUsers).values({
@@ -21,7 +20,7 @@ function seedSession(db: VaiDatabase, token: string): string {
     tokenHash: hashSessionToken('test-session-secret', token),
     userAgent: null, ipAddress: null,
     expiresAt: new Date(now.getTime() + 60_000),
-    lastSeenAt: now, createdAt: now,
+    lastSeenAt, createdAt: now,
   }).run();
   return userId;
 }
@@ -73,7 +72,7 @@ describe('PlatformAuthService local dev auth bypass', () => {
     expect(viewer.user).toEqual({
       id: '__local_dev_user__',
       email: 'dev@localhost',
-      name: 'Local Dev',
+      name: null,
       avatarUrl: null,
     });
 
@@ -89,7 +88,7 @@ describe('PlatformAuthService local dev auth bypass', () => {
     expect(storedUser).toEqual({
       id: '__local_dev_user__',
       email: 'dev@localhost',
-      name: 'Local Dev',
+      name: null,
     });
   });
 
@@ -140,5 +139,139 @@ describe('PlatformAuthService local dev auth bypass', () => {
 
     expect(viewer.authenticated).toBe(false);
     expect(viewer.user).toBeNull();
+  });
+
+  it('derives UI roles from server-owned allow-lists', async () => {
+    const token = 'owner-session-token';
+    seedSession(db, token);
+    auth = new PlatformAuthService(db, createPlatformAuthConfig(), {
+      ownerEmail: 'ws@example.com',
+      adminEmails: ['admin@example.com'],
+    });
+
+    const viewer = await auth.getViewer(makeRequest({ authorization: `Bearer ${token}` }, '127.0.0.1'));
+
+    expect(viewer.role).toBe('owner');
+  });
+
+  it('refreshes stale session activity without rewriting every authenticated request', async () => {
+    const token = 'stale-session-token';
+    const staleLastSeenAt = new Date(Date.now() - 2 * 60_000);
+    seedSession(db, token, staleLastSeenAt);
+
+    await auth.getViewer(makeRequest({ authorization: `Bearer ${token}` }, '127.0.0.1'));
+    const refreshed = db.select({ lastSeenAt: schema.platformSessions.lastSeenAt })
+      .from(schema.platformSessions)
+      .get();
+
+    expect(refreshed?.lastSeenAt.getTime()).toBeGreaterThan(staleLastSeenAt.getTime());
+
+    await auth.getViewer(makeRequest({ authorization: `Bearer ${token}` }, '127.0.0.1'));
+    const stable = db.select({ lastSeenAt: schema.platformSessions.lastSeenAt })
+      .from(schema.platformSessions)
+      .get();
+
+    expect(stable?.lastSeenAt.getTime()).toBe(refreshed?.lastSeenAt.getTime());
+  });
+
+  it('does not let a provided companion id replace another installation key', () => {
+    const first = auth.upsertAnonymousCompanionClient(makeRequest({
+      'x-vai-installation-key': 'installation-a',
+      'x-vai-client-name': 'Desktop A',
+    }, '127.0.0.1'));
+    const second = auth.upsertAnonymousCompanionClient(makeRequest({
+      'x-vai-installation-key': 'installation-b',
+      'x-vai-client-name': 'Desktop B',
+      'x-vai-companion-client-id': first!.id,
+    }, '127.0.0.1'));
+
+    expect(second?.id).not.toBe(first?.id);
+    expect(db.select().from(schema.platformCompanionClients).all()).toHaveLength(2);
+  });
+
+  it('does not rewrite an unchanged companion heartbeat inside the touch interval', () => {
+    const request = makeRequest({
+      'x-vai-installation-key': 'stable-installation',
+      'x-vai-client-name': 'Stable Desktop',
+    }, '127.0.0.1');
+    const companion = auth.upsertAnonymousCompanionClient(request)!;
+    const stableUpdatedAt = new Date('2024-01-01T00:00:00.000Z');
+
+    db.update(schema.platformCompanionClients)
+      .set({ updatedAt: stableUpdatedAt })
+      .where(eq(schema.platformCompanionClients.id, companion.id))
+      .run();
+
+    auth.upsertAnonymousCompanionClient(request);
+
+    const stored = db.select().from(schema.platformCompanionClients)
+      .where(eq(schema.platformCompanionClients.id, companion.id))
+      .get();
+    expect(stored?.updatedAt.getTime()).toBe(stableUpdatedAt.getTime());
+  });
+
+  it('does not trust an unconfigured Referer origin for OAuth return targets', async () => {
+    const baseConfig = createPlatformAuthConfig();
+    auth = new PlatformAuthService(db, {
+      ...baseConfig,
+      defaultProvider: 'google',
+      providers: {
+        ...baseConfig.providers,
+        google: {
+          enabled: true,
+          label: 'Google OAuth',
+          clientId: 'google-client-id',
+          scopes: ['openid', 'email', 'profile'],
+        },
+      },
+    });
+
+    await auth.buildProviderStartUrl(
+      'google',
+      makeRequest({ referer: 'https://attacker.example/sign-in' }, '127.0.0.1'),
+      'https://attacker.example/steal-session',
+    );
+
+    const storedState = db.select().from(schema.platformOauthStates).get();
+    expect(storedState?.returnTo).toBe('http://localhost:5173');
+  });
+
+  it('allows local preview returns without trusting arbitrary external origins', async () => {
+    const baseConfig = createPlatformAuthConfig();
+    auth = new PlatformAuthService(db, {
+      ...baseConfig,
+      defaultProvider: 'google',
+      providers: {
+        ...baseConfig.providers,
+        google: {
+          enabled: true,
+          label: 'Google OAuth',
+          clientId: 'google-client-id',
+          scopes: ['openid', 'email', 'profile'],
+        },
+      },
+    });
+
+    await auth.buildProviderStartUrl(
+      'google',
+      makeRequest({}, '127.0.0.1'),
+      'http://localhost:4100/api/auth/platform/callback',
+    );
+
+    const storedState = db.select().from(schema.platformOauthStates).get();
+    expect(storedState?.returnTo).toBe('http://localhost:4100/api/auth/platform/callback');
+  });
+
+  it('exchanges preview login handoffs once and never stores the platform session in the redirect', () => {
+    const token = 'preview-cookie-session';
+    seedSession(db, token);
+
+    const code = auth.issueLoginHandoff(token, 'http://localhost:4100');
+    const exchange = auth.exchangeLoginHandoff(code, makeRequest({}, '127.0.0.1'));
+
+    expect(exchange.user.email).toBe('ws@example.com');
+    expect(exchange.sessionToken).not.toBe(token);
+    expect(() => auth.exchangeLoginHandoff(code, makeRequest({}, '127.0.0.1')))
+      .toThrow('Login handoff is missing or expired.');
   });
 });

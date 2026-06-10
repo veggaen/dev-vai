@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Plus, Trash2, ChevronLeft,
-  FolderKanban, FolderOpenDot, Shield, Search,
+  Plus, Trash2, ChevronLeft, ChevronRight,
+  FolderKanban, Shield, Search, Pin, PinOff, Code2,
 } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
@@ -10,13 +10,13 @@ import { useEngineStore } from '../stores/engineStore.js';
 import { useLayoutStore, type SidebarPanel as PanelType } from '../stores/layoutStore.js';
 import { useSandboxStore } from '../stores/sandboxStore.js';
 import { useAuthStore } from '../stores/authStore.js';
-import { SidebarSearch } from './SidebarSearch.js';
-import { SessionList } from './SessionList.js';
-import { DockerPanel } from './DockerPanel.js';
 import { apiFetch } from '../lib/api.js';
 import { toast } from 'sonner';
-import { KnowledgeSidePanel } from './panels/KnowledgeSidePanel.js';
-import { SettingsPanel } from './panels/SettingsPanel.js';
+
+const SidebarSearch = lazy(async () => ({ default: (await import('./SidebarSearch.js')).SidebarSearch }));
+const SessionList = lazy(async () => ({ default: (await import('./SessionList.js')).SessionList }));
+const DockerPanel = lazy(async () => ({ default: (await import('./DockerPanel.js')).DockerPanel }));
+const KnowledgeSidePanel = lazy(async () => ({ default: (await import('./panels/KnowledgeSidePanel.js')).KnowledgeSidePanel }));
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 
@@ -31,7 +31,7 @@ function formatRelative(date: string): string {
 
 
 const PANEL_TITLES: Record<PanelType, string> = {
-  chats: 'Chat History',
+  chats: 'Workspace',
   projects: 'Projects',
   devlogs: 'Dev Logs',
   knowledge: 'Knowledge Base',
@@ -41,6 +41,7 @@ const PANEL_TITLES: Record<PanelType, string> = {
   vaigym: 'Vai Gymnasium',
   thorsen: 'Thorsen Wormhole',
   control: 'Control',
+  council: 'Council Progress',
 };
 
 interface SandboxProjectSummary {
@@ -53,6 +54,47 @@ interface SandboxProjectSummary {
 }
 
 const CHAT_ORDER_STORAGE_KEY = 'vai-sidebar-chat-order';
+const CHAT_PINNED_STORAGE_KEY = 'vai-sidebar-pinned-chats';
+const PROJECT_LIST_PAGE_SIZE = 12;
+
+function loadPinnedChats(): Set<string> {
+  try {
+    const raw = typeof window !== 'undefined' ? window.localStorage.getItem(CHAT_PINNED_STORAGE_KEY) : null;
+    return new Set(raw ? JSON.parse(raw) as string[] : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function savePinnedChats(ids: Set<string>): void {
+  try {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(CHAT_PINNED_STORAGE_KEY, JSON.stringify([...ids]));
+    }
+  } catch {
+    // ignore local persistence failures
+  }
+}
+
+/** Date bucket — Today, Yesterday, Older. */
+function dateBucket(updatedAt: string): { key: string; label: string; order: number } {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const updated = new Date(updatedAt).getTime();
+  if (updated >= startOfToday) return { key: 'bucket:today', label: 'Today', order: 0 };
+  if (updated >= startOfToday - 86_400_000) return { key: 'bucket:yesterday', label: 'Yesterday', order: 1 };
+  return { key: 'bucket:older', label: 'Older', order: 2 };
+}
+
+function isCodeConversation(conv: { mode?: string; sandboxProjectId?: string | null }): boolean {
+  return conv.mode === 'builder' || conv.mode === 'agent' || Boolean(conv.sandboxProjectId);
+}
+
+export const FOCUS_CHAT_SEARCH_EVENT = 'vai:focus-chat-search';
+
+function PanelLoading() {
+  return <div className="p-4 text-xs text-zinc-600">Loading panel...</div>;
+}
 
 function loadConversationOrder(): string[] {
   try {
@@ -85,13 +127,11 @@ export function SidebarPanel() {
       animate={{ width: 'var(--layout-sidebar-effective-width)', opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
       transition={{ duration: 0.15, ease: 'easeOut' }}
-      className={`flex h-full min-w-0 flex-shrink-0 flex-col overflow-hidden ${
-        isLight ? 'bg-white/96' : 'bg-zinc-950/92'
-      }`}
+      className={`flex h-full min-w-0 flex-shrink-0 flex-col overflow-hidden border-r border-[color:var(--shell-line-soft)] bg-[color:var(--sidebar-surface)]`}
       style={{ width: 'var(--layout-sidebar-effective-width)', maxWidth: '100%' }}
     >
       {/* Panel header — slim and quiet */}
-      <div className={`flex h-11 flex-shrink-0 items-center justify-between px-4 ${isLight ? 'border-b border-zinc-100' : 'border-b border-zinc-900/70'}`}>
+      <div className="flex h-11 flex-shrink-0 items-center justify-between px-4">
         <div className="min-w-0">
           <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
             {PANEL_TITLES[activePanel]}
@@ -111,14 +151,13 @@ export function SidebarPanel() {
 
       {/* Panel content */}
       <div className="flex-1 overflow-y-auto">
-        {activePanel === 'chats' && <ChatsPanel />}
-        {activePanel === 'projects' && <ProjectsPanel />}
-        {activePanel === 'devlogs' && <DevLogsPanel />}
-        {activePanel === 'knowledge' && <KnowledgeSidePanel />}
-        {activePanel === 'docker' && <DockerPanel />}
-        {activePanel === 'search' && <SearchPanel />}
-        {activePanel === 'settings' && <SettingsPanel />}
-        {activePanel === 'control' && <ControlPanel />}
+        <Suspense fallback={<PanelLoading />}>
+          {activePanel === 'chats' && <ChatsPanel />}
+          {activePanel === 'devlogs' && <DevLogsPanel />}
+          {activePanel === 'knowledge' && <KnowledgeSidePanel />}
+          {activePanel === 'docker' && <DockerPanel />}
+          {activePanel === 'control' && <ControlPanel />}
+        </Suspense>
       </div>
     </motion.div>
   );
@@ -138,10 +177,22 @@ function ChatsPanel() {
   const themePreference = useLayoutStore((state) => state.themePreference);
   const isLight = themePreference === 'light';
   const [query, setQuery] = useState('');
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => loadPinnedChats());
   const [manualOrder, setManualOrder] = useState<string[]>(() => loadConversationOrder());
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [draggedConversationId, setDraggedConversationId] = useState<string | null>(null);
   const [dragOverConversationId, setDragOverConversationId] = useState<string | null>(null);
   const suppressSelectUntilRef = useRef(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const focusSearch = () => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    };
+    window.addEventListener(FOCUS_CHAT_SEARCH_EVENT, focusSearch);
+    return () => window.removeEventListener(FOCUS_CHAT_SEARCH_EVENT, focusSearch);
+  }, []);
 
   useEffect(() => {
     fetchConversations();
@@ -206,43 +257,91 @@ function ChatsPanel() {
     });
   }, [conversations]);
 
-  // Group conversations by time buckets
-  const grouped = useMemo(() => {
-    const now = Date.now();
-    const today: typeof filteredConversations = [];
-    const yesterday: typeof filteredConversations = [];
-    const thisWeek: typeof filteredConversations = [];
-    const older: typeof filteredConversations = [];
+  const togglePinned = useCallback((conversationId: string) => {
+    setPinnedIds((current) => {
+      const next = new Set(current);
+      if (next.has(conversationId)) next.delete(conversationId);
+      else next.add(conversationId);
+      savePinnedChats(next);
+      return next;
+    });
+  }, []);
 
+  // Pinned first, then chronological Today / Yesterday / Older for all chats.
+  const grouped = useMemo(() => {
+    const groups = new Map<string, {
+      key: string;
+      label: string;
+      projectId: string | null;
+      order: number;
+      items: typeof filteredConversations;
+    }>();
     for (const conv of filteredConversations) {
-      const age = now - new Date(conv.updatedAt).getTime();
-      if (age < 86_400_000) today.push(conv);
-      else if (age < 172_800_000) yesterday.push(conv);
-      else if (age < 604_800_000) thisWeek.push(conv);
-      else older.push(conv);
+      let key: string;
+      let label: string;
+      let order: number;
+      if (pinnedIds.has(conv.id)) {
+        key = 'pinned';
+        label = 'Pinned';
+        order = -1;
+      } else {
+        const bucket = dateBucket(conv.updatedAt);
+        key = bucket.key;
+        label = bucket.label;
+        order = bucket.order;
+      }
+      const existing = groups.get(key);
+      if (existing) existing.items.push(conv);
+      else groups.set(key, { key, label, projectId: null, order, items: [conv] });
     }
 
-    return [
-      { label: 'Today', items: today },
-      { label: 'Yesterday', items: yesterday },
-      { label: 'This Week', items: thisWeek },
-      { label: 'Older', items: older },
-    ].filter((g) => g.items.length > 0);
-  }, [filteredConversations]);
+    const sorted = [...groups.values()].sort((left, right) => {
+      if (left.order !== right.order) return left.order - right.order;
+      return left.label.localeCompare(right.label);
+    });
+    for (const group of sorted) {
+      group.items.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    }
+    return sorted;
+  }, [filteredConversations, pinnedIds]);
+
+  const visibleGroups = useMemo(() => {
+    if (!query.trim()) return grouped;
+    if (filteredConversations.length === 0) return [];
+    return [{
+      key: 'search-results',
+      label: 'Matches',
+      projectId: null,
+      order: 0,
+      items: filteredConversations,
+    }];
+  }, [grouped, query, filteredConversations]);
+
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   return (
     <div className="flex flex-col">
-      <div className={`flex-shrink-0 px-3 pb-2 pt-3 ${isLight ? '' : ''}`}>
+      <div className="flex-shrink-0 px-3 pb-2 pt-2">
         <button
           onClick={handleNewChat}
-          className={`mb-2 flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+          className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-colors ${
             isLight
-              ? 'bg-violet-50 text-violet-700 hover:bg-violet-100'
-              : 'bg-violet-500/12 text-violet-200 hover:bg-violet-500/18'
+              ? 'text-zinc-800 hover:bg-zinc-200/70'
+              : 'text-zinc-200 hover:bg-white/[0.05]'
           }`}
         >
-          <Plus className="h-3.5 w-3.5" />
+          <span className={`flex h-6 w-6 items-center justify-center rounded-md ${isLight ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-950'}`}>
+            <Plus className="h-3.5 w-3.5" />
+          </span>
           New Chat
+          <span className={`ml-auto text-[10px] ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>Ctrl+N</span>
         </button>
         <div className="relative">
           <Search
@@ -251,13 +350,14 @@ function ChatsPanel() {
             }`}
           />
           <input
+            ref={searchInputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search conversations"
-            className={`w-full rounded-lg py-1.5 pl-8 pr-3 text-sm outline-none transition-colors ${
+            placeholder="Search chats"
+            className={`w-full rounded-md py-1.5 pl-8 pr-3 text-sm outline-none transition-colors ${
               isLight
-                ? 'bg-zinc-100 text-zinc-900 placeholder-zinc-400 focus:bg-white focus:ring-1 focus:ring-violet-300'
-                : 'bg-zinc-900/70 text-zinc-100 placeholder-zinc-600 focus:bg-zinc-900 focus:ring-1 focus:ring-violet-500/40'
+                ? 'bg-zinc-200/55 text-zinc-900 placeholder-zinc-400 focus:bg-white focus:ring-1 focus:ring-zinc-300'
+                : 'bg-white/[0.035] text-zinc-100 placeholder-zinc-600 focus:bg-white/[0.055] focus:ring-1 focus:ring-white/10'
             }`}
           />
         </div>
@@ -265,12 +365,26 @@ function ChatsPanel() {
 
       {/* Grouped conversation list */}
       <div className="px-1.5 pb-2">
-        {grouped.map((group) => (
-          <div key={group.label}>
-            <div className={`px-2 pb-1 pt-3 text-[10px] font-medium uppercase tracking-[0.18em] ${isLight ? 'text-zinc-500' : 'text-zinc-600'}`}>
-              {group.label}
-            </div>
-            {group.items.map((conv) => (
+        {visibleGroups.map((group) => {
+          const collapsed = collapsedGroups.has(group.key);
+          return (
+          <div key={group.key} className="mt-2">
+            <button
+              type="button"
+              onClick={() => toggleGroup(group.key)}
+              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
+                isLight ? 'text-zinc-600 hover:bg-zinc-200/60' : 'text-zinc-400 hover:bg-white/[0.035]'
+              }`}
+              aria-expanded={!collapsed}
+            >
+              <ChevronRight className={`h-3 w-3 shrink-0 text-zinc-600 transition-transform ${collapsed ? '' : 'rotate-90'}`} />
+              {group.key === 'pinned'
+                ? <Pin className="h-3 w-3 shrink-0 text-[color:var(--accent-text)]" />
+                : null}
+              <span className={`min-w-0 flex-1 truncate text-[11px] font-semibold ${group.key.startsWith('bucket:') || group.key === 'search-results' ? 'uppercase tracking-[0.14em] opacity-80' : ''}`}>{group.label}</span>
+              <span className={`text-[10px] tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>{group.items.length}</span>
+            </button>
+            {!collapsed && group.items.map((conv) => (
               <div
                 key={conv.id}
                 draggable
@@ -313,14 +427,14 @@ function ChatsPanel() {
                   setDraggedConversationId(null);
                   setDragOverConversationId(null);
                 }}
-                className={`group relative flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors ${draggedConversationId === conv.id ? 'cursor-grabbing opacity-80' : 'cursor-grab'} ${conv.id === activeConversationId
+                className={`group relative ml-3 flex items-center gap-2 rounded-md px-2 py-1.5 transition-all duration-150 hover:translate-x-0.5 ${draggedConversationId === conv.id ? 'cursor-grabbing opacity-80' : 'cursor-grab'} ${conv.id === activeConversationId
                   ? isLight
-                    ? 'bg-violet-50 text-zinc-900'
-                    : 'bg-zinc-800/60 text-zinc-100'
+                    ? 'bg-white text-zinc-950 shadow-sm'
+                    : 'bg-white/[0.065] text-zinc-100'
                   : isLight
                     ? 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
                     : 'text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200'
-                  } ${dragOverConversationId === conv.id ? (isLight ? 'bg-violet-100/80' : 'bg-zinc-800/80') : ''}`}
+                  } ${dragOverConversationId === conv.id ? 'bg-[color:var(--accent-soft)]' : ''}`}
                 title={conv.title}
                 onClick={() => {
                   if (Date.now() < suppressSelectUntilRef.current) return;
@@ -330,34 +444,56 @@ function ChatsPanel() {
                 {conv.id === activeConversationId && (
                   <span
                     aria-hidden
-                    className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-r-full bg-violet-500"
+                    className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-r-full bg-[color:var(--accent)]"
                   />
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{conv.title}</span>
-                    <span className={`flex-shrink-0 text-[10px] tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>
-                      {formatRelative(conv.updatedAt)}
-                    </span>
+                  <div className="flex items-center gap-1.5">
+                    {isCodeConversation(conv) && (
+                      <Code2
+                        aria-hidden
+                        className={`h-3 w-3 shrink-0 ${isLight ? 'text-blue-600' : 'text-violet-400'}`}
+                        title="Code / build chat"
+                      />
+                    )}
+                    <div className="flex min-w-0 flex-1 items-baseline gap-2">
+                      <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{conv.title}</span>
+                      <span className={`flex-shrink-0 text-[10px] tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>
+                        {formatRelative(conv.updatedAt)}
+                      </span>
+                    </div>
                   </div>
-                  {(conv.projectName || (conv.mode && conv.mode !== 'chat')) && (
+                  {conv.projectName && (
+                    <div className={`mt-0.5 truncate text-[10px] ${isLight ? 'text-zinc-500' : 'text-zinc-500'}`}>
+                      {conv.projectName}
+                    </div>
+                  )}
+                  {conv.mode && conv.mode !== 'chat' && !isCodeConversation(conv) && (
                     <div className={`mt-0.5 flex items-center gap-1.5 text-[10px] ${isLight ? 'text-zinc-500' : 'text-zinc-500'}`}>
-                      {conv.projectName && (
-                        <span className="inline-flex min-w-0 items-center gap-1 truncate">
-                          <FolderOpenDot className="h-2.5 w-2.5 flex-shrink-0 opacity-70" />
-                          <span className="truncate">{conv.projectName}</span>
-                        </span>
-                      )}
-                      {conv.mode && conv.mode !== 'chat' && (
-                        <span className={`flex-shrink-0 rounded px-1 py-px text-[9px] font-medium uppercase tracking-[0.12em] ${
-                          isLight ? 'bg-zinc-100 text-zinc-500' : 'bg-zinc-900 text-zinc-500'
-                        }`}>
-                          {conv.mode}
-                        </span>
-                      )}
+                      <span className="flex-shrink-0 text-[9px] font-medium uppercase tracking-[0.12em]">
+                        {conv.mode}
+                      </span>
                     </div>
                   )}
                 </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    togglePinned(conv.id);
+                  }}
+                  draggable={false}
+                  aria-label={pinnedIds.has(conv.id) ? `Unpin ${conv.title}` : `Pin ${conv.title}`}
+                  title={pinnedIds.has(conv.id) ? 'Unpin' : 'Pin to top'}
+                  className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded transition-all ${
+                    pinnedIds.has(conv.id)
+                      ? 'text-[color:var(--accent-text)] opacity-100'
+                      : `opacity-0 group-hover:opacity-100 ${
+                        isLight ? 'text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-700' : 'text-zinc-600 hover:bg-white/[0.06] hover:text-zinc-300'
+                      }`
+                  }`}
+                >
+                  {pinnedIds.has(conv.id) ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -374,7 +510,8 @@ function ChatsPanel() {
               </div>
             ))}
           </div>
-        ))}
+          );
+        })}
 
         {filteredConversations.length === 0 && (
           <p className={`px-3 py-8 text-center text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-600'}`}>
@@ -408,6 +545,9 @@ function ProjectsPanel() {
   const selectedModelId = useSettingsStore((state) => state.selectedModelId);
   const setActivePanel = useLayoutStore((state) => state.setActivePanel);
   const [projects, setProjects] = useState<SandboxProjectSummary[]>([]);
+  const [projectQuery, setProjectQuery] = useState('');
+  const [showRepeatedProjects, setShowRepeatedProjects] = useState(false);
+  const [visibleProjectLimit, setVisibleProjectLimit] = useState(PROJECT_LIST_PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [attachingId, setAttachingId] = useState<string | null>(null);
 
@@ -427,6 +567,46 @@ function ProjectsPanel() {
       .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())
       .slice(0, 4);
   }, [conversations, projectId]);
+
+  const projectNameCounts = useMemo(() => {
+    return projects.reduce<Record<string, number>>((counts, project) => {
+      const key = project.name.trim().toLowerCase();
+      counts[key] = (counts[key] ?? 0) + 1;
+      return counts;
+    }, {});
+  }, [projects]);
+
+  const listedProjects = useMemo(() => {
+    if (showRepeatedProjects) return projects;
+
+    const seen = new Set<string>();
+    return projects.filter((project) => {
+      const key = project.name.trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [projects, showRepeatedProjects]);
+
+  const repeatedProjectCount = projects.length - Object.keys(projectNameCounts).length;
+
+  const filteredProjects = useMemo(() => {
+    const needle = projectQuery.trim().toLowerCase();
+    if (!needle) return listedProjects;
+    return listedProjects.filter((project) => (
+      project.name.toLowerCase().includes(needle)
+      || project.status.toLowerCase().includes(needle)
+    ));
+  }, [listedProjects, projectQuery]);
+
+  const visibleProjects = useMemo(
+    () => filteredProjects.slice(0, visibleProjectLimit),
+    [filteredProjects, visibleProjectLimit],
+  );
+
+  useEffect(() => {
+    setVisibleProjectLimit(PROJECT_LIST_PAGE_SIZE);
+  }, [projectQuery]);
 
   const loadProjects = useCallback(async () => {
     setLoading(true);
@@ -503,7 +683,7 @@ function ProjectsPanel() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+      <div className="px-1 pb-3">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Current project</div>
@@ -518,13 +698,13 @@ function ProjectsPanel() {
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => setActivePanel('chats')}
-                className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-zinc-800"
+                className="rounded-md px-2.5 py-1.5 text-xs text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-200"
               >
                 Open chat
               </button>
               <button
                 onClick={() => void handleNewProjectChat()}
-                className="rounded-lg border border-violet-500/20 bg-violet-500/10 px-2.5 py-1.5 text-xs text-violet-100 transition-colors hover:border-violet-500/30 hover:bg-violet-500/15"
+                className="rounded-md bg-[color:var(--accent-softer)] px-2.5 py-1.5 text-xs text-[color:var(--accent-text)] transition-colors hover:bg-[color:var(--accent-soft)]"
               >
                 New project chat
               </button>
@@ -533,7 +713,7 @@ function ProjectsPanel() {
         </div>
 
         {projectId && (
-          <div className="mt-3 border-t border-zinc-800/80 pt-3">
+          <div className="mt-4">
             <div className="flex items-center justify-between gap-3">
               <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Project chats</div>
               <div className="text-[11px] text-zinc-600">
@@ -551,9 +731,9 @@ function ProjectsPanel() {
                     <button
                       key={conversation.id}
                       onClick={() => handleOpenConversation(conversation.id)}
-                      className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left transition-colors ${isActiveConversation
-                        ? 'border-violet-500/30 bg-violet-500/10'
-                        : 'border-zinc-800/80 bg-zinc-950/60 hover:border-zinc-700 hover:bg-zinc-900/80'
+                      className={`flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left transition-colors ${isActiveConversation
+                        ? 'bg-white/[0.065]'
+                        : 'hover:bg-white/[0.035]'
                         }`}
                     >
                       <div className="min-w-0">
@@ -568,7 +748,7 @@ function ProjectsPanel() {
                         </div>
                       </div>
                       {isActiveConversation && (
-                        <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-violet-200">
+                        <span className="text-[9px] font-medium uppercase tracking-[0.16em] text-[color:var(--accent-text)]">
                           active
                         </span>
                       )}
@@ -577,7 +757,7 @@ function ProjectsPanel() {
                 })}
               </div>
             ) : (
-              <div className="mt-2 rounded-xl border border-dashed border-zinc-800/80 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-500">
+              <div className="mt-2 px-2 py-2 text-xs text-zinc-500">
                 New chats will stay linked to this project automatically.
               </div>
             )}
@@ -589,14 +769,34 @@ function ProjectsPanel() {
         <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Your projects</div>
         <button
           onClick={() => void loadProjects()}
-          className="text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+          className="touch-manipulation rounded text-xs text-zinc-500 transition-colors hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
         >
           Refresh
         </button>
       </div>
 
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-600" aria-hidden="true" />
+        <input
+          value={projectQuery}
+          onChange={(event) => setProjectQuery(event.target.value)}
+          placeholder="Filter projects"
+          aria-label="Filter projects"
+          className="w-full rounded-md bg-white/[0.035] py-1.5 pl-8 pr-3 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:bg-white/[0.055] focus:ring-1 focus:ring-white/10"
+        />
+      </div>
+
+      {repeatedProjectCount > 0 && (
+        <button
+          onClick={() => setShowRepeatedProjects((current) => !current)}
+          className="touch-manipulation self-start rounded text-xs text-zinc-500 transition-colors hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
+        >
+          {showRepeatedProjects ? 'Hide repeated build names' : `Show ${repeatedProjectCount} repeated build names`}
+        </button>
+      )}
+
       <div className="space-y-2">
-        {projects.map((project) => {
+        {visibleProjects.map((project) => {
           const isCurrent = project.id === projectId;
           const linkedConversationCount = linkedConversationCounts[project.id] ?? 0;
           return (
@@ -604,9 +804,9 @@ function ProjectsPanel() {
               key={project.id}
               onClick={() => void handleAttach(project.id)}
               disabled={attachingId === project.id}
-              className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${isCurrent
-                ? 'border-violet-500/30 bg-violet-500/10'
-                : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700 hover:bg-zinc-900'
+              className={`touch-manipulation w-full rounded-md px-2 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)] ${isCurrent
+                ? 'bg-white/[0.065]'
+                : 'hover:bg-white/[0.035]'
                 } disabled:cursor-wait disabled:opacity-70`}
             >
               <div className="flex items-start justify-between gap-3">
@@ -620,13 +820,18 @@ function ProjectsPanel() {
                     {project.devPort && <span className="whitespace-nowrap">localhost:{project.devPort}</span>}
                     <span className="whitespace-nowrap">{formatRelative(project.createdAt)}</span>
                     {project.owned && <span className="whitespace-nowrap">owned</span>}
+                    {!showRepeatedProjects && projectNameCounts[project.name.trim().toLowerCase()] > 1 && (
+                      <span className="whitespace-nowrap">
+                        {projectNameCounts[project.name.trim().toLowerCase()]} builds
+                      </span>
+                    )}
                     {linkedConversationCount > 0 && (
                       <span className="whitespace-nowrap">{linkedConversationCount} chat{linkedConversationCount === 1 ? '' : 's'}</span>
                     )}
                   </div>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-1.5">
-                  {isCurrent && <span className="rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-violet-200">live</span>}
+                  {isCurrent && <span className="text-[9px] font-medium uppercase tracking-[0.16em] text-[color:var(--accent-text)]">live</span>}
                   <FolderOpenDot className="h-4 w-4 text-zinc-500" />
                 </div>
               </div>
@@ -634,15 +839,24 @@ function ProjectsPanel() {
           );
         })}
 
-        {!loading && projects.length === 0 && (
-          <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/30 p-4 text-center text-sm text-zinc-500">
-            <div>No projects yet.</div>
-            <div className="mt-2 text-xs text-zinc-600">Chat with Vai to get started.</div>
+        {!loading && filteredProjects.length === 0 && (
+          <div className="p-4 text-center text-sm text-zinc-500">
+            <div>{projectQuery.trim() ? 'No projects match that filter.' : 'No projects yet.'}</div>
+            {!projectQuery.trim() && <div className="mt-2 text-xs text-zinc-600">Chat with Vai to get started.</div>}
           </div>
         )}
 
+        {visibleProjects.length < filteredProjects.length && (
+          <button
+            onClick={() => setVisibleProjectLimit((limit) => limit + PROJECT_LIST_PAGE_SIZE)}
+            className="touch-manipulation w-full rounded-md px-3 py-2 text-sm text-zinc-400 transition-colors hover:bg-white/[0.035] hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
+          >
+            Show {Math.min(PROJECT_LIST_PAGE_SIZE, filteredProjects.length - visibleProjects.length)} more
+          </button>
+        )}
+
         {loading && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 text-center text-sm text-zinc-500">
+          <div className="p-4 text-center text-sm text-zinc-500">
             Loading projects...
           </div>
         )}
@@ -714,9 +928,9 @@ function ControlPanel() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 p-4">
+      <div className="rounded-xl border border-[color:var(--accent-ring)] bg-[color:var(--accent-soft)] p-4">
         <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
-          <Shield className="h-4 w-4 text-violet-300" />
+          <Shield className="h-4 w-4 text-[color:var(--accent-text)]" />
           Owner control surface
         </div>
         <div className="mt-2 text-xs text-zinc-300">
@@ -744,11 +958,11 @@ function ControlPanel() {
           <div className="mt-1 text-xs text-zinc-500">Open the isolated owner workspace for curating what is allowed to teach Vai.</div>
         </button>
         <button
-          onClick={() => setActivePanel('projects')}
+          onClick={() => setActivePanel('chats')}
           className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900"
         >
-          <div className="text-sm text-zinc-100">Projects</div>
-          <div className="mt-1 text-xs text-zinc-500">Jump into saved workspaces and current sandbox context.</div>
+          <div className="text-sm text-zinc-100">Chat history</div>
+          <div className="mt-1 text-xs text-zinc-500">Browse code and build chats alongside regular conversations.</div>
         </button>
         <button
           onClick={() => setActivePanel('devlogs')}

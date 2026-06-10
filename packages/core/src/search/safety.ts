@@ -17,37 +17,22 @@
  */
 
 import type { TrustSignal } from './types.js';
+import { validatePublicUrl } from '../network/safe-fetch.js';
 
 // ── SSRF Protection (mirrors runtime/routes/ingest.ts but importable from core) ──
 
-const PRIVATE_HOST_PATTERNS = [
-  'localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0',
-  '169.254.169.254', // AWS metadata
-];
-
-const PRIVATE_HOST_SUFFIXES = ['.local'];
-const PRIVATE_HOST_PREFIXES = ['10.', '192.168.'];
-const PRIVATE_HOST_REGEX = /^172\.(1[6-9]|2\d|3[01])\./;
-
 export function validateSearchUrl(raw: string): URL {
-  const url = new URL(raw);
-  if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new Error(`Only HTTP/HTTPS URLs allowed, got ${url.protocol}`);
+  try {
+    return validatePublicUrl(raw);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Only HTTP(S) URLs are allowed') {
+      throw new Error('Only HTTP/HTTPS URLs are allowed');
+    }
+    if (error instanceof Error && error.message === 'Private or local URLs are not allowed') {
+      throw new Error('Private/internal URLs are not allowed');
+    }
+    throw error;
   }
-  const host = url.hostname.toLowerCase();
-  if (PRIVATE_HOST_PATTERNS.includes(host)) {
-    throw new Error(`Private/internal URLs not allowed: ${host}`);
-  }
-  if (PRIVATE_HOST_SUFFIXES.some(s => host.endsWith(s))) {
-    throw new Error(`Private/internal URLs not allowed: ${host}`);
-  }
-  if (PRIVATE_HOST_PREFIXES.some(p => host.startsWith(p))) {
-    throw new Error(`Private/internal URLs not allowed: ${host}`);
-  }
-  if (PRIVATE_HOST_REGEX.test(host)) {
-    throw new Error(`Private/internal URLs not allowed: ${host}`);
-  }
-  return url;
 }
 
 // ── Domain Trust Scoring ──
@@ -73,6 +58,7 @@ const HIGH_TRUST_DOMAINS: ReadonlySet<string> = new Set([
 const MEDIUM_TRUST_DOMAINS: ReadonlySet<string> = new Set([
   'stackoverflow.com', 'stackexchange.com',
   'reddit.com', 'news.ycombinator.com',
+  'openstreetmap.org',
   'medium.com', 'dev.to', 'hashnode.dev',
   'bbc.com', 'reuters.com', 'apnews.com',
   'techcrunch.com', 'arstechnica.com', 'theverge.com',

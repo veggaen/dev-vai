@@ -21,4 +21,10 @@ describe('tryEmitProductEngineeringMemo', () => {
       content: 'Prototype the web dashboard UI for my ESP32 humidity sensor in React now.',
     })).toBeNull();
   });
+
+  it('does not intercept EV battery range questions', () => {
+    expect(tryEmitProductEngineeringMemo({
+      content: 'I need a straight answer on Tesla Model 3 battery range',
+    })).toBeNull();
+  });
 });

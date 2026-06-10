@@ -12,8 +12,8 @@ import { MarkdownRenderer } from '@vai/ui';
 import { API_BASE } from '../lib/api.js';
 import {
   Copy, Check, FileText, Rocket, HelpCircle, X as XIcon,
-  ChevronRight, CornerDownRight, User, Bot, ThumbsUp, ThumbsDown,
-  Wrench, Sparkles, BookOpen,
+  ChevronRight, CornerDownRight, User, ThumbsUp, ThumbsDown,
+  Wrench, Sparkles, BookOpen, ExternalLink,
 } from 'lucide-react';
 import { useSandboxStore } from '../stores/sandboxStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
@@ -37,6 +37,9 @@ import type {
   SourcePresentationUI,
   TurnKindUI,
   TurnThinkingUI,
+  ResearchTraceUI,
+  ResponseVerificationUI,
+  ChatProgressStep,
   IDE_AGENT_COLORS as _Colors,
 } from '../stores/chatStore.js';
 import type { DeployIntent, RecoveryPattern } from '../lib/intent-detector.js';
@@ -84,6 +87,12 @@ interface MessageBubbleProps {
   groundedBuildBrief?: GroundedBuildBriefUI;
   /** Vai-native thinking trace for the collapsible Thinking panel */
   thinking?: TurnThinkingUI;
+  /** Search pipeline execution trace for inspectable research turns */
+  researchTrace?: ResearchTraceUI;
+  /** Exit-gate verification metadata shown only inside the process panel */
+  verification?: ResponseVerificationUI;
+  /** Engine-narrated progress steps, surfaced in the settled panel's evidence log */
+  progressSteps?: ChatProgressStep[];
   /** Feedback state: true=helpful, false=not helpful, undefined=no feedback */
   feedback?: boolean;
   /** Called when user gives thumbs up/down */
@@ -262,8 +271,9 @@ function CitationBadge({
             {source.snippet && (
               <span className="block text-[11px] leading-5 text-zinc-400 line-clamp-3">{source.snippet}</span>
             )}
-            <span className="mt-2 inline-flex rounded-full border border-white/6 bg-white/4 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-              {source.domain}
+            <span className="mt-2 flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+              <ExternalLink className="h-2.5 w-2.5" />
+              <span className="truncate">{source.domain}</span>
             </span>
           </span>
         </span>
@@ -303,10 +313,10 @@ function CitedMarkdown({
         if (headingMatch) {
           const headingLevel = headingMatch[1].length;
           const headingClassName = headingLevel === 1
-            ? 'text-lg font-semibold text-zinc-50'
+            ? 'text-lg font-semibold text-[color:var(--chat-strong)]'
             : headingLevel === 2
-              ? 'text-base font-semibold text-zinc-100'
-              : 'text-sm font-semibold uppercase tracking-[0.14em] text-zinc-400';
+              ? 'text-base font-semibold text-[color:var(--chat-strong)]'
+              : 'text-sm font-semibold uppercase tracking-[0.14em] text-[color:var(--chat-eyebrow)]';
           return (
             <div key={`block-${blockIndex}`} className={headingClassName}>
               {renderInlineWithCitations({
@@ -408,7 +418,7 @@ function stripStructuredSections(
 
   if (hasSources) {
     next = next
-      .replace(/\n{2,}(?:#{1,6}\s*)?sources:?\s*[\s\S]*$/i, '')
+      .replace(/\n{2,}(?:#{1,6}\s*)?(?:\*\*)?sources:?(?:\*\*)?\s*[\s\S]*$/i, '')
       .replace(/\s*\[sources:[^\]]+\]\s*$/i, '')
       .trim();
   }
@@ -502,71 +512,64 @@ function GroundedBuildBriefCard({
   brief: GroundedBuildBriefUI;
   onExecute?: (prompt: string) => void;
 }) {
-  const confidenceLabel = `${Math.round(brief.confidence * 100)}% confidence`;
+  const confidencePct = Math.round(brief.confidence * 100);
   const actionLabel = getGroundedBuildBriefActionLabel(brief);
+  const domains = brief.sourceDomains.slice(0, 3);
 
   return (
-    <div className="mb-4 rounded-[1.35rem] border border-violet-500/18 bg-[linear-gradient(180deg,rgba(76,29,149,0.18),rgba(17,17,22,0.92))] px-4 py-4 shadow-[0_16px_48px_rgba(0,0,0,0.18)]">
-      <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-200/80">
-        <span className="rounded-md border border-violet-400/20 bg-violet-500/12 px-2 py-1 text-violet-100">
-          Grounded build brief
-        </span>
-        <span className="rounded-md border border-zinc-800/70 bg-zinc-950/70 px-2 py-1 text-zinc-300">
-          {brief.intent}
-        </span>
-        <span className="rounded-md border border-zinc-800/70 bg-zinc-950/70 px-2 py-1 text-zinc-400">
-          {confidenceLabel}
-        </span>
+    <div className="mb-4 rounded-xl border border-violet-500/15 bg-violet-500/[0.04] px-4 py-3.5">
+      {/* One quiet header line instead of a cluster of pills */}
+      <div className="flex items-center gap-2 text-[11px]">
+        <Rocket className="h-3.5 w-3.5 shrink-0 text-violet-300/80" />
+        <span className="font-semibold uppercase tracking-[0.16em] text-violet-200/70">Build brief</span>
+        <span className="text-zinc-700">·</span>
+        <span className="text-zinc-400">{brief.intent}</span>
+        <span className="ml-auto tabular-nums text-zinc-500">{confidencePct}% confidence</span>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="rounded-md border border-zinc-700/70 bg-zinc-900/70 px-2.5 py-1 text-[11px] font-medium text-zinc-200">
-          {brief.focusLabel}
-        </span>
-        {brief.sourceDomains.slice(0, 3).map((domain) => (
-          <span
-            key={domain}
-            className="rounded-md border border-zinc-800/80 bg-zinc-900/40 px-2 py-1 text-[10px] text-zinc-500"
-          >
-            {domain}
-          </span>
-        ))}
-      </div>
+      <div className="mt-2.5 text-[14px] font-medium leading-6 text-zinc-100">{brief.focusLabel}</div>
+      <p className="mt-1 text-[13px] leading-6 text-zinc-300">{brief.summary}</p>
 
-      <p className="mt-3 text-[14px] leading-6 text-zinc-200">{brief.summary}</p>
-
-      <div className="mt-3 rounded-[1rem] border border-zinc-800/60 bg-zinc-950/42 px-3.5 py-3">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Recommendation</div>
-        <p className="mt-1.5 text-[13px] leading-6 text-zinc-200">{brief.recommendation}</p>
-      </div>
-
-      <div className="mt-3 rounded-[1rem] border border-zinc-800/60 bg-zinc-950/32 px-3.5 py-3 text-[12px] leading-6 text-zinc-300">
-        <span className="font-semibold text-zinc-100">Next step:</span> {brief.nextStep}
-      </div>
-
-      {onExecute && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => onExecute(buildGroundedBuildBriefExecutionPrompt(brief))}
-            data-grounded-build-action="button"
-            data-grounded-build-intent={brief.intent}
-            className="inline-flex items-center gap-2 rounded-xl border border-violet-400/20 bg-violet-500/14 px-3.5 py-2 text-[12px] font-medium text-violet-100 transition-colors hover:border-violet-300/30 hover:bg-violet-500/20 hover:text-white"
-          >
-            <Rocket className="h-3.5 w-3.5" />
-            {actionLabel}
-          </button>
+      {/* Recommendation + next step: flat labeled rows, divider-separated (no nested cards) */}
+      <div className="mt-3 space-y-2.5 border-t border-white/8 pt-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Recommendation</div>
+          <p className="mt-1 text-[13px] leading-6 text-zinc-200">{brief.recommendation}</p>
         </div>
-      )}
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Next step</div>
+          <p className="mt-1 text-[13px] leading-6 text-zinc-300">{brief.nextStep}</p>
+        </div>
+      </div>
 
       {brief.reasons.length > 0 && (
-        <div className="mt-3 space-y-2">
+        <ul className="mt-3 space-y-1.5">
           {brief.reasons.map((reason, index) => (
-            <div key={`${brief.focusLabel}-${index}`} className="flex items-start gap-2 text-[12px] leading-6 text-zinc-400">
-              <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-violet-300/80" />
+            <li key={`${brief.focusLabel}-${index}`} className="flex items-start gap-2 text-[12px] leading-6 text-zinc-400">
+              <span className="mt-2 h-1 w-1 flex-shrink-0 rounded-full bg-violet-300/70" />
               <span>{reason}</span>
-            </div>
+            </li>
           ))}
+        </ul>
+      )}
+
+      {onExecute && (
+        <button
+          type="button"
+          onClick={() => onExecute(buildGroundedBuildBriefExecutionPrompt(brief))}
+          data-grounded-build-action="button"
+          data-grounded-build-intent={brief.intent}
+          className="mt-3.5 inline-flex items-center gap-2 rounded-lg border border-violet-400/25 bg-violet-500/15 px-3.5 py-2 text-[12px] font-medium text-violet-100 transition-colors hover:border-violet-300/40 hover:bg-violet-500/25 hover:text-white"
+        >
+          <Rocket className="h-3.5 w-3.5" />
+          {actionLabel}
+        </button>
+      )}
+
+      {domains.length > 0 && (
+        <div className="mt-2.5 flex items-center gap-1.5 text-[10px] text-zinc-600">
+          <span className="uppercase tracking-[0.14em]">Grounded in</span>
+          <span className="truncate text-zinc-500">{domains.join(' · ')}</span>
         </div>
       )}
     </div>
@@ -578,7 +581,7 @@ export function MessageBubble({
   fallbackDeploy, recoveryPattern = 'silent', allIntents, onIntentAction,
   isLatest = false, isStreaming = false,
   respondingModelId, fallback,
-  sources, sourcePresentation, turnKind, followUps, confidence, groundedBuildBrief, thinking, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
+  sources, sourcePresentation, turnKind, followUps, confidence, groundedBuildBrief, thinking, researchTrace, verification, progressSteps, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
   isAutoRepair = false, repairAttempt,
   compactResearchChrome = false,
   isLatestResearchMessage = false,
@@ -699,14 +702,6 @@ export function MessageBubble({
         }
       }
     }
-    // Append any remaining source citations to the last paragraph
-    for (let si = 0; si < sources.length; si++) {
-      if (!used.has(si)) {
-        const lastIdx = paragraphs.length - 1;
-        paragraphs[lastIdx] += ` [${si + 1}]`;
-        used.add(si);
-      }
-    }
     return paragraphs.join('\n\n');
   })();
   const compactSummary = cleanedContent.trim();
@@ -817,7 +812,7 @@ export function MessageBubble({
                 ? 'bg-emerald-500/10'
               : sender?.type === 'ide-agent'
                 ? studioChrome ? 'ring-1 ring-zinc-200' : 'ring-1 ring-white/8'
-                : studioChrome ? 'bg-zinc-200/80' : 'bg-zinc-800/60'
+                : 'bg-gradient-to-br from-violet-600 to-blue-600 shadow-[0_2px_8px_rgba(124,58,237,0.3)]'
           }`}
           style={sender?.type === 'ide-agent' && sender.color ? { backgroundColor: `${sender.color}20` } : undefined}
         >
@@ -827,7 +822,7 @@ export function MessageBubble({
               ? <Wrench className="h-3.5 w-3.5 text-emerald-300" />
             : sender?.type === 'ide-agent'
               ? <span className="text-[10px] font-bold" style={{ color: sender.color || '#a1a1aa' }}>{sender.name.charAt(0).toUpperCase()}</span>
-              : <Bot className={`h-3.5 w-3.5 ${studioChrome ? 'text-zinc-600' : 'text-zinc-500'}`} />
+              : <span className="text-[10px] font-bold text-white">V</span>
           }
         </div>
 
@@ -869,18 +864,6 @@ export function MessageBubble({
             {!isUser && !sender?.model && respondingModelId && (
               <span className={`text-[10px] font-normal ${studioChrome ? 'text-zinc-400' : 'text-zinc-700'}`}>· {respondingModelId}</span>
             )}
-            {!isUser && fallback && (
-              <span
-                className={`inline-flex items-center rounded-full border px-1.5 py-px text-[9px] font-semibold ${
-                  studioChrome
-                    ? 'border-amber-200 bg-amber-50 text-amber-700'
-                    : 'border-amber-500/20 bg-amber-500/10 text-amber-200'
-                }`}
-                title={`Vai switched from ${fallback.fromModelId} to ${fallback.toModelId} because the response looked ${fallback.reason === 'low-confidence' ? 'low confidence' : 'like a no-knowledge answer'}.`}
-              >
-                {fallback.reason === 'low-confidence' ? 'model handoff' : 'knowledge handoff'}
-              </span>
-            )}
             {showHeaderConfidence && (
               <span
                 className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-px text-[9px] font-semibold tabular-nums ${
@@ -913,9 +896,11 @@ export function MessageBubble({
                   ? `w-full overflow-visible px-0 py-0 ${studioChrome ? 'text-zinc-800' : 'text-zinc-200'}`
                 : isResearchMessage
                   ? studioChrome
-                    ? 'w-full overflow-visible rounded-2xl border border-zinc-200 bg-white px-5 py-4 text-zinc-800 shadow-sm'
+                    ? 'w-full overflow-visible px-0 py-0.5 text-[color:var(--chat-body)]'
                     : 'w-full overflow-visible rounded-[1.2rem] border border-zinc-800/60 bg-zinc-950/34 px-5 py-4 text-zinc-200'
-                  : `w-full overflow-visible px-1 py-0.5 ${studioChrome ? 'text-zinc-800' : 'text-zinc-200'}`
+                  : studioChrome
+                    ? 'w-full overflow-visible px-0 py-0.5 text-[color:var(--chat-body)]'
+                    : 'w-full overflow-visible px-1 py-0.5 text-zinc-200'
             }`}
           >
             {/* Image */}
@@ -945,7 +930,15 @@ export function MessageBubble({
 
             {/* Vai-native Thinking panel — strategy chain + intent + trust, above the answer */}
             {!isUser && thinking && (
-              <ThinkingPanel thinking={thinking} />
+              <ThinkingPanel
+                thinking={thinking}
+                researchTrace={researchTrace}
+                verification={verification}
+                respondingModelId={respondingModelId}
+                fallback={fallback}
+                progressSteps={progressSteps}
+                fileChanges={extractedFiles}
+              />
             )}
 
             {/* Source chip row — Perplexity-style, rendered ABOVE the answer for research messages */}

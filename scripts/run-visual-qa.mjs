@@ -40,10 +40,10 @@ async function connectAndRun(wsUrl) {
 
     ws.onopen = () => {
       const expression = BUILD_MODE
-        ? `window.__vai_qa?.build()?.promise?.then(r => JSON.stringify(r)) ?? 'QA not loaded'`
+        ? `(async () => { await window.__vai_load_automation?.(); return window.__vai_qa?.build()?.promise?.then(r => JSON.stringify(r)) ?? 'QA not loaded'; })()`
         : VERIFY_ONLY
-          ? `window.__vai_qa?.verify()?.promise?.then(r => JSON.stringify(r)) ?? 'QA not loaded'`
-          : `window.__vai_qa?.run()?.promise?.then(r => JSON.stringify(r)) ?? 'QA not loaded'`;
+          ? `(async () => { await window.__vai_load_automation?.(); return window.__vai_qa?.verify()?.promise?.then(r => JSON.stringify(r)) ?? 'QA not loaded'; })()`
+          : `(async () => { await window.__vai_load_automation?.(); return window.__vai_qa?.run()?.promise?.then(r => JSON.stringify(r)) ?? 'QA not loaded'; })()`;
 
       const msgId = id++;
       pending.set(msgId, resolve);

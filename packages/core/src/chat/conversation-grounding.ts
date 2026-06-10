@@ -1,4 +1,5 @@
 import type { Message } from '../models/adapter.js';
+import { isCapabilitiesFallbackResponse } from './capabilities-fallback.js';
 
 export type ContextGroundedFollowUpIntent =
   | 'best-next'
@@ -39,6 +40,20 @@ function extractGroundedConversationTopic(
   deps: ConversationGroundingDependencies,
 ): string {
   const combined = `${previousUser}\n${previousAssistant}\n${contextText}\n${input}`;
+  const assistantIsCapabilitiesFallback = isCapabilitiesFallbackResponse(previousAssistant);
+
+  const recentTopic = deps.inferRecentFollowUpTopic([
+    { role: 'user', content: previousUser },
+    { role: 'user', content: input },
+    { role: 'assistant', content: previousAssistant },
+  ]);
+  if (recentTopic && deps.isStableFollowUpTopic(recentTopic)) return recentTopic;
+
+  const previousNormalized = deps.condenseStableFollowUpTopic(previousUser);
+  if (deps.isStableFollowUpTopic(previousNormalized)) return previousNormalized;
+
+  const detected = deps.detectTopic(previousUser || contextText);
+  if (deps.isStableFollowUpTopic(detected)) return detected;
 
   if (/\b(?:vai|veggaai)\b/i.test(combined) && /\b(?:chat|responses?|context|relevance|accurate|responsive)\b/i.test(combined)) {
     return 'Vai chat context relevance';
@@ -49,31 +64,18 @@ function extractGroundedConversationTopic(
   if (/\bnext\.?js\b/i.test(combined) && /\bprisma\b/i.test(combined) && /\btodo\b/i.test(combined)) {
     return 'Next.js Prisma todo app';
   }
-  if (/\breact\b/i.test(combined) && /\bhooks?\b/i.test(combined)) {
+  if (!assistantIsCapabilitiesFallback && /\breact\b/i.test(previousUser) && /\bhooks?\b/i.test(previousUser)) {
     return 'React hooks';
   }
   if (/\bnext\.?js\b/i.test(combined) && /\bapp router\b/i.test(combined)) {
     return 'Next.js App Router';
   }
-  if (/\breact\b/i.test(combined) && /\btypescript\b/i.test(combined)) {
+  if (!assistantIsCapabilitiesFallback && /\breact\b/i.test(previousUser) && /\btypescript\b/i.test(previousUser)) {
     return 'React TypeScript app';
   }
   if (/\bexpress\b/i.test(combined) && /\bapi\b/i.test(combined)) {
     return 'Express API';
   }
-
-  const recentTopic = deps.inferRecentFollowUpTopic([
-    { role: 'assistant', content: previousAssistant },
-    { role: 'user', content: previousUser },
-    { role: 'user', content: input },
-  ]);
-  if (recentTopic && deps.isStableFollowUpTopic(recentTopic)) return recentTopic;
-
-  const previousNormalized = deps.condenseStableFollowUpTopic(previousUser);
-  if (deps.isStableFollowUpTopic(previousNormalized)) return previousNormalized;
-
-  const detected = deps.detectTopic(previousUser || contextText);
-  if (deps.isStableFollowUpTopic(detected)) return detected;
 
   return '';
 }
@@ -168,6 +170,12 @@ export function shouldDeferContextGroundedFollowUp(input: string, history: reado
     return true;
   }
   if (/\b(?:deploy|deployment|hosting|host\s+it|vercel|netlify|serverless)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(?:only|just)\s+the\s+(?:name|number|word|answer)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(?:shorter|too\s+long|tl;?dr|one\s+line|be\s+brief)\b/i.test(lower)) {
     return true;
   }
   if (/\b(?:build|make|create)\s+(?:it|this|that|the\s+first\s+version)(?:\s+for\s+me)?\s+now\b/i.test(lower)

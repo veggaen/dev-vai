@@ -442,6 +442,19 @@ export class KnowledgeDecomposer {
       .sort((a, b) => b.frequency - a.frequency)
       .slice(0, limit);
   }
+
+  getGraphPatterns(limit: number, maxFanout: number): SubPattern[] {
+    return Array.from(this.subPatternIndex.values())
+      .filter((pattern) => pattern.entryIndices.length <= maxFanout)
+      .sort((a, b) => b.words.length - a.words.length || a.frequency - b.frequency)
+      .slice(0, limit);
+  }
+}
+
+function traceIntelligencePerf(stage: string, startedAt: number, detail = ''): void {
+  if (process.env.VAI_TRACE_PERF_CONSOLE !== '1') return;
+  const elapsedMs = Math.round((performance.now() - startedAt) * 10) / 10;
+  console.log(`[VaiPerf] stage=intelligence:${stage} elapsedMs=${elapsedMs}${detail ? ` ${detail}` : ''}`);
 }
 
 // ─── KnowledgeConnector ─────────────────────────────────────────
@@ -462,7 +475,11 @@ export class KnowledgeConnector {
     // Track edge origins to classify Connection.type
     const edgeCandidates: Map<string, { shared: string[]; weight: number; hasSubPattern: boolean; hasWordOverlap: boolean }> = new Map();
 
-    const topPatterns = decomposer.getTopPatterns(500);
+    const scaleRoot = Math.max(8, Math.ceil(Math.sqrt(entries.length)));
+    const maxPatternFanout = scaleRoot;
+    const maxWordFanout = scaleRoot * 4;
+    const graphPatternBudget = Math.max(500, scaleRoot * 20);
+    const topPatterns = decomposer.getGraphPatterns(graphPatternBudget, maxPatternFanout);
     for (const pattern of topPatterns) {
       const indices = pattern.entryIndices;
       for (let i = 0; i < indices.length; i++) {
@@ -484,27 +501,50 @@ export class KnowledgeConnector {
     }
 
     // Also add word-overlap edges for entries that share meaningful words
-    // but might not share exact n-gram sub-patterns
-    for (let i = 0; i < entries.length; i++) {
-      const wordsA = new Set(meaningfulWords(entries[i].response));
-      if (wordsA.size < 3) continue;
-
-      for (let j = i + 1; j < entries.length; j++) {
-        const wordsB = new Set(meaningfulWords(entries[j].response));
-        if (wordsB.size < 3) continue;
-
-        const sim = jaccard(wordsA, wordsB);
-        if (sim < MIN_CONNECTION_WEIGHT) continue;
-
-        const edgeKey = `${i}:${j}`;
-        let edge = edgeCandidates.get(edgeKey);
-        if (!edge) {
-          edge = { shared: [], weight: 0, hasSubPattern: false, hasWordOverlap: false };
-          edgeCandidates.set(edgeKey, edge);
+    // but might not share exact n-gram sub-patterns. Candidate generation is
+    // inverted-index based so graph construction scales with real overlap
+    // instead of comparing every entry against every other entry.
+    const entryWords = entries.map((entry) => new Set(meaningfulWords(entry.response)));
+    const wordToEntryIndices = new Map<string, number[]>();
+    for (let entryIndex = 0; entryIndex < entryWords.length; entryIndex++) {
+      for (const word of entryWords[entryIndex]) {
+        let indices = wordToEntryIndices.get(word);
+        if (!indices) {
+          indices = [];
+          wordToEntryIndices.set(word, indices);
         }
-        edge.hasWordOverlap = true;
-        edge.weight += sim;
+        indices.push(entryIndex);
       }
+    }
+
+    const wordOverlapCandidates = new Set<string>();
+    for (const indices of wordToEntryIndices.values()) {
+      // Corpus-wide words create low-signal cliques. The square-root-derived
+      // fanout limit grows with the corpus while keeping graph work bounded.
+      if (indices.length > maxWordFanout) continue;
+      for (let i = 0; i < indices.length; i++) {
+        for (let j = i + 1; j < indices.length; j++) {
+          wordOverlapCandidates.add(`${indices[i]}:${indices[j]}`);
+        }
+      }
+    }
+
+    for (const edgeKey of wordOverlapCandidates) {
+      const [i, j] = edgeKey.split(':').map(Number);
+      const wordsA = entryWords[i];
+      const wordsB = entryWords[j];
+      if (wordsA.size < 3 || wordsB.size < 3) continue;
+
+      const sim = jaccard(wordsA, wordsB);
+      if (sim < MIN_CONNECTION_WEIGHT) continue;
+
+      let edge = edgeCandidates.get(edgeKey);
+      if (!edge) {
+        edge = { shared: [], weight: 0, hasSubPattern: false, hasWordOverlap: false };
+        edgeCandidates.set(edgeKey, edge);
+      }
+      edge.hasWordOverlap = true;
+      edge.weight += sim;
     }
 
     // Store adjacency with typed connections
@@ -526,6 +566,10 @@ export class KnowledgeConnector {
       if (!listB) { listB = []; this.adjacency.set(b, listB); }
       listB.push({ from: b, to: a, weight, sharedPatterns: shared, type: connType });
     }
+
+    for (const connections of this.adjacency.values()) {
+      connections.sort((a, b) => b.weight - a.weight);
+    }
   }
 
   /**
@@ -544,12 +588,14 @@ export class KnowledgeConnector {
     const visited = new Set<number>([startIndex]);
     const results: Array<{ index: number; weight: number; depth: number }> = [];
     let frontier = [{ index: startIndex, weight: 1.0 }];
+    const visitBudget = Math.max(32, maxResults * 16);
 
     for (let depth = 1; depth <= maxDepth; depth++) {
       const nextFrontier: typeof frontier = [];
       for (const { index, weight } of frontier) {
         const connections = this.adjacency.get(index) ?? [];
         for (const conn of connections) {
+          if (results.length >= visitBudget) break;
           const neighbor = conn.from === index ? conn.to : conn.from;
           if (visited.has(neighbor)) continue;
           visited.add(neighbor);
@@ -558,8 +604,10 @@ export class KnowledgeConnector {
           results.push({ index: neighbor, weight: cumulativeWeight, depth });
           nextFrontier.push({ index: neighbor, weight: cumulativeWeight });
         }
+        if (results.length >= visitBudget) break;
       }
       frontier = nextFrontier;
+      if (results.length >= visitBudget) break;
     }
 
     return results
@@ -882,7 +930,10 @@ export class KnowledgeIntelligence {
 
   private built = false;
 
-  constructor(private store: KnowledgeStore) {}
+  constructor(
+    private store: KnowledgeStore,
+    private readonly checkpoint?: (stage: string) => void,
+  ) {}
 
   /**
    * Build all intelligence indexes.
@@ -905,9 +956,14 @@ export class KnowledgeIntelligence {
    * connections, combine answers. Returns null if no good answer found.
    */
   answerDecomposed(question: string): CompositeAnswer | null {
+    const startedAt = performance.now();
+    this.checkpoint?.('intelligence:answer:start');
+    traceIntelligencePerf('answer:start', startedAt, `question=${JSON.stringify(question.slice(0, 100))}`);
     if (!this.built) this.build();
 
     const subQuestions = this.questionDecomposer.decompose(question);
+    this.checkpoint?.(`intelligence:answer:decomposed:${subQuestions.length}`);
+    traceIntelligencePerf('answer:decomposed', startedAt, `subQuestions=${subQuestions.length}`);
 
     // Single question? Try direct match first for efficiency.
     if (subQuestions.length === 1) {
@@ -917,7 +973,11 @@ export class KnowledgeIntelligence {
     // Multiple sub-questions: answer each, combine
     const subAnswers: SubAnswer[] = [];
     for (const sq of subQuestions) {
+      this.checkpoint?.('intelligence:answer:single-start');
+      traceIntelligencePerf('answer:single-start', startedAt, `question=${JSON.stringify(sq.text.slice(0, 100))}`);
       const result = this.answerSingle(sq.text);
+      this.checkpoint?.('intelligence:answer:single-complete');
+      traceIntelligencePerf('answer:single-complete', startedAt, `answered=${result !== null}`);
       if (result && result.confidence > DECOMPOSED_SUB_MIN) {
         subAnswers.push(...result.subAnswers);
       }
@@ -951,10 +1011,13 @@ export class KnowledgeIntelligence {
    * Answer a single (non-compound) question using knowledge store + connections.
    */
   private answerSingle(question: string): CompositeAnswer | null {
+    const startedAt = performance.now();
     const entries = this.getEntries();
 
     // Try direct best match first
     const directMatch = this.store.findBestMatchWithScore(question);
+    this.checkpoint?.('intelligence:single:direct-match-complete');
+    traceIntelligencePerf('single:direct-match-complete', startedAt, `matched=${directMatch !== null}`);
     if (directMatch && directMatch.score > DIRECT_MATCH_STRONG) {
       return {
         text: directMatch.entry.response,
@@ -973,12 +1036,16 @@ export class KnowledgeIntelligence {
 
     // Try sub-pattern search
     const patternMatches = this.decomposer.findBySubPatterns(question);
+    this.checkpoint?.('intelligence:single:sub-patterns-complete');
+    traceIntelligencePerf('single:sub-patterns-complete', startedAt, `matches=${patternMatches.length}`);
     if (patternMatches.length > 0) {
       const bestPatternIdx = patternMatches[0].entryIndex;
       const bestEntry = entries[bestPatternIdx];
       if (bestEntry) {
         // Follow connections to enrich the answer
         const related = this.connector.traverse(bestPatternIdx, 2, 3);
+        this.checkpoint?.('intelligence:single:traverse-complete');
+        traceIntelligencePerf('single:traverse-complete', startedAt, `related=${related.length}`);
         const relatedEntries = related
           .map(r => entries[r.index])
           .filter((e): e is KnowledgeEntry => e != null);
@@ -1030,6 +1097,8 @@ export class KnowledgeIntelligence {
 
     // Fall back to TF-IDF document retrieval (catches knowledge from train() calls)
     const docMatch = this.store.findBestDocumentMatch(question, DOC_MATCH_MIN);
+    this.checkpoint?.('intelligence:single:document-match-complete');
+    traceIntelligencePerf('single:document-match-complete', startedAt, `matched=${docMatch !== null}`);
     if (docMatch && docMatch.score > DOC_MATCH_MIN) {
       const snippet = docMatch.text.length > 400
         ? docMatch.text.slice(0, 400) + '...'
@@ -1102,9 +1171,9 @@ export class KnowledgeIntelligence {
   }
 
   /**
-   * Access the underlying entries array via KnowledgeStore export.
+   * Access the underlying entries without serializing the n-gram export.
    */
   private getEntries(): KnowledgeEntry[] {
-    return this.store.exportData().entries;
+    return this.store.listEntries();
   }
 }

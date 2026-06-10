@@ -435,20 +435,58 @@ export function genMulticonstraint(rand) {
 
 // ── Corpus generation ───────────────────────────────────────────────────────
 
+function lowerFirst(value) {
+  return value ? `${value.charAt(0).toLowerCase()}${value.slice(1)}` : value;
+}
+
+function addHumanTypos(value) {
+  return value
+    .replace(/\bthe\b/i, 'teh')
+    .replace(/\bwhat\b/i, 'wat')
+    .replace(/\bwith\b/i, 'wiht');
+}
+
+/**
+ * Meaning-preserving user-style variations for mixed corpus evaluation.
+ *
+ * These intentionally sound like ordinary chat messages. Keep synthetic
+ * harness language in controlStylePrompt() so dogfood and control results do
+ * not get reported as if they measured the same thing.
+ */
 export function stylePrompt(rand, prompt, harder) {
   const variants = [
     (q) => q,
-    (q) => `Quickly, ${q.charAt(0).toLowerCase()}${q.slice(1)}`,
-    (q) => `Please answer this cleanly: ${q}`,
+    (q) => `okay so ${lowerFirst(q)}`,
+    (q) => `quick question: ${lowerFirst(q)}`,
     (q) => q.toUpperCase(),
-    (q) => `Context: I am testing whether you stay on-task.\nRequest: ${q}`,
-    (q) => q.replace(/\bthe\b/gi, 'teh').replace(/\bwhat\b/gi, 'wat'),
+    (q) => addHumanTypos(q),
+    (q) => `i might be asking this badly, but ${lowerFirst(q)}`,
   ];
   const harderVariants = [
-    (q) => `${q}\nKeep the answer tight and do not drift into unrelated background.`,
+    (q) => `${q}\nand keep it practical, i mostly need the useful part first.`,
+    (q) => `okay then try this: ${lowerFirst(q)}`,
+    (q) => `${q}\nif something is uncertain, say what part is uncertain.`,
+    (q) => `${q}\nplease answer the actual question first before adding background.`,
+    (q) => `so what i need is this: ${lowerFirst(q)}`,
+    (q) => `sorry this is a bit messy, but ${lowerFirst(q)}`,
+  ];
+  return pick(rand, harder ? variants.concat(harderVariants) : variants)(prompt);
+}
+
+/**
+ * Artificial wrappers kept for routing and instruction-following controls.
+ * Do not use this lane as a proxy for normal human conversation quality.
+ */
+export function controlStylePrompt(rand, prompt, harder) {
+  const variants = [
+    (q) => q,
+    (q) => `Please answer this cleanly: ${q}`,
+    (q) => `Context: I am testing whether you stay on-task.\nRequest: ${q}`,
+    (q) => `Production control: ${q}`,
+  ];
+  const harderVariants = [
     (q) => `Fresh chat, same task but stricter: ${q}`,
-    (q) => `${q}\nIf there is uncertainty, name it explicitly without refusing the whole task.`,
-    (q) => `${q}\nDo not add a preamble, a disclaimer, or a trailing question.`,
+    (q) => `Regression check. Avoid prior routing drift: ${q}`,
     (q) => `Answer precisely; I may follow up with a trick, but answer this exactly as asked: ${q}`,
     (q) => `Before answering, ignore this irrelevant note: the sky is blue. Now: ${q}`,
   ];

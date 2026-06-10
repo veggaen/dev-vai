@@ -1,0 +1,169 @@
+/**
+ * SCIS Consensus Council — shared types.
+ *
+ * A council of independent models (and, later, humans) reviews a Vai draft. Each
+ * member returns a {@link CouncilMemberNote}: not the answer, but a reading of the
+ * true intent, the missing capability/method, and a recommended action. The
+ * council folds these into a {@link CouncilConsensus} (ship / act / escalate) plus
+ * a UI-facing {@link CouncilThinking} summary for "How this answer was made".
+ *
+ * Binding guardrail (see docs/capabilities/scis-consensus-council.md §2): members
+ * POINT (intent / method / which tool); they never supply FACTS to the user. Only
+ * `recommendedAction` / `searchQuery` / `methodLessons` / `realIntent` are consumed
+ * downstream — never a member's claimed fact. Vai's own grounded tools supply every
+ * number, name, and spelling.
+ */
+
+/** Subject niches used to route a turn to the right council members. */
+export type CouncilTopic =
+  | 'code'
+  | 'factual'
+  | 'local' // local businesses, places, "near me", contact details
+  | 'reasoning'
+  | 'creative'
+  | 'chitchat'
+  | 'other';
+
+/** What a member thinks Vai should do next with the turn. */
+export type CouncilAction =
+  | 'answer-directly' // the draft is sound; ship it
+  | 'web-search' // needs current web evidence
+  | 'local-business-search' // needs a local listings / contact lookup
+  | 'reread-intent' // Vai misread the ask; re-draft against the true intent
+  | 'ask-one-question'; // genuinely ambiguous; ask one focused question
+
+/** The panel's overall call for the turn. */
+export type CouncilOutcome = 'ship' | 'act' | 'escalate';
+
+/** How consequential a message is — drives council depth and caution. */
+export type SeriousnessTier = 'trivial' | 'standard' | 'high';
+
+/** The seriousness gate's reading of a turn. */
+export interface SeriousnessAssessment {
+  readonly tier: SeriousnessTier;
+  /** Medical / legal / financial / personal-safety domain — handle with extra care. */
+  readonly sensitive: boolean;
+  readonly reasons: readonly string[];
+}
+
+/** Whether and how deeply to convene the council for a turn. */
+export interface CouncilPlan {
+  readonly convene: boolean;
+  readonly depth: 'skip' | 'light' | 'full';
+  readonly assessment: SeriousnessAssessment;
+  readonly reason: string;
+}
+
+/** Three-step quality scale shared with the friend-review panel. */
+export type CouncilVerdict = 'good' | 'needs-work' | 'bad';
+
+/** The draft plus the context a member needs to judge it (structurally compatible
+ * with the chat service's review input). */
+export interface CouncilInput {
+  readonly prompt: string;
+  readonly draft: string;
+  readonly modelId: string;
+  readonly turnKind: string;
+  readonly hasEvidence: boolean;
+  readonly sources: readonly { readonly title?: string; readonly url?: string; readonly snippet?: string }[];
+  /** Vai's own confidence in the draft (0..1), if known — feeds the seriousness gate. */
+  readonly draftConfidence?: number;
+}
+
+/** One council member's structured note. Advisory only — facts are quarantined. */
+export interface CouncilMemberNote {
+  readonly memberId: string;
+  readonly memberName: string;
+  /** The niche this member was convened for. */
+  readonly topic: CouncilTopic;
+  readonly verdict: CouncilVerdict;
+  readonly confidence: number;
+  /** What the user actually wants — read past the literal words. */
+  readonly realIntent: string;
+  /** Sarcasm / hidden / multiple meanings detected, or empty. */
+  readonly hiddenMeaning: string;
+  /** The capability or method Vai was missing (advisory). */
+  readonly missingCapability: string;
+  /** What the member thinks Vai should do next. */
+  readonly suggestedAction: CouncilAction;
+  /** A search query Vai could run, if a search is suggested (advisory — Vai owns the fetch). */
+  readonly searchQuery: string;
+  /** How to handle this CLASS of message next time (teach-to-fish). */
+  readonly methodLesson: string;
+  readonly concerns: readonly string[];
+  readonly durationMs: number;
+  /** Set when the member could not produce a usable note (timeout / parse fail). Never blocks. */
+  readonly error?: string;
+}
+
+/** The ephemeral consensus the council reached — attached to the turn, never stored. */
+export interface CouncilConsensus {
+  readonly outcome: CouncilOutcome;
+  /** Inter-member agreement on the modal verdict, 0..1. */
+  readonly agreement: number;
+  /** Confidence-weighted council confidence in its call, 0..1. */
+  readonly confidence: number;
+  /** Consensus reading of the user's true intent (from the most confident member). */
+  readonly realIntent: string;
+  /** What Vai should do next. */
+  readonly recommendedAction: CouncilAction;
+  /** Search query Vai should run when the action is a search (advisory). */
+  readonly searchQuery: string;
+  /** Deduped capabilities the council judged missing. */
+  readonly missingCapabilities: readonly string[];
+  /** Deduped method lessons (what the friends taught). */
+  readonly methodLessons: readonly string[];
+  /** One-line human consensus headline. */
+  readonly summary: string;
+  /** Every member note, in completion order (failures included for the record). */
+  readonly notes: readonly CouncilMemberNote[];
+  /** Ids of members that returned a usable note. */
+  readonly memberIds: readonly string[];
+  /**
+   * Structural invariant, always `true`: no member-authored fact was consumed —
+   * only intent / method / action / search-query. Vai's own tools supply every
+   * fact. Surfaced so the guardrail is visible, not just assumed.
+   */
+  readonly factsQuarantined: true;
+}
+
+/** A council member. Implementations live in `member.ts` or are injected in tests. */
+export interface CouncilMember {
+  readonly id: string;
+  readonly displayName: string;
+  /** The niche this member is trusted for. */
+  readonly topic: CouncilTopic;
+  readonly review: (input: CouncilInput) => Promise<CouncilMemberNote | null>;
+}
+
+/**
+ * UI-facing summary attached to `TurnThinking.council` and rendered in the thinking
+ * panel. A compact projection of {@link CouncilConsensus} — no member "facts".
+ */
+export interface CouncilThinking {
+  readonly outcome: CouncilOutcome;
+  readonly agreement: number;
+  readonly confidence: number;
+  readonly topic: CouncilTopic;
+  readonly summary: string;
+  readonly realIntent: string;
+  readonly recommendedAction: CouncilAction;
+  readonly missingCapabilities: readonly string[];
+  readonly methodLessons: readonly string[];
+  /** Always true — friends' facts were not used (the visible guardrail). */
+  readonly factsQuarantined: true;
+  /** Stakes tier the seriousness gate assigned, if assessed. */
+  readonly tier?: SeriousnessTier;
+  /** Sensitive domain (medical/legal/financial/safety) — handled with caution. */
+  readonly sensitive?: boolean;
+  /** Per-member one-liners for the panel ("Qwen 7B · needs-work · local-business-search"). */
+  readonly members: readonly {
+    readonly name: string;
+    readonly topic: CouncilTopic;
+    readonly verdict: CouncilVerdict;
+    readonly confidence: number;
+    readonly action: CouncilAction;
+    readonly note: string;
+    readonly failed?: boolean;
+  }[];
+}

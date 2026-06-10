@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "savedAt": "2026-04-23T21:53:54.351Z",
+  "savedAt": "2026-06-02T05:39:17.526Z",
   "learnedEntries": [
     {
       "pattern": "learn the osi model in 5 minutes | opensource.com",
@@ -8,7 +8,7 @@
       "frequency": 2,
       "source": "https://opensource.com/article/22/10/osi-model-network-communications",
       "language": "en",
-      "updatedAt": 1776979812013
+      "updatedAt": 1780378755177
     },
     {
       "pattern": "understanding the osi model and tcp/ip | by diogo neto | medium",
@@ -16,7 +16,7 @@
       "frequency": 2,
       "source": "https://diog0net0sec.medium.com/understanding-the-osi-model-and-tcp-ip-369ca2978ab9",
       "language": "en",
-      "updatedAt": 1776979812013
+      "updatedAt": 1780378755177
     },
     {
       "pattern": "chatgpt",
@@ -24,7 +24,7 @@
       "frequency": 2,
       "source": "https://chatgpt.com/",
       "language": "en",
-      "updatedAt": 1776979812014
+      "updatedAt": 1780378755183
     },
     {
       "pattern": "test on osi tcp/ip",
@@ -32,7 +32,7 @@
       "frequency": 2,
       "source": "https://chatgpt.com/c/69a2f67b-9d00-8397-a8df-68f2a20d688f",
       "language": "en",
-      "updatedAt": 1776979812014
+      "updatedAt": 1780378755184
     },
     {
       "pattern": "ai slop definition and plan",
@@ -40,7 +40,7 @@
       "frequency": 2,
       "source": "https://chatgpt.com/c/699d508a-e654-8386-86a5-8534f53e8a01",
       "language": "en",
-      "updatedAt": 1776979812014
+      "updatedAt": 1780378755185
     },
     {
       "pattern": "paul storm asked chatgpt a simple question. it gave a brilliant answer. it was completely wrong. : r/promptengineering",
@@ -48,7 +48,7 @@
       "frequency": 2,
       "source": "https://www.reddit.com/r/PromptEngineering/comments/1r8skzu/paul_storm_asked_chatgpt_a_simple_question_it/",
       "language": "en",
-      "updatedAt": 1776979812015
+      "updatedAt": 1780378755186
     },
     {
       "pattern": "norsk test eksamen i skriving download - google search",
@@ -56,7 +56,7 @@
       "frequency": 2,
       "source": "https://www.google.com/search?q=norsk+test+eksamen+i+skriving+download&rlz=1C1ONGR_enNO1084NO1084&oq=nor&gs_lcrp=EgZjaHJvbWUqBggAEEUYOzIGCAAQRRg7MgYIARBFGDsyBggCEEUYOzIGCAMQRRg8MgYIBBBFGDwyBggFEEUYPDIGCAYQRRg8MgYIBxBFGDzSAQg0OTkxajBqN6gCALACAA&sourceid=chrome&ie=UTF-8",
       "language": "no",
-      "updatedAt": 1776979812017
+      "updatedAt": 1780378755186
     },
     {
       "pattern": "birgers norskside - b1-b2",
@@ -64,7 +64,7 @@
       "frequency": 2,
       "source": "https://www.bnorsk.no/1-for-elever/ressurser-for-norskelever/b1-b2",
       "language": "no",
-      "updatedAt": 1776979812017
+      "updatedAt": 1780378755186
     },
     {
       "pattern": "birgers norskside - grammatikk",
@@ -72,7 +72,7 @@
       "frequency": 2,
       "source": "https://www.bnorsk.no/1-for-elever/grammatikk",
       "language": "no",
-      "updatedAt": 1776979812017
+      "updatedAt": 1780378755186
     },
     {
       "pattern": "søk i eksamensoppgaver",
@@ -80,7 +80,7 @@
       "frequency": 2,
       "source": "https://sokeresultat.udir.no/eksamensoppgaver.html",
       "language": "no",
-      "updatedAt": 1776979812018
+      "updatedAt": 1780378755187
     },
     {
       "pattern": "norsk standard nettside - google search",
@@ -88,7 +88,7 @@
       "frequency": 2,
       "source": "https://www.google.com/search?q=norsk+standard+nettside&rlz=1C1ONGR_enNO1084NO1084&oq=norsk+standard+nettside&gs_lcrp=EgZjaHJvbWUyBggAEEUYOTIHCAEQIRigATIHCAIQIRiPAtIBCDgwMTBqMGo3qAIAsAIA&sourceid=chrome&ie=UTF-8",
       "language": "no",
-      "updatedAt": 1776979812018
+      "updatedAt": 1780378755188
     },
     {
       "pattern": "translate norwegian to english - google search",
@@ -96,7 +96,7 @@
       "frequency": 2,
       "source": "https://www.google.com/search?q=translate+norwegian+to+english&rlz=1C1ONGR_enNO1084NO1084&oq=translate&gs_lcrp=EgZjaHJvbWUqDQgAEAAYkQIYgAQYigUyDQgAEAAYkQIYgAQYigUyDQgBEAAYkQIYgAQYigUyDQgCEAAYkQIYgAQYigUyBwgDEAAYgAQyBwgEEAAYgAQyBwgFEAAYgAQyBwgGEAAYgAQyBggHEEUYPNIBCDMwODVqMGo0qAIDsAIB8QUAugmAHsw7-A&sourceid=chrome&ie=UTF-8",
       "language": "en",
-      "updatedAt": 1776979812018
+      "updatedAt": 1780378755188
     },
     {
       "pattern": "scaling veggaai: modular packs & persistence - grok",
@@ -104,7 +104,7 @@
       "frequency": 4,
       "source": "https://grok.com/c/0a9b87b0-3ec4-44e7-8303-e60be4e220a3?rid=d40a1700-8d0a-4c51-ae94-297edde62f6a",
       "language": "code",
-      "updatedAt": 1776979812019
+      "updatedAt": 1780378755188
     },
     {
       "pattern": "the drama never ends...",
@@ -112,7 +112,7 @@
       "frequency": 2,
       "source": "https://www.youtube.com/watch?v=K6CCw1DK1EQ",
       "language": "en",
-      "updatedAt": 1776979812019
+      "updatedAt": 1780378755189
     },
     {
       "pattern": "from wikipedia, the free encyclopedia \n \n (redirected from python ) \n \n \n \n british contingency plan",
@@ -120,7 +120,7 @@
       "frequency": 1,
       "source": "https://en.wikipedia.org/wiki/PYTHON",
       "language": "en",
-      "updatedAt": 1776979812019
+      "updatedAt": 1780378755189
     },
     {
       "pattern": "martin-majlis\n \n / \n \n wikipedia-api \n \n\n public \n \n\n \n\n \n \n \n \n \n \n \n \n \n \n \n\n uh oh!\n \n there was ",
@@ -128,7 +128,7 @@
       "frequency": 1,
       "source": "https://github.com/martin-majlis/Wikipedia-API",
       "language": "en",
-      "updatedAt": 1776979812019
+      "updatedAt": 1780378755190
     },
     {
       "pattern": "actions\n \n / \n \n cache \n \n\n public \n \n\n \n\n \n \n \n \n\n \n \n \n notifications\n you must be signed in to ch",
@@ -136,7 +136,7 @@
       "frequency": 1,
       "source": "https://github.com/actions/cache",
       "language": "en",
-      "updatedAt": 1776979812020
+      "updatedAt": 1780378755190
     },
     {
       "pattern": "cache (computing) a hardware or software component that stores data so that future requests for that",
@@ -144,7 +144,7 @@
       "frequency": 1,
       "source": "https://duckduckgo.com/Cache_(computing)",
       "language": "en",
-      "updatedAt": 1776979812020
+      "updatedAt": 1780378755191
     },
     {
       "pattern": "latency (engineering) a time delay between the cause and the effect of some physical change in the s",
@@ -152,7 +152,7 @@
       "frequency": 1,
       "source": "https://duckduckgo.com/Latency_(engineering)",
       "language": "en",
-      "updatedAt": 1776979812020
+      "updatedAt": 1780378755191
     },
     {
       "pattern": "latency stage the fourth stage of sigmund freud's model of a child's psychosexual development.",
@@ -160,7 +160,7 @@
       "frequency": 1,
       "source": "https://duckduckgo.com/Latency_stage",
       "language": "en",
-      "updatedAt": 1776979812020
+      "updatedAt": 1780378755191
     },
     {
       "pattern": "latency (audio) latency refers to a short period of delay between when an audio signal enters a syst",
@@ -168,7 +168,7 @@
       "frequency": 1,
       "source": "https://duckduckgo.com/Latency_(audio)",
       "language": "en",
-      "updatedAt": 1776979812020
+      "updatedAt": 1780378755191
     },
     {
       "pattern": "aviabird\n \n / \n \n angularspree \n \n\n public \n \n\n \n\n \n \n \n \n\n \n \n \n notifications\n you must be signed ",
@@ -176,7 +176,7 @@
       "frequency": 1,
       "source": "https://github.com/aviabird/angularspree",
       "language": "en",
-      "updatedAt": 1776979812020
+      "updatedAt": 1780378755191
     },
     {
       "pattern": "commerce demo store built for the jamstack. built with commerce.js, next.js, and can be one-click de",
@@ -184,7 +184,7 @@
       "frequency": 1,
       "source": "https://commercejs-demo-store.netlify.app/",
       "language": "en",
-      "updatedAt": 1776979812020
+      "updatedAt": 1780378755192
     },
     {
       "pattern": "from wikipedia, the free encyclopedia \n \n \n \n \n \n diplomatic head of nato \n secretary general&#160;o",
@@ -192,7 +192,7 @@
       "frequency": 1,
       "source": "https://en.wikipedia.org/wiki/Secretary_General_of_NATO",
       "language": "en",
-      "updatedAt": 1776981232215
+      "updatedAt": 1780378755192
     },
     {
       "pattern": "jihadist000\n \n / \n \n thetruth \n \n\n public \n \n\n \n\n \n \n \n \n\n \n \n \n notifications\n you must be signed i",
@@ -200,7 +200,7 @@
       "frequency": 1,
       "source": "https://github.com/Jihadist000/TheTruth",
       "language": "en",
-      "updatedAt": 1776981232217
+      "updatedAt": 1780378755193
     },
     {
       "pattern": "supreme allied commander europe - the supreme allied commander europe is the commander of the north ",
@@ -208,7 +208,7 @@
       "frequency": 1,
       "source": "https://duckduckgo.com/Supreme_Allied_Commander_Europe",
       "language": "en",
-      "updatedAt": 1776981232217
+      "updatedAt": 1780378755193
     }
   ],
   "strategyStats": {

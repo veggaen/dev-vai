@@ -8,6 +8,16 @@ Read `Master.md` before starting work.
 
 If `Master.md` appears outdated or incorrect, ask V3gga to review it directly rather than silently inventing replacements.
 
+## Architecture Direction — Orchestrator / Bridge
+
+See `Master.md` §12.5 for the durable version. In short:
+
+- Vai is the bridge between humans and intelligence (software, agentic, robotic, multimodal). Vai orchestrates capabilities; it does not have to be every capability itself.
+- The deterministic core (intent, context, routing, curated facts/idioms, safety, verification, memory) stays the heart and always runs first.
+- Reasoning, generation, and multimodal (voice/sound/image) come from pluggable capability modules that fire only when the deterministic core cannot answer well. The curated/idiom path always wins first; generative output is verified/sanitized by the deterministic layer before reaching the user.
+- Default modules are open-weight and local-first (e.g. Qwen/Llama for reasoning, Whisper for STT, Piper/Coqui for TTS, LLaVA/CLIP for vision) so Vai stays free for end users. Cloud providers are optional accelerators added only by V3gga.
+- When wiring these, keep them gated, configurable, and dynamic — never a per-phrase patch, never overriding a confident curated answer.
+
 ## Working Style
 
 Browse the codebase before making assumptions.

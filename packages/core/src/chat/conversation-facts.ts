@@ -91,6 +91,7 @@ export interface FactRecallResult {
 // ─── Extraction ──────────────────────────────────────────────
 
 const PROJECT_INTRO_PATTERNS: readonly RegExp[] = [
+  /\bproject\s+["']?([A-Z][\w&-]{2,30})["']?\s+uses?\b/gi,
   /\b(?:building|build|make|making|creating|started|working\s+on)\s+(?:a\s+|an\s+|the\s+|my\s+)?(?:(?:new\s+)?(?:project\s+(?:called\s+)?)?)?["']?([A-Z][\w&-]{2,30})["']?/gi,
   /\bproject\s*(?:name)?\s*[:=]\s*["']?([A-Z][\w&-]{2,30})["']?/gi,
   /\b(?:project|app|tool|service|product)\s+(?:called|named)\s+["']?([A-Z][\w&-]{2,30})["']?/gi,
@@ -222,7 +223,9 @@ function extractProjectsFromTurn(content: string, turnIndex: number): ProjectFac
 function extractStacksFromTurn(content: string): string[] {
   const found: string[] = [];
   for (const kw of STACK_KEYWORDS) {
-    const re = new RegExp(`\\b${kw.replace(/[.+]/g, '\\$&')}\\b`, 'i');
+    // Lowercase "go" is ordinary prose far more often than a language name.
+    // Preserve the stack signal only when the user actually writes "Go".
+    const re = new RegExp(`\\b${kw.replace(/[.+]/g, '\\$&')}\\b`, kw === 'Go' ? '' : 'i');
     if (re.test(content)) found.push(kw);
   }
   for (const pat of STACK_INTRO_PATTERNS) {
@@ -433,9 +436,10 @@ const PROJECT_LIST_RECALL_RE =
 const PROJECT_BY_NAME_RECALL_RE =
   /\b(?:remind\s+me\s+(?:what|about)|tell\s+me\s+about|what\s+is|describe)\s+([A-Z][\w&-]{2,30})\b(?:\s+(?:is|again))?\??/i;
 
-// "what stack does X use", "what stack is X using"
+// "what stack does X use", "what stack is X using",
+// "what stack did I say project X uses again"
 const PROJECT_STACK_NAMED_RE =
-  /\bwhat\s+(?:stack|tech|framework)\s+(?:does|is)\s+([A-Z][\w&-]{2,30})\s+(?:use|using|built\s+with|on)/i;
+  /\bwhat\s+(?:stack|tech|framework)\s+(?:(?:does|is)\s+([A-Z][\w&-]{2,30})\s+(?:use|using|built\s+with|on)|did\s+i\s+say\s+(?:project\s+)?([A-Z][\w&-]{2,30})\s+uses?)/i;
 
 const PROJECT_SUMMARY_RECALL_RE =
   /\bremind\s+me\s+(?:of|about)\s+(?:my|the|our)\s+project(?:'s)?(?:\s+name)?(?:\s*,?\s*(?:stack|features?|main\s+feature|tech))*\b|\bwhat'?s?\s+(?:my|the|our)\s+project\s+(?:name|setup|details)\b/i;
@@ -508,8 +512,9 @@ export function tryHandleFactRecall(
   // Must run before generic STACK_RECALL_RE.
   {
     const m = PROJECT_STACK_NAMED_RE.exec(text);
-    if (m && m[1]) {
-      const wanted = m[1].toLowerCase();
+    const namedProject = m?.[1] ?? m?.[2];
+    if (namedProject) {
+      const wanted = namedProject.toLowerCase();
       const proj = facts.projects.find((p) => p.name.toLowerCase() === wanted);
       if (proj && proj.stacks.length > 0) {
         return { reply: `**${proj.name}** uses ${fmtList(proj.stacks)}.`, intent: 'project-stack-named' };

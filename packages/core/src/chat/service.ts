@@ -7,7 +7,7 @@ import type {
   ChatPromptRewriteResponseDepth,
 } from '../config/types.js';
 import { conversations, messages, images } from '../db/schema.js';
-import type { ModelRegistry, ChatChunk, Message, TokenUsage } from '../models/adapter.js';
+import type { ModelRegistry, ChatChunk, Message, TokenUsage, TurnThinking, TurnRoutePlan } from '../models/adapter.js';
 import { SkillRouter } from '../models/skill-router.js';
 import type { ThorsenAdaptiveController } from '../thorsen/types.js';
 import {
@@ -19,6 +19,10 @@ import {
   resolveTemporaryTurnMode,
   shouldInjectChatStructureHint,
 } from './chat-quality.js';
+import {
+  evaluateChatAnswerQuality,
+  type ChatAnswerQualityReport,
+} from './chat-answer-quality.js';
 import { CONVERSATION_MODE_SYSTEM_PROMPTS, DEFAULT_CONVERSATION_MODE, type ConversationMode, isConversationMode } from './modes.js';
 import { tryHandleChatMeta } from './meta-router.js';
 import {
@@ -31,15 +35,76 @@ import { tryEmitConstrainedCode } from './constrained-code-emitter.js';
 import { tryEmitContinuation } from './chat-continuation.js';
 import { tryEmitFormatStrict } from './format-strict-router.js';
 import { tryEmitFactShim } from './deterministic-facts-router.js';
+import { extractIdiomContext } from './programming-idioms.js';
+import { splitCompoundQuestion, classifyQuestionIntent } from './question-intent.js';
 import { classifyTurn } from './turn-classifier.js';
+import {
+  dispatchTurn,
+  type TurnHandler,
+  type TurnContext,
+  type Resolution,
+  type DispatchPlan,
+} from './turn-pipeline.js';
+import type {
+  CouncilInput,
+  CouncilThinking,
+} from '../consensus/types.js';
+import type { CouncilRoster } from '../consensus/topic-router.js';
+import { convene, toCouncilThinking } from '../consensus/council.js';
+import {
+  salientTokens,
+  selectApplicableGuidance,
+  toTurnGuidance,
+  type RouteGuidance,
+  type GuidanceStore,
+} from './route-guidance.js';
 import { extractActiveTopicBrief, hasTopicOverlap } from './active-topic-brief.js';
 import { resolveChatPromptRewriteConfig, rewriteChatPrompt } from './prompt-rewrite.js';
 import { buildTurnKindSystemHint, classifyChatTurn } from './turn-kind.js';
-import { decideVaiFallback, pickFallbackModelId } from './vai-fallback.js';
+import {
+  decideVaiFallback,
+  pickFallbackModelId,
+  shouldEscalateDeterministicDecline,
+  VAI_FALLBACK_CONFIDENCE_THRESHOLD,
+} from './vai-fallback.js';
+import { sanitizeLeakage, verifyResponse, type ResponseVerificationConfig } from './response-verification.js';
+import {
+  evaluateBuilderRequestSatisfaction,
+  hasBuilderFileBlocks,
+  repairBuilderFallbackFileBlocks,
+  type BuilderSatisfactionReport,
+} from './builder-satisfaction.js';
 import { calculateCost } from '../usage/service.js';
 import { isProductEngineeringPlanningPrompt } from './product-engineering-intent.js';
 import { tryEmitProductEngineeringMemo } from './product-engineering-memo.js';
 import { tryEmitBoundaryResponse } from './boundary-response.js';
+import { reviewTurnSecurity } from './security-review.js';
+import { reduceConversationContract, buildContractSystemPrelude } from './conversation-contract.js';
+import { tryEmitConversationReasoning } from './conversation-reasoning.js';
+import { normalizeInputForUnderstanding } from '../input-normalization.js';
+import { tryEmitSingleClarifyingQuestion } from './single-clarifying-question.js';
+import {
+  tryEmitBridgeCapabilityAudit,
+  tryEmitPrivateLiveContextResponse,
+} from './bridge-evidence-discipline.js';
+import {
+  isFreshLocalBusinessContactRequest,
+  isFreshLocalRecommendationRequest,
+} from '../models/web-conclude-policy.js';
+import { shouldPeerReviewCode } from './code-review-policy.js';
+import { rewriteBusinessContactLookupFollowUp } from './contextual-resolver.js';
+
+/**
+ * A {@link Resolution} carrying the two service-specific fields the shared
+ * emit path needs: the `strategy` tag (becomes the persisted modelId + the
+ * thinking strategy) and any `preChunks` streamed before the answer (e.g. the
+ * product-engineering memo's progress stages). Handlers in the dispatch list
+ * return this; the core pipeline stays UI-agnostic via its generic parameter.
+ */
+interface ServiceResolution extends Resolution {
+  readonly strategy: string;
+  readonly preChunks?: readonly ChatChunk[];
+}
 
 export interface ImageInput {
   data: string;      // base64
@@ -50,6 +115,35 @@ export interface ImageInput {
   width?: number;
   height?: number;
   sizeBytes?: number;
+}
+
+export interface ResponseReviewInput {
+  readonly prompt: string;
+  readonly draft: string;
+  readonly modelId: string;
+  readonly turnKind: string;
+  readonly hasEvidence: boolean;
+  readonly sources: readonly {
+    readonly title?: string;
+    readonly url?: string;
+    readonly snippet?: string;
+  }[];
+}
+
+export interface ResponseReviewResult {
+  readonly decision: 'approve' | 'reject';
+  readonly reason: string;
+  readonly requiresFreshEvidence?: boolean;
+  readonly confidence?: number;
+  /** Peer concerns surfaced during friend review (code quality, accuracy, etc.). */
+  readonly concerns?: readonly string[];
+  /** Actionable improvements peers suggested before release. */
+  readonly suggestions?: readonly string[];
+}
+
+export interface ResponseReviewer {
+  readonly id: string;
+  readonly review: (input: ResponseReviewInput) => Promise<ResponseReviewResult | null>;
 }
 
 export interface ChatServiceOptions {
@@ -64,6 +158,33 @@ export interface ChatServiceOptions {
    * When unset or empty, vai:v0 responses are streamed as-is.
    */
   readonly vaiFallbackChain?: readonly string[];
+  /**
+   * Operator-supplied extra decline markers (configurable, e.g. localized
+   * "I don't know" phrasings). Threaded through to both the entrance decline
+   * detector ({@link decideVaiFallback}) and the exit verification arm
+   * ({@link verifyResponse}) so escalation generalizes to phrasings we never
+   * hard-coded without touching code. (§4.5 good defaults, tunable.)
+   */
+  readonly extraDeclineMarkers?: readonly string[];
+  /**
+   * Post-generation verification arm config (Master.md §12.5.3). Tunes the exit
+   * gate — calibration band, leak patterns, and the (default-off) requirement
+   * that confident factual claims be backed by evidence. `extraDeclineMarkers`
+   * above is merged in automatically. Defaults keep the gate conservative.
+   */
+  readonly verification?: Partial<ResponseVerificationConfig>;
+  /**
+   * Run the upstream security-review pass (prompt-injection / secret-exfil /
+   * malware / manipulation / safety-incident) before any broad factual router.
+   * Defaults to `true`. Set `false` to measure the prompt-only baseline.
+   */
+  readonly securityReview?: boolean;
+  /**
+   * Build the durable conversation-contract ledger and restate it every turn,
+   * instead of the legacy stateless facts prelude. Defaults to `true`. Set
+   * `false` to measure the prompt-only baseline.
+   */
+  readonly contractLedger?: boolean;
   /** Optional hook for recording final usage/cost after a streamed turn completes. */
   readonly onUsage?: (entry: {
     id: string;
@@ -77,6 +198,26 @@ export interface ChatServiceOptions {
     durationMs: number;
     finishReason: string;
   }) => void;
+  /**
+   * Preferred: full store for loading *and writing* RouteGuidance records.
+   * Writing (save + recordApplication) is what creates the durable reference
+   * data we later use to compute "was this steering a net benefit?" and to
+   * decide if re-calibration of weights, scopes, matching, or actor trust is needed.
+   */
+  readonly guidanceStore?: GuidanceStore;
+  /**
+   * Optional bounded reviewers that inspect selected drafts before release.
+   * Reviewers can veto an answer but cannot silently replace it with their own.
+   */
+  readonly responseReviewers?: readonly ResponseReviewer[];
+
+  /**
+   * Legacy: simple load fn only. If guidanceStore is also supplied it takes precedence.
+   * @deprecated Prefer guidanceStore for full read/write + analysis support.
+   */
+  readonly loadActiveGuidance?: (conversationId: string) => readonly RouteGuidance[];
+  /** SCIS Consensus Council roster (topic -> members). When supplied, the service runs the council on substantive drafts and attaches CouncilThinking to the turn trace (powers the ThinkingPanel council section). */
+  readonly councilRoster?: CouncilRoster;
 }
 
 export interface ChatPromptRewriteOverrides {
@@ -93,7 +234,12 @@ function isChatServiceOptions(value: unknown): value is ChatServiceOptions {
       'promptRewrite' in value
       || 'retrieveKnowledge' in value
       || 'vaiFallbackChain' in value
+      || 'extraDeclineMarkers' in value
+      || 'verification' in value
       || 'onUsage' in value
+      || 'securityReview' in value
+      || 'contractLedger' in value
+      || 'responseReviewers' in value
     );
 }
 
@@ -108,13 +254,308 @@ const ACTIVE_SANDBOX_EXECUTION_HINT = [
   'Do not switch into research notes, citations, or generic troubleshooting unless the user explicitly asks for them or you are blocked on a specific missing fact.',
 ].join(' ');
 
+/**
+ * Small, late prompt for the escalated builder arm. Builder mode already has a
+ * broad product-quality charter; this recovery hint keeps a small local model
+ * focused on the immediate contract after the deterministic scaffold failed.
+ */
+const BUILDER_FALLBACK_SYSTEM_HINT = [
+  'This is an escalated Builder Mode recovery turn: the first artifact did not satisfy the user request.',
+  'Return the smallest runnable implementation that visibly satisfies the request.',
+  'Do not narrate a plan, repeat these instructions, offer product advice, or ask follow-up questions unless a missing choice changes behavior, security, data, or money flows.',
+  'Emit concrete files as fenced code blocks with title="path/to/file" so the live sandbox can apply them.',
+  'For a new app, include every file required to run it. For an attached project edit, emit only the changed files.',
+  'For a lightweight UI that can run without dependencies, prefer one complete index.html file with inline CSS and JavaScript.',
+  'Implement the requested visible behaviors and domain details; do not stop at a generic scaffold.',
+  'Your response must begin with the first file block.',
+].join(' ');
+
+/** Fallback artifacts need stronger source coverage than deterministic primary scaffolds. */
+const FALLBACK_BUILDER_MIN_ANCHOR_COVERAGE = 0.8;
+
+/** Project a dispatcher {@link DispatchPlan} into the friend-readable
+ * {@link TurnRoutePlan} carried on the thinking trace. */
+function buildRoutePlan(plan: DispatchPlan): TurnRoutePlan {
+  return {
+    chosen: plan.chosen,
+    belowFloor: plan.belowFloor,
+    candidates: plan.candidates.map((c) => ({
+      name: c.name,
+      score: c.score,
+      baseScore: c.baseScore,
+      chosen: c.name === plan.chosen,
+      declined: plan.declined.includes(c.name),
+      guidance: c.guidanceApplied,
+      reason: c.reason,
+    })),
+  };
+}
+
+function buildDeterministicThinking(
+  strategy: string,
+  input: string,
+  durationMs: number,
+  confidence = 0.95,
+): TurnThinking {
+  return {
+    intent: 'structured-conversation',
+    strategy,
+    strategyChain: [strategy],
+    trustBadge: 'structured-chat',
+    confidence,
+    topic: input.trim().replace(/\s+/g, ' ').slice(0, 80),
+    knowledgeDepth: 'deep',
+    register: 'operational',
+    durationMs,
+    processTrace: [
+      { stage: 'structured:classify', durationMs: 0 },
+      { stage: `tracked:${strategy}`, durationMs },
+    ],
+  };
+}
+
+function buildFallbackThinking(input: {
+  readonly content: string;
+  readonly turnKind: string;
+  readonly trigger: string;
+  readonly fallbackModelId: string;
+  readonly verificationStage: string;
+  readonly durationMs: number;
+}): TurnThinking {
+  const verificationParts = input.verificationStage.split(':');
+  const qualityStage = verificationParts[0]?.startsWith('quality-')
+    ? verificationParts.shift()
+    : null;
+  const exitVerificationStage = verificationParts.join(':') || input.verificationStage;
+  const strategyChain = [
+    `fallback:${input.trigger}`,
+    `escalate:${input.fallbackModelId}`,
+    ...(qualityStage ? [qualityStage] : []),
+    `verify:${exitVerificationStage}`,
+  ];
+  return {
+    intent: input.turnKind === 'builder' ? 'build' : input.turnKind,
+    strategy: strategyChain.join('->'),
+    strategyChain,
+    trustBadge: 'fallback',
+    topic: input.content.trim().replace(/\s+/g, ' ').slice(0, 80),
+    knowledgeDepth: 'none',
+    register: 'escalated',
+    durationMs: input.durationMs,
+    processTrace: [
+      { stage: `fallback:decline:${input.trigger}`, durationMs: 0 },
+      { stage: `fallback:escalate:${input.fallbackModelId}`, durationMs: input.durationMs },
+      ...(qualityStage ? [{ stage: `fallback:${qualityStage}`, durationMs: input.durationMs }] : []),
+      { stage: `tracked:fallback:verify:${exitVerificationStage}`, durationMs: input.durationMs },
+    ],
+  };
+}
+
+function buildBuilderFallbackRepairMessages(
+  messages: readonly Message[],
+  report: BuilderSatisfactionReport,
+): Message[] {
+  const missing = report.missingAnchors.slice(0, 8);
+  const repairHint = [
+    'The previous Builder recovery output still failed sandbox validation. Replace it completely.',
+    report.hasFileBlocks
+      ? 'It emitted files but did not cover enough requested behavior.'
+      : 'It did not emit an auto-applicable file block.',
+    missing.length > 0 ? `Missing or weak requirements: ${missing.join(', ')}.` : '',
+    'Return one self-contained browser app. Begin exactly with: ```html title="index.html"',
+    'Use inline CSS and browser JavaScript only. Do not call backend endpoints or assume a server exists.',
+    'Wire every requested control to visible local state. Do not merely mention missing requirements in labels, comments, or prose.',
+    'Output the replacement file block only.',
+  ].filter(Boolean).join(' ');
+  const systemMessages = messages.filter((message) => message.role === 'system');
+  const conversationalMessages = messages.filter((message) => message.role !== 'system');
+  return [...systemMessages, { role: 'system', content: repairHint }, ...conversationalMessages];
+}
+
+function scoreBuilderSatisfaction(report: BuilderSatisfactionReport): number {
+  return (report.satisfied ? 100 : 0) + (report.hasFileBlocks ? 10 : 0) + report.coverage;
+}
+
+function buildFallbackQualityRepairMessages(
+  messages: readonly Message[],
+  report: ChatAnswerQualityReport,
+): Message[] {
+  const missing = report.missing
+    .slice(0, 6)
+    .map((requirement) => `${requirement.label}: ${requirement.expected}`);
+  const repairHint = [
+    'The previous fallback draft failed the answer-quality check. Rewrite it once from scratch.',
+    missing.length > 0 ? `Failed requirements: ${missing.join('; ')}.` : '',
+    'Answer the original user request directly. Do not mention this quality check or the previous draft.',
+    'For debugging guidance, diagnose the existing system from observable evidence before proposing changes.',
+    'Do not invent dependencies, versions, configuration, files, or project structure that the user did not provide.',
+    'Do not emit a replacement scaffold or multiple full files unless the user explicitly requested implementation.',
+    'Give a small ordered next step and a concrete signal the user can use to verify it.',
+  ].filter(Boolean).join(' ');
+  const systemMessages = messages.filter((message) => message.role === 'system');
+  const conversationalMessages = messages.filter((message) => message.role !== 'system');
+  return [...systemMessages, { role: 'system', content: repairHint }, ...conversationalMessages];
+}
+
+function scoreAnswerQuality(report: ChatAnswerQualityReport): number {
+  const verdictWeight = report.verdict === 'pass' ? 200 : report.verdict === 'warn' ? 100 : 0;
+  return verdictWeight + report.score;
+}
+
+function buildConservativeDiagnosticAnswer(prompt: string): string | null {
+  const normalized = prompt.toLowerCase();
+  if (!/\b(?:debug|debugging|diagnos(?:e|is)|troubleshoot|blank\s+(?:page|screen)|crash|failing|broken|error|flaky)\b/i.test(prompt)) {
+    return null;
+  }
+
+  if (/\b(?:react|blank\s+(?:page|screen)|browser|frontend|web\s*page)\b/.test(normalized)) {
+    return [
+      'Start with the first observable browser failure before changing any files.',
+      '',
+      '1. Open DevTools and check the Console. Capture the first red error; later errors are often consequences.',
+      '2. If the Console is clean, check the Network tab for a failed JavaScript request or a module returned as HTML.',
+      '3. Inspect the page and verify the React mount element exists and its id matches the startup code.',
+      '4. Check the dev-server terminal for compile errors, then reload once after fixing only the earliest confirmed failure.',
+      '',
+      'The useful next input is the first console error, failed request, or terminal stack trace. That evidence determines the smallest fix.',
+    ].join('\n');
+  }
+
+  if (/\b(?:docker|container)\b/.test(normalized)) {
+    return [
+      'Start with the container exit evidence before changing the image or compose file.',
+      '',
+      '1. Run `docker ps -a` and note the exit code.',
+      '2. Run `docker logs <container>` and capture the first startup error.',
+      '3. Inspect the configured entrypoint, command, environment, and mounted paths against that error.',
+      '4. Re-run once without an automatic restart policy so the original failure remains visible.',
+      '',
+      'The exit code and first log error are the decision point for the next fix.',
+    ].join('\n');
+  }
+
+  if (/\b(?:test|tests|flaky|vitest|jest|pytest)\b/.test(normalized)) {
+    return [
+      'Start by making one failure reproducible instead of adding retries.',
+      '',
+      '1. Run the smallest failing test alone with a fixed seed and capture its first divergent assertion or log.',
+      '2. Repeat it serially, then compare with the full-suite run to expose shared state, ordering, or timing dependence.',
+      '3. Check unawaited work, fake timers, global mutations, filesystem/network state, and cleanup between tests.',
+      '4. Fix the confirmed source of nondeterminism, then verify the test repeatedly and once inside the full suite.',
+      '',
+      'The first difference between isolated and suite behavior is the evidence that should drive the fix.',
+    ].join('\n');
+  }
+
+  return [
+    'Start by reproducing the failure and capturing the earliest reliable evidence before changing the system.',
+    '',
+    '1. Record the exact action, input, and environment that trigger it.',
+    '2. Capture the first error, stack trace, failed request, or log line.',
+    '3. Identify the smallest boundary where expected and actual behavior diverge.',
+    '4. Change one likely cause, then repeat the same reproduction to verify the result.',
+    '',
+    'Share the earliest error and the reproduction step if you want the next diagnosis to be specific.',
+  ].join('\n');
+}
+
+function buildConservativeExhaustiveAnswer(prompt: string): string | null {
+  if (
+    !/\b(?:all|every|complete|full|exhaustive)\b/i.test(prompt)
+    || !/\b(?:list|items?|options?|champions?|roles?|entries|examples?)\b/i.test(prompt)
+  ) {
+    return null;
+  }
+
+  const subject = /\bchampions?\b/i.test(prompt)
+    ? /\bmid(?:dle)?\s+lane\b/i.test(prompt) ? 'mid-lane champion roster' : 'champion roster'
+    : /\broles?\b/i.test(prompt)
+      ? 'role list'
+      : 'requested list';
+
+  return [
+    `I cannot verify a complete ${subject} from memory alone, so I should not label a partial list as "all."`,
+    '',
+    'A trustworthy exhaustive answer needs a current authoritative source or dataset, including the relevant patch or version when the set can change.',
+    '',
+    'Once that source is available, I can turn it into the dotted list you requested and keep unusual or off-meta entries clearly distinguished.',
+  ].join('\n');
+}
+
+function buildConservativeConversationalAnswer(prompt: string): string | null {
+  if (/\bhumaniz(?:e|er|ing)\b/i.test(prompt) && /\b(?:test|prompt)\b/i.test(prompt)) {
+    return [
+      'A good prompt humanizer changes the surface form without changing the test contract.',
+      '',
+      '1. Protect literals first: code, paths, URLs, numbers, quoted text, placeholders, and required output tokens.',
+      '2. Apply one or two seeded mutations: contractions, abbreviations, light punctuation changes, a realistic typo, or a meaning-preserving paraphrase.',
+      '3. Preserve intent, entities, constraints, and expected answer shape. Reject any mutation that changes those semantics.',
+      '4. Store the seed and mutation list so every failed test is reproducible.',
+      '',
+      'Verify it with invariant checks: protected tokens are unchanged, the semantic label is unchanged, and the same seed produces the same prompt.',
+    ].join('\n');
+  }
+
+  if (
+    /\bsmart friend\b/i.test(prompt)
+    || (
+      /\b(?:conversation|chat|talking)\b/i.test(prompt)
+      && /\b(?:natural|personal|human|friend)\b/i.test(prompt)
+    )
+  ) {
+    return [
+      'Make the conversation feel like a smart friend by combining context, judgment, and restraint.',
+      '',
+      '1. Remember stable preferences and recent decisions, but do not pretend to remember details that were never stored.',
+      '2. Match the user\'s register and tone without copying every slang word or emotional cue.',
+      '3. Lead with a concise answer, then add the reasoning or next step that is actually useful.',
+      '4. Use personal context when it changes the recommendation, and challenge weak assumptions gently instead of agreeing automatically.',
+      '',
+      'A useful test is whether the reply still feels specific after removing the user\'s exact wording. If it becomes generic, the system needs better context selection, not more personality text.',
+    ].join('\n');
+  }
+
+  return null;
+}
+
+function addTokenUsage(left: TokenUsage, right: TokenUsage): TokenUsage {
+  return {
+    promptTokens: left.promptTokens + right.promptTokens,
+    completionTokens: left.completionTokens + right.completionTokens,
+    cachedTokens: (left.cachedTokens ?? 0) + (right.cachedTokens ?? 0),
+  };
+}
+
+function shouldKeepDeterministicDespiteQualityGate(strategy: string): boolean {
+  return strategy === 'single-clarifying-question'
+    || strategy === 'bridge-evidence-discipline'
+    || strategy === 'chat-boundary-response'
+    || strategy.startsWith('chat-meta')
+    || strategy.startsWith('chat-facts')
+    || strategy.startsWith('chat-format-strict');
+}
+
+function failsAnswerQualityGate(prompt: string, response: string, strategy?: string): boolean {
+  if (!response.trim()) return true;
+  return evaluateChatAnswerQuality({ prompt, response, strategy }).verdict === 'fail';
+}
+
 export class ChatService {
   private readonly promptRewriteConfig: ChatPromptRewriteConfig;
   private readonly controller?: ThorsenAdaptiveController;
   private readonly retrieveKnowledge?: (query: string, topK?: number) => Array<{ text: string; source: string; score: number }>;
   private readonly skillRouter = new SkillRouter();
   private readonly vaiFallbackChain: readonly string[];
+  private readonly extraDeclineMarkers: readonly string[];
+  private readonly verificationConfig: ResponseVerificationConfig;
   private readonly onUsage?: ChatServiceOptions['onUsage'];
+  private readonly securityReviewEnabled: boolean;
+  private readonly contractLedgerEnabled: boolean;
+  private readonly guidanceStore?: GuidanceStore;
+  private readonly responseReviewers: readonly ResponseReviewer[];
+  private readonly loadActiveGuidance?: (conversationId: string) => readonly RouteGuidance[]; // legacy fallback
+  /** Optional SCIS council roster. When present, substantive turns run the council for consensus + method lessons. */
+  private readonly councilRoster?: CouncilRoster;
 
   constructor(
     private db: VaiDatabase,
@@ -127,7 +568,108 @@ export class ChatService {
     this.promptRewriteConfig = resolveChatPromptRewriteConfig(resolvedOptions?.promptRewrite);
     this.retrieveKnowledge = resolvedOptions?.retrieveKnowledge;
     this.vaiFallbackChain = resolvedOptions?.vaiFallbackChain ?? [];
+    this.extraDeclineMarkers = resolvedOptions?.extraDeclineMarkers ?? [];
+    this.verificationConfig = {
+      ...resolvedOptions?.verification,
+      extraDeclineMarkers:
+        resolvedOptions?.extraDeclineMarkers ?? resolvedOptions?.verification?.extraDeclineMarkers,
+    };
     this.onUsage = resolvedOptions?.onUsage;
+    this.securityReviewEnabled = resolvedOptions?.securityReview ?? true;
+    this.contractLedgerEnabled = resolvedOptions?.contractLedger ?? true;
+    this.guidanceStore = resolvedOptions?.guidanceStore;
+    this.responseReviewers = resolvedOptions?.responseReviewers ?? [];
+    this.loadActiveGuidance = resolvedOptions?.loadActiveGuidance;
+    this.councilRoster = resolvedOptions?.councilRoster;
+  }
+
+  private shouldReviewResponse(prompt: string): boolean {
+    return isFreshLocalRecommendationRequest(prompt)
+      || isFreshLocalBusinessContactRequest(prompt);
+  }
+
+  /** Whether peers should review this draft before release. */
+  private shouldReviewDraft(prompt: string, draft: string): boolean {
+    return this.shouldReviewResponse(prompt) || shouldPeerReviewCode(prompt, draft);
+  }
+
+  private async reviewResponse(input: ResponseReviewInput): Promise<{
+    rejected: boolean;
+    reason: string;
+    reviewers: readonly string[];
+    concerns: readonly string[];
+    suggestions: readonly string[];
+    isCodeReview: boolean;
+  }> {
+    if (!this.shouldReviewDraft(input.prompt, input.draft) || this.responseReviewers.length === 0) {
+      return { rejected: false, reason: '', reviewers: [], concerns: [], suggestions: [], isCodeReview: false };
+    }
+
+    const isCodeReview = shouldPeerReviewCode(input.prompt, input.draft);
+
+    const settled = await Promise.allSettled(
+      this.responseReviewers.map(async (reviewer) => ({
+        id: reviewer.id,
+        result: await reviewer.review(input),
+      })),
+    );
+    const completed = settled
+      .filter((entry): entry is PromiseFulfilledResult<{ id: string; result: ResponseReviewResult | null }> => entry.status === 'fulfilled')
+      .map((entry) => entry.value)
+      .filter((entry) => entry.result !== null);
+    const rejection = completed.find((entry) => entry.result?.decision === 'reject');
+    const concerns = completed.flatMap((entry) => entry.result?.concerns ?? []);
+    const suggestions = completed.flatMap((entry) => entry.result?.suggestions ?? []);
+
+    return {
+      rejected: Boolean(rejection),
+      reason: rejection?.result?.reason ?? completed.find((e) => e.result?.reason)?.result?.reason ?? '',
+      reviewers: completed.map((entry) => entry.id),
+      concerns,
+      suggestions,
+      isCodeReview,
+    };
+  }
+
+  /**
+   * Run the SCIS council on a draft (if a roster is configured). Returns the UI projection
+   * (CouncilThinking) or undefined. Never throws; failures are silent (council is advisory).
+   * Enforces the fact-quarantine: only intent/action/lessons flow downstream.
+   */
+  private async runCouncilReview(draft: {
+    readonly prompt: string;
+    readonly draftText: string;
+    readonly modelId: string;
+    readonly turnKind?: string;
+    readonly confidence?: number;
+    readonly hasEvidence?: boolean;
+    readonly sources?: readonly { readonly title?: string; readonly url?: string; readonly snippet?: string }[];
+  }): Promise<CouncilThinking | undefined> {
+    if (!this.councilRoster || !draft.prompt || !draft.draftText) return undefined;
+    try {
+      const input: CouncilInput = {
+        prompt: draft.prompt,
+        draft: draft.draftText,
+        modelId: draft.modelId,
+        turnKind: draft.turnKind ?? 'chat',
+        hasEvidence: !!draft.hasEvidence,
+        sources: draft.sources ?? [],
+        draftConfidence: draft.confidence,
+      };
+      const result = await convene(input, this.councilRoster, { timeoutMs: 12_000 });
+      if (!result.convened) return undefined;
+      return toCouncilThinking(result.topic, result.consensus, result.assessment);
+    } catch {
+      return undefined; // advisory only
+    }
+  }
+
+  private buildFreshRecommendationGuardrail(): string {
+    return [
+      'I need current local listings and recent evidence before recommending places here.',
+      'The draft did not have enough trustworthy fresh support, so I stopped it instead of showing a generic place fact or inventing businesses.',
+      'Please try the search again in a moment.',
+    ].join(' ');
   }
 
   createConversation(modelId: string, title?: string, mode: ConversationMode = DEFAULT_CONVERSATION_MODE, ownerUserId?: string | null): string {
@@ -384,6 +926,13 @@ export class ChatService {
       enrichedContent = imageParts.join('\n') + (content ? '\n' + content : '');
     }
 
+    // Plan + baseline for the *current turn*. Populated in the deterministic
+    // guidance section below. Used both for deterministic emit and (importantly)
+    // for model fallback inserts + chunks, so that high-impact steers that cause
+    // deterministic → model fallthrough are recorded in the reference data.
+    let turnPlan: DispatchPlan | undefined;
+    let turnBaselinePlan: DispatchPlan | undefined;
+
     // Persist user message
     const userMsgId = ulid();
     this.db.insert(messages).values({
@@ -400,93 +949,83 @@ export class ChatService {
     const MAX_HISTORY_MESSAGES = 40;
     const history = this.getMessages(conversationId);
 
+    // Defense directive carried from the upstream security review into the
+    // model dispatch path when a soft prompt-injection is hardened rather than
+    // refused outright. Stays null on ordinary turns.
+    let securityHardenDirective: string | null = null;
+
     // Chat-meta intent short-circuit: questions *about* the conversation itself
     // ("what was my first message", "summarize this chat") are answered
     // deterministically from persisted history and bypass model dispatch.
     // Only applies when the user sent text (image-only turns fall through).
     if (!image && content.trim().length > 0) {
+      // ── Upstream security review (runs BEFORE all broad factual routers) ──
+      // Prompt-injection / secret-exfil / malware / manipulation / acute
+      // safety incidents are reasoned about deterministically here, under a
+      // hard latency budget, so they never depend on the downstream model.
+      if (this.securityReviewEnabled) {
+        const review = reviewTurnSecurity({
+          content,
+          history: history.map((m) => ({ role: m.role, content: m.content })),
+        });
+        if (review.action === 'short-circuit') {
+          const startedAt = Date.now();
+          yield { type: 'turn_kind', turnKind: 'analysis' } as ChatChunk;
+          yield { type: 'text_delta', textDelta: review.reply } as ChatChunk;
+          const securityDurationMs = Date.now() - startedAt;
+          yield {
+            type: 'done',
+            usage: { promptTokens: 0, completionTokens: 0 },
+            durationMs: securityDurationMs,
+            thinking: buildDeterministicThinking(
+              review.modelTag,
+              content,
+              securityDurationMs,
+              0.99,
+            ),
+          } as ChatChunk;
+
+          this.db.insert(messages).values({
+            id: ulid(),
+            conversationId,
+            role: 'assistant',
+            content: review.reply,
+            modelId: review.modelTag,
+            durationMs: securityDurationMs,
+            createdAt: new Date(),
+          }).run();
+
+          const securityUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+          if (conv.title === 'New Chat' && content.length > 0) {
+            securityUpdates.title = this.generateTitle(content);
+          }
+          this.db.update(conversations)
+            .set(securityUpdates)
+            .where(eq(conversations.id, conversationId))
+            .run();
+          return;
+        }
+        if (review.action === 'harden') {
+          securityHardenDirective = review.systemDirective;
+        }
+      }
+
       const metaHistory: FactsHistoryMessage[] = history.map((m) => ({
         role: m.role as 'user' | 'assistant' | 'system' | 'tool',
         content: m.content,
       }));
-      const metaResult = tryHandleChatMeta(content, metaHistory);
-      if (metaResult) {
-        const startedAt = Date.now();
-        yield { type: 'text_delta', textDelta: metaResult.reply } as ChatChunk;
-        const metaDurationMs = Date.now() - startedAt;
-        yield {
-          type: 'done',
-          usage: { promptTokens: 0, completionTokens: 0 },
-          durationMs: metaDurationMs,
-        } as ChatChunk;
-
-        // Persist the deterministic assistant reply so subsequent turns see it.
-        const metaAssistantId = ulid();
-        this.db.insert(messages).values({
-          id: metaAssistantId,
-          conversationId,
-          role: 'assistant',
-          content: metaResult.reply,
-          modelId: `chat-meta:${metaResult.intent}`,
-          durationMs: metaDurationMs,
-          createdAt: new Date(),
-        }).run();
-
-        const metaUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
-        if (conv.title === 'New Chat' && content.length > 0) {
-          metaUpdates.title = this.generateTitle(content);
-        }
-        this.db.update(conversations)
-          .set(metaUpdates)
-          .where(eq(conversations.id, conversationId))
-          .run();
-        return;
-      }
-
-      // Fact recall (project name, stack, decisions, constraints, last change)
-      const factResult = tryHandleFactRecall(content, metaHistory);
-      if (factResult) {
-        const startedAt = Date.now();
-        yield { type: 'text_delta', textDelta: factResult.reply } as ChatChunk;
-        const factDurationMs = Date.now() - startedAt;
-        yield {
-          type: 'done',
-          usage: { promptTokens: 0, completionTokens: 0 },
-          durationMs: factDurationMs,
-        } as ChatChunk;
-
-        const factAssistantId = ulid();
-        this.db.insert(messages).values({
-          id: factAssistantId,
-          conversationId,
-          role: 'assistant',
-          content: factResult.reply,
-          modelId: `chat-facts:${factResult.intent}`,
-          durationMs: factDurationMs,
-          createdAt: new Date(),
-        }).run();
-
-        const factUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
-        if (conv.title === 'New Chat' && content.length > 0) {
-          factUpdates.title = this.generateTitle(content);
-        }
-        this.db.update(conversations)
-          .set(factUpdates)
-          .where(eq(conversations.id, conversationId))
-          .run();
-        return;
-      }
-
-      // Constrained-code emitter: when the user has stated a hard rule
-      // (TS-only, single-file HTML, no external libs, Tailwind only) and
-      // is now asking for a small piece of code, emit a templated reply
-      // that respects the rule. Beats the corpus-retrieval lottery, which
-      // ignores system prompts and regurgitates random captured snippets.
+      const understoodContent = normalizeInputForUnderstanding(content);
+      // ── Hoisted turn context ────────────────────────────────────────
+      // Everything the handlers need, derived once. None of these reads a
+      // handler result, so hoisting them above the dispatch changes no
+      // behavior — it just lets every handler score/resolve from one shared
+      // understanding instead of re-deriving it inline.
+      //
+      // Constrained-code stickiness: the most recent prior assistant turn that
+      // came from the constrained-code emitter — its intent becomes "sticky"
+      // so a follow-up like "now add X" extends the same template instead of
+      // falling through to the slow corpus path.
       const factsForCode = extractConversationFacts(metaHistory);
-      // Find the most recent prior assistant turn that came from the
-      // constrained-code emitter — its intent becomes "sticky" so a
-      // follow-up like "now add X" can extend the same template instead
-      // of falling through to the slow corpus path.
       let priorIntent: string | undefined;
       let priorAssistantText: string | undefined;
       for (let i = history.length - 1; i >= 0; i--) {
@@ -498,8 +1037,7 @@ export class ChatService {
           priorAssistantText = m.content;
           break;
         }
-        // Stop searching once we hit any non-templated assistant turn —
-        // the user has moved past the constrained slice.
+        // Stop at the first non-templated assistant turn — user moved on.
         break;
       }
       const modeForDeterministicShortcuts = isConversationMode(conv.mode) ? conv.mode : DEFAULT_CONVERSATION_MODE;
@@ -510,104 +1048,10 @@ export class ChatService {
         && !conv.sandboxProjectId
         && !productEngineeringPlanning;
 
-      const productEngineeringMemo = productEngineeringPlanning
-        ? tryEmitProductEngineeringMemo({ content })
-        : null;
-      if (productEngineeringMemo) {
-        const startedAt = Date.now();
-        yield {
-          type: 'progress',
-          progress: {
-            stage: 'understand',
-            label: 'Understanding product constraints',
-            detail: 'Hardware, enclosure, firmware, and SaaS scope',
-            status: 'running',
-          },
-        } as ChatChunk;
-        yield {
-          type: 'progress',
-          progress: {
-            stage: 'structure',
-            label: 'Structuring product-engineering memo',
-            detail: 'BOM, sourcing, risks, roadmap, and next options',
-            status: 'running',
-          },
-        } as ChatChunk;
-        yield { type: 'turn_kind', turnKind: 'analysis' } as ChatChunk;
-        yield { type: 'text_delta', textDelta: productEngineeringMemo } as ChatChunk;
-        const memoDurationMs = Date.now() - startedAt;
-        yield {
-          type: 'done',
-          usage: { promptTokens: 0, completionTokens: 0 },
-          durationMs: memoDurationMs,
-        } as ChatChunk;
-
-        const memoAssistantId = ulid();
-        this.db.insert(messages).values({
-          id: memoAssistantId,
-          conversationId,
-          role: 'assistant',
-          content: productEngineeringMemo,
-          modelId: 'chat-product-engineering',
-          durationMs: memoDurationMs,
-          createdAt: new Date(),
-        }).run();
-
-        const memoUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
-        if (conv.title === 'New Chat' && content.length > 0) {
-          memoUpdates.title = this.generateTitle(content);
-        }
-        this.db.update(conversations)
-          .set(memoUpdates)
-          .where(eq(conversations.id, conversationId))
-          .run();
-        return;
-      }
-
-      const boundaryResponse = tryEmitBoundaryResponse({ content });
-      if (boundaryResponse) {
-        const startedAt = Date.now();
-        yield { type: 'turn_kind', turnKind: 'analysis' } as ChatChunk;
-        yield { type: 'text_delta', textDelta: boundaryResponse } as ChatChunk;
-        const boundaryDurationMs = Date.now() - startedAt;
-        yield {
-          type: 'done',
-          usage: { promptTokens: 0, completionTokens: 0 },
-          durationMs: boundaryDurationMs,
-        } as ChatChunk;
-
-        const boundaryAssistantId = ulid();
-        this.db.insert(messages).values({
-          id: boundaryAssistantId,
-          conversationId,
-          role: 'assistant',
-          content: boundaryResponse,
-          modelId: 'chat-boundary-response',
-          durationMs: boundaryDurationMs,
-          createdAt: new Date(),
-        }).run();
-
-        const boundaryUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
-        if (conv.title === 'New Chat' && content.length > 0) {
-          boundaryUpdates.title = this.generateTitle(content);
-        }
-        this.db.update(conversations)
-          .set(boundaryUpdates)
-          .where(eq(conversations.id, conversationId))
-          .run();
-        return;
-      }
-
-      // ── Turn classifier + active-topic brief ────────────────────────
-      // Build once per turn. The brief is what "the conversation is
-      // currently about"; the classifier decides whether this input is a
-      // standalone question, a contextual follow-up, or a product-quality
-      // recommendation. Downstream routers consult these instead of
-      // re-running their own ad-hoc heuristics, so the routing decision
-      // stays observable and consistent.
-      // classifyTurn / extractActiveTopicBrief are pure and only read
-      // role + content; adapt the persisted DB rows (whose `role`/`toolCalls`
-      // columns are wider than the domain Message) to the minimal shape.
+      // Turn classifier + active-topic brief: the brief is what the
+      // conversation is currently about; the classifier decides standalone
+      // vs contextual follow-up vs product-quality recommendation. Pure reads
+      // (role + content only); adapt the wider persisted rows to that shape.
       const classifierHistory = history.map((m) => ({
         role: m.role as 'user' | 'assistant' | 'system' | 'tool',
         content: m.content,
@@ -616,141 +1060,15 @@ export class ChatService {
       const activeTopicBrief = extractActiveTopicBrief(content, classifierHistory);
       const isContextualFollowUp =
         turnClassification.kind === 'contextual-followup'
-        || turnClassification.kind === 'product-quality-recommendation';
-      // A contextual follow-up that DOES share topic with the prior
-      // assistant turn must not be stolen by a deterministic fact shim
-      // just because the new input happens to contain an acronym or
-      // brand word. We let standalone questions through unchanged.
+        || turnClassification.kind === 'product-quality-recommendation'
+        || turnClassification.kind === 'vai-chat-quality-direction';  // self-ref / Grok+Vai collab prompts are context-grounded product-quality direction
+      // A contextual follow-up that shares topic must be protected by the
+      // overlap gate so retrieval / glossary snippets don't steal the turn.
       const groundedContextualFollowUp =
         isContextualFollowUp
         && activeTopicBrief.hasPriorAssistant
         && hasTopicOverlap(content, activeTopicBrief);
 
-      // Strict-format pre-router: deterministic answers for prompts that
-      // pin an exact shape (first N primes / fibonacci, JSON-only schema
-      // fills). These were misrouting to article handlers or refusals.
-      const strictResult = allowConstrainedCodeShortcut
-        ? tryEmitFormatStrict({ content })
-        : null;
-      if (strictResult) {
-        const startedAt = Date.now();
-        yield { type: 'text_delta', textDelta: strictResult.reply } as ChatChunk;
-        const strictDurationMs = Date.now() - startedAt;
-        yield {
-          type: 'done',
-          usage: { promptTokens: 0, completionTokens: 0 },
-          durationMs: strictDurationMs,
-        } as ChatChunk;
-
-        const strictAssistantId = ulid();
-        this.db.insert(messages).values({
-          id: strictAssistantId,
-          conversationId,
-          role: 'assistant',
-          content: strictResult.reply,
-          modelId: `chat-format-strict:${strictResult.kind}`,
-          durationMs: strictDurationMs,
-          createdAt: new Date(),
-        }).run();
-
-        const strictUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
-        if (conv.title === 'New Chat' && content.length > 0) {
-          strictUpdates.title = this.generateTitle(content);
-        }
-        this.db.update(conversations)
-          .set(strictUpdates)
-          .where(eq(conversations.id, conversationId))
-          .run();
-        return;
-      }
-
-      // Deterministic facts shim: small static knowledge table + howto/
-      // troubleshoot templates that intercept BEFORE the broader engine
-      // refuses on well-known prompts ("Where is BMW headquartered?",
-      // "Best way to deploy Vue in production?", "memory leak — what
-      // should I check first?"). Pure data, no network, no LLM.
-      const factShim = allowConstrainedCodeShortcut && !groundedContextualFollowUp
-        ? tryEmitFactShim({ content })
-        : null;
-      if (factShim) {
-        const startedAt = Date.now();
-        yield { type: 'text_delta', textDelta: factShim.reply } as ChatChunk;
-        const shimDurationMs = Date.now() - startedAt;
-        yield {
-          type: 'done',
-          usage: { promptTokens: 0, completionTokens: 0 },
-          durationMs: shimDurationMs,
-        } as ChatChunk;
-
-        const shimAssistantId = ulid();
-        this.db.insert(messages).values({
-          id: shimAssistantId,
-          conversationId,
-          role: 'assistant',
-          content: factShim.reply,
-          modelId: `chat-fact-shim:${factShim.kind}`,
-          durationMs: shimDurationMs,
-          createdAt: new Date(),
-        }).run();
-
-        const shimUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
-        if (conv.title === 'New Chat' && content.length > 0) {
-          shimUpdates.title = this.generateTitle(content);
-        }
-        this.db.update(conversations)
-          .set(shimUpdates)
-          .where(eq(conversations.id, conversationId))
-          .run();
-        return;
-      }
-
-      const codeResult = allowConstrainedCodeShortcut
-        ? tryEmitConstrainedCode({
-          content,
-          facts: factsForCode,
-          priorIntent: priorIntent as never,
-          priorAssistantText,
-        })
-        : null;
-      if (codeResult) {
-        const startedAt = Date.now();
-        yield { type: 'text_delta', textDelta: codeResult.reply } as ChatChunk;
-        const codeDurationMs = Date.now() - startedAt;
-        yield {
-          type: 'done',
-          usage: { promptTokens: 0, completionTokens: 0 },
-          durationMs: codeDurationMs,
-        } as ChatChunk;
-
-        const codeAssistantId = ulid();
-        this.db.insert(messages).values({
-          id: codeAssistantId,
-          conversationId,
-          role: 'assistant',
-          content: codeResult.reply,
-          modelId: `chat-constrained-code:${codeResult.intent}`,
-          durationMs: codeDurationMs,
-          createdAt: new Date(),
-        }).run();
-
-        const codeUpdates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
-        if (conv.title === 'New Chat' && content.length > 0) {
-          codeUpdates.title = this.generateTitle(content);
-        }
-        this.db.update(conversations)
-          .set(codeUpdates)
-          .where(eq(conversations.id, conversationId))
-          .run();
-        return;
-      }
-
-      // Engine-layer continuation emitter: when the templated code path
-      // didn't fire but the user's message is a recognizable follow-up
-      // ("now add a button", "explain it", "make it dark"), short-circuit
-      // with a focused deterministic snippet instead of letting the slow
-      // corpus path retrieve fresh and risk wedging on a non-templated
-      // session. Falls through to normal dispatch for any unrecognized
-      // shape — we never fabricate continuations we don't understand.
       let mostRecentAssistantText: string | undefined;
       for (let i = history.length - 1; i >= 0; i--) {
         if (history[i].role === 'assistant') {
@@ -758,38 +1076,222 @@ export class ChatService {
           break;
         }
       }
-      if (mostRecentAssistantText) {
-        const contResult = tryEmitContinuation({
-          content,
-          priorAssistantText: mostRecentAssistantText,
-        });
-        if (contResult) {
-          const startedAt = Date.now();
-          yield { type: 'text_delta', textDelta: contResult.reply } as ChatChunk;
-          const contDurationMs = Date.now() - startedAt;
-          yield {
-            type: 'done',
-            usage: { promptTokens: 0, completionTokens: 0 },
-            durationMs: contDurationMs,
-          } as ChatChunk;
 
-          const contAssistantId = ulid();
-          this.db.insert(messages).values({
-            id: contAssistantId,
+      // ── Scored handler registry ─────────────────────────────────────
+      // Each deterministic capability is a handler that reports how well it
+      // fits (`score`; null = inapplicable) and produces the answer
+      // (`resolve`; null = decline → fall through). `dispatchTurn` ranks by
+      // fit (after any friend guidance), then lets the best candidate above
+      // the confidence floor answer — replacing the old "first keyword match
+      // wins" cascade with one observable decision. The base scores below
+      // preserve today's priority order exactly; intent/fit-based adjustment
+      // is layered on next as a test-guarded step. `resolve` runs its
+      // `tryEmit*` lazily, so — exactly like the old short-circuit — a later
+      // handler's work only happens if every higher one declined.
+      const det = (
+        name: string,
+        fit: number,
+        resolve: () => ServiceResolution | null,
+        applicable = true,
+        reason?: string,
+      ): TurnHandler<ServiceResolution> => ({
+        name,
+        score: () => (applicable ? { score: fit, reason } : null),
+        resolve,
+      });
+      const handlers: TurnHandler<ServiceResolution>[] = [
+        det('single-clarifying-question', 0.99, () => {
+          const reply = tryEmitSingleClarifyingQuestion(understoodContent);
+          return reply
+            ? { text: reply, turnKind: 'analysis', confidence: 0.98, strategy: 'single-clarifying-question' }
+            : null;
+        }, true, 'Top priority: if the ask is ambiguous, ask one focused question before answering.'),
+        det('bridge-evidence-discipline', 0.98, () => {
+          const reply = tryEmitPrivateLiveContextResponse(understoodContent)
+            ?? tryEmitBridgeCapabilityAudit(understoodContent);
+          return reply
+            ? { text: reply, turnKind: 'analysis', confidence: 0.99, strategy: 'bridge-evidence-discipline' }
+            : null;
+        }, true, 'Live-context / capability questions — answer only from real captured evidence, never guess.'),
+        det('conversation-reasoning', 0.97, () => {
+          const r = tryEmitConversationReasoning({ content: understoodContent, history: metaHistory });
+          return r
+            ? { text: r.reply, turnKind: 'analysis', confidence: r.confidence, strategy: `conversation-reasoning:${r.kind}` }
+            : null;
+        }, true, 'Open conversational turns that need step-by-step reasoning.'),
+        det('chat-meta', 0.96, () => {
+          const r = tryHandleChatMeta(content, metaHistory);
+          return r ? { text: r.reply, confidence: 0.98, strategy: `chat-meta:${r.intent}` } : null;
+        }, true, 'Meta openers — greetings, "what can you do", identity.'),
+        det('chat-facts', 0.95, () => {
+          const r = tryHandleFactRecall(content, metaHistory);
+          return r ? { text: r.reply, confidence: 0.98, strategy: `chat-facts:${r.intent}` } : null;
+        }, true, 'Stored fact recall for who/what/when lookups.'),
+        det('chat-product-engineering', 0.94, () => {
+          const reply = tryEmitProductEngineeringMemo({ content });
+          if (!reply) return null;
+          return {
+            text: reply,
+            turnKind: 'analysis',
+            confidence: 0.96,
+            strategy: 'chat-product-engineering',
+            preChunks: [
+              {
+                type: 'progress',
+                progress: {
+                  stage: 'understand',
+                  label: 'Understanding product constraints',
+                  detail: 'Hardware, enclosure, firmware, and SaaS scope',
+                  status: 'running',
+                },
+              } as ChatChunk,
+              {
+                type: 'progress',
+                progress: {
+                  stage: 'structure',
+                  label: 'Structuring product-engineering memo',
+                  detail: 'BOM, sourcing, risks, roadmap, and next options',
+                  status: 'running',
+                },
+              } as ChatChunk,
+            ],
+          };
+        }, productEngineeringPlanning, 'Structured product-engineering memo (hardware/firmware/SaaS scope).'),
+        det('chat-boundary-response', 0.93, () => {
+          const reply = tryEmitBoundaryResponse({ content });
+          return reply
+            ? { text: reply, turnKind: 'analysis', confidence: 0.98, strategy: 'chat-boundary-response' }
+            : null;
+        }, true, 'Safety / boundary requests that need a principled decline.'),
+        det('chat-format-strict', 0.92, () => {
+          const r = tryEmitFormatStrict({ content });
+          return r ? { text: r.reply, confidence: 0.98, strategy: `chat-format-strict:${r.kind}` } : null;
+        }, allowConstrainedCodeShortcut, 'Requests with a strict output shape (table / JSON / list).'),
+        det('chat-fact-shim', 0.91, () => {
+          const r = tryEmitFactShim({
+            content: understoodContent,
+            priorIdiom: extractIdiomContext(classifierHistory),
+            codeSnippetOnly: groundedContextualFollowUp,
+            explainConcept: this.buildComparisonConceptExplainer(),
+          });
+          return r ? { text: r.reply, confidence: 0.96, strategy: `chat-fact-shim:${r.kind}` } : null;
+        }, allowConstrainedCodeShortcut && splitCompoundQuestion(content) === null, 'Quick single-fact answer when it is not a compound question.'),
+        det('chat-constrained-code', 0.90, () => {
+          const r = tryEmitConstrainedCode({
+            content,
+            facts: factsForCode,
+            priorIntent: priorIntent as never,
+            priorAssistantText,
+          });
+          return r ? { text: r.reply, confidence: 0.96, strategy: `chat-constrained-code:${r.intent}` } : null;
+        }, allowConstrainedCodeShortcut, 'Small, constrained code snippet grounded in known facts.'),
+        det('chat-continuation', 0.89, () => {
+          if (!mostRecentAssistantText) return null;
+          const r = tryEmitContinuation({ content, priorAssistantText: mostRecentAssistantText });
+          return r ? { text: r.reply, confidence: 0.94, strategy: `chat-continuation:${r.kind}` } : null;
+        }, Boolean(mostRecentAssistantText), 'Continues the previous answer on "go on" / "more".'),
+      ];
+
+      // One understanding, scored once. `guidance` is the friend hint channel
+      // (human + AI "that process wasn't good" steers). Stage 1: load the
+      // conversation's persisted hints, keep the ones that apply to THIS turn
+      // (scope + salient-token / intent match), and project them onto the
+      // dispatcher so steering actually re-routes.
+      //
+      // We also compute a *baseline* (no-guidance) plan when any guidance is
+      // active. Both plans + the applied guidance records are the reference
+      // data used later to decide if steering delivered benefit or if the
+      // matching/weights/scopes/actor models need re-calibration.
+      const questionIntent = classifyQuestionIntent(content);
+      let activeGuidance: readonly RouteGuidance[] = [];
+      if (this.guidanceStore) {
+        activeGuidance = this.guidanceStore.loadActive(conversationId);
+      } else if (this.loadActiveGuidance) {
+        activeGuidance = this.loadActiveGuidance(conversationId);
+      }
+      const turnGuidance = activeGuidance.length > 0
+        ? selectApplicableGuidance(
+          { conversationId, tokens: salientTokens(content), intent: questionIntent },
+          activeGuidance,
+        ).map(toTurnGuidance)
+        : [];
+      const turnContext: TurnContext = {
+        content,
+        understood: understoodContent,
+        history: classifierHistory,
+        classification: turnClassification,
+        intent: questionIntent,
+        guidance: turnGuidance,
+      };
+      const outcome = dispatchTurn(turnContext, handlers, { confidenceFloor: 0.5 });
+
+      // Shadow baseline (unsteered) for reference when guidance was present.
+      // Persisted alongside so we have direct pre/post for analysis.
+      let baselinePlan: DispatchPlan | undefined;
+      if (turnGuidance.length > 0) {
+        const baselineCtx: TurnContext = { ...turnContext, guidance: [] };
+        const baseline = dispatchTurn(baselineCtx, handlers, { confidenceFloor: 0.5 });
+        baselinePlan = baseline.plan;
+        // Record application for the guidances that fired (efficacy tracking).
+        for (const g of activeGuidance) {
+          this.guidanceStore?.recordApplication(g.id);
+        }
+      }
+
+      turnPlan = outcome.plan;
+      turnBaselinePlan = baselinePlan;
+
+      if (outcome.resolution) {
+        const winner = outcome.resolution;
+        // Decline-escalation guard (meaningful-responses fix): the best
+        // deterministic answer can itself be a *non-answer* (e.g. "X isn't in
+        // my knowledge yet") that still clears the confidence floor and wins.
+        // Emitting it short-circuits the model path, so the turn never reaches
+        // a generative backend that could actually answer. When the winner is
+        // decline-shaped AND a real escalation target is reachable, fall
+        // through to the model path instead (decideVaiFallback escalates it).
+        // When no generative model is configured (the local/keyless default),
+        // we still emit the deterministic answer as the terminal safety net —
+        // behavior is unchanged unless a backend exists to do better.
+        const hasGenerativeFallback =
+          conv.modelId === 'vai:v0' &&
+          pickFallbackModelId(this.vaiFallbackChain, (id) => this.models.has(id), { content }) !== null;
+        const deterministicAnswerTooWeak =
+          hasGenerativeFallback
+          && !shouldKeepDeterministicDespiteQualityGate(winner.strategy)
+          && (
+            winner.confidence < VAI_FALLBACK_CONFIDENCE_THRESHOLD
+            || failsAnswerQualityGate(content, winner.text, winner.strategy)
+          );
+        if (
+          !shouldEscalateDeterministicDecline(winner.text, hasGenerativeFallback)
+          && !deterministicAnswerTooWeak
+        ) {
+          const council = await this.runCouncilReview({
+            prompt: content,
+            draftText: winner.text,
+            modelId: winner.strategy,
+            turnKind: winner.turnKind,
+            confidence: winner.confidence,
+          });
+          yield* this.emitDeterministicTurn({
             conversationId,
-            role: 'assistant',
-            content: contResult.reply,
-            modelId: `chat-continuation:${contResult.kind}`,
-            durationMs: contDurationMs,
-            createdAt: new Date(),
-          }).run();
-
-          this.db.update(conversations)
-            .set({ updatedAt: new Date() })
-            .where(eq(conversations.id, conversationId))
-            .run();
+            conversationTitle: conv.title,
+            content,
+            reply: winner.text,
+            strategy: winner.strategy,
+            confidence: winner.confidence,
+            turnKind: winner.turnKind,
+            preChunks: winner.preChunks,
+            plan: outcome.plan,
+            baselinePlan,
+            council,
+          });
           return;
         }
+        // else: weak deterministic win + reachable backend → fall through to
+        // the model path below so the turn can escalate instead of emitting a
+        // known non-answer or vague non-action answer.
       }
     }
 
@@ -802,6 +1304,13 @@ export class ChatService {
       toolCalls: m.toolCalls ? JSON.parse(m.toolCalls) : undefined,
       toolCallId: m.toolCallId ?? undefined,
     }));
+    const businessContactModelRewrite = rewriteBusinessContactLookupFollowUp(content, chatMessages);
+    const modelChatMessages = businessContactModelRewrite
+      ? chatMessages.map((message, index) => {
+        if (index !== chatMessages.length - 1 || message.role !== 'user') return message;
+        return { ...message, content: businessContactModelRewrite };
+      })
+      : chatMessages;
 
     const resolvedMode = isConversationMode(conv.mode) ? conv.mode : DEFAULT_CONVERSATION_MODE;
     const isTerminalHarness = Boolean(systemPrompt?.includes('TERMINAL_HARNESS_V1'));
@@ -821,19 +1330,30 @@ export class ChatService {
       systemMessages.push({ role: 'system', content: modePrompt });
     }
 
-    // Anchor the model to user-stated facts (project name, stack, decisions,
-    // constraints) extracted from this conversation. Keeps later turns
-    // consistent with named entities even when grounding regex misses.
+    // Carry an upstream security hardening directive (soft prompt-injection)
+    // into the dispatch path so the model answers the legitimate request
+    // without obeying the embedded override.
+    if (securityHardenDirective) {
+      systemMessages.push({ role: 'system', content: securityHardenDirective });
+    }
+
+    // Anchor the model to the durable conversation contract — projects, stacks,
+    // ACTIVE constraints/decisions (corrections applied), and the current
+    // output-format contract — restated every turn so a long-context model
+    // can't drift off something the user already established or corrected.
+    // Falls back to the legacy stateless facts prelude when the ledger is
+    // disabled (baseline measurement only).
+    let conversationPrelude: string | null = null;
     if (!isTerminalHarness) {
-      const factsForPrelude = extractConversationFacts(
-        history.map((m) => ({
-          role: m.role as 'user' | 'assistant' | 'system' | 'tool',
-          content: m.content,
-        })),
-      );
-      const factsPrelude = buildFactsSystemPrelude(factsForPrelude);
-      if (factsPrelude) {
-        systemMessages.push({ role: 'system', content: factsPrelude });
+      const contractHistory = history.map((m) => ({
+        role: m.role as 'user' | 'assistant' | 'system' | 'tool',
+        content: m.content,
+      }));
+      conversationPrelude = this.contractLedgerEnabled
+        ? buildContractSystemPrelude(reduceConversationContract(contractHistory))
+        : buildFactsSystemPrelude(extractConversationFacts(contractHistory));
+      if (conversationPrelude) {
+        systemMessages.push({ role: 'system', content: conversationPrelude });
       }
     }
 
@@ -915,8 +1435,18 @@ export class ChatService {
       }
     }
 
-    const buildMessagesForModel = (modelId: string): Message[] => {
-      const requestSystemMessages = [...systemMessages];
+    const buildMessagesForModel = (modelId: string, dispatch?: { readonly fallback?: boolean }): Message[] => {
+      const isBuilderFallback =
+        dispatch?.fallback === true
+        && (turnKind === 'builder' || resolvedMode === 'builder' || resolvedMode === 'agent');
+      const requestSystemMessages: Message[] = isBuilderFallback
+        ? [
+          ...(securityHardenDirective ? [{ role: 'system' as const, content: securityHardenDirective }] : []),
+          ...(conversationPrelude ? [{ role: 'system' as const, content: conversationPrelude }] : []),
+          ...(hasActiveSandbox ? [{ role: 'system' as const, content: ACTIVE_SANDBOX_EXECUTION_HINT }] : []),
+          { role: 'system', content: BUILDER_FALLBACK_SYSTEM_HINT },
+        ]
+        : [...systemMessages];
 
       // Knowledge augmentation for external models:
       // Skip entirely for generation intents (build/scaffold/create requests) — retrieved
@@ -953,8 +1483,8 @@ export class ChatService {
       }
 
       return requestSystemMessages.length > 0
-        ? [...requestSystemMessages, ...chatMessages]
-        : chatMessages;
+        ? [...requestSystemMessages, ...modelChatMessages]
+        : modelChatMessages;
     };
 
     const primaryModelId = conv.modelId;
@@ -1006,6 +1536,14 @@ export class ChatService {
 
     yield { type: 'turn_kind', turnKind } as ChatChunk;
 
+    // Live reasoning (streamed via the progress pipe): the buffered vai:v0 pass
+    // below can be slow and shows no text until it resolves, so surface a
+    // human-readable "what I'm doing now" line instead of a dead spinner.
+    yield {
+      type: 'progress',
+      progress: { stage: 'reason', label: 'Working through it — checking what I know', status: 'running' },
+    } as ChatChunk;
+
     if (primaryModelId === 'vai:v0' && fallbackModelId) {
       const bufferedChunks: ChatChunk[] = [];
       const bufferedSourceChunks: ChatChunk[] = [];
@@ -1032,36 +1570,186 @@ export class ChatService {
         }
         if (chunk.type === 'done') {
           bufferedSawDone = true;
+          if (typeof chunk.thinking?.confidence === 'number') {
+            latestConfidence = chunk.thinking.confidence;
+          }
           if (chunk.usage) bufferedUsage = chunk.usage;
           if (chunk.durationMs !== undefined) bufferedDurationMs = chunk.durationMs;
         }
       }
       if (!bufferedSawDone) {
         bufferedDurationMs = bufferedDurationMs ?? (Date.now() - streamStartedAt);
-        bufferedChunks.push({
+        const doneChunk: any = {
           type: 'done',
           usage: bufferedUsage,
           durationMs: bufferedDurationMs,
-        } as ChatChunk);
+        };
+        if (turnPlan) {
+          doneChunk.thinking = {
+            strategy: 'vai-buffered',
+            modelTag: bufferedModelId,
+            confidence: latestConfidence ?? 0.6,
+            routePlan: buildRoutePlan(turnPlan),
+          };
+        }
+        bufferedChunks.push(doneChunk as ChatChunk);
       }
 
-      const hasPrimaryBuilderFileOutput = (resolvedMode === 'builder' || resolvedMode === 'agent')
-        && /```[^\r\n`]*\b(?:title|path|file|filename)=["'][^"']+["']/i.test(bufferedText);
-      const fallbackDecision = hasPrimaryBuilderFileOutput
-        ? { shouldFallback: false as const, reason: null }
-        : decideVaiFallback({ text: bufferedText, confidence: latestConfidence });
+      // Builder Mode 2.0 — request-satisfaction gate (§4.7). A builder turn only
+      // suppresses escalation when its artifact *actually satisfies* the request;
+      // a generic scaffold (files but near-zero feature coverage) escalates to
+      // the generative module instead of shipping boilerplate as "done".
+      const isBuilderMode = resolvedMode === 'builder' || resolvedMode === 'agent';
+      const builderFiles = isBuilderMode && hasBuilderFileBlocks(bufferedText);
+      const builderSatisfies = builderFiles
+        && evaluateBuilderRequestSatisfaction(content, bufferedText).satisfied;
+      const primaryHadEvidence = bufferedSourceChunks.some(
+        (chunk) => Array.isArray(chunk.sources) && chunk.sources.length > 0,
+      );
+      let reviewReplacedPrimary = false;
+      let codeReviewRejected = false;
+      if (!builderFiles && this.shouldReviewDraft(content, bufferedText)) {
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'friend-review',
+            label: reviewLabelForDraft(content, bufferedText),
+            status: 'running',
+          },
+        } as ChatChunk;
+        const review = await this.reviewResponse({
+          prompt: content,
+          draft: bufferedText,
+          modelId: bufferedModelId,
+          turnKind,
+          hasEvidence: primaryHadEvidence,
+          sources: bufferedSourceChunks.flatMap((chunk) => chunk.sources ?? []),
+        });
+        if (review.rejected) {
+          if (review.isCodeReview) {
+            // Peers flagged the code — escalate to a stronger model instead of
+            // swapping in an unrelated guardrail paragraph.
+            codeReviewRejected = true;
+          } else if (!primaryHadEvidence) {
+            bufferedText = this.buildFreshRecommendationGuardrail();
+            bufferedModelId = 'vai:friend-review-guard';
+            latestConfidence = 0.95;
+            reviewReplacedPrimary = true;
+          }
+        }
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'friend-review',
+            label: reviewReplacedPrimary
+              ? 'A weak draft was withheld'
+              : review.rejected && review.isCodeReview
+                ? 'Code did not pass peer review — escalating'
+                : review.rejected
+                  ? 'Draft flagged by peers'
+                  : 'Draft approved for release',
+            detail: formatFriendReviewDetail(review),
+            status: 'done',
+          },
+        } as ChatChunk;
+      }
+      const confidenceFallbackDecision = decideVaiFallback({
+        text: bufferedText,
+        confidence: latestConfidence,
+        extraDeclineMarkers: this.extraDeclineMarkers,
+        prompt: content,
+      });
+      const evidenceAwareFallbackDecision =
+        primaryHadEvidence && confidenceFallbackDecision.reason === 'low-confidence'
+          ? { shouldFallback: false, reason: null }
+          : confidenceFallbackDecision;
+      const initialFallbackDecision: { shouldFallback: boolean; reason: 'low-confidence' | 'no-knowledge' | null } =
+        reviewReplacedPrimary
+          ? { shouldFallback: false, reason: null }
+          : codeReviewRejected
+            ? { shouldFallback: true, reason: 'low-confidence' }
+          : builderSatisfies
+          ? { shouldFallback: false, reason: null }
+          : builderFiles
+            ? { shouldFallback: true, reason: 'no-knowledge' }
+            : evidenceAwareFallbackDecision;
+      const fallbackDecision = !reviewReplacedPrimary
+        && !initialFallbackDecision.shouldFallback
+        && !builderFiles
+        && !primaryHadEvidence
+        && failsAnswerQualityGate(content, bufferedText, bufferedModelId)
+        ? { shouldFallback: true, reason: 'low-confidence' as const }
+        : initialFallbackDecision;
       if (!fallbackDecision.shouldFallback || !fallbackDecision.reason) {
-        fullText = bufferedText;
+        // §12.5.3 exit gate: verify + sanitize the deterministic-core arm's
+        // output before it reaches the user. The primary vai:v0 arm is already
+        // buffered, so this costs no streaming latency. Builder file artifacts
+        // skip it (they carry their own quality gates and must not be rewritten).
+        const primaryThinking = bufferedChunks.find((chunk) => chunk.type === 'done')?.thinking;
+        const primaryVerificationConfig = primaryThinking?.trustBadge === 'local-curated'
+          ? { ...this.verificationConfig, requireEvidenceForFactualClaims: false }
+          : this.verificationConfig;
+        const verdict = builderFiles
+          ? null
+          : verifyResponse({
+            text: bufferedText,
+            confidence: latestConfidence,
+            hasEvidence: primaryHadEvidence,
+            arm: 'primary',
+            prompt: content,
+            config: primaryVerificationConfig,
+          });
+
         totalUsage = bufferedUsage;
         durationMs = bufferedDurationMs;
         responseModelId = bufferedModelId;
         for (const chunk of bufferedSourceChunks) {
           yield chunk;
         }
-        for (const chunk of bufferedChunks) {
-          yield chunk;
+
+        if (verdict && verdict.action !== 'pass') {
+          const surfaced = verdict.text;
+          fullText = surfaced;
+          if (surfaced) yield { type: 'text_delta', textDelta: surfaced } as ChatChunk;
+          yield {
+            type: 'verification',
+            verification: {
+              action: verdict.action,
+              grounding: verdict.grounding,
+              reasons: verdict.reasons,
+              calibrationNote: verdict.calibrationNote,
+            },
+          } as ChatChunk;
+          // Replay only the non-text buffered chunks (e.g. the `done` chunk) so
+          // usage + duration still flow, but the raw, unsanitized text does not.
+          for (const chunk of bufferedChunks) {
+            if (chunk.type === 'text_delta') continue;
+            yield chunk;
+          }
+        } else {
+          fullText = bufferedText;
+          if (reviewReplacedPrimary) {
+            yield { type: 'text_delta', textDelta: bufferedText } as ChatChunk;
+            for (const chunk of bufferedChunks) {
+              if (chunk.type === 'text_delta') continue;
+              yield chunk;
+            }
+          } else {
+            for (const chunk of bufferedChunks) {
+              yield chunk;
+            }
+          }
         }
       } else {
+        const fallbackLabel = fallbackModelId.replace(/^(?:local|openai|anthropic|google):/, '');
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'escalate',
+            label: `Not in my memory yet — asking ${fallbackLabel}`,
+            status: 'running',
+          },
+        } as ChatChunk;
         yield {
           type: 'fallback_notice',
           fallback: {
@@ -1070,47 +1758,277 @@ export class ChatService {
             reason: fallbackDecision.reason,
           },
         };
+        yield {
+          type: 'progress',
+          progress: { stage: 'answer', label: `${fallbackLabel} is writing the answer`, status: 'running' },
+        } as ChatChunk;
 
         const fallbackAdapter = this.models.get(fallbackModelId);
-        const fallbackMessages = buildMessagesForModel(fallbackModelId);
-        let fallbackDurationMs: number | undefined;
-        let fallbackSawDone = false;
+        const fallbackMessages = buildMessagesForModel(fallbackModelId, { fallback: true });
+        let fallbackDurationMs = 0;
         responseModelId = fallbackModelId;
 
-        for await (const chunk of fallbackAdapter.chatStream({ messages: fallbackMessages, noLearn })) {
-          if (chunk.modelId) responseModelId = chunk.modelId;
-          if (chunk.type === 'sources') {
-            const normalizedSourceChunk = normalizeSourceChunkForTurn(chunk);
-            if (normalizedSourceChunk) {
-              yield normalizedSourceChunk;
+        // §12.5.3: the escalated generative arm passes back through the
+        // verification layer *before reaching the user*. We buffer it (the local
+        // open-weight model is non-streaming anyway, so this adds no real latency;
+        // for a streaming cloud model it trades token-streaming on the already-slow
+        // escalation path for a verified answer — the right trade per §6.6).
+        const collectFallback = async (messages: readonly Message[]) => {
+          const attemptStartedAt = Date.now();
+          const chunks: ChatChunk[] = [];
+          const sourceChunks: ChatChunk[] = [];
+          let text = '';
+          let sawDone = false;
+          let attemptDurationMs: number | undefined;
+          let usage: TokenUsage = { promptTokens: 0, completionTokens: 0 };
+          for await (const chunk of fallbackAdapter.chatStream({ messages, noLearn })) {
+            if (chunk.modelId) responseModelId = chunk.modelId;
+            if (chunk.type === 'sources') {
+              if (typeof chunk.confidence === 'number') latestConfidence = chunk.confidence;
+              const normalizedSourceChunk = normalizeSourceChunkForTurn(chunk);
+              if (normalizedSourceChunk) sourceChunks.push(normalizedSourceChunk);
+              continue;
             }
-            continue;
-          }
-          if (chunk.type === 'text_delta' && chunk.textDelta) {
-            fullText += chunk.textDelta;
-          }
-          if (chunk.type === 'done') {
-            fallbackSawDone = true;
-            if (chunk.usage) totalUsage = chunk.usage;
-            if (chunk.durationMs !== undefined) {
-              fallbackDurationMs = chunk.durationMs;
+            chunks.push(chunk);
+            if (chunk.type === 'text_delta' && chunk.textDelta) text += chunk.textDelta;
+            if (chunk.type === 'done') {
+              sawDone = true;
+              if (typeof chunk.thinking?.confidence === 'number') {
+                latestConfidence = chunk.thinking.confidence;
+              }
+              if (chunk.usage) usage = chunk.usage;
+              if (chunk.durationMs !== undefined) attemptDurationMs = chunk.durationMs;
             }
           }
-          yield chunk;
+          attemptDurationMs = attemptDurationMs ?? (Date.now() - attemptStartedAt);
+          if (!sawDone) {
+            chunks.push({ type: 'done', usage, durationMs: attemptDurationMs } as ChatChunk);
+          }
+          return { chunks, sourceChunks, text, durationMs: attemptDurationMs, usage };
+        };
+
+        let fallbackResult = await collectFallback(fallbackMessages);
+        totalUsage = addTokenUsage(totalUsage, fallbackResult.usage);
+        fallbackDurationMs += fallbackResult.durationMs;
+        let fbText = isBuilderMode
+          ? repairBuilderFallbackFileBlocks(fallbackResult.text).text
+          : fallbackResult.text;
+        let fbBuilderSatisfaction = isBuilderMode
+          ? evaluateBuilderRequestSatisfaction(content, fbText, {
+            minAnchorCoverage: FALLBACK_BUILDER_MIN_ANCHOR_COVERAGE,
+          })
+          : null;
+        let builderRepairAttempted = false;
+        let answerQualityRepairAttempted = false;
+        let usedConservativeQualityFallback = false;
+        let fbAnswerQuality = isBuilderMode
+          ? null
+          : evaluateChatAnswerQuality({
+            prompt: content,
+            response: fbText,
+            strategy: fallbackModelId,
+          });
+
+        // One bounded repair pass for the local builder arm. The first fallback
+        // often gets close but narrates, omits sandbox fence metadata, or leaves
+        // requested behaviors out. Feed the structural miss back once, then
+        // keep the better artifact; never loop indefinitely.
+        if (fbBuilderSatisfaction && !fbBuilderSatisfaction.satisfied) {
+          builderRepairAttempted = true;
+          const repairMessages = buildBuilderFallbackRepairMessages(fallbackMessages, fbBuilderSatisfaction);
+          const repairResult = await collectFallback(repairMessages);
+          totalUsage = addTokenUsage(totalUsage, repairResult.usage);
+          fallbackDurationMs += repairResult.durationMs;
+          const repairedText = repairBuilderFallbackFileBlocks(repairResult.text).text;
+          const repairedSatisfaction = evaluateBuilderRequestSatisfaction(content, repairedText, {
+            minAnchorCoverage: FALLBACK_BUILDER_MIN_ANCHOR_COVERAGE,
+          });
+          if (scoreBuilderSatisfaction(repairedSatisfaction) > scoreBuilderSatisfaction(fbBuilderSatisfaction)) {
+            fallbackResult = repairResult;
+            fbText = repairedText;
+            fbBuilderSatisfaction = repairedSatisfaction;
+          }
         }
-        if (!fallbackSawDone) {
-          fallbackDurationMs = fallbackDurationMs ?? (Date.now() - streamStartedAt);
+
+        // The conversational arm gets the same bounded discipline as Builder:
+        // inspect the first draft, feed back only the structural misses, and
+        // keep the better of two attempts. This catches plausible-looking but
+        // unhelpful answers before they reach the user without creating a loop.
+        if (fbAnswerQuality?.verdict === 'fail') {
+          answerQualityRepairAttempted = true;
           yield {
-            type: 'done',
-            usage: totalUsage,
-            durationMs: fallbackDurationMs,
+            type: 'progress',
+            progress: {
+              stage: 'quality-check',
+              label: 'Tightening a weak draft',
+              detail: fbAnswerQuality.missing.map((requirement) => requirement.label).join(', '),
+              status: 'running',
+            },
+          } as ChatChunk;
+          const repairMessages = buildFallbackQualityRepairMessages(fallbackMessages, fbAnswerQuality);
+          const repairResult = await collectFallback(repairMessages);
+          totalUsage = addTokenUsage(totalUsage, repairResult.usage);
+          fallbackDurationMs += repairResult.durationMs;
+          const repairedQuality = evaluateChatAnswerQuality({
+            prompt: content,
+            response: repairResult.text,
+            strategy: fallbackModelId,
+          });
+          if (scoreAnswerQuality(repairedQuality) > scoreAnswerQuality(fbAnswerQuality)) {
+            fallbackResult = repairResult;
+            fbText = repairResult.text;
+            fbAnswerQuality = repairedQuality;
+          }
+          if (fbAnswerQuality.verdict === 'fail') {
+            const conservativeAnswer = buildConservativeDiagnosticAnswer(content)
+              ?? buildConservativeExhaustiveAnswer(content)
+              ?? buildConservativeConversationalAnswer(content);
+            if (conservativeAnswer) {
+              const conservativeQuality = evaluateChatAnswerQuality({
+                prompt: content,
+                response: conservativeAnswer,
+                strategy: 'conservative-diagnostic-fallback',
+              });
+              if (scoreAnswerQuality(conservativeQuality) > scoreAnswerQuality(fbAnswerQuality)) {
+                usedConservativeQualityFallback = true;
+                fbText = conservativeAnswer;
+                fbAnswerQuality = conservativeQuality;
+                responseModelId = 'vai:quality-guard';
+              }
+            }
+          }
+          yield {
+            type: 'progress',
+            progress: {
+              stage: 'quality-check',
+              label: usedConservativeQualityFallback
+                ? 'Used a safe quality fallback after two weak drafts'
+                : fbAnswerQuality.verdict === 'pass'
+                  ? 'Quality check passed after one revision'
+                  : 'Quality check completed',
+              detail: fbAnswerQuality.missing.map((requirement) => requirement.label).join(', ') || undefined,
+              status: 'done',
+            },
           } as ChatChunk;
         }
 
-        if (bufferedDurationMs !== undefined && fallbackDurationMs !== undefined) {
+        // Builder file output from the escalated model is kept verbatim (its own
+        // quality gates apply); everything else is verified. The local model has
+        // no retrieval, so confident factual claims are inherently ungrounded —
+        // calibrate them rather than letting confident-wrong re-emerge here.
+        const fbBuilderFiles = isBuilderMode && hasBuilderFileBlocks(fbText);
+        const fbHasEvidence = fallbackResult.sourceChunks.some(
+          (chunk) => Array.isArray(chunk.sources) && chunk.sources.length > 0,
+        );
+        if (!fbBuilderFiles && this.shouldReviewDraft(content, fbText)) {
+          yield {
+            type: 'progress',
+            progress: {
+              stage: 'friend-review',
+              label: reviewLabelForDraft(content, fbText),
+              status: 'running',
+            },
+          } as ChatChunk;
+          const review = await this.reviewResponse({
+            prompt: content,
+            draft: fbText,
+            modelId: responseModelId,
+            turnKind,
+            hasEvidence: fbHasEvidence,
+            sources: fallbackResult.sourceChunks.flatMap((chunk) => chunk.sources ?? []),
+          });
+          if (review.rejected && !review.isCodeReview && !fbHasEvidence) {
+            fbText = this.buildFreshRecommendationGuardrail();
+            responseModelId = 'vai:friend-review-guard';
+            usedConservativeQualityFallback = true;
+          }
+          yield {
+            type: 'progress',
+            progress: {
+              stage: 'friend-review',
+              label: responseModelId === 'vai:friend-review-guard'
+                ? 'A weak draft was withheld'
+                : review.rejected && review.isCodeReview
+                  ? 'Escalated code still flagged by peers'
+                  : review.rejected
+                    ? 'Draft flagged by peers'
+                    : 'Draft approved for release',
+              detail: formatFriendReviewDetail(review),
+              status: 'done',
+            },
+          } as ChatChunk;
+        }
+        const fbVerdict = fbBuilderFiles
+          ? null
+          : verifyResponse({
+            text: fbText,
+            confidence: latestConfidence,
+            hasEvidence: fbHasEvidence,
+            arm: 'fallback',
+            prompt: content,
+            config: {
+              ...this.verificationConfig,
+              requireEvidenceForFactualClaims: !usedConservativeQualityFallback,
+            },
+          });
+
+        if (bufferedDurationMs !== undefined) {
           durationMs = bufferedDurationMs + fallbackDurationMs;
         } else {
-          durationMs = fallbackDurationMs ?? bufferedDurationMs;
+          durationMs = fallbackDurationMs;
+        }
+        const fallbackThinking: any = buildFallbackThinking({
+          content,
+          turnKind,
+          trigger: builderFiles ? 'builder-unsatisfied' : fallbackDecision.reason,
+          fallbackModelId,
+          verificationStage: fbBuilderSatisfaction
+            ? `${builderRepairAttempted ? 'builder-retry' : 'builder'}-${fbBuilderSatisfaction.satisfied ? 'satisfied' : 'unsatisfied'}`
+            : [
+              answerQualityRepairAttempted
+                ? `${usedConservativeQualityFallback ? 'quality-fallback' : 'quality-retry'}-${fbAnswerQuality?.verdict ?? 'unknown'}`
+                : null,
+              `${fbVerdict?.action ?? 'pass'}:${fbVerdict?.grounding ?? 'complementary'}`,
+            ].filter(Boolean).join(':'),
+          durationMs: durationMs ?? Date.now() - streamStartedAt,
+        });
+        if (turnPlan) {
+          fallbackThinking.routePlan = buildRoutePlan(turnPlan);
+        }
+
+        const decorateFallbackDone = (chunk: ChatChunk): ChatChunk => chunk.type === 'done'
+          ? {
+            ...chunk,
+            modelId: usedConservativeQualityFallback ? responseModelId : chunk.modelId ?? responseModelId,
+            thinking: fallbackThinking,
+          }
+          : chunk;
+
+        for (const chunk of fallbackResult.sourceChunks) yield chunk;
+        if (fbVerdict && fbVerdict.action !== 'pass') {
+          const surfaced = fbVerdict.text;
+          fullText = surfaced;
+          if (surfaced) yield { type: 'text_delta', textDelta: surfaced } as ChatChunk;
+          yield {
+            type: 'verification',
+            verification: {
+              action: fbVerdict.action,
+              grounding: fbVerdict.grounding,
+              reasons: fbVerdict.reasons,
+              calibrationNote: fbVerdict.calibrationNote,
+            },
+          } as ChatChunk;
+          for (const chunk of fallbackResult.chunks) {
+            if (chunk.type === 'text_delta') continue;
+            yield decorateFallbackDone(chunk);
+          }
+        } else {
+          fullText = fbText;
+          if (fbText) yield { type: 'text_delta', textDelta: fbText } as ChatChunk;
+          for (const chunk of fallbackResult.chunks) {
+            if (chunk.type === 'text_delta') continue;
+            yield decorateFallbackDone(chunk);
+          }
         }
       }
     } else {
@@ -1134,13 +2052,38 @@ export class ChatService {
         }
         yield chunk;
       }
+      // Compute council on the accumulated draft *before* emitting any synthetic done,
+      // so the thinking on the done can carry the council section for the panel.
+      let councilThinking: CouncilThinking | undefined;
+      if (fullText) {
+        councilThinking = await this.runCouncilReview({
+          prompt: content,
+          draftText: fullText,
+          modelId: responseModelId,
+          // confidence and sources are best-effort here; the council gate uses
+          // draftConfidence for "low confidence -> full council" and hasEvidence for context.
+          confidence: undefined,
+          hasEvidence: false,
+        });
+      }
       if (!primarySawDone) {
         durationMs = durationMs ?? (Date.now() - streamStartedAt);
-        yield {
+        const baseDone: any = {
           type: 'done',
           usage: totalUsage,
           durationMs,
-        } as ChatChunk;
+        };
+        const t: any = turnPlan
+          ? {
+              strategy: 'model-primary',
+              modelTag: primaryModelId,
+              confidence: 0.6,
+              routePlan: buildRoutePlan(turnPlan),
+            }
+          : { strategy: 'model-primary', modelTag: primaryModelId, confidence: 0.6 };
+        if (councilThinking) t.council = councilThinking;
+        if (turnPlan || councilThinking) baseDone.thinking = t;
+        yield baseDone as ChatChunk;
       }
     }
 
@@ -1148,6 +2091,11 @@ export class ChatService {
     if (durationMs !== undefined && this.controller) {
       this.controller.observe(durationMs);
     }
+
+    // Note: for pure adapter-streamed model turns that emitted their own 'done',
+    // a follow-up council attachment can be added by yielding a final done chunk
+    // carrying { council }. The det + synthetic paths (very common for quality
+    // and structured turns) already carry councilThinking through the emit helper.
 
     if (this.onUsage) {
       try {
@@ -1173,17 +2121,32 @@ export class ChatService {
       }
     }
 
-    // Persist assistant message
+    // Persist assistant message. §12.5.3: never persist scaffolding/drift
+    // leaks, even on the live-streamed arms where the tokens were already sent
+    // (the buffered primary arm sanitized in-flight, so this is idempotent there).
     const assistantMsgId = ulid();
+    const persistedText = sanitizeLeakage(fullText).text;
+
+    // Persist plan + baseline for model turns as well (critical for reference data
+    // when steering caused the fall-through).
+    const modelPlanBlob = turnPlan
+      ? JSON.stringify({
+          steered: turnPlan,
+          baseline: turnBaselinePlan ?? null,
+          hadGuidance: !!turnBaselinePlan,
+        })
+      : undefined;
+
     this.db.insert(messages).values({
       id: assistantMsgId,
       conversationId,
       role: 'assistant',
-      content: fullText,
+      content: persistedText,
       tokenCount: totalUsage.completionTokens || undefined,
       modelId: responseModelId,
       durationMs: durationMs ?? undefined,
       createdAt: new Date(),
+      ...(modelPlanBlob ? { plan: modelPlanBlob } : {}),
     }).run();
 
     // Update conversation timestamp + auto-title on first message
@@ -1195,6 +2158,109 @@ export class ChatService {
       .set(updates)
       .where(eq(conversations.id, conversationId))
       .run();
+  }
+
+  /**
+   * Emit + persist a deterministic assistant turn through ONE shared path.
+   *
+   * Every deterministic router used to repeat the same ~40-line block:
+   * timestamp → optional progress/turn_kind → text_delta → done (+thinking) →
+   * insert the assistant message → bump conversation title/updatedAt → return.
+   * That boilerplate now lives here once, so a handler only describes WHAT to
+   * say (reply + strategy + confidence) and this path streams + records it
+   * identically. `preChunks` carries any handler-specific lead-in chunks (e.g.
+   * the product-engineering memo's progress stages). The duration measured for
+   * the `done` chunk, the persisted row, and the thinking trace are one value,
+   * exactly as the inlined blocks computed it (clock starts before preChunks).
+   */
+  private async *emitDeterministicTurn(args: {
+    conversationId: string;
+    conversationTitle: string;
+    content: string;
+    reply: string;
+    strategy: string;
+    confidence: number;
+    turnKind?: string;
+    preChunks?: readonly ChatChunk[];
+    /** The scored routing decision (after any friend/agent/robot guidance). */
+    plan?: DispatchPlan;
+    /** Unsteered shadow plan — key reference point for "did steering help?" analysis. */
+    baselinePlan?: DispatchPlan;
+    /** SCIS council review of this draft (when roster configured and convened). */
+    council?: CouncilThinking;
+  }): AsyncGenerator<ChatChunk, void, unknown> {
+    const startedAt = Date.now();
+    for (const chunk of args.preChunks ?? []) yield chunk;
+    if (args.turnKind) {
+      yield { type: 'turn_kind', turnKind: args.turnKind } as ChatChunk;
+    }
+    yield { type: 'text_delta', textDelta: args.reply } as ChatChunk;
+    const durationMs = Date.now() - startedAt;
+    const baseThinking = buildDeterministicThinking(args.strategy, args.content, durationMs, args.confidence);
+    const finalThinking = {
+      ...(args.plan ? { ...baseThinking, routePlan: buildRoutePlan(args.plan) } : baseThinking),
+      ...(args.council ? { council: args.council } : {}),
+    };
+    yield {
+      type: 'done',
+      usage: { promptTokens: 0, completionTokens: 0 },
+      durationMs,
+      thinking: finalThinking,
+    } as ChatChunk;
+
+    // Persist the (steered) plan + baseline as JSON reference data on the message row.
+    // This + the route_guidances rows give us the longitudinal points needed to
+    // measure steering benefit and detect when re-calibration is warranted.
+    const planBlob = args.plan
+      ? JSON.stringify({
+          steered: args.plan,
+          baseline: args.baselinePlan ?? null,
+          hadGuidance: !!args.baselinePlan,
+        })
+      : undefined;
+
+    this.db.insert(messages).values({
+      id: ulid(),
+      conversationId: args.conversationId,
+      role: 'assistant',
+      content: args.reply,
+      modelId: args.strategy,
+      durationMs,
+      createdAt: new Date(),
+      ...(planBlob ? { plan: planBlob } : {}),
+    }).run();
+
+    const updates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+    if (args.conversationTitle === 'New Chat' && args.content.length > 0) {
+      updates.title = this.generateTitle(args.content);
+    }
+    this.db.update(conversations)
+      .set(updates)
+      .where(eq(conversations.id, args.conversationId))
+      .run();
+  }
+
+  /**
+   * Build a dynamic, corpus-backed explainer for ONE comparison operand, used by
+   * the comparison composer to synthesize "A vs B" from whatever Vai actually
+   * knows. Backed by the injected {@link retrieveKnowledge} retriever and gated
+   * by a salient-token relevance check, so an unrelated nearest-neighbor never
+   * leaks into a side. Returns undefined when no retriever is configured, leaving
+   * the composer on its canonical idiom table. Self-adjusting with the corpus.
+   */
+  private buildComparisonConceptExplainer(): ((concept: string) => { summary: string } | null) | undefined {
+    const retrieve = this.retrieveKnowledge;
+    if (!retrieve) return undefined;
+    return (concept: string) => {
+      const c = (concept || '').trim();
+      if (c.length < 2) return null;
+      const top = retrieve(c, 1)?.[0];
+      if (!top || top.text.length < 40) return null;
+      const salient = c.toLowerCase().split(/\s+/).find((w) => w.length >= 3);
+      if (salient && !top.text.toLowerCase().includes(salient)) return null;
+      const summary = top.text.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ').trim();
+      return summary.length > 0 ? { summary } : null;
+    };
   }
 
   private generateTitle(firstMessage: string): string {
@@ -1220,4 +2286,40 @@ export class ChatService {
       .where(eq(conversations.id, conversationId))
       .run();
   }
+
+  /**
+   * For legacy conversations created before auth (ownerUserId null, e.g. under dev bypass),
+   * assign ownership to the now-authenticated user so they can update it.
+   * Called on first write access after sign-in.
+   */
+  assignOwnerIfLegacy(conversationId: string, ownerUserId: string): void {
+    const conv = this.getConversation(conversationId);
+    if (conv && !conv.ownerUserId) {
+      this.db.update(conversations)
+        .set({ ownerUserId, updatedAt: new Date() })
+        .where(eq(conversations.id, conversationId))
+        .run();
+    }
+  }
+}
+
+function reviewLabelForDraft(prompt: string, draft: string): string {
+  return shouldPeerReviewCode(prompt, draft)
+    ? 'Asking peers to review the code draft'
+    : 'Asking local friends to check the draft';
+}
+
+function formatFriendReviewDetail(review: {
+  reason: string;
+  reviewers: readonly string[];
+  concerns: readonly string[];
+  suggestions: readonly string[];
+}): string {
+  const parts = [
+    review.reason,
+    review.reviewers.length > 0 ? `Reviewed by ${review.reviewers.join(', ')}` : '',
+    review.concerns.length > 0 ? `Concerns: ${review.concerns.slice(0, 3).join('; ')}` : '',
+    review.suggestions.length > 0 ? `Suggestions: ${review.suggestions.slice(0, 3).join('; ')}` : '',
+  ].filter(Boolean);
+  return parts.join(' · ') || 'Peer review completed';
 }

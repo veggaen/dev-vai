@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { Bot, CheckCircle2, GitBranch, Wifi, WifiOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '../../stores/authStore.js';
@@ -8,11 +8,49 @@ import { useCollabStore } from '../../stores/collabStore.js';
 import { useEngineStore } from '../../stores/engineStore.js';
 import { useLayoutStore } from '../../stores/layoutStore.js';
 import { useChatStore } from '../../stores/chatStore.js';
+import { useCursorStore } from '../../stores/cursorStore.js';
 import { useVinextStore, type VinextState } from '../../stores/vinextStore.js';
 import { BuildStatusBadge } from '../BuildStatusBadge.js';
 import { apiFetch } from '../../lib/api.js';
 import { MODE_DESCRIPTIONS } from '../../stores/layoutStore.js';
+import {
+  applyOdysseusPreset,
+  VAI_ACTIVE_THEME_ID_KEY,
+} from '../../lib/odysseus-theme.js';
 import type { ProjectHandoffIntentResponse } from '@vai/api-types/project-responses';
+import {
+  SettingsShell,
+  SettingsSection,
+  SettingsCard,
+  SettingsField,
+  SettingsSelect,
+  SettingsSwitch,
+  SettingsShortcutRow,
+  ThemePresetGrid,
+  type SettingsTabId,
+} from './settings/SettingsShell.js';
+
+const LIGHT_THEME_PRESETS = new Set(['light']);
+
+const KEYBOARD_SHORTCUTS: { keys: string; description: string }[] = [
+  { keys: 'Ctrl+K', description: 'Quick switch — fuzzy search conversations' },
+  { keys: 'Ctrl+,', description: 'Open settings' },
+  { keys: 'Ctrl+S', description: 'Cycle sidebar: expanded → rail → hidden' },
+  { keys: 'Ctrl+0', description: 'Focus mode — chat only' },
+  { keys: 'Ctrl+1 … Ctrl+5', description: 'Switch mode (chat, agent, builder, plan, debate)' },
+  { keys: 'Ctrl+B', description: 'Toggle builder / preview panel' },
+  { keys: 'Ctrl+E', description: 'Toggle file explorer' },
+  { keys: 'Ctrl+J', description: 'Toggle debug console' },
+  { keys: 'Ctrl+Shift+F', description: 'Focus chat search in sidebar' },
+  { keys: 'Ctrl+Shift+L', description: 'Open dev logs' },
+  { keys: 'Ctrl+Shift+K', description: 'Open knowledge base' },
+  { keys: 'Ctrl+Shift+M', description: 'Toggle layout density (compact ↔ open)' },
+];
+
+function loadActiveThemeId(): string {
+  if (typeof localStorage === 'undefined') return 'dark';
+  return localStorage.getItem(VAI_ACTIVE_THEME_ID_KEY) ?? 'dark';
+}
 
 function formatRelative(date: string): string {
   const diff = Date.now() - new Date(date).getTime();
@@ -69,13 +107,20 @@ export function SettingsPanel() {
   const createAudit = useCollabStore((state) => state.createAudit);
   const { status: engineStatus, stats } = useEngineStore();
   const activeMode = useLayoutStore((state) => state.mode);
+  const layoutMode = useLayoutStore((state) => state.layoutMode);
+  const setLayoutMode = useLayoutStore((state) => state.setLayoutMode);
+  const setThemePreference = useLayoutStore((state) => state.setThemePreference);
   const setActivePanel = useLayoutStore((state) => state.setActivePanel);
+  const overlayVisible = useCursorStore((state) => state.overlayVisible);
+  const setOverlayVisible = useCursorStore((state) => state.setOverlayVisible);
   const broadcastMode = useChatStore((state) => state.broadcastMode);
   const broadcastTargetClientIds = useChatStore((state) => state.broadcastTargetClientIds);
   const syncState = useVinextStore((state: VinextState) => state.syncState);
   const latencyMs = useVinextStore((state: VinextState) => state.latencyMs);
   const motionBudget = useVinextStore((state: VinextState) => state.motionBudget);
   const trustLevel = useVinextStore((state: VinextState) => state.trustLevel);
+  const [activeTab, setActiveTab] = useState<SettingsTabId>('appearance');
+  const [activeThemeId, setActiveThemeId] = useState(loadActiveThemeId);
   const [auditPrompt, setAuditPrompt] = useState('Audit this project for correctness, regressions, and architecture risks.');
   const [_expandedResults, _setExpandedResults] = useState<Set<string>>(new Set());
   const [_launchingTargetId, setLaunchingTargetId] = useState<string | null>(null);
@@ -298,300 +343,350 @@ export function SettingsPanel() {
     toast.success('Disconnected from broadcast');
   };
 
+  const handleThemeSelect = useCallback((presetId: string) => {
+    applyOdysseusPreset(presetId);
+    setActiveThemeId(presetId);
+    const scheme = LIGHT_THEME_PRESETS.has(presetId) ? 'light' : 'dark';
+    setThemePreference(scheme);
+    document.documentElement.dataset.theme = scheme;
+    document.body.dataset.theme = scheme;
+    document.documentElement.style.colorScheme = scheme;
+  }, [setThemePreference]);
+
   return (
-    <div className="flex flex-col gap-3 p-3">
-      {/* ── Section: Preferences ── */}
-      {isOwner && (
-        <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/50 p-3">
-          <div className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Preferences</div>
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs font-medium text-zinc-200">Owner view</div>
-              <div className="text-[10px] text-zinc-500">{ownerFeaturesHidden ? 'Showing user experience' : 'Showing owner tools'}</div>
-            </div>
-            <button
-              role="switch"
-              aria-checked={!ownerFeaturesHidden}
-              onClick={() => setOwnerFeaturesHidden(!ownerFeaturesHidden)}
-              className={`relative h-6 w-11 rounded-full transition-colors duration-200 ${!ownerFeaturesHidden ? 'bg-amber-500' : 'bg-zinc-700'}`}
-            >
-              <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ${!ownerFeaturesHidden ? 'translate-x-5' : 'translate-x-0'}`} />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Section: Workspace ── */}
-      <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/50 p-3">
-        <div className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Workspace</div>
-        <div className="space-y-3">
-          <div>
-            <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500">Model</label>
-            <select
-              value={selectedModelId ?? ''}
-              onChange={(e) => setSelectedModelId(e.target.value)}
-              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 transition-colors focus:border-violet-500/50 focus:outline-none"
-            >
-              {models.length === 0 && <option value="">No models available</option>}
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>{m.displayName} · {m.provider}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500">Frontend shell</label>
-            <select
-              value={selectedFrontendId ?? ''}
-              onChange={(e) => setSelectedFrontendId(e.target.value)}
-              className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 transition-colors focus:border-violet-500/50 focus:outline-none"
-            >
-              {frontends.length === 0 && <option value="">No frontend shells available</option>}
-              {frontends.map((frontend) => (
-                <option key={frontend.id} value={frontend.id}>{frontend.framework} · {frontend.role}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/50 p-3">
-        <div className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Memory Workflow</div>
-        <div className="space-y-2.5 text-[11px] leading-5 text-zinc-500">
-          <div className="rounded-xl border border-zinc-800/50 bg-zinc-950/60 px-3 py-2.5">
-            <div className="text-zinc-200">1. Runtime</div>
-            <div className="mt-1">
-              {engineStatus === 'ready'
-                ? `Online and ready with ${(stats?.documentsIndexed ?? 0).toLocaleString()} indexed documents.`
-                : 'Keep the runtime running so capture and memory questions work.'}
-            </div>
-          </div>
-          <div className="rounded-xl border border-zinc-800/50 bg-zinc-950/60 px-3 py-2.5">
-            <div className="text-zinc-200">2. Browser extension</div>
-            <div className="mt-1">
-              Capture one article, GitHub repo, or search result from the extension popup. The desktop shell will use that memory on the next chat turn.
-            </div>
-          </div>
-          <div className="rounded-xl border border-zinc-800/50 bg-zinc-950/60 px-3 py-2.5">
-            <div className="text-zinc-200">3. Grounded question</div>
-            <div className="mt-1">
-              Ask what you read earlier, what it said, or why it matters. When the answer is source-backed, the chat view will show the grounding sources directly above the response.
-            </div>
-          </div>
-        </div>
-        <button
-          onClick={() => setActivePanel('chats')}
-          className="mt-3 w-full rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[11px] font-medium text-blue-200 transition-colors hover:bg-blue-500/20"
-        >
-          Go to chat
-        </button>
-      </div>
-
-      {/* ── Section: Engine (owner only) ── */}
-      {showOwnerFeatures && (
-        <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/50 p-3">
-          <div className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Engine</div>
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-medium text-zinc-400">Status</span>
-            <div className="flex items-center gap-1.5">
-              <span className={`h-2 w-2 rounded-full ${
-                engineStatus === 'ready' ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]'
-                  : engineStatus === 'offline' ? 'bg-red-500 animate-pulse'
-                  : engineStatus === 'starting' ? 'bg-yellow-500 animate-pulse'
-                  : 'bg-zinc-600'
-              }`} />
-              <span className={`text-xs ${
-                engineStatus === 'ready' ? 'text-emerald-400'
-                  : engineStatus === 'offline' ? 'text-red-400'
-                  : 'text-zinc-500'
-              }`}>
-                {engineStatus === 'ready' ? 'Online' : engineStatus === 'offline' ? 'Offline' : engineStatus === 'starting' ? 'Starting...' : 'Idle'}
-              </span>
-            </div>
-          </div>
-          {engineStatus === 'ready' && stats && (
-            <div className="space-y-1 text-xs text-zinc-600">
-              <div className="flex justify-between"><span>Vocabulary</span><span className="text-zinc-400">{stats.vocabSize.toLocaleString()}</span></div>
-              <div className="flex justify-between"><span>Knowledge</span><span className="text-zinc-400">{stats.knowledgeEntries.toLocaleString()}</span></div>
-              <div className="flex justify-between"><span>Documents</span><span className="text-zinc-400">{stats.documentsIndexed.toLocaleString()}</span></div>
-            </div>
-          )}
-          {engineStatus === 'offline' && (
-            <p className="text-[10px] text-red-400/70">Run <code className="rounded bg-zinc-800 px-1 text-zinc-300">pnpm dev:web</code></p>
-          )}
-          <div className="mt-3 border-t border-zinc-800/40 pt-3">
-            <div className="mb-2 text-xs font-medium text-zinc-400">Build</div>
-            <BuildStatusBadge />
-          </div>
-        </div>
-      )}
-
-      {/* ── Section: Workflow (owner only) ── */}
-      {showOwnerFeatures && (
-        <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/50 p-3">
-          <div className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Workflow</div>
-          <div className="mb-2 text-[11px] text-zinc-500">
-            Runtime default: <span className="text-zinc-300">{defaultConversationMode}</span>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {workflowModes.map((workflowMode) => (
-              <span
-                key={workflowMode}
-                title={MODE_DESCRIPTIONS[workflowMode]}
-                className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-wide ${
-                  workflowMode === activeMode
-                    ? 'border-blue-500/50 bg-blue-500/10 text-blue-300'
-                    : 'border-zinc-800 bg-zinc-950 text-zinc-500'
-                }`}
-              >
-                {workflowMode}
-              </span>
-            ))}
-          </div>
-          <div className="mt-3 border-t border-zinc-800/40 pt-3">
-            <div className="mb-2 text-xs font-medium text-zinc-400">Vinext Envelope</div>
-            <div className="grid grid-cols-2 gap-2 text-[11px] text-zinc-500">
-              <div>Sync<div className="mt-0.5 text-zinc-300">{syncState}</div></div>
-              <div>Trust<div className="mt-0.5 text-zinc-300">{trustLevel}</div></div>
-              <div>Motion<div className="mt-0.5 text-zinc-300">{motionBudget}</div></div>
-              <div>Latency<div className="mt-0.5 text-zinc-300">{latencyMs === null ? 'offline' : `${Math.round(latencyMs)}ms`}</div></div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Section: IDE Connections ── */}
-      <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/50 p-3">
-        <div className="mb-2.5 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">
-            <Bot className="h-3.5 w-3.5" />
-            IDE Connections
-          </div>
-          <button
-            onClick={() => void fetchGlobalClients()}
-            className="text-[10px] text-zinc-600 transition-colors hover:text-zinc-400"
+    <SettingsShell
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      showOwnerSections={showOwnerFeatures}
+    >
+      {activeTab === 'appearance' && (
+        <>
+          <SettingsSection
+            title="Theme"
+            description="Five core colors drive the whole UI — same model as Odysseus. Pick a preset or use Light/Dark in the chat header."
           >
-            Refresh
-          </button>
-        </div>
-        <p className="mb-3 text-[11px] leading-relaxed text-zinc-500">
-          Send messages to your connected IDE extensions directly from the desktop app.
-        </p>
+            <ThemePresetGrid activeId={activeThemeId} onSelect={handleThemeSelect} />
+          </SettingsSection>
 
-        <div className="space-y-1.5">
-          {ideTargets.filter((t) => t.id !== 'desktop').map((target) => {
-            const status = ideClientStatus.get(target.id);
-            const isOnline = status?.online ?? false;
-            return (
-              <div
-                key={target.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-zinc-800/50 bg-zinc-950/60 px-3 py-2.5"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <span className={`h-2 w-2 shrink-0 rounded-full ${
-                    isOnline
-                      ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]'
-                      : 'bg-zinc-600'
-                  }`} />
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium text-zinc-200">{target.label}</div>
-                    <div className="text-[10px] text-zinc-500">
-                      {isOnline ? `Active · ${status?.lastActivity}` : status?.lastActivity ?? 'Not connected'}
-                    </div>
-                  </div>
-                </div>
-                {(() => {
-                  const isConnected = broadcastMode && status?.clientIds?.some((cid: string) => broadcastTargetClientIds.includes(cid));
-                  if (isConnected) {
-                    return (
-                      <button
-                        onClick={disconnectBroadcast}
-                        className="flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[10px] font-medium text-emerald-200 transition-colors hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-200"
-                      >
-                        <Wifi className="h-3 w-3" />
-                        Connected
-                      </button>
-                    );
-                  }
-                  return (
-                    <button
-                      onClick={() => void startCollabChat(target.label, status?.clientIds)}
-                      disabled={!status?.clientIds?.length}
-                      className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-medium transition-colors ${
-                        isOnline
-                          ? 'border border-blue-500/30 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20'
-                          : status?.clientIds?.length
-                            ? 'border border-amber-500/30 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20'
-                            : 'border border-zinc-800 bg-zinc-900 text-zinc-600 cursor-not-allowed'
-                      }`}
-                    >
-                      {isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-                      {status?.clientIds?.length ? 'Connect' : 'Setup'}
-                    </button>
-                  );
-                })()}
+          <SettingsSection title="Layout" description="Compact feels like VS Code; open adds more breathing room.">
+            <SettingsCard>
+              <div className="flex gap-2">
+                {(['compact', 'open'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setLayoutMode(mode)}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium capitalize transition-colors ${
+                      layoutMode === mode
+                        ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--fg)]'
+                        : 'border-[color:var(--border)] text-[color:var(--color-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--fg)]'
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                ))}
               </div>
-            );
-          })}
-        </div>
+            </SettingsCard>
+          </SettingsSection>
 
-        {globalClients.length === 0 && (
-          <div className="mt-3 rounded-xl border border-zinc-800/40 bg-zinc-950/50 px-3 py-2.5 text-center">
-            <div className="text-[11px] text-zinc-500">No IDE extensions connected yet</div>
-            <div className="mt-1 text-[10px] text-zinc-600">
-              Install the VeggaAI extension in VS Code, Cursor, or Antigravity and sign in
-            </div>
-          </div>
-        )}
-      </div>
+          <SettingsSection title="Vai Actions overlay">
+            <SettingsCard>
+              <SettingsSwitch
+                checked={overlayVisible}
+                onChange={setOverlayVisible}
+                label="Show Vai Actions UI"
+                description="Hover focus ring, action log, and demo overlays. Toggle also from the sparkles button on the activity rail."
+              />
+            </SettingsCard>
+          </SettingsSection>
+        </>
+      )}
 
-      {/* ── Section: Project Collaboration (owner, project-attached) ── */}
-      {showOwnerFeatures && persistentProjectId && (
-        <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/50 p-3">
-          <div className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Project Collaboration</div>
+      {activeTab === 'ai' && (
+        <>
+          <SettingsSection title="Defaults" description="Model and shell used for new conversations.">
+            <SettingsCard className="space-y-3">
+              <SettingsField label="Model">
+                <SettingsSelect
+                  value={selectedModelId ?? ''}
+                  onChange={(e) => setSelectedModelId(e.target.value)}
+                >
+                  {models.length === 0 && <option value="">No models available</option>}
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>{m.displayName} · {m.provider}</option>
+                  ))}
+                </SettingsSelect>
+              </SettingsField>
+              <SettingsField label="Frontend shell">
+                <SettingsSelect
+                  value={selectedFrontendId ?? ''}
+                  onChange={(e) => setSelectedFrontendId(e.target.value)}
+                >
+                  {frontends.length === 0 && <option value="">No frontend shells available</option>}
+                  {frontends.map((frontend) => (
+                    <option key={frontend.id} value={frontend.id}>{frontend.framework} · {frontend.role}</option>
+                  ))}
+                </SettingsSelect>
+              </SettingsField>
+            </SettingsCard>
+          </SettingsSection>
 
-          <div className="rounded-md border border-zinc-800/50 bg-zinc-950/60 p-2">
-            <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-zinc-300">
-              <GitBranch className="h-3.5 w-3.5" />
-              Active Peer Roster
-            </div>
-            <div className="space-y-1.5">
-              {peers.length === 0 && (
-                <div className="text-[11px] text-zinc-500">No peers invited yet.</div>
-              )}
-              {peers.map((peer) => (
-                <div key={peer.peerKey} className="rounded-md border border-zinc-800/40 px-2 py-2 text-[11px]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-zinc-200">{peer.displayName}</div>
-                      <div className="text-[10px] text-zinc-500">{peer.ide} · {peer.model}</div>
+          <SettingsSection title="Memory workflow" description="How capture, indexing, and grounded answers work together.">
+            <SettingsCard className="space-y-2 text-[11px] leading-5 text-[color:var(--color-muted)]">
+              <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] px-3 py-2.5">
+                <div className="font-medium text-[color:var(--fg)]">1. Runtime</div>
+                <div className="mt-1">
+                  {engineStatus === 'ready'
+                    ? `Online with ${(stats?.documentsIndexed ?? 0).toLocaleString()} indexed documents.`
+                    : 'Keep the runtime running so capture and memory questions work.'}
+                </div>
+              </div>
+              <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] px-3 py-2.5">
+                <div className="font-medium text-[color:var(--fg)]">2. Browser extension</div>
+                <div className="mt-1">Capture articles, repos, or search results from the extension popup.</div>
+              </div>
+              <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] px-3 py-2.5">
+                <div className="font-medium text-[color:var(--fg)]">3. Grounded question</div>
+                <div className="mt-1">Ask what you read earlier — source-backed answers show citations above the reply.</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePanel('chats')}
+                className="mt-1 w-full rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent-soft)] px-3 py-2 text-[11px] font-medium text-[color:var(--fg)] transition-colors hover:opacity-90"
+              >
+                Go to chat
+              </button>
+            </SettingsCard>
+          </SettingsSection>
+        </>
+      )}
+
+      {activeTab === 'integrations' && (
+        <>
+          <SettingsSection
+            title="IDE connections"
+            description="Send messages to connected IDE extensions from the desktop app."
+          >
+            <SettingsCard>
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-medium text-[color:var(--fg)]">
+                  <Bot className="h-3.5 w-3.5" />
+                  Companion extensions
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void fetchGlobalClients()}
+                  className="text-[10px] text-[color:var(--color-muted)] transition-colors hover:text-[color:var(--fg)]"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              <div className="space-y-1.5">
+                {ideTargets.filter((t) => t.id !== 'desktop').map((target) => {
+                  const status = ideClientStatus.get(target.id);
+                  const isOnline = status?.online ?? false;
+                  return (
+                    <div
+                      key={target.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] px-3 py-2.5"
+                    >
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-[color:var(--color-muted)]'}`} />
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-[color:var(--fg)]">{target.label}</div>
+                          <div className="text-[10px] text-[color:var(--color-muted)]">
+                            {isOnline ? `Active · ${status?.lastActivity}` : status?.lastActivity ?? 'Not connected'}
+                          </div>
+                        </div>
+                      </div>
+                      {(() => {
+                        const isConnected = broadcastMode && status?.clientIds?.some((cid: string) => broadcastTargetClientIds.includes(cid));
+                        if (isConnected) {
+                          return (
+                            <button
+                              type="button"
+                              onClick={disconnectBroadcast}
+                              className="flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[10px] font-medium text-emerald-200"
+                            >
+                              <Wifi className="h-3 w-3" />
+                              Connected
+                            </button>
+                          );
+                        }
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => void startCollabChat(target.label, status?.clientIds)}
+                            disabled={!status?.clientIds?.length}
+                            className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-medium transition-colors ${
+                              isOnline
+                                ? 'border border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--fg)]'
+                                : status?.clientIds?.length
+                                  ? 'border border-amber-500/30 bg-amber-500/10 text-amber-200'
+                                  : 'cursor-not-allowed border border-[color:var(--border)] text-[color:var(--color-muted)]'
+                            }`}
+                          >
+                            {isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+                            {status?.clientIds?.length ? 'Connect' : 'Setup'}
+                          </button>
+                        );
+                      })()}
                     </div>
-                    <span className="rounded-full border border-zinc-700/50 px-2 py-0.5 text-[10px] text-zinc-400">{peer.status}</span>
+                  );
+                })}
+              </div>
+
+              {globalClients.length === 0 && (
+                <div className="mt-3 rounded-lg border border-dashed border-[color:var(--border)] px-3 py-2.5 text-center text-[11px] text-[color:var(--color-muted)]">
+                  Install the VeggaAI extension in VS Code, Cursor, or Antigravity and sign in.
+                </div>
+              )}
+            </SettingsCard>
+          </SettingsSection>
+
+          {showOwnerFeatures && persistentProjectId && (
+            <SettingsSection title="Project collaboration">
+              <SettingsCard className="space-y-3">
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[color:var(--fg)]">
+                    <GitBranch className="h-3.5 w-3.5" />
+                    Active peer roster
+                  </div>
+                  <div className="space-y-1.5">
+                    {peers.length === 0 && (
+                      <div className="text-[11px] text-[color:var(--color-muted)]">No peers invited yet.</div>
+                    )}
+                    {peers.map((peer) => (
+                      <div key={peer.peerKey} className="rounded-lg border border-[color:var(--border)] px-2 py-2 text-[11px]">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-[color:var(--fg)]">{peer.displayName}</div>
+                            <div className="text-[10px] text-[color:var(--color-muted)]">{peer.ide} · {peer.model}</div>
+                          </div>
+                          <span className="rounded-full border border-[color:var(--border)] px-2 py-0.5 text-[10px] text-[color:var(--color-muted)]">{peer.status}</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          <div className="mt-3 rounded-md border border-zinc-800/50 bg-zinc-950/60 p-2">
-            <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-zinc-300">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Audit Fanout
-            </div>
-            <textarea
-              value={auditPrompt}
-              onChange={(event) => setAuditPrompt(event.target.value)}
-              className="min-h-20 w-full rounded-md border border-zinc-800/50 bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-200 outline-none transition-colors focus:border-blue-500/50"
-            />
-            <button
-              onClick={() => void handleAudit()}
-              disabled={collabLoading || peers.length === 0}
-              className="mt-2 w-full rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-[11px] font-medium text-blue-200 transition-colors hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:border-zinc-800/50 disabled:bg-zinc-900 disabled:text-zinc-600"
-            >
-              Run audit with {peers.length} peer{peers.length === 1 ? '' : 's'}
-            </button>
-          </div>
-        </div>
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[color:var(--fg)]">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Audit fanout
+                  </div>
+                  <textarea
+                    value={auditPrompt}
+                    onChange={(event) => setAuditPrompt(event.target.value)}
+                    className="min-h-20 w-full rounded-lg border border-[color:var(--border)] bg-[color:var(--input-bg,var(--panel))] px-2.5 py-2 text-[11px] text-[color:var(--fg)] outline-none focus:border-[color:var(--accent)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleAudit()}
+                    disabled={collabLoading || peers.length === 0}
+                    className="mt-2 w-full rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent-soft)] px-3 py-1.5 text-[11px] font-medium text-[color:var(--fg)] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Run audit with {peers.length} peer{peers.length === 1 ? '' : 's'}
+                  </button>
+                </div>
+              </SettingsCard>
+            </SettingsSection>
+          )}
+        </>
       )}
-    </div>
+
+      {activeTab === 'engine' && showOwnerFeatures && (
+        <>
+          <SettingsSection title="Runtime">
+            <SettingsCard>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-medium text-[color:var(--color-muted)]">Status</span>
+                <div className="flex items-center gap-1.5">
+                  <span className={`h-2 w-2 rounded-full ${
+                    engineStatus === 'ready' ? 'bg-emerald-500'
+                      : engineStatus === 'offline' ? 'bg-red-500 animate-pulse'
+                      : engineStatus === 'starting' ? 'bg-yellow-500 animate-pulse'
+                      : 'bg-[color:var(--color-muted)]'
+                  }`} />
+                  <span className="text-xs text-[color:var(--fg)]">
+                    {engineStatus === 'ready' ? 'Online' : engineStatus === 'offline' ? 'Offline' : engineStatus === 'starting' ? 'Starting…' : 'Idle'}
+                  </span>
+                </div>
+              </div>
+              {engineStatus === 'ready' && stats && (
+                <div className="space-y-1 text-xs text-[color:var(--color-muted)]">
+                  <div className="flex justify-between"><span>Vocabulary</span><span className="text-[color:var(--fg)]">{stats.vocabSize.toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span>Knowledge</span><span className="text-[color:var(--fg)]">{stats.knowledgeEntries.toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span>Documents</span><span className="text-[color:var(--fg)]">{stats.documentsIndexed.toLocaleString()}</span></div>
+                </div>
+              )}
+              {engineStatus === 'offline' && (
+                <p className="text-[10px] text-red-400/80">Run <code className="rounded bg-[color:var(--panel-bg-muted)] px-1">pnpm dev:web</code></p>
+              )}
+              <div className="mt-3 border-t border-[color:var(--border)] pt-3">
+                <div className="mb-2 text-xs font-medium text-[color:var(--fg)]">Build</div>
+                <BuildStatusBadge />
+              </div>
+            </SettingsCard>
+          </SettingsSection>
+
+          <SettingsSection title="Workflow">
+            <SettingsCard>
+              <div className="mb-2 text-[11px] text-[color:var(--color-muted)]">
+                Runtime default: <span className="text-[color:var(--fg)]">{defaultConversationMode}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {workflowModes.map((workflowMode) => (
+                  <span
+                    key={workflowMode}
+                    title={MODE_DESCRIPTIONS[workflowMode]}
+                    className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-wide ${
+                      workflowMode === activeMode
+                        ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--fg)]'
+                        : 'border-[color:var(--border)] text-[color:var(--color-muted)]'
+                    }`}
+                  >
+                    {workflowMode}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-3 border-t border-[color:var(--border)] pt-3">
+                <div className="mb-2 text-xs font-medium text-[color:var(--fg)]">Vinext envelope</div>
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-[color:var(--color-muted)]">
+                  <div>Sync<div className="mt-0.5 text-[color:var(--fg)]">{syncState}</div></div>
+                  <div>Trust<div className="mt-0.5 text-[color:var(--fg)]">{trustLevel}</div></div>
+                  <div>Motion<div className="mt-0.5 text-[color:var(--fg)]">{motionBudget}</div></div>
+                  <div>Latency<div className="mt-0.5 text-[color:var(--fg)]">{latencyMs === null ? 'offline' : `${Math.round(latencyMs)}ms`}</div></div>
+                </div>
+              </div>
+            </SettingsCard>
+          </SettingsSection>
+        </>
+      )}
+
+      {activeTab === 'shortcuts' && (
+        <SettingsSection title="Keyboard shortcuts" description="Global shortcuts work outside text fields unless noted.">
+          <SettingsCard className="overflow-hidden p-0">
+            {KEYBOARD_SHORTCUTS.map((row) => (
+              <SettingsShortcutRow key={row.keys} keys={row.keys} description={row.description} />
+            ))}
+          </SettingsCard>
+        </SettingsSection>
+      )}
+
+      {activeTab === 'account' && showOwnerFeatures && isOwner && (
+        <SettingsSection title="Owner view" description="Switch between owner tools and the standard user experience.">
+          <SettingsCard>
+            <SettingsSwitch
+              checked={!ownerFeaturesHidden}
+              onChange={(on) => setOwnerFeaturesHidden(!on)}
+              label="Show owner tools"
+              description={ownerFeaturesHidden ? 'Currently showing user experience' : 'Engine, workflow, and admin sections visible'}
+            />
+          </SettingsCard>
+        </SettingsSection>
+      )}
+    </SettingsShell>
   );
 }

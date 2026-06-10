@@ -8,6 +8,20 @@ import {
 } from './retrieval-telemetry.js';
 import { HybridRetriever } from './hybrid-retrieval.js';
 
+function resolveHybridCandidateBudget(): number {
+  const parsed = Number.parseInt(process.env.VAI_HYBRID_CANDIDATE_BUDGET ?? '', 10);
+  return Number.isFinite(parsed) && parsed >= 32 ? parsed : 768;
+}
+
+function resolveHybridRerankBudget(): number {
+  const parsed = Number.parseInt(process.env.VAI_HYBRID_RERANK_BUDGET ?? '', 10);
+  return Number.isFinite(parsed) && parsed >= 16 ? parsed : 96;
+}
+
+function normalizeDocumentSource(source: string): string {
+  return source.startsWith('entry:') ? source.slice('entry:'.length) : source;
+}
+
 export class VaiTokenizer {
   private vocab: Map<string, number> = new Map();
   private reverseVocab: Map<number, string> = new Map();
@@ -197,7 +211,12 @@ export class KnowledgeStore {
   private concepts: Map<string, { definition: string; source: string; frequency: number }> = new Map();
   private retrievalEvents: RetrievalTelemetryEvent[] = [];
   private retrievalDomainHits: Map<string, number> = new Map();
-  private hybridRetriever: HybridRetriever | null = null;
+  private readonly hybridRetriever = new HybridRetriever({
+    candidateMode: 'lexical-first',
+    candidateTokenFilter: (word) => word.length > 2 && !KnowledgeStore.STOP_WORDS.has(word),
+    candidateBudget: resolveHybridCandidateBudget(),
+    rerankBudget: resolveHybridRerankBudget(),
+  });
   private hybridDirtyFrom = 0;
 
   private static readonly COVERAGE_THRESHOLD = 0.25;
@@ -225,6 +244,7 @@ export class KnowledgeStore {
       const docId = `${source}:${index}`;
       const docIdx = this.documents.length;
       this.documents.push({ id: docId, source, words: segment, wordSet });
+      this.indexHybridDocuments();
       for (const word of wordSet) {
         this.documentFrequency.set(word, (this.documentFrequency.get(word) ?? 0) + 1);
         if (!this.wordToDocIndices.has(word)) this.wordToDocIndices.set(word, new Set());
@@ -397,6 +417,7 @@ export class KnowledgeStore {
       const docIdx = this.documents.length;
       const docId = `entry:${pattern.toLowerCase().substring(0, 60)}`;
       this.documents.push({ id: docId, source: `entry:${source}`, words: responseWords, wordSet });
+      this.indexHybridDocuments();
       for (const word of wordSet) {
         this.documentFrequency.set(word, (this.documentFrequency.get(word) ?? 0) + 1);
         if (!this.wordToDocIndices.has(word)) this.wordToDocIndices.set(word, new Set());
@@ -463,6 +484,12 @@ export class KnowledgeStore {
   }
 
   findBestMatch(input: string): KnowledgeEntry | null {
+    const traceStartedAt = performance.now();
+    const tracePerf = (stage: string, detail = ''): void => {
+      if (process.env.VAI_TRACE_PERF_CONSOLE !== '1') return;
+      const elapsedMs = Math.round((performance.now() - traceStartedAt) * 10) / 10;
+      console.log(`[VaiPerf] stage=knowledge:find-best:${stage} elapsedMs=${elapsedMs}${detail ? ` ${detail}` : ''}`);
+    };
     const query = input.toLowerCase().replace(/[?!,;:"'(){}\[\]<>\/]/g, ' ').replace(/\s+/g, ' ').trim();
     const queryWords = query.split(/\s+/).filter(word => word.length > 1);
     let best: KnowledgeEntry | null = null;
@@ -475,13 +502,14 @@ export class KnowledgeStore {
       : null;
 
     const candidateIndices = new Set<number>();
-    const expandedWords = expandSynonyms(queryWords);
+    const expandedWords = expandSynonyms(meaningfulWords.length > 0 ? meaningfulWords : queryWords);
     for (const word of expandedWords) {
       const indices = this.entryWordIndex.get(word);
       if (indices) {
         for (const idx of indices) candidateIndices.add(idx);
       }
     }
+    tracePerf('candidates-complete', `candidates=${candidateIndices.size} words=${expandedWords.length}`);
 
     if (queryWords.length <= 3) {
       for (let index = 0; index < this.entries.length; index++) {
@@ -491,7 +519,10 @@ export class KnowledgeStore {
       }
     }
 
+    let inspectedEntries = 0;
+    let junkChecks = 0;
     for (const idx of candidateIndices) {
+      inspectedEntries++;
       const entry = this.entries[idx];
 
       if (
@@ -503,14 +534,14 @@ export class KnowledgeStore {
       }
 
       const isTrustedSource = entry.source.startsWith('bootstrap') || entry.source === 'user-taught' || entry.source === 'auto-learned';
-      if (!isTrustedSource && KnowledgeStore.isJunkContent(entry.response)) {
-        continue;
-      }
-
       if (rarestWord && !isTrustedSource) {
         if (!entry.pattern.toLowerCase().includes(rarestWord)) {
           continue;
         }
+      }
+      if (!isTrustedSource && KnowledgeStore.isJunkContent(entry.response)) {
+        junkChecks++;
+        continue;
       }
 
       let score = this.similarity(query, entry.pattern);
@@ -563,12 +594,17 @@ export class KnowledgeStore {
     }
 
     const adaptiveThreshold = queryWords.length <= 2 ? 0.30 : queryWords.length <= 5 ? 0.25 : 0.25;
+    tracePerf('score-complete', `inspected=${inspectedEntries} junkChecks=${junkChecks} matched=${best !== null}`);
     if (bestScore <= adaptiveThreshold || !best) return null;
     return best;
   }
 
   findBestMatchWithScore(input: string): { entry: KnowledgeEntry; score: number } | null {
+    const traceStartedAt = performance.now();
     const match = this.findBestMatch(input);
+    if (process.env.VAI_TRACE_PERF_CONSOLE === '1') {
+      console.log(`[VaiPerf] stage=knowledge:find-best-score:match-complete elapsedMs=${Math.round((performance.now() - traceStartedAt) * 10) / 10} matched=${match !== null} patternLength=${match?.pattern.length ?? 0}`);
+    }
     if (!match) return null;
 
     const query = input.toLowerCase().replace(/[?!,;:"'(){}\[\]<>]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -586,6 +622,9 @@ export class KnowledgeStore {
       score = Math.max(score, KnowledgeStore.REVERSE_CONTAIN_FLOOR);
     }
     if (match.source === 'user-taught' || match.source.startsWith('bootstrap')) score += KnowledgeStore.TRUSTED_BOOST;
+    if (process.env.VAI_TRACE_PERF_CONSOLE === '1') {
+      console.log(`[VaiPerf] stage=knowledge:find-best-score:score-complete elapsedMs=${Math.round((performance.now() - traceStartedAt) * 10) / 10} patternLength=${match.pattern.length}`);
+    }
     return { entry: match, score };
   }
 
@@ -898,18 +937,43 @@ export class KnowledgeStore {
    * score. Callers that want telemetry should go through `retrieveRelevant`.
    */
   retrieveRelevantHybrid(query: string, topK = 5): Array<{ text: string; source: string; score: number }> {
-    if (this.documents.length === 0) return [];
-    if (!this.hybridRetriever || this.hybridDirtyFrom < this.documents.length) {
-      const retriever = this.hybridRetriever ?? new HybridRetriever();
-      for (let i = this.hybridDirtyFrom; i < this.documents.length; i++) {
-        const doc = this.documents[i];
-        retriever.add({ id: doc.id, text: doc.words.join(' '), source: doc.source });
-      }
-      this.hybridRetriever = retriever;
-      this.hybridDirtyFrom = this.documents.length;
-    }
+    return this.retrieveRelevantHybridFiltered(query, topK);
+  }
 
-    const hits = this.hybridRetriever.retrieve(query, Math.max(topK * 2, topK));
+  /**
+   * Retrieve only from selected source buckets. This keeps targeted strategies
+   * proportional to their own corpus instead of ranking every learned document
+   * and filtering afterward.
+   */
+  retrieveRelevantBySource(
+    query: string,
+    sources: readonly string[],
+    topK = 5,
+  ): Array<{ text: string; source: string; score: number }> {
+    const allowedSources = new Set(sources);
+    const hybridDisabled = process.env.VAI_HYBRID_RETRIEVAL === '0'
+      || process.env.VAI_DISABLE_HYBRID_RETRIEVAL === '1';
+    if (hybridDisabled) {
+      return this.retrieveRelevant(query, Math.max(topK * 4, topK), false)
+        .filter((result) => allowedSources.has(result.source))
+        .slice(0, topK);
+    }
+    return this.retrieveRelevantHybridFiltered(query, topK, (source) => allowedSources.has(source));
+  }
+
+  private retrieveRelevantHybridFiltered(
+    query: string,
+    topK: number,
+    sourceFilter?: (source: string) => boolean,
+  ): Array<{ text: string; source: string; score: number }> {
+    if (this.documents.length === 0) return [];
+    this.indexHybridDocuments();
+
+    const hits = this.hybridRetriever.retrieve(
+      query,
+      Math.max(topK * 2, topK),
+      sourceFilter ? (doc) => sourceFilter(normalizeDocumentSource(doc.source ?? '')) : undefined,
+    );
     // Emulate the legacy inverted-index candidate filter: require at least one
     // *content* token (non-stopword, non-action-word) to surface as a lexical
     // hit against the candidate doc. Prevents pure-trigram similarity and
@@ -977,11 +1041,19 @@ export class KnowledgeStore {
       if (definitionBoostRe && definitionBoostRe.test(text)) {
         score *= 1.6;
       }
-      const publicSource = source.startsWith('entry:') ? source.slice('entry:'.length) : source;
+      const publicSource = normalizeDocumentSource(source);
       scored.push({ text, source: publicSource, score });
     }
 
     return scored.sort((left, right) => right.score - left.score).slice(0, topK);
+  }
+
+  private indexHybridDocuments(): void {
+    for (let i = this.hybridDirtyFrom; i < this.documents.length; i++) {
+      const doc = this.documents[i];
+      this.hybridRetriever.add({ id: doc.id, text: doc.words.join(' '), source: doc.source });
+    }
+    this.hybridDirtyFrom = this.documents.length;
   }
 
   get documentCount(): number {
@@ -1036,6 +1108,14 @@ export class KnowledgeStore {
 
   get ngramCount(): number {
     return this.ngramCounts.size;
+  }
+
+  /**
+   * Return the live entries without materializing the much larger n-gram
+   * export payload. Callers must treat the collection as read-only.
+   */
+  listEntries(): KnowledgeEntry[] {
+    return this.entries;
   }
 
   exportData(): { entries: KnowledgeEntry[]; ngrams: Record<string, Record<string, number>> } {

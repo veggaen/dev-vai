@@ -7,9 +7,10 @@
  * All routes are prefixed with /docker.
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { execFile, type ExecFileOptions } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isLocalDevMutationAllowed } from '../security/request-trust.js';
 
 const exec = promisify(execFile);
 
@@ -17,6 +18,12 @@ const exec = promisify(execFile);
 
 const DOCKER_CMD = process.platform === 'win32' ? 'docker.exe' : 'docker';
 const EXEC_OPTS: ExecFileOptions = { timeout: 15_000, maxBuffer: 4 * 1024 * 1024 };
+
+function requireLocalDockerAccess(request: FastifyRequest, reply: FastifyReply): boolean {
+  if (isLocalDevMutationAllowed(request)) return true;
+  reply.code(403).send({ error: 'Docker management is restricted to local development clients.' });
+  return false;
+}
 
 /**
  * Execute a docker CLI command and return stdout.
@@ -106,7 +113,8 @@ function parseImageList(raw: string) {
 
 export function registerDockerRoutes(app: FastifyInstance) {
   /** Check Docker daemon availability */
-  app.get('/docker/status', async () => {
+  app.get('/docker/status', async (request, reply) => {
+    if (!requireLocalDockerAccess(request, reply)) return;
     try {
       const version = await docker('version', '--format', '{{.Server.Version}}');
       return { status: 'running', version };
@@ -124,7 +132,8 @@ export function registerDockerRoutes(app: FastifyInstance) {
   });
 
   /** List all containers (running + stopped) */
-  app.get('/docker/containers', async () => {
+  app.get('/docker/containers', async (request, reply) => {
+    if (!requireLocalDockerAccess(request, reply)) return;
     try {
       const raw = await docker('ps', '-a', '--no-trunc', '--format', '{{json .}}');
       const containers = parseContainerList(raw);
@@ -135,7 +144,8 @@ export function registerDockerRoutes(app: FastifyInstance) {
   });
 
   /** List local images */
-  app.get('/docker/images', async () => {
+  app.get('/docker/images', async (request, reply) => {
+    if (!requireLocalDockerAccess(request, reply)) return;
     try {
       const raw = await docker('images', '--format', '{{json .}}');
       const images = parseImageList(raw);
@@ -148,7 +158,8 @@ export function registerDockerRoutes(app: FastifyInstance) {
   /** Get container logs */
   app.get<{ Params: { id: string }; Querystring: { tail?: string } }>(
     '/docker/containers/:id/logs',
-    async (request) => {
+    async (request, reply) => {
+      if (!requireLocalDockerAccess(request, reply)) return;
       const rawTail = parseInt(request.query.tail ?? '100', 10);
       const tail = String(Math.min(Math.max(Number.isFinite(rawTail) ? rawTail : 100, 1), 10000));
       try {
@@ -163,7 +174,8 @@ export function registerDockerRoutes(app: FastifyInstance) {
   /** Start a container */
   app.post<{ Params: { id: string } }>(
     '/docker/containers/:id/start',
-    async (request) => {
+    async (request, reply) => {
+      if (!requireLocalDockerAccess(request, reply)) return;
       try {
         await docker('start', request.params.id);
         return { ok: true };
@@ -176,7 +188,8 @@ export function registerDockerRoutes(app: FastifyInstance) {
   /** Stop a container */
   app.post<{ Params: { id: string } }>(
     '/docker/containers/:id/stop',
-    async (request) => {
+    async (request, reply) => {
+      if (!requireLocalDockerAccess(request, reply)) return;
       try {
         await docker('stop', request.params.id);
         return { ok: true };
@@ -189,7 +202,8 @@ export function registerDockerRoutes(app: FastifyInstance) {
   /** Restart a container */
   app.post<{ Params: { id: string } }>(
     '/docker/containers/:id/restart',
-    async (request) => {
+    async (request, reply) => {
+      if (!requireLocalDockerAccess(request, reply)) return;
       try {
         await docker('restart', request.params.id);
         return { ok: true };
@@ -202,7 +216,8 @@ export function registerDockerRoutes(app: FastifyInstance) {
   /** Remove a container (force) */
   app.post<{ Params: { id: string } }>(
     '/docker/containers/:id/remove',
-    async (request) => {
+    async (request, reply) => {
+      if (!requireLocalDockerAccess(request, reply)) return;
       try {
         await docker('rm', '-f', request.params.id);
         return { ok: true };

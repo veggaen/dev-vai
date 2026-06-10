@@ -205,6 +205,13 @@ export function registerConversationRoutes(
       // Verify ownership for writes
       const viewer = await auth.getViewer(request);
       const userId = viewer.user?.id ?? null;
+
+      // Claim legacy convos for the signed-in user (same as chat WS path)
+      if (isPlatformAuthEnabled(auth) && viewer.authenticated && userId && conversation && !conversation.ownerUserId) {
+        chatService.assignOwnerIfLegacy(request.params.id, userId);
+        conversation = chatService.getConversation(request.params.id)!;
+      }
+
       const access = authorizeConversationAccess({
         conversation,
         viewer,

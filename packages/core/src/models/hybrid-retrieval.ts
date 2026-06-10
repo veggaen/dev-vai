@@ -39,6 +39,21 @@ export interface HybridIndexStats {
   readonly vocabularySize: number;
 }
 
+export interface HybridRetrieverOptions {
+  /**
+   * Score only documents with a lexical query hit when one exists. This is
+   * useful for large corpora whose caller rejects BM25-zero results anyway.
+   * Queries without lexical hits still fall back to the full fuzzy scan.
+   */
+  readonly candidateMode?: 'all' | 'lexical-first';
+  /** Optional lexical token filter used only while selecting candidates. */
+  readonly candidateTokenFilter?: (token: string) => boolean;
+  /** Maximum documents to score after lexical candidate generation. */
+  readonly candidateBudget?: number;
+  /** Maximum lexical candidates to rerank with the more expensive trigram kernel. */
+  readonly rerankBudget?: number;
+}
+
 const BM25_K1 = 1.5;
 const BM25_B = 0.75;
 const TRIGRAM_WEIGHT = 0.35;
@@ -67,18 +82,30 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 export class HybridRetriever {
   private docs: HybridDocument[] = [];
   private docTokens: string[][] = [];
-  private docTrigrams: Set<string>[] = [];
+  private docTermFreqs: Array<Map<string, number>> = [];
+  private docTrigrams: Array<Set<string> | null> = [];
   private docLengths: number[] = [];
   private docFreq = new Map<string, number>();
+  private tokenToDocIndices = new Map<string, Set<number>>();
   private totalDocLength = 0;
+
+  constructor(private readonly options: HybridRetrieverOptions = {}) {}
 
   add(doc: HybridDocument): void {
     const tokens = tokenize(doc.text);
-    const tgs = trigrams(doc.text);
+    const tgs = this.options.candidateMode === 'lexical-first' ? null : trigrams(doc.text);
     const unique = new Set(tokens);
-    for (const t of unique) this.docFreq.set(t, (this.docFreq.get(t) ?? 0) + 1);
+    const docIdx = this.docs.length;
+    const termFreq = new Map<string, number>();
+    for (const t of tokens) termFreq.set(t, (termFreq.get(t) ?? 0) + 1);
+    for (const t of unique) {
+      this.docFreq.set(t, (this.docFreq.get(t) ?? 0) + 1);
+      if (!this.tokenToDocIndices.has(t)) this.tokenToDocIndices.set(t, new Set());
+      this.tokenToDocIndices.get(t)!.add(docIdx);
+    }
     this.docs.push(doc);
     this.docTokens.push(tokens);
+    this.docTermFreqs.push(termFreq);
     this.docTrigrams.push(tgs);
     this.docLengths.push(tokens.length);
     this.totalDocLength += tokens.length;
@@ -91,9 +118,11 @@ export class HybridRetriever {
   clear(): void {
     this.docs = [];
     this.docTokens = [];
+    this.docTermFreqs = [];
     this.docTrigrams = [];
     this.docLengths = [];
     this.docFreq.clear();
+    this.tokenToDocIndices.clear();
     this.totalDocLength = 0;
   }
 
@@ -111,10 +140,8 @@ export class HybridRetriever {
     if (n === 0) return 0;
     const avgdl = this.totalDocLength / n;
     const dl = this.docLengths[docIdx];
-    const docTok = this.docTokens[docIdx];
     let score = 0;
-    const termFreq = new Map<string, number>();
-    for (const t of docTok) termFreq.set(t, (termFreq.get(t) ?? 0) + 1);
+    const termFreq = this.docTermFreqs[docIdx];
     for (const q of queryTokens) {
       const tf = termFreq.get(q) ?? 0;
       if (tf === 0) continue;
@@ -126,7 +153,7 @@ export class HybridRetriever {
     return score;
   }
 
-  retrieve(query: string, topK = 5): HybridScore[] {
+  retrieve(query: string, topK = 5, docFilter?: (doc: HybridDocument) => boolean): HybridScore[] {
     if (this.docs.length === 0) return [];
     const qTokens = tokenize(query);
     const qTri = trigrams(query);
@@ -136,15 +163,53 @@ export class HybridRetriever {
     const rawTri: number[] = new Array(this.docs.length);
     let maxBm25 = 0;
     let maxTri = 0;
-    for (let i = 0; i < this.docs.length; i++) {
+    const lexicalCandidateWeights = new Map<number, number>();
+    if (this.options.candidateMode === 'lexical-first') {
+      const candidateTokens = this.options.candidateTokenFilter
+        ? qTokens.filter(this.options.candidateTokenFilter)
+        : qTokens;
+      for (const token of candidateTokens) {
+        const docIndices = this.tokenToDocIndices.get(token);
+        if (!docIndices) continue;
+        const rarityWeight = 1 / docIndices.size;
+        for (const docIdx of docIndices) {
+          if (docFilter && !docFilter(this.docs[docIdx])) continue;
+          lexicalCandidateWeights.set(docIdx, (lexicalCandidateWeights.get(docIdx) ?? 0) + rarityWeight);
+        }
+      }
+      if (lexicalCandidateWeights.size === 0) return [];
+    }
+    const candidateBudget = Math.max(topK, this.options.candidateBudget ?? Number.POSITIVE_INFINITY);
+    const candidateIndices = lexicalCandidateWeights.size > 0
+      ? [...lexicalCandidateWeights.entries()]
+          .sort((left, right) => right[1] - left[1] || left[0] - right[0])
+          .slice(0, candidateBudget)
+          .map(([docIdx]) => docIdx)
+      : this.docs.flatMap((doc, index) => !docFilter || docFilter(doc) ? [index] : []);
+    for (const i of candidateIndices) {
       rawBm25[i] = this.bm25Score(qTokens, i);
-      rawTri[i] = jaccard(qTri, this.docTrigrams[i]);
+    }
+    const rerankBudget = this.options.candidateMode === 'lexical-first'
+      ? Math.max(topK, this.options.rerankBudget ?? candidateIndices.length)
+      : candidateIndices.length;
+    const rerankIndices = candidateIndices.length > rerankBudget
+      ? [...candidateIndices]
+          .sort((left, right) =>
+            rawBm25[right] - rawBm25[left]
+            || (lexicalCandidateWeights.get(right) ?? 0) - (lexicalCandidateWeights.get(left) ?? 0)
+            || left - right)
+          .slice(0, rerankBudget)
+      : candidateIndices;
+    for (const i of rerankIndices) {
+      const docTrigrams = this.docTrigrams[i] ?? trigrams(this.docs[i].text);
+      this.docTrigrams[i] = docTrigrams;
+      rawTri[i] = jaccard(qTri, docTrigrams);
       if (rawBm25[i] > maxBm25) maxBm25 = rawBm25[i];
       if (rawTri[i] > maxTri) maxTri = rawTri[i];
     }
 
     const scored: HybridScore[] = [];
-    for (let i = 0; i < this.docs.length; i++) {
+    for (const i of rerankIndices) {
       const bNorm = maxBm25 === 0 ? 0 : rawBm25[i] / maxBm25;
       const tNorm = maxTri === 0 ? 0 : rawTri[i] / maxTri;
       const blended = BM25_WEIGHT * bNorm + TRIGRAM_WEIGHT * tNorm;

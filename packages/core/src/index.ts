@@ -2,6 +2,7 @@
 export { getDb, createDb, resetDbInstance, getRawDb } from './db/client.js';
 export type { VaiDatabase } from './db/client.js';
 export * as schema from './db/schema.js';
+export { and, desc, eq, gt, inArray, isNull, lt, or } from 'drizzle-orm';
 
 // Errors
 export { VaiError, VaiValidationError, type VaiErrorCode } from './errors/vai-errors.js';
@@ -37,7 +38,32 @@ export type { AtomicFact, FactType, SubPattern, Connection, DuplicateGroup, Hygi
 
 // Chat
 export { ChatService } from './chat/service.js';
-export type { ImageInput, ChatServiceOptions, ChatPromptRewriteOverrides } from './chat/service.js';
+export type {
+  ImageInput,
+  ChatServiceOptions,
+  ChatPromptRewriteOverrides,
+  ResponseReviewInput,
+  ResponseReviewResult,
+  ResponseReviewer,
+} from './chat/service.js';
+
+export {
+  selectApplicableGuidance,
+  toTurnGuidance,
+  salientTokens,
+  InMemoryGuidanceStore,
+} from './chat/route-guidance.js';
+export type {
+  RouteGuidance,
+  TurnSignals,
+  SelectGuidanceOptions,
+  ActorInvitation,
+  ActorPermissions,
+  ActorSession,
+  ActorContribution,
+  ActorContributionPayload,
+  GuidanceStore,
+} from './chat/route-guidance.js';
 export type { ConversationRecord, MessageRecord, ImageRecord } from './chat/types.js';
 export {
   hasExplicitSoftwareExecutionAnchor,
@@ -88,6 +114,103 @@ export type { BuilderPreviewQualityInput, BuilderPreviewQualityReport, BuilderPr
 export type { ConversationMode } from './chat/modes.js';
 export { resolveChatPromptRewriteConfig, rewriteChatPrompt } from './chat/prompt-rewrite.js';
 export type { ChatPromptRewriteResult } from './chat/prompt-rewrite.js';
+export {
+  reduceConversationContract,
+  buildContractSystemPrelude,
+  CONVERSATION_CONTRACT_JSON_SCHEMA,
+} from './chat/conversation-contract.js';
+export type {
+  ConversationContract,
+  ContractConstraint,
+  ContractDecision,
+  Correction,
+  OutputFormatContract,
+  OutputFormatKind,
+  ConstraintKind,
+  LedgerStatus,
+} from './chat/conversation-contract.js';
+export { reviewTurnSecurity, SECURITY_REVIEW_BUDGET_MS } from './chat/security-review.js';
+
+// Friend Review Panel — Qwen + other AIs review a draft before release and
+// return one consolidated notice. See docs/capabilities/friend-review-panel.md.
+export {
+  runFriendReviewPanel,
+  aggregateVerdicts,
+  createModelReviewer,
+  createGrokFriendReviewer,
+  parseFriendVerdict,
+  toResponseReviewer as friendPanelToResponseReviewer,
+} from './friend-review/index.js';
+export type {
+  FriendVerdictKind,
+  FriendReviewOutcome,
+  FriendReviewInput,
+  FriendVerdict,
+  FriendReviewNotice,
+  FriendReviewer,
+  RunFriendReviewPanelOptions,
+  ModelReviewerOptions,
+  GrokFriendReviewerOptions,
+  FriendChannelAsk,
+  PanelResponseReviewerOptions,
+} from './friend-review/index.js';
+
+// SCIS Consensus Council — topic-routed council of models reaches an ephemeral
+// consensus (ship/act/escalate) on a Vai draft. See docs/capabilities/scis-consensus-council.md.
+export {
+  routeTopic,
+  selectMembers,
+  reachConsensus,
+  runCouncil,
+  convene,
+  toCouncilThinking,
+  createCouncilMember,
+  parseCouncilNote,
+} from './consensus/index.js';
+export type {
+  CouncilTopic,
+  CouncilAction,
+  CouncilOutcome,
+  CouncilVerdict,
+  CouncilInput,
+  CouncilMemberNote,
+  CouncilConsensus,
+  CouncilMember,
+  CouncilThinking,
+  CouncilRoster,
+  RunCouncilOptions,
+  CouncilMemberOptions,
+} from './consensus/index.js';
+export { tryEmitConversationReasoning } from './chat/conversation-reasoning.js';
+export {
+  LIVE_CONTEXT_MAX_AGE_MS,
+  getExplicitGrokFriendPrompt,
+  getRequestedLiveContextFields,
+  isWorkspaceDeltaQuestion,
+  tryEmitAttachedLiveContextResponse,
+  tryEmitBridgeCapabilityAudit,
+  tryEmitPrivateLiveContextResponse,
+} from './chat/bridge-evidence-discipline.js';
+export type { AttachedLiveContextEvidence } from './chat/bridge-evidence-discipline.js';
+export type { LiveContextField } from './chat/bridge-evidence-discipline.js';
+export type {
+  ConversationReasoningKind,
+  ConversationReasoningReply,
+  ConversationReasoningRequest,
+} from './chat/conversation-reasoning.js';
+export type {
+  SecurityReviewResult,
+  SecurityReviewInput,
+  SecurityIncident,
+  SecurityFamily,
+  SecuritySeverity,
+} from './chat/security-review.js';
+export { runDimensionClusterBench } from './eval/dimension-cluster-bench.js';
+export type {
+  DimensionClusterScenario,
+  DimensionClusterBenchResult,
+  DimensionClusterReport,
+} from './eval/dimension-cluster-bench.js';
 
 export {
   AnthropicAdapter,
@@ -103,6 +226,10 @@ export type { IngestResult, RawCapture } from './ingest/pipeline.js';
 export { scrapeWebPage, extractLinks } from './ingest/web.js';
 export { fetchYouTubeTranscript, extractVideoId, createYouTubeCapture } from './ingest/youtube.js';
 export { fetchGitHubRepo, deepFetchGitHubRepo, parseGitHubUrl, createGitHubCapture } from './ingest/github.js';
+
+// Network Safety
+export { assertPublicHostname, isPrivateNetworkAddress, safeFetch, validatePublicUrl } from './network/safe-fetch.js';
+export type { LookupAddress, LookupAll, SafeFetchOptions } from './network/safe-fetch.js';
 
 // Search Pipeline (Perplexity-style structured search)
 export { SearchPipeline, buildSearchPlan, validateSearchUrl, scoreDomain, scanContentSafety, contentFingerprint, assessUrl, DEFAULT_SEARCH_CONFIG } from './search/index.js';

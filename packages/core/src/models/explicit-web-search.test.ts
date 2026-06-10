@@ -19,4 +19,10 @@ describe('isExplicitWebSearchRequest', () => {
     expect(isExplicitWebSearchRequest('Compare Base44 and Perplexity and tell me what to build')).toBe(false);
     expect(isExplicitWebSearchRequest('Plan the first product loop for VeggaAI')).toBe(false);
   });
+
+  it('matches research imperatives', () => {
+    expect(isExplicitWebSearchRequest('do research on it')).toBe(true);
+    expect(isExplicitWebSearchRequest('look it up')).toBe(true);
+    expect(isExplicitWebSearchRequest('you should find it online pizza bakeren hommersåk')).toBe(true);
+  });
 });

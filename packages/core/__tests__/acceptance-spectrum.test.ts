@@ -57,6 +57,7 @@ describe('A4 — typo / dictation normalizer extensions', () => {
     ['djnago ORM relations', 'django'],
     ['vietst snapshot setup', 'vitest'],
     ['tyepscript generics in react', 'typescript'],
+    ['typesript node cli imports', 'typescript'],
   ];
   for (const [input, expected] of cases) {
     it(`normalizes "${input}" → contains "${expected}"`, () => {
@@ -71,6 +72,24 @@ describe('A4 — typo / dictation normalizer extensions', () => {
     expect(out).toContain('react');
     expect(out).toContain('typescript');
     expect(out).toContain('tailwind');
+  });
+
+  it('carries a requested language through a spoken self-correction', () => {
+    const out = normalizeInputForUnderstanding(
+      'can you write a TypeScript helper that reverses a string, wait actually make it reverse the words in a sentence, not the characters',
+    ).toLowerCase();
+    expect(out).toContain('reverse the words');
+    expect(out).toContain('typescript');
+  });
+
+  // Voice/dictation contractions (user speaking, not typing)
+  it('expands common spoken contractions for understanding', () => {
+    const out = normalizeInputForUnderstanding("i'm gonna build a react app and i wanna use tailwind").toLowerCase();
+    expect(out).toContain('going to');
+    expect(out).toContain('want to');
+    const out2 = normalizeInputForUnderstanding('dunno how but i gotta fix the build').toLowerCase();
+    expect(out2).toContain("don't know");
+    expect(out2).toContain('got to');
   });
 });
 

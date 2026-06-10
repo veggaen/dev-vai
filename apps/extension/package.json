@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
-    "typecheck": "tsc --noEmit -p .wxt/tsconfig.json",
+    "typecheck": "tsc --noEmit",
     "zip": "wxt zip"
   },
   "dependencies": {

@@ -2,15 +2,10 @@ export function tryEmitBoundaryResponse(input: { content: string }): string | nu
   const text = input.content.trim();
   if (!text) return null;
 
-  if (/\b(?:crushing|severe|heavy)\s+chest\s+pain\b|\bchest\s+pain\b[\s\S]{0,80}\b(?:shortness of breath|can't breathe|cannot breathe|dizzy|sweating|left arm|jaw)\b/i.test(text)) {
-    return [
-      'Treat this as urgent: call emergency services now (112 in Norway/EU, 911 in the US) or have someone take you to emergency care immediately.',
-      '',
-      'Chest pain with shortness of breath can be a heart or lung emergency. Do not wait to see if it passes, do not drive yourself if you feel faint, and do not rely on chat advice for this.',
-      '',
-      'If you can, tell the dispatcher your age, symptoms, when it started, medications, and whether you have heart/lung history.',
-    ].join('\n');
-  }
+  // NOTE: acute medical-emergency handling (chest pain + shortness of breath)
+  // moved upstream into `security-review.ts` as a high-severity safety
+  // incident, so it runs ahead of every router. Keep this handler focused on
+  // ordinary topical boundaries (legal disputes, local providers, hardware).
 
   // Only treat this as a legal-dispute question when there's an actual dispute
   // signal — not just the bare word "agreement". Otherwise "what was the Paris

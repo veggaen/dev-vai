@@ -57,7 +57,8 @@ export function lookupCountryKeyFromCapitalPrompt(body: string): string | null {
 }
 
 export function lookupCountryKeyFromCurrencyPrompt(body: string): string | null {
-  const match = body.match(/\b(?:iso\s+)?currency\s+code\s+of\s+([a-z][a-z\s]{1,30}?)(?:\?|\.|$)/i);
+  const match = body.match(/\b(?:iso\s+)?currency\s+code\s+(?:of|for)\s+([a-z][a-z\s]{1,30}?)(?:\?|\.|$)/i)
+    ?? body.match(/\b(?:iso\s+)?currency\s+code\s+does\s+([a-z][a-z\s]{1,30}?)\s+use\b/i);
   if (!match) return null;
   const key = normalizeCountryKey(match[1]);
   return COUNTRY_FACTS[key] ? key : null;

@@ -175,6 +175,167 @@ describe('VaiEngine', () => {
     expect(response.message.content.toLowerCase()).toContain('hva skjer');
   });
 
+  it('keeps bare contextual cues anchored when the prior answer was not grounded', async () => {
+    engine = new VaiEngine({ testMode: true });
+    const response = await engine.chat({
+      messages: [
+        { role: 'user', content: 'microtransactions after a long break worth caring about?' },
+        { role: 'assistant', content: "I don't have a confident answer for that yet." },
+        { role: 'user', content: 'how so?' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toMatch(/microtransactions/i);
+    expect(response.message.content).not.toMatch(/cache overview|VeggaAI|role.based benchmark/i);
+    expect(engine.lastResponseMeta?.strategy).toBe('contextual-cue');
+  });
+
+  it('does not recursively stack contextual continuation wrappers', async () => {
+    engine = new VaiEngine({ testMode: true });
+    const response = await engine.chat({
+      messages: [
+        { role: 'user', content: 'electric vs hybrid commute cars pros' },
+        { role: 'assistant', content: 'For a daily commute, hybrids are low-friction if charging is awkward.' },
+        { role: 'user', content: 'how so?' },
+        { role: 'assistant', content: 'Staying with **electric vs hybrid commute cars pros**: For a daily commute, hybrids are low-friction if charging is awkward.' },
+        { role: 'user', content: 'why though?' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content.match(/Staying with/g) ?? []).toHaveLength(1);
+    expect(response.message.content).toContain('For a daily commute');
+    expect(engine.lastResponseMeta?.strategy).toBe('contextual-cue');
+  });
+
+  it('recalls a business phone number from the prior assistant listing without model guessing', async () => {
+    engine = new VaiEngine({ testMode: true });
+    const response = await engine.chat({
+      messages: [
+        { role: 'user', content: 'what are good restaurants in Hommersåk Norway?' },
+        {
+          role: 'assistant',
+          content: [
+            '- **Pizzabakeren Hommersåk** - pizza. Phone: +47 51 62 74 00. [1]',
+            '- **Al Forno** - italian. Phone: +47 41 77 77 17. [2]',
+          ].join('\n'),
+        },
+        { role: 'user', content: 'what was the phone number to pb hommersåk?' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toBe(
+      'The phone number for **Pizzabakeren Hommersåk** is **+47 51 62 74 00**.',
+    );
+    expect(engine.lastResponseMeta?.strategy).toBe('conversation-contact-recall');
+  });
+
+  it('keeps unsupported action questions out of builder fallback', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'does norvexa make phones?' }],
+    });
+
+    expect(response.message.content).toMatch(/enough grounded evidence|verify|instead of guessing/i);
+    expect(response.message.content).not.toMatch(/scaffold|framework|runnable build|language/i);
+  });
+
+  it('keeps unsupported streamed action questions out of builder fallback', async () => {
+    const textChunks: string[] = [];
+
+    for await (const chunk of engine.chatStream({
+      messages: [{ role: 'user', content: 'does norvexa make phones?' }],
+    })) {
+      if (chunk.type === 'text_delta' && chunk.textDelta) textChunks.push(chunk.textDelta);
+    }
+
+    const fullText = textChunks.join('');
+    expect(fullText).toMatch(/enough grounded evidence|verify|instead of guessing/i);
+    expect(fullText).not.toMatch(/scaffold|framework|runnable build|language/i);
+  });
+
+  it('does not answer an action question with an object definition dump', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'can dogs eat chocolate?' }],
+    });
+
+    expect(response.message.content).toMatch(/enough grounded evidence|verify|instead of guessing|toxic|harmful|avoid/i);
+    expect(response.message.content).not.toMatch(/from bean to bar|main types|olmec|cacao tree/i);
+  });
+
+  it('does not attach a stale personal topic to a complete action question', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'user', content: "hey, i'm vetle" },
+        { role: 'assistant', content: 'Hi **Vetle** - noted. What can I help with?' },
+        { role: 'user', content: 'does spotify have podcasts?' },
+      ],
+    });
+
+    expect(response.message.content).not.toMatch(/about Vetle/i);
+    expect(response.message.content).toMatch(/enough grounded evidence|verify|instead of guessing|podcast/i);
+  });
+
+  it('requires directional local evidence before affirming an action question', () => {
+    vi.spyOn(engine as any, 'cachedRetrieveRelevant').mockReturnValue([
+      { score: 0.9, text: 'How adidas football boots made FIFA World Cup history.', source: 'fixture' },
+    ]);
+    vi.spyOn(engine as any, 'cachedFindBestMatch').mockReturnValue(null);
+    vi.spyOn(engine as any, 'cachedFindBestTaughtMatch').mockReturnValue(null);
+
+    const answer = (engine as any).tryYesNoAnswer('does adidas make football boots?', 'does adidas make football boots?');
+
+    expect(answer).toBeNull();
+  });
+
+  it('emits no when local action evidence is explicitly negative', () => {
+    vi.spyOn(engine as any, 'cachedRetrieveRelevant').mockReturnValue([
+      { score: 0.9, text: 'Dogs should not eat chocolate because it can be toxic and harmful to them.', source: 'fixture' },
+    ]);
+    vi.spyOn(engine as any, 'cachedFindBestMatch').mockReturnValue(null);
+    vi.spyOn(engine as any, 'cachedFindBestTaughtMatch').mockReturnValue(null);
+
+    const answer = (engine as any).tryYesNoAnswer('can dogs eat chocolate?', 'can dogs eat chocolate?');
+
+    expect(answer).toMatch(/^\*\*No\*\*/);
+  });
+
+  it('does not ground copular yes-no answers on adjacent noun overlap', () => {
+    vi.spyOn(engine as any, 'cachedRetrieveRelevant').mockReturnValue([
+      { score: 0.9, text: 'A rainbow includes red, green, sky blue, blue, and purple stripes.', source: 'fixture' },
+    ]);
+    vi.spyOn(engine as any, 'cachedFindBestMatch').mockReturnValue(null);
+    vi.spyOn(engine as any, 'cachedFindBestTaughtMatch').mockReturnValue(null);
+
+    const answer = (engine as any).tryYesNoAnswer('is the sky blue?', 'is the sky blue?');
+
+    expect(answer).toBeNull();
+  });
+
+  it('answers both sides of an elliptical repeated fact lookup', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'what is the capital of france and the capital of germany?' }],
+    });
+
+    expect(response.message.content).toMatch(/Paris/i);
+    expect(response.message.content).toMatch(/Berlin/i);
+  });
+
+  it('streams both sides of an elliptical repeated fact lookup', async () => {
+    const textChunks: string[] = [];
+
+    for await (const chunk of engine.chatStream({
+      messages: [{ role: 'user', content: 'what is the capital of france and the capital of germany?' }],
+    })) {
+      if (chunk.type === 'text_delta' && chunk.textDelta) textChunks.push(chunk.textDelta);
+    }
+
+    const fullText = textChunks.join('');
+    expect(fullText).toMatch(/Paris/i);
+    expect(fullText).toMatch(/Berlin/i);
+  });
+
   it('answers frontend auth diagnostics instead of redirecting to a build menu', async () => {
     const response = await engine.chat({
       messages: [
@@ -352,6 +513,20 @@ describe('VaiEngine', () => {
 
     expect(response.message.content.trim()).toBe('Yes.');
     expect(response.message.content).not.toMatch(/invented by|Pemberton|carbonated soft drink|key points/i);
+  });
+
+  it('answers nullable TypeScript assignability from language semantics, not a loose snippet', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.chat },
+        { role: 'user', content: 'Quick sanity check: is string | null assignable to string in TypeScript?' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toMatch(/^(\*\*)?No\b/i);
+    expect(response.message.content).toMatch(/strictNullChecks/i);
+    expect(response.message.content).not.toMatch(/template literal types/i);
   });
 
   it('keeps repeated Coca-Cola yes/no corrections to the requested answer only', async () => {
@@ -547,6 +722,45 @@ describe('VaiEngine', () => {
     });
     expect(multiFollowup.message.content).toMatch(/capital first|ISO currency code/i);
     expect(multiFollowup.message.content).not.toMatch(/Rambo|First Blood/i);
+  });
+
+  it('prefers an explicit follow-up country over incidental countries in the prior answer', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.chat },
+        { role: 'user', content: 'what is 13 plus 16 minus 2, and what is the capital city of Norway?' },
+        { role: 'assistant', content: 'The result is 27. The capital of Norway is Oslo. Norway became independent from Sweden in 1905.' },
+        { role: 'user', content: 'and what currency code does Norway use? only the code this time' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toMatch(/\bNOK\b/i);
+    expect(response.message.content).not.toMatch(/\bSEK\b/i);
+  });
+
+  it('keeps every grounded sub-answer in a constrained compound request', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.chat },
+        { role: 'user', content: 'i need 2 things, 23 plus 9 minus 1, and the capital city of Denmark. answer only with the result and the city' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content.trim()).toBe('31 / Copenhagen');
+  });
+
+  it('keeps every grounded sub-answer when natural compound clauses are reordered', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.chat },
+        { role: 'user', content: 'hello quick question: tell me the capital of Sweden and also work out 10 + 10 - 6. just give me both answers pls' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content.trim()).toBe('Stockholm / 14');
   });
 
   it('keeps deeper benchmark follow-ups anchored across several turns', async () => {
@@ -1160,6 +1374,36 @@ describe('VaiEngine', () => {
     expect(response.message.content).not.toMatch(/mental health|hack the government|pathetic/i);
   });
 
+  it('routes agent self-improvement asks to Vai chat quality direction instead of inventor lookup', async () => {
+    const response = await engine.chat({
+      noLearn: true,
+      messages: [
+        { role: 'user', content: 'I am another engineering agent auditing Vai. I am unsure what the highest-leverage next change is to make Vai more helpful in real chat beyond adding facts. Pick one concrete implementation slice, explain why it matters, and give a verification plan.' },
+      ],
+    });
+
+    expect(engine.lastResponseMeta?.strategy).toBe('vai-chat-quality-direction');
+    expect(response.message.content).toMatch(/Best next task|First implementation slice|Validation loop/i);
+    expect(response.message.content).toMatch(/Vai|chat responses|context|relevance/i);
+    expect(response.message.content).toMatch(/Quality bar|Honest|Friendly|Guiding/i);
+    expect(response.message.content).not.toMatch(/famous inventions|light bulb|telephone/i);
+    expect(response.message.content).not.toMatch(/Grok|andrewrk|named pipe|Role definition for my friend/i);
+  });
+
+  it('diagnoses stuck agent-channel streaming instead of defining WebSocket', async () => {
+    const response = await engine.chat({
+      noLearn: true,
+      messages: [
+        { role: 'user', content: "I connected to Vai through a framed local pipe. The script printed 'Using DIRECT LOCAL' and then no text ever arrived; it did not fall back to WebSocket. I am unsure where to inspect first. Give me the first three code checks, not a general explanation." },
+      ],
+    });
+
+    expect(engine.lastResponseMeta?.strategy).toBe('error-diagnosis');
+    expect(response.message.content).toMatch(/scripts\/agent-speak-to-vai\.mjs|speakViaDirectLocal/i);
+    expect(response.message.content).toMatch(/done|timed out|fallback|WebSocket/i);
+    expect(response.message.content).not.toMatch(/WebSocket\*\* is a protocol|HTTP \*\*Upgrade\*\* request/i);
+  });
+
   it('includes automated teacher-loop implementation details in grounded Vai follow-ups', async () => {
     const response = await engine.chat({
       noLearn: true,
@@ -1242,6 +1486,51 @@ describe('VaiEngine', () => {
 
     expect(response.message.content).toContain('**Short version**');
     expect(response.message.content).toMatch(/React \+ Vite|shared service path|web and desktop/i);
+  });
+
+  it('compresses a natural shorter-pls follow-up before topical regeneration can expand it', async () => {
+    const prior = [
+      'Cross-checked across 1 source:',
+      '',
+      'Mortgage crisis of 2007-2008 that led to the 2008 financial crisis and the Great Recession of 2008-2009.',
+      '',
+      'Confidence: limited - I found one entity-relevant source.',
+    ].join('\n');
+    const response = await engine.chat({
+      messages: [
+        { role: 'user', content: 'what caused the 2008 financial crisis?' },
+        { role: 'assistant', content: prior },
+        { role: 'user', content: 'shorter pls' },
+      ],
+    });
+
+    expect(engine.lastResponseMeta?.strategy).toBe('format-only-followup');
+    expect(response.message.content).toBe('**Short version**\nMortgage crisis of 2007-2008 that led to the 2008 financial crisis and the Great Recession of 2008-2009.');
+    expect(response.message.content.length).toBeLessThan(prior.length);
+  });
+
+  it('compresses a natural shorter-pls follow-up on the streamed runtime path', async () => {
+    const prior = [
+      'Cross-checked across 1 source:',
+      '',
+      'Mortgage crisis of 2007-2008 that led to the 2008 financial crisis and the Great Recession of 2008-2009.',
+      '',
+      'Confidence: limited - I found one entity-relevant source.',
+    ].join('\n');
+    let streamed = '';
+    for await (const chunk of engine.chatStream({
+      messages: [
+        { role: 'user', content: 'what caused the 2008 financial crisis?' },
+        { role: 'assistant', content: prior },
+        { role: 'user', content: 'shorter pls' },
+      ],
+    })) {
+      if (chunk.type === 'text_delta' && chunk.textDelta) streamed += chunk.textDelta;
+    }
+
+    expect(engine.lastResponseMeta?.strategy).toBe('format-only-followup');
+    expect(streamed).toBe('**Short version**\nMortgage crisis of 2007-2008 that led to the 2008 financial crisis and the Great Recession of 2008-2009.');
+    expect(streamed.length).toBeLessThan(prior.length);
   });
 
   it('rewrites real-question redirects into the actual question instead of treating them as generic follow-ups', async () => {
@@ -4655,12 +4944,38 @@ describe('VaiEngine', () => {
     expect(response.message.content).toMatch(/norway|rogaland|sandnes|temperature/i);
   });
 
+  it('does not answer a Hommersåk restaurant request with generic Norway facts', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'what are good resturants in Hommersåk Norway?' }],
+    });
+
+    expect(response.message.content).not.toMatch(/capital:\s*oslo|population:\s*~?5|norway is a country/i);
+    expect(response.message.content).toMatch(/fresh|current|verify|listings|evidence/i);
+  });
+
   it('does not prioritize research for curated best-practices topics', () => {
     const shouldPrioritizeResearch = (engine as any).shouldPrioritizeResearch.bind(engine as any) as (input: string, lower: string) => boolean;
 
     expect(shouldPrioritizeResearch('what are best practices for nextjs', 'what are best practices for nextjs')).toBe(false);
     expect(shouldPrioritizeResearch('what are best practices for vite', 'what are best practices for vite')).toBe(false);
     expect(shouldPrioritizeResearch('what are best practices for typescript', 'what are best practices for typescript')).toBe(false);
+  });
+
+  it('keeps stable framework lists local unless research was explicitly requested', async () => {
+    const shouldPrioritizeResearch = (engine as any).shouldPrioritizeResearch.bind(engine as any) as (input: string, lower: string) => boolean;
+
+    expect(shouldPrioritizeResearch('list 3 popular javascript frameworks', 'list 3 popular javascript frameworks')).toBe(false);
+    expect(shouldPrioritizeResearch('search the web for list 3 popular javascript frameworks', 'search the web for list 3 popular javascript frameworks')).toBe(true);
+
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'list 3 popular javascript frameworks' }],
+    });
+
+    expect(response.message.content).toMatch(/react/i);
+    expect(response.message.content).toMatch(/vue/i);
+    expect(response.message.content).toMatch(/angular/i);
+    expect(engine.lastResponseMeta?.strategy).toBe('framework-devops');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it('does not prioritize research when strong local factual knowledge already exists', () => {
@@ -5273,6 +5588,15 @@ describe('VaiEngine', () => {
     expect(matches.length).toBeLessThanOrEqual(1);
   });
 
+  it('routes janky search-input guidance to the debounce idiom instead of Hello World', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'how do i make my search input handler less janky?' }],
+    });
+
+    expect(response.message.content).toMatch(/function debounce/i);
+    expect(response.message.content).not.toMatch(/Hello World/i);
+  });
+
   // ─── Multi-turn memory detector (capability: prose-introduction surface forms) ──
   // Pre-written test bodies. Spec: docs/capabilities/multi-turn-memory-detector.md §6.
   // Audit: artifacts/audits/multi-turn-detector-precheck-2026-04-28T07-35Z.md.
@@ -5331,6 +5655,36 @@ describe('VaiEngine', () => {
       expect(response.message.content).not.toMatch(/\bHi\s+\*\*Working\*\*/);
       expect(response.message.content).not.toMatch(/\bGot it,\s+\*\*Working\*\*/);
     });
+
+    it('§6.6b does not capture "I\'m fuzzy on CAP theorem" as the name Fuzzy', async () => {
+      const response = await engine.chat({
+        messages: [{ role: 'user', content: "i'm fuzzy on CAP theorem tradeoffs for a chat app. honest read?" }],
+      });
+
+      expect(response.message.content).not.toMatch(/Nice to meet you,\s+\*\*Fuzzy\*\*/i);
+      expect(response.message.content).toMatch(/network partition/i);
+    });
+
+      it('does not capture an emotional state as a name in a debugging request', async () => {
+        const response = await engine.chat({
+          messages: [{ role: 'user', content: 'I am overwhelmed debugging a blank React page. Where should I start?' }],
+        });
+
+        expect(response.message.content).not.toMatch(/Nice to meet you,\s+\*\*Overwhelmed\*\*/i);
+        expect(response.message.content).not.toMatch(/What would you like to do\?/i);
+      });
+
+      it.each([
+        'I am Overwhelmed, debugging a blank React page.',
+        "I'm struggling with a broken build.",
+        'I am Debugging, and the page is still blank.',
+      ])('does not treat status wording as a name: %s', async (content) => {
+        const response = await engine.chat({
+          messages: [{ role: 'user', content }],
+        });
+
+        expect(response.message.content).not.toMatch(/Nice to meet you/i);
+      });
 
     it('§6.7 preserves existing nickname-prelude path verbatim ("my nickname is mira and im going to ask")', async () => {
       // This is the audit's INDEPENDENT-classified passing turn (thr-nickname-prelude-mira).
@@ -5590,6 +5944,7 @@ describe('SkillRouter', () => {
         maxSandboxes: 2,
         sandboxDocker: false,
         ownerEmail: '',
+        adminEmails: [],
         apiKeys: [] as string[],
         authEnabled: false,
         rateLimitPerMinute: 0,

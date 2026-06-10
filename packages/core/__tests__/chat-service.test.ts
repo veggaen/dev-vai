@@ -61,6 +61,42 @@ class StubStreamAdapter implements ModelAdapter {
   }
 }
 
+class SequencedStreamAdapter implements ModelAdapter {
+  readonly displayName: string;
+  readonly supportsStreaming = true;
+  readonly supportsToolUse = false;
+  readonly requests: ChatRequest[] = [];
+  streamCalls = 0;
+
+  constructor(
+    readonly id: string,
+    private readonly responses: readonly string[],
+  ) {
+    this.displayName = id;
+  }
+
+  async chat(_request: ChatRequest): Promise<ChatResponse> {
+    return {
+      message: { role: 'assistant', content: this.responses[0] ?? '' },
+      usage: { promptTokens: 1, completionTokens: 1 },
+      finishReason: 'stop',
+      modelId: this.id,
+    };
+  }
+
+  async *chatStream(request: ChatRequest): AsyncIterable<ChatChunk> {
+    const response = this.responses[Math.min(this.streamCalls, this.responses.length - 1)] ?? '';
+    this.streamCalls += 1;
+    this.requests.push(request);
+    yield { type: 'text_delta', textDelta: response };
+    yield {
+      type: 'done',
+      usage: { promptTokens: 10, completionTokens: Math.max(1, response.split(/\s+/).length) },
+      modelId: this.id,
+    };
+  }
+}
+
 describe('ChatService', () => {
   let db: VaiDatabase;
   let chatService: ChatService;
@@ -122,6 +158,234 @@ describe('ChatService', () => {
 
     const fullText = textChunks.map((c) => c.textDelta).join('');
     expect(fullText).toBe('Hello from VeggaAI!');
+  });
+
+  it('withholds an unsupported local recommendation after friend review', async () => {
+    const registry = new ModelRegistry();
+    const primary = new StubStreamAdapter('vai:v0', [
+      { type: 'text_delta', textDelta: 'Norway is a country in Northern Europe. Its capital is Oslo.' },
+      {
+        type: 'done',
+        usage: { promptTokens: 8, completionTokens: 12 },
+        modelId: 'vai:v0',
+        thinking: { confidence: 0.9, strategy: 'factual-curated' },
+      },
+    ]);
+    const fallback = new StubStreamAdapter('mock:test', [
+      { type: 'text_delta', textDelta: 'Unverified restaurant guesses.' },
+      { type: 'done', usage: { promptTokens: 8, completionTokens: 4 }, modelId: 'mock:test' },
+    ]);
+    registry.register(primary);
+    registry.register(fallback);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['mock:test'],
+      responseReviewers: [{
+        id: 'local:qwen2.5:7b',
+        review: async () => ({
+          decision: 'reject',
+          reason: 'The draft answers Norway, not restaurants in Hommersak.',
+          requiresFreshEvidence: true,
+          confidence: 0.99,
+        }),
+      }],
+    });
+    const convId = svc.createConversation('vai:v0');
+    const chunks: ChatChunk[] = [];
+
+    for await (const chunk of svc.sendMessage(
+      convId,
+      'what are good resturants in Hommersåk Norway?',
+    )) {
+      chunks.push(chunk);
+    }
+
+    const answer = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(answer).toMatch(/current local listings|weak draft|trustworthy fresh support/i);
+    expect(answer).not.toMatch(/capital is Oslo|Northern Europe/i);
+    expect(fallback.streamCalls).toBe(0);
+    expect(chunks.some((chunk) => chunk.type === 'progress' && chunk.progress?.stage === 'friend-review')).toBe(true);
+  });
+
+  it('keeps a low-confidence cited business contact answer instead of replacing it with an ungrounded fallback', async () => {
+    const registry = new ModelRegistry();
+    const primary = new StubStreamAdapter('vai:v0', [
+      {
+        type: 'sources',
+        confidence: 0.335,
+        sources: [{
+          url: 'https://www.openstreetmap.org/node/444491228',
+          title: 'Pizzabakeren Hommersåk',
+          domain: 'openstreetmap.org',
+          snippet: 'Phone: +47 51 62 74 00.',
+          favicon: '',
+          trustTier: 'medium',
+          trustScore: 0.7,
+        }],
+      },
+      {
+        type: 'text_delta',
+        textDelta: 'The phone number for **Pizzabakeren Hommersåk** is **+47 51 62 74 00**. [1]',
+      },
+      {
+        type: 'done',
+        usage: { promptTokens: 8, completionTokens: 12 },
+        modelId: 'vai:v0',
+        thinking: { confidence: 0.335, strategy: 'research-cited' },
+      },
+    ]);
+    const fallback = new StubStreamAdapter('mock:test', [
+      { type: 'text_delta', textDelta: 'Try searching online.' },
+      { type: 'done', usage: { promptTokens: 4, completionTokens: 3 }, modelId: 'mock:test' },
+    ]);
+    registry.register(primary);
+    registry.register(fallback);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0');
+    const chunks: ChatChunk[] = [];
+
+    for await (const chunk of svc.sendMessage(
+      convId,
+      'find the phone number online for Pizzabakeren Hommersåk',
+    )) {
+      chunks.push(chunk);
+    }
+
+    const answer = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(answer).toContain('+47 51 62 74 00');
+    expect(fallback.streamCalls).toBe(0);
+    expect(chunks.some((chunk) => chunk.type === 'sources' && chunk.sources?.length === 1)).toBe(true);
+  });
+
+  it('keeps sourced contact research for an explicit online correction instead of escalating to a friend', async () => {
+    const registry = new ModelRegistry();
+    const primary = new StubStreamAdapter('vai:v0', [
+      {
+        type: 'sources',
+        confidence: 0.335,
+        sources: [{
+          url: 'https://www.openstreetmap.org/node/444491228',
+          title: 'Pizzabakeren Hommersåk',
+          domain: 'openstreetmap.org',
+          snippet: 'Phone: +47 51 62 74 00.',
+          favicon: '',
+          trustTier: 'medium',
+          trustScore: 0.7,
+        }],
+      },
+      {
+        type: 'text_delta',
+        textDelta: 'The phone number for **Pizzabakeren Hommersåk** is **+47 51 62 74 00**. [1]',
+      },
+      {
+        type: 'done',
+        usage: { promptTokens: 8, completionTokens: 12 },
+        modelId: 'vai:v0',
+        thinking: { confidence: 0.335, strategy: 'research-cited' },
+      },
+    ]);
+    const fallback = new StubStreamAdapter('mock:test', [
+      { type: 'text_delta', textDelta: 'Try searching online.' },
+      { type: 'done', usage: { promptTokens: 4, completionTokens: 3 }, modelId: 'mock:test' },
+    ]);
+    registry.register(primary);
+    registry.register(fallback);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    for await (const chunk of svc.sendMessage(
+      convId,
+      'what was the phone number to pb hommersåk?',
+    )) {
+      void chunk;
+    }
+    svc.appendAssistantMessage(
+      convId,
+      '- **Pizzabakeren Hommersåk** - pizza. Phone: +47 51 62 74 00. [1]',
+    );
+    fallback.streamCalls = 0;
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(
+      convId,
+      'you should find it online pizza bakeren hommersåk',
+    )) {
+      chunks.push(chunk);
+    }
+
+    const answer = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(answer).toContain('+47 51 62 74 00');
+    expect(primary.lastStreamRequest?.messages.at(-1)?.content).toMatch(
+      /^find the phone number online for pizza\s*bakeren hommersåk$/i,
+    );
+    expect(fallback.streamCalls).toBe(0);
+    expect(chunks.some((chunk) => chunk.type === 'sources' && chunk.sources?.length === 1)).toBe(true);
+  });
+
+  it('canonicalizes an explicit online business-contact correction only for the model request', async () => {
+    const convId = chatService.createConversation('mock:test');
+
+    for await (const chunk of chatService.sendMessage(
+      convId,
+      'what are good restaurants in hommersåk norway?',
+    )) {
+      void chunk;
+    }
+    chatService.appendAssistantMessage(
+      convId,
+      '- **Pizzabakeren Hommersåk** - pizza. Phone: +47 51 62 74 00. [1]',
+    );
+    for await (const chunk of chatService.sendMessage(
+      convId,
+      'what was the phone number to pb hommersåk?',
+    )) {
+      void chunk;
+    }
+
+    for await (const chunk of chatService.sendMessage(
+      convId,
+      'you should find it online pizza bakeren hommersåk',
+    )) {
+      void chunk;
+    }
+
+    expect(adapter.lastStreamRequest?.messages.at(-1)?.content).toBe(
+      'find the phone number online for Pizzabakeren Hommersåk',
+    );
+    const persistedUserMessages = chatService.getMessages(convId)
+      .filter((message) => message.role === 'user')
+      .map((message) => message.content);
+    expect(persistedUserMessages.at(-1)).toBe(
+      'you should find it online pizza bakeren hommersåk',
+    );
+  });
+
+  it('lets compound fact lookups reach the model instead of answering only the final clause', async () => {
+    const convId = chatService.createConversation('mock:test');
+
+    for await (const chunk of chatService.sendMessage(
+      convId,
+      'what is the capital of france and the capital of germany?',
+    )) {
+      void chunk;
+    }
+
+    expect(adapter.lastStreamRequest).toBeDefined();
+    expect(adapter.lastStreamRequest?.messages.at(-1)?.content).toBe(
+      'what is the capital of france and the capital of germany?',
+    );
   });
 
   it('synthesizes a done chunk when an adapter stream ends without one', async () => {
@@ -250,7 +514,7 @@ describe('ChatService', () => {
     const registry = new ModelRegistry();
     const vaiAdapter = new StubStreamAdapter('vai:v0', [
       { type: 'sources', sources: [], confidence: 0.2 },
-      { type: 'text_delta', textDelta: 'I do not know this one.' },
+      { type: 'text_delta', textDelta: 'A tentative partial take.' },
       { type: 'done', usage: { promptTokens: 2, completionTokens: 6 }, modelId: 'vai:v0' },
     ]);
     const externalAdapter = new StubStreamAdapter('mock:test', [
@@ -294,6 +558,39 @@ describe('ChatService', () => {
     expect(persisted).toHaveLength(2);
     expect(persisted[1].content).toBe('External answer');
     expect(persisted[1].modelId).toBe('mock:test');
+  });
+
+  it('uses confidence from the terminal done frame when no sources frame was emitted', async () => {
+    const registry = new ModelRegistry();
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      { type: 'text_delta', textDelta: 'A confident-looking but weak answer.' },
+      {
+        type: 'done',
+        usage: { promptTokens: 2, completionTokens: 6 },
+        modelId: 'vai:v0',
+        thinking: { confidence: 0.15 } as any,
+      },
+    ]);
+    const externalAdapter = new StubStreamAdapter('mock:test', [
+      { type: 'text_delta', textDelta: 'A stronger answer.' },
+      { type: 'done', usage: { promptTokens: 4, completionTokens: 3 }, modelId: 'mock:test' },
+    ]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(convId, 'Help me')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.some((chunk) => chunk.type === 'fallback_notice')).toBe(true);
+    expect(externalAdapter.streamCalls).toBe(1);
+    expect(chunks.filter((chunk) => chunk.type === 'text_delta').map((chunk) => chunk.textDelta).join(''))
+      .toBe('A stronger answer.');
   });
 
   it('does not leak discarded primary sources when a vai:v0 turn falls back', async () => {
@@ -413,6 +710,239 @@ describe('ChatService', () => {
     expect(persisted).toHaveLength(2);
     expect(persisted[1].content).toBe('Known answer');
     expect(persisted[1].modelId).toBe('vai:v0');
+  });
+
+  it('falls back from high-confidence but non-actionable vai:v0 answers on action prompts', async () => {
+    const registry = new ModelRegistry();
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      { type: 'sources', sources: [], confidence: 0.92 },
+      { type: 'text_delta', textDelta: 'This is an important area and the system should be thoughtful about it.' },
+      { type: 'done', usage: { promptTokens: 8, completionTokens: 11 }, modelId: 'vai:v0' },
+    ]);
+    const externalAdapter = new StubStreamAdapter('mock:test', [
+      { type: 'text_delta', textDelta: 'Add a service-level quality gate, then verify it with a chat-service regression test.' },
+      { type: 'done', usage: { promptTokens: 9, completionTokens: 13 }, modelId: 'mock:test' },
+    ]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(
+      convId,
+      'What is the best next engineering task to improve Vai chat responses?',
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.some((chunk) => chunk.type === 'fallback_notice')).toBe(true);
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(text).toBe('Add a service-level quality gate, then verify it with a chat-service regression test.');
+    expect(vaiAdapter.streamCalls).toBe(1);
+    expect(externalAdapter.streamCalls).toBe(1);
+    expect(svc.getMessages(convId)[1].modelId).toBe('mock:test');
+  });
+
+  it('falls back from replies that restate a debugging guidance request without helping', async () => {
+    const registry = new ModelRegistry();
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      { type: 'sources', sources: [], confidence: 0.94 },
+      { type: 'text_delta', textDelta: 'I can see you mentioned debugging a blank React page. What would you like to do?' },
+      { type: 'done', usage: { promptTokens: 8, completionTokens: 14 }, modelId: 'vai:v0' },
+    ]);
+    const externalAdapter = new StubStreamAdapter('mock:test', [
+      { type: 'text_delta', textDelta: 'Start with the browser console. Fix the first red error, then reload and verify the React root mounts.' },
+      { type: 'done', usage: { promptTokens: 10, completionTokens: 20 }, modelId: 'mock:test' },
+    ]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(
+      convId,
+      'I am overwhelmed debugging a blank React page. Where should I start?',
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.some((chunk) => chunk.type === 'fallback_notice')).toBe(true);
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(text).toMatch(/Start with the browser console/i);
+    expect(vaiAdapter.streamCalls).toBe(1);
+    expect(externalAdapter.streamCalls).toBe(1);
+  });
+
+  it('repairs an escalated debugging answer that invents a replacement project', async () => {
+    const registry = new ModelRegistry();
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      { type: 'sources', sources: [], confidence: 0.94 },
+      { type: 'text_delta', textDelta: 'I can see you mentioned debugging a blank React page. What would you like to do?' },
+      { type: 'done', usage: { promptTokens: 8, completionTokens: 14 }, modelId: 'vai:v0' },
+    ]);
+    const externalAdapter = new SequencedStreamAdapter('mock:test', [
+      [
+        'Replace the project with these files:',
+        '```json title="package.json"',
+        '{"scripts":{"start":"webpack serve"}}',
+        '```',
+        '```js title="webpack.config.js"',
+        'module.exports = {};',
+        '```',
+      ].join('\n'),
+      'Start with the browser console and capture the first red error. If there is no error, inspect the Network tab for a failed JavaScript request, then verify that the React root element exists before changing any files.',
+    ]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(
+      convId,
+      'I am overwhelmed debugging a blank React page. Where should I start?',
+    )) {
+      chunks.push(chunk);
+    }
+
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(text).toMatch(/Start with the browser console/i);
+    expect(text).not.toMatch(/package\.json|webpack\.config/i);
+    expect(externalAdapter.streamCalls).toBe(2);
+    expect(chunks.some((chunk) =>
+      chunk.type === 'progress'
+      && chunk.progress?.stage === 'quality-check'
+      && chunk.progress.status === 'done')).toBe(true);
+    expect(externalAdapter.requests[1].messages.some((message) =>
+      message.role === 'system'
+      && /failed the answer-quality check/i.test(message.content))).toBe(true);
+  });
+
+  it('uses a conservative diagnostic answer when both model drafts violate scope', async () => {
+    const registry = new ModelRegistry();
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      { type: 'sources', sources: [], confidence: 0.94 },
+      { type: 'text_delta', textDelta: 'I can see you mentioned debugging a blank React page. What would you like to do?' },
+      { type: 'done', usage: { promptTokens: 8, completionTokens: 14 }, modelId: 'vai:v0' },
+    ]);
+    const badDraft = [
+      'Use this replacement:',
+      '```html',
+      '<div id="root"></div>',
+      '```',
+      '```js',
+      'ReactDOM.render(<App />, document.getElementById("root"));',
+      '```',
+    ].join('\n');
+    const externalAdapter = new SequencedStreamAdapter('mock:test', [badDraft, badDraft]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(
+      convId,
+      'I am overwhelmed debugging a blank React page. Where should I start?',
+    )) {
+      chunks.push(chunk);
+    }
+
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(text).toMatch(/first observable browser failure/i);
+    expect(text).toMatch(/Console|Network tab|mount element/i);
+    expect(text).not.toContain('```');
+    expect(externalAdapter.streamCalls).toBe(2);
+    expect(chunks.some((chunk) =>
+      chunk.type === 'progress'
+      && /safe quality fallback/i.test(chunk.progress?.label ?? ''))).toBe(true);
+  });
+
+  it('uses a conservative humanizer answer when both model drafts lose the test contract', async () => {
+    const registry = new ModelRegistry();
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      { type: 'text_delta', textDelta: 'Pick random words for the template.' },
+      { type: 'done', usage: { promptTokens: 8, completionTokens: 7 }, modelId: 'vai:v0' },
+    ]);
+    const externalAdapter = new SequencedStreamAdapter('mock:test', [
+      'Use random names and numbers in a template.',
+      'Choose more random words and insert them into placeholders.',
+    ]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(convId, 'Help me design a humanizer for test prompts.')) {
+      chunks.push(chunk);
+    }
+
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(text).toMatch(/protect literals|protected tokens/i);
+    expect(text).toMatch(/seed|reproducible/i);
+    expect(text).toMatch(/preserve intent|semantics/i);
+    expect(externalAdapter.streamCalls).toBe(2);
+  });
+
+  it('does not surface a partial roster after two failed exhaustive-list drafts', async () => {
+    const registry = new ModelRegistry();
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      { type: 'text_delta', textDelta: 'A League of Legends account manager with auto-login.' },
+      { type: 'done', usage: { promptTokens: 8, completionTokens: 8 }, modelId: 'vai:v0' },
+    ]);
+    const partialDraft = 'Here are some common mid-lane champions: Annie, Ahri, Lux, and others.';
+    const externalAdapter = new SequencedStreamAdapter('mock:test', [partialDraft, partialDraft]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['mock:test'],
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(
+      convId,
+      'Tell me all champions that play mid lane. Give me a dotted list.',
+    )) {
+      chunks.push(chunk);
+    }
+
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(text).toMatch(/cannot verify a complete mid-lane champion roster/i);
+    expect(text).toMatch(/current authoritative source|dataset/i);
+    expect(text).not.toContain(partialDraft);
+    expect(externalAdapter.streamCalls).toBe(2);
   });
 
   it('preserves source presentation metadata from streamed source chunks', async () => {
@@ -575,6 +1105,34 @@ describe('ChatService', () => {
     const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
     expect(lastAssistant?.modelId).toBe('chat-meta:first-user');
     expect(lastAssistant?.content).toContain('"tell me about redbull"');
+  });
+
+  it('recalls an ordinal user message without invoking search or the model adapter', async () => {
+    const convId = chatService.createConversation('mock:test');
+    const thirdMessage = 'Can you tell me what the first message I wrote to you in this chat was?';
+
+    for await (const _ of chatService.sendMessage(convId, 'what are the roles or lanes called when playing 5v5 league of legends?')) { /* drain */ }
+    for await (const _ of chatService.sendMessage(convId, 'Can you also tell me all of the champions that play in the mid lane? Give me a dotted list.')) { /* drain */ }
+    for await (const _ of chatService.sendMessage(convId, thirdMessage)) { /* drain */ }
+    adapter.lastStreamRequest = undefined;
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of chatService.sendMessage(
+      convId,
+      'Yes nice, that was correct. Can you now tell me what the third message was?',
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(adapter.lastStreamRequest).toBeUndefined();
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(text).toContain(`"${thirdMessage}"`);
+
+    const lastAssistant = [...chatService.getMessages(convId)].reverse().find((message) => message.role === 'assistant');
+    expect(lastAssistant?.modelId).toBe('chat-meta:ordinal-user');
   });
 
   it('does not let constrained code snippets hijack builder app requests', async () => {

@@ -3,7 +3,13 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { buildSearchPlan, generateFollowUps, generateTopicFollowUps } from '../src/search/pipeline.js';
+import {
+  buildSearchPlan,
+  filterRelevantSnippetsForQuery,
+  generateFollowUps,
+  generateTopicFollowUps,
+  scoreSnippetRelevanceForQuery,
+} from '../src/search/pipeline.js';
 import { SearchPipeline } from '../src/search/pipeline.js';
 import {
   validateSearchUrl,
@@ -57,6 +63,14 @@ describe('buildSearchPlan', () => {
     expect(plan.intent).toBe('troubleshoot');
   });
 
+  it('detects causal intent and fans out cause-specific queries', () => {
+    const plan = buildSearchPlan('what caused the 2008 financial crisis?');
+    expect(plan.intent).toBe('causal');
+    expect(plan.entities).toEqual(['2008', 'financial', 'crisis']);
+    expect(plan.fanOutQueries.some((query) => /financial crisis causes explained/i.test(query))).toBe(true);
+    expect(plan.fanOutQueries.some((query) => /financial crisis root causes analysis/i.test(query))).toBe(true);
+  });
+
   it('falls back to general intent', () => {
     const plan = buildSearchPlan('Fastify server setup');
     expect(plan.intent).toBe('general');
@@ -72,6 +86,14 @@ describe('buildSearchPlan', () => {
     expect(plan.fanOutQueries.length).toBeGreaterThanOrEqual(2);
     expect(plan.fanOutQueries.length).toBeLessThanOrEqual(6);
     expect(plan.fanOutQueries[0]).toBe('best JavaScript testing frameworks 2025');
+  });
+
+  it('plans local restaurant questions as recommendations rather than definitions', () => {
+    const plan = buildSearchPlan('what are good resturants in Hommersåk Norway?');
+
+    expect(plan.intent).toBe('recommendation');
+    expect(plan.fanOutQueries.some((query) => /reviews menu/i.test(query))).toBe(true);
+    expect(plan.fanOutQueries.some((query) => /official opening hours/i.test(query))).toBe(true);
   });
 
   it('strips web-search wrapper instructions from explicit package freshness prompts', () => {
@@ -359,6 +381,201 @@ describe('SearchPipeline.plan', () => {
 
 // ── Full Pipeline (with mocked fetch) ──
 
+describe('entity-weighted snippet relevance', () => {
+  const snippet = (text: string, title: string, domain = 'example.com') => ({
+    text,
+    url: `https://${domain}/example`,
+    domain,
+    title,
+    favicon: '',
+    trust: { tier: 'medium' as const, score: 0.7, reason: 'test fixture' },
+    rank: 1,
+  });
+
+  it('drops a shared-subject snippet that misses the asked-for entity', () => {
+    const unrelated = snippet(
+      'Spotify canvas covers now loop in the mobile player and artists are discussing the visual update.',
+      'Spotify covers discussion',
+      'news.ycombinator.com',
+    );
+    const relevant = snippet(
+      'Spotify has podcasts, including shows and episodes that users can browse and play in the app.',
+      'Podcasts and shows on Spotify',
+      'support.spotify.com',
+    );
+
+    const unrelatedAssessment = scoreSnippetRelevanceForQuery('does spotify have podcasts?', unrelated);
+    const relevantAssessment = scoreSnippetRelevanceForQuery('does spotify have podcasts?', relevant);
+
+    expect(unrelatedAssessment.topicHits).toBe(1);
+    expect(unrelatedAssessment.matched).toBe(false);
+    expect(relevantAssessment.topicHits).toBe(2);
+    expect(relevantAssessment.matched).toBe(true);
+    expect(filterRelevantSnippetsForQuery('does spotify have podcasts?', [unrelated, relevant])).toEqual([relevant]);
+  });
+
+  it('keeps a valid single-entity definition after typo normalization', () => {
+    const relevant = snippet(
+      'Perplexity is an AI-powered search engine that answers questions with cited sources.',
+      'What is Perplexity?',
+      'perplexity.ai',
+    );
+
+    const assessment = scoreSnippetRelevanceForQuery('exsplain perplexity in simple words. include sources.', relevant);
+
+    expect(assessment.shape).toBe('definition');
+    expect(assessment.topicHits).toBe(1);
+    expect(assessment.topicCoverage).toBe(1);
+    expect(assessment.matched).toBe(true);
+  });
+
+  it('keeps short topical acronyms distinctive when broad neighboring words overlap', () => {
+    const unrelated = snippet(
+      'The Range Rover hybrid has a battery and an electric driving range for short urban trips.',
+      'Range Rover battery range',
+      'example.com',
+    );
+    const relevant = snippet(
+      'EV battery range depends on battery capacity, vehicle efficiency, temperature, and driving speed.',
+      'EV battery range explained',
+      'energy.example',
+    );
+
+    const unrelatedAssessment = scoreSnippetRelevanceForQuery('ev battery range facts', unrelated);
+    const relevantAssessment = scoreSnippetRelevanceForQuery('ev battery range facts', relevant);
+
+    expect(unrelatedAssessment.topicHits).toBe(2);
+    expect(unrelatedAssessment.matched).toBe(false);
+    expect(relevantAssessment.topicHits).toBe(3);
+    expect(relevantAssessment.matched).toBe(true);
+  });
+
+  it('requires causal evidence for causes questions', () => {
+    const merelyRelated = snippet(
+      'Bitcoin was born out of the economic crisis and its paper was published in October 2008.',
+      'Bitcoin history',
+      'example.com',
+    );
+    const investigatesCauses = snippet(
+      'The Financial Crisis Inquiry Commission was established in 2010 to investigate the causes of the 2008 financial crisis.',
+      'Financial Crisis Inquiry Commission',
+      'example.com',
+    );
+    const causal = snippet(
+      'The 2008 financial crisis was caused by risky subprime mortgages, weak lending standards, and highly leveraged financial institutions.',
+      'Causes of the 2008 financial crisis',
+      'economics.example',
+    );
+    const consequence = snippet(
+      'The 2008 financial crisis led to a severe recession and rising unemployment.',
+      'Effects of the 2008 financial crisis',
+      'economics.example',
+    );
+
+    const relatedAssessment = scoreSnippetRelevanceForQuery('2008 financial crisis causes', merelyRelated);
+    const investigationAssessment = scoreSnippetRelevanceForQuery('2008 financial crisis causes', investigatesCauses);
+    const causalAssessment = scoreSnippetRelevanceForQuery('2008 financial crisis causes', causal);
+    const naturalQuestionAssessment = scoreSnippetRelevanceForQuery('what caused the 2008 financial crisis?', causal);
+    const consequenceAssessment = scoreSnippetRelevanceForQuery('what caused the 2008 financial crisis?', consequence);
+
+    expect(relatedAssessment.shape).toBe('causal');
+    expect(relatedAssessment.shapeMatched).toBe(false);
+    expect(relatedAssessment.matched).toBe(false);
+    expect(investigationAssessment.shapeMatched).toBe(false);
+    expect(investigationAssessment.matched).toBe(false);
+    expect(causalAssessment.shapeMatched).toBe(true);
+    expect(causalAssessment.matched).toBe(true);
+    expect(naturalQuestionAssessment.shape).toBe('causal');
+    expect(naturalQuestionAssessment.matched).toBe(true);
+    expect(consequenceAssessment.shapeMatched).toBe(false);
+    expect(consequenceAssessment.matched).toBe(false);
+  });
+
+  it('keeps side-specific evidence for comparison synthesis', () => {
+    const relevant = snippet(
+      'SearXNG is a privacy-respecting metasearch engine that aggregates results from multiple search services.',
+      'SearXNG documentation',
+      'docs.searxng.org',
+    );
+
+    const assessment = scoreSnippetRelevanceForQuery(
+      'What is SearXNG and why would I use it over DuckDuckGo Instant Answer API?',
+      relevant,
+    );
+
+    expect(assessment.shape).toBe('comparison');
+    expect(assessment.topicHits).toBe(1);
+    expect(assessment.matched).toBe(true);
+  });
+
+  it('drops whole-page keyword overlap when no local passage answers the action question', () => {
+    const unrelated = snippet(
+      'Spotify was founded in Sweden. Podcasts are popular audio shows. Users are discussing mobile-player design.',
+      'Spotify community discussion',
+      'news.ycombinator.com',
+    );
+
+    const assessment = scoreSnippetRelevanceForQuery('does spotify have podcasts?', unrelated);
+
+    expect(assessment.shape).toBe('yes-no');
+    expect(assessment.shapeMatched).toBe(false);
+    expect(assessment.matched).toBe(false);
+  });
+
+  it('does not treat the predicate as a substitute for the missing subject', () => {
+    const unrelated = snippet(
+      'In a traditional cappuccino, espresso and milk foam make up the finished coffee drink.',
+      'Cappuccino',
+      'en.wikipedia.org',
+    );
+
+    const assessment = scoreSnippetRelevanceForQuery('does starbucks make cappuccino?', unrelated);
+
+    expect(assessment.topicHits).toBe(1);
+    expect(assessment.shapeMatched).toBe(false);
+    expect(assessment.matched).toBe(false);
+  });
+
+  it('does not treat a forum question as evidence for an affirmative answer', () => {
+    const unrelated = snippet(
+      "A few questions for anyone at Spotify: Why isn't there a list of new episodes from podcasts you follow? Every other podcast service has this.",
+      'Ask HN: Why is the Spotify UX so horrible?',
+      'news.ycombinator.com',
+    );
+
+    const assessment = scoreSnippetRelevanceForQuery('does spotify have podcasts?', unrelated);
+
+    expect(assessment.shapeMatched).toBe(false);
+    expect(assessment.matched).toBe(false);
+  });
+
+  it('does not mistake an object making history for a manufacturer relationship', () => {
+    const unrelated = snippet(
+      'How adidas football boots made FIFA World Cup history.',
+      'Football boot history',
+      'en.wikipedia.org',
+    );
+
+    const assessment = scoreSnippetRelevanceForQuery('does adidas make football boots?', unrelated);
+
+    expect(assessment.shapeMatched).toBe(false);
+    expect(assessment.matched).toBe(false);
+  });
+
+  it('keeps direct negative action evidence', () => {
+    const relevant = snippet(
+      'Dogs should not eat chocolate because it can be toxic and harmful to them.',
+      'Chocolate toxicity in dogs',
+      'veterinary.example',
+    );
+
+    const assessment = scoreSnippetRelevanceForQuery('can dogs eat chocolate?', relevant);
+
+    expect(assessment.shapeMatched).toBe(true);
+    expect(assessment.matched).toBe(true);
+  });
+});
+
 describe('SearchPipeline.search', () => {
   const originalFetch = globalThis.fetch;
 
@@ -407,6 +624,118 @@ describe('SearchPipeline.search', () => {
     expect(result.answer).toContain("couldn't find useful results");
     expect(result.rawResultCount).toBe(0);
     expect(result.audit.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('returns structured nearby venues for a misspelled local restaurant request', async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('nominatim.openstreetmap.org/search')) {
+        return {
+          ok: true,
+          json: async () => ([{
+            lat: '58.9297144',
+            lon: '5.8488049',
+            display_name: 'Hommersåk, Sandnes, Rogaland, Norway',
+          }]),
+        };
+      }
+      if (url.includes('overpass-api.de/api/interpreter')) {
+        return {
+          ok: true,
+          json: async () => ({
+            elements: [
+              {
+                type: 'node',
+                id: 6260572101,
+                tags: {
+                  amenity: 'restaurant',
+                  cuisine: 'sushi',
+                  name: 'Hommersåk Wok & Sushi Bar',
+                  outdoor_seating: 'yes',
+                },
+              },
+              {
+                type: 'node',
+                id: 13422704962,
+                tags: {
+                  amenity: 'restaurant',
+                  cuisine: 'pizza',
+                  name: 'Dolly Dimples Hommersåk',
+                  opening_hours: 'Mo-We 14:00-21:00; Th-Su 13:00-21:00',
+                },
+              },
+              {
+                type: 'node',
+                id: 444491228,
+                tags: {
+                  amenity: 'fast_food',
+                  cuisine: 'pizza',
+                  name: 'Pizzabakeren Hommersåk',
+                  delivery: 'yes',
+                },
+              },
+            ],
+          }),
+        };
+      }
+      return { ok: false };
+    });
+
+    const pipeline = new SearchPipeline({
+      maxFanOut: 1,
+      resultsPerQuery: 5,
+      readTopN: 3,
+      fetchTimeoutMs: 5000,
+    });
+    const result = await pipeline.search('what are good resturants in Hommersåk Norway?');
+
+    expect(result.plan.intent).toBe('recommendation');
+    expect(result.sources).toHaveLength(3);
+    expect(result.sources.every((source) => source.domain === 'openstreetmap.org')).toBe(true);
+    expect(result.answer).toContain('Hommersåk Wok & Sushi Bar');
+    expect(result.answer).toContain('Dolly Dimples Hommersåk');
+    expect(result.answer).toContain('cannot honestly rank which one is "best"');
+    expect(result.answer).not.toMatch(/Norway is a country|capital:\s*Oslo/i);
+  });
+
+  it('returns a cited public phone number for an explicit local business lookup', async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('nominatim.openstreetmap.org/search')) {
+        return {
+          ok: true,
+          json: async () => ([{
+            osm_type: 'node',
+            osm_id: 444491228,
+            name: 'Pizzabakeren Hommersåk',
+            display_name: 'Pizzabakeren Hommersåk, Kaiveien, Hommersåk, Sandnes, Rogaland, Norge',
+            extratags: {
+              phone: '+47 51 62 74 00',
+              cuisine: 'pizza',
+              delivery: 'yes',
+            },
+            namedetails: {
+              name: 'Pizzabakeren Hommersåk',
+              brand: 'Pizzabakeren',
+            },
+          }]),
+        };
+      }
+      return { ok: false };
+    });
+
+    const pipeline = new SearchPipeline({
+      maxFanOut: 1,
+      resultsPerQuery: 3,
+      readTopN: 1,
+      fetchTimeoutMs: 5000,
+    });
+    const result = await pipeline.search('find the phone number online for Pizzabakeren Hommersåk');
+
+    expect(result.plan.intent).toBe('current');
+    expect(result.sources).toHaveLength(1);
+    expect(result.sources[0]?.url).toBe('https://www.openstreetmap.org/node/444491228');
+    expect(result.answer).toContain('**Pizzabakeren Hommersåk**');
+    expect(result.answer).toContain('**+47 51 62 74 00**');
+    expect(result.answer).toContain('[1]');
   });
 
   it('falls through to DuckDuckGo when configured SearXNG returns no usable results', async () => {
@@ -470,8 +799,77 @@ describe('SearchPipeline.search', () => {
 
     expect(result.answer).toContain('SearXNG is a privacy-respecting metasearch engine');
     expect(result.answer).toContain('prefer SearXNG over DuckDuckGo Instant Answer API');
-    expect(result.answer).toMatch(/\*\*Sources\*\*|Sources:/);
+    expect(result.answer).not.toMatch(/\*\*Sources\*\*|Sources:/);
     expect(result.answer).not.toContain('**Search:');
+  });
+
+  it('selects causal passages for causes questions instead of related history', async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('api.duckduckgo.com')) {
+        return {
+          ok: true,
+          json: async () => ({
+            Abstract: 'The bankruptcy of Lehman Brothers on September 15, 2008 is often considered the climax of the 2008 financial crisis. The 2008 financial crisis was caused by risky subprime mortgages, weak lending standards, and highly leveraged financial institutions.',
+            AbstractSource: 'Wikipedia',
+            AbstractURL: 'https://en.wikipedia.org/wiki/Financial_crisis_of_2007%E2%80%932008',
+            RelatedTopics: [],
+          }),
+        };
+      }
+      return { ok: false };
+    });
+
+    const pipeline = new SearchPipeline({ maxFanOut: 1, fetchTimeoutMs: 5000 });
+    const result = await pipeline.search('what caused the 2008 financial crisis?');
+
+    expect(result.answer).toContain('caused by risky subprime mortgages');
+    expect(result.answer).not.toMatch(/^The bankruptcy of Lehman Brothers/i);
+  });
+
+  it('refuses context-free causal fragments instead of presenting them as conclusions', async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('api.duckduckgo.com')) {
+        return {
+          ok: true,
+          json: async () => ({
+            Abstract: 'It was also a contributor to the 2008–2011 Icelandic financial crisis and the euro area crisis.',
+            AbstractSource: 'Wikipedia',
+            AbstractURL: 'https://en.wikipedia.org/wiki/2008%E2%80%932011_Icelandic_financial_crisis',
+            RelatedTopics: [],
+          }),
+        };
+      }
+      return { ok: false };
+    });
+
+    const pipeline = new SearchPipeline({ maxFanOut: 1, fetchTimeoutMs: 5000 });
+    const result = await pipeline.search('what caused the 2008 financial crisis?');
+
+    expect(result.answer).toMatch(/did not contain a direct explanation of the cause|didn't find anything that actually matches the question shape/i);
+    expect(result.answer).not.toContain('It was also a contributor');
+  });
+
+  it('prefers stronger causal relations over vague contribution language', async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('api.duckduckgo.com')) {
+        return {
+          ok: true,
+          json: async () => ({
+            Abstract: 'Accounting methods contributed to the 2008 financial crisis. The mortgage crisis of 2007–2008 led to the 2008 financial crisis and the Great Recession of 2008–2009.',
+            AbstractSource: 'Wikipedia',
+            AbstractURL: 'https://en.wikipedia.org/wiki/2008_financial_crisis',
+            RelatedTopics: [],
+          }),
+        };
+      }
+      return { ok: false };
+    });
+
+    const pipeline = new SearchPipeline({ maxFanOut: 1, fetchTimeoutMs: 5000 });
+    const result = await pipeline.search('what caused the 2008 financial crisis?');
+    expect(result.answer).not.toContain('Accounting methods contributed');
+
+    expect(result.answer).toMatch(/^The mortgage crisis of 2007–2008 led to the 2008 financial crisis/i);
   });
 
   it('uses official PyPI metadata for explicit package-version prompts', async () => {
@@ -507,7 +905,7 @@ describe('SearchPipeline.search', () => {
         return {
           ok: true,
           json: async () => ({
-            Abstract: 'Cached test content about JavaScript.',
+            Abstract: 'JavaScript is a programming language used to create interactive behavior on web pages.',
             AbstractSource: 'Wikipedia',
             AbstractURL: 'https://en.wikipedia.org/wiki/JavaScript',
             RelatedTopics: [],
@@ -523,7 +921,10 @@ describe('SearchPipeline.search', () => {
 
     // Second call should be cache hit — faster and identical
     expect(r2.answer).toBe(r1.answer);
-    expect(r2.durationMs).toBeLessThanOrEqual(r1.durationMs + 5);
+    expect(r2.durationMs).toBeLessThanOrEqual(1);
+    expect(r2.sync.latencyMs).toBe(0);
+    expect(r2.audit[0]?.detail).toMatch(/cache hit/i);
+    expect(r2.audit.some((entry) => /no new network request/i.test(entry.detail))).toBe(true);
   });
 
   it('fires learn callback for verified results', async () => {
@@ -612,6 +1013,46 @@ describe('SearchPipeline.search', () => {
     expect(result.sources.some((source) => source.domain === 'en.wikipedia.org')).toBe(true);
     expect(result.sources.some((source) => /wrapper|clone|alternatives|helallao/i.test(`${source.title} ${source.url} ${source.text}`))).toBe(false);
     expect(result.answer).not.toMatch(/inspired by Perplexity|wrapper|clone/i);
+  });
+
+  it('filters shared-subject noise before synthesizing an entity-specific answer', async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('search.example/search?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            results: [
+              {
+                title: 'Spotify covers discussion',
+                url: 'https://news.ycombinator.com/item?id=42',
+                content: 'Spotify canvas covers now loop in the mobile player and artists are discussing the visual update.',
+              },
+              {
+                title: 'Podcasts and shows on Spotify',
+                url: 'https://support.spotify.com/article/podcasts-and-shows',
+                content: 'Spotify has podcasts, including shows and episodes that users can browse and play in the app.',
+              },
+            ],
+          }),
+        };
+      }
+      return { ok: false };
+    });
+
+    const pipeline = new SearchPipeline({
+      searxngUrl: 'https://search.example',
+      maxFanOut: 1,
+      resultsPerQuery: 2,
+      readTopN: 0,
+      fetchTimeoutMs: 5000,
+    });
+    const result = await pipeline.search('does spotify have podcasts?');
+
+    expect(result.sources).toHaveLength(1);
+    expect(result.sources[0]?.domain).toBe('support.spotify.com');
+    expect(result.answer).toContain('**Yes** - Podcasts and shows on Spotify');
+    expect(result.answer).toContain('Confidence: limited');
+    expect(result.answer).not.toContain('Spotify canvas covers');
   });
 
   it('clearCache resets the cache', async () => {

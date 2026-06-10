@@ -57,6 +57,45 @@ describe('HybridRetriever', () => {
     expect(results[0].doc.id).toBe('kubernetes');
   });
 
+  it('supports lexical-first candidate filtering for large corpora', () => {
+    const r = new HybridRetriever({ candidateMode: 'lexical-first' });
+    r.addBatch([
+      { id: 'kubernetes', text: 'Kubernetes orchestrates containers across a cluster of nodes.' },
+      { id: 'weather',    text: 'The forecast calls for rain on tuesday with a chance of thunderstorms.' },
+    ]);
+    expect(r.retrieve('kubernetes cluster', 2)[0].doc.id).toBe('kubernetes');
+    expect(r.retrieve('kubrnetes orchestrtion', 2)).toEqual([]);
+  });
+
+  it('prioritizes rare lexical hits when a candidate budget is configured', () => {
+    const r = new HybridRetriever({ candidateMode: 'lexical-first', candidateBudget: 1 });
+    r.addBatch([
+      { id: 'common-a', text: 'runtime defaults should stay documented' },
+      { id: 'common-b', text: 'runtime defaults should stay observable' },
+      { id: 'rare', text: 'runtime lantern containment review' },
+    ]);
+    expect(r.retrieve('runtime lantern', 1)[0].doc.id).toBe('rare');
+  });
+
+  it('applies source filters before ranking lexical candidates', () => {
+    const r = new HybridRetriever({ candidateMode: 'lexical-first' });
+    r.addBatch([
+      { id: 'bootstrap', text: 'runtime lantern containment review', source: 'bootstrap' },
+      { id: 'taught', text: 'runtime lantern exposure decision', source: 'user-taught' },
+    ]);
+    const results = r.retrieve('runtime lantern', 2, (doc) => doc.source === 'user-taught');
+    expect(results.map((result) => result.doc.id)).toEqual(['taught']);
+  });
+
+  it('keeps lexical retrieval useful with a bounded trigram rerank budget', () => {
+    const r = new HybridRetriever({ candidateMode: 'lexical-first', rerankBudget: 1 });
+    r.addBatch([
+      { id: 'weak', text: 'runtime defaults should stay documented' },
+      { id: 'strong', text: 'runtime lantern containment review' },
+    ]);
+    expect(r.retrieve('runtime lantern containment', 1)[0].doc.id).toBe('strong');
+  });
+
   it('breaks ties deterministically by doc id', () => {
     const r = new HybridRetriever();
     r.addBatch([

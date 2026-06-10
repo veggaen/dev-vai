@@ -25,5 +25,5 @@ if (bundles === 'none') {
 }
 
 run('node', ['scripts/build-sidecar.mjs'], workspaceRoot);
-run('pnpm', tauriBuildArgs, desktopDir);
+run('corepack', ['pnpm', ...tauriBuildArgs], desktopDir);
 run('node', ['../../scripts/sync-desktop-build.mjs'], desktopDir);

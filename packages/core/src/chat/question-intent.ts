@@ -1,3 +1,6 @@
+import { isExplicitResearchRequest } from '../models/explicit-web-search.js';
+import { isFreshLocalRecommendationRequest } from '../models/web-conclude-policy.js';
+
 /**
  * Lightweight question-intent classifier.
  *
@@ -13,16 +16,18 @@ export type QuestionIntent =
   | 'action-yesno'    // "does/do/can/will X <verb> Y?" — whether X does something
   | 'definition'      // "what/who is X", "explain X", "tell me about X"
   | 'factual-lookup'  // "capital of X", "who invented Y", "when was Z founded"
+  | 'recommendation'  // "what are good restaurants in Hommersak?"
   | 'build'           // "build/create me a <app>"
   | 'meta'            // about the conversation itself
   | 'other';
 
 // Sentence-initial yes/no auxiliaries.
 const YESNO_AUX_RE = /^\s*(?:does|do|did|can|could|will|would|is|are|was|were|has|have|had|should|shall|may|might|am)\b/i;
+const CONVERSATIONAL_SUBJECT_RE = /^\s*(?:does|do|did|can|could|will|would|is|are|was|were|has|have|had|should|shall|may|might|am)\s+(?:you|we)\b/i;
 
 // An "action" predicate verb — distinguishes "does X MAKE Y?" (action) from a
 // bare "is X?" definitional/copular question.
-const ACTION_VERB_RE = /\b(?:makes?|made|making|sells?|sold|selling|offers?|serves?|produces?|owns?|sponsors?|ships?|delivers?|supports?|accepts?|costs?|charges?|stocks?|carr(?:y|ies)|provides?|runs?|operates?|eats?|drinks?|contains?|includes?|causes?|works?|fits?|flies|floats?|wins?|beats?|reaches?|exists?|grows?|happens?|helps?|hurts?|needs?|uses?|takes?|gives?|gets?)\b/i;
+const ACTION_VERB_RE = /\b(?:makes?|made|making|sells?|sold|selling|has|have|had|offers?|serves?|produces?|owns?|sponsors?|ships?|delivers?|supports?|accepts?|costs?|charges?|stocks?|carr(?:y|ies)|provides?|runs?|operates?|eats?|drinks?|contains?|includes?|causes?|works?|fits?|flies|floats?|wins?|beats?|reaches?|exists?|grows?|happens?|helps?|hurts?|needs?|uses?|takes?|gives?|gets?)\b/i;
 
 const META_RE = /\b(?:my|your)\s+(?:first|last|previous|earlier)\s+(?:message|question|answer|reply)|what\s+did\s+i\s+(?:say|ask|write)|(?:this|the)\s+(?:chat|conversation)\b/i;
 
@@ -41,9 +46,12 @@ export function classifyQuestionIntent(rawInput: string): QuestionIntent {
 
   if (META_RE.test(input)) return 'meta';
 
+  if (isExplicitResearchRequest(input)) return 'other';
+  if (isFreshLocalRecommendationRequest(input)) return 'recommendation';
+
   // Action yes/no requires BOTH a leading yes/no auxiliary AND an action verb,
   // so "is the sky blue?" (copular) is NOT mislabeled as action.
-  if (YESNO_AUX_RE.test(input) && ACTION_VERB_RE.test(input)) return 'action-yesno';
+  if (YESNO_AUX_RE.test(input) && !CONVERSATIONAL_SUBJECT_RE.test(input) && ACTION_VERB_RE.test(input)) return 'action-yesno';
 
   if (BUILD_RE.test(input)) return 'build';
   // Specific fact anchors win over the generic "what is X" definition pattern.
@@ -83,21 +91,65 @@ export function splitCompoundQuestion(rawInput: string): string[] | null {
   const input = rawInput
     .trim()
     .replace(/\?+\s*$/, '')
-    .replace(/^(?:(?:okay|ok|so|well|alright|right|also|actually|now|hmm|umm?|and|but|then|hey|yeah)[\s,]+){1,2}(?:[—–\-:]\s*)?/i, '')
+    .replace(/^(?:try\s+this|(?:hello[\s,]+)?quick\s+question)\s*[:,\-\s]*/i, '')
+    .replace(/^(?:(?:okay|ok|so|well|alright|right|also|actually|now|hmm|umm?|and|but|then|hey|yeah|yo)[\s,]+){1,3}(?:[—–\-:]\s*)?/i, '')
+    .replace(/^(?:try\s+this|(?:hello[\s,]+)?quick\s+question)\s*[:,\-\s]*/i, '')
+    .replace(/^(?:tell\s+me|and\s+tell\s+me|also\s+tell\s+me|hey\s+tell\s+me)\s+/i, '')
+    .replace(/^i\s+need\s+(?:two|2)\s+things?\s*[:,\-\s]*/i, '')
+    .replace(/\s+(?:reply|respond|answer|just\s+give\s+me|give\s+me)\b[\s\S]*$/i, '')
     .trim();
   if (!input) return null;
   if (/```|title=|\bpath=/.test(input)) return null; // never split code/build payloads
   if (COMPARISON_MARKER_RE.test(input)) return null; // single comparison question
 
-  const parts = input.split(/\s*,?\s+and\s+/i).map((p) => p.trim()).filter(Boolean);
-  if (parts.length < 2 || parts.length > 3) return null;
-  if (!parts.every((p) => QUESTION_START_RE.test(p))) return null;
-  if (!parts.every((p) => p.split(/\s+/).length >= 3)) return null;
+  const repeatedProperty = input.match(/^(what\s+(?:is|are)\s+the\s+)(.+?)\s+of\s+(.+?)\s+and\s+(?:the\s+)?\2\s+of\s+(.+)$/i);
+  if (repeatedProperty) {
+    const [, lead, property, firstSubject, secondSubject] = repeatedProperty;
+    return [
+      `${lead}${property} of ${firstSubject}?`,
+      `${lead}${property} of ${secondSubject}?`,
+    ];
+  }
 
-  return parts.map((p) => (p.endsWith('?') ? p : `${p}?`));
+  const parts = input.split(/\s*,?\s+and(?:\s+also)?\s+/i).map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2 || parts.length > 3) return null;
+  const normalizedParts = parts.map((part) => {
+    const cleaned = part.replace(/[,.!?\s]+$/, '').trim();
+    const arithmetic = cleaned.match(/^(?:work\s+out|calculate|compute)\s+(\d+(?:\s*(?:plus|minus|times|multiplied|divided|\+|-|\*|\/)\s*\d+)+)$/i)?.[1];
+    if (arithmetic) return `what is ${arithmetic}`;
+    const requestedFact = cleaned.replace(/^tell\s+me\s+/i, '');
+    if (/^(?:the\s+)?capital(?:\s+city)?\s+of\b/i.test(requestedFact)) return `what is ${requestedFact}`;
+    if (QUESTION_START_RE.test(cleaned)) return cleaned;
+    if (/^\d+\s+(?:plus|minus|times|multiplied|divided|\+|-|\*|\/)\b/i.test(cleaned)) return `what is ${cleaned}`;
+    if (/^(?:the\s+)?capital(?:\s+city)?\s+of\b/i.test(cleaned)) return `what is ${cleaned}`;
+    return null;
+  });
+  if (normalizedParts.some((part) => part === null)) return null;
+  if (!normalizedParts.every((part) => part!.split(/\s+/).length >= 3)) return null;
+
+  return normalizedParts.map((part) => (part!.endsWith('?') ? part! : `${part}?`));
 }
 
-/** Combine sub-answers from a split compound question into one reply. */
-export function combineCompoundAnswers(answers: readonly string[]): string {
-  return answers.map((a) => a.trim()).filter(Boolean).join('\n\n');
+/** Combine sub-answers from a split compound question into one reply.
+ * When subQuestions are supplied (and lengths match), produces a structured
+ * response with clear per-part headings so spoken "tell me X and Y" yields
+ * scannable, non-blended output. Default (no subs) preserves prior simple
+ * join for callers that don't have the parts.
+ */
+export function combineCompoundAnswers(
+  answers: readonly string[],
+  subQuestions?: readonly string[],
+): string {
+  const cleanAnswers = answers.map((a) => a.trim()).filter(Boolean);
+  if (cleanAnswers.length === 0) return '';
+  if (!subQuestions || subQuestions.length !== cleanAnswers.length) {
+    return cleanAnswers.join('\n\n');
+  }
+  return cleanAnswers
+    .map((ans, i) => {
+      const q = (subQuestions[i] ?? '').trim().replace(/\?+$/, '').trim();
+      const heading = q ? `**${q}?**` : `**Part ${i + 1}**`;
+      return `${heading}\n${ans}`;
+    })
+    .join('\n\n');
 }

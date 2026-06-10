@@ -11,6 +11,8 @@
  * Returns null when no handler matches; the normal pipeline takes over.
  */
 
+import { resolveProgrammingIdiom, isMultiConceptOrComparison, isMultiWayComparison, composeIdiomComparison, type IdiomContext, type ConceptExplainer } from './programming-idioms.js';
+
 export type FactShimResult = {
   reply: string;
   kind:
@@ -28,6 +30,7 @@ export type FactShimResult = {
     | 'fact-brand'
     | 'fact-acronym'
     | 'fact-definition'
+    | 'concept-primer'
     | 'safety-refusal';
 };
 
@@ -1154,7 +1157,10 @@ const COMPARE_PAIRS: ComparePair[] = [
 
 function tryCompare(content: string): FactShimResult | null {
   const lower = content.toLowerCase();
-  if (!/\bvs\.?\b|\bversus\b|\bcompare\b|\bshould i use\b/i.test(lower)) return null;
+  if (!/\bvs\.?\b|\bversus\b|\bcompare\b|\bcompared to\b|\bshould i use\b|\bdifference[s]? between\b/i.test(lower)) return null;
+  // A two-way curated pair must not answer a 3+ way comparison ("compare A, B,
+  // and C") — that question deserves a full multi-way answer, not "A vs B".
+  if (isMultiWayComparison(content)) return null;
   for (const { a, b, reply } of COMPARE_PAIRS) {
     const ra = new RegExp(`\\b${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
     const rb = new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
@@ -1163,6 +1169,16 @@ function tryCompare(content: string): FactShimResult | null {
     }
   }
   return null;
+}
+
+// Comparison of two well-known code idioms ("difference between debounce and
+// throttle"). Composed from the idiom table's own code + rationale, so it covers
+// both sides honestly where the curated COMPARE_PAIRS table has no entry. Returns
+// null unless exactly two distinct idioms are named under a comparison cue.
+function tryCompareIdioms(content: string, explainConcept?: ConceptExplainer): FactShimResult | null {
+  const reply = composeIdiomComparison(content, explainConcept);
+  if (!reply) return null;
+  return { reply, kind: 'compare-pair' };
 }
 
 // ── casual cheer ──────────────────────────────────────────────────────────
@@ -1498,7 +1514,17 @@ Notes:
   },
 ];
 
-function tryCodeSnippet(content: string): FactShimResult | null {
+function tryCodeSnippet(content: string, prior?: IdiomContext): FactShimResult | null {
+  // Language-aware idiom resolver first: it honors the requested language and
+  // generalizes across phrasings. Falls through to the legacy table only when
+  // it declines (no concept match, or requested language unsupported).
+  const idiom = resolveProgrammingIdiom(content, prior);
+  if (idiom) return idiom;
+  // The legacy table matches one concept per entry; like the idiom resolver it
+  // must not hijack a comparison/multi-concept question with a single snippet
+  // (e.g. "difference between debounce and throttle" should not return only the
+  // debounce helper). Defer those to the reasoning path.
+  if (isMultiConceptOrComparison(content)) return null;
   for (const { match, reply } of CODE_SNIPPETS) {
     if (match.test(content)) return { reply, kind: 'code-snippet' };
   }
@@ -1604,6 +1630,7 @@ const DEFINITION_FACTS: Record<string, string> = {
   semaphore: 'A **semaphore** is a synchronization primitive with an integer counter: threads call acquire (decrement, block if zero) and release (increment). A binary semaphore behaves like a mutex; a counting semaphore caps how many threads can use a resource at once.',
   deadlock: 'A **deadlock** is a state where two or more threads are each waiting for a resource held by another, so none of them can ever make progress. Classic preconditions: mutual exclusion, hold-and-wait, no preemption, and circular wait.',
   'race condition': 'A **race condition** is a bug whose outcome depends on the unpredictable ordering of concurrent operations. It typically appears when shared mutable state is read and written without proper synchronization.',
+  'cap theorem': 'The **CAP theorem** says that during a network partition, a distributed system must choose between **consistency** (every read sees the latest write) and **availability** (every request gets a response). For a chat app, partition tolerance is unavoidable: choose consistency for operations where conflicting state is dangerous, and availability with reconciliation for messages, presence, and other flows that can tolerate temporary divergence.',
   monad: 'A **monad** is a design pattern (originating in category theory) for sequencing computations that carry extra context \u2014 errors, async results, state, etc. Concretely it provides a `unit` (wrap a value) and `bind` (chain a function that returns a wrapped value), obeying associativity and identity laws.',
   currying: '**Currying** is transforming a function that takes multiple arguments into a chain of single-argument functions: `f(a, b, c)` becomes `f(a)(b)(c)`. Useful for partial application and point-free composition.',
   memoization: '**Memoization** is an optimization that caches the results of expensive function calls keyed by their arguments, so repeated calls with the same inputs return the cached value instead of recomputing.',
@@ -1642,19 +1669,39 @@ function tryDefinition(content: string): FactShimResult | null {
   return null;
 }
 
+function tryConceptualPrimer(content: string): FactShimResult | null {
+  if (
+    /\bcap\s+theorem\b/i.test(content)
+    && /\b(?:fuzzy|trade-?offs?|honest\s+read|explain|describe|what(?:'s|\s+is)|how\s+does)\b/i.test(content)
+  ) {
+    return { reply: DEFINITION_FACTS['cap theorem'], kind: 'concept-primer' };
+  }
+  return null;
+}
+
 // ── public entry point ───────────────────────────────────────────────────
-export function tryEmitFactShim(input: { content: string; intent?: string }): FactShimResult | null {
+export function tryEmitFactShim(input: { content: string; intent?: string; priorIdiom?: IdiomContext; codeSnippetOnly?: boolean; explainConcept?: ConceptExplainer }): FactShimResult | null {
   const content = (input.content || '').trim();
   if (!content) return null;
+
+  // The code-idiom resolver answers concrete, self-contained code requests
+  // ("the dedupe snippet in typescript"). A request this explicit is never an
+  // accidental steal of a grounded follow-up, so it runs FIRST and is allowed
+  // even when the caller restricts to code-only (a contextual follow-up that
+  // shares topic with the prior turn). This is what lets "ignore that, just
+  // give me the dedupe snippet" win over the corpus-retrieval lottery.
+  const codeSnippet = tryCodeSnippet(content, input.priorIdiom);
+  if (codeSnippet) return codeSnippet;
+  if (input.codeSnippetOnly) return null;
 
   // Always-on handlers: safety, runnable code, troubleshooting, comparisons,
   // meta, casual, how-to. These are appropriate regardless of question intent.
   const early = (
     trySafetyRefusal(content)
     || trySingleton(content)
-    || tryCodeSnippet(content)
     || tryTroubleshoot(content)
     || tryCompare(content)
+    || tryCompareIdioms(content, input.explainConcept)
     || tryMeta(content)
     || tryCasualCheer(content)
     || tryHowto(content)
@@ -1668,7 +1715,8 @@ export function tryEmitFactShim(input: { content: string; intent?: string }): Fa
   if (input.intent === 'action-yesno') return null;
 
   return (
-    tryAcronym(content)
+    tryConceptualPrimer(content)
+    || tryAcronym(content)
     || tryDefinition(content)
     || tryCompany(content)
     || tryBrand(content)

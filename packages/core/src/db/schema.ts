@@ -61,6 +61,18 @@ export const platformOauthStates = sqliteTable('platform_oauth_states', {
   providerIdx: index('idx_platform_oauth_states_provider').on(table.provider),
 }));
 
+export const platformLoginHandoffs = sqliteTable('platform_login_handoffs', {
+  id: text('id').primaryKey(),
+  codeHash: text('code_hash').notNull(),
+  userId: text('user_id').notNull().references(() => platformUsers.id),
+  targetOrigin: text('target_origin').notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+}, (table) => ({
+  codeUnique: uniqueIndex('idx_platform_login_handoffs_code_unique').on(table.codeHash),
+  userIdx: index('idx_platform_login_handoffs_user').on(table.userId),
+}));
+
 export const platformDeviceCodes = sqliteTable('platform_device_codes', {
   id: text('id').primaryKey(),
   deviceCode: text('device_code').notNull(),
@@ -276,8 +288,53 @@ export const messages = sqliteTable('messages', {
   durationMs: integer('duration_ms'),
   /** User feedback: 1 = helpful, 0 = not helpful, null = no feedback yet */
   feedback: integer('feedback'),
+  /**
+   * JSON snapshot of the DispatchPlan (steered + optional baseline/unsteered plan)
+   * for this assistant turn. This is the primary reference data for later
+   * calculating steering benefit (lift in score/choice/outcome) vs no-guidance,
+   * per-actor efficacy, and signals for re-calibration (e.g. guidance that
+   * no longer correlates with positive signals).
+   */
+  plan: text('plan'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
+
+// ---- Steering / Multi-Actor Guidance (persistent friend + agent + robot steering) ----
+
+/**
+ * Persisted RouteGuidance records. Written when a human, AI agent, or robot
+ * "steers" Vai by posting avoid/prefer hints on handlers for scopes.
+ * These become the durable reference + the load source for future turns.
+ * Analysis over these + linked message.plan data tells us if steering helped.
+ */
+export const routeGuidances = sqliteTable('route_guidances', {
+  id: text('id').primaryKey(),
+  /** Null = global steering (applies everywhere). */
+  conversationId: text('conversation_id').references(() => conversations.id),
+  from: text('from', { enum: ['human', 'ai'] }).notNull(),
+  /** Display name or actor identifier (e.g. "claude-4", "robot-arm-01", "vegge"). */
+  author: text('author'),
+  signal: text('signal', { enum: ['avoid', 'prefer'] }).notNull(),
+  handler: text('handler').notNull(),
+  note: text('note'),
+  scope: text('scope', { enum: ['class', 'conversation', 'global'] }).notNull(),
+  /** JSON string of string[] for salient tokens (class scope matching). */
+  matchTokens: text('match_tokens'),
+  intent: text('intent'),
+  weight: real('weight').notNull().default(1.0),
+  active: integer('active').notNull().default(1),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }),
+  /** The message/turn that prompted this steering action (for lineage + analysis). */
+  originMessageId: text('origin_message_id').references(() => messages.id),
+  /** How many turns this guidance has actually been applied to (reference metric). */
+  appliedCount: integer('applied_count').notNull().default(0),
+  lastAppliedAt: integer('last_applied_at', { mode: 'timestamp' }),
+}, (table) => ({
+  convoIdx: index('idx_route_guidances_convo').on(table.conversationId),
+  activeScopeIdx: index('idx_route_guidances_active_scope').on(table.active, table.scope),
+  createdIdx: index('idx_route_guidances_created').on(table.createdAt),
+}));
 
 // ---- Source Ingestion ----
 

@@ -4,6 +4,7 @@ import { createDb } from '@vai/core';
 import { registerFeedbackRoutes } from '../src/routes/feedback.js';
 import { registerIngestRoutes } from '../src/routes/ingest.js';
 import { registerSearchRoutes } from '../src/routes/search.js';
+import { registerDockerRoutes } from '../src/routes/docker.js';
 
 describe('Boundary Validation Routes', () => {
   let app: FastifyInstance;
@@ -49,6 +50,7 @@ describe('Boundary Validation Routes', () => {
     registerSearchRoutes(app, searchPipeline as any);
     registerFeedbackRoutes(app, createDb(':memory:'));
     registerIngestRoutes(app, ingestPipeline as any);
+    registerDockerRoutes(app);
 
     await app.ready();
   });
@@ -108,6 +110,29 @@ describe('Boundary Validation Routes', () => {
     expect(ingestPipeline.ingest).not.toHaveBeenCalled();
   });
 
+  it('blocks private ingest destinations before network work runs', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/ingest/web',
+      payload: { url: 'http://127.0.0.2/private' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: 'unsafe_url' });
+    expect(ingestPipeline.ingest).not.toHaveBeenCalled();
+  });
+
+  it('blocks private discovery seeds before network work runs', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/discover',
+      payload: { url: 'http://127.0.0.1/private' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: 'unsafe_url' });
+  });
+
   it('returns ingest dashboard metrics for the knowledge diagnostics panel', async () => {
     const res = await app.inject({
       method: 'GET',
@@ -138,6 +163,28 @@ describe('Boundary Validation Routes', () => {
     expect(res.statusCode).toBe(403);
     expect(res.json()).toMatchObject({ error: expect.stringMatching(/restricted to local clients/i) });
     expect(ingestPipeline.ingest).not.toHaveBeenCalled();
+  });
+
+  it('blocks remote reprocessing requests without trusted access', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/reprocess',
+      remoteAddress: '8.8.8.8',
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(ingestPipeline.reprocessAll).not.toHaveBeenCalled();
+  });
+
+  it('blocks remote Docker management requests', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/docker/containers/example/remove',
+      remoteAddress: '8.8.8.8',
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: expect.stringMatching(/restricted to local development/i) });
   });
 
   it('allows remote capture requests with the trusted capture key', async () => {

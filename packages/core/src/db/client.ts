@@ -58,6 +58,15 @@ const CREATE_TABLES_SQL = `
     created_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS platform_login_handoffs (
+    id TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL UNIQUE,
+    user_id TEXT NOT NULL REFERENCES platform_users(id),
+    target_origin TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS platform_device_codes (
     id TEXT PRIMARY KEY,
     device_code TEXT NOT NULL UNIQUE,
@@ -83,6 +92,8 @@ const CREATE_TABLES_SQL = `
     client_type TEXT NOT NULL,
     launch_target TEXT NOT NULL,
     capabilities TEXT,
+    available_models TEXT,
+    available_chat_info TEXT,
     last_seen_at INTEGER,
     last_polled_at INTEGER,
     created_via_device_code_id TEXT,
@@ -286,6 +297,7 @@ const CREATE_TABLES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_platform_accounts_user ON platform_accounts(user_id);
   CREATE INDEX IF NOT EXISTS idx_platform_sessions_user ON platform_sessions(user_id);
   CREATE INDEX IF NOT EXISTS idx_platform_oauth_states_provider ON platform_oauth_states(provider);
+  CREATE INDEX IF NOT EXISTS idx_platform_login_handoffs_user ON platform_login_handoffs(user_id);
   CREATE INDEX IF NOT EXISTS idx_platform_device_codes_status ON platform_device_codes(status);
   CREATE INDEX IF NOT EXISTS idx_platform_companion_clients_user ON platform_companion_clients(user_id);
   CREATE INDEX IF NOT EXISTS idx_platform_companion_clients_user_target ON platform_companion_clients(user_id, launch_target);
@@ -387,6 +399,14 @@ const MIGRATION_SQL = [
     expires_at INTEGER NOT NULL,
     created_at INTEGER NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS platform_login_handoffs (
+    id TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL UNIQUE,
+    user_id TEXT NOT NULL REFERENCES platform_users(id),
+    target_origin TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS platform_device_codes (
     id TEXT PRIMARY KEY,
     device_code TEXT NOT NULL UNIQUE,
@@ -411,6 +431,8 @@ const MIGRATION_SQL = [
     client_type TEXT NOT NULL,
     launch_target TEXT NOT NULL,
     capabilities TEXT,
+    available_models TEXT,
+    available_chat_info TEXT,
     last_seen_at INTEGER,
     last_polled_at INTEGER,
     created_via_device_code_id TEXT,
@@ -420,6 +442,7 @@ const MIGRATION_SQL = [
   `CREATE INDEX IF NOT EXISTS idx_platform_accounts_user ON platform_accounts(user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_platform_sessions_user ON platform_sessions(user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_platform_oauth_states_provider ON platform_oauth_states(provider)`,
+  `CREATE INDEX IF NOT EXISTS idx_platform_login_handoffs_user ON platform_login_handoffs(user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_platform_device_codes_status ON platform_device_codes(status)`,
   `CREATE INDEX IF NOT EXISTS idx_platform_companion_clients_user ON platform_companion_clients(user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_platform_companion_clients_user_target ON platform_companion_clients(user_id, launch_target)`,
@@ -537,6 +560,8 @@ const MIGRATION_SQL = [
   `ALTER TABLE platform_device_codes ADD COLUMN installation_key TEXT`,
   `ALTER TABLE platform_device_codes ADD COLUMN launch_target TEXT`,
   `ALTER TABLE platform_device_codes ADD COLUMN capabilities TEXT`,
+  `ALTER TABLE platform_companion_clients ADD COLUMN available_models TEXT`,
+  `ALTER TABLE platform_companion_clients ADD COLUMN available_chat_info TEXT`,
   `ALTER TABLE platform_project_peers ADD COLUMN preferred_client_id TEXT REFERENCES platform_companion_clients(id)`,
   `ALTER TABLE platform_project_audit_results ADD COLUMN claimed_by_user_id TEXT REFERENCES platform_users(id)`,
   `ALTER TABLE platform_project_audit_results ADD COLUMN claimed_by_client_id TEXT REFERENCES platform_companion_clients(id)`,
@@ -617,6 +642,11 @@ const MIGRATION_SQL = [
   // Sharing / visibility
   `ALTER TABLE conversations ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`,
   `ALTER TABLE conversations ADD COLUMN share_slug TEXT`,
+  // Steering reference data: per-assistant-turn DispatchPlan snapshot
+  // (steered + optional baseline). Canonical here so EVERY db (tests + prod)
+  // gets it; the runtime init also ALTERs it (duplicate is ignored). Without
+  // this the test DB lacks the column and every assistant insert fails.
+  `ALTER TABLE messages ADD COLUMN plan TEXT`,
 ];
 
 /**

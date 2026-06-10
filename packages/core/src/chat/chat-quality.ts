@@ -25,7 +25,7 @@ const CORRECTIVE_TURN_PATTERN =
   /^(?:no\b|no,|not exactly|that(?:'s| is) not|i mean|more specifically|to be clear|instead\b|rather\b|let me rephrase|what i meant|closer to)\b/i;
 
 const DEBUG_PATTERN =
-  /\b(debug|diagnos(?:e|is)|troubleshoot|root cause|crash(?:ing)?|fails?|failing|broken|error|stack trace|logs?)\b/i;
+  /\b(debug(?:ging)?|diagnos(?:e|is)|troubleshoot|root cause|crash(?:ing)?|fails?|failing|broken|error|stack trace|logs?)\b/i;
 
 /** Short factual question — expects a direct, concise answer (1–3 sentences max). */
 const SHORT_FACTUAL_PATTERN =
@@ -171,10 +171,15 @@ export const KNOWLEDGE_RETRIEVAL_SCORE_MIN = 0.18;
  * entirely — retrieved web captures won't help and will add noise.
  */
 const GENERATION_INTENT_PATTERN =
-  /\b(build|create|make|scaffold|generate|spin up|bootstrap|start|init|write me|code me|give me the code|ship|launch|deploy)\b.{0,80}(app|site|website|page|landing|portfolio|dashboard|component|api|server|backend|frontend|project|template|starter|shop|store)\b/i;
+  /\b(build|create|make|prototype|scaffold|generate|spin up|bootstrap|init|write me|code me|give me the code|ship|launch|deploy)\b.{0,80}(app|site|website|page|landing|portfolio|dashboard|component|api|server|backend|frontend|project|template|starter|shop|store|planner|board|list|tracker|timer|tool|workflow|form|calendar|editor|game|portal|feed|widget|extension|cli)\b/i;
+
+const START_GENERATION_INTENT_PATTERN =
+  /\bstart\s+(?:building|coding|implementing|a\s+new|an?\s+|the\s+)(?:app|site|website|page|landing|portfolio|dashboard|component|api|server|backend|frontend|project|template|starter|shop|store|planner|board|list|tracker|timer|tool|workflow|form|calendar|editor|game|portal|feed|widget|extension|cli)\b/i;
 
 export function isGenerationIntent(userContent: string): boolean {
-  return GENERATION_INTENT_PATTERN.test(userContent.trim());
+  const trimmed = userContent.trim();
+  return GENERATION_INTENT_PATTERN.test(trimmed)
+    || START_GENERATION_INTENT_PATTERN.test(trimmed);
 }
 
 export function shouldInjectChatStructureHint(mode: ConversationMode, userContent: string): boolean {
@@ -303,6 +308,11 @@ export function buildChatTurnQualitySystemHint(
 
   if (debugLike || temporaryMode === 'plan') {
     lines.push('- Prefer a concrete ordered diagnosis or checklist: likely cause, first checks, how to confirm, then next action.');
+  }
+
+  if (debugLike) {
+    lines.push('- Diagnose the existing system before changing it. Start from observable evidence such as the first browser-console error, terminal stack trace, failed request, or missing mount signal.');
+    lines.push('- Do not invent package versions, configuration files, or a replacement scaffold. Do not emit full project files unless the user explicitly asks for code or an implementation.');
   }
 
   if (needsStructure) {

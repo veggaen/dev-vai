@@ -99,6 +99,20 @@ export interface RoutingRule {
 export interface FallbackChain {
   /** Ordered list of model IDs to try. First available wins. */
   readonly models: string[];
+  /**
+   * Operator-supplied extra decline markers (e.g. localized "I don't know"
+   * phrasings) threaded into both the entrance decline detector and the exit
+   * verification arm. Lets escalation generalize without code changes (§4.5).
+   */
+  readonly declineMarkers?: readonly string[];
+  /**
+   * Post-generation verification arm tuning (Master.md §12.5.3). Defaults keep
+   * the exit gate conservative; `requireEvidenceForFactualClaims` is opt-in.
+   */
+  readonly verification?: {
+    readonly requireEvidenceForFactualClaims?: boolean;
+    readonly calibrateCeiling?: number;
+  };
 }
 
 // ── Platform Auth ──
@@ -212,6 +226,8 @@ export interface VaiConfig {
   // ── Auth ──
   /** Platform owner email — gates owner-only features (e.g. allowLearn). Env: VAI_OWNER_EMAIL */
   readonly ownerEmail: string;
+  /** Platform admin emails - grants server-derived admin UI scope. Env: VAI_ADMIN_EMAILS */
+  readonly adminEmails: readonly string[];
   /** API keys that grant access (empty = open / local-only) */
   readonly apiKeys: readonly string[];
   /** Whether API-key auth is enforced (auto-enabled when apiKeys is non-empty) */

@@ -112,7 +112,16 @@ export function registerProjectRoutes(
 
     const liveSandbox = sandbox.get(project.sandboxProjectId);
     return {
-      ...project,
+      id: project.id,
+      sandboxProjectId: project.sandboxProjectId,
+      name: project.name,
+      slug: project.slug,
+      status: project.status,
+      visibility: project.visibility,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+      lastOpenedAt: project.lastOpenedAt,
+      lastSyncedAt: project.lastSyncedAt,
       role: projects.getProjectRole(project.id, viewer.user.id),
       devPort: liveSandbox?.devPort ?? null,
       devUrl: liveSandbox?.devPort ? `http://localhost:${liveSandbox.devPort}` : null,
@@ -176,7 +185,12 @@ export function registerProjectRoutes(
           instructions: peer.instructions ?? null,
         }));
 
-      return projects.replacePeers(request.params.id, viewer.user.id, peers);
+      try {
+        return projects.replacePeers(request.params.id, viewer.user.id, peers);
+      } catch (error) {
+        reply.code(400);
+        return { error: error instanceof Error ? error.message : 'Unable to update project peers' };
+      }
     },
   );
 
@@ -195,9 +209,9 @@ export function registerProjectRoutes(
     async (request, reply) => {
       const viewer = await requireViewer(auth, request, reply);
       if (!viewer) return { error: 'Sign in to request an audit' };
-      if (!projects.canReadProject(request.params.id, viewer.user.id)) {
+      if (!projects.canContributeAudit(request.params.id, viewer.user.id)) {
         reply.code(403);
-        return { error: 'You do not have access to this project' };
+        return { error: 'You do not have permission to request project audits' };
       }
 
       const parsed = createProjectAuditBodySchema.safeParse(request.body ?? {});
@@ -220,9 +234,9 @@ export function registerProjectRoutes(
     async (request, reply) => {
       const viewer = await requireViewer(auth, request, reply);
       if (!viewer) return { error: 'Sign in to submit an audit result' };
-      if (!projects.canReadProject(request.params.id, viewer.user.id)) {
+      if (!projects.canContributeAudit(request.params.id, viewer.user.id)) {
         reply.code(403);
-        return { error: 'You do not have access to this project' };
+        return { error: 'You do not have permission to submit project audits' };
       }
 
       const parsed = submitProjectAuditResultBodySchema.safeParse(request.body ?? {});
@@ -279,7 +293,7 @@ export function registerProjectRoutes(
     async (request, reply) => {
       const viewer = await requireViewer(auth, request, reply);
       if (!viewer) return { error: 'Sign in to create share links' };
-      if (!projects.canWriteProject(request.params.id, viewer.user.id)) {
+      if (!projects.canManageProject(request.params.id, viewer.user.id)) {
         reply.code(403);
         return { error: 'You do not have permission to share this project' };
       }
@@ -313,7 +327,7 @@ export function registerProjectRoutes(
     async (request, reply) => {
       const viewer = await requireViewer(auth, request, reply);
       if (!viewer) return { error: 'Sign in to revoke share links' };
-      if (!projects.canWriteProject(request.params.id, viewer.user.id)) {
+      if (!projects.canManageProject(request.params.id, viewer.user.id)) {
         reply.code(403);
         return { error: 'You do not have permission to revoke project share links' };
       }

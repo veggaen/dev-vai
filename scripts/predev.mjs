@@ -3,10 +3,16 @@
  *
  * 1. Scans required ports (3006 runtime, 5173 vite, 4100-4110 sandbox)
  * 2. Tree-kills any process holding them (taskkill /T /F on Windows)
- * 3. Waits until ports are confirmed free
- * 4. Cleans up stale .vai-server.pid if present
+ * 3. On Windows: also aggressively kills node processes that look VAI-related
+ *    (this helps with the persistent "many TIME_WAIT on 3006" problem after repeated restarts)
+ * 4. Waits until ports are confirmed free
+ * 5. Cleans up stale .vai-server.pid if present
  *
  * Works on Windows and Unix.
+ *
+ * Usage:
+ *   node scripts/predev.mjs          → normal cleanup
+ *   node scripts/predev.mjs --nuclear → extra aggressive node process killing (use when port is stuck)
  */
 
 import { execSync } from 'node:child_process';
@@ -107,7 +113,50 @@ function killProcessOnPort(port) {
   return killed;
 }
 
+async function killAllVAINodeProcesses() {
+  if (!isWindows) return 0;
+
+  let killed = 0;
+  try {
+    // Find node processes whose command line mentions vai, runtime, desktop, or the project path
+    const output = execSync(
+      `wmic process where "name='node.exe'" get ProcessId,CommandLine /format:csv`,
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+
+    const lines = output.trim().split(/\r?\n/).slice(1); // skip header
+    for (const line of lines) {
+      if (!line.includes('node.exe')) continue;
+      const parts = line.split(',');
+      const pid = parts[parts.length - 1]?.trim();
+      const cmd = line.toLowerCase();
+
+      if (!pid || pid === '0') continue;
+
+      const looksLikeVAI =
+        cmd.includes('vai') ||
+        cmd.includes('runtime') ||
+        cmd.includes('dev-vai') ||
+        cmd.includes('packages\\runtime') ||
+        cmd.includes('apps\\desktop');
+
+      if (looksLikeVAI) {
+        console.log(`[VAI] Nuclear: killing node process ${pid} (VAI-related)`);
+        try {
+          execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'pipe' });
+          killed++;
+        } catch {}
+      }
+    }
+  } catch {
+    // wmic failed or no matches — fine
+  }
+  return killed;
+}
+
 async function main() {
+  const nuclear = process.argv.includes('--nuclear') || process.argv.includes('-n');
+
   let totalKilled = 0;
 
   // ── 1. Clean stale PID file ──
@@ -134,13 +183,20 @@ async function main() {
     }
   }
 
-  // ── 4. Wait for OS to release ports ──
-  if (totalKilled > 0) {
-    console.log(`[VAI] Killed ${totalKilled} stale process(es) — waiting for port release...`);
-    await sleep(2000);
+  // ── 4. Nuclear mode: aggressively kill VAI-related node processes (helps TIME_WAIT hell)
+  if (nuclear && isWindows) {
+    console.log('[VAI] --nuclear mode: aggressively killing all VAI-related node processes...');
+    totalKilled += await killAllVAINodeProcesses();
   }
 
-  // ── 5. Final verification on required ports ──
+  // ── 5. Wait for OS to release ports (longer wait after nuclear or many kills)
+  if (totalKilled > 0) {
+    const waitMs = nuclear ? 4000 : 2000;
+    console.log(`[VAI] Killed ${totalKilled} stale process(es) — waiting ${waitMs}ms for port release...`);
+    await sleep(waitMs);
+  }
+
+  // ── 6. Final verification on required ports ──
   const failures = [];
   for (const port of REQUIRED_PORTS) {
     const stillInUse = await isPortInUse(port);
@@ -152,6 +208,7 @@ async function main() {
   if (failures.length > 0) {
     console.error(`[VAI] ERROR: Ports still occupied: ${failures.join(', ')}`);
     console.error('[VAI] Try: netstat -ano | findstr :<port>  then  taskkill /F /T /PID <pid>');
+    console.error('[VAI] Or run: node scripts/predev.mjs --nuclear');
     process.exit(1);
   }
 

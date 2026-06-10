@@ -23,8 +23,6 @@ import { ScrollIndicator } from './sandbox/ScrollIndicator.js';
 import { RadialMenu } from './sandbox/RadialMenu.js';
 import { ActionLog } from './sandbox/ActionLog.js';
 import { runDemoSequence, DEFAULT_DEMO, type DemoAction } from './sandbox/DemoSequence.js';
-import { exposeGymAPI } from './VaiGymRunner.js';
-import { exposeQAGlobal } from './VaiQARunner.js';
 
 /* ── Screenshot flash (inline — lightweight) ── */
 function ScreenshotFlash({ active }: { active: boolean }) {
@@ -102,10 +100,24 @@ export function VaiOverlaySystem() {
       isRunning: () => useCursorStore.getState().demoRunning,
       runCustom: (seq: DemoAction[]) => runSequence(seq),
     };
-    // Also expose the gym API and QA runner for training/testing scripts
-    exposeGymAPI();
-    exposeQAGlobal();
-    return () => { delete (window as unknown as Record<string, unknown>).__vai_demo; };
+
+    let automationPromise: Promise<void> | null = null;
+    const exposeAutomationApis = () => {
+      automationPromise ??= Promise.all([
+        import('./VaiGymRunner.js'),
+        import('./VaiQARunner.js'),
+      ]).then(([gym, qa]) => {
+        gym.exposeGymAPI();
+        qa.exposeQAGlobal();
+      });
+      return automationPromise;
+    };
+    (window as unknown as Record<string, unknown>).__vai_load_automation = exposeAutomationApis;
+
+    return () => {
+      delete (window as unknown as Record<string, unknown>).__vai_demo;
+      delete (window as unknown as Record<string, unknown>).__vai_load_automation;
+    };
   }, [startDefaultDemo, stopDemo, runSequence]);
 
   return (

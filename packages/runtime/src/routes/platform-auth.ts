@@ -304,16 +304,35 @@ export function registerPlatformAuthRoutes(app: FastifyInstance, auth: PlatformA
       try {
         const result = await auth.handleProviderCallback(provider, code, state, request);
         auth.applySessionCookie(reply, result.cookieValue);
-
-        // Append session token as URL hash fragment so the SPA can store it
-        // in localStorage (more reliable than cookies across Vite proxy).
         const returnUrl = new URL(result.returnTo);
-        returnUrl.hash = `vai_token=${encodeURIComponent(result.cookieValue)}`;
+        if (auth.shouldIssueLoginHandoff(returnUrl.toString())) {
+          returnUrl.searchParams.set('vai_handoff', auth.issueLoginHandoff(result.cookieValue, returnUrl.origin));
+        }
         return reply.redirect(returnUrl.toString());
       } catch (callbackError) {
         reply.code(400);
         return {
           error: callbackError instanceof Error ? callbackError.message : `${auth.getProviderLabel(provider)} sign-in failed`,
+        };
+      }
+    },
+  );
+
+  app.post<{ Body: { code?: string } }>(
+    '/api/auth/handoff/exchange',
+    async (request, reply) => {
+      const code = request.body?.code?.trim();
+      if (!code) {
+        reply.code(400);
+        return { error: 'Missing login handoff code' };
+      }
+
+      try {
+        return auth.exchangeLoginHandoff(code, request);
+      } catch (handoffError) {
+        reply.code(410);
+        return {
+          error: handoffError instanceof Error ? handoffError.message : 'Login handoff failed',
         };
       }
     },

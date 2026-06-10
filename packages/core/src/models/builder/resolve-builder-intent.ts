@@ -32,20 +32,8 @@ export function resolveBuilderIntent(input: BuilderIntentInput): BuilderIntent |
     };
   }
 
-  // Todo / task list — match before generic dashboard so 'task dashboard' still hits a real todo recipe.
-  if (/\b(?:todo|to-do|to\s+do|task\s+list|task\s+manager|tasks?\s+app|checklist|kanban)\b/i.test(text)) {
-    return {
-      archetype: 'todo',
-      audience,
-      domain: 'productivity',
-      modules: [],
-      prompt: input.input,
-      cleanedPrompt: input.cleanedProjectDesc,
-      isCloneRequest,
-    };
-  }
-
-  // Pomodoro / focus timer.
+  // Pomodoro / focus timer — match before todo because a real focus planner
+  // usually includes a task list as a secondary feature.
   if (/\b(?:pomodoro|focus\s+timer|tomato\s+timer|work\s+timer|productivity\s+timer)\b/i.test(text)) {
     return {
       archetype: 'pomodoro',
@@ -173,6 +161,19 @@ export function resolveBuilderIntent(input: BuilderIntentInput): BuilderIntent |
       audience,
       domain: 'scheduling',
       modules: getDefaultBuilderModules('booking'),
+      prompt: input.input,
+      cleanedPrompt: input.cleanedProjectDesc,
+      isCloneRequest,
+    };
+  }
+
+  // Todo / task list — match before generic dashboard so 'task dashboard' still hits a real todo recipe.
+  if (/\b(?:todo|to-do|to\s+do|task\s+list|task\s+manager|tasks?\s+app|checklist|kanban)\b/i.test(text)) {
+    return {
+      archetype: 'todo',
+      audience,
+      domain: 'productivity',
+      modules: [],
       prompt: input.input,
       cleanedPrompt: input.cleanedProjectDesc,
       isCloneRequest,

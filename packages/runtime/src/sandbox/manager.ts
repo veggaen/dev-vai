@@ -1,6 +1,6 @@
 import { mkdir, writeFile, readFile, rm, readdir } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { isAbsolute, join, dirname, relative, resolve } from 'node:path';
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -380,7 +380,8 @@ export class SandboxManager {
   /** Resolve a file path within the sandbox root, guarding against path traversal. */
   private safePath(rootDir: string, filePath: string): string {
     const full = resolve(rootDir, filePath);
-    if (!full.startsWith(rootDir)) {
+    const relativePath = relative(rootDir, full);
+    if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
       throw new Error(`Path traversal blocked: ${filePath}`);
     }
     return full;

@@ -1,20 +1,11 @@
 /**
- * ChatWindow — Claude-inspired chat interface.
+ * ChatWindow — chat interface.
  *
  * Layout philosophy:
- *   • Empty state: centered welcome + presets in the middle of the window.
- *   • First message: welcome fades out, messages appear ABOVE the input.
- *   • New messages push previous ones UP. The input stays anchored near the
- *     bottom so the user's eyes stay focused on the latest content.
- *   • Smart auto-scroll: auto-follows during streaming unless user scrolled up.
- *   • Scroll-to-bottom FAB when user has scrolled away.
- *   • Auto-growing textarea (1 line → max ~8 lines) with Enter to send.
- *   • Draggable divider between messages and input.
- *
- * Key CSS trick for "messages above input":
- *   The scroll container uses `flex-col justify-end` so when messages are sparse
- *   they sit at the BOTTOM of the viewport, right above the input. As messages
- *   accumulate they naturally push upward and overflow triggers scroll.
+ *   • When no messages: minimal centered note (or blank); input bar at bottom is primary.
+ *   • Messages appear above the anchored input.
+ *   • New messages push previous ones up.
+ *   • Smart auto-scroll during streaming.
  */
 
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
@@ -40,12 +31,13 @@ import {
   Eye, Brain, Bot, Wifi, Plus, Moon, Sun, ChevronDown, ChevronRight, Layers,
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
-import { FocusModeToggle } from './LayoutModeToggle.js';
+import { FocusModeToggle } from './FocusModeToggle.js';
 import { BroadcastStrip } from './BroadcastStrip.js';
 import type { PerIdeConfig } from './BroadcastTargetPicker.js';
 import { ResearchContextRail } from './chat/ResearchContextRail.js';
 import { ChatEmptyState } from './chat/ChatEmptyState.js';
 import { ConversationSourcesSidebar, aggregateConversationSources } from './chat/ConversationSourcesSidebar.js';
+import { CouncilProgressPanel } from './panels/CouncilProgressPanel.js';
 import { resolveSendTimeWorkIntent } from '../lib/auto-sandbox-intent.js';
 import { resolveLatestResearchContext } from '../lib/research-context.js';
 import {
@@ -177,6 +169,19 @@ export function ChatWindow() {
     themePreference,
     toggleThemePreference,
   } = useLayoutStore();
+  const { showCouncilPanel, toggleCouncilPanel } = useLayoutStore();
+
+  // Auto-open the right Council Progress panel when a new assistant message arrives with council data.
+  // This makes the "live" council review visible immediately in the UI for better transparency and steering.
+  const latestAssistantWithCouncil = useMemo(() => {
+    return [...messages].reverse().find(m => m.role === 'assistant' && m.thinking?.council);
+  }, [messages]);
+
+  useEffect(() => {
+    if (latestAssistantWithCouncil && !showCouncilPanel) {
+      toggleCouncilPanel();
+    }
+  }, [latestAssistantWithCouncil, showCouncilPanel, toggleCouncilPanel]);
   const studioBuilderChrome = themePreference === 'light';
   const isOwner = useAuthStore((state) => state.isOwner);
   const ownerFeaturesHidden = useAuthStore((state) => state.ownerFeaturesHidden);
@@ -869,37 +874,6 @@ export function ChatWindow() {
     }
   };
 
-  const handlePresetClick = (label: string) => { handleSend(label); };
-  const handleChipClick = (label: string) => {
-    setInput(label);
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      adjustTextareaHeight();
-    });
-  };
-
-  /** Switch to Builder mode + focus input — Base44-style "just start building" */
-  const startBuilding = async (description?: string) => {
-    setMode('builder');
-    if (!showBuilderPanel) toggleBuilderPanel();
-    const convId = activeConversationId;
-    if (!convId) {
-      const modelId = selectedModelId ?? 'vai:v0';
-      await createConversation(modelId, 'builder', {
-        sandboxProjectId: sandboxProjectId ?? null,
-      });
-    } else {
-      await updateConversationMode(convId, 'builder');
-    }
-    if (description) {
-      await handleSend(description);
-    } else {
-      setTimeout(() => {
-        setInput('');
-        textareaRef.current?.focus();
-      }, 50);
-    }
-  };
   const charCount = input.length;
   const canSend = input.trim().length > 0 && !isStreaming && (!pastedImage || imageDescription.trim().length > 0);
 
@@ -970,7 +944,7 @@ export function ChatWindow() {
           ? 'General questions stay detached from the active project until you reference the app, preview, or files.'
         : hasMessages
           ? 'Use a sharper follow-up to keep the thread moving.'
-          : 'Start with the outcome you want, then add files or screenshots if needed.';
+          : 'Type here. Workspace context (files, editor) attaches automatically on relevant questions.';
   const composerStateChips = useMemo(() => {
     const chips: Array<{ key: string; label: string; tone: 'emerald' | 'blue' | 'violet' | 'amber' }> = [
       {
@@ -1102,12 +1076,11 @@ export function ChatWindow() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-row overflow-hidden">
-    <div
-      data-studio-builder-chrome={studioBuilderChrome ? 'true' : undefined}
-      className={`relative flex h-full min-w-0 flex-1 flex-col overflow-hidden ${
-        studioBuilderChrome ? 'bg-[#fafafa]' : 'bg-[#0a0a0a]'
-      }`}
-    >
+      {/* Main chat content area - takes remaining space so the right Council panel can sit beside it without crushing the chat or causing horizontal overflow */}
+      <div
+        data-studio-builder-chrome={studioBuilderChrome ? 'true' : undefined}
+        className={`relative flex h-full min-w-0 flex-1 flex-col overflow-hidden shell-canvas`}
+      >
       <input
         ref={fileInputRef}
         type="file"
@@ -1117,24 +1090,17 @@ export function ChatWindow() {
         className="hidden"
       />
 
-      <div className={studioBuilderChrome ? 'border-b border-zinc-200 bg-white' : 'border-b border-zinc-900 bg-zinc-950/92'}>
+      <div className="shell-header">
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
             <div className="min-w-0">
-              <h2 className={`truncate text-[14px] font-medium ${studioBuilderChrome ? 'text-zinc-900' : 'text-zinc-200'}`}>
+              <h2 className={`truncate font-display text-[14px] font-semibold tracking-[-0.01em] ${studioBuilderChrome ? 'text-[color:var(--shell-text)]' : 'text-zinc-200'}`}>
                 {headerTitle}
               </h2>
-              {studioBuilderChrome && (
-                <p className="truncate text-[11px] text-zinc-500">
-                  {(authUser?.name || authUser?.email?.split('@')[0] || 'Your')}&apos;s workspace
-                </p>
-              )}
             </div>
             <span
-              className={`hidden rounded-md border px-2 py-0.5 text-[10px] font-medium sm:inline-flex ${
-                studioBuilderChrome
-                  ? 'border-zinc-200 bg-zinc-50 text-zinc-600'
-                  : 'border-zinc-800/70 bg-zinc-950 text-zinc-500'
+              className={`shell-chip hidden rounded-md px-2 py-0.5 text-[10px] font-medium sm:inline-flex ${
+                studioBuilderChrome ? '' : 'border-zinc-800/70 bg-zinc-950 text-zinc-500'
               }`}
             >
               {shellModeLabel}
@@ -1177,7 +1143,7 @@ export function ChatWindow() {
               className={`flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[11px] font-medium transition-colors ${
                 isConversationSourcesOpen
                   ? (studioBuilderChrome
-                      ? 'border-violet-300 bg-violet-50 text-violet-700'
+                      ? 'border-blue-300 bg-blue-50 text-blue-700'
                       : 'border-violet-500/40 bg-violet-500/10 text-violet-200')
                   : (studioBuilderChrome
                       ? 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50'
@@ -1190,7 +1156,7 @@ export function ChatWindow() {
               {conversationSourcesCount > 0 && (
                 <span className={`ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-md px-1 text-[10px] font-semibold tabular-nums ${
                   isConversationSourcesOpen
-                    ? 'bg-violet-500/20 text-violet-100'
+                    ? (studioBuilderChrome ? 'bg-blue-100 text-blue-700' : 'bg-violet-500/20 text-violet-100')
                     : (studioBuilderChrome ? 'bg-zinc-100 text-zinc-600' : 'bg-zinc-900 text-zinc-300')
                 }`}>
                   {conversationSourcesCount}
@@ -1202,10 +1168,11 @@ export function ChatWindow() {
         </div>
       </div>
 
-      {/* ── Messages area ── */}
+      {/* ── Messages + floating composer (messages scroll behind input) ── */}
+      <div className="composer-stack relative min-h-0 flex-1">
       <div
         ref={scrollRef}
-        className="relative flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
+        className="composer-scroll absolute inset-0 overflow-y-auto overflow-x-hidden"
         style={{ overscrollBehavior: 'contain' }}
       >
         {/* Scroll-to-bottom FAB */}
@@ -1281,19 +1248,19 @@ export function ChatWindow() {
 
         {showOwnerTrainingStrip && (
           <div className="mx-auto max-w-3xl px-4 pt-3">
-            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-3 backdrop-blur-sm">
+            <div className={`rounded-2xl border p-3 backdrop-blur-sm ${studioBuilderChrome ? 'border-emerald-600/25 bg-emerald-50' : 'border-emerald-500/20 bg-emerald-500/10'}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
-                    <Brain className="h-4 w-4 text-emerald-300" />
+                  <div className={`flex items-center gap-2 text-sm font-medium ${studioBuilderChrome ? 'text-emerald-900' : 'text-zinc-100'}`}>
+                    <Brain className={`h-4 w-4 ${studioBuilderChrome ? 'text-emerald-600' : 'text-emerald-300'}`} />
                     Owner training workspace
                     {trainingWorkspace && (
-                      <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-emerald-200">
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] ${studioBuilderChrome ? 'border-emerald-600/30 bg-emerald-600/10 text-emerald-700' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>
                         isolated
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 text-xs text-zinc-500">
+                  <div className={`mt-1 text-xs ${studioBuilderChrome ? 'text-emerald-900/70' : 'text-zinc-500'}`}>
                     {trainingWorkspace
                       ? 'User chats do not train Vai. This workspace is the only place where owner-curated conversations can be marked as teachable.'
                       : 'Learning is locked off for normal chats. Start or enter an owner training workspace when you want to curate training manually.'}
@@ -1303,7 +1270,7 @@ export function ChatWindow() {
                   {showOwnerFeatures && !trainingWorkspace && (
                     <button
                       onClick={() => setTrainingWorkspace(true)}
-                      className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                      className={`rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors ${studioBuilderChrome ? 'border-emerald-600/30 bg-emerald-600/10 text-emerald-800 hover:bg-emerald-600/20' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20'}`}
                     >
                       Enter training workspace
                     </button>
@@ -1343,10 +1310,17 @@ export function ChatWindow() {
         {!hasMessages ? (
           /* ═══════════ WELCOME STATE ═══════════ */
           <ChatEmptyState
-            onStartBuilding={startBuilding}
-            onPresetClick={handlePresetClick}
-            onAskMemoryQuestion={(prompt, options) => { void handleSend(prompt, options); }}
             onOpenSettings={() => setActivePanel('settings')}
+            onPrompt={(prompt) => {
+              setInput(prompt);
+              requestAnimationFrame(() => {
+                const ta = textareaRef.current;
+                if (!ta) return;
+                ta.focus();
+                ta.setSelectionRange(prompt.length, prompt.length);
+                adjustTextareaHeight();
+              });
+            }}
           />
         ) : (
           /* ═══════════ MESSAGE THREAD ═══════════ */
@@ -1420,6 +1394,9 @@ export function ChatWindow() {
                         confidence={msg.confidence}
                         groundedBuildBrief={msg.groundedBuildBrief}
                         thinking={msg.thinking}
+                        researchTrace={msg.researchTrace}
+                        verification={msg.verification}
+                        progressSteps={msg.progressSteps}
                         feedback={msg.feedback}
                         onFeedback={(helpful) => useChatStore.getState().setFeedback(msg.id, helpful)}
                         onFollowUp={(question) => { void handleSend(question); }}
@@ -1458,9 +1435,8 @@ export function ChatWindow() {
         )}
       </div>
 
-      {/* ── Input area — centered, auto-growing ── */}
-      <div className="flex-shrink-0">
-        <div className={`mx-auto w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100%-2rem))]' : 'max-w-[min(68rem,calc(100%-2rem))]'} px-4 pb-4 pt-2 md:px-5`}>
+      <div className="composer-dock">
+        <div className={`composer-dock-inner mx-auto w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100%-2rem))]' : 'max-w-[min(68rem,calc(100%-2rem))]'} px-4 pb-4 pt-6 md:px-5`}>
 
           {/* Image preview row */}
           {pastedImage && (
@@ -1520,17 +1496,9 @@ export function ChatWindow() {
           )}
           {/* The input box */}
           <motion.div
-            className={`relative flex flex-col overflow-visible rounded-[1.25rem] border transition-all focus-within:ring-[2.5px] ${
-              deliveryRoute === 'broadcast'
-                ? studioBuilderChrome
-                  ? 'border-blue-200 bg-white shadow-sm focus-within:ring-blue-200/70'
-                  : 'border-blue-500/15 bg-zinc-950/82 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.55)] focus-within:border-violet-500/35 focus-within:ring-violet-500/10'
-                : studioBuilderChrome
-                  ? 'border-zinc-200 bg-white shadow-sm focus-within:ring-zinc-200/60'
-                  : 'border-zinc-800/60 bg-zinc-950/82 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.55)] focus-within:border-violet-500/30 focus-within:ring-violet-500/8'
+            className={`composer-shell relative flex flex-col transition-[border-color,box-shadow] duration-200 ${
+              deliveryRoute === 'broadcast' && studioBuilderChrome ? 'border-blue-200' : ''
             }`}
-            animate={canSend ? { borderColor: deliveryRoute === 'broadcast' ? 'rgba(96,165,250,0.24)' : studioBuilderChrome ? 'rgba(228,228,231,1)' : 'rgba(63,63,70,0.75)' } : {}}
-            transition={{ duration: 0.2 }}
           >
             <AnimatePresence initial={false}>
               {deliveryRoute === 'broadcast' && (
@@ -1556,9 +1524,7 @@ export function ChatWindow() {
               )}
             </AnimatePresence>
 
-            <div className={`flex flex-wrap items-center justify-between gap-2 border-b px-3.5 py-2 ${
-              studioBuilderChrome ? 'border-zinc-200/80 bg-zinc-50/80' : 'border-zinc-800/75 bg-zinc-950/72'
-            }`}>
+            <div className="composer-toolbar flex flex-wrap items-center justify-between gap-2 px-3.5 pb-1 pt-2.5">
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                 {composerStateChips.map((chip) => {
                   const toneClass = chip.tone === 'blue'
@@ -1574,7 +1540,7 @@ export function ChatWindow() {
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                           : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
                         : studioBuilderChrome
-                          ? 'border-violet-200 bg-violet-50 text-violet-700'
+                          ? 'border-blue-200 bg-blue-50 text-blue-700'
                           : 'border-violet-500/20 bg-violet-500/10 text-violet-200';
 
                   return (
@@ -1604,9 +1570,7 @@ export function ChatWindow() {
             </div>
 
             {(buildActivity.length > 0 || transientActivity.length > 0) && (
-              <div className={`border-b px-3.5 py-2.5 ${
-                studioBuilderChrome ? 'border-zinc-200/80 bg-white/70' : 'border-zinc-800/75 bg-zinc-950/58'
-              }`}>
+              <div className="px-3.5 pb-2 pt-1">
                 <button
                   type="button"
                   onClick={() => setActivityCollapsed((value) => !value)}
@@ -1666,7 +1630,7 @@ export function ChatWindow() {
                             ? studioBuilderChrome ? 'text-amber-700' : 'text-amber-300'
                             : item.tone === 'orange'
                               ? 'text-orange-500'
-                              : studioBuilderChrome ? 'text-violet-700' : 'text-violet-300';
+                              : studioBuilderChrome ? 'text-blue-700' : 'text-violet-300';
                         const dotClass = item.tone === 'orange'
                           ? 'bg-orange-500'
                           : toneClass.replace('text-', 'bg-');
@@ -1968,8 +1932,12 @@ export function ChatWindow() {
                       disabled={!canSend}
                       className={`flex h-8 w-8 items-center justify-center rounded-full transition-all duration-200 ${
                         canSend
-                          ? 'bg-gradient-to-br from-violet-500 to-indigo-500 text-white shadow-[0_2px_10px_rgba(139,92,246,0.4)] hover:from-violet-400 hover:to-indigo-400 hover:shadow-[0_4px_14px_rgba(139,92,246,0.5)]'
-                          : 'bg-zinc-800 text-zinc-600'
+                          ? studioBuilderChrome
+                            ? 'bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-[0_2px_10px_rgba(37,99,235,0.35)] hover:from-blue-500 hover:to-sky-400 hover:shadow-[0_4px_14px_rgba(37,99,235,0.45)]'
+                            : 'bg-gradient-to-br from-violet-500 to-indigo-500 text-white shadow-[0_2px_10px_rgba(139,92,246,0.4)] hover:from-violet-400 hover:to-indigo-400 hover:shadow-[0_4px_14px_rgba(139,92,246,0.5)]'
+                          : studioBuilderChrome
+                            ? 'bg-zinc-200 text-zinc-400'
+                            : 'bg-zinc-800 text-zinc-600'
                       }`}
                       whileHover={canSend ? { scale: 1.05 } : {}}
                       whileTap={canSend ? { scale: 0.92 } : {}}
@@ -1983,10 +1951,11 @@ export function ChatWindow() {
             </div>
           </motion.div>
 
-          <p className="mt-2 text-center text-[10px] text-zinc-700/60">
+          <p className="mt-2 text-center text-[10px] text-[color:var(--chat-muted)]">
             Vai can make mistakes. Verify important information.
           </p>
         </div>
+      </div>
       </div>
     </div>
     <ConversationSourcesSidebar
@@ -2002,6 +1971,45 @@ export function ChatWindow() {
       })()}
       onFollowUp={(question) => { void handleSend(question); }}
     />
+
+    {/* Live Council Progress panel — Codex-style right contextual view.
+        Shows when user toggles or when latest assistant turn has council data.
+        This is the key "make council visible and actionable" surface so Vai feels like
+        a transparent, steerable friend rather than a black box. */}
+    {(showCouncilPanel || (() => {
+      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+      return !!lastAssistant?.thinking?.council;
+    })()) && (
+      <div className="flex h-full w-80 flex-shrink-0 border-l border-zinc-800 overflow-hidden">
+        <CouncilProgressPanel
+          council={(() => {
+            const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+            return lastAssistant?.thinking?.council ?? null;
+          })()}
+          isOpen={true}
+          onClose={() => toggleCouncilPanel()}
+          onApplyLesson={(lesson: string) => {
+            console.log('[CouncilPanel] Apply lesson:', lesson);
+            // Live steering: inject as a system note and re-trigger thinking for next turn visibility
+            void handleSend(`[Council live steering applied] Incorporate this method lesson: ${lesson}. Re-evaluate the previous context with this guidance.`);
+          }}
+          onReconvene={() => {
+            console.log('[CouncilPanel] Re-convene requested');
+            void handleSend('Re-run a fresh council review on the last assistant response using the current context and any previous lessons.');
+          }}
+          onDesignMode={() => {
+            console.log('[CouncilPanel] Design Mode requested');
+            // Simulate annotation: in real, this would open an overlay on the panel itself for pointing at cards/lessons
+            void handleSend('Enter Design Mode for the Council panel: I want to visually annotate the member cards and lessons to refine how they are displayed and acted on.');
+          }}
+          onExportVisualPlan={() => {
+            console.log('[CouncilPanel] Export visual plan');
+            // Generate a shareable artifact of the current council state
+            void handleSend('Export the current council decision as a visual plan artifact for review and sharing.');
+          }}
+        />
+      </div>
+    )}
     </div>
   );
 }

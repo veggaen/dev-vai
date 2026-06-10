@@ -23,6 +23,7 @@ interface AuthBootstrap {
     workos: AuthProviderInfo;
   };
   authenticated: boolean;
+  role?: AppRole;
   user: AuthUser | null;
 }
 
@@ -45,11 +46,6 @@ type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'anonymous' | 'error';
 /** Platform role — determines navigation scope and permissions */
 export type AppRole = 'builder' | 'admin' | 'owner';
 
-/** Sync with server `VAI_OWNER_EMAIL` — set `VITE_VAI_OWNER_EMAIL` at desktop build time if you override the server default. */
-const OWNER_EMAIL = (import.meta.env.VITE_VAI_OWNER_EMAIL?.trim() || 'v3ggat@gmail.com').toLowerCase();
-
-/** Admin emails — add here or derive from backend in the future */
-const ADMIN_EMAILS: string[] = [];
 const OWNER_FEATURES_HIDDEN_KEY = 'vai-owner-features-hidden';
 
 function readOwnerFeaturesHidden(): boolean {
@@ -156,16 +152,29 @@ async function pollForDeviceApproval(deviceCode: string, intervalSeconds: number
   throw new Error('Browser sign-in timed out. Start again.');
 }
 
-function matchesOwner(user: AuthUser | null): boolean {
-  return user?.email?.trim().toLowerCase() === OWNER_EMAIL;
+function deriveRole(auth: AuthBootstrap): AppRole {
+  return auth.authenticated ? (auth.role ?? 'builder') : 'builder';
 }
 
-function deriveRole(user: AuthUser | null): AppRole {
-  if (!user) return 'builder';
-  const email = user.email?.trim().toLowerCase();
-  if (email === OWNER_EMAIL) return 'owner';
-  if (ADMIN_EMAILS.includes(email ?? '')) return 'admin';
-  return 'builder';
+function resolveBootstrap(auth: AuthBootstrap) {
+  const role = deriveRole(auth);
+  const isOwner = role === 'owner';
+  const providerId = resolveProviderId(auth);
+
+  return {
+    enabled: auth.enabled,
+    providerId,
+    providerLabel: providerId ? auth.providers[providerId].label : null,
+    user: auth.user,
+    role,
+    isOwner,
+    ownerFeaturesHidden: isOwner ? readOwnerFeaturesHidden() : false,
+    browserLinking: false,
+    status: auth.enabled
+      ? (auth.authenticated ? 'authenticated' as const : 'anonymous' as const)
+      : 'idle' as const,
+    error: null,
+  };
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -182,23 +191,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   syncBootstrap: (auth) => {
     if (!auth) return;
-    const isOwner = matchesOwner(auth.user);
-    const role = deriveRole(auth.user);
-    const providerId = resolveProviderId(auth);
-    set({
-      enabled: auth.enabled,
-      providerId,
-      providerLabel: providerId ? auth.providers[providerId].label : null,
-      user: auth.user,
-      role,
-      isOwner,
-      ownerFeaturesHidden: isOwner ? readOwnerFeaturesHidden() : false,
-      browserLinking: false,
-      status: auth.enabled
-        ? (auth.authenticated ? 'authenticated' : 'anonymous')
-        : 'idle',
-      error: null,
-    });
+    set(resolveBootstrap(auth));
   },
 
   fetchSession: async () => {
@@ -210,24 +203,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const response = await apiFetch('/api/auth/me');
       const payload = await response.json() as AuthBootstrap;
-      const isOwner = matchesOwner(payload.user);
-      const role = deriveRole(payload.user);
-      const providerId = resolveProviderId(payload);
-
-      set({
-        enabled: payload.enabled,
-        providerId,
-        providerLabel: providerId ? payload.providers[providerId].label : null,
-        user: payload.user,
-        role,
-        isOwner,
-        ownerFeaturesHidden: isOwner ? readOwnerFeaturesHidden() : false,
-        browserLinking: false,
-        status: payload.enabled
-          ? (payload.authenticated ? 'authenticated' : 'anonymous')
-          : 'idle',
-        error: null,
-      });
+      set(resolveBootstrap(payload));
     } catch {
       set({
         browserLinking: false,

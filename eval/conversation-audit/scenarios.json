@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "description": "Multi-turn visual audit scenarios for Vai. Each turn is graded before the next prompt is sent. Scenario order is seeded and randomized by the runner.",
+  "scenarios": [
+    {
+      "id": "runtime-exposure-decision",
+      "label": "Security boundary decision with correction and constrained output",
+      "canary": "LANTERN-17",
+      "dimensions": ["security-reasoning"],
+      "turns": [
+        {
+          "prompt": "Control question LANTERN-17: We are auditing a local-first runtime. It currently binds to 127.0.0.1. In exactly two bullets, state the safe default and the main risk if someone changes the bind host to 0.0.0.0.",
+          "assert": {
+            "minLength": 45,
+            "maxWords": 130,
+            "contains": ["127\\.0\\.0\\.1|loopback", "0\\.0\\.0\\.0|all interfaces|network"],
+            "notContains": ["scaffold|landing page|I (?:don'?t|do not) know"]
+          }
+        },
+        {
+          "prompt": "Correction: the deployment now requests 0.0.0.0 and API keys are empty. Should startup proceed? Answer yes or no first, then explain the control that should stop it.",
+          "dimensions": ["correction-memory"],
+          "assert": {
+            "minLength": 35,
+            "maxWords": 140,
+            "contains": ["^\\s*no\\b|should not|must not|refus", "auth|API key|credential"],
+            "notContains": ["^\\s*yes\\b"]
+          }
+        },
+        {
+          "prompt": "Now compress the decision into JSON only with keys allow_startup, reason, required_change. No Markdown.",
+          "dimensions": ["correction-memory", "output-contract"],
+          "assert": {
+            "minLength": 35,
+            "maxWords": 100,
+            "jsonKeys": ["allow_startup", "reason", "required_change"],
+            "notContains": ["```|Here is|Sure"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sandbox-containment-review",
+      "label": "Code-review reasoning for sibling-prefix traversal",
+      "canary": "QUARTZ-29",
+      "dimensions": ["security-code-review"],
+      "turns": [
+        {
+          "prompt": "Audit task QUARTZ-29: Review this Node path guard and explain the security flaw before discussing style: `const full = resolve(rootDir, requestedPath); if (!full.startsWith(rootDir)) throw new Error('blocked');`. Include one concrete sibling-prefix example and name a safer Node primitive. Keep the response under 170 words.",
+          "assert": {
+            "minLength": 90,
+            "maxWords": 190,
+            "contains": ["prefix|sibling", "relative\\(|path\\.relative|relative path"],
+            "notContains": ["scaffold|CSS|landing page"]
+          }
+        },
+        {
+          "prompt": "Would `path.resolve()` alone solve the containment bug? Reply with yes or no first, then give exactly two reasons.",
+          "assert": {
+            "minLength": 35,
+            "maxWords": 130,
+            "contains": ["^\\s*no\\b", "prefix|contain|root|sibling"],
+            "notContains": ["^\\s*yes\\b"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "typescript-constraint-memory",
+      "label": "Durable instruction memory across a distractor",
+      "canary": "EMBER-44",
+      "dimensions": ["constraint-memory"],
+      "turns": [
+        {
+          "prompt": "Instruction EMBER-44: Every code answer in this conversation must use TypeScript only. Never provide JavaScript. Acknowledge the constraint in one short sentence.",
+          "assert": {
+            "minLength": 15,
+            "maxWords": 45,
+            "contains": ["TypeScript"],
+            "notContains": ["```"]
+          }
+        },
+        {
+          "prompt": "Briefly explain why DNS rebinding is relevant to SSRF defenses. No code yet.",
+          "dimensions": ["security-reasoning"],
+          "assert": {
+            "minLength": 55,
+            "maxWords": 180,
+            "contains": ["DNS|hostname|resolv", "private|internal|IP|address"],
+            "notContains": ["```js\\b|```javascript\\b"]
+          }
+        },
+        {
+          "prompt": "Now write a small helper that accepts a URL string and rejects non-http protocols. Keep the earlier code-language rule.",
+          "dimensions": ["code-generation"],
+          "assert": {
+            "minLength": 80,
+            "contains": ["```ts|```typescript", "URL\\(|http"],
+            "notContains": ["```js\\b|```javascript\\b"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "benchmark-prioritization",
+      "label": "Cluster-first engineering prioritization",
+      "canary": "ORBIT-63",
+      "dimensions": ["systems-prioritization"],
+      "turns": [
+        {
+          "prompt": "Engineering audit ORBIT-63: A repository has 48 lint errors across 25 files, 54 root scratch artifacts, three authored files above 5,000 lines, and 141 runtime routes. Propose an order of operations that avoids whack-a-mole fixes. Explain the leverage point behind your first choice.",
+          "assert": {
+            "minLength": 120,
+            "maxWords": 300,
+            "contains": ["lint|48", "artifact|54", "5,?000|oversized|module", "route|141"],
+            "notContains": ["fix everything at once|scaffold"]
+          }
+        },
+        {
+          "prompt": "Choose one trend metric that would reveal whether the cleanup loop is actually improving the system instead of moving failures around. Define it precisely.",
+          "assert": {
+            "minLength": 65,
+            "maxWords": 210,
+            "contains": ["metric|measure|trend|rate|count", "failure|regression|baseline|cluster"],
+            "notContains": ["looks better|probably"]
+          }
+        },
+        {
+          "prompt": "What threshold should trigger architectural escalation rather than another local patch? Give a concrete rule and justify it.",
+          "assert": {
+            "minLength": 55,
+            "maxWords": 190,
+            "contains": ["threshold|trigger|when|if", "architect|module|repeat|cluster|failure"],
+            "notContains": ["it depends only"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "incident-calibration",
+      "label": "Ask a useful clarifying question before prescribing",
+      "canary": "MOSAIC-71",
+      "dimensions": ["incident-reasoning"],
+      "turns": [
+        {
+          "prompt": "Production incident MOSAIC-71: after a deploy, API latency doubled, memory is climbing, and error rate is still flat. You may ask exactly one clarifying question before proposing a diagnosis. Ask the highest-information question only.",
+          "dimensions": ["calibration"],
+          "assert": {
+            "minLength": 20,
+            "maxWords": 80,
+            "contains": ["\\?"],
+            "notContains": ["1\\.|2\\.|3\\.|likely|diagnosis|fix"]
+          }
+        },
+        {
+          "prompt": "Answer: the memory increase is isolated to the API process, begins immediately after traffic reaches the new version, and falls after rollback. Now give a ranked diagnosis and the first three verification steps.",
+          "assert": {
+            "minLength": 110,
+            "maxWords": 300,
+            "contains": ["memory|leak|retain|allocation", "rollback|deploy|new version", "verify|profile|heap|metric|step"],
+            "notContains": ["ask exactly one"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decision-recall",
+      "label": "Distinguish committed decisions from alternatives",
+      "canary": "SUMMIT-88",
+      "dimensions": ["decision-memory"],
+      "turns": [
+        {
+          "prompt": "Project note SUMMIT-88: We considered SQLite and Postgres. Decision: use Postgres for production and SQLite only for local test fixtures. Acknowledge the decision briefly.",
+          "assert": {
+            "minLength": 20,
+            "maxWords": 80,
+            "contains": ["Postgres", "SQLite", "test|fixture|local"]
+          }
+        },
+        {
+          "prompt": "Distractor question: explain idempotency in one sentence.",
+          "dimensions": ["context-switching"],
+          "assert": {
+            "minLength": 20,
+            "maxWords": 80,
+            "contains": ["same|repeat|multiple|effect|result"],
+            "notContains": ["Postgres|SQLite"]
+          }
+        },
+        {
+          "prompt": "Which database did we commit to for production, and what limited role remains for the other option?",
+          "assert": {
+            "minLength": 25,
+            "maxWords": 100,
+            "contains": ["Postgres", "SQLite", "test|fixture|local"],
+            "notContains": ["not sure|I (?:don'?t|do not) remember"]
+          }
+        }
+      ]
+    }
+  ]
+}

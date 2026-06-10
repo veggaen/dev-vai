@@ -133,6 +133,7 @@ const NORMALIZATION_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/\btypescirpt\b/gi, 'typescript'],
   [/\btypsecript\b/gi, 'typescript'],
   [/\btypscript\b/gi, 'typescript'],
+  [/\btypesript\b/gi, 'typescript'],
   [/\btypecript\b/gi, 'typescript'],
   [/\bjavascripts\b/gi, 'javascript'],
   [/\bjavascritp\b/gi, 'javascript'],
@@ -182,6 +183,15 @@ const NORMALIZATION_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bmeanig\b/gi, 'meaning'],
   [/\bprograming\b/gi, 'programming'],
   [/\bprgramming\b/gi, 'programming'],
+  // Common spoken contractions / reductions that survive to typo pass
+  [/\bgonna\b/gi, 'going to'],
+  [/\bwanna\b/gi, 'want to'],
+  [/\bgotta\b/gi, 'got to'],
+  [/\bhafta\b/gi, 'have to'],
+  [/\boughta\b/gi, 'ought to'],
+  [/\bletcha\b/gi, 'let you'],
+  [/\bdunno\b/gi, "don't know"],
+  [/\bwhatcha\b/gi, 'what are you'],
 ];
 
 // ── Voice / dictation disfluency handling ───────────────────────────────
@@ -193,8 +203,10 @@ const NORMALIZATION_RULES: ReadonlyArray<readonly [RegExp, string]> = [
 // extractor depends on that literal prefix to reframe the prior topic.
 // Note: bare "actually" in mid-sentence is NOT a restart (e.g. "when do they
 // actually hit the database?") — restart forms require "wait actually" or
-// "actually, no/make/let/I mean …".
-const RESTART_MARKER_RE = /\b(?:wait(?:,?\s+actually)?|scratch that|actually,?\s+(?:no|make|let|i\s+mean)|no,?\s+wait|hmm,?\s+no|let me rephrase)\b/gi;
+// "actually, no/make/let/I mean …". A bare "wait" is also NOT a restart: it is
+// almost always the verb ("run the calls and wait for all of them"). A "wait"
+// restart must be followed by an explicit correction cue.
+const RESTART_MARKER_RE = /\b(?:wait,?\s+(?:actually|no|sorry|hold\s+on|i\s+mean|let\s+me|scratch\s+that)|scratch that|actually,?\s+(?:no|make|let|i\s+mean)|no,?\s+wait|hmm,?\s+no|let me rephrase)\b/gi;
 
 function applyRestartMarkers(input: string): string {
   let lastIdx = -1;
@@ -208,12 +220,44 @@ function applyRestartMarkers(input: string): string {
   if (lastIdx < 0) return input;
   const after = input.slice(lastIdx + lastLen).replace(/^[\s,.:;]+/, '');
   if (after.length < 8) return input;
+  const before = input.slice(0, lastIdx);
+  const language = before.match(/\b(?:typescript|javascript|python|rust|go|java|c\+\+|c#|ruby|kotlin|swift|php)\b/i)?.[0];
+  if (language && !new RegExp(`\\b${language.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(after)) {
+    return `${after} in ${language}`;
+  }
   return after;
+}
+
+// Leading acknowledgement / reaction tokens that real users tack onto the
+// front of a substantive request ("cool. now i need it in rust", "thanks.
+// actually scratch that, ..."). When such a token forms its OWN clause —
+// terminated by `.`/`!`/`…` — and a substantial request follows, the ack is
+// social noise that must not be allowed to short-circuit routing (e.g. trip a
+// "you starting with a reaction word" handler into "Glad to hear it!"). The
+// terminal-punctuation requirement keeps flow-through openers like "ok so i'm
+// building …" and pure reactions like "nice, that works" untouched.
+const LEADING_ACK_RE =
+  /^(?:thanks?(?:\s+you)?|thx|ty|cool|nice|sweet|awesome|amazing|great|perfect|dope|sick|gotcha|got\s+it|lol|lmao|rofl|haha+|ok|okay|kk|yeah|yep|yup|sure|alright|right|word|wow|oh\s+(?:nice|cool|wow)|oh|ah)(?:\s+(?:cool|nice|then|man|dude))?[.!…]+\s+/i;
+
+function stripLeadingAcknowledgement(input: string): string {
+  let out = input;
+  // Peel up to two stacked acks ("ok cool. thanks. now …" is rare but cheap to
+  // handle). Stop as soon as the remaining clause would be too short to be a
+  // real request, so a bare "cool." or "thanks!" is preserved verbatim.
+  for (let i = 0; i < 2; i += 1) {
+    const m = out.match(LEADING_ACK_RE);
+    if (!m) break;
+    const rest = out.slice(m[0].length).trim();
+    if (rest.length < 8) break;
+    out = rest;
+  }
+  return out;
 }
 
 function stripDisfluencies(input: string): string {
   let out = input;
 
+  out = stripLeadingAcknowledgement(out);
   out = applyRestartMarkers(out);
 
   // Filler tokens — standalone "mm" is excluded because it clobbers valid

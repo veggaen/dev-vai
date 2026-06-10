@@ -301,3 +301,13 @@ describe('tryAlgorithmCodeGen routing matrix (Part 1: strings, arrays, sort, mat
     });
   }
 });
+
+describe('tryAlgorithmCodeGen language preservation', () => {
+  it('keeps a natural TypeScript helper request in a TypeScript fence', () => {
+    const engine = new VaiEngine();
+    const result = (engine as unknown as { tryAlgorithmCodeGen(input: string): string | null })
+      .tryAlgorithmCodeGen('can you write a TypeScript helper that reverses the words in a sentence');
+    expect(result).toMatch(/```typescript\b/);
+    expect(result).not.toMatch(/```python\b/);
+  });
+});

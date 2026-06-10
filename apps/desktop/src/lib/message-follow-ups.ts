@@ -32,7 +32,11 @@ function isReasonableFollowUp(question: string, content: string): boolean {
   const overlap = questionTokens.filter((token) => contentTokens.has(token)).length;
 
   if (/^(?:make|add|change|turn|show|explain|give|rank|narrow|list)\b/i.test(normalized)) {
-    return overlap >= 1 || questionTokens.length <= 5;
+    // Imperatives must still share at least one content word with the answer.
+    // The old `|| questionTokens.length <= 5` free pass let generic boilerplate
+    // ("Narrow this to the strongest recommendation") render as a Related chip
+    // on answers it had nothing to do with.
+    return overlap >= 1;
   }
 
   return overlap >= 2;

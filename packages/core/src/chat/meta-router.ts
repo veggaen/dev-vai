@@ -18,6 +18,8 @@ export interface ChatMetaResult {
   readonly intent:
     | 'first-user'
     | 'first-assistant'
+    | 'ordinal-user'
+    | 'ordinal-assistant'
     | 'last-user'
     | 'last-assistant'
     | 'message-count'
@@ -32,6 +34,11 @@ const FIRST_ASSISTANT_RE =
   /\b(what|whats|what's)\b[^?]*\b(your|you)\s+(first|earliest|original|initial|opening)\s+(message|response|reply|answer|output|line|turn)\b/i;
 const FIRST_ASSISTANT_ALT_RE =
   /\bwhat\s+did\s+you\s+(?:(first|originally|initially)\s+)?(say|reply|respond|answer|tell\s+me)(?:\s+(first|originally|initially))?\b/i;
+
+const ORDINAL_MESSAGE_RE =
+  /\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|1st|2nd|3rd|4th|5th|6th|7th|8th|9th|10th)\s+(?:(user|assistant)\s+)?(message|question|prompt|thing|input|reply|response|answer|turn|entry)\b/i;
+const ORDINAL_REQUEST_RE =
+  /\b(what|which|tell|remind|recall|repeat|show|quote)\b/i;
 
 const LAST_USER_RE =
   /\bwhat\s+(did|do)\s+i\s+(just|last|previously|already)\s+(say|ask|write|tell\s+you|send|type)\b/i;
@@ -70,6 +77,47 @@ function firstUserMessage(history: readonly MetaHistoryMessage[]): MetaHistoryMe
 
 function firstAssistantMessage(history: readonly MetaHistoryMessage[]): MetaHistoryMessage | null {
   return history.find((m) => m.role === 'assistant') ?? null;
+}
+
+const ORDINAL_INDEX: Readonly<Record<string, number>> = {
+  first: 0,
+  '1st': 0,
+  second: 1,
+  '2nd': 1,
+  third: 2,
+  '3rd': 2,
+  fourth: 3,
+  '4th': 3,
+  fifth: 4,
+  '5th': 4,
+  sixth: 5,
+  '6th': 5,
+  seventh: 6,
+  '7th': 6,
+  eighth: 7,
+  '8th': 7,
+  ninth: 8,
+  '9th': 8,
+  tenth: 9,
+  '10th': 9,
+};
+
+function ordinalTurnsBeforeCurrent(
+  history: readonly MetaHistoryMessage[],
+  role: 'user' | 'assistant',
+  currentContent: string,
+): MetaHistoryMessage[] {
+  const turns = history.filter((message) => message.role === role);
+  if (role !== 'user' || turns.length === 0) return turns;
+
+  const current = currentContent.trim().replace(/\s+/g, ' ').toLowerCase();
+  const last = turns[turns.length - 1]?.content.trim().replace(/\s+/g, ' ').toLowerCase();
+  return current && last === current ? turns.slice(0, -1) : turns;
+}
+
+function ordinalLabel(index: number): string {
+  return ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'][index]
+    ?? `${index + 1}th`;
 }
 
 function lastUserMessageBeforeCurrent(history: readonly MetaHistoryMessage[]): MetaHistoryMessage | null {
@@ -122,6 +170,37 @@ export function tryHandleChatMeta(
     const msg = firstAssistantMessage(history);
     if (!msg) return { reply: "I haven't replied to anything yet — this is the first turn.", intent: 'first-assistant' };
     return { reply: `My first reply in this chat was: ${quote(msg.content)}.`, intent: 'first-assistant' };
+  }
+
+  const ordinalMatch = ORDINAL_REQUEST_RE.test(text) ? text.match(ORDINAL_MESSAGE_RE) : null;
+  if (ordinalMatch) {
+    const index = ORDINAL_INDEX[ordinalMatch[1].toLowerCase()];
+    const explicitRole = ordinalMatch[2]?.toLowerCase();
+    const noun = ordinalMatch[3].toLowerCase();
+    const beforeOrdinal = text.slice(0, ordinalMatch.index ?? 0).toLowerCase();
+    const asksForAssistant =
+      explicitRole === 'assistant'
+      || /\b(your|you)\s*$/.test(beforeOrdinal)
+      || /^(reply|response|answer)$/.test(noun);
+    const role = asksForAssistant ? 'assistant' : 'user';
+    const turns = ordinalTurnsBeforeCurrent(history, role, text);
+    const msg = turns[index];
+    const label = ordinalLabel(index);
+
+    if (!msg) {
+      const owner = role === 'assistant' ? 'me' : 'you';
+      return {
+        reply: `I can only find ${turns.length} earlier message${turns.length === 1 ? '' : 's'} from ${owner} in this chat, so there isn't a ${label} one to quote.`,
+        intent: role === 'assistant' ? 'ordinal-assistant' : 'ordinal-user',
+      };
+    }
+
+    return {
+      reply: role === 'assistant'
+        ? `My ${label} reply in this chat was: ${quote(msg.content)}.`
+        : `Your ${label} message in this chat was: ${quote(msg.content)}.`,
+      intent: role === 'assistant' ? 'ordinal-assistant' : 'ordinal-user',
+    };
   }
 
   if (LAST_USER_RE.test(text) || LAST_USER_ALT_RE.test(text)) {

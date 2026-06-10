@@ -11,7 +11,7 @@ export interface BuildStatus {
 export type AppView = 'chat' | 'devlogs' | 'knowledge' | 'vaigym' | 'thorsen' | 'projects' | 'control';
 
 /** Sidebar panel modes — which view the expanded panel shows */
-export type SidebarPanel = 'chats' | 'projects' | 'devlogs' | 'knowledge' | 'search' | 'settings' | 'docker' | 'vaigym' | 'thorsen' | 'control';
+export type SidebarPanel = 'chats' | 'projects' | 'devlogs' | 'knowledge' | 'search' | 'settings' | 'docker' | 'vaigym' | 'thorsen' | 'control' | 'council';
 
 /**
  * Role-gated navigation — which panels each role can access.
@@ -20,9 +20,9 @@ export type SidebarPanel = 'chats' | 'projects' | 'devlogs' | 'knowledge' | 'sea
  * Owner: everything including platform tools.
  */
 export const ROLE_NAV_ITEMS: Record<AppRole, SidebarPanel[]> = {
-  builder: ['chats', 'projects', 'search', 'settings'],
-  admin:   ['chats', 'projects', 'devlogs', 'search', 'settings', 'docker'],
-  owner:   ['chats', 'projects', 'control', 'devlogs', 'knowledge', 'vaigym', 'docker', 'thorsen', 'search', 'settings'],
+  builder: ['chats', 'settings'],
+  admin:   ['chats', 'devlogs', 'settings', 'docker'],
+  owner:   ['chats', 'control', 'devlogs', 'knowledge', 'vaigym', 'docker', 'thorsen', 'settings'],
 };
 
 /** Three-state sidebar: rail (icons only), expanded (full panel), hidden */
@@ -68,6 +68,8 @@ interface LayoutState {
   screenClass: ScreenClass;
   /** Whether secondary sidebar is visible (ultrawide only) */
   showSecondarySidebar: boolean;
+  /** Dedicated right Council Progress panel (Codex-style contextual view for SCIS council) */
+  showCouncilPanel: boolean;
 
   setMode: (mode: ChatMode) => void;
   setView: (view: AppView) => void;
@@ -103,6 +105,8 @@ interface LayoutState {
   updateScreenClass: () => void;
   /** Toggle secondary sidebar (ultrawide only) */
   toggleSecondarySidebar: () => void;
+  /** Toggle the dedicated right Council Progress panel (Codex-style) */
+  toggleCouncilPanel: () => void;
 
   /** Legacy compat — maps to sidebarState !== 'hidden' */
   showSidebar: boolean;
@@ -148,6 +152,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   themePreference: savedThemePreference,
   screenClass: typeof window !== 'undefined' ? detectScreenClass() : 'desktop',
   showSecondarySidebar: false,
+  showCouncilPanel: false,
 
   setMode: (mode) => set({ mode }),
   setView: (view) => {
@@ -175,6 +180,27 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   setActivePanel: (panel) => {
     const { sidebarState, activePanel } = get();
 
+    // Legacy panels merged into chats.
+    if (panel === 'search') {
+      set({ activePanel: 'chats', sidebarState: 'expanded', showSidebar: true, view: 'chat' });
+      window.dispatchEvent(new CustomEvent('vai:focus-chat-search'));
+      return;
+    }
+    if (panel === 'projects' || panel === 'council') {
+      set({ activePanel: 'chats', sidebarState: 'expanded', showSidebar: true, view: 'chat' });
+      return;
+    }
+
+    // Settings — wide drawer overlay (~80%), not the narrow sidebar column
+    if (panel === 'settings') {
+      if (activePanel === 'settings') {
+        set({ activePanel: 'chats', sidebarState: 'rail', showSidebar: true, view: 'chat' });
+        return;
+      }
+      set({ activePanel: 'settings', sidebarState: 'rail', showSidebar: true, view: 'chat' });
+      return;
+    }
+
     // Full-screen views — switch view but keep sidebar in rail mode (no expanded panel content)
     const FULLSCREEN_PANELS: SidebarPanel[] = ['vaigym', 'thorsen'];
     if (FULLSCREEN_PANELS.includes(panel)) {
@@ -193,11 +219,9 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       ? 'devlogs'
       : panel === 'knowledge'
         ? 'knowledge'
-        : panel === 'projects'
-          ? 'projects'
-          : panel === 'control'
-            ? 'control'
-            : 'chat';
+        : panel === 'control'
+          ? 'control'
+          : 'chat';
     set({ activePanel: panel, sidebarState: 'expanded', showSidebar: true, view });
   },
 
@@ -261,11 +285,12 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   },
   updateScreenClass: () => set({ screenClass: detectScreenClass() }),
   toggleSecondarySidebar: () => set((s) => ({ showSecondarySidebar: !s.showSecondarySidebar })),
+  toggleCouncilPanel: () => set((s) => ({ showCouncilPanel: !s.showCouncilPanel })),
 }));
 
 /** Mode-specific input placeholders */
 export const MODE_PLACEHOLDERS: Record<ChatMode, string> = {
-  chat: 'Message VeggaAI...',
+  chat: 'Message Vai...',
   agent: 'Vai will figure out the best approach...',
   builder: 'What would you like to change?',
   plan: 'What are you trying to accomplish?',

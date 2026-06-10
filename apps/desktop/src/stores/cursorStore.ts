@@ -13,6 +13,13 @@ import { create } from 'zustand';
 import type { CursorState } from '../components/sandbox/VaiCursor.js';
 import type { ActionEntry, ActionType } from '../components/sandbox/ActionLog.js';
 
+const OVERLAY_VISIBLE_KEY = 'vai-overlay-visible';
+
+function loadOverlayVisible(): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  return localStorage.getItem(OVERLAY_VISIBLE_KEY) === '1';
+}
+
 export const CURSOR_INITIAL: CursorState = {
   x: 0, y: 0, visible: false,
   clicking: false, hovering: false, typing: false,
@@ -123,7 +130,7 @@ export const useCursorStore = create<CursorStore>((set, get) => ({
   scrollIndicatorDeltaY: 0,
   scrollIndicatorX: 0,
   scrollIndicatorY: 0,
-  overlayVisible: false,
+  overlayVisible: loadOverlayVisible(),
   _actionId: 0,
 
   setLabel: (label: string) => {
@@ -235,7 +242,12 @@ export const useCursorStore = create<CursorStore>((set, get) => ({
     }
   },
 
-  setOverlayVisible: (visible) => set({ overlayVisible: visible }),
+  setOverlayVisible: (visible) => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(OVERLAY_VISIBLE_KEY, visible ? '1' : '0');
+    }
+    set({ overlayVisible: visible });
+  },
 
   arrowKey: (key) => {
     set({ arrowKeyActive: key });

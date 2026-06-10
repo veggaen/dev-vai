@@ -22,7 +22,7 @@ if (await isFrontendReady()) {
   process.exit(0);
 }
 
-const child = spawn('pnpm', ['--filter', '@vai/desktop', 'dev'], {
+const child = spawn('corepack', ['pnpm', '--filter', '@vai/desktop', 'dev'], {
   stdio: 'inherit',
   shell: true,
   env: process.env,

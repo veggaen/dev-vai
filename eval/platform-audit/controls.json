@@ -1,0 +1,245 @@
+{
+  "version": 1,
+  "controls": [
+    {
+      "id": "security-runtime-loopback-default",
+      "category": "security",
+      "severity": "critical",
+      "profiles": ["static", "qa"],
+      "kind": "file-content",
+      "path": "packages/runtime/src/security/runtime-exposure.ts",
+      "allPatterns": ["VAI_HOST\\?\\.trim\\(\\) \\|\\| '127\\.0\\.0\\.1'", "Refusing to bind runtime"],
+      "remediation": "Keep local-first defaults and require API authentication before binding another interface."
+    },
+    {
+      "id": "security-runtime-no-wildcard-bootstrap",
+      "category": "security",
+      "severity": "critical",
+      "profiles": ["static", "qa"],
+      "kind": "file-content",
+      "path": "packages/runtime/src/index.ts",
+      "absentPatterns": ["host:\\s*['\"]0\\.0\\.0\\.0['\"]"],
+      "remediation": "Resolve the runtime bind host through the exposure policy."
+    },
+    {
+      "id": "security-sandbox-containment",
+      "category": "security",
+      "severity": "critical",
+      "profiles": ["static", "qa"],
+      "kind": "file-content",
+      "path": "packages/runtime/src/sandbox/manager.ts",
+      "allPatterns": ["relative\\(rootDir, full\\)", "isAbsolute\\(relativePath\\)"],
+      "remediation": "Use path-relative containment checks rather than string prefix checks."
+    },
+    {
+      "id": "security-markdown-html-escaping",
+      "category": "security",
+      "severity": "critical",
+      "profiles": ["static", "qa"],
+      "kind": "file-content",
+      "path": "packages/ui/src/MarkdownRenderer.tsx",
+      "allPatterns": ["return escapeHtml\\(text\\)", "sanitizeHref\\(href\\)"],
+      "remediation": "Escape untrusted text before generating HTML and allow-list link protocols."
+    },
+    {
+      "id": "security-discovery-ssrf-validation",
+      "category": "security",
+      "severity": "critical",
+      "profiles": ["static", "qa"],
+      "kind": "file-content",
+      "path": "packages/runtime/src/routes/ingest.ts",
+      "allPatterns": ["const safeUrl = await validateUrlOrReply\\(url, reply\\)", "safeFetch\\(safeUrl", "validateUrl\\(link\\)"],
+      "remediation": "Validate seed URLs and discovered links before any network fetch."
+    },
+    {
+      "id": "security-network-safe-fetch",
+      "category": "security",
+      "severity": "critical",
+      "profiles": ["static", "qa"],
+      "kind": "file-content",
+      "path": "packages/core/src/network/safe-fetch.ts",
+      "allPatterns": ["lookup\\(hostname", "redirect: 'manual'", "assertPublicHostname\\(currentUrl", "validatePublicUrl\\(new URL\\(location, currentUrl\\)\\)"],
+      "remediation": "Keep all untrusted page fetches behind DNS-aware validation and validate each redirect target."
+    },
+    {
+      "id": "security-docker-local-boundary",
+      "category": "security",
+      "severity": "high",
+      "profiles": ["static", "qa"],
+      "kind": "file-content",
+      "path": "packages/runtime/src/routes/docker.ts",
+      "allPatterns": ["requireLocalDockerAccess", "isLocalDevMutationAllowed"],
+      "remediation": "Keep Docker management restricted to local development callers."
+    },
+    {
+      "id": "compliance-security-policy",
+      "category": "compliance",
+      "severity": "medium",
+      "profiles": ["static", "qa"],
+      "kind": "file-exists",
+      "path": "SECURITY.md",
+      "remediation": "Add a security policy with reporting, supported-version, and disclosure guidance."
+    },
+    {
+      "id": "compliance-dependency-automation",
+      "category": "compliance",
+      "severity": "medium",
+      "profiles": ["static", "qa"],
+      "kind": "any-file-exists",
+      "paths": [".github/dependabot.yml", ".github/dependabot.yaml", "renovate.json", ".renovaterc"],
+      "remediation": "Enable automated dependency update review."
+    },
+    {
+      "id": "compliance-security-workflow",
+      "category": "compliance",
+      "severity": "medium",
+      "profiles": ["static", "qa"],
+      "kind": "file-content",
+      "path": ".github/workflows/ci.yml",
+      "anyPatterns": ["codeql", "dependency-review", "gitleaks", "trivy", "semgrep"],
+      "flags": "i",
+      "remediation": "Add at least one automated security scanning control to CI."
+    },
+    {
+      "id": "hygiene-root-scratch-artifacts",
+      "category": "hygiene",
+      "severity": "medium",
+      "profiles": ["static", "qa"],
+      "kind": "root-artifacts",
+      "patterns": ["^_.*\\.(jsonl|partial|cjs|report\\.md|review\\.md)$", "^bench-round.*\\.jsonl$"],
+      "remediation": "Move local experiment outputs under Temporary_files or artifacts."
+    },
+    {
+      "id": "architecture-source-file-pressure",
+      "category": "architecture",
+      "severity": "high",
+      "profiles": ["static", "qa"],
+      "kind": "max-lines",
+      "roots": ["packages", "apps"],
+      "excludeDirs": ["node_modules", "dist", "target", ".vite", ".wxt", ".output"],
+      "extensions": [".ts", ".tsx", ".js", ".mjs", ".cjs"],
+      "maxLines": 5000,
+      "warnLines": 1500,
+      "remediation": "Split oversized modules along stable ownership boundaries and benchmark behavior before and after."
+    },
+    {
+      "id": "inventory-runtime-routes",
+      "category": "inventory",
+      "severity": "info",
+      "profiles": ["static", "qa"],
+      "kind": "route-inventory",
+      "root": "packages/runtime/src/routes"
+    },
+    {
+      "id": "quality-visual-conversation-audit",
+      "category": "quality",
+      "severity": "high",
+      "profiles": ["static", "qa"],
+      "kind": "file-content",
+      "path": "scripts/vai-visual-conversation-audit.mjs",
+      "allPatterns": ["openFreshConversation\\(page\\)", "expandLatestThinking\\(page\\)", "gradeAuditTurn\\(", "buildGeneratedAuditWave\\(", "auditClusters"],
+      "remediation": "Keep a visual audit that opens fresh chats, generates held-out waves, invokes an independent grader, captures trace evidence, and clusters failures."
+    },
+    {
+      "id": "quality-generated-conversation-wave",
+      "category": "quality",
+      "severity": "high",
+      "profiles": ["static", "qa"],
+      "kind": "file-content",
+      "path": "scripts/lib/vai-generated-audit-wave.mjs",
+      "allPatterns": ["randomAuditSeed\\(", "buildGeneratedAuditWave\\(", "generated-held-out", "rubric"],
+      "remediation": "Keep reproducible random audit generation separate from the browser runner."
+    },
+    {
+      "id": "quality-independent-conversation-grader",
+      "category": "quality",
+      "severity": "high",
+      "profiles": ["static", "qa"],
+      "kind": "file-content",
+      "path": "scripts/lib/vai-generated-audit-grader.mjs",
+      "allPatterns": ["gradeAuditTurn\\(", "auditTrace\\(", "routing:forbidden-strategy", "isolation:cross-conversation-leak"],
+      "remediation": "Grade generated turns outside the browser driver and keep trace, routing, contract, and conversation-isolation checks."
+    },
+    {
+      "id": "quality-visual-conversation-corpus",
+      "category": "quality",
+      "severity": "high",
+      "profiles": ["static", "qa"],
+      "kind": "file-exists",
+      "path": "eval/conversation-audit/scenarios.json",
+      "remediation": "Maintain a multi-turn conversation corpus with control questions, tasks, corrections, and instruction-memory probes."
+    },
+    {
+      "id": "qa-generated-audit-wave-tests",
+      "category": "qa",
+      "severity": "high",
+      "profiles": ["qa"],
+      "kind": "command",
+      "command": ["node", "--test", "scripts/lib/vai-generated-audit-wave.test.mjs"],
+      "timeoutMs": 120000
+    },
+    {
+      "id": "qa-corpus-lint",
+      "category": "qa",
+      "severity": "high",
+      "profiles": ["qa"],
+      "kind": "command",
+      "command": ["corepack", "pnpm", "corpus:lint"],
+      "timeoutMs": 120000
+    },
+    {
+      "id": "qa-eslint",
+      "category": "qa",
+      "severity": "high",
+      "profiles": ["qa"],
+      "kind": "command",
+      "command": ["corepack", "pnpm", "lint"],
+      "timeoutMs": 240000
+    },
+    {
+      "id": "qa-typecheck",
+      "category": "qa",
+      "severity": "high",
+      "profiles": ["qa"],
+      "kind": "command",
+      "command": ["corepack", "pnpm", "typecheck"],
+      "timeoutMs": 240000
+    },
+    {
+      "id": "qa-targeted-runtime-security",
+      "category": "qa",
+      "severity": "critical",
+      "profiles": ["qa"],
+      "kind": "command",
+      "command": ["node", "node_modules/vitest/vitest.mjs", "run", "packages/runtime/__tests__/runtime-exposure.test.ts", "packages/runtime/__tests__/boundary-validation-routes.test.ts", "--maxWorkers=1"],
+      "timeoutMs": 180000
+    },
+    {
+      "id": "qa-targeted-network-security",
+      "category": "qa",
+      "severity": "critical",
+      "profiles": ["qa"],
+      "kind": "command",
+      "command": ["node", "node_modules/vitest/vitest.mjs", "run", "packages/core/__tests__/safe-fetch.test.ts", "--maxWorkers=1"],
+      "timeoutMs": 120000
+    },
+    {
+      "id": "qa-targeted-sandbox-containment",
+      "category": "qa",
+      "severity": "critical",
+      "profiles": ["qa"],
+      "kind": "command",
+      "command": ["node", "node_modules/vitest/vitest.mjs", "run", "packages/runtime/__tests__/sandbox-manager.test.ts", "--maxWorkers=1", "-t", "blocks traversal into sibling directories with a shared prefix"],
+      "timeoutMs": 120000
+    },
+    {
+      "id": "qa-targeted-ui-security",
+      "category": "qa",
+      "severity": "critical",
+      "profiles": ["qa"],
+      "kind": "command",
+      "command": ["node", "node_modules/vitest/vitest.mjs", "run", "packages/ui/src/MarkdownRenderer.test.ts", "--maxWorkers=1"],
+      "timeoutMs": 120000
+    }
+  ]
+}

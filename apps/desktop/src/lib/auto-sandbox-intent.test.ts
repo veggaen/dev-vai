@@ -102,6 +102,29 @@ describe('resolveAutoSandboxIntent', () => {
     expect(result.requestSystemPrompt).toBeUndefined();
   });
 
+  it('keeps debugging guidance in chat when "start" and "page" describe the problem', () => {
+    const result = resolveSendTimeWorkIntent({
+      userPrompt: 'I am overwhelmed debugging a blank React page. Where should I start?',
+      mode: 'chat',
+      hasActiveProject: false,
+    });
+
+    expect(result.intent).toBe('none');
+    expect(result.shouldPrimeBuilder).toBe(false);
+    expect(result.requestSystemPrompt).toBeUndefined();
+  });
+
+  it('does not mistake advice about starting a project for an execute-now build request', () => {
+    const result = resolveSendTimeWorkIntent({
+      userPrompt: 'Where should I start if I want to make a portfolio website?',
+      mode: 'chat',
+      hasActiveProject: false,
+    });
+
+    expect(result.intent).toBe('none');
+    expect(result.shouldPrimeBuilder).toBe(false);
+  });
+
   it('does not prime builder for chat-app quality recommendation prompts', () => {
     const result = resolveSendTimeWorkIntent({
       userPrompt: 'What is the single best next engineering task to make my chat app responses more relevant and accurate?',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatWebSocketInboundSchema } from '../src/chat-ws.js';
+import { chatProgressStepSchema, chatWebSocketInboundSchema } from '../src/chat-ws.js';
 import {
   createConversationBodySchema,
   patchConversationBodySchema,
@@ -38,6 +38,52 @@ describe('chatWebSocketInboundSchema', () => {
   it('rejects missing conversationId', () => {
     const r = chatWebSocketInboundSchema.safeParse({ content: 'only' });
     expect(r.success).toBe(false);
+  });
+});
+
+describe('chatProgressStepSchema', () => {
+  it('accepts structured shadow-advisor traces and rejects hidden prompt data', () => {
+    const valid = chatProgressStepSchema.safeParse({
+      stage: 'local-steering',
+      label: 'Local model friend returned advice',
+      status: 'done',
+      advisor: {
+        schemaVersion: 1,
+        actorId: 'local:qwen2.5:7b',
+        modelId: 'qwen2.5:7b',
+        state: 'ready',
+        taskShape: 'debugging',
+        qualityContract: {
+          answerLength: 'structured',
+          mustBeGuiding: true,
+          mustBeCurrent: false,
+          mustUseJson: false,
+          shouldAskClarifyingQuestion: false,
+        },
+        routeGuidance: [],
+        riskFlags: ['generic-fallback-risk'],
+        retrievalHints: ['blank React page'],
+        confidence: 0.81,
+      },
+    });
+    expect(valid.success).toBe(true);
+
+    const leakedPrompt = chatProgressStepSchema.safeParse({
+      stage: 'local-steering',
+      label: 'Advice',
+      status: 'done',
+      advisor: {
+        schemaVersion: 1,
+        actorId: 'local:qwen2.5:7b',
+        modelId: 'qwen2.5:7b',
+        state: 'ready',
+        routeGuidance: [],
+        riskFlags: [],
+        retrievalHints: [],
+        rawPrompt: 'secret user text',
+      },
+    });
+    expect(leakedPrompt.success).toBe(false);
   });
 });
 
