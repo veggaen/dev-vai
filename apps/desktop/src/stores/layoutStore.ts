@@ -28,8 +28,8 @@ export const ROLE_NAV_ITEMS: Record<AppRole, SidebarPanel[]> = {
 /** Three-state sidebar: rail (icons only), expanded (full panel), hidden */
 export type SidebarState = 'expanded' | 'rail' | 'hidden';
 
-/** Layout density mode: compact (VSCode-like, edge-to-edge) vs open (floating, airy) */
-export type LayoutMode = 'compact' | 'open';
+/** Layout density: compact (VS Code), open (floating panels), odyssey (Odysseus-style bubbles). */
+export type LayoutMode = 'compact' | 'open' | 'odyssey';
 export type ThemePreference = 'dark' | 'light';
 
 /**
@@ -71,6 +71,9 @@ interface LayoutState {
   /** Dedicated right Council Progress panel (Codex-style contextual view for SCIS council) */
   showCouncilPanel: boolean;
 
+  /** When non-null, settings drawer shrinks so theme edits preview on the canvas. */
+  themeEditingBaseId: string | null;
+
   setMode: (mode: ChatMode) => void;
   setView: (view: AppView) => void;
 
@@ -96,7 +99,9 @@ interface LayoutState {
   setBuildStatus: (status: BuildStatus) => void;
   setShowQuickSwitch: (show: boolean) => void;
 
-  /** Toggle compact ↔ open layout mode */
+  /** Cycle compact → open → odyssey */
+  cycleLayoutMode: () => void;
+  /** @deprecated Use cycleLayoutMode */
   toggleLayoutMode: () => void;
   setLayoutMode: (mode: LayoutMode) => void;
   toggleThemePreference: () => void;
@@ -107,6 +112,7 @@ interface LayoutState {
   toggleSecondarySidebar: () => void;
   /** Toggle the dedicated right Council Progress panel (Codex-style) */
   toggleCouncilPanel: () => void;
+  setThemeEditingBaseId: (baseId: string | null) => void;
 
   /** Legacy compat — maps to sidebarState !== 'hidden' */
   showSidebar: boolean;
@@ -127,9 +133,11 @@ function detectScreenClass(): ScreenClass {
 
 /** Persist layout mode preference */
 const LAYOUT_MODE_KEY = 'vai-layout-mode';
-const savedMode = (typeof localStorage !== 'undefined'
+const VALID_LAYOUT_MODES: LayoutMode[] = ['compact', 'open', 'odyssey'];
+const rawSavedMode = typeof localStorage !== 'undefined'
   ? localStorage.getItem(LAYOUT_MODE_KEY) as LayoutMode | null
-  : null) ?? 'compact';
+  : null;
+const savedMode = rawSavedMode && VALID_LAYOUT_MODES.includes(rawSavedMode) ? rawSavedMode : 'compact';
 const THEME_PREFERENCE_KEY = 'vai-theme-preference';
 const savedThemePreference = (typeof localStorage !== 'undefined'
   ? localStorage.getItem(THEME_PREFERENCE_KEY) as ThemePreference | null
@@ -153,7 +161,9 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   screenClass: typeof window !== 'undefined' ? detectScreenClass() : 'desktop',
   showSecondarySidebar: false,
   showCouncilPanel: false,
+  themeEditingBaseId: null,
 
+  setThemeEditingBaseId: (themeEditingBaseId) => set({ themeEditingBaseId }),
   setMode: (mode) => set({ mode }),
   setView: (view) => {
     // Sync active panel when view changes
@@ -265,8 +275,10 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   setBuildStatus: (buildStatus) => set({ buildStatus }),
   setShowQuickSwitch: (showQuickSwitch) => set({ showQuickSwitch }),
 
-  toggleLayoutMode: () => set((s) => {
-    const next = s.layoutMode === 'compact' ? 'open' : 'compact';
+  toggleLayoutMode: () => get().cycleLayoutMode(),
+  cycleLayoutMode: () => set((s) => {
+    const order: LayoutMode[] = ['compact', 'open', 'odyssey'];
+    const next = order[(order.indexOf(s.layoutMode) + 1) % order.length];
     localStorage.setItem(LAYOUT_MODE_KEY, next);
     return { layoutMode: next };
   }),

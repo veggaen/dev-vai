@@ -20,7 +20,7 @@ const MODE_KEYS: Record<string, ChatMode> = {
  *   Ctrl+Shift+L    — Toggle Dev Logs panel
  *   Ctrl+Shift+F    — Focus chat search in sidebar
  *   Ctrl+Shift+K    — Toggle Knowledge Base panel
- *   Ctrl+Shift+M    — Toggle layout mode (compact ↔ open)
+ *   Ctrl+Shift+M    — Cycle layout: compact → open → odyssey
  *   Ctrl+J          — Toggle debug console (paired with Ctrl+K: pick chat vs inspect logs)
  *   Ctrl+E          — Toggle file explorer
  *   Ctrl+B          — Toggle builder panel
@@ -29,7 +29,7 @@ export function useKeyboardShortcuts() {
   const {
     setMode, toggleDebugConsole, toggleFileExplorer,
     toggleBuilderPanel, toggleFocusMode, cycleSidebar,
-    setShowQuickSwitch, setActivePanel, toggleLayoutMode,
+    setShowQuickSwitch, setActivePanel, cycleLayoutMode,
   } = useLayoutStore();
   const activeConversationId = useChatStore((state) => state.activeConversationId);
   const updateConversationMode = useChatStore((state) => state.updateConversationMode);
@@ -92,7 +92,7 @@ export function useKeyboardShortcuts() {
       // Ctrl+Shift+M — Toggle layout mode (compact ↔ open)
       if (ctrl && shift && key.toLowerCase() === 'm') {
         e.preventDefault();
-        toggleLayoutMode();
+        cycleLayoutMode();
         return;
       }
 
@@ -146,7 +146,7 @@ export function useKeyboardShortcuts() {
     toggleDebugConsole,
     toggleFileExplorer,
     toggleFocusMode,
-    toggleLayoutMode,
+    cycleLayoutMode,
     updateConversationMode,
   ]);
 }

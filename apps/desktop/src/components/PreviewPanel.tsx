@@ -2,7 +2,7 @@ import { useSandboxStore } from '../stores/sandboxStore.js';
 import { apiFetch } from '../lib/api.js';
 import {
   RefreshCw, Smartphone, Tablet, Monitor, Copy, ExternalLink,
-  Code2, Eye, EyeOff, Trash2, Download, CheckCircle, XCircle, Loader2,
+  Code2, Eye, Trash2, Download, CheckCircle, XCircle, Loader2,
   Camera, Terminal, FolderTree, Play, Square, Maximize2, Minimize2,
   ArrowLeft, ArrowRight, Save, RotateCcw, MessageSquare, File, Moon, Sun,
 } from 'lucide-react';
@@ -13,6 +13,7 @@ import { DeployProgress } from './DeployProgress.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { useCursorStore } from '../stores/cursorStore.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { SandboxAppToggle } from './SandboxAppToggle.js';
 
 /* ── Types ── */
 
@@ -903,39 +904,13 @@ function Toolbar({
   const {
     showDebugConsole, showFileExplorer,
     toggleDebugConsole, toggleFileExplorer,
-    previewExpanded, togglePreviewExpanded, toggleBuilderPanel,
+    previewExpanded, togglePreviewExpanded,
     toggleThemePreference,
   } = useLayoutStore();
   const showViewToggle = true;
 
-  const chromeBtn = studioChrome
-    ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
-    : 'text-zinc-500 hover:bg-zinc-900/80 hover:text-zinc-100';
-  const chromeTabActive = studioChrome
-    ? 'border-zinc-900 text-zinc-900'
-    : 'border-zinc-100 text-zinc-100';
-  const chromeTabIdle = studioChrome
-    ? 'border-transparent text-zinc-500 hover:text-zinc-900'
-    : 'border-transparent text-zinc-500 hover:text-zinc-200';
-  const chromeUrlRing = studioChrome ? 'border-zinc-200' : 'border-zinc-800/70';
-  const chromeUrlBg = studioChrome ? 'bg-zinc-50 hover:bg-zinc-100' : 'bg-zinc-950 hover:bg-zinc-900';
-  const iconGhost = studioChrome
-    ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
-    : 'text-zinc-500 hover:bg-zinc-900/80 hover:text-zinc-100';
-  const bpOn = studioChrome
-    ? 'bg-zinc-900 text-white'
-    : 'bg-zinc-100 text-zinc-950';
-  const bpOff = studioChrome
-    ? 'text-zinc-500 hover:text-zinc-900'
-    : 'text-zinc-600 hover:text-zinc-300';
-  const rail = studioChrome ? 'bg-zinc-200' : 'bg-zinc-800/70';
-
   return (
-    <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2 ${
-      studioChrome
-        ? 'border-zinc-200 bg-white'
-        : 'border-zinc-800/75 bg-[linear-gradient(180deg,rgba(18,24,39,0.96),rgba(10,12,20,0.92))]'
-    }`}>
+    <div className="preview-toolbar flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
       <div className="flex items-center gap-0.5">
         <button
           onClick={() => {
@@ -945,7 +920,7 @@ function Toolbar({
               return;
             }
           }}
-          className={`rounded-md p-1.5 transition-colors ${chromeBtn}`}
+          className="preview-toolbar-btn"
           title="Back"
         >
           <ArrowLeft className="h-3 w-3" />
@@ -958,46 +933,38 @@ function Toolbar({
               return;
             }
           }}
-          className={`rounded-md p-1.5 transition-colors ${chromeBtn}`}
+          className="preview-toolbar-btn"
           title="Forward"
         >
           <ArrowRight className="h-3 w-3" />
         </button>
         <button
           onClick={onRefresh}
-          className={`rounded-md p-1.5 transition-colors ${chromeBtn}`}
+          className="preview-toolbar-btn"
           title="Refresh"
         >
           <RefreshCw className="h-3 w-3" />
         </button>
       </div>
 
-      <div className={`hidden h-4 w-px md:block ${rail}`} />
+      <div className="preview-toolbar-rail hidden h-4 w-px md:block" />
 
       {showViewToggle && (
         <div className="flex items-center gap-3">
           <button
             onClick={() => setViewMode('preview')}
-            className={`flex items-center gap-1.5 border-b-2 px-0 py-1.5 text-[11px] font-medium transition-colors ${
-              viewMode === 'preview'
-                ? chromeTabActive
-                : chromeTabIdle
-            }`}
+            className={`preview-toolbar-tab ${viewMode === 'preview' ? 'preview-toolbar-tab--active' : 'preview-toolbar-tab--idle'}`}
           >
             <Eye className="h-3 w-3" />
-            Preview
+            Live view
           </button>
           {hasFiles && (
             <button
               onClick={() => setViewMode('code')}
-              className={`flex items-center gap-1.5 border-b-2 px-0 py-1.5 text-[11px] font-medium transition-colors ${
-                viewMode === 'code'
-                  ? chromeTabActive
-                  : chromeTabIdle
-              }`}
+              className={`preview-toolbar-tab ${viewMode === 'code' ? 'preview-toolbar-tab--active' : 'preview-toolbar-tab--idle'}`}
             >
               <Code2 className="h-3 w-3" />
-              Code
+              Source
             </button>
           )}
         </div>
@@ -1007,22 +974,20 @@ function Toolbar({
         type="button"
         onClick={devPort ? onCopyUrl : undefined}
         disabled={!devPort}
-        className={`flex min-w-[13rem] flex-1 items-center gap-2 rounded-md border px-3 py-2 text-[11px] transition-colors ${
-          devPort
-            ? `cursor-pointer ${chromeUrlBg} ${chromeUrlRing} hover:border-zinc-300`
-            : `cursor-default ${studioChrome ? 'bg-zinc-50 border-zinc-200' : 'bg-zinc-950/72 border-zinc-800/70'}`
+        className={`preview-toolbar-url flex min-w-[13rem] flex-1 items-center gap-2 px-3 py-2 text-[11px] ${
+          devPort ? 'preview-toolbar-url--interactive cursor-pointer' : 'cursor-default opacity-80'
         }`}
         title={devPort ? `Copy: ${previewUrl}` : 'No live preview'}
       >
         <div className={`flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full ${
-          devPort ? 'bg-emerald-500/20' : studioChrome ? 'bg-zinc-200' : 'bg-zinc-800'
+          devPort ? 'bg-emerald-500/20' : 'bg-[color:var(--panel-bg-muted)]'
         }`}>
-          <div className={`h-1.5 w-1.5 rounded-full ${devPort ? 'bg-emerald-400' : studioChrome ? 'bg-zinc-400' : 'bg-zinc-700'}`} />
+          <div className={`h-1.5 w-1.5 rounded-full ${devPort ? 'bg-emerald-400' : 'bg-[color:var(--color-muted)]'}`} />
         </div>
         {devPort ? (
-          <span className={`truncate font-mono ${studioChrome ? 'text-zinc-600' : 'text-zinc-400'}`}>{previewUrl}</span>
+          <span className="truncate font-mono text-[color:var(--color-muted)]">{previewUrl}</span>
         ) : (
-          <span className={studioChrome ? 'text-zinc-500' : 'text-zinc-700'}>
+          <span className="text-[color:var(--color-muted)]">
             {hasActiveSandbox ? 'Starting preview...' : 'No live preview'}
           </span>
         )}
@@ -1030,16 +995,14 @@ function Toolbar({
 
       {showActions && (
         <div className="flex items-center gap-0.5">
-          <div className={`hidden h-4 w-px md:block ${rail}`} />
+          <div className="preview-toolbar-rail hidden h-4 w-px md:block" />
           <div className="flex items-center gap-0.5">
             {(Object.entries(BREAKPOINTS) as [BreakpointKey, typeof BREAKPOINTS[BreakpointKey]][]).map(
               ([key, { icon: Icon, label }]) => (
                 <button
                   key={key}
                   onClick={() => setBreakpoint(key)}
-                  className={`rounded-md p-1.5 transition-colors ${
-                    breakpoint === key ? bpOn : bpOff
-                  }`}
+                  className={breakpoint === key ? 'preview-toolbar-bp--active' : 'preview-toolbar-bp--idle'}
                   title={label}
                 >
                   <Icon className="h-3 w-3" />
@@ -1049,109 +1012,77 @@ function Toolbar({
           </div>
 
           <button onClick={onCopyUrl} disabled={!devPort}
-            className={`rounded-md p-1.5 transition-colors disabled:opacity-30 ${iconGhost}`} title={copied ? 'Copied!' : 'Copy URL'}>
+            className="preview-toolbar-btn disabled:opacity-30" title={copied ? 'Copied!' : 'Copy URL'}>
             <Copy className="h-3 w-3" />
           </button>
           <button onClick={onScreenshot} disabled={!devPort}
-            className={`rounded-md p-1.5 transition-colors disabled:opacity-30 ${iconGhost}`} title="Take screenshot">
+            className="preview-toolbar-btn disabled:opacity-30" title="Take screenshot">
             <Camera className="h-3 w-3" />
           </button>
           {onToggleDemo && (
             <button
               onClick={onToggleDemo}
-              className={`rounded-md p-1.5 transition-colors ${
-                demoRunning
-                  ? studioChrome
-                    ? 'text-red-600 hover:bg-red-50 hover:text-red-700'
-                    : 'text-red-400 hover:bg-zinc-900 hover:text-red-300'
-                  : studioChrome
-                    ? 'text-orange-600 hover:bg-orange-50 hover:text-orange-800'
-                    : 'text-violet-400 hover:bg-zinc-900 hover:text-violet-300'
-              }`}
+              className={`preview-toolbar-btn ${demoRunning ? 'text-[color:var(--red)]' : 'text-[color:var(--accent)]'}`}
               title={demoRunning ? 'Stop demo' : 'Run Vai demo sequence'}
             >
               {demoRunning ? <Square className="h-3 w-3 fill-current" /> : <Play className="h-3 w-3" />}
             </button>
           )}
           <button onClick={onOpenExternal} disabled={!devPort}
-            className={`rounded-md p-1.5 transition-colors disabled:opacity-30 ${iconGhost}`} title="Open in new tab">
+            className="preview-toolbar-btn hidden items-center gap-1 border border-[color:var(--shell-line-soft)] px-2 py-1 text-[10px] font-medium disabled:opacity-30 sm:flex" title="Open in browser tab">
             <ExternalLink className="h-3 w-3" />
+            Browser
           </button>
           <button onClick={onDestroy}
-            className={`rounded-md p-1.5 transition-colors ${
-              studioChrome
-                ? 'text-zinc-500 hover:bg-red-50 hover:text-red-600'
-                : 'text-zinc-600 hover:bg-zinc-900 hover:text-red-400'
-            }`} title="Destroy project">
+            className="preview-toolbar-btn hover:text-[color:var(--red)]" title="Destroy project">
             <Trash2 className="h-3 w-3" />
           </button>
         </div>
       )}
 
-      {canShowConsoleChrome && (
-        <div className="flex items-center gap-0.5">
-          <div className={`h-4 w-px ${rail}`} />
-          <button
-            onClick={toggleDebugConsole}
-            title={showDebugConsole ? 'Hide console (Ctrl+J)' : 'Show console (Ctrl+J)'}
-            className={`rounded-md p-1.5 transition-colors ${
-              showDebugConsole
-                ? studioChrome
-                  ? 'text-emerald-600 hover:bg-emerald-50'
-                  : 'text-emerald-400 hover:bg-zinc-900'
-                : chromeBtn
-            }`}
-          >
-            <Terminal className="h-3 w-3" />
-          </button>
-          {hasActiveSandbox && (
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+        {canShowConsoleChrome && (
+          <>
             <button
-              onClick={toggleFileExplorer}
-              title={showFileExplorer ? 'Hide files (Ctrl+E)' : 'Show files (Ctrl+E)'}
-              className={`rounded-md p-1.5 transition-colors ${
-                showFileExplorer
-                  ? studioChrome
-                    ? 'text-amber-700 hover:bg-amber-50'
-                    : 'text-amber-400 hover:bg-zinc-900'
-                  : chromeBtn
-              }`}
+              onClick={toggleDebugConsole}
+              title={showDebugConsole ? 'Hide console (Ctrl+J)' : 'Show console (Ctrl+J)'}
+              className={showDebugConsole ? 'preview-toolbar-chip--on flex items-center gap-1' : 'preview-toolbar-btn flex items-center gap-1 px-2 py-1 text-[10px] font-medium'}
             >
-              <FolderTree className="h-3 w-3" />
+              <Terminal className="h-3 w-3" />
+              Console
             </button>
-          )}
-        </div>
-      )}
-
-      <div className="ml-auto flex items-center gap-0.5">
-        <button
-          onClick={toggleThemePreference}
-          title={studioChrome ? 'Switch to dark theme' : 'Switch to light theme'}
-          className={`rounded-md p-1.5 transition-colors ${chromeBtn}`}
-        >
-          {studioChrome ? <Moon className="h-3 w-3" /> : <Sun className="h-3 w-3" />}
-        </button>
-        <button
-          onClick={toggleBuilderPanel}
-          title="Hide preview (Ctrl+B)"
-          className={`rounded-md p-1.5 transition-colors ${chromeBtn}`}
-        >
-          <EyeOff className="h-3 w-3" />
-        </button>
+            {hasActiveSandbox && (
+              <button
+                onClick={toggleFileExplorer}
+                title={showFileExplorer ? 'Hide files (Ctrl+E)' : 'Show files (Ctrl+E)'}
+                className={showFileExplorer ? 'preview-toolbar-chip--warn flex items-center gap-1' : 'preview-toolbar-btn flex items-center gap-1 px-2 py-1 text-[10px] font-medium'}
+              >
+                <FolderTree className="h-3 w-3" />
+                Files
+              </button>
+            )}
+          </>
+        )}
+        <SandboxAppToggle studioChrome={studioChrome} size="toolbar" />
         <button
           onClick={togglePreviewExpanded}
-          title={previewExpanded ? 'Shrink preview' : 'Expand preview'}
-          className={`rounded-md p-1.5 transition-colors ${
-            previewExpanded
-              ? studioChrome
-                ? 'text-orange-600 hover:bg-orange-50'
-                : 'text-violet-400 hover:bg-zinc-900 hover:text-violet-300'
-              : chromeBtn
+          title={previewExpanded ? 'Restore split layout' : 'Expand app to full width'}
+          className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
+            previewExpanded ? 'text-[color:var(--accent)]' : 'preview-toolbar-btn'
           }`}
         >
           {previewExpanded
             ? <Minimize2 className="h-3 w-3" />
             : <Maximize2 className="h-3 w-3" />
           }
+          <span className="hidden sm:inline">{previewExpanded ? 'Restore' : 'Expand'}</span>
+        </button>
+        <button
+          onClick={toggleThemePreference}
+          title={studioChrome ? 'Switch to dark theme' : 'Switch to light theme'}
+          className="preview-toolbar-btn"
+        >
+          {studioChrome ? <Moon className="h-3 w-3" /> : <Sun className="h-3 w-3" />}
         </button>
       </div>
     </div>
@@ -1299,7 +1230,7 @@ export function PreviewPanel() {
           : 'Ask for a concrete app, screen, or edit in Builder mode. As soon as files or a starter land, this panel becomes the live app automatically.';
 
       return (
-        <div className={`flex h-full flex-col ${studioChrome ? 'bg-[#fafafa]' : 'bg-zinc-950'}`}>
+        <div className="preview-panel-root flex h-full flex-col">
           <Toolbar viewMode="preview" setViewMode={() => {}} projectName={null} previewUrl=""
             devPort={null} breakpoint={breakpoint} setBreakpoint={setBreakpoint}
             onRefresh={() => {}} onOpenExternal={() => {}} onCopyUrl={() => {}}
@@ -1359,14 +1290,15 @@ export function PreviewPanel() {
     }
 
     return (
-      <div className="flex h-full flex-col bg-zinc-950">
+      <div className="preview-panel-root flex h-full flex-col">
         <Toolbar viewMode="preview" setViewMode={() => {}} projectName={null} previewUrl=""
           devPort={null} breakpoint={breakpoint} setBreakpoint={setBreakpoint}
           onRefresh={() => {}} onOpenExternal={() => {}} onCopyUrl={() => {}}
           onScreenshot={() => {}} onDestroy={() => {}} showActions={false}
           hasFiles={false} hasActiveSandbox={false}
-          demoRunning={demoRunning} onToggleDemo={toggleDemo} />
-        <div className="flex-1 min-h-0">
+          demoRunning={demoRunning} onToggleDemo={toggleDemo}
+          studioChrome={studioChrome} />
+        <div className="preview-panel-canvas min-h-0 flex-1">
           <TemplateGallery
             onDeploy={(stackId, tier, stackName, tierName) => deployStack(stackId, tier, stackName, tierName)}
             onTemplate={(templateId, name) => scaffoldFromTemplate(templateId, name)}
@@ -1380,7 +1312,7 @@ export function PreviewPanel() {
   // ── Deploy in progress ──
   if (deployPhase === 'deploying' || deployPhase === 'failed') {
     return (
-      <div className="flex h-full flex-col bg-zinc-950">
+      <div className="preview-panel-root flex h-full flex-col">
         <Toolbar viewMode="preview" setViewMode={() => {}} projectName={deployStackName} previewUrl=""
           devPort={null} breakpoint={breakpoint} setBreakpoint={setBreakpoint}
           onRefresh={() => {}} onOpenExternal={() => {}} onCopyUrl={() => {}}
@@ -1400,7 +1332,7 @@ export function PreviewPanel() {
   }
 
   return (
-    <div className={`flex h-full flex-col ${studioChrome ? 'bg-[#fafafa]' : 'bg-zinc-950'}`}>
+    <div className="preview-panel-root flex h-full flex-col">
       {/* ── Toolbar ── */}
       <Toolbar
         viewMode={viewMode} setViewMode={setViewMode}
@@ -1430,11 +1362,7 @@ export function PreviewPanel() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className={`flex h-full items-stretch justify-stretch ${
-                studioChrome
-                  ? 'bg-[radial-gradient(ellipse_at_50%_0%,rgba(255,200,170,0.35),rgba(250,250,250,0)_50%),linear-gradient(180deg,#fafafa,#f4f4f5)]'
-                  : 'bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),rgba(9,11,20,0)_44%),linear-gradient(180deg,rgba(15,18,29,0.98),rgba(6,8,15,0.98))]'
-              }`}
+              className="preview-panel-canvas flex h-full items-stretch justify-stretch"
             >
               {status === 'failed' ? (
                 <div className="text-center">
@@ -1451,11 +1379,7 @@ export function PreviewPanel() {
               ) : status === 'running' && devPort ? (
                 <div
                   ref={previewContainerRef}
-                  className={`relative h-full w-full overflow-hidden ${
-                    studioChrome
-                      ? 'bg-white'
-                      : 'bg-zinc-950'
-                  }`}
+                  className="preview-panel-iframe-bg relative h-full w-full overflow-hidden"
                   style={{ width: breakpoint === 'desktop' ? '100%' : BREAKPOINTS[breakpoint].width, maxWidth: '100%' }}
                 >
                   <iframe ref={iframeRef} src={previewUrl} className="h-full w-full" data-testid="preview-iframe"

@@ -14,8 +14,9 @@ import { BuildStatusBadge } from '../BuildStatusBadge.js';
 import { apiFetch } from '../../lib/api.js';
 import { MODE_DESCRIPTIONS } from '../../stores/layoutStore.js';
 import {
-  applyOdysseusPreset,
-  VAI_ACTIVE_THEME_ID_KEY,
+  applyThemeById,
+  getActiveThemeId,
+  listCustomThemeEntries,
 } from '../../lib/odysseus-theme.js';
 import type { ProjectHandoffIntentResponse } from '@vai/api-types/project-responses';
 import {
@@ -30,7 +31,11 @@ import {
   type SettingsTabId,
 } from './settings/SettingsShell.js';
 
-const LIGHT_THEME_PRESETS = new Set(['light']);
+const LAYOUT_MODES = [
+  { id: 'compact' as const, label: 'Compact', hint: 'VS Code — edge-to-edge, minimal chrome' },
+  { id: 'open' as const, label: 'Open', hint: 'Floating panels with soft shadows' },
+  { id: 'odyssey' as const, label: 'Odyssey', hint: 'Odysseus-style — airy canvas, bubble panels' },
+];
 
 const KEYBOARD_SHORTCUTS: { keys: string; description: string }[] = [
   { keys: 'Ctrl+K', description: 'Quick switch — fuzzy search conversations' },
@@ -44,12 +49,11 @@ const KEYBOARD_SHORTCUTS: { keys: string; description: string }[] = [
   { keys: 'Ctrl+Shift+F', description: 'Focus chat search in sidebar' },
   { keys: 'Ctrl+Shift+L', description: 'Open dev logs' },
   { keys: 'Ctrl+Shift+K', description: 'Open knowledge base' },
-  { keys: 'Ctrl+Shift+M', description: 'Toggle layout density (compact ↔ open)' },
+  { keys: 'Ctrl+Shift+M', description: 'Cycle layout: Compact → Open → Odyssey' },
 ];
 
 function loadActiveThemeId(): string {
-  if (typeof localStorage === 'undefined') return 'dark';
-  return localStorage.getItem(VAI_ACTIVE_THEME_ID_KEY) ?? 'dark';
+  return getActiveThemeId();
 }
 
 function formatRelative(date: string): string {
@@ -109,7 +113,6 @@ export function SettingsPanel() {
   const activeMode = useLayoutStore((state) => state.mode);
   const layoutMode = useLayoutStore((state) => state.layoutMode);
   const setLayoutMode = useLayoutStore((state) => state.setLayoutMode);
-  const setThemePreference = useLayoutStore((state) => state.setThemePreference);
   const setActivePanel = useLayoutStore((state) => state.setActivePanel);
   const overlayVisible = useCursorStore((state) => state.overlayVisible);
   const setOverlayVisible = useCursorStore((state) => state.setOverlayVisible);
@@ -121,9 +124,27 @@ export function SettingsPanel() {
   const trustLevel = useVinextStore((state: VinextState) => state.trustLevel);
   const [activeTab, setActiveTab] = useState<SettingsTabId>('appearance');
   const [activeThemeId, setActiveThemeId] = useState(loadActiveThemeId);
+  const [customThemes, setCustomThemes] = useState(() => listCustomThemeEntries());
+  const setThemeEditingBaseId = useLayoutStore((state) => state.setThemeEditingBaseId);
+  const [editingThemePresetId, setEditingThemePresetIdLocal] = useState<string | null>(null);
+  const setEditingThemePresetId = useCallback((id: string | null) => {
+    setEditingThemePresetIdLocal(id);
+    setThemeEditingBaseId(id);
+  }, [setThemeEditingBaseId]);
   const [auditPrompt, setAuditPrompt] = useState('Audit this project for correctness, regressions, and architecture risks.');
   const [_expandedResults, _setExpandedResults] = useState<Set<string>>(new Set());
   const [_launchingTargetId, setLaunchingTargetId] = useState<string | null>(null);
+
+  const refreshCustomThemes = useCallback(() => {
+    setCustomThemes(listCustomThemeEntries());
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'appearance') {
+      setActiveThemeId(getActiveThemeId());
+      refreshCustomThemes();
+    }
+  }, [activeTab, refreshCustomThemes]);
 
   useEffect(() => {
     fetchBootstrap();
@@ -343,17 +364,27 @@ export function SettingsPanel() {
     toast.success('Disconnected from broadcast');
   };
 
-  const handleThemeSelect = useCallback((presetId: string) => {
-    applyOdysseusPreset(presetId);
-    setActiveThemeId(presetId);
-    const scheme = LIGHT_THEME_PRESETS.has(presetId) ? 'light' : 'dark';
-    setThemePreference(scheme);
-    document.documentElement.dataset.theme = scheme;
-    document.body.dataset.theme = scheme;
-    document.documentElement.style.colorScheme = scheme;
-  }, [setThemePreference]);
+  const applyThemeId = useCallback((themeId: string) => {
+    applyThemeById(themeId);
+    setActiveThemeId(themeId);
+  }, []);
+
+  const handleThemeSelect = useCallback((themeId: string) => {
+    setEditingThemePresetId(null);
+    applyThemeId(themeId);
+  }, [applyThemeId, setEditingThemePresetId]);
+
+  const customThemeCards = useMemo(() => {
+    return customThemes.map((theme) => ({
+      id: theme.id,
+      label: theme.label,
+      basePresetId: theme.basePresetId,
+      swatch: [theme.bg, theme.fg, theme.panel, theme.red],
+    }));
+  }, [customThemes]);
 
   return (
+    <div className="h-full min-h-0">
     <SettingsShell
       activeTab={activeTab}
       onTabChange={setActiveTab}
@@ -365,24 +396,43 @@ export function SettingsPanel() {
             title="Theme"
             description="Five core colors drive the whole UI — same model as Odysseus. Pick a preset or use Light/Dark in the chat header."
           >
-            <ThemePresetGrid activeId={activeThemeId} onSelect={handleThemeSelect} />
+            <ThemePresetGrid
+              activeId={activeThemeId}
+              onSelect={handleThemeSelect}
+              editingPresetId={editingThemePresetId}
+              onStartEdit={setEditingThemePresetId}
+              onEndEdit={() => {
+                applyThemeId(activeThemeId);
+                setEditingThemePresetId(null);
+              }}
+              onThemeSaved={(themeId) => {
+                refreshCustomThemes();
+                applyThemeId(themeId);
+                toast.success('Custom theme saved');
+              }}
+              customThemes={customThemeCards}
+            />
           </SettingsSection>
 
-          <SettingsSection title="Layout" description="Compact feels like VS Code; open adds more breathing room.">
+          <SettingsSection
+            title="Layout"
+            description="Compact is VS Code-like. Open adds floating panels. Odyssey is an Odysseus-inspired airy layout with separated bubbles."
+          >
             <SettingsCard>
-              <div className="flex gap-2">
-                {(['compact', 'open'] as const).map((mode) => (
+              <div className="grid gap-2 sm:grid-cols-3">
+                {LAYOUT_MODES.map((mode) => (
                   <button
-                    key={mode}
+                    key={mode.id}
                     type="button"
-                    onClick={() => setLayoutMode(mode)}
-                    className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium capitalize transition-colors ${
-                      layoutMode === mode
-                        ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--fg)]'
-                        : 'border-[color:var(--border)] text-[color:var(--color-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--fg)]'
+                    onClick={() => setLayoutMode(mode.id)}
+                    className={`rounded-xl border px-3 py-3 text-left transition-colors ${
+                      layoutMode === mode.id
+                        ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)]'
+                        : 'border-[color:var(--border)] hover:border-[color:var(--accent)]'
                     }`}
                   >
-                    {mode}
+                    <div className="text-sm font-medium text-[color:var(--fg)]">{mode.label}</div>
+                    <div className="mt-1 text-[11px] leading-4 text-[color:var(--color-muted)]">{mode.hint}</div>
                   </button>
                 ))}
               </div>
@@ -688,5 +738,6 @@ export function SettingsPanel() {
         </SettingsSection>
       )}
     </SettingsShell>
+    </div>
   );
 }

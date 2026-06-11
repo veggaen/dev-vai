@@ -1121,7 +1121,7 @@ export function ChatWindow() {
               {studioBuilderChrome ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
               <span>{studioBuilderChrome ? 'Dark' : 'Light'}</span>
             </button>
-            {!showBuilderPanel && (
+            {!showBuilderPanel ? (
               <button
                 onClick={toggleBuilderPanel}
                 className={`flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[11px] font-medium transition-colors ${
@@ -1129,10 +1129,23 @@ export function ChatWindow() {
                     ? 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50'
                     : 'border-zinc-800/70 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200'
                 }`}
-                title="Show preview (Ctrl+B)"
+                title="Open live app preview (Ctrl+B)"
               >
                 <Eye className="h-3.5 w-3.5" />
-                <span>Preview</span>
+                <span>App preview</span>
+              </button>
+            ) : (
+              <button
+                onClick={toggleBuilderPanel}
+                className={`flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[11px] font-medium transition-colors ${
+                  studioBuilderChrome
+                    ? 'border-blue-300 bg-blue-50 text-blue-700'
+                    : 'border-violet-500/40 bg-violet-500/10 text-violet-200'
+                }`}
+                title="Close app preview (Ctrl+B)"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                <span>Close app</span>
               </button>
             )}
             <button

@@ -439,15 +439,15 @@ export function TemplateGallery({ onDeploy, onTemplate, isDeploying }: Props) {
 
   /* ── Stack Selector View — main gallery ── */
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="h-full overflow-y-auto text-[color:var(--shell-text)]">
       <div className="flex min-h-full flex-col items-center justify-center p-4 pb-36">
         <div className="w-full max-w-md">
       <div className="mb-4 text-center">
-        <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/10 ring-1 ring-violet-500/20">
-          <Rocket className="h-5 w-5 text-violet-400" />
+        <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[color:var(--accent-soft)] ring-1 ring-[color:var(--accent)]">
+          <Rocket className="h-5 w-5 text-[color:var(--accent)]" />
         </div>
-        <h3 className="text-sm font-semibold text-zinc-200">Start Building</h3>
-        <p className="mt-1 text-[11px] text-zinc-500">
+        <h3 className="text-sm font-semibold text-[color:var(--fg)]">Start Building</h3>
+        <p className="mt-1 text-[11px] text-[color:var(--color-muted)]">
           Quick scaffold or pick a full stack to deploy
         </p>
       </div>
@@ -455,7 +455,7 @@ export function TemplateGallery({ onDeploy, onTemplate, isDeploying }: Props) {
       {/* ── Quick Start — instant scaffolds ── */}
       {onTemplate && (
         <div className="mb-4">
-          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-600">Quick Start</p>
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[color:var(--color-subheader)]">Quick Start</p>
           <div className="grid grid-cols-2 gap-2">
             {QUICK_STARTS.map((qs) => (
               <button
@@ -466,10 +466,10 @@ export function TemplateGallery({ onDeploy, onTemplate, isDeploying }: Props) {
               >
                 <div className="flex items-center gap-2 mb-1">
                   <span className={`text-base font-bold ${qs.iconColor}`}>{qs.icon}</span>
-                  <span className="text-xs font-semibold text-zinc-200">{qs.label}</span>
+                  <span className="text-xs font-semibold text-[color:var(--fg)]">{qs.label}</span>
                 </div>
-                <p className="text-[10px] leading-tight text-zinc-500">{qs.description}</p>
-                <div className="mt-1.5 flex items-center gap-1 text-[9px] text-zinc-600">
+                <p className="text-[10px] leading-tight text-[color:var(--color-muted)]">{qs.description}</p>
+                <div className="mt-1.5 flex items-center gap-1 text-[9px] text-[color:var(--color-subheader)]">
                   <Zap className="h-2.5 w-2.5" />
                   Instant scaffold
                 </div>
@@ -479,7 +479,7 @@ export function TemplateGallery({ onDeploy, onTemplate, isDeploying }: Props) {
         </div>
       )}
 
-      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-600">Full Stacks</p>
+      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[color:var(--color-subheader)]">Full Stacks</p>
 
       {/* Stack cards */}
       <div className="grid grid-cols-2 gap-2">
@@ -497,11 +497,11 @@ export function TemplateGallery({ onDeploy, onTemplate, isDeploying }: Props) {
               <div className="flex items-center gap-2">
                 <span className="text-lg">{stack.icon}</span>
                 <div className="flex-1">
-                  <span className="text-xs font-semibold text-zinc-200">{stack.name}</span>
-                  <ChevronRight className="ml-1 inline h-3 w-3 text-zinc-600 transition-transform group-hover/card:translate-x-0.5" />
+                  <span className="text-xs font-semibold text-[color:var(--fg)]">{stack.name}</span>
+                  <ChevronRight className="ml-1 inline h-3 w-3 text-[color:var(--color-subheader)] transition-transform group-hover/card:translate-x-0.5" />
                 </div>
               </div>
-              <p className="mt-1 text-[10px] leading-tight text-zinc-500">{stack.tagline}</p>
+              <p className="mt-1 text-[10px] leading-tight text-[color:var(--color-muted)]">{stack.tagline}</p>
               <div className="mt-2 flex flex-wrap gap-1">
                 {stack.techStack.map((tech) => (
                   <span key={tech} className="rounded bg-zinc-800/80 px-1 py-0.5 text-[9px] text-zinc-500">

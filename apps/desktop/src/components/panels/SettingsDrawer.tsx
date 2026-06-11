@@ -22,6 +22,8 @@ function PanelLoading() {
 
 export function SettingsDrawer() {
   const setActivePanel = useLayoutStore((s) => s.setActivePanel);
+  const themeEditingBaseId = useLayoutStore((s) => s.themeEditingBaseId);
+  const editingTheme = Boolean(themeEditingBaseId);
   const close = useCallback(() => setActivePanel('chats'), [setActivePanel]);
 
   useEffect(() => {
@@ -43,7 +45,9 @@ export function SettingsDrawer() {
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: -16 }}
         transition={{ duration: 0.2, ease: 'easeOut' }}
-        className="settings-drawer flex h-full min-w-0 flex-[4] flex-col overflow-hidden border-r border-[color:var(--shell-line-soft)] bg-[color:var(--sidebar-surface)] shadow-[4px_0_24px_rgba(0,0,0,0.18)]"
+        className={`settings-drawer flex h-full min-w-0 flex-col overflow-hidden border-r border-[color:var(--shell-line-soft)] bg-[color:var(--sidebar-surface)] shadow-[4px_0_24px_rgba(0,0,0,0.18)] ${
+          editingTheme ? 'flex-[2] max-w-[min(42rem,48%)]' : 'flex-[4]'
+        }`}
         role="dialog"
         aria-modal="true"
         aria-label="Settings"
@@ -64,9 +68,11 @@ export function SettingsDrawer() {
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <Suspense fallback={<PanelLoading />}>
-            <SettingsPanel />
+            <div className="h-full min-h-0 flex-1">
+              <SettingsPanel />
+            </div>
           </Suspense>
         </div>
       </motion.div>
@@ -78,8 +84,12 @@ export function SettingsDrawer() {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.15 }}
-        onClick={close}
-        className="settings-drawer-backdrop h-full min-w-[4.5rem] flex-[1] cursor-default border-0 bg-black/35 backdrop-blur-[2px] transition-colors hover:bg-black/45"
+        onClick={editingTheme ? undefined : close}
+        className={`settings-drawer-backdrop h-full min-w-[4.5rem] flex-1 border-0 transition-colors ${
+          editingTheme
+            ? 'cursor-default bg-transparent'
+            : 'cursor-default bg-black/35 hover:bg-black/45'
+        }`}
         aria-label="Close settings"
         title="Click to close settings"
       />

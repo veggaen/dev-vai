@@ -4,6 +4,12 @@
  */
 
 import type { ReactNode, SelectHTMLAttributes } from 'react';
+import { Settings2 } from 'lucide-react';
+import {
+  isThemeCardActive,
+  ODYSSEUS_THEME_PRESETS,
+} from '../../../lib/odysseus-theme.js';
+import { ThemeColorEditor } from './ThemeColorEditor.js';
 
 export type SettingsTabId =
   | 'appearance'
@@ -98,8 +104,8 @@ export function SettingsShell({
   const visibleNav = NAV_ITEMS.filter((item) => !item.ownerOnly || showOwnerSections);
 
   return (
-    <div className="settings-shell flex h-full min-h-0">
-      <nav className="settings-nav flex w-52 shrink-0 flex-col gap-1 border-r border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] p-3">
+    <div className="settings-shell flex h-full min-h-0 items-stretch">
+      <nav className="settings-nav flex h-full w-52 shrink-0 flex-col gap-1 self-stretch border-r border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] p-3">
         {visibleNav.map((item) => (
           <button
             key={item.id}
@@ -233,9 +239,19 @@ export function SettingsShortcutRow({ keys, description }: { keys: string; descr
 export function ThemePresetGrid({
   activeId,
   onSelect,
+  editingPresetId,
+  onStartEdit,
+  onEndEdit,
+  onThemeSaved,
+  customThemes = [],
 }: {
   activeId: string;
   onSelect: (id: string) => void;
+  editingPresetId: string | null;
+  onStartEdit: (basePresetId: string) => void;
+  onEndEdit: () => void;
+  onThemeSaved: (themeId: string) => void;
+  customThemes?: { id: string; label: string; swatch: string[]; basePresetId: string }[];
 }) {
   const presets = [
     { id: 'dark', label: 'Dark', swatch: ['#282c34', '#9cdef2', '#111111', '#e06c75'] },
@@ -245,27 +261,94 @@ export function ThemePresetGrid({
     { id: 'gpt', label: 'GPT', swatch: ['#212121', '#ececec', '#171717', '#949494'] },
   ];
 
-  return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-      {presets.map((preset) => (
+  const renderCard = (
+    preset: { id: string; label: string; swatch: string[] },
+    basePresetId: string,
+    isCustom = false,
+  ) => {
+    const cardId = preset.id;
+    const isEditing = !isCustom && editingPresetId === basePresetId;
+    const selected = isThemeCardActive(activeId, cardId);
+
+    return (
+    <div
+      key={preset.id}
+      className={`group relative rounded-xl border transition-colors ${
+        isEditing ? 'col-span-full border-[color:var(--accent)] bg-[color:var(--accent-soft)] p-4' : 'p-3'
+      } ${
+        selected && !isEditing
+          ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)] ring-1 ring-[color:var(--accent)]'
+          : 'border-[color:var(--border)] bg-[color:var(--panel)] hover:border-[color:var(--accent)]'
+      }`}
+    >
+      <div className="flex items-start gap-2">
         <button
-          key={preset.id}
           type="button"
-          onClick={() => onSelect(preset.id)}
-          className={`rounded-xl border p-3 text-left transition-colors ${
-            activeId === preset.id
-              ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)]'
-              : 'border-[color:var(--border)] bg-[color:var(--panel)] hover:border-[color:var(--accent)]'
-          }`}
+          onClick={() => onSelect(cardId)}
+          className="min-w-0 flex-1 text-left"
         >
           <div className="mb-2.5 flex h-10 overflow-hidden rounded-lg border border-[color:var(--border)]">
             {preset.swatch.map((color) => (
               <span key={color} className="flex-1" style={{ background: color }} />
             ))}
           </div>
-          <div className="text-sm font-medium text-[color:var(--fg)]">{preset.label}</div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-[color:var(--fg)]">{preset.label}</span>
+            {isCustom && (
+              <span className="rounded-full border border-[color:var(--border)] px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-[color:var(--color-muted)]">
+                Custom
+              </span>
+            )}
+          </div>
         </button>
-      ))}
+
+        {!isCustom && (
+          <button
+            type="button"
+            onClick={() => (isEditing ? onEndEdit() : onStartEdit(basePresetId))}
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all ${
+              isEditing
+                ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--fg)]'
+                : 'border-[color:var(--border)] bg-[color:var(--panel)] text-[color:var(--color-muted)] opacity-0 hover:border-[color:var(--accent)] hover:text-[color:var(--fg)] group-hover:opacity-100 focus:opacity-100'
+            }`}
+            title={isEditing ? 'Close color editor' : `Customize ${ODYSSEUS_THEME_PRESETS[basePresetId]?.label ?? basePresetId}`}
+            aria-label={isEditing ? 'Close color editor' : `Customize ${preset.label}`}
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
+      {isEditing && (
+        <ThemeColorEditor
+          basePresetId={basePresetId}
+          onSaved={(themeId) => {
+            onThemeSaved(themeId);
+            onEndEdit();
+          }}
+          onCancel={onEndEdit}
+        />
+      )}
+    </div>
+  );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        {presets.map((preset) => renderCard(preset, preset.id))}
+      </div>
+
+      {customThemes.length > 0 && (
+        <div>
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--color-subheader)]">
+            Your themes
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+            {customThemes.map((theme) => renderCard(theme, theme.basePresetId, true))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -223,7 +223,104 @@
   --layout-panel-bg: rgba(255, 255, 255, 0.97);
 }
 
-/* ── Layout root transitions ── */
+/* Odyssey mode — Odysseus-inspired open canvas with floating bubble panels */
+[data-layout-mode="odyssey"] {
+  --layout-gap: 14px;
+  --layout-radius: 22px;
+  --layout-padding: 12px;
+  --layout-shadow: 0 20px 50px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.12);
+  --layout-border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  --layout-margin: 18px;
+  --layout-panel-bg: var(--panel);
+  --odyssey-bubble-radius: 1.25rem;
+  --odyssey-chat-gap: 1rem;
+}
+
+[data-theme="light"][data-layout-mode="odyssey"] {
+  --layout-shadow: 0 18px 44px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+  --layout-border: 1px solid color-mix(in srgb, var(--border) 90%, white);
+}
+
+[data-layout-mode="odyssey"] .builder-shell-surface {
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+[data-layout-mode="odyssey"] .builder-shell-surface::before {
+  background:
+    radial-gradient(ellipse 90% 60% at 50% -10%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 55%),
+    radial-gradient(circle at 85% 90%, color-mix(in srgb, var(--fg) 4%, transparent), transparent 40%);
+}
+
+[data-layout-mode="odyssey"] #layout-root {
+  background: var(--bg);
+}
+
+[data-layout-mode="odyssey"] .layout-panel--odyssey-host {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+[data-layout-mode="odyssey"] .odyssey-workspace-row {
+  gap: var(--layout-gap);
+}
+
+[data-layout-mode="odyssey"] .odyssey-bubble {
+  height: 100%;
+  min-height: 0;
+  border-radius: var(--layout-radius);
+  box-shadow: var(--layout-shadow);
+  background: var(--layout-panel-bg);
+  border: var(--layout-border);
+  overflow: hidden;
+}
+
+[data-layout-mode="odyssey"] .odyssey-nav-cluster .layout-panel--rail {
+  border-radius: 999px !important;
+  margin: 6px 0;
+  align-self: stretch;
+  background: color-mix(in srgb, var(--panel) 92%, var(--bg)) !important;
+  border: var(--layout-border) !important;
+  box-shadow: var(--layout-shadow) !important;
+}
+
+[data-layout-mode="odyssey"] .odyssey-sidebar-slot {
+  border-radius: var(--layout-radius);
+  overflow: hidden;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+[data-layout-mode="odyssey"] .odyssey-sidebar-slot .sidebar-panel-shell {
+  height: 100%;
+}
+
+[data-layout-mode="odyssey"] .layout-panel:not(.layout-panel--rail):not(.layout-panel--odyssey-host):not(.odyssey-sidebar-slot) {
+  border-radius: var(--layout-radius);
+  box-shadow: var(--layout-shadow);
+  background: var(--layout-panel-bg);
+  border: var(--layout-border);
+  overflow: hidden;
+}
+
+[data-layout-mode="odyssey"] .settings-drawer {
+  border-radius: var(--layout-radius) 0 0 var(--layout-radius);
+}
+
+[data-layout-mode="odyssey"] .shell-atmosphere {
+  opacity: 0.55;
+}
+
+/* Odyssey: separate resize gutters visually */
+[data-layout-mode="odyssey"] [data-panel-resize-handle-id] {
+  background: transparent;
+  width: var(--layout-gap) !important;
+}
+
 #layout-root {
   width: 100%;
   min-width: 0;
@@ -1272,6 +1369,133 @@ pre code {
 }
 .prose tr:nth-child(even) {
   background: var(--chat-table-stripe);
+}
+
+/* Settings shell — nav column spans full drawer height */
+.settings-shell {
+  height: 100%;
+  min-height: 0;
+}
+
+.settings-nav {
+  min-height: 100%;
+}
+
+/* Preview / app panel — follows active Odysseus theme (not hardcoded zinc/blue) */
+.preview-panel-root {
+  background: var(--shell-bg);
+  color: var(--shell-text);
+}
+
+.preview-panel-canvas {
+  background:
+    radial-gradient(circle at top, color-mix(in srgb, var(--accent) 10%, transparent), transparent 44%),
+    linear-gradient(180deg, var(--shell-bg), color-mix(in srgb, var(--shell-bg) 88%, var(--panel)));
+}
+
+[data-theme="light"] .preview-panel-canvas {
+  background:
+    radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 50%),
+    linear-gradient(180deg, var(--shell-bg), color-mix(in srgb, var(--panel) 35%, var(--bg)));
+}
+
+.preview-toolbar {
+  background: var(--shell-surface-strong);
+  border-bottom: 1px solid var(--shell-line);
+  color: var(--shell-text);
+}
+
+.preview-toolbar-btn {
+  border-radius: 0.375rem;
+  padding: 0.375rem;
+  color: var(--color-muted);
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.preview-toolbar-btn:hover {
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+  color: var(--fg);
+}
+
+.preview-toolbar-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-bottom: 2px solid transparent;
+  padding: 0.375rem 0;
+  font-size: 11px;
+  font-weight: 500;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.preview-toolbar-tab--active {
+  border-bottom-color: var(--accent);
+  color: var(--fg);
+}
+
+.preview-toolbar-tab--idle {
+  color: var(--color-muted);
+}
+
+.preview-toolbar-tab--idle:hover {
+  color: var(--fg);
+}
+
+.preview-toolbar-url {
+  border-radius: 0.375rem;
+  border: 1px solid var(--shell-line-soft);
+  background: var(--panel-bg-muted);
+  color: var(--color-muted);
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.preview-toolbar-url--interactive:hover {
+  border-color: var(--border);
+  background: var(--panel);
+}
+
+.preview-toolbar-url--interactive span {
+  color: var(--color-muted);
+}
+
+.preview-toolbar-rail {
+  background: var(--shell-line-soft);
+}
+
+.preview-toolbar-bp--active {
+  border-radius: 0.375rem;
+  padding: 0.375rem;
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+.preview-toolbar-bp--idle {
+  border-radius: 0.375rem;
+  padding: 0.375rem;
+  color: var(--color-muted);
+  transition: color 0.15s;
+}
+
+.preview-toolbar-bp--idle:hover {
+  color: var(--fg);
+}
+
+.preview-toolbar-chip--on {
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 10px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--tone-success, #10b981) 12%, var(--panel));
+  color: color-mix(in srgb, var(--tone-success, #10b981) 85%, var(--fg));
+}
+
+.preview-toolbar-chip--warn {
+  background: color-mix(in srgb, var(--tone-warn, #f59e0b) 12%, var(--panel));
+  color: color-mix(in srgb, var(--tone-warn, #f59e0b) 85%, var(--fg));
+}
+
+.preview-panel-iframe-bg {
+  background: var(--shell-bg);
 }
 
 /* Settings drawer — phone: full width, close via X / Esc */

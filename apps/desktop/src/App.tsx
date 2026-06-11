@@ -21,7 +21,7 @@ import { SettingsDrawer } from './components/panels/SettingsDrawer.js';
 import { AuthGate } from './components/AuthGate.js';
 import { toast } from 'sonner';
 import { isDevAuthBypassEnabled } from './lib/dev-auth-bypass.js';
-import { applyThemePreference } from './lib/odysseus-theme.js';
+import { applyThemePreference, applyThemeById, getActiveThemeId } from './lib/odysseus-theme.js';
 
 const DebugConsole = lazy(async () => ({ default: (await import('./components/DebugConsole.js')).DebugConsole }));
 const FileExplorer = lazy(async () => ({ default: (await import('./components/FileExplorer.js')).FileExplorer }));
@@ -222,17 +222,23 @@ export function App() {
 
   const themeSwitchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousTheme = useRef(themePreference);
+  const themeMounted = useRef(false);
   useEffect(() => {
-    // Cross-fade colors during a theme flip (see [data-theme-switching] in index.css).
-    applyThemePreference(themePreference);
-    if (previousTheme.current !== themePreference) {
+    if (!themeMounted.current) {
+      themeMounted.current = true;
+      applyThemeById(getActiveThemeId());
       previousTheme.current = themePreference;
-      document.documentElement.setAttribute('data-theme-switching', 'true');
-      if (themeSwitchTimer.current) clearTimeout(themeSwitchTimer.current);
-      themeSwitchTimer.current = setTimeout(() => {
-        document.documentElement.removeAttribute('data-theme-switching');
-      }, 350);
+      return;
     }
+    if (previousTheme.current === themePreference) return;
+
+    applyThemePreference(themePreference);
+    previousTheme.current = themePreference;
+    document.documentElement.setAttribute('data-theme-switching', 'true');
+    if (themeSwitchTimer.current) clearTimeout(themeSwitchTimer.current);
+    themeSwitchTimer.current = setTimeout(() => {
+      document.documentElement.removeAttribute('data-theme-switching');
+    }, 350);
   }, [themePreference]);
 
   const hasActiveSandbox = projectId !== null;
@@ -378,8 +384,19 @@ export function App() {
           <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" style={{ gap: 'var(--layout-gap)' }}>
           {/* Activity Rail — always visible unless hidden/focus */}
           {showRail && (
-            <div className="layout-panel layout-panel--rail">
+            <div
+              className={`h-full self-stretch ${layoutMode === 'odyssey' ? 'odyssey-nav-cluster flex min-h-0 shrink-0 items-stretch' : ''}`}
+              style={layoutMode === 'odyssey' ? { gap: 'var(--layout-gap)' } : undefined}
+            >
+            <div className="layout-panel layout-panel--rail h-full">
               <ActivityRail />
+            </div>
+            {/* Odyssey: sidebar sits beside rail as a second bubble (not square-attached) */}
+            {layoutMode === 'odyssey' && showPanel && !isSettingsOpen && (
+              <div className="layout-panel odyssey-sidebar-slot min-h-0">
+                <SidebarPanel />
+              </div>
+            )}
             </div>
           )}
 
@@ -392,9 +409,9 @@ export function App() {
             )}
           </AnimatePresence>
 
-          {/* Sidebar Panel — only in expanded state (not for settings) */}
+          {/* Sidebar Panel — expanded (compact/open only; odyssey uses cluster above) */}
           <AnimatePresence mode="popLayout">
-            {showPanel && !isSettingsOpen && (
+            {showPanel && !isSettingsOpen && layoutMode !== 'odyssey' && (
               <div className="layout-panel" key="sidebar-panel-wrap">
                 <SidebarPanel key="sidebar-panel" />
               </div>
@@ -424,9 +441,9 @@ export function App() {
               <ThorsenPanel />
             </div>
           ) : (
-            <div className="layout-panel relative flex-1 min-w-0">
+            <div className={`layout-panel relative flex-1 min-w-0 ${layoutMode === 'odyssey' ? 'layout-panel--odyssey-host' : ''}`}>
 
-              <Group id="vai-main-layout" orientation="horizontal">
+              <Group id="vai-main-layout" orientation="horizontal" className={layoutMode === 'odyssey' ? 'odyssey-workspace-row' : undefined}>
                 {/* ── Chat panel — hidden when preview is expanded ── */}
                 {!previewExpanded && (
                 <Panel
@@ -434,7 +451,9 @@ export function App() {
                   defaultSize={showBuilderWorkspace ? '55' : '100'}
                   minSize="30"
                 >
-                  <ChatWindow />
+                  <div className={layoutMode === 'odyssey' ? 'odyssey-bubble h-full min-h-0' : 'h-full min-h-0'}>
+                    <ChatWindow />
+                  </div>
                 </Panel>
                 )}
 
@@ -448,6 +467,7 @@ export function App() {
                       minSize={previewExpanded ? '100' : '25'}
                       collapsible={!previewExpanded}
                     >
+                      <div className={layoutMode === 'odyssey' ? 'odyssey-bubble h-full min-h-0' : 'h-full min-h-0'}>
                       <Group id="vai-builder-layout" orientation="vertical">
                         {/* File explorer — top section when active */}
                         {hasActiveSandbox && showFileExplorer && (
@@ -484,6 +504,7 @@ export function App() {
                           </>
                         )}
                       </Group>
+                      </div>
                     </Panel>
                   </>
                 )}

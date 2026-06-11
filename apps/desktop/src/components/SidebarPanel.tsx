@@ -118,8 +118,9 @@ function saveConversationOrder(ids: string[]): void {
 /* ── Main Panel ────────────────────────────────────────────────── */
 
 export function SidebarPanel() {
-  const { activePanel, toggleSidebar, themePreference } = useLayoutStore();
+  const { activePanel, toggleSidebar, themePreference, layoutMode } = useLayoutStore();
   const isLight = themePreference === 'light';
+  const isOdyssey = layoutMode === 'odyssey';
 
   return (
     <motion.div
@@ -127,7 +128,11 @@ export function SidebarPanel() {
       animate={{ width: 'var(--layout-sidebar-effective-width)', opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
       transition={{ duration: 0.15, ease: 'easeOut' }}
-      className={`flex h-full min-w-0 flex-shrink-0 flex-col overflow-hidden border-r border-[color:var(--shell-line-soft)] bg-[color:var(--sidebar-surface)]`}
+      className={`sidebar-panel-shell flex h-full min-w-0 flex-shrink-0 flex-col overflow-hidden bg-[color:var(--sidebar-surface)] ${
+        isOdyssey
+          ? 'rounded-[var(--layout-radius)] border border-[color:var(--border)] shadow-[var(--layout-shadow)]'
+          : 'border-r border-[color:var(--shell-line-soft)]'
+      }`}
       style={{ width: 'var(--layout-sidebar-effective-width)', maxWidth: '100%' }}
     >
       {/* Panel header — slim and quiet */}

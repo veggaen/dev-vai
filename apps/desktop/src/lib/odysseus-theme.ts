@@ -100,6 +100,92 @@ export const VAI_THEME_STORAGE_KEY = 'vai-theme-preference';
 export const VAI_CUSTOM_THEMES_KEY = 'vai-custom-themes';
 export const VAI_ACTIVE_THEME_ID_KEY = 'vai-active-theme-id';
 
+/** Metadata stored alongside customized preset colors. */
+export interface StoredCustomTheme extends OdysseusCoreColors {
+  label: string;
+  basePresetId: string;
+}
+
+export const CORE_COLOR_FIELDS: { key: keyof OdysseusCoreColors; label: string; hint: string }[] = [
+  { key: 'bg', label: 'Background', hint: 'Page canvas and workspace' },
+  { key: 'fg', label: 'Foreground', hint: 'Primary text and icons' },
+  { key: 'panel', label: 'Panel', hint: 'Sidebar, inputs, AI bubbles' },
+  { key: 'border', label: 'Border', hint: 'Lines and dividers' },
+  { key: 'red', label: 'Accent', hint: 'Buttons, active states, brand' },
+];
+
+/** Strip preset metadata (id, label) — only the five core colors (+ optional advanced). */
+export function pickOdysseusCoreColors(
+  source: Partial<OdysseusCoreColors> & { id?: string; label?: string },
+): OdysseusCoreColors {
+  const fallback = ODYSSEUS_THEME_PRESETS.dark;
+  const colors: OdysseusCoreColors = {
+    bg: source.bg ?? fallback.bg,
+    fg: source.fg ?? fallback.fg,
+    panel: source.panel ?? fallback.panel,
+    border: source.border ?? fallback.border,
+    red: source.red ?? fallback.red,
+  };
+  if (source.advanced) colors.advanced = source.advanced;
+  return colors;
+}
+
+function toStoredCustomTheme(
+  storageId: string,
+  theme: StoredCustomTheme & { id?: string },
+): StoredCustomTheme {
+  const basePresetId = theme.basePresetId || storageId.replace(/-custom$/, '');
+  return {
+    ...pickOdysseusCoreColors(theme),
+    label: theme.label || customThemeLabelForBase(basePresetId),
+    basePresetId,
+  };
+}
+
+export function customThemeIdForBase(basePresetId: string): string {
+  return `${basePresetId}-custom`;
+}
+
+export function customThemeLabelForBase(basePresetId: string): string {
+  const preset = ODYSSEUS_THEME_PRESETS[basePresetId];
+  return preset ? `${preset.label} Custom` : 'Custom';
+}
+
+export function resolveThemeColorScheme(themeId: string): 'dark' | 'light' {
+  const base = themeId.replace(/-custom(?:-\d+)?$/, '');
+  return base === 'light' ? 'light' : 'dark';
+}
+
+/** True when a saved custom variant of this base preset is the active theme. */
+export function isCustomVariantActive(activeId: string, basePresetId: string): boolean {
+  return activeId === customThemeIdForBase(basePresetId)
+    || activeId.startsWith(`${basePresetId}-custom-`);
+}
+
+/** Base preset ring — only when that exact preset is active (not a custom fork). */
+export function isBasePresetActive(activeId: string, basePresetId: string): boolean {
+  return activeId === basePresetId && !isCustomVariantActive(activeId, basePresetId);
+}
+
+/** Custom theme card ring — exact id match only. */
+export function isCustomThemeActive(activeId: string, customId: string): boolean {
+  return activeId === customId;
+}
+
+/** Maps Vai light/dark header toggle → built-in dark/light presets only. */
+export function applyThemePreference(preference: 'dark' | 'light'): void {
+  applyThemeById(preference);
+}
+
+export function getThemeColorsById(themeId: string): OdysseusCoreColors {
+  if (themeId in ODYSSEUS_THEME_PRESETS) {
+    return ODYSSEUS_THEME_PRESETS[themeId];
+  }
+  const custom = loadCustomThemes()[themeId];
+  if (custom) return custom;
+  return ODYSSEUS_THEME_PRESETS.dark;
+}
+
 const ADV_KEYS: { key: keyof OdysseusAdvancedColors; css: string }[] = [
   { key: 'userBubbleBg', css: '--user-bubble-bg' },
   { key: 'aiBubbleBg', css: '--ai-bubble-bg' },
@@ -227,54 +313,144 @@ export function applyOdysseusColors(colors: OdysseusCoreColors): void {
 }
 
 export function applyOdysseusPreset(presetId: string): void {
-  const custom = loadCustomThemes()[presetId];
-  const preset = custom ?? ODYSSEUS_THEME_PRESETS[presetId] ?? ODYSSEUS_THEME_PRESETS.dark;
-  applyOdysseusColors(preset);
+  applyThemeById(presetId);
+}
+
+function persistAppliedTheme(themeId: string, colors: OdysseusCoreColors): void {
+  applyOdysseusColors(colors);
   if (typeof localStorage !== 'undefined') {
-    localStorage.setItem(VAI_ACTIVE_THEME_ID_KEY, presetId);
+    localStorage.setItem(VAI_ACTIVE_THEME_ID_KEY, themeId);
+  }
+  const scheme = resolveThemeColorScheme(themeId);
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.theme = scheme;
+    document.body.dataset.theme = scheme;
+    document.documentElement.style.colorScheme = scheme;
   }
 }
 
-/** Maps Vai light/dark toggle → Odysseus presets (extensible to full theme picker). */
-export function applyThemePreference(preference: 'dark' | 'light'): void {
-  applyOdysseusPreset(preference);
-  document.documentElement.dataset.theme = preference;
-  document.body.dataset.theme = preference;
-  document.documentElement.style.colorScheme = preference;
+/** Apply a built-in preset or saved custom theme by its unique id. */
+export function applyThemeById(themeId: string): void {
+  const builtins = ODYSSEUS_THEME_PRESETS;
+
+  // Built-in ids always map to canonical presets — never a custom entry stored under the same key.
+  if (themeId in builtins) {
+    persistAppliedTheme(themeId, builtins[themeId]);
+    return;
+  }
+
+  const custom = loadCustomThemes()[themeId];
+  if (custom) {
+    persistAppliedTheme(themeId, custom);
+    return;
+  }
+
+  applyThemeById('dark');
 }
 
-export function loadCustomThemes(): Record<string, OdysseusCoreColors> {
+export function getActiveThemeId(): string {
+  if (typeof localStorage === 'undefined') return 'dark';
+  return localStorage.getItem(VAI_ACTIVE_THEME_ID_KEY) ?? 'dark';
+}
+
+/** True only when this exact card id is the active theme — presets and customs are mutually exclusive. */
+export function isThemeCardActive(activeId: string, cardId: string): boolean {
+  return activeId === cardId;
+}
+
+const BUILTIN_THEME_IDS = new Set(Object.keys(ODYSSEUS_THEME_PRESETS));
+
+/** Migrate legacy custom themes saved under preset ids (e.g. "dark") → "dark-custom". */
+function normalizeCustomThemes(
+  raw: Record<string, StoredCustomTheme>,
+): { themes: Record<string, StoredCustomTheme>; migrated: boolean } {
+  const out: Record<string, StoredCustomTheme> = {};
+  let migrated = false;
+
+  for (const [key, theme] of Object.entries(raw)) {
+    const cleaned = toStoredCustomTheme(key, theme);
+    if (BUILTIN_THEME_IDS.has(key)) {
+      const newKey = customThemeIdForBase(key);
+      if (!out[newKey]) {
+        out[newKey] = toStoredCustomTheme(newKey, {
+          ...cleaned,
+          basePresetId: cleaned.basePresetId || key,
+        });
+      }
+      migrated = true;
+    } else {
+      const prev = out[key];
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(cleaned)) {
+        migrated = true;
+      }
+      out[key] = cleaned;
+    }
+  }
+
+  return { themes: out, migrated };
+}
+
+export function loadCustomThemes(): Record<string, StoredCustomTheme> {
   if (typeof localStorage === 'undefined') return {};
   try {
-    return JSON.parse(localStorage.getItem(VAI_CUSTOM_THEMES_KEY) ?? '{}') as Record<string, OdysseusCoreColors>;
+    const raw = JSON.parse(localStorage.getItem(VAI_CUSTOM_THEMES_KEY) ?? '{}') as Record<string, StoredCustomTheme>;
+    const { themes, migrated } = normalizeCustomThemes(raw);
+    if (migrated) {
+      localStorage.setItem(VAI_CUSTOM_THEMES_KEY, JSON.stringify(themes));
+      const active = localStorage.getItem(VAI_ACTIVE_THEME_ID_KEY);
+      if (active && BUILTIN_THEME_IDS.has(active) && raw[active]) {
+        localStorage.setItem(VAI_ACTIVE_THEME_ID_KEY, customThemeIdForBase(active));
+      }
+    }
+    return themes;
   } catch {
     return {};
   }
 }
 
-export function saveCustomTheme(name: string, colors: OdysseusCoreColors): void {
+export function listCustomThemeEntries(): (StoredCustomTheme & { id: string })[] {
+  return Object.entries(loadCustomThemes()).map(([storageId, theme]) => ({
+    ...theme,
+    id: storageId,
+  }));
+}
+
+export function saveCustomThemeFromPreset(
+  basePresetId: string,
+  colors: OdysseusCoreColors,
+): string {
+  const id = customThemeIdForBase(basePresetId);
+  const entry: StoredCustomTheme = {
+    ...pickOdysseusCoreColors(colors),
+    label: customThemeLabelForBase(basePresetId),
+    basePresetId,
+  };
+  saveCustomTheme(id, entry);
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(VAI_ACTIVE_THEME_ID_KEY, id);
+  }
+  applyOdysseusColors(entry);
+  return id;
+}
+
+export function saveCustomTheme(name: string, colors: StoredCustomTheme | OdysseusCoreColors): void {
   const all = loadCustomThemes();
-  all[name] = colors;
+  const basePresetId = 'basePresetId' in colors && colors.basePresetId
+    ? colors.basePresetId
+    : name.replace(/-custom$/, '');
+  const entry: StoredCustomTheme = {
+    ...pickOdysseusCoreColors(colors),
+    label: 'label' in colors && colors.label ? colors.label : customThemeLabelForBase(basePresetId),
+    basePresetId,
+  };
+  all[name] = entry;
   localStorage.setItem(VAI_CUSTOM_THEMES_KEY, JSON.stringify(all));
 }
 
 /** Early boot — read storage before React paints (also called from index.html inline script). */
 export function initOdysseusThemeFromStorage(): 'dark' | 'light' {
-  const pref = (typeof localStorage !== 'undefined'
-    ? localStorage.getItem(VAI_THEME_STORAGE_KEY)
-    : null) as 'dark' | 'light' | null;
-  const themeId = (typeof localStorage !== 'undefined'
-    ? localStorage.getItem(VAI_ACTIVE_THEME_ID_KEY)
-    : null) ?? pref ?? 'dark';
-  const custom = loadCustomThemes()[themeId];
-  if (custom) {
-    applyOdysseusColors(custom);
-  } else {
-    applyOdysseusPreset(themeId in ODYSSEUS_THEME_PRESETS ? themeId : (pref ?? 'dark'));
-  }
-  const resolved = (pref ?? 'dark') as 'dark' | 'light';
-  document.documentElement.dataset.theme = resolved;
-  document.body.dataset.theme = resolved;
-  document.documentElement.style.colorScheme = resolved;
-  return resolved;
+  loadCustomThemes();
+  const themeId = getActiveThemeId();
+  applyThemeById(themeId);
+  return resolveThemeColorScheme(themeId);
 }
