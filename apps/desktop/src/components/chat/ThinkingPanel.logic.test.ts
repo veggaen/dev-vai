@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildThinkingPanelModel, buildReasoningNarrative, prettyModelName, humanizeStage, explainStage, formatDuration, summarizeProcessTrace, buildTurnEvidence, buildAdvisorLessons } from './ThinkingPanel.logic.js';
+import { buildThinkingPanelModel, buildReasoningNarrative, prettyModelName, humanizeStage, explainStage, formatDuration, summarizeProcessTrace, buildTurnEvidence, buildAdvisorLessons, buildPipelinePhases } from './ThinkingPanel.logic.js';
 import type { TurnThinkingUI } from '../../stores/chatStore.js';
 
 const base: TurnThinkingUI = {
@@ -12,6 +12,27 @@ const base: TurnThinkingUI = {
   knowledgeDepth: 'deep',
   durationMs: 140,
 };
+
+describe('buildPipelinePhases', () => {
+  it('folds checkpoints into ordered macro-phases with proportional shares', () => {
+    const view = summarizeProcessTrace([
+      { stage: 'chat:start', durationMs: 5 },
+      { stage: 'chat:preflight-complete', durationMs: 30 },
+      { stage: 'generate:research-routing-complete', durationMs: 60 },
+      { stage: 'generate:synthesis-complete', durationMs: 160 },
+      { stage: 'tracked:conversational', durationMs: 200 },
+    ]);
+    const phases = buildPipelinePhases(view);
+    expect(phases.map((p) => p.id)).toEqual(['read', 'route', 'evidence', 'compose', 'verify']);
+    const compose = phases.find((p) => p.id === 'compose')!;
+    expect(compose.ms).toBe(100);
+    expect(compose.share).toBeCloseTo(0.5, 1);
+  });
+
+  it('returns an empty list for an empty trace', () => {
+    expect(buildPipelinePhases(summarizeProcessTrace([]))).toEqual([]);
+  });
+});
 
 describe('buildThinkingPanelModel', () => {
   it('humanizes intent, strategy chain, trust, and confidence', () => {

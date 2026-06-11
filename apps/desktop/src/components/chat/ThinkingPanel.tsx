@@ -24,8 +24,8 @@ import {
   Scale,
 } from 'lucide-react';
 import type { ChatProgressStep, CouncilThinkingUI, ResearchTraceUI, ResponseVerificationUI, TurnThinkingUI } from '../../stores/chatStore.js';
-import type { TurnEvidenceUI } from './ThinkingPanel.logic.js';
-import { buildAdvisorLessons, buildThinkingPanelModel, buildReasoningNarrative, humanizeStrategy, formatDuration, summarizeProcessTrace, buildTurnEvidence } from './ThinkingPanel.logic.js';
+import type { PipelinePhaseUI, TurnEvidenceUI } from './ThinkingPanel.logic.js';
+import { buildAdvisorLessons, buildPipelinePhases, buildThinkingPanelModel, buildReasoningNarrative, humanizeStrategy, formatDuration, summarizeProcessTrace, buildTurnEvidence } from './ThinkingPanel.logic.js';
 import { useChatStore } from '../../stores/chatStore.js';
 
 interface ThinkingPanelProps {
@@ -84,6 +84,11 @@ export function ThinkingPanel({ thinking, researchTrace, verification, respondin
     researchSourceCount: researchTrace?.sourceCount,
   });
 
+  // Macro pipeline — Read → Route → Evidence → Compose → Verify, folded from the
+  // raw checkpoint trace. Drives both the trigger's mini track and the hero.
+  const timingView = thinking.processTrace && thinking.processTrace.length > 0 ? summarizeProcessTrace(thinking.processTrace) : undefined;
+  const phases = timingView ? buildPipelinePhases(timingView) : [];
+
   // Structured, copyable decision record — the "data for review" surface. A
   // human or another AI can paste this to audit how Vai chose its answer.
   const copyDecisionJson = () => {
@@ -109,7 +114,7 @@ export function ThinkingPanel({ thinking, researchTrace, verification, respondin
 
   return (
     <div className="mb-4 text-xs" data-testid="thinking-panel" data-misroute={flagged ? '1' : '0'}>
-      <div className={expanded ? 'thinking-panel-expanded overflow-hidden rounded-xl thinking-surface' : ''}>
+      <div className={`thinking-shell ${expanded ? 'thinking-shell--open thinking-surface' : ''}`}>
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
@@ -119,24 +124,41 @@ export function ThinkingPanel({ thinking, researchTrace, verification, respondin
         aria-expanded={expanded}
         aria-label={`${expanded ? 'Collapse' : 'Expand'} answer process`}
       >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]">
+        <span className="thinking-glyph flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]">
           <Brain aria-hidden="true" className="h-3.5 w-3.5" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[11px] font-medium text-[color:var(--chat-body)]">How this answer was made</span>
-          <span className="mt-0.5 block truncate text-[11px] leading-4 text-[color:var(--chat-muted)]">{narrative.summary}</span>
+          <span className="flex items-baseline gap-2">
+            <span className="block truncate text-[11px] font-medium text-[color:var(--chat-body)]">{narrative.summary}</span>
+            {model.durationMs !== undefined && (
+              <span className="shrink-0 tabular-nums text-[10px] text-[color:var(--chat-muted)]">{formatDuration(model.durationMs)}</span>
+            )}
+          </span>
+          {phases.length > 1 && (
+            <span className="thinking-minitrack mt-1.5 flex h-[3px] w-full max-w-[260px] gap-px overflow-hidden rounded-full" aria-hidden="true">
+              {phases.map((phase) => (
+                <span
+                  key={phase.id}
+                  className={`thinking-phase-fill thinking-phase-fill--${phase.id} h-full rounded-full`}
+                  style={{ width: `${Math.round(phase.share * 100)}%` }}
+                />
+              ))}
+            </span>
+          )}
         </span>
         {flagged && <AlertTriangle aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-amber-400" />}
-        <ChevronRight aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 transition-transform group-hover:text-[color:var(--chat-body)] ${expanded ? 'rotate-90' : ''}`} />
+        <ChevronRight aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-hover:text-[color:var(--chat-body)] ${expanded ? 'rotate-90' : ''}`} />
       </button>
 
       {expanded && (
-        <div className="space-y-4 p-4 sm:p-5">
+        <div className="thinking-expand-in space-y-4 p-4 sm:p-5">
           {model.misrouteHint && (
             <p className="thinking-callout-warn px-3 py-2.5 text-[11px] leading-5 text-[color:var(--tone-warn)]">
               {model.misrouteHint}
             </p>
           )}
+
+          {phases.length > 0 && timingView && <PipelineFlow phases={phases} totalMs={timingView.totalMs} />}
 
           {/* At-a-glance metrics */}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-analyst-stats="1">
@@ -257,6 +279,57 @@ export function ThinkingPanel({ thinking, researchTrace, verification, respondin
       )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Pipeline hero — the turn rendered as a connected Read → Route → Evidence →
+ * Compose → Verify flow. Each node lights with its phase tone; the proportional
+ * track underneath shows where the time actually went. Phases that never ran
+ * are simply absent, so the spine is an honest shape of the turn.
+ */
+const PHASE_ICONS: Record<PipelinePhaseUI['id'], React.ReactNode> = {
+  read: <FileText aria-hidden="true" className="h-3 w-3" />,
+  route: <Route aria-hidden="true" className="h-3 w-3" />,
+  evidence: <Search aria-hidden="true" className="h-3 w-3" />,
+  compose: <Brain aria-hidden="true" className="h-3 w-3" />,
+  verify: <ShieldCheck aria-hidden="true" className="h-3 w-3" />,
+};
+
+function PipelineFlow({ phases, totalMs }: { phases: readonly PipelinePhaseUI[]; totalMs: number }) {
+  return (
+    <section className="thinking-pipeline thinking-surface-soft rounded-lg p-3.5" data-pipeline={phases.map((p) => p.id).join('-')}>
+      <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--chat-eyebrow)]">
+        <Zap aria-hidden="true" className="h-3 w-3 text-[color:var(--chat-muted)]" />
+        Pipeline
+        <span className="ml-auto tabular-nums normal-case tracking-normal text-[color:var(--chat-muted)]">{formatDuration(totalMs)}</span>
+      </div>
+      <ol className="flex items-start">
+        {phases.map((phase, index) => (
+          <li key={phase.id} className="thinking-pipeline-node flex min-w-0 flex-1 flex-col items-center gap-1.5" style={{ animationDelay: `${index * 70}ms` }}>
+            <div className="flex w-full items-center">
+              <span aria-hidden="true" className={`h-px flex-1 ${index === 0 ? 'opacity-0' : 'thinking-pipeline-link'}`} />
+              <span className={`thinking-pipeline-dot thinking-phase-tone--${phase.id} flex h-7 w-7 shrink-0 items-center justify-center rounded-full`}>
+                {PHASE_ICONS[phase.id]}
+              </span>
+              <span aria-hidden="true" className={`h-px flex-1 ${index === phases.length - 1 ? 'opacity-0' : 'thinking-pipeline-link'}`} />
+            </div>
+            <span className="text-[10px] font-medium text-[color:var(--chat-body)]">{phase.label}</span>
+            <span className="tabular-nums text-[9px] text-[color:var(--chat-muted)]">{formatDuration(phase.ms)}</span>
+          </li>
+        ))}
+      </ol>
+      <div className="thinking-minitrack mt-3 flex h-1.5 w-full gap-px overflow-hidden rounded-full" role="img" aria-label="Time share per phase">
+        {phases.map((phase) => (
+          <span
+            key={phase.id}
+            className={`thinking-phase-fill thinking-phase-fill--${phase.id} h-full rounded-full`}
+            style={{ width: `${Math.round(phase.share * 100)}%` }}
+            title={`${phase.label}: ${formatDuration(phase.ms)} (${Math.round(phase.share * 100)}%)`}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 

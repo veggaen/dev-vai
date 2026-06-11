@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { flushSync } from 'react-dom';
+import { applyThemePreference, withThemeTransition } from '../lib/odysseus-theme.js';
 import type { AppRole } from './authStore.js';
 
 export type ChatMode = 'chat' | 'agent' | 'builder' | 'plan' | 'debate';
@@ -286,14 +288,21 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     localStorage.setItem(LAYOUT_MODE_KEY, layoutMode);
     set({ layoutMode });
   },
-  toggleThemePreference: () => set((s) => {
-    const next = s.themePreference === 'dark' ? 'light' : 'dark';
+  toggleThemePreference: () => {
+    const current = get().themePreference;
+    const next = current === 'dark' ? 'light' : 'dark';
     localStorage.setItem(THEME_PREFERENCE_KEY, next);
-    return { themePreference: next };
-  }),
+    withThemeTransition(() => {
+      applyThemePreference(next);
+      flushSync(() => set({ themePreference: next }));
+    });
+  },
   setThemePreference: (themePreference) => {
     localStorage.setItem(THEME_PREFERENCE_KEY, themePreference);
-    set({ themePreference });
+    withThemeTransition(() => {
+      applyThemePreference(themePreference);
+      flushSync(() => set({ themePreference }));
+    });
   },
   updateScreenClass: () => set({ screenClass: detectScreenClass() }),
   toggleSecondarySidebar: () => set((s) => ({ showSecondarySidebar: !s.showSecondarySidebar })),

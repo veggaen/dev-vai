@@ -21,7 +21,8 @@ import { SettingsDrawer } from './components/panels/SettingsDrawer.js';
 import { AuthGate } from './components/AuthGate.js';
 import { toast } from 'sonner';
 import { isDevAuthBypassEnabled } from './lib/dev-auth-bypass.js';
-import { applyThemePreference, applyThemeById, getActiveThemeId } from './lib/odysseus-theme.js';
+import { applyThemeById, getActiveThemeId } from './lib/odysseus-theme.js';
+import { VaiMark } from './components/brand/VaiMark.js';
 
 const DebugConsole = lazy(async () => ({ default: (await import('./components/DebugConsole.js')).DebugConsole }));
 const FileExplorer = lazy(async () => ({ default: (await import('./components/FileExplorer.js')).FileExplorer }));
@@ -40,8 +41,8 @@ function BootScreen() {
       <div className="text-center">
         <div className="relative mx-auto mb-4 h-16 w-16">
           <div className="absolute inset-0 animate-ping rounded-full bg-violet-500/20" />
-          <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-blue-600 shadow-lg shadow-violet-500/25">
-            <span className="text-2xl font-bold text-white">V</span>
+          <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-900 shadow-lg shadow-violet-500/25 ring-1 ring-white/10">
+            <VaiMark size={34} animated />
           </div>
         </div>
         <h1 className="mb-1 font-display text-3xl font-bold text-zinc-100">Vai</h1>
@@ -220,26 +221,13 @@ export function App() {
     };
   }, [updateScreenClass]);
 
-  const themeSwitchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const previousTheme = useRef(themePreference);
-  const themeMounted = useRef(false);
+  // Theme switching is handled at the action source (layoutStore /
+  // SettingsPanel) inside a View Transition so vars + attributes flip in one
+  // visual snapshot. Here we only hydrate the persisted theme on mount.
   useEffect(() => {
-    if (!themeMounted.current) {
-      themeMounted.current = true;
-      applyThemeById(getActiveThemeId());
-      previousTheme.current = themePreference;
-      return;
-    }
-    if (previousTheme.current === themePreference) return;
-
-    applyThemePreference(themePreference);
-    previousTheme.current = themePreference;
-    document.documentElement.setAttribute('data-theme-switching', 'true');
-    if (themeSwitchTimer.current) clearTimeout(themeSwitchTimer.current);
-    themeSwitchTimer.current = setTimeout(() => {
-      document.documentElement.removeAttribute('data-theme-switching');
-    }, 350);
-  }, [themePreference]);
+    applyThemeById(getActiveThemeId());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const hasActiveSandbox = projectId !== null;
   const canShowConsole = hasActiveSandbox || sandboxStatus === 'failed';

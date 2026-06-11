@@ -353,6 +353,34 @@ export function getActiveThemeId(): string {
   return localStorage.getItem(VAI_ACTIVE_THEME_ID_KEY) ?? 'dark';
 }
 
+/**
+ * Run a theme change inside a View Transition so the whole UI cross-fades as
+ * one frame-perfect snapshot — no per-element transition storm, no mismatch
+ * frame between React's data-theme commit and the CSS-var writes. Falls back
+ * to the [data-theme-switching] color cross-fade where unsupported or when
+ * the user prefers reduced motion.
+ */
+export function withThemeTransition(apply: () => void): void {
+  if (typeof document === 'undefined') {
+    apply();
+    return;
+  }
+  const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
+  const reduceMotion = typeof window !== 'undefined'
+    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (typeof doc.startViewTransition === 'function' && !reduceMotion) {
+    doc.startViewTransition(() => {
+      apply();
+    });
+    return;
+  }
+  document.documentElement.setAttribute('data-theme-switching', 'true');
+  apply();
+  window.setTimeout(() => {
+    document.documentElement.removeAttribute('data-theme-switching');
+  }, 350);
+}
+
 /** True only when this exact card id is the active theme — presets and customs are mutually exclusive. */
 export function isThemeCardActive(activeId: string, cardId: string): boolean {
   return activeId === cardId;

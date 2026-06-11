@@ -10,6 +10,7 @@
 import { useState, useCallback } from 'react';
 import { MarkdownRenderer } from '@vai/ui';
 import { API_BASE } from '../lib/api.js';
+import { VaiMark } from './brand/VaiMark.js';
 import {
   Copy, Check, FileText, Rocket, HelpCircle, X as XIcon,
   ChevronRight, CornerDownRight, User, ThumbsUp, ThumbsDown,
@@ -822,7 +823,7 @@ export function MessageBubble({
               ? <Wrench className="h-3.5 w-3.5 text-emerald-300" />
             : sender?.type === 'ide-agent'
               ? <span className="text-[10px] font-bold" style={{ color: sender.color || '#a1a1aa' }}>{sender.name.charAt(0).toUpperCase()}</span>
-              : <span className="text-[10px] font-bold text-white">V</span>
+              : <VaiMark size={14} variant="onAccent" />
           }
         </div>
 

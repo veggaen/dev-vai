@@ -4,6 +4,7 @@
 
 import { motion, useReducedMotion } from 'framer-motion';
 import { useLayoutStore } from '../../stores/layoutStore.js';
+import { VaiMark } from '../brand/VaiMark.js';
 
 interface VaiWelcomeMarkProps {
   size?: 'md' | 'lg';
@@ -39,25 +40,7 @@ export function VaiWelcomeMark({ size = 'lg' }: VaiWelcomeMarkProps) {
         }`}
         style={{ width: dim, height: dim }}
       >
-        <svg
-          width={icon}
-          height={icon}
-          viewBox="0 0 64 64"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-          className="vai-welcome-glyph"
-        >
-          <path
-            d="M15 14h10l7 22 7-22h10L36 50h-8L15 14Z"
-            fill="url(#vai-welcome-gradient)"
-          />
-          <defs>
-            <linearGradient id="vai-welcome-gradient" x1="15" y1="14" x2="49" y2="50" gradientUnits="userSpaceOnUse">
-              <stop stopColor="var(--brand-color)" />
-              <stop offset="1" stopColor="color-mix(in srgb, var(--brand-color) 72%, var(--fg))" />
-            </linearGradient>
-          </defs>
-        </svg>
+        <VaiMark size={icon} animated className="vai-welcome-glyph" />
       </motion.div>
     </div>
   );

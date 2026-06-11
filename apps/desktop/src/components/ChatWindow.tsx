@@ -22,6 +22,7 @@ import { MessageBubble } from './MessageBubble.js';
 import { ModeSelector } from './ModeSelector.js';
 import { ScrollToBottom } from './ScrollToBottom.js';
 import { TypingIndicator } from './TypingIndicator.js';
+import { VaiMark } from './brand/VaiMark.js';
 import { useAutoScroll } from '../hooks/useAutoScroll.js';
 import { useIntentStore, computeFallbackMap } from '../stores/intentStore.js';
 import { apiFetch } from '../lib/api.js';
@@ -1198,8 +1199,8 @@ export function ChatWindow() {
               <div className="flex items-center gap-2">
                 {/* Vai — always present */}
                 <div className="flex items-center gap-1.5 rounded-full bg-zinc-800/60 px-2.5 py-1 ring-1 ring-zinc-700/40">
-                  <div className="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-blue-600">
-                    <span className="text-[9px] font-bold text-white">V</span>
+                  <div className="flex h-5 w-5 items-center justify-center">
+                    <VaiMark size={15} />
                   </div>
                   <span className="text-[11px] font-medium text-zinc-300">Vai</span>
                 </div>

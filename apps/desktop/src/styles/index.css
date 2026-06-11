@@ -169,9 +169,24 @@
 }
 
 /* ── Seamless theme switching ──────────────────────────────────────────────
-   App.tsx sets [data-theme-switching] on the root for ~350ms when the theme
-   flips, so background / border / text colors cross-fade instead of snapping.
-   Scoped to the switch window so it never fights component transitions. */
+   Primary path: View Transitions API — the store wraps theme flips in
+   document.startViewTransition(), so old and new UI cross-fade as two flat
+   snapshots. No per-element transition storm, no mismatch frame.
+   Fallback ([data-theme-switching]): color cross-fade armed before the flip. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  mix-blend-mode: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0ms;
+  }
+}
+
 [data-theme-switching] *,
 [data-theme-switching] *::before,
 [data-theme-switching] *::after {
@@ -182,6 +197,35 @@
     fill 300ms ease,
     stroke 300ms ease,
     box-shadow 300ms ease !important;
+}
+
+/* ── Banding-resistant gradients ───────────────────────────────────────────
+   Monitor-side processing (digital vibrance, contrast boosts, 6-bit+FRC
+   panels) exaggerates the quantization steps in long, low-contrast ramps.
+   Two defenses:
+   1. .grain-veil — a static blue-noise veil (SVG turbulence) at ~2% alpha
+      laid over large gradient surfaces. Breaks up contour lines the same way
+      film grain does, invisible at normal viewing distance.
+   2. Gradients on big surfaces interpolate in OKLab (smoother perceptual
+      ramps, no gray dead-zone) — see aurora/atmosphere rules below. */
+.grain-veil {
+  position: relative;
+}
+
+.grain-veil::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.55;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+  mix-blend-mode: overlay;
+}
+
+[data-theme="light"] .grain-veil::after {
+  opacity: 0.35;
 }
 
 [data-thorsen-sync="wormhole"] {
@@ -206,39 +250,73 @@
   --vinext-trust-ring: rgba(239, 68, 68, 0.28);
 }
 
-/* Open mode — floating, generous spacing */
+/* Open mode — T3-inspired: one calm canvas, content floats as soft cards.
+   Generous air, large radius, diffuse shadows, hairline borders. The rail and
+   sidebar melt into the canvas; only working surfaces read as panels. */
 [data-layout-mode="open"] {
-  --layout-gap: 8px;
-  --layout-radius: 14px;
-  --layout-padding: 8px;
-  --layout-shadow: 0 18px 44px rgba(0, 0, 0, 0.18);
+  --layout-gap: 14px;
+  --layout-radius: 18px;
+  --layout-padding: 14px;
+  --layout-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 24px 64px -28px rgba(0, 0, 0, 0.4);
   --layout-border: 1px solid var(--shell-line-soft);
-  --layout-margin: 8px;
-  --layout-panel-bg: var(--shell-surface);
+  --layout-margin: 14px;
+  --layout-panel-bg: color-mix(in oklab, var(--panel) 88%, var(--bg));
 }
 
 [data-theme="light"][data-layout-mode="open"] {
-  --layout-shadow: 0 16px 38px rgba(15, 23, 42, 0.06);
+  --layout-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 18px 48px -20px rgba(15, 23, 42, 0.1);
   --layout-border: 1px solid rgba(226, 232, 240, 0.9);
   --layout-panel-bg: rgba(255, 255, 255, 0.97);
 }
 
-/* Odyssey mode — Odysseus-inspired open canvas with floating bubble panels */
+/* Open canvas — a quiet accent wash behind the floating cards */
+[data-layout-mode="open"] #layout-root {
+  background:
+    radial-gradient(ellipse 120% 80% at 50% -20% in oklab, color-mix(in oklab, var(--accent) 6%, transparent), transparent 60%),
+    var(--bg);
+}
+
+/* Rail + sidebar merge into the canvas — only content panels float */
+[data-layout-mode="open"] {
+  --sidebar-surface: color-mix(in oklab, var(--panel) 24%, transparent);
+}
+
+[data-layout-mode="open"] .layout-panel--rail {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+[data-layout-mode="open"] [data-panel-resize-handle-id] {
+  background: transparent;
+}
+
+/* Odyssey mode — Odysseus-inspired workspace: a deep canvas with bold
+   floating bubble panels, a pill rail, and a living gradient atmosphere.
+   Reads as "instruments on a deck", clearly distinct from Open's calm cards. */
 [data-layout-mode="odyssey"] {
-  --layout-gap: 14px;
-  --layout-radius: 22px;
-  --layout-padding: 12px;
-  --layout-shadow: 0 20px 50px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.12);
-  --layout-border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
-  --layout-margin: 18px;
-  --layout-panel-bg: var(--panel);
-  --odyssey-bubble-radius: 1.25rem;
-  --odyssey-chat-gap: 1rem;
+  --layout-gap: 18px;
+  --layout-radius: 26px;
+  --layout-padding: 14px;
+  --layout-shadow: 0 28px 64px -16px rgba(0, 0, 0, 0.38), 0 2px 10px rgba(0, 0, 0, 0.16);
+  --layout-border: 1px solid color-mix(in oklab, var(--border) 85%, transparent);
+  --layout-margin: 22px;
+  --layout-panel-bg: color-mix(in oklab, var(--panel) 96%, var(--fg));
+  --odyssey-bubble-radius: 1.5rem;
+  --odyssey-chat-gap: 1.125rem;
 }
 
 [data-theme="light"][data-layout-mode="odyssey"] {
-  --layout-shadow: 0 18px 44px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
-  --layout-border: 1px solid color-mix(in srgb, var(--border) 90%, white);
+  --layout-shadow: 0 22px 52px -14px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.05);
+  --layout-border: 1px solid color-mix(in oklab, var(--border) 90%, white);
+}
+
+/* Odyssey canvas — deeper than the panels, with a slow aurora wash */
+[data-layout-mode="odyssey"] #layout-root {
+  background:
+    radial-gradient(ellipse 90% 70% at 18% -10% in oklab, color-mix(in oklab, var(--accent) 9%, transparent), transparent 55%),
+    radial-gradient(ellipse 70% 60% at 95% 105% in oklab, color-mix(in oklab, var(--fg) 5%, transparent), transparent 50%),
+    color-mix(in oklab, var(--bg) 92%, black);
 }
 
 [data-layout-mode="odyssey"] .builder-shell-surface {
@@ -251,10 +329,6 @@
   background:
     radial-gradient(ellipse 90% 60% at 50% -10%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 55%),
     radial-gradient(circle at 85% 90%, color-mix(in srgb, var(--fg) 4%, transparent), transparent 40%);
-}
-
-[data-layout-mode="odyssey"] #layout-root {
-  background: var(--bg);
 }
 
 [data-layout-mode="odyssey"] .layout-panel--odyssey-host {
@@ -444,8 +518,21 @@ code, pre, kbd {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 80% 50% at 50% 0%, var(--shell-accent-soft), transparent),
+    radial-gradient(ellipse 80% 50% at 50% 0% in oklab, var(--shell-accent-soft), transparent),
     linear-gradient(180deg, var(--shell-bg) 0%, var(--shell-bg) 100%);
+}
+
+/* Static blue-noise veil over the atmosphere — masks gradient banding that
+   monitor-side vibrance/contrast processing makes visible. */
+.shell-atmosphere::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+  mix-blend-mode: overlay;
 }
 
 .builder-shell-surface {
@@ -648,14 +735,14 @@ code, pre, kbd {
 .aurora-field::before {
   top: 4%;
   left: 18%;
-  background: radial-gradient(circle, var(--shell-accent), transparent 65%);
+  background: radial-gradient(circle in oklab, var(--shell-accent), transparent 65%);
   animation: aurora-a 22s ease-in-out infinite;
 }
 
 .aurora-field::after {
   bottom: 4%;
   right: 14%;
-  background: radial-gradient(circle, #0ea5e9, transparent 65%);
+  background: radial-gradient(circle in oklab, #0ea5e9, transparent 65%);
   animation: aurora-b 26s ease-in-out infinite;
 }
 
@@ -676,6 +763,110 @@ code, pre, kbd {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   box-shadow: var(--panel-shadow);
+}
+
+/* Shell wrapper — rounded open state with a soft entrance */
+.thinking-shell--open {
+  overflow: hidden;
+  border-radius: 0.75rem;
+}
+
+@keyframes thinking-expand-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.thinking-expand-in {
+  animation: thinking-expand-in 260ms var(--ease-out-expo) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-expand-in { animation: none; }
+}
+
+/* Trigger glyph — quiet conic shimmer ring on hover */
+.thinking-glyph {
+  position: relative;
+  isolation: isolate;
+}
+.thinking-glyph::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 0.5625rem;
+  background: conic-gradient(
+    from var(--thinking-glyph-angle, 0deg),
+    transparent 0%,
+    color-mix(in oklab, var(--accent) 65%, transparent) 12%,
+    transparent 30%
+  );
+  opacity: 0;
+  z-index: -1;
+  transition: opacity 240ms ease;
+}
+@property --thinking-glyph-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes thinking-glyph-spin {
+  to { --thinking-glyph-angle: 360deg; }
+}
+.thinking-panel-trigger:hover .thinking-glyph::before {
+  opacity: 1;
+  animation: thinking-glyph-spin 2.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-panel-trigger:hover .thinking-glyph::before { animation: none; opacity: 0.5; }
+}
+
+/* Phase tones — pipeline nodes, track fills. Hue per macro-phase. */
+:root {
+  --phase-read: #8b9bb4;
+  --phase-route: #b07ce8;
+  --phase-evidence: #e8b34d;
+  --phase-compose: var(--accent);
+  --phase-verify: #4ade80;
+}
+
+.thinking-phase-fill { transition: width 480ms var(--ease-out-expo); min-width: 3px; }
+.thinking-phase-fill--read { background: color-mix(in oklab, var(--phase-read) 75%, transparent); }
+.thinking-phase-fill--route { background: color-mix(in oklab, var(--phase-route) 75%, transparent); }
+.thinking-phase-fill--evidence { background: color-mix(in oklab, var(--phase-evidence) 75%, transparent); }
+.thinking-phase-fill--compose { background: color-mix(in oklab, var(--phase-compose) 80%, transparent); }
+.thinking-phase-fill--verify { background: color-mix(in oklab, var(--phase-verify) 75%, transparent); }
+
+.thinking-minitrack { background: color-mix(in oklab, var(--panel-border-soft) 45%, transparent); }
+
+.thinking-pipeline-dot {
+  border: 1px solid color-mix(in oklab, var(--phase-tone, var(--accent)) 38%, var(--panel-border-soft));
+  background: color-mix(in oklab, var(--phase-tone, var(--accent)) 12%, var(--panel-bg-elevated));
+  color: color-mix(in oklab, var(--phase-tone, var(--accent)) 85%, var(--fg));
+  box-shadow: 0 0 12px color-mix(in oklab, var(--phase-tone, var(--accent)) 14%, transparent);
+}
+.thinking-phase-tone--read { --phase-tone: var(--phase-read); }
+.thinking-phase-tone--route { --phase-tone: var(--phase-route); }
+.thinking-phase-tone--evidence { --phase-tone: var(--phase-evidence); }
+.thinking-phase-tone--compose { --phase-tone: var(--phase-compose); }
+.thinking-phase-tone--verify { --phase-tone: var(--phase-verify); }
+
+.thinking-pipeline-link {
+  background: linear-gradient(to right, color-mix(in oklab, var(--panel-border) 80%, transparent), color-mix(in oklab, var(--panel-border) 80%, transparent));
+}
+
+@keyframes thinking-node-in {
+  from { opacity: 0; transform: translateY(3px) scale(0.92); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.thinking-pipeline-node { animation: thinking-node-in 320ms var(--ease-out-expo) both; }
+@media (prefers-reduced-motion: reduce) {
+  .thinking-pipeline-node { animation: none; }
 }
 
 .thinking-surface-soft {
@@ -761,7 +952,7 @@ code, pre, kbd {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-[data-theme="light"] .thinking-panel-expanded .thinking-panel-trigger {
+[data-theme="light"] .thinking-shell--open .thinking-panel-trigger {
   background: transparent;
 }
 
@@ -822,6 +1013,19 @@ code, pre, kbd {
   filter: drop-shadow(0 2px 8px color-mix(in srgb, var(--accent) 28%, transparent));
 }
 
+/* VaiMark intelligence node — slow luminous breath when animated */
+@keyframes vai-mark-node-breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.82); }
+}
+.vai-mark-node {
+  transform-origin: 51.5px 12.5px;
+  animation: vai-mark-node-breathe 2.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vai-mark-node { animation: none; }
+}
+
 .shell-header {
   background: var(--shell-surface-strong);
   border-bottom: 1px solid var(--shell-line);
@@ -849,9 +1053,9 @@ code, pre, kbd {
   bottom: 0;
   z-index: 30;
   background: linear-gradient(
-    to top,
+    to top in oklab,
     var(--shell-bg) 0%,
-    color-mix(in srgb, var(--shell-bg) 88%, transparent) 42%,
+    color-mix(in oklab, var(--shell-bg) 88%, transparent) 42%,
     transparent 100%
   );
 }

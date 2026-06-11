@@ -10,6 +10,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, Check } from 'lucide-react';
+import { VaiMark } from './brand/VaiMark.js';
 import type { ChatProgressStep } from '../stores/chatStore.js';
 
 export function TypingIndicator({ progressSteps = [] }: { progressSteps?: ChatProgressStep[] }) {
@@ -26,9 +27,9 @@ export function TypingIndicator({ progressSteps = [] }: { progressSteps?: ChatPr
       data-testid="typing-indicator"
     >
       {/* Avatar — brand mark with a soft breathing glow while working */}
-      <div className="relative mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-blue-600">
+      <div className="relative mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center">
         <span className="absolute inset-0 animate-ping rounded-full bg-violet-500/20" style={{ animationDuration: '2.4s' }} />
-        <span className="relative text-[10px] font-bold text-white">V</span>
+        <VaiMark size={20} animated className="relative" />
       </div>
 
       {/* Live steps — quiet left rail, flat rows */}

@@ -10,6 +10,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { TemplateGallery } from './TemplateGallery.js';
 import { DeployProgress } from './DeployProgress.js';
+import { VaiMark } from './brand/VaiMark.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { useCursorStore } from '../stores/cursorStore.js';
 import { useChatStore } from '../stores/chatStore.js';
@@ -115,7 +116,7 @@ function StudioMark({ className = '' }: { className?: string }) {
       className={`flex h-16 w-16 items-center justify-center rounded-[1.35rem] bg-[linear-gradient(135deg,#18181b,#27272a)] shadow-[0_20px_60px_rgba(0,0,0,0.24)] ring-1 ring-white/10 ${className}`}
       aria-hidden
     >
-      <span className="text-lg font-semibold tracking-[-0.08em] text-zinc-100">V</span>
+      <VaiMark size={30} />
     </div>
   );
 }

@@ -17,6 +17,7 @@ import {
   applyThemeById,
   getActiveThemeId,
   listCustomThemeEntries,
+  withThemeTransition,
 } from '../../lib/odysseus-theme.js';
 import type { ProjectHandoffIntentResponse } from '@vai/api-types/project-responses';
 import {
@@ -365,7 +366,9 @@ export function SettingsPanel() {
   };
 
   const applyThemeId = useCallback((themeId: string) => {
-    applyThemeById(themeId);
+    withThemeTransition(() => {
+      applyThemeById(themeId);
+    });
     setActiveThemeId(themeId);
   }, []);
 

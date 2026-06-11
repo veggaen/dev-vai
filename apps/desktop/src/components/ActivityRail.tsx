@@ -17,6 +17,7 @@ import { useAuthStore, type AppRole } from '../stores/authStore.js';
 import { motion } from 'framer-motion';
 import { useRef, useState } from 'react';
 import { UserPopover } from './UserPopover.js';
+import { VaiMark } from './brand/VaiMark.js';
 
 /**
  * ActivityRail — left icon rail. Primary entry is Chats; owner/admin tools
@@ -112,9 +113,9 @@ export function ActivityRail() {
       >
         <div
           aria-hidden="true"
-          className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-[color:var(--brand-color)] shadow-[0_2px_8px_color-mix(in_srgb,var(--brand-color)_40%,transparent)] transition-all duration-200 group-hover:scale-105 group-hover:shadow-[0_4px_16px_color-mix(in_srgb,var(--brand-color)_50%,transparent)]"
+          className="relative flex h-7 w-7 items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-110 group-hover:drop-shadow-[0_4px_12px_color-mix(in_srgb,var(--brand-color)_55%,transparent)]"
         >
-          <span className="text-xs font-bold text-[color:var(--bg)]">V</span>
+          <VaiMark size={22} />
         </div>
       </button>
 

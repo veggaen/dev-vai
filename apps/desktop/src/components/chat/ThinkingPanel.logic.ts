@@ -218,6 +218,66 @@ export function summarizeProcessTrace(
   return { rows, totalMs };
 }
 
+/** One macro-phase of the answer pipeline — the spine of the process hero. */
+export interface PipelinePhaseUI {
+  readonly id: 'read' | 'route' | 'evidence' | 'compose' | 'verify';
+  readonly label: string;
+  /** Time spent inside this phase (sum of its checkpoints' step deltas). */
+  readonly ms: number;
+  /** 0..1 share of the turn — drives the segmented track widths. */
+  readonly share: number;
+  /** Number of underlying checkpoints folded into this phase. */
+  readonly count: number;
+}
+
+const PHASE_ORDER: readonly PipelinePhaseUI['id'][] = ['read', 'route', 'evidence', 'compose', 'verify'];
+
+const PHASE_LABELS: Record<PipelinePhaseUI['id'], string> = {
+  read: 'Read',
+  route: 'Route',
+  evidence: 'Evidence',
+  compose: 'Compose',
+  verify: 'Verify',
+};
+
+function classifyPhase(stage: string): PipelinePhaseUI['id'] {
+  const s = stage.toLowerCase();
+  if (/verif|sanitiz|guard|tracked|honest|trust/.test(s)) return 'verify';
+  if (/synth|assemble|compose|stream|answer|writ/.test(s)) return 'compose';
+  if (/search|retriev|research|ingest|source|file|read|attach|context|tool|exec|terminal|bridge|taught|doc/.test(s)) return 'evidence';
+  if (/preflight|route|routing|intent|candidate|classif|match|short-topic|compound|creative|intelligence/.test(s)) return 'route';
+  return 'read';
+}
+
+/**
+ * Fold the checkpoint rows into a fixed Read → Route → Evidence → Compose →
+ * Verify pipeline. Phases that never ran are dropped, so a pure-conversation
+ * turn renders a short spine, and a research turn renders the full one.
+ */
+export function buildPipelinePhases(view: ProcessTimingView): PipelinePhaseUI[] {
+  const totals = new Map<PipelinePhaseUI['id'], { ms: number; count: number }>();
+  for (const row of view.rows) {
+    const id = classifyPhase(row.stage);
+    const entry = totals.get(id) ?? { ms: 0, count: 0 };
+    entry.ms += row.stepMs;
+    entry.count += 1;
+    totals.set(id, entry);
+  }
+  const denom = view.totalMs > 0 ? view.totalMs : [...totals.values()].reduce((sum, e) => sum + e.ms, 0) || 1;
+  return PHASE_ORDER
+    .filter((id) => totals.has(id))
+    .map((id) => {
+      const entry = totals.get(id)!;
+      return {
+        id,
+        label: PHASE_LABELS[id],
+        ms: entry.ms,
+        share: Math.max(0.02, Math.min(1, entry.ms / denom)),
+        count: entry.count,
+      };
+    });
+}
+
 /**
  * Typed evidence log for a turn — the "what I actually did" record, Codex-style.
  * A discriminated union so each action renders with the right chrome: a search
