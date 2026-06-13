@@ -18,6 +18,10 @@ export function isExplicitWebSearchRequest(input: string): boolean {
 }
 
 export {
+  hasSubstantiveQuestionAfterOpener,
+  isPureConversationalTurn,
+} from './web-conclude-policy.js';
+export {
   isExplicitResearchRequest,
   shouldConcludeWithWebSearch,
   shouldSkipWebConclusion,

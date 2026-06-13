@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildThinkingPanelModel, buildReasoningNarrative, prettyModelName, humanizeStage, explainStage, formatDuration, summarizeProcessTrace, buildTurnEvidence, buildAdvisorLessons, buildPipelinePhases } from './ThinkingPanel.logic.js';
+import { buildThinkingPanelModel, buildReasoningNarrative, prettyModelName, humanizeStage, explainStage, formatDuration, summarizeProcessTrace, buildTurnEvidence, buildAdvisorLessons, buildPipelinePhases, describeAdvisorContribution } from './ThinkingPanel.logic.js';
 import type { TurnThinkingUI } from '../../stores/chatStore.js';
 
 const base: TurnThinkingUI = {
@@ -360,6 +360,66 @@ describe('buildTurnEvidence', () => {
 
   it('is empty-safe', () => {
     expect(buildTurnEvidence()).toEqual([]);
+  });
+});
+
+describe('describeAdvisorContribution', () => {
+  const advisor = {
+    schemaVersion: 1 as const,
+    actorId: 'local:qwen2.5:7b',
+    modelId: 'qwen2.5:7b',
+    state: 'ready' as const,
+    qualityContract: {
+      answerLength: 'structured' as const,
+      mustBeGuiding: false,
+      mustBeCurrent: true,
+      mustUseJson: false,
+      shouldAskClarifyingQuestion: false,
+    },
+    routeGuidance: [],
+    riskFlags: [],
+    retrievalHints: [],
+    confidence: 0.8,
+  };
+
+  it('credits the answering model when advisor and fallback are the same voice', () => {
+    const copy = describeAdvisorContribution(advisor, {
+      fromModelId: 'vai:v0',
+      toModelId: 'local:qwen2.5:7b',
+      reason: 'low-confidence',
+    });
+    expect(copy.title).toBe('Answer handoff');
+    expect(copy.detail).toMatch(/qwen2\.5:7b drafted the answer/i);
+    expect(copy.detail).not.toMatch(/Vai wrote the final answer/i);
+  });
+
+  it('reports honestly when the advisor raised nothing', () => {
+    const copy = describeAdvisorContribution(advisor);
+    expect(copy.title).toBe('Advisor contribution');
+    expect(copy.detail).toMatch(/raised no concerns/i);
+    expect(copy.detail).toMatch(/Vai stayed responsible/i);
+  });
+
+  it('enumerates real findings instead of canned copy', () => {
+    const copy = describeAdvisorContribution({
+      ...advisor,
+      routeGuidance: [{ signal: 'prefer', handler: 'research-cited', reason: 'roster changes' }],
+      riskFlags: ['freshness-needed'],
+      durationMs: 3300,
+    });
+    expect(copy.detail).toMatch(/1 route hint/);
+    expect(copy.detail).toMatch(/1 risk flag/);
+    expect(copy.detail).toMatch(/freshness-needed/);
+    expect(copy.detail).toMatch(/3\.3s/);
+  });
+
+  it('says plainly when the advisor was unavailable or ran in the background', () => {
+    expect(describeAdvisorContribution({ ...advisor, state: 'unavailable' }).detail)
+      .toMatch(/unavailable this turn/i);
+    expect(describeAdvisorContribution({ ...advisor, state: 'background' }).detail)
+      .toMatch(/did not shape this turn/i);
+    expect(describeAdvisorContribution(undefined).detail)
+      .toMatch(/No shadow advisor ran/i);
   });
 });
 

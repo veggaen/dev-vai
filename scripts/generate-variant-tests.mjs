@@ -18,7 +18,7 @@ let testCount = 0;
 
 // Handle: it('name', ...) and it("name", ...)
 let result = src.replace(
-  /(\bit\s*\(\s*)(['"])((?:(?!\2).)*?)\2/g,
+  /(\bit\s*\(\s*)(['"])((?:\\.|(?!\2).)*?)\2/g,
   (match, prefix, quote, name) => {
     testCount++;
     return `${prefix}${quote}${name} (variant)${quote}`;
@@ -27,7 +27,7 @@ let result = src.replace(
 
 // Handle: it.each([...])('name %s', ...) — the second ('name' after the array
 result = result.replace(
-  /(it\.each\s*\([^)]*\)\s*\(\s*)(['"])((?:(?!\2).)*?)\2/g,
+  /(it\.each\s*\([^)]*\)\s*\(\s*)(['"])((?:\\.|(?!\2).)*?)\2/g,
   (match, prefix, quote, name) => {
     if (!name.includes('(variant)')) {
       testCount++;

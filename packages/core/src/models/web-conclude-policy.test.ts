@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  hasSubstantiveQuestionAfterOpener,
   isExplicitResearchRequest,
   isFreshLocalBusinessContactRequest,
   isFreshLocalRecommendationRequest,
   isGameFranchiseOverviewQuestion,
+  isPureConversationalTurn,
   normalizeWebConclusionInput,
   shouldConcludeWithWebSearch,
   shouldDeferWebConclusionToLocalRoutes,
@@ -40,8 +42,19 @@ describe('web-conclude-policy', () => {
 
   it('skips builder and greeting turns', () => {
     expect(shouldSkipWebConclusion('hey')).toBe(true);
+    expect(shouldSkipWebConclusion('heya')).toBe(true);
     expect(shouldSkipWebConclusion('build me a todo app', { activeMode: 'builder' })).toBe(true);
     expect(shouldConcludeWithWebSearch('build me a todo app', { activeMode: 'builder' })).toBe(false);
+  });
+
+  it('classifies pure conversational turns structurally instead of per-word lists', () => {
+    expect(isPureConversationalTurn('heya')).toBe(true);
+    expect(isPureConversationalTurn('yo')).toBe(true);
+    expect(isPureConversationalTurn('list all lol roles')).toBe(false);
+    expect(isPureConversationalTurn('what is Docker')).toBe(false);
+    expect(isPureConversationalTurn('Hello, who is the king of Norway?')).toBe(false);
+    expect(hasSubstantiveQuestionAfterOpener('Hello, who is the king of Norway?')).toBe(true);
+    expect(hasSubstantiveQuestionAfterOpener('heya')).toBe(false);
   });
 
   it('strips style wrappers before routing and skips bare decorated follow-ups', () => {

@@ -64,7 +64,7 @@ export function routeBuilderRequest(input: BuilderRequestRouteInput): BuilderReq
     };
   }
 
-  const wantsVisualEdit = /\b(?:edit|update|change|improve|polish|refine|make|turn|switch|rename|add|style|animate|include|insert)\b/i.test(lower);
+  const wantsVisualEdit = /\b(?:edit|update|change|improve|polish|refine|make|turn|switch|rename|add|style|restyle|redesign|animate|include|insert|tweak|adjust)\b/i.test(lower);
   const visualSignals = [
     /\blanding\s+page\b/i,
     /\bhero\b/i,
@@ -83,6 +83,18 @@ export function routeBuilderRequest(input: BuilderRequestRouteInput): BuilderReq
     /\btransition\b/i,
     /\bentrance\b/i,
     /\breveal\b/i,
+    // Plain-language visual asks ("make my background more fancy", "make it
+    // look nicer") are edits of the running app, not new-app briefs.
+    /\bfanc(?:y|ier)\b/i,
+    /\bprett(?:y|ier)\b/i,
+    /\bnicer\b/i,
+    /\blooks?\b/i,
+    /\bdesign\b/i,
+    /\bstyl(?:e|ing|ish)\b/i,
+    /\bfonts?\b/i,
+    /\bvisuals?\b/i,
+    /\bgradient\b/i,
+    /\bbackdrop\b/i,
   ].filter((pattern) => pattern.test(lower)).length;
 
   if (wantsVisualEdit && visualSignals >= 2) {
@@ -104,7 +116,7 @@ export function routeBuilderRequest(input: BuilderRequestRouteInput): BuilderReq
     };
   }
 
-  const wantsProjectIteration = /\b(?:add|change|modify|update|convert|switch|remove|delete|include|insert|replace|refactor|fix|use|rename|polish|improve|refine|tighten)\b/i.test(lower)
+  const wantsProjectIteration = /\b(?:add|change|modify|update|convert|switch|remove|delete|include|insert|replace|refactor|fix|use|rename|polish|improve|refine|tighten|make|style|restyle|redesign|adjust|tweak|tune)\b/i.test(lower)
     || /\b(?:auth(?:entication)?|login|sign[\s-]?in|session|middleware|filters?|dashboard|chart|date range|traffic sources)\b/i.test(lower);
 
   if (wantsProjectIteration) {

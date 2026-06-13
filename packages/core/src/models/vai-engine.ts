@@ -59,6 +59,9 @@ import {
   isGameFranchiseOverviewQuestion,
   isMetaCognitiveKnowledgePattern,
   normalizeWebConclusionInput,
+  isPureConversationalTurn,
+  hasSubstantiveQuestionAfterOpener,
+  shouldSkipWebConclusion,
 } from './web-conclude-policy.js';
 import { tryEmitFactShim } from '../chat/deterministic-facts-router.js';
 import { extractIdiomContext } from '../chat/programming-idioms.js';
@@ -8902,6 +8905,17 @@ export class VaiEngine implements ModelAdapter {
     this._lastOodaTrace = null;
     this._lastCognitiveFrame = analyze(userContent);
     this._lastIntent = this.classifyIntent(userContent, request.messages);
+    {
+      const topic = this.detectTopic(userContent);
+      const ledgerEntry = topic && topic.trim().length > 0
+        ? this._knowledgeLedger.get(topic)
+        : null;
+      this._lastOodaTrace = preAct({
+        frame: this._lastCognitiveFrame,
+        topic,
+        topicConfidence: ledgerEntry?.confidence ?? null,
+      });
+    }
     this.refreshConversationModeState(request.messages);
     const start = performance.now();
     this._processTraceStartedAt = start;
@@ -9001,7 +9015,13 @@ export class VaiEngine implements ModelAdapter {
     // For low-level systems / perf / concurrency unknowns that have no exact entry, emit the assembled explanation
     // from local primitives *before* retrieval, product memos, or the generic don't-know fallback can claim the turn.
     // This is the live realization of the new knowledge type created over the Grok-Vai channel.
-    const technicalSynthPreflight = this.trySynthesizeTechnicalConcept(userContent);
+    const hasRepoNativeSystemHardening = request.messages.some((message) =>
+      message.role === 'system'
+      && /\b(?:prompt hardening for ambiguous repo-native questions|repository-native engineering question|deep design memo)\b/i.test(message.content),
+    );
+    const technicalSynthPreflight = hasRepoNativeSystemHardening
+      ? null
+      : this.trySynthesizeTechnicalConcept(userContent);
     if (technicalSynthPreflight) {
       const durationMs = Math.round(performance.now() - start);
       this.tracePerf('chat:tech-synth-preflight', userContent, performance.now());
@@ -10349,6 +10369,25 @@ export class VaiEngine implements ModelAdapter {
     );
     const activeMode = this._activeMode;
 
+    const conversationalContext = {
+      activeMode,
+      hasActiveSandbox: this._hasActiveSandboxContext,
+    };
+    // Only short-circuit genuine STANDALONE small-talk here ("heya", "thanks").
+    // A short cue like "yes"/"sure"/"ok" that FOLLOWS an assistant turn is a
+    // contextual reply (e.g. confirming a build-chooser) and must flow to the
+    // contextual-followup resolver downstream — not be swallowed as chit-chat
+    // (live failure: "Build something:" → "yes" returned "Back at it…" instead
+    // of the plan preview). The deeper handleConversational pass still catches
+    // it later if nothing else claims it.
+    const hasPriorAssistantTurn = history.some((m) => m.role === 'assistant' && m.content.trim().length > 0);
+    if (!hasPriorAssistantTurn && isPureConversationalTurn(input, conversationalContext)) {
+      const conversational = this.handleConversational(input.trim().toLowerCase(), history);
+      if (conversational) {
+        return this.tracked('conversational', conversational, input);
+      }
+    }
+
     // A local recommendation is a current-data task, not a place definition.
     // Resolve it before any curated entity or country handler sees the location
     // token and mistakes that nearby fact for the requested answer.
@@ -11217,6 +11256,7 @@ export class VaiEngine implements ModelAdapter {
       && !preferBuilderVinextFiles
       && !preferBuilderNextjsFiles
       && !preferBuilderStackClarifier
+      && !this.namesConcreteProductBrief(input)
       && (
         isExplicitInstall
         || (!isBuilderMode && (isExplicitScaffoldRequest || isDirectChatBuildRequest || isBuilderProjectBuildRequest))
@@ -15824,6 +15864,12 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
    */
   private trySynthesizeTechnicalConcept(input: string): string | null {
     const lower = input.toLowerCase().trim();
+    const containsUrl = /https?:\/\/\S+/i.test(input);
+    const isRepoNativeArchitectureRequest =
+      /\b(?:design|architecture|memo|engine|system|workflow|pipeline)\b/i.test(lower)
+      && /\b(?:repo-native|repository-native|monorepo|code assistant|context engine|prediction engine|predictive prefetch)\b/i.test(lower);
+    if (containsUrl || isRepoNativeArchitectureRequest) return null;
+
     // Only trigger on likely low-level CS / perf / concurrency / arch terms that are classically "unknown" in the bench.
     const isSynthesizableDomain = /\b(false.?sharing|cache.?line|coheren[ct]|MESI|MOESI|branch.?predict|speculat(ive|ion)|out.of.order|memory.?barrier|memory.?fence|prefetch|NUMA|atomic|spin.?lock|mutex|dead.?lock|livelock|pipeline.?stall|write.?combining|store.?buffer|load.?buffer|true.?sharing)\b/i.test(lower)
       || /\bfalse.?sharing\b/i.test(lower)
@@ -15843,6 +15889,9 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     } else if (/branch.?predict|speculat/i.test(lower)) {
       parts.push('Branch prediction + speculative execution: modern CPUs guess the outcome of conditional branches and execute the predicted path before the condition resolves. On correct guess: free speedup. On mispredict: pipeline flush, rollback of speculative state, large penalty (10-20+ cycles). Related: out-of-order execution, reorder buffer (ROB), speculation windows, Spectre/Meltdown side-channels (speculation leaks).');
       parts.push('Mitigation patterns: predictable branch order (sort data), branchless code (cmov, arithmetic), profile-guided optimization, or explicit likely/unlikely hints where the ISA supports them.');
+    } else if (/dead.?lock/i.test(lower)) {
+      parts.push('A deadlock is a permanent wait cycle: each task holds a lock or resource another task needs, so none can continue. The classic Coffman conditions are mutual exclusion, hold-and-wait, no preemption, and circular wait; all four must be present.');
+      parts.push('Prevent it by enforcing one global lock order, avoiding nested lock acquisition, using timeouts or try-lock with rollback, and keeping critical sections small. Diagnose it with thread dumps or a wait-for graph that exposes the circular dependency.');
     } else if (/atomic|spin.?lock|mutex|contention/i.test(lower)) {
       parts.push('Atomics and lock contention: atomic ops (compare-and-swap, fetch-add) provide single-instruction visibility and ordering across cores without full locks. But every atomic touches the coherence fabric. High contention on the same cache line or lock word causes the same invalidation traffic as false sharing plus serialization. Related primitives: memory ordering (acquire/release/seq-cst), store buffers, lock-free vs wait-free, NUMA remote access costs.');
       parts.push('Prefer: per-core sharding, lock-free rings with careful padding, or coarser locks that are held for less total time.');
@@ -15878,9 +15927,12 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     // must NOT trigger — they appear in ordinary software questions ("design a
     // dockable panel architecture") that deserve a real answer, not this
     // adapter-routing placeholder. Require Vai/own-internals framing instead.
+    const asksVaiRoutingDecision =
+      /\bhow (should|would|does|do)\s+(vai|you)\s+(decide|route|know when|pick|choose)\b/i.test(lower)
+      && /\b(route|router|adapter|tool|model|endpoint|bridge|capabilit|grok|companion)\w*\b/i.test(lower);
     const mentionsVaiInternals =
       /\b(smart router|dumb conduit|two endpoints|claude critique|grok (channel|friend|pipe|bridge)|vai-collab|adapter family|bridge (architecture|routing|decision|design)|mcp (server|adapter|bridge))\b/i.test(lower)
-      || /\bhow (should|would|does|do)\s+(vai|you)\s+(decide|route|know when|pick|choose)\b/i.test(lower)
+      || asksVaiRoutingDecision
       || /\b(your|vai'?s)\s+(router|adapter|bridge|routing|architecture)\b/i.test(lower);
     const isMetaOrHardUnknown = mentionsVaiInternals
       || (lower.split(/\s+/).length > 8 && /\b(i don't know|don't have|no knowledge|not sure about)\b/i.test(lower)); // meta self-ref on don't-know
@@ -18241,6 +18293,10 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     // Must have a build verb
     if (!/\b(?:build|create|make|design|generate|write me|code me|give me|develop)\b/i.test(lower)) return null;
 
+    // A named product/clone brief already says what to build — never answer
+    // it with an app-shape menu.
+    if (this.namesConcreteProductBrief(lower)) return null;
+
     // Skip diagnostic, rewrite, and code-snippet requests that merely mention
     // an app/page/site as context. Those should be answered directly.
     if (/\b(?:diagnostic|diagnose|debug|debugging|separate|order\s+of\s+operations|why|explain|what\s+went\s+wrong|blank\s+white\s+screen|after\s+login|frontend|runtime\s+failures?)\b/i.test(lower)) return null;
@@ -19475,7 +19531,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       `\`\`\`${ext} title="src/App.${ext}"\nimport { useState } from 'react'\n\nexport default function App() {\n  const [count, setCount] = useState(0)\n  return (\n    <div className="app">\n      <h1>Vite + React</h1>\n      <button onClick={() => setCount(c => c + 1)}>count is {count}</button>\n    </div>\n  )\n}\n\`\`\`\n\n` +
       `\`\`\`css title="src/index.css"\n${cssContent}\`\`\`\n\n` +
       `\`\`\`${isTs ? 'ts' : 'js'} title="vite.config.${isTs ? 'ts' : 'js'}"\nimport { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\nexport default defineConfig({ plugins: [react()] })\n\`\`\`\n\n` +
-      (isTs ? `\`\`\`json title="tsconfig.json"\n{\n  "compilerOptions": {\n    "target": "ES2020",\n    "lib": ["ES2020", "DOM", "DOM.Iterable"],\n    "module": "ESNext",\n    "moduleResolution": "bundler",\n    "jsx": "react-jsx",\n    "strict": true,\n    "skipLibCheck": true\n  },\n  "include": ["src"]\n}\n\`\`\`\n\n` : '') +
+      (isTs ? `\`\`\`json title="tsconfig.json"\n{\n  "compilerOptions": {\n    "target": "ES2020",\n    "lib": ["ES2020", "DOM", "DOM.Iterable"],\n    "module": "ESNext",\n    "moduleResolution": "bundler",\n    "allowImportingTsExtensions": true,\n    "noEmit": true,\n    "jsx": "react-jsx",\n    "strict": true,\n    "skipLibCheck": true\n  },\n  "include": ["src"]\n}\n\`\`\`\n\n` : '') +
       '**Run:** `npm install && npm run dev` → http://localhost:5173\n' +
       '**What to check:** Click the button, count increments.'
     );
@@ -20173,6 +20229,8 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
           lib: ['ES2020', 'DOM', 'DOM.Iterable'],
           module: 'ESNext',
           moduleResolution: 'bundler',
+          allowImportingTsExtensions: true,
+          noEmit: true,
           jsx: 'react-jsx',
           strict: true,
           skipLibCheck: true,
@@ -20257,6 +20315,8 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
           lib: ['ES2020', 'DOM', 'DOM.Iterable'],
           module: 'ESNext',
           moduleResolution: 'bundler',
+          allowImportingTsExtensions: true,
+          noEmit: true,
           jsx: 'react-jsx',
           strict: true,
           skipLibCheck: true,
@@ -20690,6 +20750,8 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
           lib: ['ES2020', 'DOM', 'DOM.Iterable'],
           module: 'ESNext',
           moduleResolution: 'bundler',
+          allowImportingTsExtensions: true,
+          noEmit: true,
           jsx: 'react-jsx',
           strict: true,
           skipLibCheck: true,
@@ -24782,6 +24844,8 @@ dd { margin: 0; color: #f7fffb; font-weight: 800; }
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true
@@ -25049,6 +25113,8 @@ body {
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true
@@ -25653,6 +25719,8 @@ export default function App() {
           lib: ['ES2020', 'DOM', 'DOM.Iterable'],
           module: 'ESNext',
           moduleResolution: 'bundler',
+          allowImportingTsExtensions: true,
+          noEmit: true,
           jsx: 'react-jsx',
           strict: true,
           skipLibCheck: true,
@@ -51304,6 +51372,18 @@ function topKLargest(nums, k) {
   }
 
   /**
+   * Briefs that name a concrete product ("clone of tinder", "an app like
+   * spotify") must NEVER be answered with a tech-stack or app-shape menu —
+   * the user said exactly what to build, and the menus discard it (live
+   * failure: "clone of tinder" → PERN deploy button → "task manager" demo).
+   * These flow to the real builder paths (archetypes / council codegen).
+   */
+  private namesConcreteProductBrief(input: string): boolean {
+    return /\b(?:tinder|twitter|x\.com|instagram|facebook|spotify|netflix|airbnb|uber|youtube|tiktok|reddit|discord|slack|notion|trello|pinterest|whatsapp|telegram|snapchat|twitch|ebay|etsy|duolingo|strava|hinge|bumble)\b/i.test(input)
+      || /\bclone\b/i.test(input);
+  }
+
+  /**
    * Detect when user wants to scaffold, build, or deploy a project.
    * Returns a friendly response with {{deploy:stackId:tier:Name}} markers
    * that MessageBubble renders as clickable deploy buttons.
@@ -54218,6 +54298,12 @@ Want me to customize it with your actual links, change the color scheme, add ani
     // Test mode: never touch the network. See top-of-file TEST MODE doc block.
     if (this.testMode) return null;
     query = normalizeWebConclusionInput(query) || query.trim();
+    if (shouldSkipWebConclusion(query, {
+      activeMode: this._activeMode,
+      hasActiveSandbox: this._hasActiveSandboxContext,
+    })) {
+      return null;
+    }
     // Builder mode / active sandbox: only block when the prompt looks like a
     // build/edit instruction. Off-topic factual questions ("who are famous
     // runescape youtubers", "what year was X born") should still reach the
@@ -54727,10 +54813,12 @@ Want me to customize it with your actual links, change the color scheme, add ani
       return `You started with: "${priorUserPool[0].content}".`;
     }
 
-    const hasFactualQuestionAfterGreeting = /[?,]/.test(input)
-      || /\b(?:who|what|where|when|why|how|which|whose|whom|can|could|should|would|does|do|did|is|are|was|were|will)\b\s+\w+/i.test(input.replace(/^(hello|hi|hey|yo|sup|hei|hallo|howdy|oyoy|oy+|myyh|fese|ey+|oi|heia|heisann|heihei|yoyo|aye|wassup|whaddup|wazzup|g'?day|good\s+(morning|afternoon|evening))[,!\s.?]*/i, ''));
-    if (!hasFactualQuestionAfterGreeting
-      && /^(hello|hi|hey|yo|sup|hei|hallo|howdy|oyoy|oy+|myyh|fese|ey+|oi|heia|heisann|heihei|yoyo|aye|wassup|whaddup|wazzup|g'?day|good\s+(morning|afternoon|evening))(\s+\w+)?[\s!.?]*$/i.test(input)) {
+    const hasFactualQuestionAfterGreeting = hasSubstantiveQuestionAfterOpener(input);
+    const conversationalContext = {
+      activeMode: this._activeMode,
+      hasActiveSandbox: this._hasActiveSandboxContext,
+    };
+    if (!hasFactualQuestionAfterGreeting && isPureConversationalTurn(input, conversationalContext)) {
       // Detect Norwegian greetings — respond in Norwegian
       const isNorwegianGreeting = /^(hei|heia|heisann|heihei|hallo|oyoy|myyh|fese|oi)(\s+\w+)?[\s!.?]*$/i.test(input);
 

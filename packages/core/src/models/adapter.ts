@@ -255,6 +255,13 @@ export interface TurnRouteCandidate {
   readonly guidance?: string;
   /** Why this handler valued the turn as it did — the reviewable rationale. */
   readonly reason?: string;
+  /**
+   * A shadow candidate is SCORED and shown for comparison but never decides the
+   * turn — it is a Capability-Kernel candidate running alongside the live
+   * handlers so its scoring can be observed on real turns before it is trusted
+   * to route. The live decision is unaffected.
+   */
+  readonly shadow?: boolean;
 }
 
 // ── Model Adapter Interface ──

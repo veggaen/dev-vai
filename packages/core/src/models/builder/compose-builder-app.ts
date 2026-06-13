@@ -86,6 +86,12 @@ export function buildReactViteTsApp(options: {
         lib: ['ES2020', 'DOM', 'DOM.Iterable'],
         module: 'ESNext',
         moduleResolution: 'bundler',
+        // main.tsx imports './App.tsx' with its extension (Vite style); tsc
+        // rejects that without this pair, so `npm run build` (tsc -b && vite
+        // build) fails on our own scaffold. noEmit also stops tsc from
+        // spraying compiled .js next to the sources.
+        allowImportingTsExtensions: true,
+        noEmit: true,
         jsx: 'react-jsx',
         strict: true,
         skipLibCheck: true,

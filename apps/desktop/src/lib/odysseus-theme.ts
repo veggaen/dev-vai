@@ -446,11 +446,13 @@ export function listCustomThemeEntries(): (StoredCustomTheme & { id: string })[]
 export function saveCustomThemeFromPreset(
   basePresetId: string,
   colors: OdysseusCoreColors,
+  label?: string,
 ): string {
   const id = customThemeIdForBase(basePresetId);
+  const existing = loadCustomThemes()[id];
   const entry: StoredCustomTheme = {
     ...pickOdysseusCoreColors(colors),
-    label: customThemeLabelForBase(basePresetId),
+    label: label?.trim() || existing?.label || customThemeLabelForBase(basePresetId),
     basePresetId,
   };
   saveCustomTheme(id, entry);
@@ -459,6 +461,37 @@ export function saveCustomThemeFromPreset(
   }
   applyOdysseusColors(entry);
   return id;
+}
+
+/** Update an existing saved custom theme in place (same storage id). */
+export function updateCustomTheme(
+  customThemeId: string,
+  colors: OdysseusCoreColors,
+  label: string,
+): string {
+  const all = loadCustomThemes();
+  const existing = all[customThemeId];
+  if (!existing) {
+    throw new Error(`Unknown custom theme: ${customThemeId}`);
+  }
+  const entry: StoredCustomTheme = {
+    ...pickOdysseusCoreColors(colors),
+    label: label.trim() || existing.label,
+    basePresetId: existing.basePresetId,
+  };
+  all[customThemeId] = entry;
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(VAI_CUSTOM_THEMES_KEY, JSON.stringify(all));
+    if (getActiveThemeId() === customThemeId) {
+      localStorage.setItem(VAI_ACTIVE_THEME_ID_KEY, customThemeId);
+      applyOdysseusColors(entry);
+    }
+  }
+  return customThemeId;
+}
+
+export function isStoredCustomThemeId(themeId: string): boolean {
+  return themeId in loadCustomThemes();
 }
 
 export function saveCustomTheme(name: string, colors: StoredCustomTheme | OdysseusCoreColors): void {

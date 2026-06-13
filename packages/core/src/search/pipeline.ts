@@ -32,6 +32,7 @@ import {
   isFreshLocalBusinessContactRequest,
   isFreshLocalRecommendationRequest,
 } from '../models/web-conclude-policy.js';
+import { fetchGoogleViaBrowser, isBrowserSearchEnabled } from './browser-search.js';
 
 // ── Query Normalization (Step 1: CLARIFY) ──
 
@@ -65,6 +66,8 @@ const ENTITY_STOP_WORDS = new Set([
   'same', 'so', 'than', 'too', 'very', 'just', 'about', 'and', 'but',
   'or', 'if', 'what', 'which', 'who', 'whom', 'this', 'that', 'these',
   'those', 'i', 'me', 'my', 'it', 'its', 'we', 'they', 'search', 'find',
+  'he', 'she', 'him', 'her', 'his', 'hers', 'them', 'their', 'theirs', 'you',
+  'your', 'yours', 'us', 'our', 'ours', 'info', 'information', 'details',
   'look', 'up', 'tell', 'give', 'show', 'get', 'know', 'please', 'explain',
   'describe', 'explained', 'simple', 'words', 'simply', 'include', 'sources',
   'source', 'citation', 'citations', 'references', 'reference', 'cause', 'causes',
@@ -1412,6 +1415,113 @@ async function fetchSearXNG(query: string, baseUrl: string, timeoutMs: number): 
   return results;
 }
 
+// Browser-style UA for HTML scrape endpoints (DDG-lite 403-blocks anything
+// that self-identifies as a bot).
+const BROWSER_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
+function stripHtmlTags(value: string): string {
+  return value
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Bing result hrefs are redirect links (`bing.com/ck/a?...&u=a1<base64url>`);
+ * the real destination is base64url-encoded in the `u` param after an "a1"
+ * version prefix. Returns null when no destination can be recovered.
+ */
+function decodeBingRedirectUrl(href: string): string | null {
+  const unescaped = href.replace(/&amp;/g, '&');
+  if (!/bing\.com\/ck\/a/i.test(unescaped)) {
+    return /bing\.com|microsoft\.com\/(?:en-us\/)?bing/i.test(unescaped) ? null : unescaped;
+  }
+  const m = /[?&]u=a1([A-Za-z0-9+/_=-]+)/.exec(unescaped);
+  if (!m) return null;
+  try {
+    const b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const decoded = Buffer.from(padded, 'base64').toString('utf8');
+    return /^https?:\/\/\S+$/i.test(decoded) ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Bing HTML search — keyless general-web provider. The keyless DDG chain
+ * (Instant Answer + Wikipedia + Reddit) only covers famous entities; Bing is
+ * a true web index that also surfaces directory/profile pages for ordinary
+ * people and niche businesses. DDG-lite bot-blocks Node's TLS fingerprint
+ * (returns a 202 challenge page), while Bing serves plain HTML.
+ */
+async function fetchBingHtml(query: string, timeoutMs: number): Promise<RawSearchResult[]> {
+  const results: RawSearchResult[] = [];
+  try {
+    const res = await fetch(`https://www.bing.com/search?q=${encodeURIComponent(query)}&count=10`, {
+      headers: {
+        'User-Agent': BROWSER_USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return results;
+    const html = await res.text();
+
+    const blocks = html.split(/<li class="b_algo"/i).slice(1);
+    for (const block of blocks.slice(0, 8)) {
+      const titleMatch = /<h2[^>]*>\s*<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+      if (!titleMatch) continue;
+      const url = decodeBingRedirectUrl(titleMatch[1]);
+      if (!url) continue;
+      const title = stripHtmlTags(titleMatch[2]);
+
+      const snippetMatch =
+        /<p[^>]*class="[^"]*b_lineclamp[^"]*"[^>]*>([\s\S]*?)<\/p>/i.exec(block)
+        ?? /<div class="b_caption"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i.exec(block)
+        ?? /<p[^>]*>([\s\S]*?)<\/p>/i.exec(block);
+      const snippet = snippetMatch ? stripHtmlTags(snippetMatch[1]) : '';
+      if (!title || snippet.length < 20) continue;
+      results.push({ title, snippet, url });
+    }
+  } catch { /* continue to next provider */ }
+  return results;
+}
+
+/** Mojeek HTML search — independent keyless index, backup when Bing is thin. */
+async function fetchMojeekHtml(query: string, timeoutMs: number): Promise<RawSearchResult[]> {
+  const results: RawSearchResult[] = [];
+  try {
+    const res = await fetch(`https://www.mojeek.com/search?q=${encodeURIComponent(query)}`, {
+      headers: {
+        'User-Agent': BROWSER_USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return results;
+    const html = await res.text();
+
+    const re = /<h2><a class="title"[^>]*href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a><\/h2>\s*<p class="s">([\s\S]*?)<\/p>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null && results.length < 8) {
+      const title = stripHtmlTags(m[2]);
+      const snippet = stripHtmlTags(m[3]);
+      if (!title || snippet.length < 20) continue;
+      results.push({ title, snippet, url: m[1] });
+    }
+  } catch { /* continue */ }
+  return results;
+}
+
 // Module-level reddit rate-limit cooldown. When reddit returns 429 we back
 // off site-wide for 60s so we stop burning per-request timeout budget.
 let redditCooldownUntil = 0;
@@ -1831,12 +1941,20 @@ async function fetchDuckDuckGo(query: string, timeoutMs: number): Promise<RawSea
     } catch { /* continue */ }
   }
 
-  // 3. DDG lite HTML scrape — last resort, more stable than full DDG HTML
-  if (results.length < 2) {
+  // 3. DDG lite HTML scrape — the only real general-web provider in the
+  // keyless chain (Instant Answer + Wikipedia only cover famous entities).
+  // DDG 403-blocks bot-style user agents, so this request must present a
+  // plain browser UA. Run whenever results are thin — for person/entity
+  // lookups the earlier providers usually return nothing.
+  if (results.length < 3) {
     try {
       const liteUrl = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
       const res = await fetch(liteUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; VeggaAI/1.0)' },
+        headers: {
+          'User-Agent': BROWSER_USER_AGENT,
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (res.ok) {
@@ -1887,14 +2005,36 @@ async function fetchProviderChain(query: string, config: SearchPipelineConfig, p
   if (config.braveApiKey) {
     providers.push(() => fetchBrave(query, config.braveApiKey as string, config.fetchTimeoutMs));
   }
+  // Real-browser Google first: drives the installed Chrome/Edge/Opera
+  // headlessly, so Vai sees the same organic results the user would —
+  // the only keyless route that reliably answers person / local / fresh
+  // queries. Skipped automatically when no browser is installed or Google
+  // has us in a CAPTCHA cooldown; the HTTP chain below is the fallback.
+  if (isBrowserSearchEnabled()) {
+    providers.push(() => fetchGoogleViaBrowser(query, config.fetchTimeoutMs));
+  }
+  // Bing next in the keyless chain: a real web index that covers ordinary
+  // people, local businesses, and niche topics the DDG instant-answer /
+  // Wikipedia chain cannot. DDG keeps fast instant answers for famous
+  // entities; Mojeek is the independent backup index.
+  providers.push(() => fetchBingHtml(query, config.fetchTimeoutMs));
   providers.push(() => fetchDuckDuckGo(query, config.fetchTimeoutMs));
+  providers.push(() => fetchMojeekHtml(query, config.fetchTimeoutMs));
 
   const merged: RawSearchResult[] = [];
   const seen = new Set<string>();
   const minUsefulResults = Math.max(3, config.resultsPerQuery);
 
   for (const provider of providers) {
-    const batch = await provider().catch(() => [] as RawSearchResult[]);
+    const batch = await provider().catch((error) => {
+      if (process.env.VAI_SEARCH_DEBUG) {
+        console.error(`[search-debug] provider failed for "${query}": ${(error as Error).message}`);
+      }
+      return [] as RawSearchResult[];
+    });
+    if (process.env.VAI_SEARCH_DEBUG) {
+      console.error(`[search-debug] provider #${providers.indexOf(provider)} for "${query}": ${batch.length} results`);
+    }
     for (const result of batch) {
       const dedupeKey = `${result.url}::${result.title}`.toLowerCase();
       if (seen.has(dedupeKey)) continue;
@@ -2684,6 +2824,7 @@ type RelevanceShape =
   | 'temporal'
   | 'causal'
   | 'definition'
+  | 'person'
   | 'how-to'
   | 'generic';
 
@@ -2719,7 +2860,8 @@ function inferRelevanceShape(query: string, plan: VaiSearchPlan): RelevanceShape
   if (/\b(?:bigger|larger|smaller|higher|lower|more\s+than|less\s+than|vs\.?|versus|compare|compared|difference\s+between)\b/.test(q) || plan.intent === 'comparison') return 'comparison';
   if (/\b(?:when|what\s+(?:year|date)|latest|current|release(?:d)?|version|today|now|202[4-9])\b/.test(q) || plan.intent === 'temporal' || plan.intent === 'current') return 'temporal';
   if (/\b(?:causes?|caused\s+by|what\s+(?:caused|led\s+to|triggered|drove)|reasons?\s+for|why\s+(?:did|does|is|are|was|were))\b/.test(q)) return 'causal';
-  if (/^(?:what(?:'s|\s+is|\s+are)|who(?:\s+is|\s+are)|define|explain|describe|hva\s+er|forklar|beskriv)\b/i.test(q) || plan.intent === 'definition' || plan.intent === 'person') return 'definition';
+  if (/^who\s+(?:is|was|are|were)\b/i.test(q) || /\bhvem\s+er\b/i.test(q) || plan.intent === 'person') return 'person';
+  if (/^(?:what(?:'s|\s+is|\s+are)|who(?:\s+is|\s+are)|define|explain|describe|hva\s+er|forklar|beskriv)\b/i.test(q) || plan.intent === 'definition') return 'definition';
   if (/\bhow\s+(?:to|do|can|does)\b/i.test(q) || plan.intent === 'how-to' || plan.intent === 'troubleshoot') return 'how-to';
   return 'generic';
 }
@@ -2740,6 +2882,13 @@ function answerShapeMatches(shape: RelevanceShape, combined: string): boolean {
       return /\b(?:because(?:\s+of)?|caused?\s+by|causes?\s+(?:include|included|are|were)|due\s+to|led\s+to|result(?:ed|s)?\s+from|driven\s+by|triggered\s+by|contributed\s+to|root\s+causes?|reasons?\s+(?:include|included|are|were|for)|factors?\s+(?:include|included|are|were|behind|contributed))\b/i.test(combined);
     case 'definition':
       return /\b(?:is|are|was|were|refers\s+to|means|describes|known\s+as|defined\s+as|type\s+of|kind\s+of|creator|founded|born)\b/i.test(combined);
+    case 'person':
+      // Person lookups are answered by biography text OR directory/profile
+      // listings (often non-English) — registry entries, contact pages,
+      // LinkedIn-style profiles. Norwegian markers cover the local registries
+      // (proff.no, 1881.no, gulesider.no) that dominate results for
+      // Norwegian individuals.
+      return /\b(?:born|age(?:d)?\s+\d|biography|bio|profile|works?\s+(?:at|as|for)|career|founder|co-?founder|ceo|director|manager|chairman|owner|partner|employee|student|professor|author|artist|player|address|phone|contact|email|linkedin|registered|company|companies|roles?|shareholder|board\s+member|f\.\s*\d{4}|født|alder|adresse|telefon(?:nummer)?|kontaktinformasjon|roller|aksjer|registrert|n[æe]ringsliv(?:et)?|daglig\s+leder|styre(?:medlem|leder)?|selskap|person)\b/i.test(combined);
     case 'how-to':
       return /\b(?:step|steps|use|using|install|configure|setup|fix|debug|solve|works?|example|guide|tutorial|command|option)\b/i.test(combined);
     case 'generic':
@@ -2827,6 +2976,12 @@ function topicAnchorVariants(value: string): string[] {
   if (value.length >= 5 && value.endsWith('ies')) variants.add(`${value.slice(0, -3)}y`);
   else if (value.length >= 5 && value.endsWith('s') && !value.endsWith('ss')) variants.add(value.slice(0, -1));
   else if (value.length >= 4) variants.add(`${value}s`);
+  // Single/double final-consonant spelling variants — common in personal and
+  // place names ("bauman" ↔ "baumann", "hansen" ↔ "hanssen").
+  const lower = value.toLowerCase();
+  const doubledTail = /([b-df-hj-np-tv-z])\1$/.exec(lower);
+  if (doubledTail) variants.add(lower.slice(0, -1));
+  else if (lower.length >= 5 && /[b-df-hj-np-tv-z]$/.test(lower)) variants.add(`${lower}${lower.slice(-1)}`);
   return [...variants];
 }
 
@@ -3038,7 +3193,7 @@ export function scoreSnippetRelevanceForQuery(
 
   const topicOk = topicAnchorGateMatches(topicAnchors, topicHits, topicCoverage, shape);
   const shapeOk = shape === 'generic' || shapeMatched || packageSupportSource;
-  const threshold = shape === 'definition' || shape === 'generic' ? 0.38 : 0.5;
+  const threshold = shape === 'definition' || shape === 'person' || shape === 'generic' ? 0.38 : 0.5;
   const matched = packageSupportSource || (topicOk && shapeOk && score >= threshold);
 
   return {

@@ -3,6 +3,7 @@ Temporary_files/
 artifacts/
 ztemp_mds/
 MDS/
+.pnpm-store/
 test-screenshots/
 screenshots/
 scripts/screenshots/
@@ -40,7 +41,22 @@ _*.json
 _*_debug.mjs
 test-out.txt
 test-result.txt
+.grok-*
+.vai-*
+/.debug-*
+*.err
+*.tmp
 .codex-run/
+
+# Root-level visual and launcher experiments
+/_veggat-collab-review.md
+/dual-goal-*.html
+/hex-fun-launcher.html
+/launcher-*.html
+/veggat-review-visual.html
+/launch_vite.bat
+/readthis.txt
+/temp-drive-*.mjs
 
 # Scratch probes / one-off scripts
 scripts/_*.mjs
@@ -80,6 +96,7 @@ packages/*/dist/
 packages/runtime/*.db
 packages/runtime/*.db-shm
 packages/runtime/*.db-wal
+packages/runtime/.vai-runtime.lock
 vai.db
 vai.db-shm
 vai.db-wal

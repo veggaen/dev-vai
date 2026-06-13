@@ -139,6 +139,66 @@ export function detectAnswerTopicMismatch(prompt: string | undefined, response: 
   return !subjects.some((subject) => responseLower.includes(subject));
 }
 
+export interface GroundedFallbackInput {
+  /** Did this turn retrieve real external web evidence (prefetched sources)? */
+  readonly hadWebEvidence: boolean;
+  /** Is a capable non-vai:v0 fallback model registered + reachable? */
+  readonly hasFallbackModel: boolean;
+  /** Friend-review already swapped in a guardrail reply. */
+  readonly reviewReplacedPrimary?: boolean;
+  /** Builder turn whose primary output already satisfies the request. */
+  readonly builderSatisfies?: boolean;
+  /** Builder turn that produced file artifacts. */
+  readonly builderFiles?: boolean;
+  /** Master switch (env-driven); defaults to enabled. */
+  readonly enabled?: boolean;
+}
+
+/**
+ * Prefer the capable grounded fallback model when this turn retrieved real web
+ * evidence. The `vai:v0` corpus/keyword arm does not consume injected web
+ * sources — it answers from its primer store, which is the documented cause of
+ * confident-but-off-topic replies (see docs/substrate-memo.md). When we DID
+ * find sources, the grounded model should write the answer so it actually uses
+ * them. Builder/review paths are excluded (they carry their own contracts).
+ */
+export function shouldPreferGroundedFallback(input: GroundedFallbackInput): boolean {
+  if (input.enabled === false) return false;
+  if (!input.hadWebEvidence || !input.hasFallbackModel) return false;
+  if (input.reviewReplacedPrimary || input.builderSatisfies || input.builderFiles) return false;
+  return true;
+}
+
+export interface PrimaryGenerativeFlipInput {
+  /** Classified turn kind for this user turn (see ChatTurnKind). */
+  readonly turnKind: string;
+  /** Conversation mode, when available. */
+  readonly mode?: string;
+  /** Is a capable non-vai:v0 generative model registered + reachable? */
+  readonly hasFallbackModel: boolean;
+  /** Master switch (env-driven); defaults to enabled. */
+  readonly enabled?: boolean;
+}
+
+/**
+ * Primary-generator flip (substrate-memo §"retire, don't deepen"): substantive
+ * turns (analysis / research) go straight to the capable generative model
+ * instead of running the vai:v0 corpus arm first and escalating on decline.
+ * The deterministic dispatch upstream still wins outright for curated facts,
+ * greetings, idioms, and safety turns — this only changes which arm writes the
+ * answer once a turn has already reached the model path. Builder/agent modes
+ * keep the vai:v0-first contract (file-artifact emission has its own gates),
+ * and conversational turns stay on the fast deterministic path.
+ * Reversible via VAI_PRIMARY_GENERATIVE=0.
+ */
+export function shouldFlipPrimaryToGenerative(input: PrimaryGenerativeFlipInput): boolean {
+  if (input.enabled === false) return false;
+  if (!input.hasFallbackModel) return false;
+  const mode = input.mode?.toLowerCase();
+  if (mode === 'builder' || mode === 'agent') return false;
+  return input.turnKind === 'analysis' || input.turnKind === 'research';
+}
+
 export interface VaiFallbackDecisionInput {
   /** Full assistant text that vai:v0 produced (after stream completes). */
   readonly text: string;

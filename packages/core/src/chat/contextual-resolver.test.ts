@@ -10,6 +10,9 @@ import {
   rewriteBusinessContactLookupFollowUp,
   isEpisodicOrPersonalInput,
   inferBoldTopic,
+  inferPersonFromPriorTurn,
+  inferActiveTopic,
+  resolveContextualFollowUp,
   cleanTopic,
 } from './contextual-resolver.js';
 
@@ -67,6 +70,16 @@ describe('rewritePronounFollowUp', () => {
   it('tolerates non-string input without throwing', () => {
     expect(rewritePronounFollowUp(null as unknown as string, 'Oslo')).toBeNull();
     expect(rewritePronounFollowUp(123 as unknown as string, 'Oslo')).toBeNull();
+  });
+
+  it('resolves possessive profile-link follow-ups into a searchable entity query', () => {
+    expect(rewritePronounFollowUp('got a link to his profiles if any public?', 'Kristian Salte'))
+      .toBe('Kristian Salte public profile links social media');
+  });
+
+  it('resolves bare possessive references to the active topic', () => {
+    expect(rewritePronounFollowUp('what is his job?', 'Kristian Salte'))
+      .toBe('what is Kristian Salte job?');
   });
 });
 
@@ -169,5 +182,33 @@ describe('inferBoldTopic / cleanTopic', () => {
   });
   it('cleans parentheticals and markdown', () => {
     expect(cleanTopic('**VPN (Virtual Private Network)**')).toBe('VPN');
+  });
+});
+
+describe('inferPersonFromPriorTurn / resolveContextualFollowUp', () => {
+  const kristianHistory: Message[] = [
+    turn('user', 'Who is kristian salte'),
+    turn('assistant', 'Kristian Salte is a Norwegian entrepreneur known for work in tech.'),
+    turn('user', 'got a link to his profiles if any public?'),
+  ];
+
+  it('infers a person entity from the prior who-is question', () => {
+    expect(inferPersonFromPriorTurn(kristianHistory)).toBe('kristian salte');
+  });
+
+  it('rewrites possessive profile follow-ups using conversation history', () => {
+    expect(resolveContextualFollowUp('got a link to his profiles if any public?', kristianHistory))
+      .toBe('kristian salte public profile links social media');
+  });
+
+  it('prefers a bold entity from the last assistant answer when present', () => {
+    const history = [
+      turn('user', 'Who is kristian salte'),
+      turn('assistant', '**Kristian Salte** is a Norwegian entrepreneur.'),
+      turn('user', 'got a link to his profiles if any public?'),
+    ];
+    expect(inferActiveTopic(history)).toBe('Kristian Salte');
+    expect(resolveContextualFollowUp('got a link to his profiles if any public?', history))
+      .toBe('Kristian Salte public profile links social media');
   });
 });

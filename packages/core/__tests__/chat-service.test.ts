@@ -179,6 +179,9 @@ describe('ChatService', () => {
     registry.register(fallback);
     const svc = new ChatService(createDb(':memory:'), registry, {
       vaiFallbackChain: ['mock:test'],
+      // Legacy vai-first arm: this exercises the *primary-arm* friend-review
+      // guardrail, which only runs when the corpus arm writes the draft.
+      primaryGenerativeFlip: false,
       responseReviewers: [{
         id: 'local:qwen2.5:7b',
         review: async () => ({
@@ -244,6 +247,9 @@ describe('ChatService', () => {
     registry.register(fallback);
     const svc = new ChatService(createDb(':memory:'), registry, {
       vaiFallbackChain: ['mock:test'],
+      // Legacy vai-first arm: cited-answer retention only applies when the
+      // corpus arm actually ran and produced the cited draft.
+      primaryGenerativeFlip: false,
     });
     const convId = svc.createConversation('vai:v0');
     const chunks: ChatChunk[] = [];
@@ -299,6 +305,8 @@ describe('ChatService', () => {
     registry.register(fallback);
     const svc = new ChatService(createDb(':memory:'), registry, {
       vaiFallbackChain: ['mock:test'],
+      // Legacy vai-first arm (see cited-answer retention test above).
+      primaryGenerativeFlip: false,
     });
     const convId = svc.createConversation('vai:v0');
 
@@ -526,6 +534,9 @@ describe('ChatService', () => {
     registry.register(externalAdapter);
     const svc = new ChatService(createDb(':memory:'), registry, {
       vaiFallbackChain: ['vai:v0', 'mock:test'],
+      // Legacy vai-first arm: low-confidence escalation requires the corpus
+      // arm to have produced the weak draft first.
+      primaryGenerativeFlip: false,
     });
     const convId = svc.createConversation('vai:v0');
 
@@ -689,6 +700,9 @@ describe('ChatService', () => {
     registry.register(externalAdapter);
     const svc = new ChatService(createDb(':memory:'), registry, {
       vaiFallbackChain: ['vai:v0', 'mock:test'],
+      // Legacy vai-first arm: high-confidence pass-through only exists when
+      // the corpus arm answers first.
+      primaryGenerativeFlip: false,
     });
     const convId = svc.createConversation('vai:v0');
 
@@ -712,6 +726,73 @@ describe('ChatService', () => {
     expect(persisted[1].modelId).toBe('vai:v0');
   });
 
+  it('primary flip sends substantive turns straight to the capable model without running vai:v0', async () => {
+    const registry = new ModelRegistry();
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      { type: 'text_delta', textDelta: 'Corpus-arm answer that must never run' },
+      { type: 'done', usage: { promptTokens: 2, completionTokens: 2 }, modelId: 'vai:v0' },
+    ]);
+    const externalAdapter = new StubStreamAdapter('mock:test', [
+      {
+        type: 'text_delta',
+        textDelta: 'Start with the browser console. Fix the first red error, then reload and verify the React root mounts.',
+      },
+      { type: 'done', usage: { promptTokens: 4, completionTokens: 8 }, modelId: 'mock:test' },
+    ]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['vai:v0', 'mock:test'],
+      primaryGenerativeFlip: true,
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(
+      convId,
+      'I am overwhelmed debugging a blank React page. Where should I start?',
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(vaiAdapter.streamCalls).toBe(0);
+    expect(externalAdapter.streamCalls).toBe(1);
+    expect(chunks.some((chunk) => chunk.type === 'fallback_notice')).toBe(true);
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => chunk.textDelta)
+      .join('');
+    expect(text).toMatch(/Start with the browser console/i);
+    expect(svc.getMessages(convId)[1].modelId).toBe('mock:test');
+  });
+
+  it('primary flip leaves conversational turns off the generative arm', async () => {
+    const registry = new ModelRegistry();
+    const vaiAdapter = new StubStreamAdapter('vai:v0', [
+      { type: 'text_delta', textDelta: 'Hey! What are we building today?' },
+      { type: 'done', usage: { promptTokens: 1, completionTokens: 4 }, modelId: 'vai:v0' },
+    ]);
+    const externalAdapter = new StubStreamAdapter('mock:test', [
+      { type: 'text_delta', textDelta: 'Generative small talk that should not be needed' },
+      { type: 'done', usage: { promptTokens: 1, completionTokens: 1 }, modelId: 'mock:test' },
+    ]);
+    registry.register(vaiAdapter);
+    registry.register(externalAdapter);
+    const svc = new ChatService(createDb(':memory:'), registry, {
+      vaiFallbackChain: ['vai:v0', 'mock:test'],
+      primaryGenerativeFlip: true,
+    });
+    const convId = svc.createConversation('vai:v0');
+
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of svc.sendMessage(convId, 'hey!')) {
+      chunks.push(chunk);
+    }
+
+    expect(externalAdapter.streamCalls).toBe(0);
+    expect(chunks.some((chunk) => chunk.type === 'fallback_notice')).toBe(false);
+  });
+
   it('falls back from high-confidence but non-actionable vai:v0 answers on action prompts', async () => {
     const registry = new ModelRegistry();
     const vaiAdapter = new StubStreamAdapter('vai:v0', [
@@ -727,6 +808,9 @@ describe('ChatService', () => {
     registry.register(externalAdapter);
     const svc = new ChatService(createDb(':memory:'), registry, {
       vaiFallbackChain: ['mock:test'],
+      // Legacy vai-first arm: the non-actionable-answer quality gate needs the
+      // corpus arm to produce the vague draft first.
+      primaryGenerativeFlip: false,
     });
     const convId = svc.createConversation('vai:v0');
 
@@ -764,6 +848,9 @@ describe('ChatService', () => {
     registry.register(externalAdapter);
     const svc = new ChatService(createDb(':memory:'), registry, {
       vaiFallbackChain: ['mock:test'],
+      // Legacy vai-first arm: the restated-request quality gate needs the
+      // corpus arm to produce the unhelpful draft first.
+      primaryGenerativeFlip: false,
     });
     const convId = svc.createConversation('vai:v0');
 

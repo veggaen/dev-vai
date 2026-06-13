@@ -128,12 +128,21 @@ if (typeof window !== 'undefined') {
       if (state.projectId) {
         useSandboxStore.setState({ logs: [...state.logs, line].slice(-MAX_CLIENT_LOG_ENTRIES) });
       }
+      return;
+    }
+    if (event.data?.type === 'vai-sandbox-action' && event.data.action === 'prefill-chat') {
+      const prompt = typeof event.data.prompt === 'string' ? event.data.prompt.trim() : '';
+      if (!prompt) return;
+      window.dispatchEvent(new CustomEvent('vai:prefill-chat', { detail: { prompt } }));
     }
   });
 }
 
 // Module-level AbortController for deploy cancellation
 let deployAbortController: AbortController | null = null;
+
+/** Monotonic token so only the most recent attachProject call wins. */
+let attachProjectToken = 0;
 
 export const useSandboxStore = create<SandboxState>((set, get) => ({
   projectId: null,
@@ -363,6 +372,9 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
   },
 
   attachProject: async (sandboxProjectId: string) => {
+    // Last attach wins: when two attaches race (fast conversation switches),
+    // a stale response must never overwrite the newer project binding.
+    const token = ++attachProjectToken;
     set((state) => ({
       ...state,
       buildActivity: [],
@@ -370,6 +382,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
     }));
     useLayoutStore.getState().setBuildStatus({ step: 'idle' });
     const res = await apiFetch(`/api/sandbox/${sandboxProjectId}`);
+    if (token !== attachProjectToken) return;
     if (!res.ok) {
       const message = res.status === 404
         ? 'Sandbox project no longer exists'
@@ -390,6 +403,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       logs: string[];
       persistentProjectId: string | null;
     };
+    if (token !== attachProjectToken) return;
 
     set({
       projectId: data.id,
@@ -407,7 +421,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
     });
     // Auto-restart dev server if node_modules exist but server isn't running
     // (happens after runtime restarts — deps are already installed, just need to start)
-    if (data.hasNodeModules && !data.devPort && data.status !== 'building') {
+    if (data.hasNodeModules && !data.devPort && data.status !== 'building' && token === attachProjectToken) {
       useLayoutStore.getState().setBuildStatus({ step: 'building', message: 'Restarting dev server...' });
       await get().startDev();
     }

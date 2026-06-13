@@ -1,11 +1,14 @@
 import { isProductEngineeringPlanningPrompt } from '@vai/core/browser';
 
 const AUTH_SIGNALS = /\b(?:auth(?:entication)?|login|sign[\s-]?in|sign[\s-]?up|session|middleware|protected|account|user)\b/i;
-const VISUAL_SIGNALS = /\b(?:spacing|typography|font|hero|headline|heading|cta|theme|color|palette|button|layout|landing|page|ui|visual|style|polish|refine|motions?|animations?|animate|kinetic|transitions?|entrance|reveal|body)\b/i;
+const VISUAL_SIGNALS = /\b(?:spacing|typography|font|hero|headline|heading|cta|theme|color|palette|button|layout|landing|page|ui|visual|style|polish|refine|motions?|animations?|animate|kinetic|transitions?|entrance|reveal|body|background|backdrop|gradient|fanc(?:y|ier)|prett(?:y|ier)|nicer|looks?|design|appearance)\b/i;
 const FILE_REFERENCE_SIGNALS = /(?:\b[\w./-]+\.(?:tsx|ts|jsx|js|css|scss|sass|json|html|md|py|sh|yml|yaml|toml|sql)\b|`[^`]+\.(?:tsx|ts|jsx|js|css|scss|sass|json|html|md|py|sh|yml|yaml|toml|sql)`)/i;
 const PROJECT_REFERENCE_SIGNALS = /\b(?:this|current|existing|attached|same|active)\s+(?:app|project|preview|page|screen|component|repo|codebase|site|workspace)\b/i;
-const PROJECT_ACTION_SIGNALS = /\b(?:fix|debug|repair|edit|change|update|improve|polish|refactor|restyle|wire|implement|connect|adjust|tweak|add|include|insert|ship|deploy|build|create|scaffold)\b/i;
-const PROJECT_TARGET_SIGNALS = /\b(?:app|project|preview|page|screen|component|route|layout|file|files|code|codebase|repo|ui|ux|style|styles|css|hero|headline|heading|body|motions?|animations?|transitions?|entrance|reveal|auth|login|session|api|server|client|bug|error|issue|preview)\b/i;
+const PROJECT_ACTION_SIGNALS = /\b(?:fix|debug|repair|edit|change|update|improve|polish|refactor|restyle|redesign|make|wire|implement|connect|adjust|tweak|tune|add|include|insert|ship|deploy|build|create|scaffold)\b/i;
+// "make my background more fancy" is an edit of the running app — background/
+// design/look words must attach project context (live failure: it didn't, so
+// the turn fresh-built a new "Fancy Background App" instead of restyling).
+const PROJECT_TARGET_SIGNALS = /\b(?:app|project|preview|page|screen|component|route|layout|file|files|code|codebase|repo|ui|ux|style|styles|styling|css|hero|headline|heading|body|background|backdrop|gradient|design|look|looks|appearance|font|fonts|colors?|theme|motions?|animations?|transitions?|entrance|reveal|auth|login|session|api|server|client|bug|error|issue|preview)\b/i;
 const SANDBOX_REFERENCE_SIGNALS = /\b(?:sandbox|dev\s+server|localhost:\d+|running\s+app|live\s+preview|preview\s+server)\b/i;
 
 const HIGH_PRIORITY_PATTERNS: Array<{ pattern: RegExp; weight: number }> = [

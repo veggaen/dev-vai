@@ -4,7 +4,7 @@
  */
 
 import type { ReactNode, SelectHTMLAttributes } from 'react';
-import { Settings2 } from 'lucide-react';
+import { Pencil, Settings2 } from 'lucide-react';
 import {
   isThemeCardActive,
   ODYSSEUS_THEME_PRESETS,
@@ -111,9 +111,9 @@ export function SettingsShell({
             key={item.id}
             type="button"
             onClick={() => onTabChange(item.id)}
-            className={`settings-nav-item flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[13px] font-medium transition-colors ${
+            className={`settings-nav-item flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[13px] font-medium ${
               activeTab === item.id
-                ? 'bg-[color:var(--accent-soft)] text-[color:var(--fg)]'
+                ? 'is-active text-[color:var(--fg)]'
                 : 'text-[color:var(--color-muted)] hover:bg-[color:var(--panel)] hover:text-[color:var(--fg)]'
             }`}
           >
@@ -267,19 +267,17 @@ export function ThemePresetGrid({
     isCustom = false,
   ) => {
     const cardId = preset.id;
-    const isEditing = !isCustom && editingPresetId === basePresetId;
+    const isEditing = isCustom
+      ? editingPresetId === cardId
+      : editingPresetId === basePresetId;
     const selected = isThemeCardActive(activeId, cardId);
 
     return (
     <div
       key={preset.id}
-      className={`group relative rounded-xl border transition-colors ${
-        isEditing ? 'col-span-full border-[color:var(--accent)] bg-[color:var(--accent-soft)] p-4' : 'p-3'
-      } ${
-        selected && !isEditing
-          ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)] ring-1 ring-[color:var(--accent)]'
-          : 'border-[color:var(--border)] bg-[color:var(--panel)] hover:border-[color:var(--accent)]'
-      }`}
+      className={`vai-selection-surface group relative rounded-xl ${
+        isEditing ? 'is-editing col-span-full p-4' : 'p-3'
+      } ${selected && !isEditing ? 'is-selected' : ''}`}
     >
       <div className="flex items-start gap-2">
         <button
@@ -302,26 +300,31 @@ export function ThemePresetGrid({
           </div>
         </button>
 
-        {!isCustom && (
-          <button
-            type="button"
-            onClick={() => (isEditing ? onEndEdit() : onStartEdit(basePresetId))}
-            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-all ${
-              isEditing
-                ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--fg)]'
-                : 'border-[color:var(--border)] bg-[color:var(--panel)] text-[color:var(--color-muted)] opacity-0 hover:border-[color:var(--accent)] hover:text-[color:var(--fg)] group-hover:opacity-100 focus:opacity-100'
-            }`}
-            title={isEditing ? 'Close color editor' : `Customize ${ODYSSEUS_THEME_PRESETS[basePresetId]?.label ?? basePresetId}`}
-            aria-label={isEditing ? 'Close color editor' : `Customize ${preset.label}`}
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => (isEditing ? onEndEdit() : onStartEdit(isCustom ? cardId : basePresetId))}
+          className={`vai-selection-control flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+            isEditing
+              ? 'is-active text-[color:var(--fg)]'
+              : 'text-[color:var(--color-muted)] opacity-0 hover:text-[color:var(--fg)] group-hover:opacity-100 focus:opacity-100'
+          }`}
+          title={
+            isEditing
+              ? 'Close editor'
+              : isCustom
+                ? `Edit ${preset.label}`
+                : `Customize ${ODYSSEUS_THEME_PRESETS[basePresetId]?.label ?? basePresetId}`
+          }
+          aria-label={isEditing ? 'Close editor' : isCustom ? `Edit ${preset.label}` : `Customize ${preset.label}`}
+        >
+          {isCustom ? <Pencil className="h-3.5 w-3.5" /> : <Settings2 className="h-3.5 w-3.5" />}
+        </button>
       </div>
 
       {isEditing && (
         <ThemeColorEditor
-          basePresetId={basePresetId}
+          basePresetId={isCustom ? undefined : basePresetId}
+          customThemeId={isCustom ? cardId : undefined}
           onSaved={(themeId) => {
             onThemeSaved(themeId);
             onEndEdit();

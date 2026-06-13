@@ -13,6 +13,21 @@ import {
 } from '@vai/api-types/conversations';
 import { invalidRequestBody } from '../validation/http-validation.js';
 
+/**
+ * Build a unique sandbox project name for a conversation.
+ * One conversation = one project; a shared default name ('builder-app')
+ * made distinct projects indistinguishable in the projects list.
+ */
+function uniqueSandboxName(title: string | undefined | null, conversationId: string): string {
+  const base = (title ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+    || 'builder-app';
+  return `${base}-${conversationId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6)}`;
+}
+
 function getProjectBySandboxId(projects: ProjectService, sandboxProjectId: string) {
   return typeof projects.getProjectBySandboxId === 'function'
     ? projects.getProjectBySandboxId(sandboxProjectId)
@@ -174,8 +189,10 @@ export function registerConversationRoutes(
       if (sandboxProjectId) {
         chatService.updateConversationSandbox(id, sandboxProjectId);
       } else if (resolvedMode === 'builder') {
-        // Auto-create a sandbox project for builder conversations
-        const projectName = title || 'builder-app';
+        // Auto-create a sandbox project for builder conversations.
+        // Name must be unique per conversation — dozens of projects all named
+        // 'builder-app' made the projects list ambiguous (wrong-app opens).
+        const projectName = uniqueSandboxName(title, id);
         const project = await sandbox.create(projectName, ownerUserId);
         syncSandboxProject(projects, project);
         chatService.updateConversationSandbox(id, project.id);
@@ -229,7 +246,7 @@ export function registerConversationRoutes(
 
         // If switching to builder and no sandbox exists, create one
         if (mode === 'builder' && !conversation?.sandboxProjectId) {
-          const project = await sandbox.create(conversation?.title || 'builder-app', userId);
+          const project = await sandbox.create(uniqueSandboxName(conversation?.title, request.params.id), userId);
           syncSandboxProject(projects, project);
           chatService.updateConversationSandbox(request.params.id, project.id);
           conversation = chatService.getConversation(request.params.id);

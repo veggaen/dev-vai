@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import type { ChatProgressStep, CouncilThinkingUI, ResearchTraceUI, ResponseVerificationUI, TurnThinkingUI } from '../../stores/chatStore.js';
 import type { PipelinePhaseUI, TurnEvidenceUI } from './ThinkingPanel.logic.js';
-import { buildAdvisorLessons, buildPipelinePhases, buildThinkingPanelModel, buildReasoningNarrative, humanizeStrategy, formatDuration, summarizeProcessTrace, buildTurnEvidence } from './ThinkingPanel.logic.js';
+import { buildAdvisorLessons, buildPipelinePhases, buildThinkingPanelModel, buildReasoningNarrative, describeAdvisorContribution, humanizeStrategy, formatDuration, summarizeProcessTrace, buildTurnEvidence } from './ThinkingPanel.logic.js';
 import { useChatStore } from '../../stores/chatStore.js';
 
 interface ThinkingPanelProps {
@@ -66,9 +66,15 @@ export function ThinkingPanel({ thinking, researchTrace, verification, respondin
     ?? evidence.filter((e) => e.kind === 'search').reduce((sum, e) => sum + (e.kind === 'search' ? e.results.length : 0), 0);
   const responderName = (fallback?.toModelId ?? respondingModelId ?? 'Vai').replace(/^(?:local|openai|anthropic|google):/, '');
   const advisorModel = evidence.find((e) => e.kind === 'steering' && e.advisor?.modelId);
+  const advisorAlsoAnswered = Boolean(
+    fallback
+    && advisorModel?.kind === 'steering'
+    && advisorModel.advisor?.modelId
+    && advisorModel.advisor.modelId.replace(/^(?:local|openai|anthropic|google):/, '') === responderName,
+  );
   const modelsConsulted = [...new Set([
     'Vai (routing)',
-    ...(advisorModel && advisorModel.kind === 'steering' && advisorModel.advisor
+    ...(advisorModel && advisorModel.kind === 'steering' && advisorModel.advisor && !advisorAlsoAnswered
       ? [`${advisorModel.advisor.modelId.replace(/^(?:local|openai|anthropic|google):/, '')} (advisor)`]
       : []),
     ...(thinking.council ? [`council ×${thinking.council.members.length}`] : []),
@@ -224,7 +230,7 @@ export function ThinkingPanel({ thinking, researchTrace, verification, respondin
             </section>
           )}
 
-          {evidence.length > 0 && <EvidenceLog items={evidence} />}
+          {evidence.length > 0 && <EvidenceLog items={evidence} fallback={fallback} />}
           {plan && plan.candidates.length > 0 && <RoutePlanDetails plan={plan} />}
           {thinking.processTrace && thinking.processTrace.length > 0 && <ProcessTraceExplorer trace={thinking.processTrace} />}
           {researchTrace && <ResearchTraceExplorer trace={researchTrace} />}
@@ -339,7 +345,13 @@ function PipelineFlow({ phases, totalMs }: { phases: readonly PipelinePhaseUI[];
  * command to its output, a note carries the engine's own step narration. This is
  * the panel-side of the Codex-style "see what actually happened" view.
  */
-function EvidenceLog({ items }: { items: readonly TurnEvidenceUI[] }) {
+function EvidenceLog({
+  items,
+  fallback,
+}: {
+  items: readonly TurnEvidenceUI[];
+  fallback?: ThinkingPanelProps['fallback'];
+}) {
   return (
     <section className="thinking-surface-soft rounded-lg p-3.5" data-evidence-log={items.length}>
       <div className="mb-2.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--chat-eyebrow)]">
@@ -349,7 +361,7 @@ function EvidenceLog({ items }: { items: readonly TurnEvidenceUI[] }) {
       </div>
       <ol className="space-y-2">
         {items.map((item, index) => (
-          <EvidenceItem key={index} item={item} />
+          <EvidenceItem key={index} item={item} fallback={fallback} />
         ))}
       </ol>
     </section>
@@ -368,7 +380,13 @@ function advisorQualitySummary(item: Extract<TurnEvidenceUI, { kind: 'steering' 
   ].filter(Boolean);
 }
 
-function EvidenceItem({ item }: { item: TurnEvidenceUI }) {
+function EvidenceItem({
+  item,
+  fallback,
+}: {
+  item: TurnEvidenceUI;
+  fallback?: ThinkingPanelProps['fallback'];
+}) {
   const postSteer = useChatStore((state) => state.postSteer);
   const activeConversationId = useChatStore((state) => state.activeConversationId);
   const [lessonState, setLessonState] = useState<Record<string, 'saving' | 'saved' | 'error'>>({});
@@ -396,6 +414,7 @@ function EvidenceItem({ item }: { item: TurnEvidenceUI }) {
     const advisor = item.advisor;
     const lessons = buildAdvisorLessons(advisor);
     const qualitySummary = advisorQualitySummary(item);
+    const advisorCopy = describeAdvisorContribution(advisor, fallback);
     const hasStructuredAdvice = Boolean(
       advisor?.taskShape
       || qualitySummary.length
@@ -410,11 +429,11 @@ function EvidenceItem({ item }: { item: TurnEvidenceUI }) {
           <Brain aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--accent-text)]" />
           <div className="min-w-0 flex-1">
             <div>
-              <span className="font-medium text-[color:var(--chat-strong)]">Advisor contribution</span>
+              <span className="font-medium text-[color:var(--chat-strong)]">{advisorCopy.title}</span>
               {item.status && <span className="ml-2 text-[9px] uppercase tracking-[0.12em] text-[color:var(--accent-text)]">{item.status}</span>}
             </div>
-            <span className="mt-1 block text-[11px] leading-5 text-zinc-500">
-              Qwen reviewed the route and quality risks. Vai remained responsible for the final answer.
+            <span className="mt-1 block text-[11px] leading-5 text-[color:var(--chat-muted)]">
+              {advisorCopy.detail}
             </span>
             {advisor && (
               <div className="mt-1.5 flex flex-wrap gap-x-2 text-[9px] uppercase tracking-[0.1em] text-zinc-600">
@@ -778,14 +797,16 @@ function RoutePlanDetails({ plan }: { plan: NonNullable<TurnThinkingUI['routePla
           const basePct = candidate.baseScore !== undefined ? clamp(candidate.baseScore) : undefined;
           const moved = basePct !== undefined && basePct !== pct;
           const outcome = candidate.chosen ? 'won' : candidate.declined ? 'declined' : 'not reached';
+          const isShadow = candidate.shadow === true;
           return (
             <li
               key={`${candidate.name}-${index}`}
               className={`px-3 py-2 text-[10px] ${
                 candidate.chosen ? 'bg-emerald-400/[0.055]' : 'thinking-surface-soft'
-              }`}
+              } ${isShadow ? 'opacity-70 border-l-2 border-dashed border-zinc-700' : ''}`}
               data-route-candidate={candidate.name}
               data-chosen={candidate.chosen ? '1' : '0'}
+              data-shadow={isShadow ? '1' : '0'}
             >
               <div
                 className={`flex items-center gap-2 ${
@@ -794,9 +815,17 @@ function RoutePlanDetails({ plan }: { plan: NonNullable<TurnThinkingUI['routePla
               >
                 <span className="w-3 shrink-0 text-center">{candidate.chosen ? '›' : candidate.declined ? '·' : ''}</span>
                 <span className="min-w-0 flex-1 truncate">
-                  {humanizeStrategy(candidate.name)}
+                  {humanizeStrategy(candidate.name.replace(/\s*\(shadow\)$/i, ''))}
                 </span>
-                <span className="shrink-0 text-[9px] text-zinc-600">{candidate.chosen ? 'selected' : outcome}</span>
+                {isShadow && (
+                  <span
+                    className="shrink-0 rounded bg-zinc-700/40 px-1 text-[8px] uppercase tracking-wide text-zinc-400"
+                    title="Capability Kernel candidate — scored for comparison, does not decide this turn yet"
+                  >
+                    shadow
+                  </span>
+                )}
+                <span className="shrink-0 text-[9px] text-zinc-600">{candidate.chosen ? 'selected' : isShadow ? (candidate.declined ? 'would decline' : 'would answer') : outcome}</span>
                 {candidate.guidance && (
                   <span className="shrink-0 text-[9px] text-[color:var(--tone-warn)]" title="Friend guidance steered this candidate">
                     {candidate.guidance}
@@ -808,7 +837,7 @@ function RoutePlanDetails({ plan }: { plan: NonNullable<TurnThinkingUI['routePla
                 >
                   {moved ? `${basePct}→${pct}%` : `${pct}%`}
                 </span>
-                {!candidate.chosen && (
+                {!candidate.chosen && !isShadow && (
                   <span className="ml-1 flex shrink-0 gap-2 text-[9px]">
                     <button
                       onClick={() => handleSteer('avoid', candidate.name)}

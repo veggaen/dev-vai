@@ -1,4 +1,5 @@
 import type { Message } from '../models/adapter.js';
+import { isPureConversationalTurn } from '../models/web-conclude-policy.js';
 
 /**
  * Contextual follow-up resolver.
@@ -17,10 +18,21 @@ import type { Message } from '../models/adapter.js';
 
 const QUESTION_START = /^(?:how|what|which|when|where|why|who|whom|whose|is|are|was|were|does|do|did|can|could|will|would|should|has|have|had|tell|give|explain|and)\b/i;
 
+// Imperative / fragment follow-ups that still refer back ("got a link to his profiles").
+const FOLLOW_UP_FRAGMENT = /^(?:got|any|share|show|give|find|look|link)\b/i;
+const PROFILE_LINK_CUE = /\b(?:profile|profiles|link|links|url|website|social|linkedin|twitter|instagram|facebook)\b/i;
+
 // Place referents → "in <topic>"; thing referents → "<topic>"; "one" → "a <topic>".
 const PLACE_REF = /\bthere\b/i;
 const THING_REF = /\b(?:it|its|it's|that|this|they|them|those|these)\b/i;
 const ONE_REF = /\bone\b/i;
+const POSSESSIVE_REF = /\b(?:his|her|their)\b/i;
+
+const PRIOR_ENTITY_PATTERNS = [
+  /\bwho\s+(?:is|are|was|were)\s+(.+?)\??\s*$/i,
+  /\bwhat\s+(?:do\s+you\s+know\s+about|is)\s+(.+?)\??\s*$/i,
+  /\btell\s+me\s+about\s+(.+?)\??\s*$/i,
+] as const;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -86,7 +98,7 @@ function extractAssistantContactDetails(history: readonly Message[]): AssistantC
 
   for (let i = history.length - 1; i >= 0; i -= 1) {
     const message = history[i];
-    if (message.role !== 'assistant' || !message.content.trim()) continue;
+    if (message.role !== 'assistant' || typeof message.content !== 'string' || !message.content.trim()) continue;
 
     for (const line of message.content.split(/\n+/)) {
       const boldEntity = /\*\*([^*\n]{2,100})\*\*/.exec(line);
@@ -169,7 +181,7 @@ export function rewriteBusinessContactLookupFollowUp(
     || /\b(?:online|web|google)\b[\s\S]{0,35}\b(?:find|look\s+up|search|check|verify)\b/i.test(trimmed);
   if (!explicitOnlineLookup) return null;
 
-  const userMessages = history.filter((message) => message.role === 'user' && message.content.trim());
+  const userMessages = history.filter((message) => message.role === 'user' && typeof message.content === 'string' && message.content.trim());
   let previousUser = '';
   for (let i = userMessages.length - 1; i >= 0; i -= 1) {
     if (normalizeLookupText(userMessages[i].content) === normalizeLookupText(trimmed)) continue;
@@ -215,7 +227,12 @@ export function rewritePronounFollowUp(input: string, topic: string): string | n
 
   const words = trimmed.split(/\s+/);
   if (words.length > 14) return null;                 // long turns are standalone
-  if (!QUESTION_START.test(trimmed)) return null;     // must look like a follow-up question
+  const hasReferential = PLACE_REF.test(trimmed) || THING_REF.test(trimmed) || ONE_REF.test(trimmed) || POSSESSIVE_REF.test(trimmed);
+  const allowsRewrite =
+    QUESTION_START.test(trimmed)
+    || POSSESSIVE_REF.test(trimmed)
+    || (FOLLOW_UP_FRAGMENT.test(trimmed) && PROFILE_LINK_CUE.test(trimmed));
+  if (!allowsRewrite) return null;
   // Imperative build/action requests ("can you make it for me?", "build it now",
   // "do it") use "it" to mean "the thing we're building" — the builder handles
   // those directly, so don't rewrite them into a factual question.
@@ -226,6 +243,15 @@ export function rewritePronounFollowUp(input: string, topic: string): string | n
 
   const topicRe = new RegExp(`\\b${escapeRegex(cleanedTopic)}\\b`, 'i');
   const restHasOtherProperNoun = /\b[A-Z][a-z]{2,}\b/.test(trimmed.replace(/^[A-Z]/, '')); // keep for callers; not used to block
+
+  // Possessive + profile/link follow-ups ("got a link to his profiles?" -> searchable entity query).
+  if (POSSESSIVE_REF.test(trimmed) && (PROFILE_LINK_CUE.test(trimmed) || FOLLOW_UP_FRAGMENT.test(trimmed))) {
+    return `${cleanedTopic} public profile links social media`;
+  }
+  if (POSSESSIVE_REF.test(trimmed)) {
+    return trimmed.replace(/\b(?:his|her|their)\b/gi, cleanedTopic);
+  }
+  if (!QUESTION_START.test(trimmed) && !hasReferential) return null;
 
   // "there" (place) -> "in <topic>"  ("how many people live there?" -> "... in Oslo?")
   if (PLACE_REF.test(trimmed)) {
@@ -361,8 +387,7 @@ export function isEpisodicOrPersonalInput(input: string): boolean {
   if (!t) return true;
   // A genuine interrogative or question mark → it's a real question; learn its answer.
   if (/\b(?:who|what|where|when|why|how|which|whose|whom)\b/.test(t) || /\?/.test(t)) return false;
-  // Greetings / thanks / small-talk openers.
-  if (/^(?:hi|hey|hello|yo|sup|hiya|heya|good\s+(?:morning|afternoon|evening|night)|thanks?|thank\s+you|thx|cheers|cool|nice|great|awesome|ok(?:ay)?|lol|haha|hmm|yeah|yep|nope)\b/.test(t)) return true;
+  if (isPureConversationalTurn(input)) return true;
   // Personal self-description (no question) — name, what they're doing, prefs.
   if (/\b(?:i'?m|i\s+am|my\s+name|call\s+me|i'?m\s+building|i'?m\s+working|i\s+(?:like|love|want|need|prefer|have|own|use|hate|enjoy|live|study|build))\b/.test(t)) return true;
   return false;
@@ -375,4 +400,38 @@ export function inferBoldTopic(history: readonly Message[]): string | null {
   if (!m) return null;
   const t = cleanTopic(m[1]);
   return t.length >= 2 ? t : null;
+}
+
+/** Infer the entity from the most recent prior user turn ("who is Kristian Salte"). */
+export function inferPersonFromPriorTurn(history: readonly Message[]): string | null {
+  let skippedCurrentUser = false;
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const message = history[i];
+    if (message.role !== 'user' || typeof message.content !== 'string' || !message.content.trim()) continue;
+    if (!skippedCurrentUser) {
+      skippedCurrentUser = true;
+      continue;
+    }
+    for (const pattern of PRIOR_ENTITY_PATTERNS) {
+      const hit = message.content.trim().match(pattern);
+      if (hit?.[1]) {
+        const topic = cleanTopic(hit[1]);
+        if (topic.length >= 2) return topic;
+      }
+    }
+    break;
+  }
+  return null;
+}
+
+/** Best-effort active topic: bold entity from the last answer, else prior who-is ask. */
+export function inferActiveTopic(history: readonly Message[]): string | null {
+  return inferBoldTopic(history) ?? inferPersonFromPriorTurn(history);
+}
+
+/** Rewrite a short contextual follow-up using conversation history. */
+export function resolveContextualFollowUp(input: string, history: readonly Message[]): string | null {
+  const topic = inferActiveTopic(history);
+  if (!topic) return null;
+  return rewritePronounFollowUp(input, topic);
 }

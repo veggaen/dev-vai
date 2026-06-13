@@ -69,16 +69,55 @@ function createConfig(): VaiConfig {
 }
 
 describe('registerConfiguredModels', () => {
-  it('registers all known profiles for enabled providers and one local model', () => {
+  it('registers all known profiles for enabled providers and the static local model when discovery is unavailable', async () => {
     const models = new ModelRegistry();
-    const registered = registerConfiguredModels(createConfig(), models);
+    const { registered, rankedLocalIds } = await registerConfiguredModels(createConfig(), models, {
+      discover: async () => null,
+    });
 
     expect(registered).toContain('anthropic:claude-sonnet-4-20250514');
     expect(registered).toContain('openai:gpt-5.4-mini');
     expect(registered).toContain('openai:gpt-5.3-codex');
     expect(registered).toContain('local:llama3.1');
+    expect(rankedLocalIds).toEqual([]);
     expect(models.listByProvider('anthropic')).toHaveLength(3);
     expect(models.listByProvider('openai')).toHaveLength(7);
     expect(models.listByProvider('google')).toHaveLength(0);
+  });
+
+  it('registers every discovered local model ranked best-first with real capabilities', async () => {
+    const models = new ModelRegistry();
+    const { registered, rankedLocalIds } = await registerConfiguredModels(createConfig(), models, {
+      discover: async () => [
+        {
+          name: 'qwen2.5:3b',
+          sizeBytes: 1_900_000_000,
+          parameterB: 3.1,
+          contextWindow: null,
+          thinking: false,
+          toolUse: false,
+          vision: false,
+          embedding: false,
+        },
+        {
+          name: 'qwen3:8b',
+          sizeBytes: 5_200_000_000,
+          parameterB: 8.2,
+          contextWindow: 40960,
+          thinking: true,
+          toolUse: true,
+          vision: false,
+          embedding: false,
+        },
+      ],
+    });
+
+    expect(rankedLocalIds).toEqual(['local:qwen3:8b', 'local:qwen2.5:3b']);
+    expect(registered).toContain('local:qwen3:8b');
+    // configured llama3.1 is not installed → not registered, only a warning
+    expect(registered).not.toContain('local:llama3.1');
+    const qwen3 = models.get('local:qwen3:8b');
+    expect(qwen3.contextWindow).toBe(40960);
+    expect(qwen3.capabilities.extendedThinking).toBe(true);
   });
 });

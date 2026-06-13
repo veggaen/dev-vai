@@ -171,6 +171,21 @@ async function stopServer() {
 }
 
 async function startServer() {
+  // Single-instance policy: the supported launch is `pnpm nuke && pnpm dev`.
+  // If a healthy runtime is already serving, refuse unless explicitly forced.
+  const force = process.argv.includes('--force');
+  if (!force) {
+    try {
+      const res = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(2500) });
+      if (res.ok) {
+        log(`A healthy VAI runtime is already serving port ${PORT} — refusing to replace it.`);
+        log('Use the existing runtime, or the supported launch: pnpm nuke && pnpm dev');
+        log('(Pass --force to deliberately restart it via this manager.)');
+        return false;
+      }
+    } catch { /* not healthy — proceed */ }
+  }
+
   // Stop any existing server first
   await stopServer();
 

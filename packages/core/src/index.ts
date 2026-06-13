@@ -111,6 +111,18 @@ export { isFreshBuildRequestForEmptySandbox, routeBuilderRequest } from './model
 export type { BuilderRequestRoute, BuilderRequestRouteInput, BuilderRequestRouteKind } from './models/builder/builder-request-router.js';
 export { evaluateBuilderPreviewQuality } from './models/builder/preview-quality.js';
 export type { BuilderPreviewQualityInput, BuilderPreviewQualityReport, BuilderPreviewQualityRequirement, BuilderPreviewQualityVerdict } from './models/builder/preview-quality.js';
+export { BRAND_BLUEPRINTS, councilGenerateApp, detectBrandBlueprint, extractAppFiles, validateGeneratedApp } from './models/builder/council-codegen/index.js';
+export type { BrandBlueprint } from './models/builder/council-codegen/index.js';
+export type {
+  AppValidationReport,
+  CodegenReviewNote,
+  CouncilAppSpec,
+  CouncilCodegenEvent,
+  CouncilCodegenInput,
+  CouncilCodegenMember,
+  CouncilCodegenMessage,
+  CouncilCodegenResult,
+} from './models/builder/council-codegen/index.js';
 export type { ConversationMode } from './chat/modes.js';
 export { resolveChatPromptRewriteConfig, rewriteChatPrompt } from './chat/prompt-rewrite.js';
 export type { ChatPromptRewriteResult } from './chat/prompt-rewrite.js';
@@ -219,6 +231,17 @@ export {
   LocalOpenAICompatibleAdapter,
   createAdapterForProfile,
 } from './models/provider-adapters.js';
+
+export {
+  discoverOllamaModels,
+  parseDiscoveredModel,
+  parseParameterSize,
+  extractContextWindow,
+  rankDiscoveredModels,
+  buildDiscoveredModelProfile,
+  resolveEffectiveLocalChain,
+} from './models/ollama-discovery.js';
+export type { DiscoveredOllamaModel, DiscoverOllamaOptions } from './models/ollama-discovery.js';
 
 // Ingestion
 export { IngestPipeline } from './ingest/pipeline.js';

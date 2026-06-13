@@ -83,6 +83,8 @@ export interface TurnRouteCandidateUI {
   guidance?: string;
   /** Why this handler valued the turn as it did — the reviewable rationale. */
   reason?: string;
+  /** A scored-but-non-deciding Capability-Kernel candidate, shown for comparison. */
+  shadow?: boolean;
 }
 
 /** The scored routing decision Vai made — shown so all friends can see and steer it. */
@@ -203,6 +205,35 @@ export interface ChatMessage {
   progressSteps?: ChatProgressStep[];
 }
 
+function parseEvidenceFromMessagePlan(plan: string | null | undefined): Partial<Pick<
+  ChatMessage,
+  'sources' | 'sourcePresentation' | 'researchTrace' | 'followUps' | 'confidence'
+>> {
+  if (!plan) return {};
+  try {
+    const parsed = JSON.parse(plan) as {
+      evidence?: {
+        sources?: SearchSourceUI[];
+        sourcePresentation?: SourcePresentationUI;
+        researchTrace?: ResearchTraceUI;
+        followUps?: string[];
+        confidence?: number;
+      };
+    };
+    const evidence = parsed.evidence;
+    if (!evidence?.sources?.length) return {};
+    return {
+      sources: evidence.sources,
+      sourcePresentation: evidence.sourcePresentation,
+      researchTrace: evidence.researchTrace,
+      followUps: evidence.followUps,
+      confidence: evidence.confidence,
+    };
+  } catch {
+    return {};
+  }
+}
+
 /** Server list row — kept in sync via @vai/api-types/responses (compile-time contract). */
 type Conversation = ConversationSummary;
 
@@ -297,6 +328,9 @@ export function resolveConversationSandboxProjectIdOption(
 
 /** Active broadcast response poller */
 let broadcastPollTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Monotonic token so only the most recent selectConversation call wins. */
+let selectConversationToken = 0;
 
 /** Currently active streaming WebSocket. Only one may be open at a time. */
 let activeWs: WebSocket | null = null;
@@ -489,15 +523,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   selectConversation: async (id: string) => {
+    // Guard against rapid conversation switches: only the LATEST selection may
+    // mutate state, otherwise a slow fetch for chat A lands after the user
+    // already opened chat B and attaches A's sandbox over B's preview.
+    const token = ++selectConversationToken;
+    const isStale = () => token !== selectConversationToken;
     const [res] = await Promise.all([
       apiFetch(`/api/conversations/${id}/messages`),
       get().fetchConversations(),
     ]);
+    if (isStale()) return;
     const rawMessages = (await res.json()) as Array<{
       id: string;
       role: string;
       content: string;
       imageId?: string | null;
+      plan?: string | null;
+      modelId?: string | null;
     }>;
     const conversation = get().conversations.find((item) => item.id === id);
     // Restore per-chat broadcast state
@@ -510,6 +552,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         role: m.role as ChatMessage['role'],
         content: m.content,
         imageId: m.imageId,
+        ...(m.role === 'assistant' ? parseEvidenceFromMessagePlan(m.plan) : {}),
+        ...(m.role === 'assistant' && m.modelId ? { respondingModelId: m.modelId } : {}),
       }))),
       broadcastMode: isBroadcastChat,
       broadcastTargetClientIds: isBroadcastChat ? broadcastChats[id] : [],
@@ -522,12 +566,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       try {
         await useSandboxStore.getState().attachProject(conversation.sandboxProjectId);
       } catch {
+        if (isStale()) return;
         useSandboxStore.getState().reset();
         useLayoutStore.getState().collapseBuilder();
       }
       return;
     }
 
+    if (isStale()) return;
     useSandboxStore.getState().reset();
     useLayoutStore.getState().collapseBuilder();
   },
@@ -799,8 +845,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
           return { messages: msgs };
         });
-      } else if (chunk.type === 'sources' && chunk.sources) {
-        // Attach sources + follow-ups + confidence to the current assistant message
+      } else if (chunk.type === 'sources') {
+        const sourceList = chunk.sources ?? [];
         set((state) => {
           const msgs = [...state.messages];
           const targetIndex = activeStreamingAssistantId
@@ -808,17 +854,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
             : msgs.length - 1;
           const target = targetIndex >= 0 ? msgs[targetIndex] : null;
           if (target && target.role === 'assistant') {
-            const hasSources = (chunk.sources?.length ?? 0) > 0;
+            const hasSources = sourceList.length > 0;
             const hasGroundedBrief = Boolean(chunk.groundedBrief);
             const shouldAttachEvidenceMeta = hasSources || hasGroundedBrief || Boolean(chunk.researchTrace);
             msgs[targetIndex] = {
               ...target,
-              sources: hasSources ? chunk.sources : undefined,
-              sourcePresentation: shouldAttachEvidenceMeta ? chunk.sourcePresentation : undefined,
-              followUps: chunk.followUps,
-              confidence: shouldAttachEvidenceMeta ? chunk.confidence : undefined,
-              groundedBuildBrief: chunk.groundedBrief,
-              researchTrace: chunk.researchTrace,
+              sources: hasSources ? sourceList : target.sources,
+              sourcePresentation: shouldAttachEvidenceMeta
+                ? (chunk.sourcePresentation ?? target.sourcePresentation)
+                : target.sourcePresentation,
+              followUps: chunk.followUps ?? target.followUps,
+              confidence: shouldAttachEvidenceMeta
+                ? (chunk.confidence ?? target.confidence)
+                : target.confidence,
+              groundedBuildBrief: chunk.groundedBrief ?? target.groundedBuildBrief,
+              researchTrace: chunk.researchTrace ?? target.researchTrace,
               respondingModelId: chunk.modelId ?? target.respondingModelId,
             };
           }

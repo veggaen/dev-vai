@@ -30,8 +30,8 @@ const basicFiles: { path: string; content: string }[] = [
         },
         dependencies: {},
         devDependencies: {
-          vite: '^6.3.0',
-          typescript: '^5.9.0',
+          vite: '^8.0.4',
+          typescript: '^6.0.2',
         },
       },
       null,
@@ -232,6 +232,10 @@ function generateLevel(levelNum: number): Room[] {
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
 canvas.width = W; canvas.height = H;
+canvas.tabIndex = 0;
+canvas.setAttribute('aria-label', 'Neon Operative game canvas');
+canvas.focus();
+canvas.addEventListener('click', () => canvas.focus());
 
 // ── Input ────────────────────────────────────────────────────
 window.addEventListener('keydown', e => {
@@ -727,7 +731,7 @@ const solidOverrides: { path: string; content: string }[] = [
         type: 'module',
         scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
         dependencies: {},
-        devDependencies: { vite: '^6.3.0', typescript: '^5.9.0' },
+        devDependencies: { vite: '^8.0.4', typescript: '^6.0.2' },
       },
       null,
       2,
@@ -831,7 +835,7 @@ const battleTestedOverrides: { path: string; content: string }[] = [
         type: 'module',
         scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview', test: 'vitest run' },
         dependencies: {},
-        devDependencies: { vite: '^6.3.0', typescript: '^5.9.0', vitest: '^4.0.0' },
+        devDependencies: { vite: '^8.0.4', typescript: '^6.0.2', vitest: '^4.0.0' },
       },
       null,
       2,
@@ -953,7 +957,7 @@ const vaiOverrides: { path: string; content: string }[] = [
         type: 'module',
         scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview', test: 'vitest run', 'test:watch': 'vitest' },
         dependencies: {},
-        devDependencies: { vite: '^6.3.0', typescript: '^5.9.0', vitest: '^4.0.0' },
+        devDependencies: { vite: '^8.0.4', typescript: '^6.0.2', vitest: '^4.0.0' },
       },
       null,
       2,
@@ -1043,8 +1047,8 @@ const gameBasic: StackTemplate = {
   id: 'game-basic',
   stackId: 'game',
   tier: 'basic',
-  name: 'Game Basic',
-  description: 'Neon Operative — top-down action with combat, quests, achievements, and RPG progression',
+  name: 'Neon Operative — Arcade RPG',
+  description: 'Canvas action RPG — combat, quests, achievements, dash combos, and pause HUD. Zero dependencies, 60fps.',
   features: [
     'WASD movement + mouse aim/shoot',
     '4 weapons (Pistol, SMG, Shotgun, Rifle) with ammo management',
@@ -1068,7 +1072,7 @@ const gameSolid: StackTemplate = {
   id: 'game-solid',
   stackId: 'game',
   tier: 'solid',
-  name: 'Game Solid',
+  name: 'Neon Operative + Inventory',
   description: 'Adds inventory system, branching dialogue, save/load persistence',
   features: [
     'Inventory system with stacking, equipment slots',
@@ -1086,7 +1090,7 @@ const gameBattleTested: StackTemplate = {
   id: 'game-battle-tested',
   stackId: 'game',
   tier: 'battle-tested',
-  name: 'Game Battle-Tested',
+  name: 'Neon Operative Campaign',
   description: 'Story/lore system, wave spawner, configurable game params, test suite',
   features: [
     'Story engine with 4 chapters and objectives',
@@ -1105,7 +1109,7 @@ const gameVai: StackTemplate = {
   id: 'game-vai',
   stackId: 'game',
   tier: 'vai',
-  name: 'Game Vai',
+  name: 'Neon Operative Ultimate',
   description: "VeggaAI's premium game — level editor, replay system, analytics dashboard",
   features: [
     'Level editor with import/export',
@@ -1125,9 +1129,9 @@ const gameVai: StackTemplate = {
 
 export const gameStack: StackDefinition = {
   id: 'game',
-  name: 'Game Engine',
-  tagline: 'Top-down action with RPG systems',
-  description: 'Canvas 2D game engine — combat, quests, story, achievements, procedural levels',
+  name: 'Neon Operative',
+  tagline: 'Arcade action with RPG progression',
+  description: 'Top-down canvas shooter — weapons, quests, achievements, dash combos, procedural rooms',
   techStack: ['Canvas 2D', 'TypeScript', 'Vite'],
   icon: '🎮',
   color: 'emerald',

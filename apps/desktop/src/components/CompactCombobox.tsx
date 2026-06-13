@@ -289,7 +289,7 @@ export function CompactCombobox({
           px-2.5 py-1 text-[11px] font-medium transition-all
           ${open ? `ring-1 ${colors.ring} border-zinc-600` : `${colors.hoverBorder}`}
           ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
-          bg-zinc-900/80 backdrop-blur-sm
+          bg-zinc-900
           ${className}
         `}
         title={triggerLabel}
@@ -307,8 +307,8 @@ export function CompactCombobox({
           ref={dropdownRef}
           className={`
             fixed z-[100] ${dropdownWidth}
-            rounded-xl border border-zinc-700/60 bg-zinc-900/95
-            shadow-2xl shadow-black/30 backdrop-blur-xl
+            rounded-xl border border-zinc-700/60 bg-zinc-900
+            shadow-2xl shadow-black/30
             overflow-hidden
           `}
           style={{

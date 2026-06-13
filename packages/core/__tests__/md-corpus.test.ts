@@ -9,9 +9,11 @@
  * once the corresponding engine arm lands.
  */
 
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { VaiEngine } from '../src/models/vai-engine.js';
 import { CORPUS, type CorpusRegex } from '../../../eval/generated/corpus.js';
+
+const originalFetch = globalThis.fetch;
 
 function compile(r: CorpusRegex): RegExp {
   return new RegExp(r.pattern, r.flags);
@@ -28,6 +30,14 @@ describe('MD corpus (eval/corpus-md → eval/generated/corpus.ts)', () => {
       beforeEach(() => {
         engine = new VaiEngine();
         messages.length = 0;
+        globalThis.fetch = vi.fn(async () => {
+          throw new TypeError('fetch disabled in corpus test');
+        }) as typeof fetch;
+      });
+
+      afterEach(() => {
+        globalThis.fetch = originalFetch;
+        vi.restoreAllMocks();
       });
 
       it(`pattern=${spec.pattern} category=${spec.category}`, async () => {

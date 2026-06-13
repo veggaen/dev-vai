@@ -10,6 +10,7 @@ import {
   isThemeCardActive,
   listCustomThemeEntries,
   loadCustomThemes,
+  updateCustomTheme,
 } from './odysseus-theme.js';
 
 describe('odysseus-theme', () => {
@@ -142,6 +143,40 @@ describe('odysseus-theme', () => {
 
       expect(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()).toBe('#111111');
       expect(getActiveThemeId()).toBe('dark-custom');
+    });
+
+    it('updateCustomTheme edits in place and preserves storage id', () => {
+      localStorage.setItem(
+        VAI_CUSTOM_THEMES_KEY,
+        JSON.stringify({
+          'dark-custom': {
+            bg: '#111111',
+            fg: '#ffffff',
+            panel: '#222222',
+            border: '#333333',
+            red: '#00ff00',
+            label: 'Dark Custom',
+            basePresetId: 'dark',
+          },
+        }),
+      );
+
+      updateCustomTheme('dark-custom', {
+        bg: '#0a0a0a',
+        fg: '#eeeeee',
+        panel: '#1a1a1a',
+        border: '#444444',
+        red: '#ff0066',
+      }, 'My Night Mode');
+
+      const themes = loadCustomThemes();
+      expect(Object.keys(themes)).toEqual(['dark-custom']);
+      expect(themes['dark-custom']).toMatchObject({
+        bg: '#0a0a0a',
+        red: '#ff0066',
+        label: 'My Night Mode',
+        basePresetId: 'dark',
+      });
     });
   });
 });

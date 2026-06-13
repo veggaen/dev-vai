@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { type ChatMode, useLayoutStore, MODE_DESCRIPTIONS } from '../stores/layoutStore.js';
 import { MessageCircle, Bot, Hammer, ListChecks, Swords, ChevronDown } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
@@ -35,17 +36,47 @@ export function ModeSelector() {
   const updateConversationMode = useChatStore((state) => state.updateConversationMode);
   const workflowModes = useSettingsStore((state) => state.workflowModes);
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ left: number; bottom: number; maxHeight: number } | null>(null);
   const isLight = themePreference === 'light';
+
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const menuWidth = 272; // w-68
+    const left = Math.min(Math.max(12, rect.left), window.innerWidth - menuWidth - 12);
+    setMenuPos({
+      left,
+      bottom: window.innerHeight - rect.top + 6,
+      maxHeight: Math.max(160, rect.top - 16),
+    });
+  }, []);
 
   useEffect(() => {
     if (!open) return;
+    updateMenuPosition();
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target)) return;
+      if (dropdownRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [open]);
+  }, [open, updateMenuPosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    const reflow = () => updateMenuPosition();
+    window.addEventListener('resize', reflow);
+    window.addEventListener('scroll', reflow, true);
+    return () => {
+      window.removeEventListener('resize', reflow);
+      window.removeEventListener('scroll', reflow, true);
+    };
+  }, [open, updateMenuPosition]);
 
   const availableModes = MODES.filter((candidate) => workflowModes.includes(candidate.id));
   const current = availableModes.find((m) => m.id === mode) ?? availableModes[0] ?? MODES[0];
@@ -59,23 +90,38 @@ export function ModeSelector() {
     : MODE_ACCENTS[current.id] ?? 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200';
 
   return (
-    <div ref={ref} className="relative z-[80]">
+    <>
       <button
+        ref={triggerRef}
+        type="button"
         onClick={() => setOpen((v) => !v)}
         className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium ring-1 transition-all ${accentClass}`}
         title={`Mode: ${current.label} (Ctrl+1-5)`}
+        aria-expanded={open}
+        aria-haspopup="listbox"
       >
         <CurrentIcon className="h-3.5 w-3.5" />
         <span>{current.label}</span>
         <ChevronDown className={`h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {open && (
-        <div className={`absolute bottom-full left-0 mb-1.5 w-68 rounded-lg border py-1.5 shadow-xl backdrop-blur-sm ${
-          isLight
-            ? 'border-zinc-200 bg-white/98 shadow-[0_18px_48px_rgba(15,23,42,0.12)]'
-            : 'border-zinc-700/60 bg-zinc-900/95 shadow-2xl shadow-black/40'
-        }`}>
+      {open && menuPos && createPortal(
+        <div
+          ref={dropdownRef}
+          role="listbox"
+          aria-label="Response mode"
+          className={`fixed z-[200] w-68 rounded-lg border py-1.5 shadow-xl ${
+            isLight
+              ? 'border-zinc-200 bg-white shadow-[0_18px_48px_rgba(15,23,42,0.12)]'
+              : 'border-zinc-700/60 bg-zinc-900 shadow-2xl shadow-black/40'
+          }`}
+          style={{
+            left: menuPos.left,
+            bottom: menuPos.bottom,
+            maxHeight: menuPos.maxHeight,
+            overflowY: 'auto',
+          }}
+        >
           <div className={`mb-1 border-b px-3 pb-1.5 ${isLight ? 'border-zinc-200' : 'border-zinc-800/60'}`}>
             <span className={`text-[10px] font-semibold uppercase tracking-[0.2em] ${isLight ? 'text-zinc-500' : 'text-zinc-600'}`}>Response mode</span>
           </div>
@@ -97,6 +143,9 @@ export function ModeSelector() {
             return (
               <button
                 key={m.id}
+                type="button"
+                role="option"
+                aria-selected={isActive}
                 onClick={async () => {
                   setMode(m.id);
                   if (activeConversationId) {
@@ -144,8 +193,9 @@ export function ModeSelector() {
               </button>
             );
           })}
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   );
 }

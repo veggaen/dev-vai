@@ -31,6 +31,12 @@ describe('bridge evidence discipline', () => {
     )).toMatch(/live chat-window observation unavailable/i);
   });
 
+  it('does not mistake a requested app screen for private desktop observation', () => {
+    expect(tryEmitPrivateLiveContextResponse(
+      'Build a fresh Vinext app and let me see the default home screen first.',
+    )).toBeNull();
+  });
+
   it('does not treat workspace delta as chat-history recall', () => {
     expect(tryEmitPrivateLiveContextResponse(
       'Which files did I change in this repo since my last message? Answer from direct observation only; if you cannot inspect it, say unavailable.',

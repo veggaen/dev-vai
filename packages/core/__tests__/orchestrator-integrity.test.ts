@@ -114,6 +114,9 @@ async function runScenario(scenario: OrchestratorScenario): Promise<Orchestrator
   const svc = new ChatService(createDb(':memory:'), registry, {
     vaiFallbackChain: ['vai:v0', 'mock:fallback'],
     verification: scenario.requireEvidence ? { requireEvidenceForFactualClaims: true } : undefined,
+    // This audit lane scores the legacy vai-first decline → escalate → verify
+    // path; the primary-generative flip bypasses that arm for substantive turns.
+    primaryGenerativeFlip: false,
   });
   vai.next = scenario.vai;
   if (scenario.fallbackText) fallback.next = scenario.fallbackText;
@@ -121,8 +124,18 @@ async function runScenario(scenario: OrchestratorScenario): Promise<Orchestrator
   const convId = svc.createConversation('vai:v0', scenario.label, scenario.mode ?? 'chat');
 
   const chunks: ChatChunk[] = [];
-  for await (const chunk of svc.sendMessage(convId, scenario.prompt)) {
-    chunks.push(chunk);
+  const priorCouncilFlag = process.env.VAI_COUNCIL_CODEGEN;
+  process.env.VAI_COUNCIL_CODEGEN = '0';
+  try {
+    for await (const chunk of svc.sendMessage(convId, scenario.prompt)) {
+      chunks.push(chunk);
+    }
+  } finally {
+    if (priorCouncilFlag === undefined) {
+      delete process.env.VAI_COUNCIL_CODEGEN;
+    } else {
+      process.env.VAI_COUNCIL_CODEGEN = priorCouncilFlag;
+    }
   }
 
   const finalText = chunks
@@ -295,7 +308,29 @@ describe('orchestrator-integrity audit lane', () => {
         text: '```tsx title="src/App.tsx"\nexport default function App() { return <div>Hello</div>; }\n```',
         confidence: 0.9,
       },
-      fallbackText: '```tsx title="src/App.tsx"\n// shared shopping list; household members add grouped items; activity feed shows changes\nexport default function App(){ return <ShoppingList household={members} activity={feed} items={grouped} />; }\n```',
+      fallbackText: [
+        '```tsx title="src/App.tsx"',
+        "import { useState } from 'react';",
+        'export default function App() {',
+        "  const [items, setItems] = useState(['Coffee', 'Rice']);",
+        "  const addItem = () => setItems((current) => [...current, 'New item']);",
+        '  return <main className="shopping-shell"><header><p>Household members</p><h1>Shared Shopping List</h1></header><section className="grouped-items"><h2>Grouped items</h2>{items.map((item) => <button key={item}>{item}</button>)}</section><aside className="activity-feed"><h2>Activity feed</h2><p>ShoppingList updated by the household.</p></aside><button className="primary-action" onClick={addItem}>Add item</button></main>;',
+        '}',
+        '```',
+        '```css title="src/styles.css"',
+        ':root { font-family: Inter, sans-serif; background: #0f172a; color: #f8fafc; }',
+        '* { box-sizing: border-box; }',
+        'body { margin: 0; min-height: 100vh; }',
+        '.shopping-shell { width: min(900px, 92vw); margin: 0 auto; padding: 3rem; }',
+        'header { display: grid; gap: .5rem; }',
+        'h1 { font-size: 2.5rem; }',
+        '.grouped-items { display: grid; gap: .75rem; }',
+        '.activity-feed { margin-top: 2rem; padding: 1rem; }',
+        'button { border: 0; border-radius: .75rem; padding: .8rem 1rem; }',
+        '.primary-action { margin-top: 1.5rem; background: #38bdf8; }',
+        'button:hover, button:focus { transform: translateY(-1px); }',
+        '```',
+      ].join('\n'),
       expect: { escalates: true, finalContains: 'ShoppingList' },
     });
 
@@ -338,7 +373,23 @@ describe('orchestrator-integrity audit lane', () => {
       },
       fallbackTexts: [
         '```html\n<!doctype html><html><body><h1>Focus Planner</h1><section>Task list</section><output>Streak counter</output></body></html>\n```',
-        '```html title="index.html"\n<!doctype html><html><body><h1>Focus Planner</h1><section>Pomodoro sessions <button>Start session</button></section><section>Task list <button>Add task</button></section><output>Streak counter</output></body></html>\n```',
+        [
+          '```html title="index.html"',
+          '<!doctype html><html><head><style>',
+          ':root{font-family:Inter,sans-serif;background:#111827;color:#f9fafb}',
+          '*{box-sizing:border-box}',
+          'body{margin:0;min-height:100vh}',
+          'main{width:min(760px,92vw);margin:auto;padding:3rem}',
+          'header{display:grid;gap:.5rem}',
+          'section{margin-top:1rem;padding:1rem;background:#1f2937}',
+          'h1{font-size:2.5rem}',
+          'button{border:0;border-radius:.75rem;padding:.75rem 1rem}',
+          '.tasks{display:grid;gap:.75rem}',
+          'output{display:block;margin-top:1rem}',
+          'button:hover,button:focus{background:#38bdf8}',
+          '</style></head><body><main><header><h1>Focus Planner</h1></header><section>Pomodoro sessions <button>Start session</button></section><section class="tasks">Task list <button>Add task</button></section><output>Streak counter</output></main></body></html>',
+          '```',
+        ].join('\n'),
       ],
       expect: { escalates: true, finalContains: 'Streak counter' },
     });

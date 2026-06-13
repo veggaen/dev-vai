@@ -175,6 +175,40 @@ describe('KnowledgeHygiene', () => {
     expect(groups[0].duplicates).toContain(1);
   });
 
+  it('keeps canonical grouping stable when several entries are near-duplicates', () => {
+    const entries = [
+      { pattern: 'react hooks', response: 'React hooks let function components use state and lifecycle features', frequency: 1, source: 'test', language: 'en' as const },
+      { pattern: 'react hooks guide', response: 'React hooks let function components use state and lifecycle features safely', frequency: 1, source: 'test', language: 'en' as const },
+      { pattern: 'react hooks tutorial', response: 'React hooks let function components use state and lifecycle features today', frequency: 1, source: 'test', language: 'en' as const },
+      { pattern: 'sql joins', response: 'SQL joins combine rows from related tables', frequency: 1, source: 'test', language: 'en' as const },
+    ];
+
+    expect(hygiene.findDuplicates(entries)).toEqual([
+      {
+        canonical: 0,
+        duplicates: [1, 2],
+        similarity: 0.75,
+      },
+    ]);
+  });
+
+  it('avoids an all-pairs scan for a large disjoint knowledge set', () => {
+    const entries = Array.from({ length: 3_000 }, (_, index) => ({
+      pattern: `topic-${index} concept-${index}`,
+      response: `detail-${index} evidence-${index}`,
+      frequency: 1,
+      source: 'test',
+      language: 'en' as const,
+    }));
+
+    const startedAt = performance.now();
+    const groups = hygiene.findDuplicates(entries);
+    const durationMs = performance.now() - startedAt;
+
+    expect(groups).toEqual([]);
+    expect(durationMs).toBeLessThan(1_000);
+  });
+
   it('scores entry quality higher for informative content', () => {
     const good = {
       pattern: 'docker networking',

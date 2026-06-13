@@ -25,6 +25,16 @@ export default {
           surface: 'var(--sidebar-surface)',
         },
       },
+      backgroundImage: {
+        'dither-noise':
+          "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
+      },
+      boxShadow: {
+        'smooth-lg':
+          '0 1px 2px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.05), 0 4px 8px rgba(0,0,0,0.05), 0 8px 16px rgba(0,0,0,0.05)',
+        'smooth-xl':
+          '0 2px 4px rgba(0,0,0,0.04), 0 4px 8px rgba(0,0,0,0.04), 0 8px 16px rgba(0,0,0,0.04), 0 16px 32px rgba(0,0,0,0.04)',
+      },
       keyframes: {
         'fade-up': {
           from: { opacity: '0', transform: 'translateY(12px)' },

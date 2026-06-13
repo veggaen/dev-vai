@@ -45,6 +45,8 @@ import {
   type Resolution,
   type DispatchPlan,
 } from './turn-pipeline.js';
+import { shadowScore, type ShadowScore } from './capability-kernel.js';
+import { liveContextCapability } from './capabilities/live-context-capability.js';
 import type {
   CouncilInput,
   CouncilThinking,
@@ -62,9 +64,17 @@ import { extractActiveTopicBrief, hasTopicOverlap } from './active-topic-brief.j
 import { resolveChatPromptRewriteConfig, rewriteChatPrompt } from './prompt-rewrite.js';
 import { buildTurnKindSystemHint, classifyChatTurn } from './turn-kind.js';
 import {
+  buildSourcesChunkFromSearch,
+  buildEvidenceContextSystemHint,
+  fetchTurnWebEvidence,
+  shouldAttemptWebConclusion,
+} from './web-conclude-turn.js';
+import {
   decideVaiFallback,
   pickFallbackModelId,
   shouldEscalateDeterministicDecline,
+  shouldFlipPrimaryToGenerative,
+  shouldPreferGroundedFallback,
   VAI_FALLBACK_CONFIDENCE_THRESHOLD,
 } from './vai-fallback.js';
 import { sanitizeLeakage, verifyResponse, type ResponseVerificationConfig } from './response-verification.js';
@@ -74,6 +84,15 @@ import {
   repairBuilderFallbackFileBlocks,
   type BuilderSatisfactionReport,
 } from './builder-satisfaction.js';
+import {
+  councilGenerateApp,
+  extractTitledFiles,
+  parseActiveSandboxContext,
+  validateGeneratedApp,
+  type CouncilCodegenMember,
+  type CouncilEditContext,
+} from '../models/builder/council-codegen/index.js';
+import { routeBuilderRequest } from '../models/builder/builder-request-router.js';
 import { calculateCost } from '../usage/service.js';
 import { isProductEngineeringPlanningPrompt } from './product-engineering-intent.js';
 import { tryEmitProductEngineeringMemo } from './product-engineering-memo.js';
@@ -90,9 +109,14 @@ import {
 import {
   isFreshLocalBusinessContactRequest,
   isFreshLocalRecommendationRequest,
+  isPureConversationalTurn,
+  shouldSkipWebConclusion,
 } from '../models/web-conclude-policy.js';
 import { shouldPeerReviewCode } from './code-review-policy.js';
-import { rewriteBusinessContactLookupFollowUp } from './contextual-resolver.js';
+import {
+  resolveContextualFollowUp,
+  rewriteBusinessContactLookupFollowUp,
+} from './contextual-resolver.js';
 
 /**
  * A {@link Resolution} carrying the two service-specific fields the shared
@@ -174,6 +198,13 @@ export interface ChatServiceOptions {
    */
   readonly verification?: Partial<ResponseVerificationConfig>;
   /**
+   * Primary-generator flip: substantive (analysis/research) turns go straight
+   * to the capable generative model instead of running the vai:v0 corpus arm
+   * first. Defaults to the VAI_PRIMARY_GENERATIVE env switch (enabled unless
+   * set to '0'). Set `false` to exercise the legacy vai-first arm.
+   */
+  readonly primaryGenerativeFlip?: boolean;
+  /**
    * Run the upstream security-review pass (prompt-injection / secret-exfil /
    * malware / manipulation / safety-incident) before any broad factual router.
    * Defaults to `true`. Set `false` to measure the prompt-only baseline.
@@ -218,6 +249,11 @@ export interface ChatServiceOptions {
   readonly loadActiveGuidance?: (conversationId: string) => readonly RouteGuidance[];
   /** SCIS Consensus Council roster (topic -> members). When supplied, the service runs the council on substantive drafts and attaches CouncilThinking to the turn trace (powers the ThinkingPanel council section). */
   readonly councilRoster?: CouncilRoster;
+  /**
+   * Optional web search hook for attaching evidence to analysis/research turns
+   * when the responding model does not emit its own sources chunk (e.g. local Qwen).
+   */
+  readonly searchForEvidence?: (query: string, budgetMs: number) => Promise<import('../search/types.js').SearchResponse | null>;
 }
 
 export interface ChatPromptRewriteOverrides {
@@ -240,6 +276,7 @@ function isChatServiceOptions(value: unknown): value is ChatServiceOptions {
       || 'securityReview' in value
       || 'contractLedger' in value
       || 'responseReviewers' in value
+      || 'searchForEvidence' in value
     );
 }
 
@@ -264,6 +301,7 @@ const BUILDER_FALLBACK_SYSTEM_HINT = [
   'Return the smallest runnable implementation that visibly satisfies the request.',
   'Do not narrate a plan, repeat these instructions, offer product advice, or ask follow-up questions unless a missing choice changes behavior, security, data, or money flows.',
   'Emit concrete files as fenced code blocks with title="path/to/file" so the live sandbox can apply them.',
+  'The fence info line must look exactly like ```html title="index.html" — the title value in double quotes on the fence line itself, never as a line inside the file body.',
   'For a new app, include every file required to run it. For an attached project edit, emit only the changed files.',
   'For a lightweight UI that can run without dependencies, prefer one complete index.html file with inline CSS and JavaScript.',
   'Implement the requested visible behaviors and domain details; do not stop at a generic scaffold.',
@@ -274,20 +312,35 @@ const BUILDER_FALLBACK_SYSTEM_HINT = [
 const FALLBACK_BUILDER_MIN_ANCHOR_COVERAGE = 0.8;
 
 /** Project a dispatcher {@link DispatchPlan} into the friend-readable
- * {@link TurnRoutePlan} carried on the thinking trace. */
-function buildRoutePlan(plan: DispatchPlan): TurnRoutePlan {
+ * {@link TurnRoutePlan} carried on the thinking trace. Shadow capabilities (if
+ * any) are appended as non-deciding candidates so their Capability-Kernel
+ * scoring is visible for comparison without affecting the live decision. */
+function buildRoutePlan(plan: DispatchPlan, shadows: readonly ShadowScore[] = []): TurnRoutePlan {
+  const liveCandidates = plan.candidates.map((c) => ({
+    name: c.name,
+    score: c.score,
+    baseScore: c.baseScore,
+    chosen: c.name === plan.chosen,
+    declined: plan.declined.includes(c.name),
+    guidance: c.guidanceApplied,
+    reason: c.reason,
+  }));
+  const shadowCandidates = shadows
+    .filter((s) => s.score !== null)
+    .map((s) => ({
+      name: `${s.name} (shadow)`,
+      score: s.score as number,
+      chosen: false,
+      // A shadow that would resolve+verify is "ready"; otherwise mark it
+      // declined so the panel shows it could not have grounded its answer.
+      declined: !(s.wouldResolve && s.wouldVerify),
+      reason: s.verifyReason ? `${s.reason} — verify: ${s.verifyReason}` : s.reason,
+      shadow: true,
+    }));
   return {
     chosen: plan.chosen,
     belowFloor: plan.belowFloor,
-    candidates: plan.candidates.map((c) => ({
-      name: c.name,
-      score: c.score,
-      baseScore: c.baseScore,
-      chosen: c.name === plan.chosen,
-      declined: plan.declined.includes(c.name),
-      guidance: c.guidanceApplied,
-      reason: c.reason,
-    })),
+    candidates: [...liveCandidates, ...shadowCandidates],
   };
 }
 
@@ -549,6 +602,7 @@ export class ChatService {
   private readonly extraDeclineMarkers: readonly string[];
   private readonly verificationConfig: ResponseVerificationConfig;
   private readonly onUsage?: ChatServiceOptions['onUsage'];
+  private readonly primaryGenerativeFlipEnabled: boolean;
   private readonly securityReviewEnabled: boolean;
   private readonly contractLedgerEnabled: boolean;
   private readonly guidanceStore?: GuidanceStore;
@@ -556,6 +610,7 @@ export class ChatService {
   private readonly loadActiveGuidance?: (conversationId: string) => readonly RouteGuidance[]; // legacy fallback
   /** Optional SCIS council roster. When present, substantive turns run the council for consensus + method lessons. */
   private readonly councilRoster?: CouncilRoster;
+  private readonly searchForEvidence?: ChatServiceOptions['searchForEvidence'];
 
   constructor(
     private db: VaiDatabase,
@@ -575,12 +630,51 @@ export class ChatService {
         resolvedOptions?.extraDeclineMarkers ?? resolvedOptions?.verification?.extraDeclineMarkers,
     };
     this.onUsage = resolvedOptions?.onUsage;
+    this.primaryGenerativeFlipEnabled =
+      resolvedOptions?.primaryGenerativeFlip ?? (process.env.VAI_PRIMARY_GENERATIVE !== '0');
     this.securityReviewEnabled = resolvedOptions?.securityReview ?? true;
     this.contractLedgerEnabled = resolvedOptions?.contractLedger ?? true;
     this.guidanceStore = resolvedOptions?.guidanceStore;
     this.responseReviewers = resolvedOptions?.responseReviewers ?? [];
     this.loadActiveGuidance = resolvedOptions?.loadActiveGuidance;
     this.councilRoster = resolvedOptions?.councilRoster;
+    this.searchForEvidence = resolvedOptions?.searchForEvidence;
+  }
+
+  /**
+   * Council members for builder codegen: fallback-chain adapters first
+   * (best-first — members[0] becomes architect+coder), topped up with the
+   * remaining registered local models as reviewers. Capped at 3 so a build
+   * turn stays bounded; the pipeline runs them sequentially (crash-safe on a
+   * machine that BSODs under combined GPU load).
+   */
+  private builderCouncilMembers(): CouncilCodegenMember[] {
+    const orderedIds = [
+      ...this.vaiFallbackChain,
+      ...this.models.listByProvider('local').map((adapter) => adapter.id),
+    ];
+    const members: CouncilCodegenMember[] = [];
+    const seen = new Set<string>();
+    for (const id of orderedIds) {
+      if (id === 'vai:v0' || seen.has(id)) continue;
+      seen.add(id);
+      const adapter = this.models.tryGet(id);
+      if (!adapter) continue;
+      members.push({
+        id,
+        displayName: adapter.displayName,
+        complete: async (messages, options) => {
+          const response = await adapter.chat({
+            messages: messages.map((m) => ({ role: m.role, content: m.content })),
+            maxTokens: options?.maxTokens,
+            temperature: options?.temperature,
+          });
+          return { text: response.message.content, usage: response.usage };
+        },
+      });
+      if (members.length >= 3) break;
+    }
+    return members;
   }
 
   private shouldReviewResponse(prompt: string): boolean {
@@ -646,6 +740,7 @@ export class ChatService {
     readonly sources?: readonly { readonly title?: string; readonly url?: string; readonly snippet?: string }[];
   }): Promise<CouncilThinking | undefined> {
     if (!this.councilRoster || !draft.prompt || !draft.draftText) return undefined;
+    if (isPureConversationalTurn(draft.prompt)) return undefined;
     try {
       const input: CouncilInput = {
         prompt: draft.prompt,
@@ -932,6 +1027,10 @@ export class ChatService {
     // deterministic → model fallthrough are recorded in the reference data.
     let turnPlan: DispatchPlan | undefined;
     let turnBaselinePlan: DispatchPlan | undefined;
+    // Capability-Kernel shadow scores for this turn — computed for observation,
+    // never deciding. Surfaced in the route plan so the kernel's scoring can be
+    // watched on real turns before any capability is promoted to a live decider.
+    let turnShadowScores: ShadowScore[] = [];
 
     // Persist user message
     const userMsgId = ulid();
@@ -953,6 +1052,10 @@ export class ChatService {
     // model dispatch path when a soft prompt-injection is hardened rather than
     // refused outright. Stays null on ordinary turns.
     let securityHardenDirective: string | null = null;
+
+    // Rewritten routing text for contextual follow-ups (possessive pronouns,
+    // profile/link fragments). The persisted user message stays verbatim.
+    let effectiveContent = content;
 
     // Chat-meta intent short-circuit: questions *about* the conversation itself
     // ("what was my first message", "summarize this chat") are answered
@@ -1014,7 +1117,15 @@ export class ChatService {
         role: m.role as 'user' | 'assistant' | 'system' | 'tool',
         content: m.content,
       }));
-      const understoodContent = normalizeInputForUnderstanding(content);
+      const classifierHistory = history.map((m) => ({
+        role: m.role as 'user' | 'assistant' | 'system' | 'tool',
+        content: m.content,
+      }));
+      const contextualRewrite = resolveContextualFollowUp(content, classifierHistory);
+      const routingContent = contextualRewrite ?? content;
+      const businessContactRewrite = rewriteBusinessContactLookupFollowUp(routingContent, classifierHistory);
+      effectiveContent = businessContactRewrite ?? routingContent;
+      const understoodContent = normalizeInputForUnderstanding(effectiveContent);
       // ── Hoisted turn context ────────────────────────────────────────
       // Everything the handlers need, derived once. None of these reads a
       // handler result, so hoisting them above the dispatch changes no
@@ -1052,12 +1163,8 @@ export class ChatService {
       // conversation is currently about; the classifier decides standalone
       // vs contextual follow-up vs product-quality recommendation. Pure reads
       // (role + content only); adapt the wider persisted rows to that shape.
-      const classifierHistory = history.map((m) => ({
-        role: m.role as 'user' | 'assistant' | 'system' | 'tool',
-        content: m.content,
-      }));
-      const turnClassification = classifyTurn(content, classifierHistory);
-      const activeTopicBrief = extractActiveTopicBrief(content, classifierHistory);
+      const turnClassification = classifyTurn(effectiveContent, classifierHistory);
+      const activeTopicBrief = extractActiveTopicBrief(effectiveContent, classifierHistory);
       const isContextualFollowUp =
         turnClassification.kind === 'contextual-followup'
         || turnClassification.kind === 'product-quality-recommendation'
@@ -1067,7 +1174,7 @@ export class ChatService {
       const groundedContextualFollowUp =
         isContextualFollowUp
         && activeTopicBrief.hasPriorAssistant
-        && hasTopicOverlap(content, activeTopicBrief);
+        && hasTopicOverlap(effectiveContent, activeTopicBrief);
 
       let mostRecentAssistantText: string | undefined;
       for (let i = history.length - 1; i >= 0; i--) {
@@ -1241,6 +1348,14 @@ export class ChatService {
       turnPlan = outcome.plan;
       turnBaselinePlan = baselinePlan;
 
+      // Shadow-score the kernel capabilities against the same context. Pure
+      // observation: the live `outcome` above already decided the turn; these
+      // only annotate the visible plan. A null means inapplicable → dropped.
+      const shadowCapabilities = [liveContextCapability];
+      turnShadowScores = shadowCapabilities
+        .map((cap) => shadowScore(cap, turnContext))
+        .filter((s): s is ShadowScore => s !== null);
+
       if (outcome.resolution) {
         const winner = outcome.resolution;
         // Decline-escalation guard (meaningful-responses fix): the best
@@ -1304,11 +1419,10 @@ export class ChatService {
       toolCalls: m.toolCalls ? JSON.parse(m.toolCalls) : undefined,
       toolCallId: m.toolCallId ?? undefined,
     }));
-    const businessContactModelRewrite = rewriteBusinessContactLookupFollowUp(content, chatMessages);
-    const modelChatMessages = businessContactModelRewrite
+    const modelChatMessages = effectiveContent !== content
       ? chatMessages.map((message, index) => {
         if (index !== chatMessages.length - 1 || message.role !== 'user') return message;
-        return { ...message, content: businessContactModelRewrite };
+        return { ...message, content: effectiveContent };
       })
       : chatMessages;
 
@@ -1320,7 +1434,7 @@ export class ChatService {
     const turnKind = isTerminalHarness
       ? 'analysis'
       : classifyChatTurn({
-        userContent: content,
+        userContent: effectiveContent,
         mode: resolvedMode,
         hasActiveSandbox,
         hasImage: Boolean(image),
@@ -1411,7 +1525,7 @@ export class ChatService {
     const rewrite = isTerminalHarness || turnKind === 'conversational'
       ? null
       : rewriteChatPrompt({
-        userContent: content,
+        userContent: effectiveContent,
         mode: resolvedMode,
         config: promptRewriteOverrides
           ? resolveChatPromptRewriteConfig({
@@ -1488,7 +1602,6 @@ export class ChatService {
     };
 
     const primaryModelId = conv.modelId;
-    const primaryMessages = buildMessagesForModel(primaryModelId);
     const fallbackModelId = primaryModelId === 'vai:v0'
       ? pickFallbackModelId(
         this.vaiFallbackChain,
@@ -1500,6 +1613,9 @@ export class ChatService {
       if (chunk.type !== 'sources') return chunk;
 
       if (turnKind === 'conversational' && !chunk.groundedBrief) {
+        // Plain conversational turns (greetings, small talk) must not surface
+        // web-source chrome — an adapter that emits a low-signal sources chunk
+        // for "hey" should be dropped, not rendered as supporting references.
         return null;
       }
 
@@ -1526,6 +1642,70 @@ export class ChatService {
       };
     };
 
+    let prefetchedEvidenceChunk: ChatChunk | null = null;
+    let prefetchedEvidenceYielded = false;
+    let evidenceSearchResult: import('../search/types.js').SearchResponse | null = null;
+    let turnEvidencePersist: {
+      sources: NonNullable<ChatChunk['sources']>;
+      sourcePresentation?: ChatChunk['sourcePresentation'];
+      researchTrace?: ChatChunk['researchTrace'];
+      followUps?: ChatChunk['followUps'];
+      confidence?: number;
+    } | null = null;
+    const webConclusionContext = { activeMode: resolvedMode, hasActiveSandbox };
+    const shouldAttachWebEvidence =
+      Boolean(this.searchForEvidence)
+      && turnKind !== 'builder'
+      && !isPureConversationalTurn(effectiveContent, webConclusionContext)
+      && !shouldSkipWebConclusion(effectiveContent, webConclusionContext)
+      && (
+        turnKind === 'analysis'
+        || turnKind === 'research'
+        || shouldAttemptWebConclusion(effectiveContent, webConclusionContext)
+      );
+
+    const yieldPrefetchedEvidence = function* (): Generator<ChatChunk, void, unknown> {
+      if (prefetchedEvidenceChunk && !prefetchedEvidenceYielded) {
+        prefetchedEvidenceYielded = true;
+        yield prefetchedEvidenceChunk;
+      }
+    };
+
+    // TS control-flow analysis cannot see the assignments made inside
+    // resolvePrefetchedEvidence (a closure), so sites that read these vars
+    // before any direct assignment must go through accessors or the compiler
+    // narrows them to their `null` initializer.
+    const currentTurnEvidence = () => turnEvidencePersist;
+    const currentPrefetchedEvidence = () => prefetchedEvidenceChunk;
+
+    const resolvePrefetchedEvidence = async (): Promise<void> => {
+      if (!this.searchForEvidence || !shouldAttachWebEvidence) return;
+      try {
+        const searchResult = await fetchTurnWebEvidence(effectiveContent, chatMessages, {
+          testMode: false,
+          search: (query, budgetMs) => this.searchForEvidence!(query, budgetMs),
+          searchBudgetMs: 15_000,
+        }, { activeMode: resolvedMode, hasActiveSandbox }, { ignoreLocalDefer: true });
+        if (!searchResult) return;
+        evidenceSearchResult = searchResult;
+        const rawChunk = buildSourcesChunkFromSearch(effectiveContent, searchResult, turnKind);
+        prefetchedEvidenceChunk = normalizeSourceChunkForTurn(rawChunk);
+        if (prefetchedEvidenceChunk?.sources?.length) {
+          turnEvidencePersist = {
+            sources: prefetchedEvidenceChunk.sources,
+            sourcePresentation: prefetchedEvidenceChunk.sourcePresentation,
+            researchTrace: prefetchedEvidenceChunk.researchTrace,
+            followUps: prefetchedEvidenceChunk.followUps,
+            confidence: prefetchedEvidenceChunk.confidence,
+          };
+          const evidenceHint = buildEvidenceContextSystemHint(effectiveContent, searchResult);
+          systemMessages.push({ role: 'system', content: evidenceHint });
+        }
+      } catch {
+        // Non-fatal — the model answer still ships without web evidence.
+      }
+    };
+
     // Stream from model
     const adapter = this.models.get(primaryModelId);
     let fullText = '';
@@ -1544,7 +1724,42 @@ export class ChatService {
       progress: { stage: 'reason', label: 'Working through it — checking what I know', status: 'running' },
     } as ChatChunk;
 
+    if (shouldAttachWebEvidence) {
+      yield {
+        type: 'progress',
+        progress: { stage: 'search', label: 'Checking the web for sources', status: 'running' },
+      } as ChatChunk;
+      await resolvePrefetchedEvidence();
+      const resolvedEvidence = currentTurnEvidence();
+      if (resolvedEvidence) {
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'search',
+            label: `Found ${resolvedEvidence.sources.length} source${resolvedEvidence.sources.length === 1 ? '' : 's'}`,
+            status: 'done',
+          },
+        } as ChatChunk;
+      }
+      for (const chunk of yieldPrefetchedEvidence()) {
+        yield chunk;
+      }
+    }
+
+    const primaryMessages = buildMessagesForModel(primaryModelId);
+
     if (primaryModelId === 'vai:v0' && fallbackModelId) {
+      // Primary-generator flip: substantive turns skip the vai:v0 corpus arm
+      // entirely and go straight to the capable generative model. Deterministic
+      // dispatch (curated facts, greetings, safety) already returned above, so
+      // this only redirects turns the substrate would have answered from its
+      // primer store — the documented confident-but-off-topic failure class.
+      const primaryFlip = shouldFlipPrimaryToGenerative({
+        turnKind,
+        mode: resolvedMode,
+        hasFallbackModel: true,
+        enabled: this.primaryGenerativeFlipEnabled,
+      });
       const bufferedChunks: ChatChunk[] = [];
       const bufferedSourceChunks: ChatChunk[] = [];
       let bufferedText = '';
@@ -1554,6 +1769,7 @@ export class ChatService {
       let latestConfidence: number | undefined;
       let bufferedSawDone = false;
 
+      if (!primaryFlip) {
       for await (const chunk of adapter.chatStream({ messages: primaryMessages, noLearn })) {
         if (chunk.modelId) bufferedModelId = chunk.modelId;
         if (chunk.type === 'sources') {
@@ -1589,10 +1805,11 @@ export class ChatService {
             strategy: 'vai-buffered',
             modelTag: bufferedModelId,
             confidence: latestConfidence ?? 0.6,
-            routePlan: buildRoutePlan(turnPlan),
+            routePlan: buildRoutePlan(turnPlan, turnShadowScores),
           };
         }
         bufferedChunks.push(doneChunk as ChatChunk);
+      }
       }
 
       // Builder Mode 2.0 — request-satisfaction gate (§4.7). A builder turn only
@@ -1608,7 +1825,7 @@ export class ChatService {
       );
       let reviewReplacedPrimary = false;
       let codeReviewRejected = false;
-      if (!builderFiles && this.shouldReviewDraft(content, bufferedText)) {
+      if (!primaryFlip && !builderFiles && this.shouldReviewDraft(content, bufferedText)) {
         yield {
           type: 'progress',
           progress: {
@@ -1659,12 +1876,36 @@ export class ChatService {
         extraDeclineMarkers: this.extraDeclineMarkers,
         prompt: content,
       });
-      const evidenceAwareFallbackDecision =
-        primaryHadEvidence && confidenceFallbackDecision.reason === 'low-confidence'
-          ? { shouldFallback: false, reason: null }
-          : confidenceFallbackDecision;
+      // Grounded-fallback preference: when this turn retrieved real external
+      // web evidence, the capable fallback model (e.g. qwen2.5:7b) should be
+      // the one to answer — the vai:v0 corpus/keyword arm does NOT consume the
+      // injected web sources and is the documented source of confident-but-
+      // off-topic answers (Bergen for "king of Norway"; see
+      // docs/substrate-memo.md). Routing evidence-backed turns to the grounded
+      // model lets the answer actually use the sources we found. Reversible via
+      // VAI_PREFER_GROUNDED_FALLBACK=0. Unit tests never configure
+      // `searchForEvidence`, so `evidenceSearchResult` stays null there and this
+      // is a no-op for them.
+      const hadPrefetchedWebEvidence =
+        Boolean(evidenceSearchResult) && (currentTurnEvidence()?.sources?.length ?? 0) > 0;
+      const preferGroundedFallback = shouldPreferGroundedFallback({
+        enabled: process.env.VAI_PREFER_GROUNDED_FALLBACK !== '0',
+        hadWebEvidence: hadPrefetchedWebEvidence,
+        hasFallbackModel: Boolean(fallbackModelId),
+        reviewReplacedPrimary,
+        builderSatisfies,
+        builderFiles,
+      });
+      const evidenceAwareFallbackDecision: { shouldFallback: boolean; reason: 'low-confidence' | 'no-knowledge' | null } =
+        preferGroundedFallback
+          ? { shouldFallback: true, reason: 'low-confidence' }
+          : primaryHadEvidence && confidenceFallbackDecision.reason === 'low-confidence'
+            ? { shouldFallback: false, reason: null }
+            : confidenceFallbackDecision;
       const initialFallbackDecision: { shouldFallback: boolean; reason: 'low-confidence' | 'no-knowledge' | null } =
-        reviewReplacedPrimary
+        primaryFlip
+          ? { shouldFallback: true, reason: 'low-confidence' }
+          : reviewReplacedPrimary
           ? { shouldFallback: false, reason: null }
           : codeReviewRejected
             ? { shouldFallback: true, reason: 'low-confidence' }
@@ -1703,8 +1944,26 @@ export class ChatService {
         totalUsage = bufferedUsage;
         durationMs = bufferedDurationMs;
         responseModelId = bufferedModelId;
-        for (const chunk of bufferedSourceChunks) {
-          yield chunk;
+        if (bufferedSourceChunks.length > 0) {
+          const sourced = bufferedSourceChunks.find(
+            (chunk) => chunk.type === 'sources' && (chunk.sources?.length ?? 0) > 0,
+          );
+          if (sourced?.sources?.length) {
+            turnEvidencePersist = {
+              sources: sourced.sources,
+              sourcePresentation: sourced.sourcePresentation,
+              researchTrace: sourced.researchTrace,
+              followUps: sourced.followUps,
+              confidence: sourced.confidence,
+            };
+          }
+          for (const chunk of bufferedSourceChunks) {
+            yield chunk;
+          }
+        } else {
+          for (const chunk of yieldPrefetchedEvidence()) {
+            yield chunk;
+          }
         }
 
         if (verdict && verdict.action !== 'pass') {
@@ -1746,7 +2005,9 @@ export class ChatService {
           type: 'progress',
           progress: {
             stage: 'escalate',
-            label: `Not in my memory yet — asking ${fallbackLabel}`,
+            label: primaryFlip
+              ? `Handing this to ${fallbackLabel} — my generative arm`
+              : `Not in my memory yet — asking ${fallbackLabel}`,
             status: 'running',
           },
         } as ChatChunk;
@@ -1807,16 +2068,104 @@ export class ChatService {
           return { chunks, sourceChunks, text, durationMs: attemptDurationMs, usage };
         };
 
-        let fallbackResult = await collectFallback(fallbackMessages);
+        // Council codegen arm: for builder turns, Vai's council of AIs (the
+        // ranked local/cloud models) builds the app together — architect →
+        // coder → reviewers → bounded repair — behind a real TypeScript syntax
+        // gate. A null result or any throw falls through to the single-model
+        // arm below; the council must never sink the turn.
+        let councilResult: Awaited<ReturnType<typeof collectFallback>> | null = null;
+        let councilEditUsed = false;
+        console.log(`[builder-arm] isBuilderMode=${isBuilderMode} mode=${resolvedMode} turnKind=${turnKind} councilFlag=${process.env.VAI_COUNCIL_CODEGEN !== '0'} brief=${JSON.stringify(content.slice(0, 60))}`);
+        if (isBuilderMode && process.env.VAI_COUNCIL_CODEGEN !== '0') {
+          const councilMembers = this.builderCouncilMembers();
+          // Active-sandbox awareness: when the desktop attached the running
+          // project (name + file snapshots), an iteration-shaped prompt must
+          // PATCH that project. Without this, "make my background more fancy"
+          // becomes a brand-new "Fancy Background App" (live failure).
+          let councilEdit: CouncilEditContext | undefined;
+          const sandboxContext = parseActiveSandboxContext(systemPrompt);
+          if (sandboxContext && sandboxContext.files.length > 0) {
+            const builderRoute = routeBuilderRequest({
+              input: content,
+              activeMode: 'builder',
+              hasActiveSandboxContext: true,
+              snapshotPaths: sandboxContext.files.map((file) => file.path),
+            });
+            if (builderRoute.shouldPatchActiveSandbox) councilEdit = sandboxContext;
+          }
+          if (councilMembers.length > 0) {
+            const councilStartedAt = Date.now();
+            console.log(`[council] start members=${councilMembers.map((m) => m.id).join(',')} edit=${Boolean(councilEdit)} brief=${JSON.stringify(content.slice(0, 80))}`);
+            try {
+              for await (const event of councilGenerateApp({ brief: content, members: councilMembers, edit: councilEdit })) {
+                if (event.type === 'stage') {
+                  console.log(`[council] ${event.stage}/${event.status}: ${event.label}${event.detail ? ` — ${event.detail.slice(0, 140)}` : ''}`);
+                } else {
+                  console.log(`[council] result: ${event.result ? `shipped (${event.result.memberIds.join(',')}, repairs=${event.result.repairsUsed})` : 'null'}`);
+                }
+                if (event.type === 'stage') {
+                  yield {
+                    type: 'progress',
+                    progress: {
+                      stage: `council-${event.stage}`,
+                      label: event.label,
+                      detail: event.detail,
+                      status: event.status,
+                    },
+                  } as ChatChunk;
+                  continue;
+                }
+                if (event.result) {
+                  const councilDurationMs = Date.now() - councilStartedAt;
+                  councilResult = {
+                    chunks: [{ type: 'done', usage: event.result.usage, durationMs: councilDurationMs } as ChatChunk],
+                    sourceChunks: [],
+                    text: event.result.output,
+                    durationMs: councilDurationMs,
+                    usage: event.result.usage,
+                  };
+                  responseModelId = councilMembers[0].id;
+                  councilEditUsed = Boolean(councilEdit);
+                }
+              }
+            } catch (error) {
+              councilResult = null;
+              // Never silent: the user steers by seeing what failed.
+              yield {
+                type: 'progress',
+                progress: {
+                  stage: 'council-error',
+                  label: 'Council build crashed — falling back to the single-model arm',
+                  detail: (error instanceof Error ? error.message : String(error)).slice(0, 160),
+                  status: 'done',
+                },
+              } as ChatChunk;
+            }
+          }
+        }
+
+        const usedCouncilArtifact = councilResult !== null;
+        let fallbackResult = councilResult ?? await collectFallback(fallbackMessages);
         totalUsage = addTokenUsage(totalUsage, fallbackResult.usage);
         fallbackDurationMs += fallbackResult.durationMs;
         let fbText = isBuilderMode
           ? repairBuilderFallbackFileBlocks(fallbackResult.text).text
           : fallbackResult.text;
-        let fbBuilderSatisfaction = isBuilderMode
-          ? evaluateBuilderRequestSatisfaction(content, fbText, {
-            minAnchorCoverage: FALLBACK_BUILDER_MIN_ANCHOR_COVERAGE,
-          })
+        // A council artifact already passed an internal compile gate + council
+        // review + bounded repair, so it is held to the DEFAULT anchor gate —
+        // the strict fallback threshold was tuned for unvalidated one-shot
+        // local-model output and would let a single-file echo beat a compiled
+        // scaffold on raw keyword coverage (live smoke-test artifact).
+        // A council EDIT bypasses the anchor gate entirely: its output is the
+        // changed files only, so fresh-build anchor coverage is meaningless,
+        // and the legacy one-shot repair must never replace a targeted patch
+        // with a new app built from the request's words.
+        let fbBuilderSatisfaction: BuilderSatisfactionReport | null = isBuilderMode
+          ? councilEditUsed
+            ? { hasFileBlocks: true, satisfied: true, coverage: 1, anchorsHit: 0, anchorsTotal: 0, missingAnchors: [], reasons: ['council-edit-artifact'] }
+            : evaluateBuilderRequestSatisfaction(content, fbText, usedCouncilArtifact
+              ? undefined
+              : { minAnchorCoverage: FALLBACK_BUILDER_MIN_ANCHOR_COVERAGE })
           : null;
         let builderRepairAttempted = false;
         let answerQualityRepairAttempted = false;
@@ -1833,7 +2182,16 @@ export class ChatService {
         // often gets close but narrates, omits sandbox fence metadata, or leaves
         // requested behaviors out. Feed the structural miss back once, then
         // keep the better artifact; never loop indefinitely.
-        if (fbBuilderSatisfaction && !fbBuilderSatisfaction.satisfied) {
+        //
+        // Council artifacts are exempt: the council carries its own satisfaction
+        // machinery (architect spec from the brief, reviewers checking against
+        // the brief, a real compile gate, bounded repair). The anchor gate is a
+        // keyword-echo heuristic for unvalidated one-shot output, and it has
+        // twice replaced a correct council app with a worse single-file echo —
+        // live case: a tsc-clean "Swipe Match" tinder clone scored 0/2 anchors
+        // because it didn't contain the words "tinder clone", while the
+        // one-shot index.html echoing "Tinder Clone" scored 2/2 and won.
+        if (fbBuilderSatisfaction && !fbBuilderSatisfaction.satisfied && !usedCouncilArtifact) {
           builderRepairAttempted = true;
           const repairMessages = buildBuilderFallbackRepairMessages(fallbackMessages, fbBuilderSatisfaction);
           const repairResult = await collectFallback(repairMessages);
@@ -1847,6 +2205,49 @@ export class ChatService {
             fallbackResult = repairResult;
             fbText = repairedText;
             fbBuilderSatisfaction = repairedSatisfaction;
+          }
+        }
+
+        // Quality gate for the one-shot arm: when the council refused to ship,
+        // the fallback may NOT stealth-ship an ungated artifact (live failure:
+        // council refused a mismatched draft → fallback shipped a white card
+        // with a broken external image). Refusing honestly beats shipping junk.
+        if (isBuilderMode && !usedCouncilArtifact && hasBuilderFileBlocks(fbText)) {
+          const oneShotFiles = extractTitledFiles(fbText);
+          const oneShotApp = oneShotFiles.get('src/App.tsx') ?? null;
+          const gateErrors: string[] = [];
+          if (oneShotApp) {
+            const report = await validateGeneratedApp({ appTsx: oneShotApp, stylesCss: oneShotFiles.get('src/styles.css') ?? null });
+            gateErrors.push(...report.errors);
+          } else {
+            const html = oneShotFiles.get('index.html') ?? '';
+            if (!html) {
+              gateErrors.push('no recognizable app artifact (src/App.tsx or index.html)');
+            } else {
+              const styleBody = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n');
+              const ruleCount = (styleBody.match(/\{/g) ?? []).length;
+              if (ruleCount < 10) gateErrors.push(`only ${ruleCount} CSS rules — visually unfinished`);
+              if (!/:hover/.test(styleBody)) gateErrors.push('no hover states');
+              if (/https?:\/\/(?!www\.w3\.org)/.test(html)) gateErrors.push('external asset URLs (broken images offline)');
+            }
+          }
+          if (gateErrors.length > 0) {
+            fbText = [
+              `I attempted this build but the result did not meet the quality bar (${gateErrors.slice(0, 2).join('; ')}), so I did not apply it — your preview is unchanged.`,
+              '',
+              'Say **try again** to rebuild from scratch, or add specifics (features, style, layout) and I will target them directly.',
+            ].join('\n');
+            responseModelId = 'vai:builder-quality-gate';
+            fbBuilderSatisfaction = { hasFileBlocks: false, satisfied: false, coverage: 0, anchorsHit: 0, anchorsTotal: 0, missingAnchors: [], reasons: ['builder-quality-refusal'] };
+            yield {
+              type: 'progress',
+              progress: {
+                stage: 'quality-check',
+                label: 'Build withheld — below the quality bar',
+                detail: gateErrors.slice(0, 2).join(' | '),
+                status: 'done',
+              },
+            } as ChatChunk;
           }
         }
 
@@ -1983,7 +2384,12 @@ export class ChatService {
           trigger: builderFiles ? 'builder-unsatisfied' : fallbackDecision.reason,
           fallbackModelId,
           verificationStage: fbBuilderSatisfaction
-            ? `${builderRepairAttempted ? 'builder-retry' : 'builder'}-${fbBuilderSatisfaction.satisfied ? 'satisfied' : 'unsatisfied'}`
+            ? usedCouncilArtifact
+              // Council artifacts pass their own compile + review gates; the
+              // anchor coverage number is reported for the record, not as a
+              // verdict (a "Swipe Match" tinder clone legitimately scores 0).
+              ? `council-${councilEditUsed ? 'edit' : 'build'}-shipped`
+              : `${builderRepairAttempted ? 'builder-retry' : 'builder'}-${fbBuilderSatisfaction.satisfied ? 'satisfied' : 'unsatisfied'}`
             : [
               answerQualityRepairAttempted
                 ? `${usedConservativeQualityFallback ? 'quality-fallback' : 'quality-retry'}-${fbAnswerQuality?.verdict ?? 'unknown'}`
@@ -1993,7 +2399,7 @@ export class ChatService {
           durationMs: durationMs ?? Date.now() - streamStartedAt,
         });
         if (turnPlan) {
-          fallbackThinking.routePlan = buildRoutePlan(turnPlan);
+          fallbackThinking.routePlan = buildRoutePlan(turnPlan, turnShadowScores);
         }
 
         const decorateFallbackDone = (chunk: ChatChunk): ChatChunk => chunk.type === 'done'
@@ -2005,6 +2411,34 @@ export class ChatService {
           : chunk;
 
         for (const chunk of fallbackResult.sourceChunks) yield chunk;
+        if (fallbackResult.sourceChunks.length === 0) {
+          for (const chunk of yieldPrefetchedEvidence()) {
+            yield chunk;
+          }
+        } else {
+          const sourced = fallbackResult.sourceChunks.find(
+            (chunk) => chunk.type === 'sources' && (chunk.sources?.length ?? 0) > 0,
+          );
+          if (sourced?.sources?.length) {
+            turnEvidencePersist = {
+              sources: sourced.sources,
+              sourcePresentation: sourced.sourcePresentation,
+              researchTrace: sourced.researchTrace,
+              followUps: sourced.followUps,
+              confidence: sourced.confidence,
+            };
+          }
+        }
+        const prefetched = currentPrefetchedEvidence();
+        if (!turnEvidencePersist && prefetched?.type === 'sources' && prefetched.sources?.length) {
+          turnEvidencePersist = {
+            sources: prefetched.sources,
+            sourcePresentation: prefetched.sourcePresentation,
+            researchTrace: prefetched.researchTrace,
+            followUps: prefetched.followUps,
+            confidence: prefetched.confidence,
+          };
+        }
         if (fbVerdict && fbVerdict.action !== 'pass') {
           const surfaced = fbVerdict.text;
           fullText = surfaced;
@@ -2033,6 +2467,11 @@ export class ChatService {
       }
     } else {
       let primarySawDone = false;
+      if (!prefetchedEvidenceYielded) {
+        for (const chunk of yieldPrefetchedEvidence()) {
+          yield chunk;
+        }
+      }
       for await (const chunk of adapter.chatStream({ messages: primaryMessages, noLearn })) {
         if (chunk.modelId) responseModelId = chunk.modelId;
         if (chunk.type === 'sources') {
@@ -2078,7 +2517,7 @@ export class ChatService {
               strategy: 'model-primary',
               modelTag: primaryModelId,
               confidence: 0.6,
-              routePlan: buildRoutePlan(turnPlan),
+              routePlan: buildRoutePlan(turnPlan, turnShadowScores),
             }
           : { strategy: 'model-primary', modelTag: primaryModelId, confidence: 0.6 };
         if (councilThinking) t.council = councilThinking;
@@ -2129,11 +2568,10 @@ export class ChatService {
 
     // Persist plan + baseline for model turns as well (critical for reference data
     // when steering caused the fall-through).
-    const modelPlanBlob = turnPlan
+    const modelPlanBlob = turnPlan || turnEvidencePersist
       ? JSON.stringify({
-          steered: turnPlan,
-          baseline: turnBaselinePlan ?? null,
-          hadGuidance: !!turnBaselinePlan,
+          ...(turnPlan ? { steered: turnPlan, baseline: turnBaselinePlan ?? null, hadGuidance: !!turnBaselinePlan } : {}),
+          ...(turnEvidencePersist ? { evidence: turnEvidencePersist } : {}),
         })
       : undefined;
 

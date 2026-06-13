@@ -137,8 +137,10 @@ export function tryEmitPrivateLiveContextResponse(input: string): string | null 
     return unavailable('editor selection', 'VS Code companion editor-selection', 'report the selected text');
   }
 
-  const asksForChatWindow = /\b(?:chat window|current chat window|screen)\b/i.test(lower)
-    && /\b(?:exact text|direct observation|right now|currently|see|visible)\b/i.test(lower);
+  const explicitlyNamesChatWindow = /\b(?:current\s+)?chat window\b/i.test(lower);
+  const asksForObservedScreen = /\bscreen\b/i.test(lower)
+    && /\b(?:exact text|direct observation|right now|currently visible|what (?:do|can) you see)\b/i.test(lower);
+  const asksForChatWindow = explicitlyNamesChatWindow || asksForObservedScreen;
   if (asksForChatWindow) {
     return unavailable('chat-window observation', 'desktop UI observation', 'report text visible in the current chat window');
   }

@@ -117,3 +117,59 @@ describe('builder-satisfaction', () => {
     expect(repairBuilderFallbackFileBlocks(output)).toEqual({ text: output, changed: false });
   });
 });
+
+describe('generic preview shell (echo scaffold)', () => {
+  const echoShell = [
+    '```tsx title="src/App.tsx"',
+    'export default function App() {',
+    '  const features = [',
+    "    { label: 'recipe collection app where i', hint: 'Editable from chat.' },",
+    "    { label: 'search recipes by name or', hint: 'Tunable via controls.' },",
+    '  ];',
+    '  return <main><p className="eyebrow">Vai · live preview</p></main>;',
+    '}',
+    '```',
+  ].join('\n');
+
+  it('never counts as satisfaction even though it echoes every request anchor', () => {
+    const report = evaluateBuilderRequestSatisfaction(
+      'Build a recipe collection app where I can search recipes by name',
+      echoShell,
+    );
+    expect(report.satisfied).toBe(false);
+    expect(report.reasons).toContain('generic-preview-shell');
+  });
+
+  it('does not flag real apps that lack the shell signature', () => {
+    const report = evaluateBuilderRequestSatisfaction(
+      'Build a shopping list app with grouped items',
+      REAL_SHOPPING_APP,
+    );
+    expect(report.reasons).not.toContain('generic-preview-shell');
+  });
+});
+
+describe('repairBuilderFallbackFileBlocks formatting recovery', () => {
+  it('quotes a bare title attribute on the fence line', () => {
+    const raw = '```html title=index.html\n<!DOCTYPE html><html><body>hi</body></html>\n```';
+    const repaired = repairBuilderFallbackFileBlocks(raw);
+    expect(repaired.changed).toBe(true);
+    expect(repaired.reason).toBe('unquoted-title');
+    expect(hasBuilderFileBlocks(repaired.text)).toBe(true);
+  });
+
+  it('drops a leaked title= line before the doctype when titling a bare HTML fence', () => {
+    const raw = [
+      '```html',
+      'title=index.html',
+      '<!DOCTYPE html>',
+      '<html><body><h1>Workout Log</h1></body></html>',
+      '```',
+    ].join('\n');
+    const repaired = repairBuilderFallbackFileBlocks(raw);
+    expect(repaired.changed).toBe(true);
+    expect(repaired.reason).toBe('single-html-index');
+    expect(repaired.text).toContain('title="index.html"');
+    expect(repaired.text).not.toMatch(/\ntitle=index\.html/);
+  });
+});

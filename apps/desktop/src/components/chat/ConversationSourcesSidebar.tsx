@@ -34,7 +34,7 @@ function trustBand(score: number): { label: string; dot: string; text: string } 
   if (score >= 0.8) return { label: 'Strong', dot: 'bg-emerald-400', text: 'text-emerald-300' };
   if (score >= 0.55) return { label: 'Solid', dot: 'bg-sky-400', text: 'text-sky-300' };
   if (score >= 0.35) return { label: 'Mixed', dot: 'bg-amber-400', text: 'text-amber-300' };
-  return { label: 'Thin', dot: 'bg-zinc-500', text: 'text-zinc-400' };
+  return { label: 'Thin', dot: 'bg-[color:var(--color-muted)]', text: 'text-[color:var(--color-muted)]' };
 }
 
 interface Props {
@@ -60,6 +60,12 @@ export function ConversationSourcesSidebar({ messages, isOpen, onClose, onJumpTo
     return Array.from(set);
   }, [aggregated]);
   const visibleFollowUps = useMemo(() => (relatedFollowUps ?? []).slice(0, 6), [relatedFollowUps]);
+  const lastAssistant = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i]?.role === 'assistant') return messages[i];
+    }
+    return null;
+  }, [messages]);
 
   return (
     <AnimatePresence initial={false}>
@@ -72,21 +78,21 @@ export function ConversationSourcesSidebar({ messages, isOpen, onClose, onJumpTo
           animate={{ width: 'min(22rem, 32vw)', opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 320, damping: 34, mass: 0.7 }}
-          className="relative flex h-full min-h-0 flex-shrink-0 flex-col overflow-hidden border-l border-zinc-800/70 bg-zinc-950/85 backdrop-blur-md"
+          className="relative flex h-full min-h-0 flex-shrink-0 flex-col overflow-hidden border-l border-[color:var(--border)] bg-[color:var(--panel)]/95 backdrop-blur-md"
         >
-          <div className="flex items-start justify-between gap-3 border-b border-zinc-900/80 px-4 py-3">
+          <div className="flex items-start justify-between gap-3 border-b border-[color:var(--border)] px-4 py-3">
             <div className="min-w-0">
-              <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
+              <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--color-subheader)]">
                 <Layers className="h-3 w-3" />
                 <span>Sources in this chat</span>
               </div>
               <div className="mt-1.5 flex items-baseline gap-2">
-                <span className="text-[18px] font-semibold tabular-nums text-zinc-100">{aggregated.length}</span>
-                <span className="text-[11px] text-zinc-500">
+                <span className="text-[18px] font-semibold tabular-nums text-[color:var(--fg)]">{aggregated.length}</span>
+                <span className="text-[11px] text-[color:var(--color-muted)]">
                   {aggregated.length === 1 ? 'source' : 'sources'}
                   {domains.length > 0 && (
                     <>
-                      <span className="mx-1.5 text-zinc-700">·</span>
+                      <span className="mx-1.5 text-[color:var(--border)]">·</span>
                       {domains.length} {domains.length === 1 ? 'domain' : 'domains'}
                     </>
                   )}
@@ -98,15 +104,15 @@ export function ConversationSourcesSidebar({ messages, isOpen, onClose, onJumpTo
               onClick={onClose}
               data-conversation-sources-close
               aria-label="Close sources sidebar"
-              className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-900/60 hover:text-zinc-200"
+              className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-[color:var(--color-muted)] transition-colors hover:bg-[color:var(--panel-bg-muted)] hover:text-[color:var(--fg)]"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
 
           {visibleFollowUps.length > 0 && (
-            <div data-conversation-sources-related className="border-b border-zinc-900/80 px-4 py-3">
-              <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
+            <div data-conversation-sources-related className="border-b border-[color:var(--border)] px-4 py-3">
+              <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--color-subheader)]">
                 <Sparkles className="h-3 w-3" />
                 <span>Related</span>
               </div>
@@ -117,10 +123,10 @@ export function ConversationSourcesSidebar({ messages, isOpen, onClose, onJumpTo
                     type="button"
                     onClick={() => onFollowUp?.(q)}
                     data-conversation-related-followup={i + 1}
-                    className="group/fu flex w-full items-center gap-2 rounded-lg border border-zinc-800/60 bg-zinc-900/40 px-2.5 py-2 text-left text-[12px] leading-[1.35] text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-900/80 hover:text-zinc-100"
+                    className="group/fu flex w-full items-center gap-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] px-2.5 py-2 text-left text-[12px] leading-[1.35] text-[color:var(--chat-body)] transition-colors hover:border-[color:var(--selection-border,var(--border))] hover:bg-[color:var(--panel)] hover:text-[color:var(--fg)]"
                   >
                     <span className="line-clamp-2 flex-1">{q}</span>
-                    <span className="flex-shrink-0 text-zinc-600 transition-colors group-hover/fu:text-zinc-300">→</span>
+                    <span className="flex-shrink-0 text-[color:var(--color-muted)] transition-colors group-hover/fu:text-[color:var(--fg)]">→</span>
                   </button>
                 ))}
               </div>
@@ -129,16 +135,18 @@ export function ConversationSourcesSidebar({ messages, isOpen, onClose, onJumpTo
 
           {aggregated.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-900/70 text-zinc-600">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[color:var(--panel-bg-muted)] text-[color:var(--color-muted)]">
                 <Layers className="h-4 w-4" />
               </div>
-              <p className="text-[12px] font-medium text-zinc-300">No sources yet</p>
-              <p className="text-[11px] leading-5 text-zinc-500">
-                Ask Vai a research question and any sources used to ground the answer will collect here for the whole chat.
+              <p className="text-[12px] font-medium text-[color:var(--fg)]">No sources yet</p>
+              <p className="text-[11px] leading-5 text-[color:var(--color-muted)]">
+                {lastAssistant
+                  ? 'This answer was drawn from model knowledge. Web sources appear here when Vai searches to ground a reply.'
+                  : 'Ask Vai a research question and any sources used to ground the answer will collect here for the whole chat.'}
               </p>
             </div>
           ) : (
-            <ul className="flex-1 divide-y divide-zinc-900/70 overflow-y-auto px-3 py-2">
+            <ul className="flex-1 divide-y divide-[color:var(--border)] overflow-y-auto px-3 py-2">
               {aggregated.map((src, idx) => {
                 const band = trustBand(src.trustScore ?? 0);
                 const label = src.domain.replace(/^www\./, '');
@@ -149,13 +157,13 @@ export function ConversationSourcesSidebar({ messages, isOpen, onClose, onJumpTo
                       target="_blank"
                       rel="noopener noreferrer"
                       data-conversation-source-item={idx + 1}
-                      className="group/src flex items-start gap-3 rounded-lg px-2 py-3 transition-colors hover:bg-zinc-900/45"
+                      className="group/src flex items-start gap-3 rounded-lg px-2 py-3 transition-colors hover:bg-[color:var(--panel-bg-muted)]"
                     >
                       <div className="flex flex-shrink-0 flex-col items-center gap-1 pt-0.5">
-                        <span className="font-mono text-[10px] font-semibold tabular-nums text-zinc-500 group-hover/src:text-zinc-300">
+                        <span className="font-mono text-[10px] font-semibold tabular-nums text-[color:var(--color-muted)] group-hover/src:text-[color:var(--fg)]">
                           {String(idx + 1).padStart(2, '0')}
                         </span>
-                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-zinc-900/80 ring-1 ring-zinc-800/80">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[color:var(--panel-bg-muted)] ring-1 ring-[color:var(--border)]">
                           {src.favicon ? (
                             <img
                               src={src.favicon}
@@ -164,24 +172,24 @@ export function ConversationSourcesSidebar({ messages, isOpen, onClose, onJumpTo
                               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                             />
                           ) : (
-                            <span className="text-[9px] font-bold uppercase text-zinc-500">{label.slice(0, 1)}</span>
+                            <span className="text-[9px] font-bold uppercase text-[color:var(--color-muted)]">{label.slice(0, 1)}</span>
                           )}
                         </span>
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
-                          <span className="truncate font-medium text-zinc-300">{label}</span>
-                          <span className="flex h-1 w-1 flex-shrink-0 rounded-full bg-zinc-700" />
+                        <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-muted)]">
+                          <span className="truncate font-medium text-[color:var(--chat-body)]">{label}</span>
+                          <span className="flex h-1 w-1 flex-shrink-0 rounded-full bg-[color:var(--border)]" />
                           <span className={`inline-flex flex-shrink-0 items-center gap-1 normal-case tracking-normal ${band.text}`}>
                             <span className={`h-1.5 w-1.5 rounded-full ${band.dot}`} />
                             {band.label}
                           </span>
                         </div>
-                        <p className="mt-1 line-clamp-2 text-[12.5px] font-medium leading-5 text-zinc-100 transition-colors group-hover/src:text-white">
+                        <p className="mt-1 line-clamp-2 text-[12.5px] font-medium leading-5 text-[color:var(--fg)] transition-colors group-hover/src:text-[color:var(--accent-text,var(--fg))]">
                           {src.title}
                         </p>
                         {src.snippet && (
-                          <p className="mt-1 line-clamp-2 text-[11px] leading-[1.45] text-zinc-500 transition-colors group-hover/src:text-zinc-400">
+                          <p className="mt-1 line-clamp-2 text-[11px] leading-[1.45] text-[color:var(--color-muted)] transition-colors group-hover/src:text-[color:var(--chat-body)]">
                             {src.snippet}
                           </p>
                         )}
@@ -192,19 +200,19 @@ export function ConversationSourcesSidebar({ messages, isOpen, onClose, onJumpTo
                                 key={mi}
                                 type="button"
                                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onJumpToMessage(mi); }}
-                                className="rounded-md border border-zinc-800/80 bg-zinc-900/40 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 transition-colors hover:border-zinc-700 hover:bg-zinc-800/70 hover:text-zinc-200"
+                                className="rounded-md border border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] px-1.5 py-0.5 text-[10px] font-medium text-[color:var(--color-muted)] transition-colors hover:border-[color:var(--selection-border,var(--border))] hover:bg-[color:var(--panel)] hover:text-[color:var(--fg)]"
                                 title={`Jump to answer #${Math.floor(mi / 2) + 1}`}
                               >
                                 Used in #{Math.floor(mi / 2) + 1}
                               </button>
                             ))}
                             {src.messageIndices.length > 4 && (
-                              <span className="text-[10px] text-zinc-600">+{src.messageIndices.length - 4}</span>
+                              <span className="text-[10px] text-[color:var(--color-muted)]">+{src.messageIndices.length - 4}</span>
                             )}
                           </div>
                         )}
                       </div>
-                      <ExternalLink className="mt-1 h-3 w-3 flex-shrink-0 text-zinc-700 transition-colors group-hover/src:text-zinc-300" />
+                      <ExternalLink className="mt-1 h-3 w-3 flex-shrink-0 text-[color:var(--color-muted)] transition-colors group-hover/src:text-[color:var(--fg)]" />
                     </a>
                   </li>
                 );

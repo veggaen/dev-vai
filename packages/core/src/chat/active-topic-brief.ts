@@ -111,7 +111,7 @@ export function extractActiveTopicBrief(
  * snippet is almost certainly a coincidence and should not win.
  */
 const ANAPHORIC_GATE_RE =
-  /\b(?:it|this|that|these|those|them|same|continue|more|deeper|expand|further|again|keep\s+going)\b/i;
+  /\b(?:it|this|that|these|those|them|his|her|their|same|continue|more|deeper|expand|further|again|keep\s+going)\b/i;
 
 export function hasTopicOverlap(
   input: string,

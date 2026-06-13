@@ -5425,6 +5425,27 @@ describe('VaiEngine', () => {
     expect(body).not.toContain('ask me anything');
   });
 
+  it('treats short non-question openers as greetings instead of web-search terms', async () => {
+    const chunks: Array<{ type: string; sources?: unknown[] }> = [];
+    for await (const chunk of engine.chatStream({
+      messages: [{ role: 'user', content: 'heya' }],
+      noLearn: true,
+    })) {
+      chunks.push(chunk);
+    }
+
+    const sourceChunk = chunks.find((chunk) => chunk.type === 'sources');
+    const text = chunks
+      .filter((chunk) => chunk.type === 'text_delta')
+      .map((chunk) => (chunk as { textDelta?: string }).textDelta ?? '')
+      .join('');
+
+    expect(sourceChunk).toBeUndefined();
+    expect(text.toLowerCase()).toContain("what's up");
+    expect(text.toLowerCase()).not.toContain('anime');
+    expect(text.toLowerCase()).not.toContain('wikipedia');
+  });
+
   it('answers ambiguous GitHub ranking prompts without drifting into junk retrieval', async () => {
     const response = await engine.chat({
       messages: [{ role: 'user', content: 'who is top master frontend web dev on github' }],

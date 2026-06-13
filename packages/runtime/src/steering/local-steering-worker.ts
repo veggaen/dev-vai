@@ -140,7 +140,13 @@ function durationFromEnv(value: string | undefined, fallback: number, max: numbe
 export function localSteeringOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): LocalSteeringWorkerOptions {
   return {
     enabled: ['1', 'true', 'yes'].includes((env.VAI_LOCAL_STEERING_ENABLED ?? '').toLowerCase()),
-    model: env.VAI_LOCAL_STEERING_MODEL?.trim() || 'qwen2.5:7b',
+    // Role override → fast local role → capable local role → legacy default.
+    // Following LOCAL_MODEL keeps this current when the operator upgrades the
+    // local model instead of pinning a stale generation forever.
+    model: env.VAI_LOCAL_STEERING_MODEL?.trim()
+      || env.LOCAL_FAST_MODEL?.trim()
+      || env.LOCAL_MODEL?.trim()
+      || 'qwen2.5:7b',
     baseUrl: (env.VAI_LOCAL_STEERING_URL?.trim() || 'http://localhost:11434').replace(/\/$/, ''),
     timeoutMs: durationFromEnv(env.VAI_LOCAL_STEERING_TIMEOUT_MS, 8000, 60_000),
     visibleWaitMs: durationFromEnv(env.VAI_LOCAL_STEERING_VISIBLE_WAIT_MS, 1200, 5000),
@@ -255,6 +261,9 @@ export class LocalSteeringWorker {
         body: JSON.stringify({
           model: this.options.model,
           stream: false,
+          // Keep the steering model resident — a reload per guided turn costs
+          // seconds and (for large models) evicts the chat model from VRAM.
+          keep_alive: process.env.VAI_LOCAL_KEEP_ALIVE?.trim() || '30m',
           options: { temperature: 0 },
           prompt,
         }),

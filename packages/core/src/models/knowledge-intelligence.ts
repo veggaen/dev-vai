@@ -671,25 +671,53 @@ export class KnowledgeConnector {
 export class KnowledgeHygiene {
   /**
    * Find groups of near-duplicate entries.
+   *
+   * Uses an inverted word index instead of comparing every entry with every
+   * other entry. Any pair that can clear the Jaccard threshold must share at
+   * least one meaningful word and have compatible set sizes, so disjoint and
+   * impossible pairs never enter the exact similarity pass.
    */
   findDuplicates(entries: KnowledgeEntry[]): DuplicateGroup[] {
     const groups: DuplicateGroup[] = [];
     const assigned = new Set<number>();
+    const wordSets = entries.map(
+      (entry) => new Set(meaningfulWords(`${entry.pattern} ${entry.response}`)),
+    );
+    const postings = new Map<string, number[]>();
+
+    for (let index = 0; index < wordSets.length; index++) {
+      for (const word of wordSets[index]) {
+        const indices = postings.get(word);
+        if (indices) indices.push(index);
+        else postings.set(word, [index]);
+      }
+    }
 
     for (let i = 0; i < entries.length; i++) {
       if (assigned.has(i)) continue;
 
-      const wordsI = new Set(meaningfulWords(`${entries[i].pattern} ${entries[i].response}`));
+      const wordsI = wordSets[i];
       if (wordsI.size < 2) continue;
 
       const duplicates: number[] = [];
+      const intersections = new Map<number, number>();
+      const minCandidateSize = Math.ceil(wordsI.size * DUPLICATE_THRESHOLD);
+      const maxCandidateSize = Math.floor(wordsI.size / DUPLICATE_THRESHOLD);
 
-      for (let j = i + 1; j < entries.length; j++) {
-        if (assigned.has(j)) continue;
+      for (const word of wordsI) {
+        for (const j of postings.get(word) ?? []) {
+          if (j <= i || assigned.has(j)) continue;
+          const candidateSize = wordSets[j].size;
+          if (candidateSize < minCandidateSize || candidateSize > maxCandidateSize) continue;
+          intersections.set(j, (intersections.get(j) ?? 0) + 1);
+        }
+      }
 
-        const wordsJ = new Set(meaningfulWords(`${entries[j].pattern} ${entries[j].response}`));
-        const sim = jaccard(wordsI, wordsJ);
-
+      const candidates = [...intersections.keys()].sort((a, b) => a - b);
+      for (const j of candidates) {
+        const intersection = intersections.get(j) ?? 0;
+        const union = wordsI.size + wordSets[j].size - intersection;
+        const sim = union > 0 ? intersection / union : 0;
         if (sim >= DUPLICATE_THRESHOLD) {
           duplicates.push(j);
           assigned.add(j);

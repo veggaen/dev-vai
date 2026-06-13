@@ -30,6 +30,8 @@ const BREAKPOINTS: Record<BreakpointKey, { width: number; icon: typeof Smartphon
 
 const STEP_ORDER = ['creating', 'writing', 'installing', 'building', 'running'] as const;
 
+const EMPTY_HANDOFF_STEPS: ReadonlyArray<{ stage: string; label: string; detail?: string; status: string }> = [];
+
 const STEP_LABELS: Record<string, string> = {
   creating: 'Creating',
   writing: 'Writing files',
@@ -447,6 +449,7 @@ function PreviewHandoffShell({
   eyebrow,
   previewUrl,
   activeStep,
+  steps,
   studio = false,
 }: {
   title: string;
@@ -454,6 +457,8 @@ function PreviewHandoffShell({
   eyebrow: string;
   previewUrl?: string;
   activeStep?: string;
+  /** Live pipeline steps — rendered instead of the fake skeleton so the wait shows REAL process. */
+  steps?: ReadonlyArray<{ stage: string; label: string; detail?: string; status: string }>;
   /** Base44-like light gradient + sun mark */
   studio?: boolean;
 }) {
@@ -484,24 +489,44 @@ function PreviewHandoffShell({
             </div>
             <span className="truncate font-mono">{previewUrl ?? 'Preparing live preview...'}</span>
           </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <div className="rounded-2xl border border-zinc-800/70 bg-zinc-950/70 p-3">
-              <div className="mb-3 h-3 w-24 rounded-full bg-zinc-800" />
-              <div className="space-y-2">
-                <div className="h-16 rounded-xl bg-zinc-900" />
-                <div className="h-3 w-4/5 rounded-full bg-zinc-800" />
-                <div className="h-3 w-3/5 rounded-full bg-zinc-800" />
+          {steps && steps.length > 0 ? (
+            <div className="mt-4 space-y-2">
+              {steps.slice(-5).map((step, index, shown) => {
+                const isLast = index === shown.length - 1;
+                const running = isLast && step.status === 'running';
+                return (
+                  <div key={`${step.stage}-${index}`} className="flex min-w-0 items-start gap-2.5 rounded-xl border border-zinc-800/60 bg-zinc-950/60 px-3 py-2">
+                    <span className={`mt-1.5 inline-flex h-1.5 w-1.5 shrink-0 rounded-full ${running ? 'animate-pulse bg-violet-400' : 'bg-emerald-400'}`} />
+                    <div className="min-w-0">
+                      <div className={`truncate text-[12px] ${isLast ? 'font-medium text-zinc-100' : 'text-zinc-400'}`}>{step.label}</div>
+                      {step.detail && isLast && (
+                        <div className="mt-0.5 line-clamp-2 text-[11px] leading-5 text-zinc-500">{step.detail}</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-zinc-800/70 bg-zinc-950/70 p-3">
+                <div className="mb-3 h-3 w-24 rounded-full bg-zinc-800" />
+                <div className="space-y-2">
+                  <div className="h-16 rounded-xl bg-zinc-900" />
+                  <div className="h-3 w-4/5 rounded-full bg-zinc-800" />
+                  <div className="h-3 w-3/5 rounded-full bg-zinc-800" />
+                </div>
+              </div>
+              <div className="rounded-2xl border border-zinc-800/70 bg-zinc-950/70 p-3">
+                <div className="mb-3 h-3 w-28 rounded-full bg-zinc-800" />
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="h-20 rounded-xl bg-zinc-900" />
+                  <div className="h-20 rounded-xl bg-zinc-900" />
+                  <div className="col-span-2 h-10 rounded-xl bg-zinc-900" />
+                </div>
               </div>
             </div>
-            <div className="rounded-2xl border border-zinc-800/70 bg-zinc-950/70 p-3">
-              <div className="mb-3 h-3 w-28 rounded-full bg-zinc-800" />
-              <div className="grid grid-cols-2 gap-2">
-                <div className="h-20 rounded-xl bg-zinc-900" />
-                <div className="h-20 rounded-xl bg-zinc-900" />
-                <div className="col-span-2 h-10 rounded-xl bg-zinc-900" />
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
@@ -1112,6 +1137,13 @@ export function PreviewPanel() {
   const themePreference = useLayoutStore((s) => s.themePreference);
   const buildStatus = useLayoutStore((s) => s.buildStatus);
   const isStreaming = useChatStore((s) => s.isStreaming);
+  // Live pipeline steps of the streaming turn — shown in the handoff card so
+  // the wait displays REAL process (council stages), not a fake skeleton.
+  const liveHandoffSteps = useChatStore((s) => {
+    if (!s.isStreaming) return EMPTY_HANDOFF_STEPS;
+    const last = s.messages[s.messages.length - 1];
+    return (last?.progressSteps as typeof EMPTY_HANDOFF_STEPS | undefined) ?? EMPTY_HANDOFF_STEPS;
+  });
 
   /* ── Phase 0: cursor store (global — rendered by VaiOverlaySystem) ── */
   const demoRunning = useCursorStore((s) => s.demoRunning);
@@ -1418,10 +1450,13 @@ export function PreviewPanel() {
                 <PreviewHandoffShell
                   studio={studioChrome}
                   eyebrow="Preview handoff"
-                  title="Starting preview"
-                  body={buildStatus.message || 'Creating the sandbox, wiring dependencies, and reconnecting the live app for this conversation.'}
+                  title={isStreaming ? 'Building your app' : 'Starting preview'}
+                  body={isStreaming
+                    ? 'Vai\'s council is working — these are the real pipeline steps as they happen.'
+                    : buildStatus.message || 'Creating the sandbox, wiring dependencies, and reconnecting the live app for this conversation.'}
                   previewUrl={devPort ? `http://localhost:${devPort}` : undefined}
                   activeStep={activeStepLabel}
+                  steps={liveHandoffSteps}
                 />
               )}
             </motion.div>

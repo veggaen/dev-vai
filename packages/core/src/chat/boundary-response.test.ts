@@ -1,13 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import { tryEmitBoundaryResponse } from './boundary-response.js';
+import { reviewTurnSecurity } from './security-review.js';
 
-describe('tryEmitBoundaryResponse', () => {
-  it('escalates chest pain with shortness of breath', () => {
-    const response = tryEmitBoundaryResponse({ content: 'I have crushing chest pain and shortness of breath. What should I do?' });
-    expect(response).toMatch(/emergency services|112|911/i);
-    expect(response).not.toMatch(/wait and see|probably fine/i);
+describe('acute medical-emergency safety net', () => {
+  // Chest-pain escalation moved upstream into security-review.ts so it runs
+  // ahead of every router. This guards the safety path at its real location.
+  it('short-circuits chest pain with shortness of breath into an emergency reply', () => {
+    const result = reviewTurnSecurity({
+      content: 'I have crushing chest pain and shortness of breath. What should I do?',
+    });
+    expect(result.action).toBe('short-circuit');
+    if (result.action === 'short-circuit') {
+      expect(result.reply).toMatch(/emergency services|112|911/i);
+      expect(result.reply).not.toMatch(/wait and see|probably fine/i);
+    }
   });
 
+  it('does not short-circuit an ordinary question', () => {
+    expect(reviewTurnSecurity({ content: 'What is a deadlock?' }).action).toBe('allow');
+  });
+});
+
+describe('tryEmitBoundaryResponse', () => {
   it('keeps legal contract questions jurisdiction-aware', () => {
     const response = tryEmitBoundaryResponse({ content: 'Is this contract enforceable if my customer refuses to pay?' });
     expect(response).toMatch(/jurisdiction|contract terms|lawyer|not legal advice/i);

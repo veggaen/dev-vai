@@ -108,7 +108,12 @@ function detectFileExtension(text: string): string {
   return 'md';
 }
 
-function truncateSnapshotContent(content: string, limit = 1000): string {
+// 10k chars ≈ a full council-built App.tsx. Edits regenerate COMPLETE files
+// from these snapshots, so a tight cap here silently amputates code: the
+// model rewrites what it can see and the applied file loses the rest. The
+// truncation marker lets the server-side edit pipeline exclude any file that
+// still overflows instead of editing it blind.
+function truncateSnapshotContent(content: string, limit = 10000): string {
   if (content.length <= limit) return content;
   return `${content.slice(0, limit).trimEnd()}\n/* truncated for prompt context */`;
 }
@@ -217,7 +222,14 @@ export function ChatWindow() {
   const [showIdePopup, setShowIdePopup] = useState(false);
   const [isResearchRailOpen, setIsResearchRailOpen] = useState(false);
   const [isConversationSourcesOpen, setIsConversationSourcesOpen] = useState(false);
-  const [activityCollapsed, setActivityCollapsed] = useState(false);
+  // Collapsed by default: the strip sits above the composer and expands on
+  // demand — it must never crowd the message input (direct user feedback).
+  const [activityCollapsed, setActivityCollapsed] = useState(true);
+  // …but while a turn is streaming, the live pipeline steps ARE the point:
+  // auto-expand so the user can watch (and steer) what Vai is actually doing.
+  useEffect(() => {
+    if (isStreaming) setActivityCollapsed(false);
+  }, [isStreaming]);
   /** `@` mention: start index in `input`, or null when not in a mention token */
   const [mentionAt, setMentionAt] = useState<number | null>(null);
   const [mentionQuery, setMentionQuery] = useState('');
@@ -590,6 +602,24 @@ export function ChatWindow() {
     }
   }, [isStreaming, pastedImage, messages.length]);
 
+  /* ── Preview shell can push example prompts into chat ── */
+  useEffect(() => {
+    const onPrefill = (event: Event) => {
+      const prompt = (event as CustomEvent<{ prompt?: string }>).detail?.prompt?.trim();
+      if (!prompt) return;
+      setInput(prompt);
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current;
+        if (!ta) return;
+        ta.focus();
+        ta.setSelectionRange(prompt.length, prompt.length);
+        adjustTextareaHeight();
+      });
+    };
+    window.addEventListener('vai:prefill-chat', onPrefill);
+    return () => window.removeEventListener('vai:prefill-chat', onPrefill);
+  }, [adjustTextareaHeight]);
+
   /* ── Image paste + smart text paste ── */
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
@@ -793,7 +823,7 @@ export function ChatWindow() {
       lastSandboxContextHashRef.current = contextHash;
 
       const lines: string[] = [
-        `ACTIVE SANDBOX PROJECT: "${sandboxProjectName || sandboxProjectId}"`,
+        `ACTIVE SANDBOX PROJECT: "${sandboxProjectName || sandboxProjectId}" (project id: ${sandboxProjectId})`,
       ];
       if (sandboxDevPort) {
         lines.push(`Dev server is RUNNING at http://localhost:${sandboxDevPort}`);
@@ -892,18 +922,47 @@ export function ChatWindow() {
     const items: Array<{ key: string; tone: 'violet' | 'blue' | 'emerald' | 'amber' | 'orange'; label: string; detail: string }> = [];
 
     if (isStreaming) {
-      const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content?.toLowerCase() ?? '';
-      const isSearchLikely = /\b(?:what|who|when|where|why|how|latest|current|news|price|weather|search|find|look up|research)\b/.test(lastUserMsg);
-      items.push({
-        key: 'thinking',
-        tone: mode === 'builder' ? 'orange' : isSearchLikely ? 'blue' : 'violet',
-        label: mode === 'builder' ? 'thinking...' : isSearchLikely ? 'Searching the web...' : 'Thinking...',
-        detail: mode === 'builder'
-          ? 'generating code and writing to preview'
-          : isSearchLikely
-            ? 'fetching sources and composing cited answer'
-            : 'composing response',
-      });
+      // Stream the REAL pipeline steps (council architect/coder/stylist/
+      // validate/review/repair, search, escalation…) instead of a canned
+      // "thinking…" line — the user steers Vai by watching what it actually
+      // does, live, not after the fact.
+      const steps = streamingProgressSteps;
+      const latest = steps[steps.length - 1];
+      if (latest) {
+        const toneFor = (stage: string): 'violet' | 'blue' | 'emerald' | 'amber' | 'orange' =>
+          stage.startsWith('council') ? 'orange'
+            : stage === 'search' || stage === 'escalate' ? 'blue'
+              : stage === 'quality-check' ? 'amber'
+                : 'violet';
+        items.push({
+          key: `live-${steps.length}`,
+          tone: toneFor(latest.stage),
+          label: latest.label,
+          detail: latest.detail ?? (latest.status === 'running' ? 'in progress…' : 'done'),
+        });
+        const previous = steps[steps.length - 2];
+        if (previous) {
+          items.push({
+            key: `live-${steps.length - 1}`,
+            tone: 'violet',
+            label: `✓ ${previous.label}`,
+            detail: previous.detail ?? '',
+          });
+        }
+      } else {
+        const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content?.toLowerCase() ?? '';
+        const isSearchLikely = /\b(?:what|who|when|where|why|how|latest|current|news|price|weather|search|find|look up|research)\b/.test(lastUserMsg);
+        items.push({
+          key: 'thinking',
+          tone: mode === 'builder' ? 'orange' : isSearchLikely ? 'blue' : 'violet',
+          label: mode === 'builder' ? 'Starting the build pipeline…' : isSearchLikely ? 'Searching the web...' : 'Thinking...',
+          detail: mode === 'builder'
+            ? 'routing your request to the builder council'
+            : isSearchLikely
+              ? 'fetching sources and composing cited answer'
+              : 'composing response',
+        });
+      }
     }
 
     if (deployPhase === 'deploying' && activeDeployStep) {
@@ -926,7 +985,7 @@ export function ChatWindow() {
     }
 
     return items.slice(0, 3);
-  }, [activeDeployStep, buildStatus.message, buildStatus.step, deployPhase, isStreaming, mode]);
+  }, [activeDeployStep, buildStatus.message, buildStatus.step, deployPhase, isStreaming, messages, mode, streamingProgressSteps]);
   const showProjectContextStrip = Boolean(sandboxProjectId);
   const draftWouldAttachProjectContext = Boolean(sandboxProjectId && shouldAttachSandboxContext(input));
   const draftContextPaths = useMemo(
@@ -1183,10 +1242,22 @@ export function ChatWindow() {
       </div>
 
       {/* ── Messages + floating composer (messages scroll behind input) ── */}
-      <div className="composer-stack relative min-h-0 flex-1">
+      <div
+        className="composer-stack relative min-h-0 flex-1"
+        data-empty-chat={!hasMessages ? 'true' : undefined}
+      >
+      {!hasMessages && (
+        <>
+          <div aria-hidden className="chat-ambient" />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 z-0 bg-dither-noise bg-[length:200px_200px] opacity-[0.015] mix-blend-overlay"
+          />
+        </>
+      )}
       <div
         ref={scrollRef}
-        className="composer-scroll absolute inset-0 overflow-y-auto overflow-x-hidden"
+        className="composer-scroll absolute inset-0 z-[1] overflow-y-auto overflow-x-hidden"
         style={{ overscrollBehavior: 'contain' }}
       >
         {/* Scroll-to-bottom FAB */}
@@ -1450,7 +1521,7 @@ export function ChatWindow() {
       </div>
 
       <div className="composer-dock">
-        <div className={`composer-dock-inner mx-auto w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100%-2rem))]' : 'max-w-[min(68rem,calc(100%-2rem))]'} px-4 pb-4 pt-6 md:px-5`}>
+        <div className={`composer-dock-inner relative z-[1] mx-auto w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100%-2rem))]' : 'max-w-[min(68rem,calc(100%-2rem))]'} px-4 pb-3 pt-2 md:px-5 md:pb-4`}>
 
           {/* Image preview row */}
           {pastedImage && (
@@ -1508,6 +1579,90 @@ export function ChatWindow() {
               ))}
             </div>
           )}
+          {/* Activity strip — its own collapsible card ABOVE the composer, never inside the input box */}
+          {(buildActivity.length > 0 || transientActivity.length > 0) && (
+            <div className={`mb-2 rounded-xl border px-3.5 pb-2 pt-1.5 ${
+              studioBuilderChrome ? 'border-zinc-200 bg-white/80' : 'border-zinc-800/70 bg-zinc-900/60'
+            }`}>
+              <button
+                type="button"
+                onClick={() => setActivityCollapsed((value) => !value)}
+                className={`flex w-full items-center justify-between gap-3 text-left ${
+                  studioBuilderChrome ? 'text-zinc-700' : 'text-zinc-300'
+                }`}
+              >
+                <div className="min-w-0">
+                  <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${
+                    studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-600'
+                  }`}>
+                    Activity {activityCollapsed ? `• ${activitySummary}` : ''}
+                  </div>
+                  {activityCollapsed && (
+                    <div className={`mt-1 truncate text-[11px] ${
+                      studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-400'
+                    }`}>
+                      {buildStatus.message || 'Recent project writes and startup progress'}
+                    </div>
+                  )}
+                </div>
+                {activityCollapsed ? <ChevronRight className="h-3.5 w-3.5 shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0" />}
+              </button>
+
+              {!activityCollapsed && buildActivity.length > 0 && (
+                <div className="mt-1.5 space-y-1.5">
+                  {buildActivity.slice(-5).map((a) => (
+                    <div key={a.id} className="flex min-w-0 items-start gap-2 text-[11px] leading-snug">
+                      <FileText className={`mt-0.5 h-3 w-3 shrink-0 ${studioBuilderChrome ? 'text-zinc-400' : 'text-zinc-500'}`} />
+                      <span className="min-w-0">
+                        <span className={studioBuilderChrome ? 'font-medium text-zinc-700' : 'font-medium text-zinc-300'}>Wrote</span>{' '}
+                        <code className={`break-all rounded-md px-1.5 py-0.5 font-mono text-[10px] ${
+                          studioBuilderChrome ? 'bg-zinc-100 text-zinc-800' : 'bg-zinc-900 text-zinc-200'
+                        }`}>
+                          {a.detail}
+                        </code>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!activityCollapsed && transientActivity.length > 0 && (
+                <AnimatePresence initial={false}>
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    className={`${buildActivity.length > 0 ? 'mt-2.5' : 'mt-2'} flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] ${
+                      studioBuilderChrome ? 'text-zinc-600' : 'text-zinc-400'
+                    }`}
+                  >
+                    {transientActivity.map((item) => {
+                      const toneClass = item.tone === 'blue'
+                        ? studioBuilderChrome ? 'text-blue-700' : 'text-blue-300'
+                        : item.tone === 'amber'
+                          ? studioBuilderChrome ? 'text-amber-700' : 'text-amber-300'
+                          : item.tone === 'orange'
+                            ? 'text-orange-500'
+                            : studioBuilderChrome ? 'text-blue-700' : 'text-violet-300';
+                      const dotClass = item.tone === 'orange'
+                        ? 'bg-orange-500'
+                        : toneClass.replace('text-', 'bg-');
+                      const detailMuted = studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-400';
+
+                      return (
+                        <div key={item.key} className="flex min-w-0 items-center gap-2">
+                          <span className={`inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full ${dotClass}`} />
+                          <span className={`truncate font-medium ${toneClass}`}>{item.label}</span>
+                          <span className={`hidden max-w-[42rem] truncate lg:inline ${detailMuted}`}>{item.detail}</span>
+                        </div>
+                      );
+                    })}
+                  </motion.div>
+                </AnimatePresence>
+              )}
+            </div>
+          )}
+
           {/* The input box */}
           <motion.div
             className={`composer-shell relative flex flex-col transition-[border-color,box-shadow] duration-200 ${
@@ -1582,88 +1737,6 @@ export function ChatWindow() {
                 ))}
               </div>
             </div>
-
-            {(buildActivity.length > 0 || transientActivity.length > 0) && (
-              <div className="px-3.5 pb-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setActivityCollapsed((value) => !value)}
-                  className={`flex w-full items-center justify-between gap-3 text-left ${
-                    studioBuilderChrome ? 'text-zinc-700' : 'text-zinc-300'
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${
-                      studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-600'
-                    }`}>
-                      Activity {activityCollapsed ? `• ${activitySummary}` : ''}
-                    </div>
-                    {activityCollapsed && (
-                      <div className={`mt-1 truncate text-[11px] ${
-                        studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-400'
-                      }`}>
-                        {buildStatus.message || 'Recent project writes and startup progress'}
-                      </div>
-                    )}
-                  </div>
-                  {activityCollapsed ? <ChevronRight className="h-3.5 w-3.5 shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0" />}
-                </button>
-
-                {!activityCollapsed && buildActivity.length > 0 && (
-                  <div className="space-y-1.5">
-                    {buildActivity.slice(-5).map((a) => (
-                      <div key={a.id} className="flex min-w-0 items-start gap-2 text-[11px] leading-snug">
-                        <FileText className={`mt-0.5 h-3 w-3 shrink-0 ${studioBuilderChrome ? 'text-zinc-400' : 'text-zinc-500'}`} />
-                        <span className="min-w-0">
-                          <span className={studioBuilderChrome ? 'font-medium text-zinc-700' : 'font-medium text-zinc-300'}>Wrote</span>{' '}
-                          <code className={`break-all rounded-md px-1.5 py-0.5 font-mono text-[10px] ${
-                            studioBuilderChrome ? 'bg-zinc-100 text-zinc-800' : 'bg-zinc-900 text-zinc-200'
-                          }`}>
-                            {a.detail}
-                          </code>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {!activityCollapsed && transientActivity.length > 0 && (
-                  <AnimatePresence initial={false}>
-                    <motion.div
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -4 }}
-                      className={`${buildActivity.length > 0 ? 'mt-2.5' : 'mt-2'} flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] ${
-                        studioBuilderChrome ? 'text-zinc-600' : 'text-zinc-400'
-                      }`}
-                    >
-                      {transientActivity.map((item) => {
-                        const toneClass = item.tone === 'blue'
-                          ? studioBuilderChrome ? 'text-blue-700' : 'text-blue-300'
-                          : item.tone === 'amber'
-                            ? studioBuilderChrome ? 'text-amber-700' : 'text-amber-300'
-                            : item.tone === 'orange'
-                              ? 'text-orange-500'
-                              : studioBuilderChrome ? 'text-blue-700' : 'text-violet-300';
-                        const dotClass = item.tone === 'orange'
-                          ? 'bg-orange-500'
-                          : toneClass.replace('text-', 'bg-');
-                        const detailMuted = studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-400';
-
-                        return (
-                          <div key={item.key} className="flex min-w-0 items-center gap-2">
-                            <span className={`inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full ${dotClass}`} />
-                            <span className={`truncate font-medium ${toneClass}`}>{item.label}</span>
-                            <span className={`hidden max-w-[42rem] truncate lg:inline ${detailMuted}`}>{item.detail}</span>
-                          </div>
-                        );
-                      })}
-                    </motion.div>
-                  </AnimatePresence>
-                )}
-
-              </div>
-            )}
 
             <textarea
               ref={textareaRef}
@@ -1965,7 +2038,7 @@ export function ChatWindow() {
             </div>
           </motion.div>
 
-          <p className="mt-2 text-center text-[10px] text-[color:var(--chat-muted)]">
+          <p className="pointer-events-none mt-1.5 text-center text-[10px] text-[color:var(--chat-muted)]">
             Vai can make mistakes. Verify important information.
           </p>
         </div>

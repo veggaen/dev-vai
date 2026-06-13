@@ -152,6 +152,14 @@ describe('classifyChatTurn', () => {
     })).toBe('conversational');
   });
 
+  it('does not treat lol in a substantive game question as casual chat', () => {
+    expect(classifyChatTurn({
+      userContent: 'list all lol roles',
+      mode: 'chat',
+      hasActiveSandbox: false,
+    })).toBe('analysis');
+  });
+
   it('classifies project review / EVM / HEX-better / fix unfinished contract prompts as analysis (not fact-shim)', () => {
     expect(classifyChatTurn({
       userContent: 'review my unfinished EVM contract and frontend and make it HEX but better',

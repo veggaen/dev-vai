@@ -60,7 +60,7 @@ const QUICK_STARTS = [
   },
   {
     id: 'nextjs',
-    label: 'Next.js 15',
+    label: 'Next.js 16',
     description: 'Full-stack app with API routes',
     icon: '▲',
     color: 'from-violet-500/10 to-violet-500/3 border-violet-800/30 hover:border-violet-600/40',

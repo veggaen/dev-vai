@@ -126,6 +126,8 @@
   --accent-softer: color-mix(in srgb, var(--accent) 8%, transparent);
   --accent-text: var(--accent);
   --accent-ring: color-mix(in srgb, var(--accent) 55%, transparent);
+  --selection-border: color-mix(in srgb, var(--accent) 26%, var(--border));
+  --selection-glow: color-mix(in srgb, var(--accent) 20%, transparent);
 
   --chat-body: var(--fg);
   --chat-strong: var(--fg);
@@ -518,21 +520,8 @@ code, pre, kbd {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 80% 50% at 50% 0% in oklab, var(--shell-accent-soft), transparent),
-    linear-gradient(180deg, var(--shell-bg) 0%, var(--shell-bg) 100%);
-}
-
-/* Static blue-noise veil over the atmosphere — masks gradient banding that
-   monitor-side vibrance/contrast processing makes visible. */
-.shell-atmosphere::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.5;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 160px 160px;
-  mix-blend-mode: overlay;
+    radial-gradient(ellipse 80% 50% at 50% 0% in srgb, var(--shell-accent-soft), transparent 72%),
+    var(--shell-bg);
 }
 
 .builder-shell-surface {
@@ -703,59 +692,43 @@ code, pre, kbd {
     kinetic-gradient-pan 9s ease-in-out infinite;
 }
 
-/* Aurora blobs behind the empty state */
-@keyframes aurora-a {
-  0%, 100% { transform: translate(-8%, -4%) scale(1); }
-  50% { transform: translate(6%, 8%) scale(1.15); }
-}
-@keyframes aurora-b {
-  0%, 100% { transform: translate(8%, 6%) scale(1.1); }
-  50% { transform: translate(-6%, -8%) scale(0.92); }
-}
-
-.aurora-field {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.aurora-field::before,
-.aurora-field::after {
-  content: '';
-  position: absolute;
-  width: 55vmin;
-  height: 55vmin;
-  border-radius: 9999px;
-  filter: blur(90px);
-  opacity: 0.16;
-  will-change: transform;
-}
-
-.aurora-field::before {
-  top: 4%;
-  left: 18%;
-  background: radial-gradient(circle in oklab, var(--shell-accent), transparent 65%);
-  animation: aurora-a 22s ease-in-out infinite;
-}
-
-.aurora-field::after {
-  bottom: 4%;
-  right: 14%;
-  background: radial-gradient(circle in oklab, #0ea5e9, transparent 65%);
-  animation: aurora-b 26s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .vai-welcome-pulse {
-    animation: none;
-    opacity: 0.25;
+/* Chat empty-state ambient — one large wash on the full canvas (no circle divs). */
+@keyframes chat-ambient-drift {
+  0%, 100% {
+    background-position: 48% 38%;
+  }
+  50% {
+    background-position: 54% 46%;
   }
 }
 
-[data-theme="light"] .aurora-field::before,
-[data-theme="light"] .aurora-field::after {
-  opacity: 0.1;
+.chat-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: var(--shell-bg);
+  background-image: radial-gradient(
+    ellipse 90% 80% at 50% 40% in oklch,
+    color-mix(in oklch, var(--shell-accent) 30%, var(--shell-bg)) 0%,
+    color-mix(in oklch, var(--shell-accent) 16%, var(--shell-bg)) 22%,
+    color-mix(in oklch, var(--shell-accent) 8%, var(--shell-bg)) 40%,
+    color-mix(in oklch, var(--shell-accent) 3%, var(--shell-bg)) 58%,
+    var(--shell-bg) 82%
+  );
+  background-repeat: no-repeat;
+  background-size: 130% 130%;
+  background-position: 48% 38%;
+  animation: chat-ambient-drift 32s ease-in-out infinite;
+}
+
+[data-theme="light"] .chat-ambient {
+  background-image: radial-gradient(
+    ellipse 90% 80% at 50% 40% in oklch,
+    color-mix(in oklch, var(--shell-accent) 18%, var(--shell-bg)) 0%,
+    color-mix(in oklch, var(--shell-accent) 8%, var(--shell-bg)) 28%,
+    var(--shell-bg) 75%
+  );
 }
 
 /* ── Thinking panel + composer surfaces — 1:1 light/dark parity ── */
@@ -928,19 +901,31 @@ code, pre, kbd {
 .composer-shell {
   background: var(--composer-bg);
   border: 1px solid var(--composer-border);
-  box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04), 0 4px 8px rgba(0, 0, 0, 0.04), 0 8px 16px rgba(0, 0, 0, 0.04), 0 16px 32px rgba(0, 0, 0, 0.04);
   border-radius: 1.25rem;
-  overflow: hidden;
+  overflow: clip;
+  transition:
+    border-color 280ms var(--ease-out-expo),
+    box-shadow 280ms var(--ease-out-expo);
 }
 .composer-shell:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--composer-border));
-  box-shadow: 0 0 0 2.5px var(--composer-ring), 0 20px 60px -20px rgba(0, 0, 0, 0.45);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--composer-border));
+  box-shadow:
+    0 0 28px -6px var(--selection-glow),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 4px 8px rgba(0, 0, 0, 0.04),
+    0 8px 16px rgba(0, 0, 0, 0.04),
+    0 16px 32px rgba(0, 0, 0, 0.04);
 }
 [data-theme="light"] .composer-shell {
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 28px -8px rgba(15, 23, 42, 0.14);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 2px 4px rgba(15, 23, 42, 0.03), 0 4px 8px rgba(15, 23, 42, 0.03), 0 8px 16px rgba(15, 23, 42, 0.03);
 }
 [data-theme="light"] .composer-shell:focus-within {
-  box-shadow: 0 0 0 2.5px var(--composer-ring), 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 28px -8px rgba(15, 23, 42, 0.12);
+  box-shadow:
+    0 0 24px -8px var(--selection-glow),
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 2px 4px rgba(15, 23, 42, 0.03),
+    0 4px 8px rgba(15, 23, 42, 0.03);
 }
 
 [data-theme="light"] .thinking-surface {
@@ -1038,12 +1023,13 @@ code, pre, kbd {
 }
 
 .composer-stack {
-  --composer-scroll-pad: 11.5rem;
+  --composer-scroll-pad: 13rem;
 }
 
 .composer-scroll {
   padding-bottom: var(--composer-scroll-pad);
   scroll-padding-bottom: var(--composer-scroll-pad);
+  background: transparent;
 }
 
 .composer-dock {
@@ -1052,12 +1038,39 @@ code, pre, kbd {
   inset-inline: 0;
   bottom: 0;
   z-index: 30;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.composer-dock::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 11rem;
+  pointer-events: none;
   background: linear-gradient(
-    to top in oklab,
+    to top,
     var(--shell-bg) 0%,
-    color-mix(in oklab, var(--shell-bg) 88%, transparent) 42%,
+    color-mix(in oklch, var(--shell-bg) 72%, transparent) 55%,
     transparent 100%
   );
+}
+
+.composer-stack[data-empty-chat="true"] .composer-dock::before {
+  height: 12rem;
+  background: linear-gradient(
+    to top,
+    color-mix(in oklch, var(--shell-bg) 62%, transparent) 0%,
+    color-mix(in oklch, var(--shell-bg) 24%, transparent) 50%,
+    transparent 100%
+  );
+}
+
+.composer-stack[data-empty-chat="true"] .composer-shell {
+  background: color-mix(in oklch, var(--composer-bg) 86%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
 .composer-dock-inner {
@@ -1111,11 +1124,15 @@ code, pre, kbd {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .vai-welcome-pulse {
+    animation: none;
+    opacity: 0.25;
+  }
+
   .kinetic-text,
   .thinking-sheen,
   .word-rise,
-  .aurora-field::before,
-  .aurora-field::after {
+  .chat-ambient {
     animation: none !important;
   }
   .kinetic-text,
@@ -1583,6 +1600,68 @@ pre code {
 
 .settings-nav {
   min-height: 100%;
+}
+
+/* Subtle selection — lighter border tint + outer glow, no stacked ring */
+.vai-selection-surface {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  transition:
+    border-color 280ms var(--ease-out-expo),
+    box-shadow 280ms var(--ease-out-expo),
+    background-color 280ms var(--ease-out-expo);
+}
+
+.vai-selection-surface:hover:not(.is-selected):not(.is-editing):not(.is-active) {
+  border-color: color-mix(in srgb, var(--accent) 16%, var(--border));
+}
+
+.vai-selection-surface.is-selected,
+.vai-selection-surface.is-active {
+  border-color: var(--selection-border);
+  background: color-mix(in srgb, var(--accent) 4%, var(--panel));
+  box-shadow: 0 0 24px -8px var(--selection-glow);
+}
+
+.vai-selection-surface.is-editing {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  box-shadow: 0 0 28px -6px var(--selection-glow);
+}
+
+.vai-selection-control {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  transition:
+    border-color 280ms var(--ease-out-expo),
+    box-shadow 280ms var(--ease-out-expo),
+    background-color 280ms var(--ease-out-expo),
+    color 280ms var(--ease-out-expo),
+    opacity 280ms var(--ease-out-expo);
+}
+
+.vai-selection-control:hover:not(.is-active) {
+  border-color: color-mix(in srgb, var(--accent) 16%, var(--border));
+}
+
+.vai-selection-control.is-active {
+  border-color: var(--selection-border);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  box-shadow: 0 0 16px -6px var(--selection-glow);
+  color: var(--fg);
+}
+
+.settings-nav-item {
+  transition:
+    color 280ms var(--ease-out-expo),
+    background-color 280ms var(--ease-out-expo),
+    box-shadow 280ms var(--ease-out-expo);
+}
+
+.settings-nav-item.is-active {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel-bg-muted));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 /* Preview / app panel — follows active Odysseus theme (not hardcoded zinc/blue) */

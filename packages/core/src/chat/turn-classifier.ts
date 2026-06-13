@@ -42,7 +42,7 @@ export interface TurnClassification {
 }
 
 const PRIOR_REF_RE =
-  /\b(?:it|this|that|these|those|them|there|above|earlier|previous|same|your\s+(?:answer|response)|the\s+(?:answer|response|context|approach|app|code|thing|plan|brief)|the\s+(?:above|previous|last)\s+(?:answer|response|explanation|message))\b/i;
+  /\b(?:it|this|that|these|those|them|his|her|their|there|above|earlier|previous|same|your\s+(?:answer|response)|the\s+(?:answer|response|context|approach|app|code|thing|plan|brief)|the\s+(?:above|previous|last)\s+(?:answer|response|explanation|message))\b/i;
 
 const ANAPHORIC_INSTRUCTION_RE =
   /^\s*(?:(?:please|can\s+you|could\s+you|would\s+you|will\s+you|kindly)\s+)*(?:make|fix|improve|polish|harden|tighten|refactor|simplify|clean|expand|extend|continue|deepen|go\s+deeper|explain|describe|tell\s+me\s+more|what\s+about|how\s+about|why|and|then|next)\b/i;

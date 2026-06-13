@@ -5,15 +5,10 @@ import { isExplicitResearchRequest, isExplicitWebSearchRequest } from '../models
 import {
   isFreshLocalBusinessContactRequest,
   isFreshLocalRecommendationRequest,
+  isPureConversationalTurn,
 } from '../models/web-conclude-policy.js';
 
 export type ChatTurnKind = 'conversational' | 'research' | 'builder' | 'analysis';
-
-const GREETING_PATTERN =
-  /^(?:hi|hello|hey|heya|yo|sup|what'?s up|good\s+(?:morning|afternoon|evening)|thanks?|thank you|thx|nice|cool|great|sounds good|got it|understood|ok(?:ay)?)\b[!. ]*$/i;
-
-const CASUAL_CHAT_PATTERN =
-  /\b(?:gg(?:\s+wp)?|lol|lmao|rofl|brb|afk|np|ty|thx|k|ok|yeah|yea|nope|sure|idk|cool|nice|ez|rekt|rip)\b/i;
 
 const LITERAL_ECHO_PATTERN =
   /^(?:say|write|send|reply|respond)\s+back\s+to\s+me\b/i;
@@ -41,6 +36,8 @@ export function classifyChatTurn(input: ClassifyChatTurnInput): ChatTurnKind {
   const trimmed = input.userContent.trim();
   if (!trimmed) return 'conversational';
 
+  const turnContext = { activeMode: input.mode, hasActiveSandbox: input.hasActiveSandbox };
+
   // Fresh local recommendations must win before the loose gamer-slang matcher:
   // Unicode place names such as "Hommersåk" can otherwise expose a trailing
   // ASCII "k" as a standalone regex word and look like a casual-chat token.
@@ -53,7 +50,13 @@ export function classifyChatTurn(input: ClassifyChatTurnInput): ChatTurnKind {
     return 'research';
   }
 
-  if (!input.hasImage && (GREETING_PATTERN.test(trimmed) || LITERAL_ECHO_PATTERN.test(trimmed) || CASUAL_CHAT_PATTERN.test(trimmed))) {
+  if (
+    !input.hasImage
+    && (
+      LITERAL_ECHO_PATTERN.test(trimmed)
+      || isPureConversationalTurn(trimmed, turnContext)
+    )
+  ) {
     return 'conversational';
   }
 

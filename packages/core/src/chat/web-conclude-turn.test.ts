@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   expandQueryWithHistory,
+  fetchTurnWebEvidence,
   shouldAttemptWebConclusion,
   tryWebConcludeTurn,
 } from './web-conclude-turn.js';
@@ -230,6 +231,55 @@ describe('web-conclude-turn', () => {
     );
 
     expect(result?.text).toContain('current Node.js installer');
+    expect(search).toHaveBeenCalledOnce();
+  });
+
+  it('fetchTurnWebEvidence can still search stable list prompts when ignoreLocalDefer is set', async () => {
+    const search = vi.fn(async () => ({
+      answer: 'Top, Jungle, Mid, ADC, Support.',
+      confidence: 0.75,
+      plan: {
+        originalQuery: 'list all lol roles',
+        intent: 'game roles',
+        entities: ['League of Legends'],
+        constraints: {},
+        fanOutQueries: ['league of legends roles'],
+      },
+      rawResultCount: 2,
+      durationMs: 12,
+      sync: {
+        state: 'linear' as const,
+        latencyMs: 12,
+        recommendedConcurrency: 1,
+        medianLatencyMs: 12,
+        p95LatencyMs: 12,
+        observations: 1,
+      },
+      sources: [{
+        text: 'League of Legends has five primary roles.',
+        url: 'https://example.com/lol-roles',
+        title: 'LoL roles',
+        domain: 'example.com',
+        favicon: '',
+        trust: { score: 0.8, tier: 'high' as const, reason: 'test' },
+        rank: 0,
+      }],
+      audit: [],
+    }));
+
+    const result = await fetchTurnWebEvidence(
+      'list all lol roles',
+      [],
+      {
+        testMode: false,
+        searchBudgetMs: 1000,
+        search,
+      },
+      {},
+      { ignoreLocalDefer: true },
+    );
+
+    expect(result?.sources).toHaveLength(1);
     expect(search).toHaveBeenCalledOnce();
   });
 });

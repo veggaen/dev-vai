@@ -649,11 +649,21 @@ export class SandboxManager {
       const scripts = pkg.scripts ?? {};
           if (scripts.dev) {
         const usePnpm = existsSync(join(project.rootDir, 'pnpm-lock.yaml'));
-        // Next.js uses --hostname, and running it through `pnpm run dev -- --port ...`
-        // injects a literal `--` that Next treats as a project directory.
-        const isNextjs = typeof scripts.dev === 'string' && scripts.dev.includes('next');
-            const isVite = typeof scripts.dev === 'string' && /\bvite\b/.test(scripts.dev);
-        if (isNextjs) {
+        const devScript = typeof scripts.dev === 'string' ? scripts.dev : '';
+        const hasVinextDep = !!(pkg.dependencies?.vinext ?? pkg.devDependencies?.vinext);
+        const isVinext = hasVinextDep || devScript.startsWith('vinext');
+        // Must check vinext before next — "vinext dev" contains the substring "next"
+        const isNextjs = !isVinext && /\bnext\b/.test(devScript);
+            const isVite = !isVinext && !isNextjs && /\bvite\b/.test(devScript);
+        if (isVinext) {
+          if (usePnpm) {
+            cmd = 'pnpm';
+            args = ['exec', 'vinext', 'dev', '--port', String(port), '--host', '0.0.0.0'];
+          } else {
+            cmd = 'npx';
+            args = ['vinext', 'dev', '--port', String(port), '--host', '0.0.0.0'];
+          }
+        } else if (isNextjs) {
           if (usePnpm) {
             cmd = 'pnpm';
             args = ['exec', 'next', 'dev', '--port', String(port), '--hostname', '0.0.0.0'];
@@ -817,6 +827,17 @@ export class SandboxManager {
     const project = this.projects.get(projectId);
     if (!project) return [];
     return project.logs.slice(-count);
+  }
+
+  /**
+   * Stop every running dev server WITHOUT deleting project files.
+   * Called on runtime shutdown — sandbox children are spawned with
+   * shell:true and outlive the runtime on Windows otherwise.
+   */
+  stopAllDev(): void {
+    for (const id of this.projects.keys()) {
+      this.stopDev(id);
+    }
   }
 
   /** Cleanup all projects */

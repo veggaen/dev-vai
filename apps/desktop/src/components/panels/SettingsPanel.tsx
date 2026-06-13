@@ -411,7 +411,11 @@ export function SettingsPanel() {
               onThemeSaved={(themeId) => {
                 refreshCustomThemes();
                 applyThemeId(themeId);
-                toast.success('Custom theme saved');
+                toast.success(
+                  themeId.endsWith('-custom') && editingThemePresetId === themeId
+                    ? 'Theme updated'
+                    : 'Custom theme saved',
+                );
               }}
               customThemes={customThemeCards}
             />
@@ -428,10 +432,8 @@ export function SettingsPanel() {
                     key={mode.id}
                     type="button"
                     onClick={() => setLayoutMode(mode.id)}
-                    className={`rounded-xl border px-3 py-3 text-left transition-colors ${
-                      layoutMode === mode.id
-                        ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)]'
-                        : 'border-[color:var(--border)] hover:border-[color:var(--accent)]'
+                    className={`vai-selection-surface rounded-xl px-3 py-3 text-left ${
+                      layoutMode === mode.id ? 'is-selected' : ''
                     }`}
                   >
                     <div className="text-sm font-medium text-[color:var(--fg)]">{mode.label}</div>

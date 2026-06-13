@@ -3,8 +3,9 @@
  * Uses shouldConcludeWithWebSearch + SearchPipeline (duckduckgo/brave/searx).
  */
 
-import type { Message } from '../models/adapter.js';
-import { SearchPipeline } from '../search/pipeline.js';
+import type { ChatChunk, Message, ResearchTrace } from '../models/adapter.js';
+import type { ChatTurnKind } from './turn-kind.js';
+import { SearchPipeline, generateFollowUps } from '../search/pipeline.js';
 import type { SearchResponse } from '../search/types.js';
 import {
   isConversationalWebFollowUpCue,
@@ -16,6 +17,7 @@ import {
   type WebConclusionContext,
 } from '../models/web-conclude-policy.js';
 import { isCapabilitiesFallbackResponse } from './capabilities-fallback.js';
+import { resolveContextualFollowUp } from './contextual-resolver.js';
 
 export type WebConcludeDependencies = {
   readonly testMode: boolean;
@@ -40,7 +42,7 @@ function isContextualFollowUpFragment(input: string): boolean {
   if (words.length > 14) return false;
 
   const cue = normalized.replace(/[.?!]+$/g, '').trim();
-  return /^(?:why(?:\s+though)?|how(?:\s+so)?|go\s+(?:on|deeper)|more|shorter(?:\s+(?:pls|please))?|explain\s+(?:that\s+)?more\s+simply|ok\s+but\s+go\s+deeper\s+on\s+that|what\s+about\b.+|no\s+i\s+meant\b.+|\S.*\b(?:that|it|still\s+accurate|accurate\s+in\s+202\d|stay\s+on\s+that)\b.*)$/i.test(cue);
+  return /^(?:why(?:\s+though)?|how(?:\s+so)?|go\s+(?:on|deeper)|more|shorter(?:\s+(?:pls|please))?|explain\s+(?:that\s+)?more\s+simply|ok\s+but\s+go\s+deeper\s+on\s+that|what\s+about\b.+|no\s+i\s+meant\b.+|\S.*\b(?:that|it|his|her|their|still\s+accurate|accurate\s+in\s+202\d|stay\s+on\s+that)\b.*)$/i.test(cue);
 }
 
 function isLocalRewriteFollowUp(input: string): boolean {
@@ -68,7 +70,7 @@ function hasSubstantiveAssistantAnswer(history: readonly Message[]): boolean {
   for (let i = history.length - 1; i >= 0; i -= 1) {
     const message = history[i];
     if (message.role !== 'assistant') continue;
-    const content = message.content.trim();
+    const content = (typeof message.content === 'string' ? message.content : '').trim();
     if (content.length < 12) continue;
     return !isCapabilitiesFallbackResponse(content);
   }
@@ -101,6 +103,9 @@ function findPriorSubstantiveUserTopic(input: string, history: readonly Message[
 
 /** Expand short follow-ups using prior user context (no fixed topic list). */
 export function expandQueryWithHistory(input: string, history: readonly Message[]): string {
+  const contextual = resolveContextualFollowUp(input, history);
+  if (contextual) return normalizeWebConclusionInput(contextual);
+
   const current = normalizeWebConclusionInput(input);
   if (!isContextualFollowUpFragment(current)) return current;
 
@@ -151,6 +156,98 @@ export async function tryWebConcludeTurn(
   if (!text || isCapabilitiesFallbackResponse(text)) return null;
 
   return { text, sources: result.sources.length, searchResult: result };
+}
+
+/** Search-only path — attach sources to a model answer without replacing it. */
+export type FetchTurnEvidenceOptions = {
+  /** When true, still search for stable list/explain prompts so the Sources tab can populate. */
+  ignoreLocalDefer?: boolean;
+};
+
+export async function fetchTurnWebEvidence(
+  input: string,
+  history: readonly Message[],
+  deps: Pick<WebConcludeDependencies, 'testMode' | 'search' | 'searchBudgetMs'>,
+  context: WebConclusionContext = {},
+  options: FetchTurnEvidenceOptions = {},
+): Promise<SearchResponse | null> {
+  if (deps.testMode) return null;
+  if (hasLocalOnlyDirective(history)) return null;
+  if (isLocalRewriteFollowUp(input)) return null;
+  if (isContextualFollowUpFragment(input) && hasSubstantiveAssistantAnswer(history)) return null;
+  if (!options.ignoreLocalDefer && shouldDeferWebConclusionToLocalRoutes(input)) return null;
+
+  const query = expandQueryWithHistory(input, history);
+  if (!shouldAttemptWebConclusion(query, context)) return null;
+
+  const searchQuery = isRecommendationQuery(query)
+    ? `${query} (reddit OR review OR "2025" OR "2026" OR recommendation)`
+    : query;
+
+  const result = await deps.search(searchQuery, deps.searchBudgetMs);
+  if (!result || result.sources.length === 0) return null;
+  return result;
+}
+
+/** Give the answering model (e.g. Qwen fallback) the retrieved web snippets. */
+export function buildEvidenceContextSystemHint(query: string, result: SearchResponse): string {
+  const snippets = result.sources.slice(0, 5).map((source, index) => {
+    const excerpt = source.text.trim().slice(0, 320);
+    return `[${index + 1}] ${source.title || source.domain} (${source.domain})\n${excerpt}\nURL: ${source.url}`;
+  }).join('\n\n');
+
+  return [
+    'Web sources were retrieved for this turn.',
+    'Ground factual claims in these sources when they apply.',
+    'When you rely on a source, make that clear in the answer (e.g. "According to …").',
+    'If the sources are thin or off-topic, say so briefly instead of inventing citations.',
+    `User question: ${query.trim()}`,
+    'Sources:',
+    snippets,
+  ].join('\n\n');
+}
+
+function buildResearchTraceFromSearch(result: SearchResponse, sourceCount: number): ResearchTrace {
+  return {
+    mode: result.sync.state,
+    latencyMs: result.sync.latencyMs,
+    recommendedConcurrency: result.sync.recommendedConcurrency,
+    rawResultCount: result.rawResultCount,
+    sourceCount,
+    intent: result.plan.intent,
+    entities: [...result.plan.entities],
+    fanOutQueries: [...result.plan.fanOutQueries],
+    stages: result.audit.map((entry) => ({
+      step: entry.step,
+      label: entry.step,
+      detail: entry.detail,
+      durationMs: entry.durationMs,
+    })),
+  };
+}
+
+export function buildSourcesChunkFromSearch(
+  query: string,
+  result: SearchResponse,
+  turnKind: ChatTurnKind,
+): ChatChunk {
+  const presented = result.sources.slice(0, 6);
+  return {
+    type: 'sources',
+    sources: presented.map((s) => ({
+      url: s.url,
+      title: s.title || s.domain,
+      domain: s.domain,
+      snippet: s.text.slice(0, 200),
+      favicon: s.favicon,
+      trustTier: s.trust.tier,
+      trustScore: s.trust.score,
+    })),
+    sourcePresentation: turnKind === 'research' ? 'research' : 'supporting',
+    followUps: generateFollowUps(query, result),
+    confidence: result.confidence,
+    researchTrace: buildResearchTraceFromSearch(result, presented.length),
+  };
 }
 
 export function createDefaultSearchPipeline(): SearchPipeline {

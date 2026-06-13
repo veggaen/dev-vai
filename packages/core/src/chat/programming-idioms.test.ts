@@ -91,4 +91,9 @@ describe('resolveIdiomExplanation honors requested language', () => {
     expect(isMultiConceptOrComparison('debounce vs throttle')).toBe(true);
     expect(isMultiConceptOrComparison('write a debounce function')).toBe(false);
   });
+
+  it('requires programming intent before treating sleep as an idiom', () => {
+    expect(resolveIdiomExplanation('implement sleep function', 'typescript')?.label).toMatch(/sleep/i);
+    expect(resolveIdiomExplanation('Sleep debt', 'typescript')).toBeNull();
+  });
 });

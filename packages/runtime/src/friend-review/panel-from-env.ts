@@ -86,7 +86,9 @@ export function friendReviewReviewersFromEnv(
 
   const baseUrl = (env.VAI_FRIEND_REVIEW_URL?.trim() || 'http://localhost:11434').replace(/\/$/, '');
   const timeoutMs = timeoutFromEnv(env.VAI_FRIEND_REVIEW_TIMEOUT_MS);
-  const modelNames = (env.VAI_FRIEND_REVIEW_MODELS?.trim() || 'qwen2.5:7b')
+  // Reviewer default follows the configured capable local model so the panel
+  // upgrades together with LOCAL_MODEL instead of pinning a stale generation.
+  const modelNames = (env.VAI_FRIEND_REVIEW_MODELS?.trim() || env.LOCAL_MODEL?.trim() || 'qwen2.5:7b')
     .split(',')
     .map((m) => m.trim())
     .filter(Boolean);

@@ -458,6 +458,10 @@ export function composeDomainApp(model: DomainModel): string {
         lib: ['ES2020', 'DOM', 'DOM.Iterable'],
         module: 'ESNext',
         moduleResolution: 'bundler',
+        // Vite-style './App.tsx' extension imports need this pair or
+        // `tsc -b` fails the generated app's own build script.
+        allowImportingTsExtensions: true,
+        noEmit: true,
         jsx: 'react-jsx',
         strict: true,
         skipLibCheck: true,

@@ -406,6 +406,88 @@ export function prettyModelName(id?: string): string {
   return id.replace(/^(?:local|openai|anthropic|google):/, '');
 }
 
+function normalizeModelKey(id?: string): string {
+  return prettyModelName(id).toLowerCase();
+}
+
+/**
+ * What the advisor ACTUALLY returned, in plain language. Never a canned
+ * "reviewed the route and quality risks" line: if it raised nothing, say so;
+ * if it was unavailable or ran in the background, say that. Honesty here is
+ * the product — the panel must describe the processes that really happened.
+ */
+function describeAdvisorFindings(advisor: AdvisorTrace): string {
+  if (advisor.state === 'unavailable') {
+    return 'was unavailable this turn, so no shadow review happened';
+  }
+  if (advisor.state === 'background') {
+    return 'finished after the answer was already written — its advice was recorded for evaluation but did not shape this turn';
+  }
+  if (advisor.state === 'invalid') {
+    return 'returned advice Vai could not parse, so it was discarded';
+  }
+  if (advisor.state === 'running') {
+    return 'is still reviewing in the background';
+  }
+
+  const parts: string[] = [];
+  if (advisor.routeGuidance.length > 0) {
+    const first = advisor.routeGuidance[0];
+    parts.push(`${advisor.routeGuidance.length} route hint${advisor.routeGuidance.length === 1 ? '' : 's'} (${first.signal} ${friendlyHandler(first.handler)})`);
+  }
+  if (advisor.riskFlags.length > 0) {
+    parts.push(`${advisor.riskFlags.length} risk flag${advisor.riskFlags.length === 1 ? '' : 's'}: ${advisor.riskFlags.slice(0, 2).join('; ')}`);
+  }
+  if (advisor.retrievalHints.length > 0) {
+    parts.push(`${advisor.retrievalHints.length} retrieval hint${advisor.retrievalHints.length === 1 ? '' : 's'}`);
+  }
+  const timing = advisor.durationMs !== undefined ? ` in ${(advisor.durationMs / 1000).toFixed(1)}s` : '';
+  if (parts.length === 0) {
+    return `reviewed the turn${timing} and raised no concerns`;
+  }
+  return `returned ${parts.join(', ')}${timing}`;
+}
+
+/** Plain-language advisor row — matches header attribution when a model also answered. */
+export function describeAdvisorContribution(
+  advisor: AdvisorTrace | undefined,
+  fallback?: ReasoningExtras['fallback'],
+): { title: string; detail: string } {
+  const advisorName = prettyModelName(advisor?.modelId);
+
+  if (fallback) {
+    const answerName = prettyModelName(fallback.toModelId);
+    const reason = fallback.reason === 'low-confidence'
+      ? 'was not confident in its own draft'
+      : 'had no grounded match in memory';
+    const sameVoice = normalizeModelKey(advisor?.modelId) === normalizeModelKey(fallback.toModelId);
+
+    if (sameVoice || !advisor) {
+      return {
+        title: 'Answer handoff',
+        detail: `${answerName} drafted the answer after Vai ${reason}. Vai verified it before showing you.`,
+      };
+    }
+
+    return {
+      title: 'Advisor + answer handoff',
+      detail: `${advisorName} (shadow advisor) ${describeAdvisorFindings(advisor)}. ${answerName} drafted the answer after Vai ${reason}.`,
+    };
+  }
+
+  if (!advisor) {
+    return {
+      title: 'Advisor contribution',
+      detail: 'No shadow advisor ran this turn. Vai wrote the final answer.',
+    };
+  }
+
+  return {
+    title: 'Advisor contribution',
+    detail: `${advisorName} (shadow advisor) ${describeAdvisorFindings(advisor)}. Vai stayed responsible for the final answer.`,
+  };
+}
+
 export interface ReasoningExtras {
   readonly respondingModelId?: string;
   readonly fallback?: { readonly fromModelId: string; readonly toModelId: string; readonly reason: 'low-confidence' | 'no-knowledge' };

@@ -423,9 +423,52 @@ export class GoogleAdapter extends BaseHttpAdapter {
 interface OllamaChatResponse {
   message?: {
     content?: string;
+    thinking?: string;
   };
   prompt_eval_count?: number;
   eval_count?: number;
+}
+
+/**
+ * Local-daemon runtime knobs (measured on RTX 3080 Ti, qwen3:8b):
+ *
+ * - `numCtx`: Ollama defaults to a 4096-token context regardless of what the
+ *   model supports. Vai's system stack (mode charter + contract ledger + turn
+ *   hints + web evidence + history) regularly exceeds that, and the daemon
+ *   silently drops the oldest tokens — the model loses its own instructions
+ *   or the start of the conversation. Default to 16384 (capped by the model's
+ *   real window); override via VAI_LOCAL_NUM_CTX.
+ * - `keepAlive`: the daemon unloads models after ~5 idle minutes, so the next
+ *   turn pays a multi-second reload. Keep the chat model resident for 30m by
+ *   default; override via VAI_LOCAL_KEEP_ALIVE (e.g. '-1' = never unload).
+ */
+export function resolveLocalRuntimeOptions(
+  contextWindow: number,
+  env: NodeJS.ProcessEnv = process.env,
+): { numCtx: number; keepAlive: string } {
+  const requested = Number(env.VAI_LOCAL_NUM_CTX?.trim());
+  const numCtx = Math.min(
+    contextWindow,
+    Number.isFinite(requested) && requested > 0 ? requested : 16384,
+  );
+  return {
+    numCtx,
+    keepAlive: env.VAI_LOCAL_KEEP_ALIVE?.trim() || '30m',
+  };
+}
+
+/**
+ * Thinking-family models (qwen3, deepseek-r1, …) may interleave reasoning as
+ * `<think>…</think>` blocks in `message.content` depending on daemon version
+ * and the `think` request flag. The user-facing answer must never contain raw
+ * reasoning markup, so strip closed blocks and any unterminated opener.
+ */
+export function stripThinkingBlocks(content: string): string {
+  if (!content.includes('<think>')) return content;
+  return content
+    .replace(/<think>[\s\S]*?<\/think>/g, '')
+    .replace(/<think>[\s\S]*$/, '')
+    .trim();
 }
 
 export class LocalOpenAICompatibleAdapter extends BaseHttpAdapter {
@@ -434,20 +477,31 @@ export class LocalOpenAICompatibleAdapter extends BaseHttpAdapter {
   }
 
   protected async performChat(request: ChatRequest): Promise<ChatResponse> {
+    const runtime = resolveLocalRuntimeOptions(this.profile.contextWindow);
+    const body: Record<string, unknown> = {
+      model: this.profile.modelName,
+      messages: request.messages.map((message) => ({ role: message.role, content: messageText(message) })),
+      stream: false,
+      keep_alive: runtime.keepAlive,
+      options: {
+        temperature: this.temperature(request),
+        num_predict: this.maxTokens(request),
+        num_ctx: runtime.numCtx,
+      },
+    };
+    // Chat latency contract: thinking-capable local models default to thinking
+    // OFF (a chat turn should answer in seconds, not minutes); opt back in via
+    // VAI_LOCAL_THINK=1. The flag is only sent to models discovered as
+    // thinking-capable — daemons reject it for non-thinking models.
+    if (this.profile.capabilities.extendedThinking) {
+      body.think = process.env.VAI_LOCAL_THINK === '1';
+    }
     const res = await fetch(`${this.providerConfig.baseUrl ?? 'http://localhost:11434'}/api/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model: this.profile.modelName,
-        messages: request.messages.map((message) => ({ role: message.role, content: messageText(message) })),
-        stream: false,
-        options: {
-          temperature: this.temperature(request),
-          num_predict: this.maxTokens(request),
-        },
-      }),
+      body: JSON.stringify(body),
       signal: request.signal,
     });
 
@@ -459,7 +513,7 @@ export class LocalOpenAICompatibleAdapter extends BaseHttpAdapter {
     return {
       message: {
         role: 'assistant',
-        content: payload.message?.content ?? '',
+        content: stripThinkingBlocks(payload.message?.content ?? ''),
       },
       usage: {
         promptTokens: payload.prompt_eval_count ?? 0,

@@ -18,6 +18,7 @@ import {
   ThorsenAdaptiveController,
   EvalRunner,
   SearchPipeline,
+  resolveEffectiveLocalChain,
 } from '@vai/core';
 import type { ChatServiceOptions, ResponseReviewInput, VaiConfig } from '@vai/core';
 import { registerChatRoutes } from './routes/chat.js';
@@ -37,6 +38,7 @@ import { registerSearchRoutes } from './routes/search.js';
 import { registerSkillRoutes } from './routes/skills.js';
 import { registerFeedbackRoutes } from './routes/feedback.js';
 import { registerSteeringRoutes } from './routes/steering.js';
+import { registerAgentIntrospectRoutes } from './routes/agent-introspect.js';
 import { createGuidanceStore } from './steering/guidance-store.js';
 import { computeSteeringLift } from './steering/analyze-steering.js';
 import { LocalSteeringWorker, localSteeringOptionsFromEnv } from './steering/local-steering-worker.js';
@@ -119,9 +121,43 @@ export async function createServer(options?: ServerOptions) {
   });
   models.register(vaiEngine);
 
-  const externalModels = registerConfiguredModels(config, models);
-  if (externalModels.length > 0) {
-    console.log(`[VAI] External adapters registered: ${externalModels.join(', ')}`);
+  const modelRegistration = await registerConfiguredModels(config, models);
+  if (modelRegistration.registered.length > 0) {
+    console.log(`[VAI] External adapters registered: ${modelRegistration.registered.join(', ')}`);
+  }
+
+  // Self-healing escalation chain: when auto-discovery found installed local
+  // models, replace any configured-but-uninstalled local:* chain entry with
+  // the best installed one, so escalation never silently degrades to
+  // vai:v0-only because of a stale LOCAL_MODEL value.
+  const effectiveFallbackModels = modelRegistration.rankedLocalIds.length > 0
+    ? resolveEffectiveLocalChain(config.fallbackChain.models, modelRegistration.rankedLocalIds)
+    : config.fallbackChain.models;
+  if (effectiveFallbackModels.join(',') !== config.fallbackChain.models.join(',')) {
+    console.log(`[VAI] Fallback chain adjusted to installed local models: ${effectiveFallbackModels.join(' → ')}`);
+  }
+  const effectiveConfig: VaiConfig = {
+    ...config,
+    fallbackChain: { ...config.fallbackChain, models: effectiveFallbackModels },
+  };
+
+  // Warm the capable local model at boot (fire-and-forget) so the first user
+  // turn doesn't pay the multi-second model load into VRAM.
+  const firstLocalModel = effectiveFallbackModels.find((id) => id.startsWith('local:'));
+  if (firstLocalModel && config.providers.local.enabled) {
+    const warmupBase = (config.providers.local.baseUrl ?? 'http://localhost:11434').replace(/\/$/, '');
+    void fetch(`${warmupBase}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: firstLocalModel.slice('local:'.length),
+        keep_alive: process.env.VAI_LOCAL_KEEP_ALIVE?.trim() || '30m',
+      }),
+    }).then((res) => {
+      if (res.ok) console.log(`[VAI] Local model warmed and resident: ${firstLocalModel}`);
+    }).catch(() => {
+      // Daemon not up yet — the first turn will load the model lazily.
+    });
   }
 
   const registeredModels = models.list().map((model) => model.id);
@@ -181,12 +217,24 @@ export async function createServer(options?: ServerOptions) {
   const friendReviewReviewers = friendReviewReviewersFromEnv({
     grokAsk: (prompt) => grokFriendClient.ask(prompt),
   });
+  const searchPipeline = new SearchPipeline({
+    braveApiKey: process.env.BRAVE_SEARCH_API_KEY || undefined,
+    searxngUrl: process.env.VAI_SEARXNG_URL || undefined,
+  });
   const chatService = new ChatService(
     db,
     models,
     adaptiveController,
     {
-      ...buildChatServiceOptions(config, vaiEngine, pipeline),
+      ...buildChatServiceOptions(effectiveConfig, vaiEngine, pipeline),
+      searchForEvidence: async (query) => {
+        try {
+          const result = await searchPipeline.search(query);
+          return result.sources.length > 0 ? result : null;
+        } catch {
+          return null;
+        }
+      },
       onUsage: config.enableUsageTracking ? (entry) => usageService.record(entry) : undefined,
       guidanceStore,
       responseReviewers: [
@@ -359,15 +407,12 @@ export async function createServer(options?: ServerOptions) {
   });
   registerScaleEvalRoutes(app, platformAuth, { ownerEmail: config.ownerEmail });
 
-  const searchPipeline = new SearchPipeline({
-    braveApiKey: process.env.BRAVE_SEARCH_API_KEY || undefined,
-    searxngUrl: process.env.VAI_SEARXNG_URL || undefined,
-  });
   registerSearchRoutes(app, searchPipeline);
 
   registerSkillRoutes(app);
   registerFeedbackRoutes(app, db);
   registerSteeringRoutes(app, guidanceStore);
+  registerAgentIntrospectRoutes(app, { models, fallbackChain: effectiveConfig.fallbackChain.models });
 
   app.get('/api/usage', async (request) => {
     const query = request.query as { from?: string; to?: string };
@@ -380,7 +425,7 @@ export async function createServer(options?: ServerOptions) {
 
   app.get('/api/config', async () => ({
     defaultModelId: config.defaultModelId,
-    fallbackChain: config.fallbackChain,
+    fallbackChain: effectiveConfig.fallbackChain,
     enableToolCalling: config.enableToolCalling,
     maxToolIterations: config.maxToolIterations,
     enableUsageTracking: config.enableUsageTracking,
@@ -527,7 +572,7 @@ export async function createServer(options?: ServerOptions) {
     try {
       const summary = computeSteeringLift(db);
       return { ok: true, ...summary, note: 'Use as signal for whether current steering (weights, scopes, actors) is net beneficial or needs re-calibration.' };
-    } catch (e) {
+    } catch {
       return { ok: false, error: 'analysis_failed' };
     }
   });

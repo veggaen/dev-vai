@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { motion } from 'framer-motion';
 import {
   Plus, Trash2, ChevronLeft, ChevronRight,
-  FolderKanban, Shield, Search, Pin, PinOff, Code2,
+  FolderKanban, FolderOpen, Shield, Search, Pin, PinOff, Code2,
 } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
@@ -455,11 +455,12 @@ function ChatsPanel() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     {isCodeConversation(conv) && (
-                      <Code2
-                        aria-hidden
-                        className={`h-3 w-3 shrink-0 ${isLight ? 'text-blue-600' : 'text-violet-400'}`}
-                        title="Code / build chat"
-                      />
+                      <span title="Code / build chat">
+                        <Code2
+                          aria-hidden
+                          className={`h-3 w-3 shrink-0 ${isLight ? 'text-blue-600' : 'text-violet-400'}`}
+                        />
+                      </span>
                     )}
                     <div className="flex min-w-0 flex-1 items-baseline gap-2">
                       <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{conv.title}</span>
@@ -545,7 +546,6 @@ function ProjectsPanel() {
   const activeConversationId = useChatStore((state) => state.activeConversationId);
   const fetchConversations = useChatStore((state) => state.fetchConversations);
   const selectConversation = useChatStore((state) => state.selectConversation);
-  const startNewChat = useChatStore((state) => state.startNewChat);
   const createConversation = useChatStore((state) => state.createConversation);
   const selectedModelId = useSettingsStore((state) => state.selectedModelId);
   const setActivePanel = useLayoutStore((state) => state.setActivePanel);
@@ -653,8 +653,14 @@ function ProjectsPanel() {
         await selectConversation(linkedConversation.id);
         toast.success('Opened project and linked chat');
       } else if (activeConversation?.sandboxProjectId && activeConversation.sandboxProjectId !== sandboxProjectId) {
-        startNewChat();
-        toast.success('Opened project and cleared the old mismatched chat');
+        // The active chat belongs to a DIFFERENT project. Never leave this
+        // project rendered under another conversation's chat — bind a fresh
+        // conversation to it. (startNewChat() here would reset the sandbox
+        // store and detach the project we just opened.)
+        await createConversation(selectedModelId ?? 'vai:v0', 'builder', {
+          sandboxProjectId,
+        });
+        toast.success('Opened project in a new linked chat');
       } else {
         toast.success('Project opened');
       }
@@ -837,7 +843,7 @@ function ProjectsPanel() {
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-1.5">
                   {isCurrent && <span className="text-[9px] font-medium uppercase tracking-[0.16em] text-[color:var(--accent-text)]">live</span>}
-                  <FolderOpenDot className="h-4 w-4 text-zinc-500" />
+                  <FolderOpen className="h-4 w-4 text-zinc-500" />
                 </div>
               </div>
             </button>

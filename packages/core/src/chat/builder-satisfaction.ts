@@ -49,29 +49,48 @@ export function hasBuilderFileBlocks(text: string): boolean {
 export interface BuilderFileBlockRepair {
   readonly text: string;
   readonly changed: boolean;
-  readonly reason?: 'single-html-index';
+  readonly reason?: 'single-html-index' | 'unquoted-title';
 }
 
 /**
- * Recover the narrow formatting miss a small local builder model commonly
- * makes: one complete standalone HTML document in an untitled fence. The
- * sandbox needs `title="index.html"` to apply it. Multi-file or partial output
- * stays untouched because inferring paths there would be guesswork.
+ * Recover the narrow formatting misses a small local builder model commonly
+ * makes:
+ *  1. `title=index.html` without quotes in the fence info (the titled-block
+ *     regexes require quotes, so the artifact is otherwise invisible), and
+ *  2. one complete standalone HTML document in an untitled fence — the
+ *     sandbox needs `title="index.html"` to apply it. Stray prose or a leaked
+ *     `title=...` line *before* the doctype is dropped so it cannot render as
+ *     visible junk text at the top of the page (a real live-probe artifact).
+ * Multi-file or partial output stays untouched because inferring paths there
+ * would be guesswork.
  */
 export function repairBuilderFallbackFileBlocks(output: string): BuilderFileBlockRepair {
   const text = output ?? '';
-  if (!text || hasBuilderFileBlocks(text)) return { text, changed: false };
+  if (!text) return { text, changed: false };
 
+  // Repair 1: quote bare title/path attributes in fence info lines.
+  const quoted = text.replace(
+    /(```[^\r\n`]*\b(?:title|path|file|filename)=)([^"'\s`][^\s`]*)/gi,
+    '$1"$2"',
+  );
+  if (quoted !== text && hasBuilderFileBlocks(quoted)) {
+    return { text: quoted, changed: true, reason: 'unquoted-title' };
+  }
+  if (hasBuilderFileBlocks(text)) return { text, changed: false };
+
+  // Repair 2: single untitled fence holding a complete HTML document.
   const blocks = [...text.matchAll(/```([^\r\n`]*)\r?\n([\s\S]*?)```/g)];
   if (blocks.length !== 1) return { text, changed: false };
 
   const match = blocks[0];
   const info = (match[1] ?? '').trim();
-  const body = match[2] ?? '';
+  const rawBody = match[2] ?? '';
   const language = info.split(/\s+/)[0]?.toLowerCase() ?? '';
+  const docStart = rawBody.search(/<!doctype\s+html|<html[\s>]/i);
+  const body = docStart > 0 ? rawBody.slice(docStart) : rawBody;
   const isCompleteHtml =
     (language === '' || language === 'html' || language === 'htm')
-    && /(?:<!doctype\s+html|<html[\s>])/i.test(body)
+    && docStart >= 0
     && /<\/html>/i.test(body);
   if (!isCompleteHtml || match.index === undefined) return { text, changed: false };
 
@@ -81,6 +100,27 @@ export function repairBuilderFallbackFileBlocks(output: string): BuilderFileBloc
     changed: true,
     reason: 'single-html-index',
   };
+}
+
+/**
+ * Signature strings of the substrate's generic "echo shell" (see
+ * builder/vai-codegen/primitives.ts): a hero card that quotes the user's own
+ * request words back as fake feature labels. Because it embeds the request
+ * verbatim, it scores near-perfect anchor coverage while implementing nothing
+ * — the one shape the coverage heuristic cannot catch on its own. Outputs
+ * carrying this signature must never count as satisfaction; they escalate to
+ * the generative builder arm instead.
+ */
+const GENERIC_PREVIEW_SHELL_MARKERS = [
+  'Vai · live preview',
+  'Editable from chat.',
+  'Tunable via controls.',
+  'Refine with one message.',
+];
+
+export function isGenericPreviewShell(output: string): boolean {
+  const text = output ?? '';
+  return GENERIC_PREVIEW_SHELL_MARKERS.some((marker) => text.includes(marker));
 }
 
 /** Scaffold boilerplate files whose contents/names must NOT count toward request coverage. */
@@ -139,15 +179,19 @@ export function evaluateBuilderRequestSatisfaction(
   }
   const coverage = anchors.length === 0 ? 1 : hit.length / anchors.length;
 
+  const genericShell = isGenericPreviewShell(output);
+
   const reasons: string[] = [];
   if (!hasFileBlocks) reasons.push('no-file-blocks');
   if (anchors.length > 0 && coverage < minCoverage) {
     reasons.push(`low-anchor-coverage:${hit.length}/${anchors.length}`);
   }
+  if (genericShell) reasons.push('generic-preview-shell');
 
   // Satisfying = produced real file artifacts AND engaged enough of the request's
-  // feature anchors. A scaffold with files but near-zero feature coverage fails.
-  const satisfied = hasFileBlocks && (anchors.length === 0 || coverage >= minCoverage);
+  // feature anchors. A scaffold with files but near-zero feature coverage fails,
+  // and the echo shell fails outright regardless of its (self-quoted) coverage.
+  const satisfied = hasFileBlocks && !genericShell && (anchors.length === 0 || coverage >= minCoverage);
 
   return {
     hasFileBlocks,

@@ -21,11 +21,9 @@ export function ChatEmptyState(_props: ChatEmptyStateProps) {
       animate={{ opacity: 1 }}
       exit={prefersReducedMotion ? undefined : { opacity: 0, y: -8 }}
       transition={{ duration: prefersReducedMotion ? 0 : 0.3 }}
-      className="relative flex min-h-full min-w-0 flex-col items-center justify-center px-6 py-12"
+      className="relative z-[1] flex min-h-full min-w-0 flex-col items-center justify-center px-6 py-12"
       data-clean-empty-state="v6"
     >
-      <div aria-hidden className="aurora-field" />
-
       <div className="relative mx-auto flex w-full max-w-2xl min-w-0 flex-col items-center text-center">
         <VaiWelcomeMark size="lg" />
 

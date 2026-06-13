@@ -375,7 +375,7 @@ const IDIOMS: Idiom[] = [
   },
   {
     id: 'sleep',
-    match: /\bsleep\b|\bwait\s+(?:for\s+)?\d+\s*(?:ms\b|millisecond|second)|\bpause\s+(?:execution|the\s+(?:script|program))\b/i,
+    match: /\b(?:implement|write|show|add|create|make|use)\b.{0,40}\bsleep(?:\s+(?:function|helper|delay))?\b|\bsleep\s+(?:function|helper|delay|in\s+(?:javascript|typescript|python|bash|code))\b|\bwait\s+(?:for\s+)?\d+\s*(?:ms\b|milliseconds?\b|seconds?\b)|\bpause\s+(?:execution|the\s+(?:script|program))\b/i,
     defaultLang: 'javascript',
     impls: {
       javascript: {

@@ -6,6 +6,8 @@ import {
   looksLikeDecline,
   pickFallbackModelId,
   shouldEscalateDeterministicDecline,
+  shouldFlipPrimaryToGenerative,
+  shouldPreferGroundedFallback,
 } from '../src/chat/vai-fallback.js';
 
 describe('vai-fallback', () => {
@@ -250,5 +252,61 @@ describe('topical-mismatch (confident-wrong) escalation', () => {
     const ans =
       'Rust gives you fearless concurrency through its ownership and borrow checker, so data races are caught at compile time. For your use case, prefer channels or Arc<Mutex<T>> depending on contention and sharing needs.';
     expect(detectAnswerTopicMismatch('How does Rust handle concurrency safely?', ans)).toBe(false);
+  });
+});
+
+describe('shouldPreferGroundedFallback', () => {
+  const base = { hadWebEvidence: true, hasFallbackModel: true };
+
+  it('prefers the grounded model when web evidence was retrieved and a fallback exists', () => {
+    expect(shouldPreferGroundedFallback(base)).toBe(true);
+  });
+
+  it('does not prefer when no web evidence was retrieved', () => {
+    expect(shouldPreferGroundedFallback({ ...base, hadWebEvidence: false })).toBe(false);
+  });
+
+  it('does not prefer when no capable fallback model is available', () => {
+    expect(shouldPreferGroundedFallback({ ...base, hasFallbackModel: false })).toBe(false);
+  });
+
+  it('is a no-op when explicitly disabled (env flag off)', () => {
+    expect(shouldPreferGroundedFallback({ ...base, enabled: false })).toBe(false);
+  });
+
+  it('does not override a friend-review guardrail replacement', () => {
+    expect(shouldPreferGroundedFallback({ ...base, reviewReplacedPrimary: true })).toBe(false);
+  });
+
+  it('does not preempt a satisfied builder turn or builder file artifacts', () => {
+    expect(shouldPreferGroundedFallback({ ...base, builderSatisfies: true })).toBe(false);
+    expect(shouldPreferGroundedFallback({ ...base, builderFiles: true })).toBe(false);
+  });
+});
+
+describe('shouldFlipPrimaryToGenerative', () => {
+  const base = { turnKind: 'analysis', mode: 'chat', hasFallbackModel: true };
+
+  it('flips substantive analysis and research turns to the generative model', () => {
+    expect(shouldFlipPrimaryToGenerative(base)).toBe(true);
+    expect(shouldFlipPrimaryToGenerative({ ...base, turnKind: 'research' })).toBe(true);
+  });
+
+  it('never flips conversational or builder turn kinds', () => {
+    expect(shouldFlipPrimaryToGenerative({ ...base, turnKind: 'conversational' })).toBe(false);
+    expect(shouldFlipPrimaryToGenerative({ ...base, turnKind: 'builder' })).toBe(false);
+  });
+
+  it('keeps the vai:v0-first contract in builder and agent modes', () => {
+    expect(shouldFlipPrimaryToGenerative({ ...base, mode: 'builder' })).toBe(false);
+    expect(shouldFlipPrimaryToGenerative({ ...base, mode: 'agent' })).toBe(false);
+  });
+
+  it('requires a reachable generative model', () => {
+    expect(shouldFlipPrimaryToGenerative({ ...base, hasFallbackModel: false })).toBe(false);
+  });
+
+  it('is reversible via the master switch', () => {
+    expect(shouldFlipPrimaryToGenerative({ ...base, enabled: false })).toBe(false);
   });
 });

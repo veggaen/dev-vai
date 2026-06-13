@@ -7,7 +7,39 @@ const EXPLICIT_ONLINE_LOOKUP_PATTERN =
   /^(?:(?:you\s+should|please|can\s+you)\s+)?(?:find|look\s+up|search|check|verify)\s+(?:it|that|this)?\s*(?:online|on\s+the\s+web|the\s+web|google)\b.+/i;
 
 const GREETING_PATTERN =
-  /^(?:hi|hello|hey|heya|yo|sup|what'?s up|good\s+(?:morning|afternoon|evening)|thanks?|thank you|thx|nice|cool|great|sounds good|got it|understood|ok(?:ay)?)\b[!. ]*$/i;
+  /^(?:hi|hiya|hello|hullo|hey|heya|heyo|hey\s+there|hi\s+there|yo|sup|wassup|howdy|g'?day|what'?s up|good\s+(?:morning|afternoon|evening)|thanks?|thank you|thx|nice|cool|great|sounds good|got it|understood|ok(?:ay)?|hei|heisann|heihei|hei\s+hei|heia|hallo|halla|takk|takk\s+skal\s+du\s+ha|god\s+(?:morgen|kveld|dag))\b[!. ]*$/i;
+
+// Banter / acknowledgement / gamer-slang tokens that carry no topical content.
+// A short turn is conversational ONLY when EVERY token is filler — that keeps
+// "gg wp" and "lol brb" conversational while bare topic words ("docker",
+// "latency", "recursion") fall through to the answer path.
+const CONVERSATIONAL_FILLER_TOKENS = new Set([
+  'lol', 'lmao', 'lmaoo', 'rofl', 'heh', 'yep', 'yup', 'yeah', 'yea', 'ya',
+  'nope', 'nah', 'naw', 'sure', 'alright', 'aight', 'wow', 'oh', 'huh', 'wait',
+  'np', 'ty', 'tysm', 'thx', 'cheers', 'maybe', 'idk', 'true', 'right',
+  'exactly', 'same', 'word', 'bet', 'fr', 'frfr', 'lmk', 'brb', 'gtg', 'gotcha',
+  'k', 'kk', 'ok', 'okay', 'ay', 'aye', 'oi', 'meh', 'welp', 'ah', 'ahh', 'ohh',
+  'damn', 'dang', 'sheesh', 'yikes', 'oof', 'bruh', 'fine', 'cool', 'nice',
+  // gamer slang
+  'gg', 'wp', 'ggwp', 'glhf', 'ez', 'gj', 'gz', 'rip', 'clutch', 'pog', 'poggers',
+]);
+
+const FILLER_PUNCT_OR_REPEAT = /^(?:haha+|hehe+|hah+|hmm+|mhm+|ugh+|hm+|ha+|yay+|woo+|wooo+)$/i;
+
+function isAllConversationalFiller(trimmed: string): boolean {
+  const tokens = trimmed
+    .toLowerCase()
+    .replace(/[!.?,;:]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  if (tokens.length === 0 || tokens.length > 3) return false;
+  return tokens.every(
+    (token) => CONVERSATIONAL_FILLER_TOKENS.has(token) || FILLER_PUNCT_OR_REPEAT.test(token),
+  );
+}
+
+const SUBSTANTIVE_QUESTION_TAIL =
+  /\b(?:who|what|where|when|why|how|which|whose|whom|can|could|should|would|does|do|did|is|are|was|were|will)\b\s+\w+/i;
 
 const FOLLOW_UP_CUE_PATTERN =
   /^(?:tell\s+me(?:\s+(?:then|more|about\s+it))?|go\s+on|continue|more|what\s+else|and\s+then|and\??|so\??|ok|okay|yes|yeah|nope?|sure|right|cool|nice|why(?:\s+though)?|how(?:\s+so)?|shorter(?:\s+(?:pls|please))?|explain\s+(?:that\s+)?more\s+simply)[\s.?!]*$/i;
@@ -83,6 +115,7 @@ export interface WebConclusionContext {
  * that should not become search terms.
  */
 export function normalizeWebConclusionInput(input: string): string {
+  if (typeof input !== 'string') return '';
   return input
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, ' ')
     .replace(/^\s*(?:could\s+you\s+please\s+help\s+me\s+understand|please\s+provide\s+a\s+concise\s+explanation)\s*:\s*/i, '')
@@ -229,6 +262,51 @@ export function shouldConcludeWithWebSearch(
 
   const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
   return wordCount >= 4;
+}
+
+/**
+ * Small-talk / opener turns with no substantive information need.
+ * Derived from the existing skip vs conclude policy — short non-questions,
+ * greeting phrases, and follow-up cues — not a growing per-word allowlist.
+ */
+export function isPureConversationalTurn(
+  input: string,
+  context: WebConclusionContext = {},
+): boolean {
+  if (shouldConcludeWithWebSearch(input, context)) return false;
+
+  const trimmed = normalizeWebConclusionInput(input);
+  if (!trimmed || /\?/.test(trimmed)) return false;
+
+  // Greetings, thanks, acknowledgements, and discourse-only follow-up cues.
+  if (GREETING_PATTERN.test(trimmed) || isConversationalWebFollowUpCue(trimmed)) return true;
+
+  // A short banter/filler token ("lol", "yep", "wow", "idk") with no topical
+  // content. We do NOT treat every ≤2-word turn as conversational: bare topic
+  // words like "docker", "recursion", or "latency" are terse knowledge asks
+  // that must reach the answer path, not the greeting handler.
+  if (isAllConversationalFiller(trimmed)) return true;
+
+  return false;
+}
+
+/**
+ * Detects "Hello, who is …?" style turns: a short opener plus a real question.
+ */
+export function hasSubstantiveQuestionAfterOpener(input: string): boolean {
+  const trimmed = normalizeWebConclusionInput(input);
+  if (!trimmed) return false;
+  if (/[?,]/.test(trimmed)) return true;
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length <= 2) {
+    return SUBSTANTIVE_QUESTION_TAIL.test(trimmed);
+  }
+
+  const remainder = words.slice(Math.min(2, words.length - 1)).join(' ');
+  if (remainder && SUBSTANTIVE_QUESTION_TAIL.test(remainder)) return true;
+
+  return SUBSTANTIVE_QUESTION_TAIL.test(trimmed);
 }
 
 export function isGameFranchiseOverviewQuestion(lower: string): boolean {
