@@ -7,7 +7,7 @@ import type {
   ChatPromptRewriteResponseDepth,
 } from '../config/types.js';
 import { conversations, messages, images } from '../db/schema.js';
-import type { ModelRegistry, ChatChunk, Message, TokenUsage, TurnThinking, TurnRoutePlan } from '../models/adapter.js';
+import type { ModelRegistry, ModelAdapter, ChatChunk, Message, TokenUsage, TurnThinking, TurnRoutePlan } from '../models/adapter.js';
 import { SkillRouter } from '../models/skill-router.js';
 import type { ThorsenAdaptiveController } from '../thorsen/types.js';
 import {
@@ -50,6 +50,7 @@ import { liveContextCapability } from './capabilities/live-context-capability.js
 import type {
   CouncilInput,
   CouncilThinking,
+  CouncilConsensus,
 } from '../consensus/types.js';
 import type { CouncilRoster } from '../consensus/topic-router.js';
 import { convene, toCouncilThinking } from '../consensus/council.js';
@@ -277,7 +278,68 @@ function isChatServiceOptions(value: unknown): value is ChatServiceOptions {
       || 'contractLedger' in value
       || 'responseReviewers' in value
       || 'searchForEvidence' in value
+      || 'councilRoster' in value
+      || 'guidanceStore' in value
+      || 'loadActiveGuidance' in value
     );
+}
+
+/** A draft handed to the council, with the context a member needs to judge it. */
+interface CouncilDraftInput {
+  readonly prompt: string;
+  readonly draftText: string;
+  readonly modelId: string;
+  readonly turnKind?: string;
+  readonly confidence?: number;
+  readonly hasEvidence?: boolean;
+  readonly sources?: readonly { readonly title?: string; readonly url?: string; readonly snippet?: string }[];
+}
+
+/**
+ * What the council teaches the redraft — intent + method, never facts. Mirrors the
+ * fact-quarantine: a member's reading of HOW to approach the turn, not its answer.
+ */
+export interface CouncilRedraftFeedback {
+  readonly realIntent: string;
+  readonly methodLessons: readonly string[];
+  readonly missingCapabilities: readonly string[];
+  readonly concerns: readonly string[];
+  readonly recommendedAction: string;
+}
+
+/**
+ * Rank a consensus so the loop can keep the better of two drafts. Higher is better:
+ * ship beats act beats escalate; ties break on agreement then confidence.
+ */
+export function councilScore(consensus: CouncilConsensus): number {
+  const outcomeRank = consensus.outcome === 'ship' ? 2 : consensus.outcome === 'act' ? 1 : 0;
+  return outcomeRank * 100 + consensus.agreement * 10 + consensus.confidence;
+}
+
+/**
+ * Turn council feedback into a compact redraft instruction. Intent and method only —
+ * the friends point, Vai writes. Returns a single appended system/user nudge string.
+ */
+export function buildCouncilRedraftInstruction(feedback: CouncilRedraftFeedback): string {
+  const lines: string[] = [
+    'Your draft was reviewed by your friend council before reaching the user. They did NOT clear it yet.',
+    'Use their reading to improve THIS answer. They point at intent and method only — you supply every fact yourself.',
+  ];
+  if (feedback.realIntent) lines.push(`What the user actually wants: ${feedback.realIntent}`);
+  if (feedback.recommendedAction === 'reread-intent') {
+    lines.push('You likely misread the ask. Re-read the true intent above and answer THAT, directly.');
+  }
+  if (feedback.methodLessons.length) {
+    lines.push(`How to handle this kind of message: ${feedback.methodLessons.slice(0, 3).join('; ')}.`);
+  }
+  if (feedback.missingCapabilities.length) {
+    lines.push(`Capabilities your draft was missing: ${feedback.missingCapabilities.slice(0, 3).join('; ')}.`);
+  }
+  if (feedback.concerns.length) {
+    lines.push(`Specific concerns to fix: ${feedback.concerns.slice(0, 4).join('; ')}.`);
+  }
+  lines.push('Rewrite the answer now, keeping everything that was already correct and fixing only what they flagged.');
+  return lines.join('\n');
 }
 
 const ACTIVE_SANDBOX_EXECUTION_HINT = [
@@ -725,20 +787,10 @@ export class ChatService {
     };
   }
 
-  /**
-   * Run the SCIS council on a draft (if a roster is configured). Returns the UI projection
-   * (CouncilThinking) or undefined. Never throws; failures are silent (council is advisory).
-   * Enforces the fact-quarantine: only intent/action/lessons flow downstream.
-   */
-  private async runCouncilReview(draft: {
-    readonly prompt: string;
-    readonly draftText: string;
-    readonly modelId: string;
-    readonly turnKind?: string;
-    readonly confidence?: number;
-    readonly hasEvidence?: boolean;
-    readonly sources?: readonly { readonly title?: string; readonly url?: string; readonly snippet?: string }[];
-  }): Promise<CouncilThinking | undefined> {
+  /** One council pass over a draft. Returns the projection + raw consensus, or undefined. */
+  private async conveneOnce(draft: CouncilDraftInput): Promise<
+    { thinking: CouncilThinking; consensus: CouncilConsensus } | undefined
+  > {
     if (!this.councilRoster || !draft.prompt || !draft.draftText) return undefined;
     if (isPureConversationalTurn(draft.prompt)) return undefined;
     try {
@@ -753,9 +805,110 @@ export class ChatService {
       };
       const result = await convene(input, this.councilRoster, { timeoutMs: 12_000 });
       if (!result.convened) return undefined;
-      return toCouncilThinking(result.topic, result.consensus, result.assessment);
+      return {
+        thinking: toCouncilThinking(result.topic, result.consensus, result.assessment),
+        consensus: result.consensus,
+      };
     } catch {
       return undefined; // advisory only
+    }
+  }
+
+  /**
+   * Run the SCIS council on a draft (if a roster is configured). Returns the UI projection
+   * (CouncilThinking) or undefined. Never throws; failures are silent (council is advisory).
+   * Enforces the fact-quarantine: only intent/action/lessons flow downstream.
+   *
+   * Display-only path: grades the draft but does NOT regenerate. Used where there is
+   * no model to re-prompt (the deterministic/corpus arm). For the model path that can
+   * actually act on feedback, use {@link runCouncilLoop}.
+   */
+  private async runCouncilReview(draft: CouncilDraftInput): Promise<CouncilThinking | undefined> {
+    return (await this.conveneOnce(draft))?.thinking;
+  }
+
+  /**
+   * Close the Thorsen loop: grade the draft, and when the council does NOT clear it for
+   * release (outcome `act` / `reread-intent`), feed the friends' reading — the real
+   * intent, the method lessons, the concerns — back into ONE bounded redraft, then
+   * re-convene against the new draft and keep whichever the council rates higher.
+   *
+   * Fact-quarantine holds: only intent/method/action/concerns are passed to the redraft.
+   * The friends never supply facts — they tell Vai how to think about the turn, and Vai
+   * regenerates the answer itself. Capped at one extra round so it can never spin, and a
+   * no-op (returns the original) whenever there is no roster, no `redraft`, or the council
+   * already says ship.
+   */
+  private async runCouncilLoop(
+    draft: CouncilDraftInput,
+    redraft?: (feedback: CouncilRedraftFeedback) => Promise<string | undefined>,
+  ): Promise<{ council?: CouncilThinking; finalText: string; revised: boolean }> {
+    const first = await this.conveneOnce(draft);
+    if (!first) return { council: undefined, finalText: draft.draftText, revised: false };
+
+    const shouldRedraft =
+      Boolean(redraft) &&
+      first.consensus.outcome !== 'ship' &&
+      (first.consensus.recommendedAction === 'reread-intent' ||
+        first.consensus.recommendedAction === 'answer-directly' ||
+        first.consensus.outcome === 'act');
+    if (!shouldRedraft) {
+      return { council: first.thinking, finalText: draft.draftText, revised: false };
+    }
+
+    let revisedText: string | undefined;
+    try {
+      revisedText = await redraft!({
+        realIntent: first.consensus.realIntent,
+        methodLessons: first.consensus.methodLessons,
+        missingCapabilities: first.consensus.missingCapabilities,
+        concerns: first.consensus.notes.flatMap((note) => note.concerns).filter(Boolean),
+        recommendedAction: first.consensus.recommendedAction,
+      });
+    } catch {
+      revisedText = undefined; // redraft failure must never break the turn
+    }
+    const cleaned = revisedText?.trim();
+    if (!cleaned || cleaned === draft.draftText.trim()) {
+      return { council: first.thinking, finalText: draft.draftText, revised: false };
+    }
+
+    // Re-convene against the regenerated draft and keep the better-rated of the two.
+    const second = await this.conveneOnce({ ...draft, draftText: cleaned });
+    if (!second) {
+      // Council couldn't re-grade — trust the redraft only if the first call wanted action.
+      return { council: first.thinking, finalText: cleaned, revised: true };
+    }
+    const improved = councilScore(second.consensus) >= councilScore(first.consensus);
+    return improved
+      ? { council: second.thinking, finalText: cleaned, revised: true }
+      : { council: first.thinking, finalText: draft.draftText, revised: false };
+  }
+
+  /**
+   * Re-prompt the same model that wrote the draft, appending the council's reading as a
+   * final instruction. Returns the regenerated answer text, or undefined on any failure
+   * (the loop then keeps the original draft). Bounded by the model's own token limits;
+   * no streaming to the user — the result is graded again before anything is shown.
+   */
+  private async redraftWithCouncilFeedback(
+    adapter: ModelAdapter,
+    baseMessages: readonly Message[],
+    feedback: CouncilRedraftFeedback,
+    noLearn?: boolean,
+  ): Promise<string | undefined> {
+    const messages: Message[] = [
+      ...baseMessages,
+      { role: 'user', content: buildCouncilRedraftInstruction(feedback) },
+    ];
+    try {
+      let text = '';
+      for await (const chunk of adapter.chatStream({ messages, noLearn })) {
+        if (chunk.type === 'text_delta' && chunk.textDelta) text += chunk.textDelta;
+      }
+      return text.trim() || undefined;
+    } catch {
+      return undefined;
     }
   }
 
@@ -1922,6 +2075,49 @@ export class ChatService {
         ? { shouldFallback: true, reason: 'low-confidence' as const }
         : initialFallbackDecision;
       if (!fallbackDecision.shouldFallback || !fallbackDecision.reason) {
+        // Thorsen loop: the friend council grades this buffered draft and, when it
+        // does not clear it for release, feeds its reading (real intent + method +
+        // concerns — never facts) back into one bounded redraft from the SAME model,
+        // re-grades, and keeps the better. The draft is still buffered (not shown),
+        // so a revision replaces the text cleanly with no streaming to unwind.
+        // Builder file artifacts and code peer-review escalations are left alone.
+        let councilThinking: CouncilThinking | undefined;
+        if (!builderFiles && !codeReviewRejected && bufferedText.trim()) {
+          yield {
+            type: 'progress',
+            progress: { stage: 'council', label: 'Friend council reviewing the draft', status: 'running' },
+          } as ChatChunk;
+          const loop = await this.runCouncilLoop(
+            {
+              prompt: content,
+              draftText: bufferedText,
+              modelId: bufferedModelId,
+              turnKind,
+              confidence: latestConfidence,
+              hasEvidence: primaryHadEvidence,
+              sources: bufferedSourceChunks.flatMap((chunk) => chunk.sources ?? []),
+            },
+            (feedback) => this.redraftWithCouncilFeedback(adapter, primaryMessages, feedback, noLearn),
+          );
+          councilThinking = loop.council;
+          if (loop.revised) {
+            bufferedText = loop.finalText;
+            reviewReplacedPrimary = true; // re-emit the revised text on flush
+          }
+          yield {
+            type: 'progress',
+            progress: {
+              stage: 'council',
+              label: loop.revised
+                ? 'Council asked for a revision — Vai redrafted'
+                : councilThinking?.outcome === 'ship'
+                  ? 'Council cleared the draft'
+                  : 'Council reviewed the draft',
+              detail: councilThinking?.summary,
+              status: 'done',
+            },
+          } as ChatChunk;
+        }
         // §12.5.3 exit gate: verify + sanitize the deterministic-core arm's
         // output before it reaches the user. The primary vai:v0 arm is already
         // buffered, so this costs no streaming latency. Builder file artifacts
@@ -1966,6 +2162,16 @@ export class ChatService {
           }
         }
 
+        // Carry the council projection onto the `done` chunk so the ThinkingPanel
+        // can render the "How this answer was made" council section.
+        const withCouncil = (chunk: ChatChunk): ChatChunk => {
+          if (chunk.type !== 'done' || !councilThinking) return chunk;
+          const done = chunk as any;
+          const thinking = { ...(done.thinking ?? { strategy: 'vai-buffered', modelTag: bufferedModelId, confidence: latestConfidence ?? 0.6 }) };
+          thinking.council = councilThinking;
+          return { ...done, thinking } as ChatChunk;
+        };
+
         if (verdict && verdict.action !== 'pass') {
           const surfaced = verdict.text;
           fullText = surfaced;
@@ -1983,7 +2189,7 @@ export class ChatService {
           // usage + duration still flow, but the raw, unsanitized text does not.
           for (const chunk of bufferedChunks) {
             if (chunk.type === 'text_delta') continue;
-            yield chunk;
+            yield withCouncil(chunk);
           }
         } else {
           fullText = bufferedText;
@@ -1991,11 +2197,11 @@ export class ChatService {
             yield { type: 'text_delta', textDelta: bufferedText } as ChatChunk;
             for (const chunk of bufferedChunks) {
               if (chunk.type === 'text_delta') continue;
-              yield chunk;
+              yield withCouncil(chunk);
             }
           } else {
             for (const chunk of bufferedChunks) {
-              yield chunk;
+              yield withCouncil(chunk);
             }
           }
         }
@@ -2313,6 +2519,53 @@ export class ChatService {
           } as ChatChunk;
         }
 
+        // Thorsen loop on the escalated/flip arm. This is where substantive
+        // analysis/research turns actually land (the primary-generative flip
+        // skips the vai:v0 buffered block entirely), so the friend council must
+        // grade THIS draft — not just the legacy buffered one — or it never runs
+        // on the turns it exists to improve. Same contract as the buffered path:
+        // the council reads intent + method + concerns (never facts) and Vai
+        // redrafts once from the SAME escalated model, re-graded, better kept.
+        // Builder file artifacts keep their own gates and are left alone.
+        let fallbackCouncilThinking: CouncilThinking | undefined;
+        const fbHasFileBlocksForCouncil = isBuilderMode && hasBuilderFileBlocks(fbText);
+        if (!fbHasFileBlocksForCouncil && fbText.trim()) {
+          const fbCouncilHasEvidence = fallbackResult.sourceChunks.some(
+            (chunk) => Array.isArray(chunk.sources) && chunk.sources.length > 0,
+          );
+          yield {
+            type: 'progress',
+            progress: { stage: 'council', label: 'Friend council reviewing the draft', status: 'running' },
+          } as ChatChunk;
+          const loop = await this.runCouncilLoop(
+            {
+              prompt: content,
+              draftText: fbText,
+              modelId: responseModelId,
+              turnKind,
+              confidence: latestConfidence,
+              hasEvidence: fbCouncilHasEvidence,
+              sources: fallbackResult.sourceChunks.flatMap((chunk) => chunk.sources ?? []),
+            },
+            (feedback) => this.redraftWithCouncilFeedback(fallbackAdapter, fallbackMessages, feedback, noLearn),
+          );
+          fallbackCouncilThinking = loop.council;
+          if (loop.revised) fbText = loop.finalText;
+          yield {
+            type: 'progress',
+            progress: {
+              stage: 'council',
+              label: loop.revised
+                ? 'Council asked for a revision — Vai redrafted'
+                : fallbackCouncilThinking?.outcome === 'ship'
+                  ? 'Council cleared the draft'
+                  : 'Council reviewed the draft',
+              detail: fallbackCouncilThinking?.summary,
+              status: 'done',
+            },
+          } as ChatChunk;
+        }
+
         // Builder file output from the escalated model is kept verbatim (its own
         // quality gates apply); everything else is verified. The local model has
         // no retrieval, so confident factual claims are inherently ungrounded —
@@ -2400,6 +2653,9 @@ export class ChatService {
         });
         if (turnPlan) {
           fallbackThinking.routePlan = buildRoutePlan(turnPlan, turnShadowScores);
+        }
+        if (fallbackCouncilThinking) {
+          fallbackThinking.council = fallbackCouncilThinking;
         }
 
         const decorateFallbackDone = (chunk: ChatChunk): ChatChunk => chunk.type === 'done'

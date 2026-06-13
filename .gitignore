@@ -100,3 +100,6 @@ packages/runtime/.vai-runtime.lock
 vai.db
 vai.db-shm
 vai.db-wal
+
+# TypeScript incremental build info
+*.tsbuildinfo

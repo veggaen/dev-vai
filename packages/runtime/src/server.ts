@@ -54,6 +54,7 @@ import { PlatformAuthService } from './auth/platform-auth.js';
 import { registerPlatformAuthRoutes } from './routes/platform-auth.js';
 import { ProjectService } from './projects/service.js';
 import { registerProjectRoutes } from './routes/projects.js';
+import { buildLocalCouncilRoster } from './council/build-roster.js';
 import { CompanionContextBroker } from './companion-context/broker.js';
 import { GrokFriendClient } from './grok-friend/client.js';
 import { WorkspaceStatusReader } from './workspace-status/reader.js';
@@ -221,6 +222,19 @@ export async function createServer(options?: ServerOptions) {
     braveApiKey: process.env.BRAVE_SEARCH_API_KEY || undefined,
     searxngUrl: process.env.VAI_SEARXNG_URL || undefined,
   });
+  // SCIS friend council — built from the FREE local models already registered
+  // (qwen variants via Ollama). When present, ChatService grades every substantive
+  // draft and, on a non-ship verdict, redrafts once against the council's reading
+  // before release. No paid keys are read; the council stays dormant if no local
+  // model is installed. Opt out with VAI_COUNCIL_ENABLED=0.
+  const councilRoster = process.env.VAI_COUNCIL_ENABLED === '0'
+    ? undefined
+    : buildLocalCouncilRoster(models, {
+        maxMembers: Number(process.env.VAI_COUNCIL_MAX_MEMBERS) || 3,
+      });
+  if (councilRoster) {
+    console.log(`[VAI] Friend council active: ${councilRoster.default.map((m) => m.displayName).join(', ')}`);
+  }
   const chatService = new ChatService(
     db,
     models,
@@ -237,6 +251,7 @@ export async function createServer(options?: ServerOptions) {
       },
       onUsage: config.enableUsageTracking ? (entry) => usageService.record(entry) : undefined,
       guidanceStore,
+      councilRoster,
       responseReviewers: [
         ...(localSteeringWorker.isEnabled()
           ? [{
