@@ -19,6 +19,7 @@ import {
   EvalRunner,
   SearchPipeline,
   resolveEffectiveLocalChain,
+  createGrokVisionAdapter,
 } from '@vai/core';
 import type { ChatServiceOptions, ResponseReviewInput, VaiConfig } from '@vai/core';
 import { registerChatRoutes } from './routes/chat.js';
@@ -235,6 +236,11 @@ export async function createServer(options?: ServerOptions) {
   if (councilRoster) {
     console.log(`[VAI] Friend council active: ${councilRoster.default.map((m) => m.displayName).join(', ')}`);
   }
+  // Vision: read image pixels via the local grok CLI by default (free, can see images), so image
+  // turns are grounded instead of fabricated. Falls back to the honest no-op when grok is absent.
+  // Opt out with VAI_VISION_GROK=0.
+  const visionAdapter = process.env.VAI_VISION_GROK === '0' ? undefined : (createGrokVisionAdapter() ?? undefined);
+  if (visionAdapter) console.log(`[VAI] Vision active: ${visionAdapter.id}`);
   const chatService = new ChatService(
     db,
     models,
@@ -252,6 +258,7 @@ export async function createServer(options?: ServerOptions) {
       onUsage: config.enableUsageTracking ? (entry) => usageService.record(entry) : undefined,
       guidanceStore,
       councilRoster,
+      visionAdapter,
       responseReviewers: [
         ...(localSteeringWorker.isEnabled()
           ? [{

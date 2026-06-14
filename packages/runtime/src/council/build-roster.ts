@@ -14,7 +14,7 @@
  * stays on `default` for breadth. De-dupe in `selectMembers` keeps that honest.
  */
 
-import { createCouncilMember } from '@vai/core';
+import { createCouncilMember, createGrokCliAdapter } from '@vai/core';
 import type { CouncilMember, CouncilRoster, CouncilTopic, ModelAdapter, ModelRegistry } from '@vai/core';
 
 /** Topics we prefer to seat a dedicated specialist on when we have spare members. */
@@ -62,6 +62,20 @@ export function buildLocalCouncilRoster(
       (byTopic[specialistTopic] ??= []).push(member);
     }
   });
+
+  // Seat Grok (via the local `grok` CLI) as a standing, vision-capable FACTUAL council member —
+  // Vai's permanent digital friend + the first of (intended) several image-verifying entities.
+  // ON BY DEFAULT whenever the free CLI is available; set VAI_COUNCIL_GROK=0 to opt out. Grok can
+  // see images, so it is the council's vision verifier for screenshot/image turns with no local
+  // GB model. Fact-quarantine is unchanged: Grok points/verifies; Vai's tools own surfaced facts.
+  if (process.env.VAI_COUNCIL_GROK !== '0') {
+    const grokAdapter = createGrokCliAdapter({ timeoutMs });
+    if (grokAdapter) {
+      const grokMember = createCouncilMember({ adapter: grokAdapter, topic: 'factual', timeoutMs });
+      defaultMembers.push(grokMember);
+      (byTopic.factual ??= []).push(grokMember);
+    }
+  }
 
   return { byTopic, default: defaultMembers };
 }

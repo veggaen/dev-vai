@@ -647,6 +647,25 @@ const MIGRATION_SQL = [
   // gets it; the runtime init also ALTERs it (duplicate is ignored). Without
   // this the test DB lacks the column and every assistant insert fails.
   `ALTER TABLE messages ADD COLUMN plan TEXT`,
+  // Stage E — visual/fact grounding learning log (cross-check + vision outcomes).
+  `CREATE TABLE IF NOT EXISTS visual_grounding_log (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT,
+    message_id TEXT,
+    prompt TEXT NOT NULL,
+    subject TEXT,
+    claim_number REAL,
+    evidence_median REAL,
+    corroboration INTEGER NOT NULL DEFAULT 0,
+    verdict TEXT NOT NULL,
+    vision_used INTEGER NOT NULL DEFAULT 0,
+    vision_confidence REAL,
+    shipped INTEGER NOT NULL DEFAULT 0,
+    error_type TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS visual_grounding_log_created_at_idx ON visual_grounding_log(created_at)`,
+  `CREATE INDEX IF NOT EXISTS visual_grounding_log_error_type_idx ON visual_grounding_log(error_type)`,
 ];
 
 /**

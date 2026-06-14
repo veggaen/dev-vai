@@ -54,6 +54,10 @@ import type {
 } from '../consensus/types.js';
 import type { CouncilRoster } from '../consensus/topic-router.js';
 import { convene, toCouncilThinking } from '../consensus/council.js';
+import { extractCheckableClaim, assessClaimAgreement, applyCrossCheck } from '../consensus/cross-check.js';
+import { resolveIntent } from '../consensus/intent-resolver.js';
+import { checkCorrectionGuard } from '../consensus/correction-guard.js';
+import { logGrounding, type GroundingErrorType, type GroundingVerdict } from '../consensus/grounding-log.js';
 import {
   salientTokens,
   selectApplicableGuidance,
@@ -255,6 +259,12 @@ export interface ChatServiceOptions {
    * when the responding model does not emit its own sources chunk (e.g. local Qwen).
    */
   readonly searchForEvidence?: (query: string, budgetMs: number) => Promise<import('../search/types.js').SearchResponse | null>;
+  /**
+   * Optional image reader. When supplied AND it `canSee`, image turns get a grounded machine
+   * reading of the pixels appended to the prompt (instead of only the human description), so Vai
+   * stops fabricating descriptions of screenshots it never saw. Defaults to an honest no-op.
+   */
+  readonly visionAdapter?: import('../vision/adapter.js').VisionAdapter;
 }
 
 export interface ChatPromptRewriteOverrides {
@@ -293,6 +303,10 @@ interface CouncilDraftInput {
   readonly confidence?: number;
   readonly hasEvidence?: boolean;
   readonly sources?: readonly { readonly title?: string; readonly url?: string; readonly snippet?: string }[];
+  /** Prior turns (oldest→newest), so the cross-check can run the multi-turn correction guard. */
+  readonly history?: readonly { readonly role: 'user' | 'assistant' | 'system' | 'tool'; readonly content: string }[];
+  /** Conversation id, for the grounding learning log. */
+  readonly conversationId?: string;
 }
 
 /**
@@ -673,6 +687,7 @@ export class ChatService {
   /** Optional SCIS council roster. When present, substantive turns run the council for consensus + method lessons. */
   private readonly councilRoster?: CouncilRoster;
   private readonly searchForEvidence?: ChatServiceOptions['searchForEvidence'];
+  private readonly visionAdapter?: ChatServiceOptions['visionAdapter'];
 
   constructor(
     private db: VaiDatabase,
@@ -701,6 +716,7 @@ export class ChatService {
     this.loadActiveGuidance = resolvedOptions?.loadActiveGuidance;
     this.councilRoster = resolvedOptions?.councilRoster;
     this.searchForEvidence = resolvedOptions?.searchForEvidence;
+    this.visionAdapter = resolvedOptions?.visionAdapter;
   }
 
   /**
@@ -805,13 +821,107 @@ export class ChatService {
       };
       const result = await convene(input, this.councilRoster, { timeoutMs: 12_000 });
       if (!result.convened) return undefined;
+      const consensus = await this.crossCheckConsensus(draft, result.consensus);
       return {
-        thinking: toCouncilThinking(result.topic, result.consensus, result.assessment),
-        consensus: result.consensus,
+        thinking: toCouncilThinking(result.topic, consensus, result.assessment),
+        consensus,
       };
     } catch {
       return undefined; // advisory only
     }
+  }
+
+  /**
+   * Optional fact cross-check: when the council cleared a draft that carries a checkable
+   * claim (a price, count, date, named entity), run ONE web search and fold the outcome into
+   * the consensus — a confirmation strongly boosts agreement (a verified "pass"), a
+   * contradiction flips the action to `reread-intent` so the redraft loop fixes the draft.
+   * Pure decisioning lives in `cross-check.ts`; this method only owns the gating + the search.
+   * Returns the original consensus unchanged whenever it should not (or cannot) run.
+   */
+  private async crossCheckConsensus(
+    draft: CouncilDraftInput,
+    consensus: CouncilConsensus,
+  ): Promise<CouncilConsensus> {
+    if (process.env.VAI_COUNCIL_CROSSCHECK === '0') return consensus;
+
+    // Stage A — resolve what the user actually wants (subject, current-value, image refs).
+    const intent = resolveIntent(draft.prompt, draft.draftText, false);
+
+    // Stage F — multi-turn correction guard. Runs even without search: if the draft repeats a
+    // value the user already disputed this conversation, flip to reread-intent so it can't ship
+    // the same wrong number again. Highest priority — a known-bad repeat shouldn't even be verified.
+    if (draft.history && draft.history.length > 0) {
+      const guard = checkCorrectionGuard(draft.history, draft.draftText);
+      if (guard.repeatsDisputedValue) {
+        this.logGroundingOutcome(draft, intent, {
+          verdict: 'contradict', claimNumber: guard.disputedValue, shipped: false,
+          errorType: 'persistent_error_after_correction',
+        });
+        return {
+          ...consensus,
+          confidence: Math.max(0, consensus.confidence * 0.4),
+          recommendedAction: 'reread-intent',
+          outcome: consensus.outcome === 'ship' ? 'act' : consensus.outcome,
+        };
+      }
+    }
+
+    if (!this.searchForEvidence) return consensus;
+    // Verify whenever the council points at a fact-shaped action (answer-directly = "the
+    // draft is fine", web-search = "go confirm this") AND the draft carries a checkable claim.
+    // Note: a UNANIMOUS web-search verdict is the STRONGEST signal to verify, not skip.
+    // We only skip a council that escalated with no actionable direction.
+    const factShapedAction = consensus.recommendedAction === 'answer-directly' || consensus.recommendedAction === 'web-search';
+    if (!factShapedAction || consensus.outcome === 'escalate') return consensus;
+    const claim = extractCheckableClaim(draft.prompt, draft.draftText, intent);
+    if (!claim) return consensus;
+    // Anchor the query on the subject + currentness when we can ("eth price today").
+    const anchoredQuery = [intent.subject, intent.valueKind === 'price' ? 'price' : '', intent.wantsCurrentValue ? 'today' : '']
+      .filter(Boolean).join(' ').trim();
+    const query = consensus.searchQuery?.trim() || anchoredQuery || draft.prompt;
+    try {
+      const search = await this.searchForEvidence(query, 4_000);
+      if (!search || search.sources.length === 0) {
+        this.logGroundingOutcome(draft, intent, { verdict: 'inconclusive', claimNumber: claim.numeric, shipped: false });
+        return consensus;
+      }
+      const assessment = assessClaimAgreement(claim, search, query, intent);
+      const verdict: GroundingVerdict = assessment.contradicted ? 'contradict' : assessment.verified ? 'confirm' : 'inconclusive';
+      let errorType: GroundingErrorType | null = null;
+      if (assessment.contradicted) errorType = claim.temporalClaim && assessment.temporalUngrounded ? 'fabricated_timestamp' : 'price_hallucination';
+      else if (!assessment.verified) errorType = 'weak_source_confirmation';
+      this.logGroundingOutcome(draft, intent, {
+        verdict, claimNumber: claim.numeric, evidenceMedian: assessment.evidenceMedian,
+        corroboration: assessment.corroboration, shipped: assessment.verified, errorType,
+      });
+      return applyCrossCheck(consensus, assessment);
+    } catch {
+      return consensus; // verification is advisory — never break the turn
+    }
+  }
+
+  /** Best-effort write to the Stage E grounding learning log. Never throws into a turn. */
+  private logGroundingOutcome(
+    draft: CouncilDraftInput,
+    intent: ReturnType<typeof resolveIntent>,
+    fields: {
+      verdict: GroundingVerdict; claimNumber?: number | null; evidenceMedian?: number | null;
+      corroboration?: number; shipped?: boolean; errorType?: GroundingErrorType | null;
+    },
+  ): void {
+    logGrounding(this.db as never, {
+      conversationId: draft.conversationId ?? null,
+      prompt: draft.prompt,
+      subject: intent.subject,
+      claimNumber: fields.claimNumber ?? null,
+      evidenceMedian: fields.evidenceMedian ?? null,
+      corroboration: fields.corroboration ?? 0,
+      verdict: fields.verdict,
+      visionUsed: false,
+      shipped: fields.shipped ?? false,
+      errorType: fields.errorType ?? null,
+    });
   }
 
   /**
@@ -1171,6 +1281,29 @@ export class ChatService {
       // Prepend the image description + question to the message content for the AI
       const imageParts = [`[Image: ${image.description}]`];
       if (image.question) imageParts.push(`[Question about image: ${image.question}]`);
+      // Stage C — actually READ the pixels when a seeing vision adapter is configured, so Vai
+      // grounds on what's in the image instead of fabricating from the human description alone.
+      // The reading is labelled as machine vision (not asserted as truth) and is still subject to
+      // the council + cross-check downstream. On a failed/absent read we add an honest marker so
+      // the model knows it must NOT invent image contents.
+      if (this.visionAdapter?.canSee) {
+        try {
+          const seen = await this.visionAdapter.describe({
+            dataBase64: image.data,
+            mime: image.mimeType,
+            question: image.question ?? (content || undefined),
+          });
+          if (seen?.text) {
+            imageParts.push(`[Vision (${seen.source}) read the image: ${seen.text.slice(0, 1500)}]`);
+          } else {
+            imageParts.push('[Vision could not read this image — do NOT guess its contents; say you could not read it.]');
+          }
+        } catch {
+          imageParts.push('[Vision unavailable — do NOT guess the image contents.]');
+        }
+      } else {
+        imageParts.push('[No image-reading capability — do NOT state specific contents of the image; offer to verify another way.]');
+      }
       enrichedContent = imageParts.join('\n') + (content ? '\n' + content : '');
     }
 
@@ -1541,6 +1674,8 @@ export class ChatService {
             modelId: winner.strategy,
             turnKind: winner.turnKind,
             confidence: winner.confidence,
+            history: history.map((m) => ({ role: m.role, content: m.content })),
+            conversationId,
           });
           yield* this.emitDeterministicTurn({
             conversationId,
@@ -2096,6 +2231,8 @@ export class ChatService {
               confidence: latestConfidence,
               hasEvidence: primaryHadEvidence,
               sources: bufferedSourceChunks.flatMap((chunk) => chunk.sources ?? []),
+              history: history.map((m) => ({ role: m.role, content: m.content })),
+              conversationId,
             },
             (feedback) => this.redraftWithCouncilFeedback(adapter, primaryMessages, feedback, noLearn),
           );
@@ -2546,6 +2683,8 @@ export class ChatService {
               confidence: latestConfidence,
               hasEvidence: fbCouncilHasEvidence,
               sources: fallbackResult.sourceChunks.flatMap((chunk) => chunk.sources ?? []),
+              history: history.map((m) => ({ role: m.role, content: m.content })),
+              conversationId,
             },
             (feedback) => this.redraftWithCouncilFeedback(fallbackAdapter, fallbackMessages, feedback, noLearn),
           );
@@ -2759,6 +2898,8 @@ export class ChatService {
           // draftConfidence for "low confidence -> full council" and hasEvidence for context.
           confidence: undefined,
           hasEvidence: false,
+          history: history.map((m) => ({ role: m.role, content: m.content })),
+          conversationId,
         });
       }
       if (!primarySawDone) {
