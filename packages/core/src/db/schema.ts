@@ -488,6 +488,46 @@ export const retrievalQualityLog = sqliteTable('retrieval_quality_log', {
   createdAtIdx: index('retrieval_quality_log_created_at_idx').on(t.createdAt),
 }));
 
+// ---- Visual / Fact Grounding Log (Stage E — cross-check + vision learning data) ----
+
+/**
+ * One labeled outcome per cross-check / vision run. The dataset for tuning the corroboration
+ * threshold + tolerance, measuring new-vs-old, and (later) fine-tuning Vai's visual inspection.
+ * `errorType` is the taxonomy from the council review: it lets us bucket failure CLASSES rather
+ * than just pass/fail. Append-only; never read on the hot path.
+ */
+export const visualGroundingLog = sqliteTable('visual_grounding_log', {
+  id: text('id').primaryKey(),
+  conversationId: text('conversation_id').references(() => conversations.id),
+  messageId: text('message_id').references(() => messages.id),
+  prompt: text('prompt').notNull(),
+  /** Resolved subject the claim was anchored to ("ETH"), or null. */
+  subject: text('subject'),
+  /** The numeric value the draft claimed, if any. */
+  claimNumber: real('claim_number'),
+  /** Median of the qualifying corroborating candidates, if computed. */
+  evidenceMedian: real('evidence_median'),
+  /** How many subject-anchored candidates corroborated/disagreed. */
+  corroboration: integer('corroboration').notNull().default(0),
+  /** 'confirm' | 'contradict' | 'inconclusive' | 'declined' */
+  verdict: text('verdict').notNull(),
+  /** Whether a vision adapter was used for this turn. */
+  visionUsed: integer('vision_used', { mode: 'boolean' }).notNull().default(false),
+  visionConfidence: real('vision_confidence'),
+  /** Whether the answer was ultimately shipped (vs declined / redrafted). */
+  shipped: integer('shipped', { mode: 'boolean' }).notNull().default(false),
+  /**
+   * Error class when the run represents a caught/avoided failure:
+   * price_hallucination | image_claim_without_vision | fabricated_timestamp |
+   * weak_source_confirmation | persistent_error_after_correction | null (clean).
+   */
+  errorType: text('error_type'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+}, (t) => ({
+  createdAtIdx: index('visual_grounding_log_created_at_idx').on(t.createdAt),
+  errorTypeIdx: index('visual_grounding_log_error_type_idx').on(t.errorType),
+}));
+
 export const usageRecords = sqliteTable('usage_records', {
   id: text('id').primaryKey(),
   modelId: text('model_id').notNull(),

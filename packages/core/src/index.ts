@@ -202,6 +202,10 @@ export {
   MIN_CORROBORATION,
 } from './consensus/cross-check.js';
 export type { CheckableClaim, ClaimAssessment } from './consensus/cross-check.js';
+export { checkCorrectionGuard, collectDisputedValues } from './consensus/correction-guard.js';
+export type { CorrectionTurn, CorrectionGuardResult } from './consensus/correction-guard.js';
+export { logGrounding } from './consensus/grounding-log.js';
+export type { GroundingErrorType, GroundingVerdict, GroundingLogEntry } from './consensus/grounding-log.js';
 export { createGrokCliAdapter, isGrokCliAvailable } from './models/grok-cli-adapter.js';
 export type { GrokCliAdapterOptions } from './models/grok-cli-adapter.js';
 export { NullVisionAdapter, createGrokVisionAdapter } from './vision/index.js';
