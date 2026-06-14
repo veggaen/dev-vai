@@ -259,6 +259,12 @@ export interface ChatServiceOptions {
    * when the responding model does not emit its own sources chunk (e.g. local Qwen).
    */
   readonly searchForEvidence?: (query: string, budgetMs: number) => Promise<import('../search/types.js').SearchResponse | null>;
+  /**
+   * Optional image reader. When supplied AND it `canSee`, image turns get a grounded machine
+   * reading of the pixels appended to the prompt (instead of only the human description), so Vai
+   * stops fabricating descriptions of screenshots it never saw. Defaults to an honest no-op.
+   */
+  readonly visionAdapter?: import('../vision/adapter.js').VisionAdapter;
 }
 
 export interface ChatPromptRewriteOverrides {
@@ -681,6 +687,7 @@ export class ChatService {
   /** Optional SCIS council roster. When present, substantive turns run the council for consensus + method lessons. */
   private readonly councilRoster?: CouncilRoster;
   private readonly searchForEvidence?: ChatServiceOptions['searchForEvidence'];
+  private readonly visionAdapter?: ChatServiceOptions['visionAdapter'];
 
   constructor(
     private db: VaiDatabase,
@@ -709,6 +716,7 @@ export class ChatService {
     this.loadActiveGuidance = resolvedOptions?.loadActiveGuidance;
     this.councilRoster = resolvedOptions?.councilRoster;
     this.searchForEvidence = resolvedOptions?.searchForEvidence;
+    this.visionAdapter = resolvedOptions?.visionAdapter;
   }
 
   /**
@@ -1273,6 +1281,29 @@ export class ChatService {
       // Prepend the image description + question to the message content for the AI
       const imageParts = [`[Image: ${image.description}]`];
       if (image.question) imageParts.push(`[Question about image: ${image.question}]`);
+      // Stage C — actually READ the pixels when a seeing vision adapter is configured, so Vai
+      // grounds on what's in the image instead of fabricating from the human description alone.
+      // The reading is labelled as machine vision (not asserted as truth) and is still subject to
+      // the council + cross-check downstream. On a failed/absent read we add an honest marker so
+      // the model knows it must NOT invent image contents.
+      if (this.visionAdapter?.canSee) {
+        try {
+          const seen = await this.visionAdapter.describe({
+            dataBase64: image.data,
+            mime: image.mimeType,
+            question: image.question ?? (content || undefined),
+          });
+          if (seen?.text) {
+            imageParts.push(`[Vision (${seen.source}) read the image: ${seen.text.slice(0, 1500)}]`);
+          } else {
+            imageParts.push('[Vision could not read this image — do NOT guess its contents; say you could not read it.]');
+          }
+        } catch {
+          imageParts.push('[Vision unavailable — do NOT guess the image contents.]');
+        }
+      } else {
+        imageParts.push('[No image-reading capability — do NOT state specific contents of the image; offer to verify another way.]');
+      }
       enrichedContent = imageParts.join('\n') + (content ? '\n' + content : '');
     }
 

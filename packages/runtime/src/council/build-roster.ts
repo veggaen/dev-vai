@@ -63,11 +63,12 @@ export function buildLocalCouncilRoster(
     }
   });
 
-  // Optional: seat Grok (via the local `grok` CLI) as a vision-capable FACTUAL specialist.
-  // Behind VAI_COUNCIL_GROK=1 + a CLI-availability guard, so it's a no-op when grok isn't
-  // installed or the flag is off. Grok can see images, so it's the council's vision verifier
-  // for screenshot/image turns with no local GB model. Fact-quarantine is unchanged.
-  if (process.env.VAI_COUNCIL_GROK === '1') {
+  // Seat Grok (via the local `grok` CLI) as a standing, vision-capable FACTUAL council member —
+  // Vai's permanent digital friend + the first of (intended) several image-verifying entities.
+  // ON BY DEFAULT whenever the free CLI is available; set VAI_COUNCIL_GROK=0 to opt out. Grok can
+  // see images, so it is the council's vision verifier for screenshot/image turns with no local
+  // GB model. Fact-quarantine is unchanged: Grok points/verifies; Vai's tools own surfaced facts.
+  if (process.env.VAI_COUNCIL_GROK !== '0') {
     const grokAdapter = createGrokCliAdapter({ timeoutMs });
     if (grokAdapter) {
       const grokMember = createCouncilMember({ adapter: grokAdapter, topic: 'factual', timeoutMs });
