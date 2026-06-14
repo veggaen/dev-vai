@@ -480,6 +480,7 @@ export function registerChatRoutes(
               data.systemPrompt,
               noLearn,
               promptRewriteOverrides,
+              { imageMode: data.imageMode === true },
             )) {
               if (chunk.type === 'conversation_resolved' && chunk.conversationId) {
                 fastify.log.warn(

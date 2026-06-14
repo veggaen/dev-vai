@@ -13,12 +13,55 @@
 
 import type { ImageProducer, GeneratedImage } from './image-producer.js';
 import type { VisionAdapter } from './adapter.js';
+import type { ModelAdapter } from '../models/adapter.js';
+
+/**
+ * Build a `confirmWantsImage` gate backed by a model (Grok/council member). Asks, in text, whether
+ * the user's message is actually a request to GENERATE an image — the "did the user even ask for an
+ * image?" axis. Fail-open: any error/parse-miss returns wantsImage:true so a flaky verifier never
+ * blocks a legitimate request. Returns undefined when no adapter is given (no gate).
+ */
+export function modelBackedWantsImageGate(
+  adapter: ModelAdapter | undefined,
+  userMessage: string,
+): ((signal?: AbortSignal) => Promise<{ wantsImage: boolean; reason?: string }>) | undefined {
+  if (!adapter) return undefined;
+  return async (signal?: AbortSignal) => {
+    try {
+      const res = await adapter.chat({
+        messages: [
+          { role: 'system', content: 'You judge intent only. Reply STRICT JSON: {"wantsImage": boolean, "reason": "short"}. wantsImage=true ONLY if the user is asking to CREATE/GENERATE/DRAW a NEW image (not to read/analyze an existing one).' },
+          { role: 'user', content: `User message: ${JSON.stringify(userMessage)}\nReturn the JSON now.` },
+        ],
+        temperature: 0,
+        maxTokens: 80,
+        signal,
+      });
+      const m = /\{[\s\S]*\}/.exec(res.message.content);
+      if (!m) return { wantsImage: true };
+      const parsed = JSON.parse(m[0]) as { wantsImage?: boolean; reason?: string };
+      return { wantsImage: parsed.wantsImage !== false, reason: parsed.reason };
+    } catch {
+      return { wantsImage: true }; // fail-open
+    }
+  };
+}
 
 export interface ImageGenLoopOptions {
   /** Max total generation attempts (including the first). Default 3. */
   readonly maxAttempts?: number;
   /** Below this verifier match score (0..1) we regenerate. Default 0.7. */
   readonly acceptThreshold?: number;
+  /**
+   * Multi-axis gate run BEFORE producing: confirm the user actually wants an image (catches an
+   * auto-detect false positive). Returns false → the loop declines without generating. Injected
+   * so it can be backed by Grok / the council (not just the regex detector). Optional.
+   */
+  readonly confirmWantsImage?: (signal?: AbortSignal) => Promise<{ wantsImage: boolean; reason?: string }>;
+  /** Called as each attempt completes — lets the caller stream live progress to the UI. */
+  readonly onAttempt?: (attempt: ImageGenAttempt) => void;
+  /** Called once before producing each attempt — lets the caller stream "generating…" first. */
+  readonly onProduceStart?: (attempt: number) => void;
   readonly signal?: AbortSignal;
 }
 
@@ -41,6 +84,8 @@ export interface ImageGenLoopResult {
   readonly attempts: readonly ImageGenAttempt[];
   /** True when the final image met the accept threshold. */
   readonly accepted: boolean;
+  /** Set when the pre-gate decided NOT to generate (the user didn't actually want an image). */
+  readonly declinedReason?: string;
 }
 
 /** Ask the vision verifier to score a produced image against the prompt and list flaws. */
@@ -79,12 +124,27 @@ export async function generateWithVerification(
 ): Promise<ImageGenLoopResult> {
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const acceptThreshold = options.acceptThreshold ?? 0.7;
+
+  // Pre-gate (axis: did the user even ask for an image?). Backed by Grok/council when injected.
+  // Guards against an auto-detect false positive producing an unwanted image.
+  if (options.confirmWantsImage) {
+    try {
+      const gate = await options.confirmWantsImage(options.signal);
+      if (!gate.wantsImage) {
+        return { image: null, attempts: [], accepted: false, declinedReason: gate.reason ?? 'verifier judged the request did not ask for an image' };
+      }
+    } catch {
+      // gate failure → proceed (fail-open: don't block generation on a flaky verifier)
+    }
+  }
+
   const attempts: ImageGenAttempt[] = [];
   let negativePrompt = request.negativePrompt ?? '';
   let best: ImageGenAttempt | null = null;
 
   for (let i = 1; i <= maxAttempts; i++) {
     if (options.signal?.aborted) break;
+    options.onProduceStart?.(i);
     const image = await producer.generate({
       prompt: request.prompt, negativePrompt, width: request.width, height: request.height, signal: options.signal,
     });
@@ -94,6 +154,7 @@ export async function generateWithVerification(
     if (!vision?.canSee) {
       const attempt: ImageGenAttempt = { attempt: i, image, matchScore: 0.5, flaws: [], accepted: true };
       attempts.push(attempt);
+      options.onAttempt?.(attempt);
       return { image, attempts, accepted: true };
     }
 
@@ -101,6 +162,7 @@ export async function generateWithVerification(
     const accepted = matchScore >= acceptThreshold && flaws.length === 0;
     const attempt: ImageGenAttempt = { attempt: i, image, matchScore, flaws, accepted };
     attempts.push(attempt);
+    options.onAttempt?.(attempt);
     if (!best || matchScore > best.matchScore) best = attempt;
     if (accepted) return { image, attempts, accepted: true };
 

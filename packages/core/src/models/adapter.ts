@@ -116,7 +116,9 @@ export interface ChatChunk {
     | 'done'
     | 'conversation_resolved'
     | 'fallback_notice'
-    | 'verification';
+    | 'verification'
+    | 'image_progress'
+    | 'image_result';
   readonly textDelta?: string;
   readonly reasoningDelta?: string;
   readonly toolCallDelta?: { readonly id: string; readonly name: string; readonly argumentsDelta: string };
@@ -181,6 +183,29 @@ export interface ChatChunk {
    * flag intent/strategy mismatches (misroutes).
    */
   readonly thinking?: TurnThinking;
+  /**
+   * Image-generation activity for an image-output turn. `image_progress` streams the
+   * produce→verify→regenerate steps so the UI shows real work (not a spinner); `image_result`
+   * carries the final image. Fields are only set on those chunk types.
+   */
+  readonly image?: {
+    /** 'produce' | 'verify' | 'regenerate' | 'final' | 'declined' */
+    readonly phase: string;
+    /** Human label for the step ("Generating…", "Auditing image (attempt 2)…"). */
+    readonly label?: string;
+    /** Current attempt number (1-based). */
+    readonly attempt?: number;
+    /** Verifier match score 0..1, when known. */
+    readonly matchScore?: number;
+    /** Flaws the verifier flagged on this attempt. */
+    readonly flaws?: readonly string[];
+    /** Final image as a data URL (set on image_result). */
+    readonly dataUrl?: string;
+    readonly width?: number;
+    readonly height?: number;
+    /** Whether the final image met the accept threshold. */
+    readonly accepted?: boolean;
+  };
 }
 
 /**

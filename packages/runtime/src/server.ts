@@ -20,6 +20,8 @@ import {
   SearchPipeline,
   resolveEffectiveLocalChain,
   createGrokVisionAdapter,
+  createComfyUiProducer,
+  createGrokCliAdapter,
 } from '@vai/core';
 import type { ChatServiceOptions, ResponseReviewInput, VaiConfig } from '@vai/core';
 import { registerChatRoutes } from './routes/chat.js';
@@ -241,6 +243,11 @@ export async function createServer(options?: ServerOptions) {
   // Opt out with VAI_VISION_GROK=0.
   const visionAdapter = process.env.VAI_VISION_GROK === '0' ? undefined : (createGrokVisionAdapter() ?? undefined);
   if (visionAdapter) console.log(`[VAI] Vision active: ${visionAdapter.id}`);
+  // Image generation: local ComfyUI backend (free/OSS), dormant until a server is reachable.
+  // Opt out with VAI_IMAGEGEN=0. The Grok CLI adapter (if present) is the image-intent pre-gate.
+  const imageProducer = process.env.VAI_IMAGEGEN === '0' ? undefined : createComfyUiProducer();
+  const imageIntentGateAdapter = createGrokCliAdapter({ timeoutMs: 8_000 }) ?? undefined;
+  if (imageProducer) console.log(`[VAI] Image generation active: ${imageProducer.id} (ComfyUI; dormant until server reachable)`);
   const chatService = new ChatService(
     db,
     models,
@@ -259,6 +266,8 @@ export async function createServer(options?: ServerOptions) {
       guidanceStore,
       councilRoster,
       visionAdapter,
+      imageProducer,
+      imageIntentGateAdapter,
       responseReviewers: [
         ...(localSteeringWorker.isEnabled()
           ? [{

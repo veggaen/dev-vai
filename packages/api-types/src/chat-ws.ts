@@ -38,6 +38,8 @@ export const chatWebSocketInboundSchema = z
     allowLearn: z.boolean().optional(),
     modelId: z.string().min(1).optional(),
     mode: z.enum(['chat', 'agent', 'builder', 'plan', 'debate']).optional(),
+    /** Explicit "Image" input mode — when true the turn is answered with a generated image. */
+    imageMode: z.boolean().optional(),
     // Timestamped evidence supplied by the VS Code companion. The runtime only
     // incorporates matching fields while this capture is fresh.
     editorContext: companionContextEvidenceSchema.refine(

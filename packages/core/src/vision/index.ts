@@ -8,5 +8,5 @@ export { createComfyUiProducer, isComfyUiReachable } from './comfyui-producer.js
 export type { ComfyUiOptions } from './comfyui-producer.js';
 export { recommendImageGenDefaults, detectVramMb } from './hardware-probe.js';
 export type { ImageGenDefaults } from './hardware-probe.js';
-export { generateWithVerification } from './image-gen-loop.js';
+export { generateWithVerification, modelBackedWantsImageGate } from './image-gen-loop.js';
 export type { ImageGenLoopOptions, ImageGenLoopResult, ImageGenAttempt } from './image-gen-loop.js';

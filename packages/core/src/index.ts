@@ -217,6 +217,7 @@ export {
   recommendImageGenDefaults,
   detectVramMb,
   generateWithVerification,
+  modelBackedWantsImageGate,
 } from './vision/index.js';
 export type {
   ImageProducer,

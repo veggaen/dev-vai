@@ -56,6 +56,8 @@ import type { CouncilRoster } from '../consensus/topic-router.js';
 import { convene, toCouncilThinking } from '../consensus/council.js';
 import { extractCheckableClaim, assessClaimAgreement, applyCrossCheck } from '../consensus/cross-check.js';
 import { resolveIntent } from '../consensus/intent-resolver.js';
+import { detectImageIntent } from './image-intent.js';
+import { generateWithVerification, modelBackedWantsImageGate } from '../vision/image-gen-loop.js';
 import { checkCorrectionGuard } from '../consensus/correction-guard.js';
 import { logGrounding, type GroundingErrorType, type GroundingVerdict } from '../consensus/grounding-log.js';
 import {
@@ -265,6 +267,17 @@ export interface ChatServiceOptions {
    * stops fabricating descriptions of screenshots it never saw. Defaults to an honest no-op.
    */
   readonly visionAdapter?: import('../vision/adapter.js').VisionAdapter;
+  /**
+   * Optional image generator. When supplied AND it `canProduce`, image-output turns (explicit
+   * Image mode or detected "draw me…" intent) produce an image via the produce→verify→regenerate
+   * loop (using `visionAdapter` as the verifier) instead of a text answer.
+   */
+  readonly imageProducer?: import('../vision/image-producer.js').ImageProducer;
+  /**
+   * Optional model adapter used as the image-intent PRE-GATE ("did the user actually ask for an
+   * image?") on auto-detected (non-explicit) image turns. Typically the council's Grok adapter.
+   */
+  readonly imageIntentGateAdapter?: import('../models/adapter.js').ModelAdapter;
 }
 
 export interface ChatPromptRewriteOverrides {
@@ -688,6 +701,8 @@ export class ChatService {
   private readonly councilRoster?: CouncilRoster;
   private readonly searchForEvidence?: ChatServiceOptions['searchForEvidence'];
   private readonly visionAdapter?: ChatServiceOptions['visionAdapter'];
+  private readonly imageProducer?: ChatServiceOptions['imageProducer'];
+  private readonly imageIntentGateAdapter?: ChatServiceOptions['imageIntentGateAdapter'];
 
   constructor(
     private db: VaiDatabase,
@@ -717,6 +732,8 @@ export class ChatService {
     this.councilRoster = resolvedOptions?.councilRoster;
     this.searchForEvidence = resolvedOptions?.searchForEvidence;
     this.visionAdapter = resolvedOptions?.visionAdapter;
+    this.imageProducer = resolvedOptions?.imageProducer;
+    this.imageIntentGateAdapter = resolvedOptions?.imageIntentGateAdapter;
   }
 
   /**
@@ -804,6 +821,83 @@ export class ChatService {
   }
 
   /** One council pass over a draft. Returns the projection + raw consensus, or undefined. */
+  /**
+   * Run an image-output turn: produce → (Grok/council) verify → regenerate-on-flaws, streaming
+   * each step so the UI shows real work. Persists the result as an assistant message and emits a
+   * `done`. Declines honestly (no fabricated image) when the producer is dormant or the multi-axis
+   * pre-gate decides the user didn't actually ask for an image.
+   */
+  private async *runImageGenerationTurn(args: {
+    conversationId: string; content: string; subject: string; startedAt: number; explicit: boolean;
+  }): AsyncGenerator<ChatChunk> {
+    yield { type: 'turn_kind', turnKind: 'analysis' } as ChatChunk;
+    const producer = this.imageProducer!;
+    yield { type: 'image_progress', image: { phase: 'produce', label: 'Generating image…', attempt: 1 } } as ChatChunk;
+
+    // Pre-gate only on AUTO-detected turns (explicit Image mode is authoritative — skip the gate).
+    const confirmWantsImage = args.explicit ? undefined : modelBackedWantsImageGate(this.imageIntentGateAdapter, args.content);
+
+    const result = await generateWithVerification(
+      producer,
+      this.visionAdapter,
+      { prompt: args.subject },
+      {
+        maxAttempts: Number(process.env.VAI_IMAGEGEN_MAX_ATTEMPTS) || 3,
+        confirmWantsImage,
+      },
+    );
+
+    // Stream each attempt's audit as visible progress (best-effort; result already has the trace).
+    for (const att of result.attempts) {
+      yield {
+        type: 'image_progress',
+        image: {
+          phase: att.accepted ? 'final' : 'verify',
+          label: att.accepted ? `Image accepted (match ${Math.round(att.matchScore * 100)}%)` : `Audited attempt ${att.attempt} — match ${Math.round(att.matchScore * 100)}%${att.flaws.length ? `, fixing: ${att.flaws.join(', ')}` : ''}`,
+          attempt: att.attempt, matchScore: att.matchScore, flaws: att.flaws,
+        },
+      } as ChatChunk;
+    }
+
+    const durationMs = Date.now() - args.startedAt;
+    if (!result.image) {
+      const reason = result.declinedReason
+        ? `I held off generating an image — ${result.declinedReason}.`
+        : 'I can’t generate images right now (no image backend is running). Start ComfyUI and try again, or tell me what you’d like and I’ll describe it.';
+      yield { type: 'image_progress', image: { phase: 'declined', label: reason } } as ChatChunk;
+      const declineId = ulid();
+      this.db.insert(messages).values({
+        id: declineId, conversationId: args.conversationId, role: 'assistant',
+        content: reason, modelId: producer.id, durationMs, createdAt: new Date(),
+      }).run();
+      yield { type: 'text_delta', textDelta: reason } as ChatChunk;
+      yield { type: 'done', modelId: producer.id, durationMs } as ChatChunk;
+      return;
+    }
+
+    const img = result.image;
+    const dataUrl = `data:${img.mime};base64,${img.dataBase64}`;
+    yield {
+      type: 'image_result',
+      image: { phase: 'final', dataUrl, width: img.width, height: img.height, accepted: result.accepted },
+    } as ChatChunk;
+
+    // Persist as an assistant message. Content holds a markdown image so existing renderers + the
+    // transcript keep it; the raw image also goes to the images table for reuse.
+    const caption = result.accepted ? '' : '\n\n_(Best effort — I couldn’t fully resolve every detail.)_';
+    const assistantText = `![generated image](${dataUrl})${caption}`;
+    const storedImageId = this.storeImage(
+      { data: img.dataBase64, mimeType: img.mime, description: `Generated: ${args.subject}`.slice(0, 480), width: img.width, height: img.height },
+      args.conversationId,
+    );
+    const msgId = ulid();
+    this.db.insert(messages).values({
+      id: msgId, conversationId: args.conversationId, role: 'assistant',
+      content: assistantText, imageId: storedImageId, modelId: producer.id, durationMs, createdAt: new Date(),
+    }).run();
+    yield { type: 'done', modelId: producer.id, durationMs } as ChatChunk;
+  }
+
   private async conveneOnce(draft: CouncilDraftInput): Promise<
     { thinking: CouncilThinking; consensus: CouncilConsensus } | undefined
   > {
@@ -1247,7 +1341,7 @@ export class ChatService {
     systemPrompt?: string,
     noLearn?: boolean,
     promptRewriteOverrides?: ChatPromptRewriteOverrides,
-    autoCreateOptions?: { fallbackModelId?: string; fallbackMode?: ConversationMode },
+    autoCreateOptions?: { fallbackModelId?: string; fallbackMode?: ConversationMode; imageMode?: boolean },
   ): AsyncGenerator<ChatChunk> {
     // Auto-create on missing conversation: covers the well-known race where
     // the desktop client opens a WebSocket and sends a message before the
@@ -1333,6 +1427,25 @@ export class ChatService {
     // Always keep at least the most recent pair so the model stays coherent.
     const MAX_HISTORY_MESSAGES = 40;
     const history = this.getMessages(conversationId);
+
+    // ── Image-output short-circuit ──
+    // When the turn wants an IMAGE back (explicit Image mode, authoritative; else detected
+    // "draw me…" intent in chat/agent) AND a producer is configured, generate via the
+    // produce→verify→regenerate loop and stream the steps. Multi-axis verify: a pre-gate
+    // (Grok/council) confirms the user actually asked for an image before producing.
+    {
+      const imgIntent = detectImageIntent(content, {
+        explicitImageMode: autoCreateOptions?.imageMode,
+        mode: conv.mode,
+      });
+      if (imgIntent.wantsImage && this.imageProducer?.canProduce) {
+        yield* this.runImageGenerationTurn({
+          conversationId, content, subject: imgIntent.subject || content,
+          startedAt: Date.now(), explicit: imgIntent.source === 'explicit',
+        });
+        return;
+      }
+    }
 
     // Defense directive carried from the upstream security review into the
     // model dispatch path when a soft prompt-injection is hardened rather than

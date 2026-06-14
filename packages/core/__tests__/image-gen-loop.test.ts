@@ -105,4 +105,32 @@ describe('generateWithVerification', () => {
     expect(res.image).toBeNull();
     expect(res.attempts).toHaveLength(0);
   });
+
+  it('PRE-GATE: declines without generating when the verifier says the user did not ask for an image', async () => {
+    const producer = recordingProducer();
+    const res = await generateWithVerification(producer, undefined, { prompt: 'how are you?' }, {
+      confirmWantsImage: async () => ({ wantsImage: false, reason: 'just a greeting' }),
+    });
+    expect(res.image).toBeNull();
+    expect(res.attempts).toHaveLength(0);
+    expect(res.declinedReason).toContain('greeting');
+    expect(producer.negatives).toHaveLength(0); // never even called the producer
+  });
+
+  it('PRE-GATE: proceeds when the verifier confirms the user wants an image', async () => {
+    const producer = recordingProducer();
+    const res = await generateWithVerification(producer, undefined, { prompt: 'draw a cat' }, {
+      confirmWantsImage: async () => ({ wantsImage: true }),
+    });
+    expect(res.image).not.toBeNull();
+    expect(producer.negatives).toHaveLength(1);
+  });
+
+  it('PRE-GATE: fails open (still generates) when the gate throws', async () => {
+    const producer = recordingProducer();
+    const res = await generateWithVerification(producer, undefined, { prompt: 'draw a cat' }, {
+      confirmWantsImage: async () => { throw new Error('gate down'); },
+    });
+    expect(res.image).not.toBeNull();
+  });
 });
