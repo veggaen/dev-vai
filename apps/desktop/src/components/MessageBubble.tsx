@@ -94,6 +94,8 @@ interface MessageBubbleProps {
   verification?: ResponseVerificationUI;
   /** Engine-narrated progress steps, surfaced in the settled panel's evidence log */
   progressSteps?: ChatProgressStep[];
+  /** Live image-generation steps (produce→verify→regenerate) shown as visible process. */
+  imageGenSteps?: { phase: string; label: string; attempt?: number; matchScore?: number; flaws?: string[] }[];
   /** Feedback state: true=helpful, false=not helpful, undefined=no feedback */
   feedback?: boolean;
   /** Called when user gives thumbs up/down */
@@ -582,7 +584,7 @@ export function MessageBubble({
   fallbackDeploy, recoveryPattern = 'silent', allIntents, onIntentAction,
   isLatest = false, isStreaming = false,
   respondingModelId, fallback,
-  sources, sourcePresentation, turnKind, followUps, confidence, groundedBuildBrief, thinking, researchTrace, verification, progressSteps, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
+  sources, sourcePresentation, turnKind, followUps, confidence, groundedBuildBrief, thinking, researchTrace, verification, progressSteps, imageGenSteps, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
   isAutoRepair = false, repairAttempt,
   compactResearchChrome = false,
   isLatestResearchMessage = false,
@@ -940,6 +942,28 @@ export function MessageBubble({
                 progressSteps={progressSteps}
                 fileChanges={extractedFiles}
               />
+            )}
+
+            {/* Image-generation process — visible produce→verify→regenerate steps, not a spinner */}
+            {!isUser && imageGenSteps && imageGenSteps.length > 0 && (
+              <div className="mb-2 rounded-lg border border-fuchsia-500/20 bg-fuchsia-500/[0.04] px-3 py-2 text-[11px]">
+                <div className="mb-1 font-medium text-fuchsia-300/90">Image generation</div>
+                <ol className="space-y-1">
+                  {imageGenSteps.map((step, i) => (
+                    <li key={i} className="flex items-start gap-2 text-zinc-400">
+                      <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
+                        step.phase === 'final' ? 'bg-emerald-400' : step.phase === 'declined' ? 'bg-amber-400' : 'bg-fuchsia-400'
+                      }`} />
+                      <span>
+                        {step.label}
+                        {step.flaws && step.flaws.length > 0 && (
+                          <span className="text-zinc-500"> — fixing: {step.flaws.join(', ')}</span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
             )}
 
             {/* Source chip row — Perplexity-style, rendered ABOVE the answer for research messages */}

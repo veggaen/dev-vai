@@ -193,6 +193,10 @@ export interface ChatMessage {
   thinking?: TurnThinkingUI;
   /** Exit-gate result. Exposed in the process panel, never prepended to answer text. */
   verification?: ResponseVerificationUI;
+  /** Live image-generation steps (produce→verify→regenerate) shown as visible process. */
+  imageGenSteps?: { phase: string; label: string; attempt?: number; matchScore?: number; flaws?: string[] }[];
+  /** Final generated image (data URL) for an image-output turn. */
+  imageGenResult?: { dataUrl: string; width?: number; height?: number; accepted?: boolean };
   /** Search pipeline trace for inspectable research turns, including empty-result attempts. */
   researchTrace?: ResearchTraceUI;
   /** User feedback: true = helpful, false = not helpful, undefined = no feedback */
@@ -263,7 +267,7 @@ interface ChatState {
   setConversationSandbox: (id: string, sandboxProjectId: string | null) => Promise<void>;
   setConversationVisibility: (id: string, visibility: 'private' | 'unlisted' | 'public') => Promise<string | null>;
   deleteConversation: (id: string) => Promise<void>;
-  sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string, opts?: { isAutoRepair?: boolean; repairAttempt?: number }) => void;
+  sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string, opts?: { isAutoRepair?: boolean; repairAttempt?: number; imageMode?: boolean }) => void;
   /** Inject a message from an IDE agent (group chat) */
   injectAgentMessage: (content: string, sender: MessageSender) => void;
   /** Persist a backend-authored project update into the current conversation */
@@ -682,7 +686,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await get().fetchConversations();
   },
 
-  sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string, opts?: { isAutoRepair?: boolean; repairAttempt?: number }) => {
+  sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string, opts?: { isAutoRepair?: boolean; repairAttempt?: number; imageMode?: boolean }) => {
     const state = get();
     if (!state.activeConversationId) return;
 
@@ -743,6 +747,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (modelId) payload.modelId = modelId;
       const layoutMode = useLayoutStore.getState().mode;
       if (layoutMode) payload.mode = layoutMode;
+      if (opts?.imageMode) payload.imageMode = true;
       if (image) {
         payload.image = {
           data: image.data,
@@ -799,6 +804,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         researchTrace?: ResearchTraceUI;
         error?: string;
         conversationId?: string;
+        image?: {
+          phase: string; label?: string; attempt?: number; matchScore?: number;
+          flaws?: string[]; dataUrl?: string; width?: number; height?: number; accepted?: boolean;
+        };
       };
 
       // Server auto-created a conversation because our id was unknown — adopt
@@ -903,6 +912,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ...target,
               verification: chunk.verification,
             };
+          }
+          return { messages: msgs };
+        });
+      } else if ((chunk.type === 'image_progress' || chunk.type === 'image_result') && chunk.image) {
+        const img = chunk.image;
+        set((state) => {
+          const msgs = [...state.messages];
+          const idx = activeStreamingAssistantId
+            ? msgs.findIndex((m) => m.id === activeStreamingAssistantId)
+            : msgs.length - 1;
+          const target = idx >= 0 ? msgs[idx] : null;
+          if (target && target.role === 'assistant') {
+            if (chunk.type === 'image_result' && img.dataUrl) {
+              msgs[idx] = { ...target, imageGenResult: { dataUrl: img.dataUrl, width: img.width, height: img.height, accepted: img.accepted } };
+            } else {
+              const steps = [...(target.imageGenSteps ?? []), { phase: img.phase, label: img.label ?? '', attempt: img.attempt, matchScore: img.matchScore, flaws: img.flaws }];
+              msgs[idx] = { ...target, imageGenSteps: steps };
+            }
           }
           return { messages: msgs };
         });

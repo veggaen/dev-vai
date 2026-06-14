@@ -28,7 +28,7 @@ import { useIntentStore, computeFallbackMap } from '../stores/intentStore.js';
 import { apiFetch } from '../lib/api.js';
 import {
   BookOpen, MessageCircle, Sparkles, Shield, Globe,
-  Paperclip, X, FileText, ArrowUp, Square,
+  Paperclip, X, FileText, ArrowUp, Square, ImagePlus,
   Eye, Brain, Bot, Wifi, Plus, Moon, Sun, ChevronDown, ChevronRight, Layers,
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -214,6 +214,8 @@ export function ChatWindow() {
   const [imageDescription, setImageDescription] = useState('');
   const [imageQuestion, setImageQuestion] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([]);
+  /** Explicit "Image" output mode — when on, this turn is answered with a generated image. */
+  const [imageMode, setImageMode] = useState(false);
   const [deliveryRoute, setDeliveryRoute] = useState<DeliveryRoute>('vai');
   const [broadcastModel, setBroadcastModel] = useState('gpt-4o');
   const [broadcastChatApp, setBroadcastChatApp] = useState('chat');
@@ -887,10 +889,10 @@ export function ChatWindow() {
         data: pastedImage.data, mimeType: pastedImage.mimeType,
         description: imageDescription.trim(), question: imageQuestion.trim() || undefined,
         width: pastedImage.width, height: pastedImage.height, sizeBytes: pastedImage.sizeBytes,
-      }, composedSystemPrompt);
+      }, composedSystemPrompt, { imageMode });
       clearImage();
     } else {
-      sendMessage(fullContent, undefined, composedSystemPrompt);
+      sendMessage(fullContent, undefined, composedSystemPrompt, { imageMode });
     }
 
     if (!isOverrideSend) {
@@ -1481,6 +1483,7 @@ export function ChatWindow() {
                         thinking={msg.thinking}
                         researchTrace={msg.researchTrace}
                         verification={msg.verification}
+                        imageGenSteps={msg.imageGenSteps}
                         progressSteps={msg.progressSteps}
                         feedback={msg.feedback}
                         onFeedback={(helpful) => useChatStore.getState().setFeedback(msg.id, helpful)}
@@ -1835,6 +1838,18 @@ export function ChatWindow() {
                   title="Attach files"
                 >
                   <Paperclip className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setImageMode((v) => !v)}
+                  className={`flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium transition-all ${
+                    imageMode
+                      ? 'bg-fuchsia-500/15 text-fuchsia-300 ring-1 ring-fuchsia-500/30'
+                      : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                  }`}
+                  title={imageMode ? 'Image mode ON — Vai will respond with a generated image' : 'Image mode — make Vai respond with a generated image'}
+                >
+                  <ImagePlus className="h-3.5 w-3.5" />
+                  <span>Image</span>
                 </button>
                 <ModeSelector />
                 {roundtablePeers.length > 0 && (
