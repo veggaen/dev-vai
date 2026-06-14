@@ -193,6 +193,17 @@ export type {
   RunCouncilOptions,
   CouncilMemberOptions,
 } from './consensus/index.js';
+export { resolveIntent } from './consensus/intent-resolver.js';
+export type { ResolvedIntent, ValueKind } from './consensus/intent-resolver.js';
+export {
+  extractCheckableClaim,
+  assessClaimAgreement,
+  applyCrossCheck,
+  MIN_CORROBORATION,
+} from './consensus/cross-check.js';
+export type { CheckableClaim, ClaimAssessment } from './consensus/cross-check.js';
+export { createGrokCliAdapter, isGrokCliAvailable } from './models/grok-cli-adapter.js';
+export type { GrokCliAdapterOptions } from './models/grok-cli-adapter.js';
 export { tryEmitConversationReasoning } from './chat/conversation-reasoning.js';
 export {
   LIVE_CONTEXT_MAX_AGE_MS,
