@@ -21,6 +21,7 @@
 
 import { SearchPipeline } from '../search/pipeline.js';
 import { fetchGooglePageViaBrowser, isBrowserSearchEnabled } from '../search/browser-search.js';
+import { readUrl } from '../tools/read-url.js';
 
 /** A source snippet shaped to drop straight into `CouncilInput.sources`. */
 export interface WebEvidenceSource {
@@ -38,7 +39,7 @@ export interface WebEvidence {
   /** ISO timestamp the evidence was gathered (freshness signal for members). */
   readonly gatheredAt: string;
   /** Which path produced the sources, for the audit/panel. */
-  readonly via: 'pipeline' | 'browser-fallback' | 'none';
+  readonly via: 'pipeline' | 'browser-fallback' | 'read-url' | 'none';
 }
 
 export interface GatherWebEvidenceOptions {
@@ -53,6 +54,46 @@ export interface GatherWebEvidenceOptions {
 }
 
 const EMPTY: WebEvidence = { aiOverview: null, sources: [], gatheredAt: '', via: 'none' };
+
+/** Cap on URLs we'll fetch from a single message — guards against link-spam / latency. */
+const MAX_READ_URLS = 3;
+
+/**
+ * Pull explicit http(s) URLs out of the user's message, in order, de-duped.
+ * Trailing punctuation (the `.` ending a sentence, a wrapping `)` ) is stripped so the
+ * fetch gets a clean URL.
+ */
+export function extractUrls(text: string): string[] {
+  const matches = (text ?? '').match(/https?:\/\/[^\s<>"'`]+/gi) ?? [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of matches) {
+    const url = raw.replace(/[.,;:!?)\]}'"]+$/, '');
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+    if (out.length >= MAX_READ_URLS) break;
+  }
+  return out;
+}
+
+/**
+ * Fetch each pasted URL with the Readability/Turndown reader and shape the result as
+ * top-trust source snippets. This is what makes "inspect this page" / pasting a GitHub
+ * or Codeberg link actually work — the council reads the page Vai fetched, not just a
+ * search of the URL string. Best-effort: unreadable pages (SPA share-links, 404s) are
+ * skipped silently and the search path still runs.
+ */
+async function readPastedUrls(urls: string[]): Promise<WebEvidenceSource[]> {
+  if (urls.length === 0) return [];
+  const results = await Promise.all(urls.map((url) => readUrl(url).catch(() => null)));
+  const out: WebEvidenceSource[] = [];
+  for (const r of results) {
+    if (!r || !r.ok || !r.markdown) continue;
+    out.push({ title: r.title ?? r.url, url: r.url, snippet: r.markdown });
+  }
+  return out;
+}
 
 /**
  * Gather web evidence for a query. SearXNG/pipeline first (stable); if results are thin,
@@ -74,13 +115,28 @@ export async function gatherWebEvidence(
   let sources: WebEvidenceSource[] = [];
   let via: WebEvidence['via'] = 'none';
 
+  // 0) Pasted-URL path: if the user dropped explicit links ("inspect this page",
+  //    a GitHub/Codeberg repo, a blog post), fetch and read THOSE exact pages and put
+  //    them first — they're the most-trusted evidence because the user named them.
+  const readPages = await readPastedUrls(extractUrls(trimmed));
+  if (readPages.length > 0) {
+    sources = [...readPages];
+    via = 'read-url';
+  }
+
   // 1) Stable path: the existing search pipeline (SearXNG-preferred chain, cached, ranked).
   try {
     const res = await pipeline.search(trimmed);
-    sources = res.sources.map((s) => ({ title: s.title, url: s.url, snippet: s.text }));
-    if (sources.length > 0) via = 'pipeline';
+    const searched = res.sources.map((s) => ({ title: s.title, url: s.url, snippet: s.text }));
+    // De-dupe against pages we already read so a pasted URL isn't listed twice.
+    const seen = new Set(sources.map((s) => s.url).filter(Boolean));
+    for (const s of searched) {
+      if (s.url && seen.has(s.url)) continue;
+      sources.push(s);
+    }
+    if (via === 'none' && searched.length > 0) via = 'pipeline';
   } catch {
-    sources = [];
+    // Search failed — keep whatever pasted-URL sources we already have.
   }
 
   // 2) AI Overview bonus + thin-result fallback: drive Chrome for the Google page. We grab

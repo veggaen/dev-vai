@@ -367,6 +367,56 @@ async function runGoogleSearch(query: string, timeoutMs: number): Promise<Google
   }
 }
 
+// ── Generic page rendering (for JS-heavy SPAs like ChatGPT share links) ──────
+
+/**
+ * Load an arbitrary URL in the real browser, let its JavaScript render, and return
+ * the fully-rendered HTML — what a human would actually see. This is the escalation
+ * for client-rendered SPAs (ChatGPT share pages, JS-only docs) where a plain HTTP
+ * fetch only gets an empty app shell. {@link readUrl} calls this when static
+ * extraction finds nothing.
+ *
+ * Reuses the same singleton browser, profile and polite serialization as search, but
+ * is independent of Google's CAPTCHA cooldown (that only governs google.com). Returns
+ * null on no-browser / timeout / failure so the caller degrades gracefully. The caller
+ * is responsible for SSRF/private-network checks BEFORE calling this — a real browser
+ * will happily load internal addresses.
+ */
+export async function fetchRenderedHtml(url: string, timeoutMs: number): Promise<string | null> {
+  if (!isBrowserSearchEnabled()) return null;
+  try {
+    return await enqueue(() => renderPage(url, Math.max(timeoutMs, 12_000)));
+  } catch (error) {
+    if (process.env.VAI_SEARCH_DEBUG) {
+      console.error(`[browser-search] render failed for "${url}": ${(error as Error).message}`);
+    }
+    return null;
+  }
+}
+
+async function renderPage(url: string, timeoutMs: number): Promise<string | null> {
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    );
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+    // domcontentloaded gets us a parseable DOM fast; then give the SPA a beat to
+    // hydrate its content before we snapshot. networkidle would be ideal but many
+    // chat/doc apps hold long-poll connections open and never go idle.
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    await page.evaluate(() => new Promise<void>((r) => setTimeout(r, 1200))).catch(() => undefined);
+    const html = await page.content().catch(() => '');
+    return html && html.length > 0 ? html : null;
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+}
+
 /**
  * Search Google through the installed browser. Returns [] on cooldown, when
  * no browser is available, or when extraction fails — the HTTP provider

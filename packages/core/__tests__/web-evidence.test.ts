@@ -23,7 +23,12 @@ vi.mock('../src/search/browser-search.js', () => ({
   isBrowserSearchEnabled: () => browserEnabledMock(),
 }));
 
-import { gatherWebEvidence } from '../src/consensus/web-evidence.js';
+const readUrlMock = vi.fn();
+vi.mock('../src/tools/read-url.js', () => ({
+  readUrl: (url: string) => readUrlMock(url),
+}));
+
+import { gatherWebEvidence, extractUrls } from '../src/consensus/web-evidence.js';
 
 function pipelineResult(sources: Array<{ title: string; url: string; text: string }>) {
   return { sources, answer: '', confidence: 0.5, plan: {}, rawResultCount: sources.length, durationMs: 1, sync: {}, audit: [] };
@@ -33,6 +38,7 @@ beforeEach(() => {
   searchMock.mockReset();
   browserPageMock.mockReset();
   browserEnabledMock.mockReset();
+  readUrlMock.mockReset();
   browserEnabledMock.mockReturnValue(false); // default: no browser → pipeline only
 });
 
@@ -116,5 +122,67 @@ describe('gatherWebEvidence — never throws (council must convene regardless)',
     const ev = await gatherWebEvidence('q', { minSources: 3 });
     expect(ev.sources.map((s) => s.url)).toEqual(['https://a.com']);
     expect(ev.aiOverview).toBeNull();
+  });
+
+  it('never throws when readUrl rejects on a pasted URL', async () => {
+    searchMock.mockResolvedValue(pipelineResult([]));
+    readUrlMock.mockRejectedValue(new Error('boom'));
+    const ev = await gatherWebEvidence('https://example.com', { skipAiOverview: true });
+    expect(ev.via).toBe('none');
+    expect(ev.sources).toEqual([]);
+  });
+});
+
+describe('extractUrls', () => {
+  it('pulls http(s) URLs in order, de-duped', () => {
+    const text = 'see https://github.com/a/b and http://example.com plus https://github.com/a/b again';
+    expect(extractUrls(text)).toEqual(['https://github.com/a/b', 'http://example.com']);
+  });
+
+  it('strips trailing sentence punctuation and wrapping parens', () => {
+    expect(extractUrls('look at https://codeberg.org/ziglang/zig.')).toEqual(['https://codeberg.org/ziglang/zig']);
+    expect(extractUrls('(https://example.com/x)')).toEqual(['https://example.com/x']);
+  });
+
+  it('caps the number of fetched URLs at 3', () => {
+    expect(extractUrls('https://a.com https://b.com https://c.com https://d.com')).toHaveLength(3);
+  });
+
+  it('returns nothing for plain text', () => {
+    expect(extractUrls('what is the capital of france')).toEqual([]);
+    expect(extractUrls('')).toEqual([]);
+  });
+});
+
+describe('gatherWebEvidence — pasted-URL reading (read-url path)', () => {
+  it('reads a pasted URL and lists it first as read-url evidence', async () => {
+    searchMock.mockResolvedValue(pipelineResult([]));
+    readUrlMock.mockResolvedValue({
+      ok: true,
+      url: 'https://github.com/pewdiepie-archdaemon/odysseus',
+      title: 'odysseus',
+      markdown: '# Odysseus\nA project readme.',
+    });
+    const ev = await gatherWebEvidence('inspect https://github.com/pewdiepie-archdaemon/odysseus', { skipAiOverview: true });
+    expect(ev.via).toBe('read-url');
+    expect(ev.sources[0]?.url).toBe('https://github.com/pewdiepie-archdaemon/odysseus');
+    expect(ev.sources[0]?.snippet).toContain('Odysseus');
+    expect(readUrlMock).toHaveBeenCalledWith('https://github.com/pewdiepie-archdaemon/odysseus');
+  });
+
+  it('falls back to search when the page is unreadable (SPA share-link)', async () => {
+    readUrlMock.mockResolvedValue({ ok: false, url: 'https://chatgpt.com/share/abc', error: 'renders via JavaScript' });
+    searchMock.mockResolvedValue(pipelineResult([{ title: 'result', url: 'https://elsewhere.com', text: 'snippet' }]));
+    const ev = await gatherWebEvidence('read https://chatgpt.com/share/abc', { skipAiOverview: true });
+    expect(ev.via).toBe('pipeline');
+    expect(ev.sources.map((s) => s.url)).toContain('https://elsewhere.com');
+  });
+
+  it('does not list a pasted URL twice when search also returns it', async () => {
+    readUrlMock.mockResolvedValue({ ok: true, url: 'https://example.com/post', title: 'Post', markdown: 'body' });
+    searchMock.mockResolvedValue(pipelineResult([{ title: 'Post', url: 'https://example.com/post', text: 'snippet' }]));
+    const ev = await gatherWebEvidence('https://example.com/post', { skipAiOverview: true });
+    expect(ev.sources.filter((s) => s.url === 'https://example.com/post')).toHaveLength(1);
+    expect(ev.via).toBe('read-url');
   });
 });
