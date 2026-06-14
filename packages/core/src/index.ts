@@ -210,6 +210,24 @@ export { createGrokCliAdapter, isGrokCliAvailable } from './models/grok-cli-adap
 export type { GrokCliAdapterOptions } from './models/grok-cli-adapter.js';
 export { NullVisionAdapter, createGrokVisionAdapter } from './vision/index.js';
 export type { VisionAdapter, VisionDescribeInput, VisionDescription, GrokVisionOptions } from './vision/index.js';
+export {
+  NullImageProducer,
+  createComfyUiProducer,
+  isComfyUiReachable,
+  recommendImageGenDefaults,
+  detectVramMb,
+  generateWithVerification,
+} from './vision/index.js';
+export type {
+  ImageProducer,
+  ImageGenRequest,
+  GeneratedImage,
+  ComfyUiOptions,
+  ImageGenDefaults,
+  ImageGenLoopOptions,
+  ImageGenLoopResult,
+  ImageGenAttempt,
+} from './vision/index.js';
 export { tryEmitConversationReasoning } from './chat/conversation-reasoning.js';
 export {
   LIVE_CONTEXT_MAX_AGE_MS,
