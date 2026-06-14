@@ -15,9 +15,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { createDb } from '../src/db/client.js';
-import { ChatService, buildCouncilRedraftInstruction, councilScore } from '../src/chat/service.js';
+import { ChatService, buildCouncilRedraftInstruction, councilScore, redraftResolvedConcern } from '../src/chat/service.js';
 import type { CouncilRedraftFeedback } from '../src/chat/service.js';
 import { ModelRegistry } from '../src/models/adapter.js';
+import { InMemoryGuidanceStore, salientTokens, selectApplicableGuidance } from '../src/chat/route-guidance.js';
 import type { CouncilMember, CouncilMemberNote, CouncilConsensus, CouncilAction, CouncilVerdict } from '../src/consensus/types.js';
 import type { CouncilRoster } from '../src/consensus/topic-router.js';
 
@@ -115,6 +116,48 @@ describe('councilScore', () => {
     const lo = councilScore({ ...base, outcome: 'act', agreement: 0.4, confidence: 0.9 });
     const hi = councilScore({ ...base, outcome: 'act', agreement: 0.6, confidence: 0.1 });
     expect(hi).toBeGreaterThan(lo); // agreement dominates confidence
+  });
+});
+
+describe('redraftResolvedConcern — outcome-aware acceptance (council self-eval upgrade)', () => {
+  const base: CouncilConsensus = {
+    outcome: 'act', agreement: 0.6, confidence: 0.6, realIntent: '',
+    recommendedAction: 'reread-intent', searchQuery: '', missingCapabilities: [],
+    methodLessons: [], summary: '', notes: [], memberIds: [], factsQuarantined: true,
+  };
+
+  it('falls back to score comparison when no specific gap was flagged', () => {
+    const first = { ...base, missingCapabilities: [], agreement: 0.5 };
+    const better = { ...base, missingCapabilities: [], agreement: 0.9 };
+    const worse = { ...base, missingCapabilities: [], outcome: 'escalate' as const };
+    expect(redraftResolvedConcern(first, better)).toBe(true);
+    expect(redraftResolvedConcern(first, worse)).toBe(false);
+  });
+
+  it('REJECTS a redraft that raised agreement but left the flagged gap unresolved', () => {
+    const first = { ...base, missingCapabilities: ['concrete code example'], agreement: 0.5 };
+    // Higher score (agreement up) but the SAME gap is still named → must not win.
+    const second = { ...base, missingCapabilities: ['concrete code example'], agreement: 0.95 };
+    expect(councilScore(second)).toBeGreaterThan(councilScore(first)); // would have won under old rule
+    expect(redraftResolvedConcern(first, second)).toBe(false);          // but not under outcome-aware rule
+  });
+
+  it('ACCEPTS a redraft that dropped the flagged gap without regressing', () => {
+    const first = { ...base, missingCapabilities: ['concrete code example'], agreement: 0.6 };
+    const second = { ...base, missingCapabilities: [], agreement: 0.6 };
+    expect(redraftResolvedConcern(first, second)).toBe(true);
+  });
+
+  it('ACCEPTS when the redraft reached ship even if a gap was flagged', () => {
+    const first = { ...base, missingCapabilities: ['x'], outcome: 'act' as const };
+    const second = { ...base, missingCapabilities: [], outcome: 'ship' as const };
+    expect(redraftResolvedConcern(first, second)).toBe(true);
+  });
+
+  it('REJECTS when the redraft escalated, regardless of gap state', () => {
+    const first = { ...base, missingCapabilities: ['x'] };
+    const second = { ...base, missingCapabilities: [], outcome: 'escalate' as const };
+    expect(redraftResolvedConcern(first, second)).toBe(false);
   });
 });
 
@@ -218,5 +261,83 @@ describe('runCouncilLoop', () => {
     expect(result.revised).toBe(false);
     expect(result.council).toBeUndefined();
     expect(result.finalText).toBe('Original draft.');
+  });
+});
+
+// ── The closed loop: council lessons become self-applying guidance ──
+// A non-ship council turn must persist its method lesson as class-scope
+// RouteGuidance so a LATER similar turn is steered by it before the model writes.
+// This is what makes Vai actually grow across turns rather than re-learning each time.
+function makeServiceWithStore(roster: CouncilRoster, store: InMemoryGuidanceStore): ChatService {
+  return new ChatService(createDb(':memory:'), new ModelRegistry(), {
+    councilRoster: roster,
+    guidanceStore: store,
+  });
+}
+
+describe('council lesson persistence (closed self-improvement loop)', () => {
+  const TURN = 'How do I make my React table re-render less often on filter changes?';
+
+  it('persists a non-ship council lesson as class-scope AI guidance', async () => {
+    const store = new InMemoryGuidanceStore();
+    const service = makeServiceWithStore(
+      rereadRoster('wants the actual re-render fix, not theory', 'profile first with React DevTools, then memoize the row'),
+      store,
+    );
+    await runLoop(service, { prompt: TURN, draftText: 'Re-renders happen for many reasons.', modelId: 'local:test' });
+
+    const saved = store.loadActive(null);
+    expect(saved.length).toBeGreaterThan(0);
+    const lesson = saved[0];
+    expect(lesson.scope).toBe('class');
+    expect(lesson.from).toBe('ai');
+    expect(lesson.note).toMatch(/profile first|memoize/i);
+    expect(lesson.matchTokens && lesson.matchTokens.length).toBeGreaterThan(0);
+  });
+
+  it('a persisted lesson is selected on a later similar turn', async () => {
+    const store = new InMemoryGuidanceStore();
+    const service = makeServiceWithStore(
+      rereadRoster('wants the actual re-render fix', 'profile first with React DevTools, then memoize the row'),
+      store,
+    );
+    // Turn 1 teaches the lesson.
+    await runLoop(service, { prompt: TURN, draftText: 'A weak first draft.', modelId: 'local:test' });
+
+    // Turn 2 is a same-class question (shares ≥half the originating turn's
+    // distinctive tokens) — the loader must surface the stored lesson.
+    const similar = 'How do I make my React table re-render less often when filter changes happen?';
+    const selected = selectApplicableGuidance(
+      { tokens: salientTokens(similar) },
+      store.loadActive(null),
+    );
+    expect(selected.length).toBeGreaterThan(0);
+    expect(selected[0].note).toMatch(/profile first|memoize/i);
+  });
+
+  it('does NOT persist when the council ships the draft (nothing to fix)', async () => {
+    const store = new InMemoryGuidanceStore();
+    const service = makeServiceWithStore(shipRoster(), store);
+    await runLoop(service, { prompt: TURN, draftText: 'A good draft.', modelId: 'local:test' });
+    expect(store.loadActive(null).length).toBe(0);
+  });
+
+  it('dedupes: a second similar non-ship turn does not stack a duplicate hint', async () => {
+    const store = new InMemoryGuidanceStore();
+    const service = makeServiceWithStore(
+      rereadRoster('wants the fix', 'profile first with React DevTools, then memoize the row'),
+      store,
+    );
+    await runLoop(service, { prompt: TURN, draftText: 'draft one', modelId: 'local:test' });
+    await runLoop(service, { prompt: TURN, draftText: 'draft two', modelId: 'local:test' });
+    // Same handler + overlapping tokens → second turn must be absorbed, not stacked.
+    expect(store.loadActive(null).length).toBe(1);
+  });
+
+  it('is a no-op when no guidance store is configured (back-compat)', async () => {
+    const service = makeService(rereadRoster('x', 'lesson y'));
+    // Must not throw and must still grade/redraft normally.
+    const result = await runLoop(service, { prompt: TURN, draftText: 'draft', modelId: 'local:test' });
+    expect(result.finalText).toBe('draft');
   });
 });

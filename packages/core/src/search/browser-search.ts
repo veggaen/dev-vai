@@ -27,6 +27,13 @@ export interface BrowserSearchResult {
   url: string;
 }
 
+/** A Google search run: the organic results plus, when present, the AI Overview box. */
+export interface GoogleSearchPage {
+  readonly results: readonly BrowserSearchResult[];
+  /** Google's AI Overview (generative summary) text, or null when absent / extraction failed. */
+  readonly aiOverview: string | null;
+}
+
 type PuppeteerBrowser = import('puppeteer-core').Browser;
 type PuppeteerPage = import('puppeteer-core').Page;
 
@@ -240,6 +247,23 @@ function looksLikeCaptcha(pageUrl: string, bodyText: string): boolean {
     || /unusual traffic|not a robot|recaptcha/i.test(bodyText.slice(0, 3000));
 }
 
+/**
+ * Clean an extracted AI Overview blob: drop Google's "AI Overview", "Show more",
+ * "Learn more", and feedback chrome, collapse whitespace, cap length. Returns null
+ * when what's left is too short to be a real summary (Google omits the box for many
+ * queries, and its DOM changes often — null = "not present", never an error).
+ */
+function cleanAiOverview(raw: string): string | null {
+  const text = raw
+    .replace(/^\s*AI Overview\s*/i, '')
+    .replace(/\b(Show more|Show less|Learn more)\b/gi, ' ')
+    .replace(/AI responses may include mistakes[\s\S]*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1500);
+  return text.length >= 60 ? text : null;
+}
+
 async function dismissGoogleConsent(page: PuppeteerPage): Promise<void> {
   if (!/consent\.google\./.test(page.url())) return;
   try {
@@ -254,7 +278,7 @@ async function dismissGoogleConsent(page: PuppeteerPage): Promise<void> {
   } catch { /* continue — results extraction will just find nothing */ }
 }
 
-async function runGoogleSearch(query: string, timeoutMs: number): Promise<BrowserSearchResult[]> {
+async function runGoogleSearch(query: string, timeoutMs: number): Promise<GoogleSearchPage> {
   const browser = await getBrowser();
   const page = await browser.newPage();
   try {
@@ -272,8 +296,33 @@ async function runGoogleSearch(query: string, timeoutMs: number): Promise<Browse
     const bodyText = await page.evaluate(() => document.body?.innerText ?? '').catch(() => '');
     if (looksLikeCaptcha(page.url(), bodyText)) {
       googleCooldownUntil = Date.now() + CAPTCHA_COOLDOWN_MS;
-      return [];
+      return { results: [], aiOverview: null };
     }
+
+    // AI Overview box (generative summary). Google renders it lazily and renames
+    // its containers constantly, so we try a few stable-ish anchors and fall back
+    // to scanning for the labelled block. Best-effort: any miss yields null, never
+    // an error — the organic results below are the reliable signal.
+    const aiOverviewRaw = await page.evaluate(() => {
+      const selectors = [
+        '[data-attrid="AIOverview"]',
+        '[aria-label*="AI Overview" i]',
+        'div[data-subtree="aifb"]',
+        '#m-x-content',
+      ];
+      for (const sel of selectors) {
+        const el = document.querySelector<HTMLElement>(sel);
+        const t = (el?.innerText ?? '').trim();
+        if (t.length > 80) return t;
+      }
+      // Fallback: find a heading that says "AI Overview" and take its container text.
+      const headings = Array.from(document.querySelectorAll<HTMLElement>('h1,h2,div,span'));
+      const label = headings.find((h) => /^AI Overview$/i.test((h.textContent ?? '').trim()));
+      const container = label?.closest('div[jscontroller], div[data-hveid]') as HTMLElement | null;
+      const text = (container?.innerText ?? '').trim();
+      return text.length > 80 ? text : '';
+    }).catch(() => '');
+    const aiOverview = cleanAiOverview(aiOverviewRaw);
 
     // Organic results: anchors containing an <h3>. Snippets live in sibling
     // text containers; falling back to the result block's text keeps this
@@ -309,9 +358,10 @@ async function runGoogleSearch(query: string, timeoutMs: number): Promise<Browse
       return out;
     }) as ExtractedResult[];
 
-    return extracted
+    const results = extracted
       .map(({ title, url: resultUrl, snippet }) => ({ title, url: resultUrl, snippet: cleanGoogleSnippet(title, snippet) }))
       .filter((r) => r.snippet.length >= 20 && !/^https?:\/\/(?:[a-z0-9-]+\.)*google\./i.test(r.url));
+    return { results, aiOverview };
   } finally {
     await page.close().catch(() => undefined);
   }
@@ -323,13 +373,22 @@ async function runGoogleSearch(query: string, timeoutMs: number): Promise<Browse
  * chain continues as fallback in all those cases.
  */
 export async function fetchGoogleViaBrowser(query: string, timeoutMs: number): Promise<BrowserSearchResult[]> {
-  if (!isBrowserSearchEnabled() || isGoogleCoolingDown()) return [];
+  return [...(await fetchGooglePageViaBrowser(query, timeoutMs)).results];
+}
+
+/**
+ * Like {@link fetchGoogleViaBrowser} but also returns Google's AI Overview box when present.
+ * Returns `{ results: [], aiOverview: null }` on cooldown / no browser / failure — every
+ * caller can rely on the shape and fall back to the HTTP provider chain.
+ */
+export async function fetchGooglePageViaBrowser(query: string, timeoutMs: number): Promise<GoogleSearchPage> {
+  if (!isBrowserSearchEnabled() || isGoogleCoolingDown()) return { results: [], aiOverview: null };
   try {
     return await enqueue(() => runGoogleSearch(query, Math.max(timeoutMs, 12_000)));
   } catch (error) {
     if (process.env.VAI_SEARCH_DEBUG) {
       console.error(`[browser-search] google failed for "${query}": ${(error as Error).message}`);
     }
-    return [];
+    return { results: [], aiOverview: null };
   }
 }

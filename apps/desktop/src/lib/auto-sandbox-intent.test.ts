@@ -158,6 +158,18 @@ describe('resolveAutoSandboxIntent', () => {
     expect(sendTime.shouldPrimeBuilder).toBe(false);
   });
 
+  it('primes agent-mode explicit clone builds for execution', () => {
+    const result = resolveSendTimeWorkIntent({
+      userPrompt: 'Build a 100% accurate Tinder clone with React + Vite. Ship complete runnable files.',
+      mode: 'agent',
+      hasActiveProject: false,
+    });
+
+    expect(result.intent).toBe('build');
+    expect(result.shouldPrimeBuilder).toBe(true);
+    expect(result.requestSystemPrompt).toContain('execute-now build request');
+  });
+
   it('still primes builder when the hardware user explicitly asks for a web dashboard prototype', () => {
     const result = resolveSendTimeWorkIntent({
       userPrompt: 'Prototype the web dashboard UI for my ESP32 humidity sensor in React now.',

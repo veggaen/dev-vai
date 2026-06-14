@@ -21,7 +21,6 @@ import { useAuthStore } from '../stores/authStore.js';
 import { MessageBubble } from './MessageBubble.js';
 import { ModeSelector } from './ModeSelector.js';
 import { ScrollToBottom } from './ScrollToBottom.js';
-import { TypingIndicator } from './TypingIndicator.js';
 import { VaiMark } from './brand/VaiMark.js';
 import { useAutoScroll } from '../hooks/useAutoScroll.js';
 import { useIntentStore, computeFallbackMap } from '../stores/intentStore.js';
@@ -29,15 +28,18 @@ import { apiFetch } from '../lib/api.js';
 import {
   BookOpen, MessageCircle, Sparkles, Shield, Globe,
   Paperclip, X, FileText, ArrowUp, Square, ImagePlus,
-  Eye, Brain, Bot, Wifi, Plus, Moon, Sun, ChevronDown, ChevronRight, Layers,
+  Eye, Brain, Bot, Wifi, Plus, Moon, Sun, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
-import { FocusModeToggle } from './FocusModeToggle.js';
+import { WorkspaceLayoutControls } from './workspace/WorkspaceLayoutControls.js';
 import { BroadcastStrip } from './BroadcastStrip.js';
 import type { PerIdeConfig } from './BroadcastTargetPicker.js';
 import { ResearchContextRail } from './chat/ResearchContextRail.js';
 import { ChatEmptyState } from './chat/ChatEmptyState.js';
 import { ConversationSourcesSidebar, aggregateConversationSources } from './chat/ConversationSourcesSidebar.js';
+import { FileChangesBar, type FileChangeEntry } from './chat/FileChangesBar.js';
+import { BackgroundProcessWindow } from './chat/BackgroundProcessWindow.js';
+import { useBackgroundProcesses, useBackgroundTaskEvents } from '../hooks/useBackgroundProcesses.js';
 import { CouncilProgressPanel } from './panels/CouncilProgressPanel.js';
 import { resolveSendTimeWorkIntent } from '../lib/auto-sandbox-intent.js';
 import { resolveLatestResearchContext } from '../lib/research-context.js';
@@ -185,17 +187,27 @@ export function ChatWindow() {
     return [...messages].reverse().find(m => m.role === 'assistant' && m.thinking?.council);
   }, [messages]);
 
+  const hasLiveCouncilStream = useMemo(() => {
+    if (!isStreaming) return false;
+    const steps = messages[messages.length - 1]?.progressSteps ?? [];
+    return steps.some((step) => step.stage?.startsWith('council'));
+  }, [isStreaming, messages]);
+
   useEffect(() => {
-    if (latestAssistantWithCouncil && !showCouncilPanel) {
+    if ((latestAssistantWithCouncil || hasLiveCouncilStream) && !showCouncilPanel) {
       toggleCouncilPanel();
     }
-  }, [latestAssistantWithCouncil, showCouncilPanel, toggleCouncilPanel]);
+  }, [latestAssistantWithCouncil, hasLiveCouncilStream, showCouncilPanel, toggleCouncilPanel]);
   const studioBuilderChrome = themePreference === 'light';
   const isOwner = useAuthStore((state) => state.isOwner);
   const ownerFeaturesHidden = useAuthStore((state) => state.ownerFeaturesHidden);
   const authUser = useAuthStore((state) => state.user);
   const persistentProjectId = useSandboxStore((state) => state.persistentProjectId);
   const buildActivity = useSandboxStore((state) => state.buildActivity);
+  const clearBuildActivity = useSandboxStore((state) => state.clearBuildActivity);
+  const lastDiff = useSandboxStore((state) => state.lastDiff);
+  const lastRevisionId = useSandboxStore((state) => state.lastRevisionId);
+  const revertRevision = useSandboxStore((state) => state.revertRevision);
   const sandboxStatus = useSandboxStore((state) => state.status);
   const sandboxFiles = useSandboxStore((state) => state.files);
   const sandboxProjectName = useSandboxStore((state) => state.projectName);
@@ -234,6 +246,15 @@ export function ChatWindow() {
   useEffect(() => {
     if (isStreaming) setActivityCollapsed(false);
   }, [isStreaming]);
+
+  useBackgroundTaskEvents();
+  const backgroundProcesses = useBackgroundProcesses();
+
+  useEffect(() => {
+    const toggleSources = () => setIsConversationSourcesOpen((open) => !open);
+    window.addEventListener('vai:toggle-sources-panel', toggleSources);
+    return () => window.removeEventListener('vai:toggle-sources-panel', toggleSources);
+  }, []);
   /** `@` mention: start index in `input`, or null when not in a mention token */
   const [mentionAt, setMentionAt] = useState<number | null>(null);
   const [mentionQuery, setMentionQuery] = useState('');
@@ -950,7 +971,6 @@ export function ChatWindow() {
   const streamingProgressSteps = isStreaming
     ? messages[messages.length - 1]?.progressSteps ?? []
     : [];
-  const showTypingIndicator = isStreaming && messages.length > 0 && messages[messages.length - 1]?.content === '';
   const activeDeployStep = useMemo(
     () => deploySteps.find((step) => step.status === 'running')
       ?? deploySteps.find((step) => step.status === 'failed')
@@ -1210,72 +1230,23 @@ export function ChatWindow() {
             <button
               type="button"
               onClick={toggleThemePreference}
-              className={`flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[11px] font-medium transition-colors ${
+              className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-medium transition-colors ${
                 studioBuilderChrome
                   ? 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50'
-                  : 'border-zinc-800/70 bg-zinc-950 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-100'
+                  : 'border-[color:var(--shell-line-soft)] bg-[color:var(--panel)]/40 text-[color:var(--color-muted)] hover:border-[color:var(--border)] hover:bg-[color:var(--panel)] hover:text-[color:var(--fg)]'
               }`}
               title={studioBuilderChrome ? 'Switch to dark theme' : 'Switch to light theme'}
             >
               {studioBuilderChrome ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
-              <span>{studioBuilderChrome ? 'Dark' : 'Light'}</span>
+              <span className="hidden sm:inline">{studioBuilderChrome ? 'Dark' : 'Light'}</span>
             </button>
-            {!showBuilderPanel ? (
-              <button
-                onClick={toggleBuilderPanel}
-                className={`flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[11px] font-medium transition-colors ${
-                  studioBuilderChrome
-                    ? 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50'
-                    : 'border-zinc-800/70 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200'
-                }`}
-                title="Open live app preview (Ctrl+B)"
-              >
-                <Eye className="h-3.5 w-3.5" />
-                <span>App preview</span>
-              </button>
-            ) : (
-              <button
-                onClick={toggleBuilderPanel}
-                className={`flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[11px] font-medium transition-colors ${
-                  studioBuilderChrome
-                    ? 'border-blue-300 bg-blue-50 text-blue-700'
-                    : 'border-violet-500/40 bg-violet-500/10 text-violet-200'
-                }`}
-                title="Close app preview (Ctrl+B)"
-              >
-                <Eye className="h-3.5 w-3.5" />
-                <span>Close app</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setIsConversationSourcesOpen((open) => !open)}
-              data-conversation-sources-toggle
-              data-state={isConversationSourcesOpen ? 'open' : 'closed'}
-              className={`flex h-8 items-center gap-1.5 rounded-xl border px-3 text-[11px] font-medium transition-colors ${
-                isConversationSourcesOpen
-                  ? (studioBuilderChrome
-                      ? 'border-blue-300 bg-blue-50 text-blue-700'
-                      : 'border-violet-500/40 bg-violet-500/10 text-violet-200')
-                  : (studioBuilderChrome
-                      ? 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50'
-                      : 'border-zinc-800/70 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200')
-              }`}
-              title={`${isConversationSourcesOpen ? 'Hide' : 'Show'} sources for this chat`}
-            >
-              <Layers className="h-3.5 w-3.5" />
-              <span>Sources</span>
-              {conversationSourcesCount > 0 && (
-                <span className={`ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-md px-1 text-[10px] font-semibold tabular-nums ${
-                  isConversationSourcesOpen
-                    ? (studioBuilderChrome ? 'bg-blue-100 text-blue-700' : 'bg-violet-500/20 text-violet-100')
-                    : (studioBuilderChrome ? 'bg-zinc-100 text-zinc-600' : 'bg-zinc-900 text-zinc-300')
-                }`}>
-                  {conversationSourcesCount}
-                </span>
-              )}
-            </button>
-            <FocusModeToggle />
+            <WorkspaceLayoutControls
+              surface="chat"
+              studio={studioBuilderChrome}
+              sourcesOpen={isConversationSourcesOpen}
+              sourcesCount={conversationSourcesCount}
+              onToggleSources={() => setIsConversationSourcesOpen((open) => !open)}
+            />
           </div>
         </div>
       </div>
@@ -1540,9 +1511,10 @@ export function ChatWindow() {
                   );
                 })}
 
-                <AnimatePresence>
-                  {showTypingIndicator && <TypingIndicator progressSteps={streamingProgressSteps} />}
-                </AnimatePresence>
+                {/* The live process view is owned by the streaming assistant bubble's
+                    ProcessTree (expandable, branded, flat). The old standalone
+                    TypingIndicator rendered the SAME progress steps a second time —
+                    the "double box" the audit caught — so it's intentionally gone. */}
 
                 <div className="h-2 flex-shrink-0" />
               </div>
@@ -1619,89 +1591,54 @@ export function ChatWindow() {
               ))}
             </div>
           )}
-          {/* Activity strip — its own collapsible card ABOVE the composer, never inside the input box */}
-          {(buildActivity.length > 0 || transientActivity.length > 0) && (
-            <div className={`mb-2 rounded-xl border px-3.5 pb-2 pt-1.5 ${
-              studioBuilderChrome ? 'border-zinc-200 bg-white/80' : 'border-zinc-800/70 bg-zinc-900/60'
-            }`}>
-              <button
-                type="button"
-                onClick={() => setActivityCollapsed((value) => !value)}
-                className={`flex w-full items-center justify-between gap-3 text-left ${
-                  studioBuilderChrome ? 'text-zinc-700' : 'text-zinc-300'
-                }`}
-              >
-                <div className="min-w-0">
-                  <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${
-                    studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-600'
-                  }`}>
-                    Activity {activityCollapsed ? `• ${activitySummary}` : ''}
-                  </div>
-                  {activityCollapsed && (
-                    <div className={`mt-1 truncate text-[11px] ${
-                      studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-400'
-                    }`}>
-                      {buildStatus.message || 'Recent project writes and startup progress'}
-                    </div>
-                  )}
-                </div>
-                {activityCollapsed ? <ChevronRight className="h-3.5 w-3.5 shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 shrink-0" />}
-              </button>
+          {/* File-changes action bar — files changed this turn, with diff stats
+               (when the backend reports them), one-click open into the code view,
+               and turn-level Keep/Discard. The ONLY surface for file mutations;
+               process steps live in-bubble (ProcessTree), council in the right
+               panel. Keeps every surface showing distinct information. */}
+          {(() => {
+            // Prefer the server-computed diff (true +added/−removed) for the latest
+            // write; fall back to bare paths from buildActivity when no diff yet.
+            const diffByPath = new Map(lastDiff.map((d) => [d.path, d]));
+            const fileEntries: FileChangeEntry[] = buildActivity
+              .filter((a) => /wrote|changed|created|updated|\.(tsx?|jsx?|css|json|md|html?)$/i.test(a.detail || ''))
+              .slice(-8)
+              .map((a) => {
+                const detail = a.detail || '';
+                const path = detail.replace(/^(?:Wrote|Changed|Created|Updated)\s*/i, '').trim().split(/\s+/)[0];
+                const d = diffByPath.get(path);
+                return { id: a.id, path, added: d?.added, removed: d?.removed };
+              })
+              .filter((f) => f.path.length > 0);
+            if (fileEntries.length === 0) return null;
 
-              {!activityCollapsed && buildActivity.length > 0 && (
-                <div className="mt-1.5 space-y-1.5">
-                  {buildActivity.slice(-5).map((a) => (
-                    <div key={a.id} className="flex min-w-0 items-start gap-2 text-[11px] leading-snug">
-                      <FileText className={`mt-0.5 h-3 w-3 shrink-0 ${studioBuilderChrome ? 'text-zinc-400' : 'text-zinc-500'}`} />
-                      <span className="min-w-0">
-                        <span className={studioBuilderChrome ? 'font-medium text-zinc-700' : 'font-medium text-zinc-300'}>Wrote</span>{' '}
-                        <code className={`break-all rounded-md px-1.5 py-0.5 font-mono text-[10px] ${
-                          studioBuilderChrome ? 'bg-zinc-100 text-zinc-800' : 'bg-zinc-900 text-zinc-200'
-                        }`}>
-                          {a.detail}
-                        </code>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
+            const openFile = (path: string) => {
+              if (!path) return;
+              if (!showBuilderPanel) toggleBuilderPanel();
+              requestAnimationFrame(() => {
+                window.dispatchEvent(new CustomEvent('vai:reveal-file', { detail: { path } }));
+              });
+            };
 
-              {!activityCollapsed && transientActivity.length > 0 && (
-                <AnimatePresence initial={false}>
-                  <motion.div
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    className={`${buildActivity.length > 0 ? 'mt-2.5' : 'mt-2'} flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] ${
-                      studioBuilderChrome ? 'text-zinc-600' : 'text-zinc-400'
-                    }`}
-                  >
-                    {transientActivity.map((item) => {
-                      const toneClass = item.tone === 'blue'
-                        ? studioBuilderChrome ? 'text-blue-700' : 'text-blue-300'
-                        : item.tone === 'amber'
-                          ? studioBuilderChrome ? 'text-amber-700' : 'text-amber-300'
-                          : item.tone === 'orange'
-                            ? 'text-orange-500'
-                            : studioBuilderChrome ? 'text-blue-700' : 'text-violet-300';
-                      const dotClass = item.tone === 'orange'
-                        ? 'bg-orange-500'
-                        : toneClass.replace('text-', 'bg-');
-                      const detailMuted = studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-400';
+            return (
+              <FileChangesBar
+                files={fileEntries}
+                studioChrome={studioBuilderChrome}
+                onOpenFile={openFile}
+                onKeep={() => clearBuildActivity()}
+                onDiscard={lastRevisionId ? () => { void revertRevision().then((ok) => {
+                  toast[ok ? 'success' : 'error'](ok ? 'Reverted this turn’s file changes' : 'Could not revert changes');
+                }); } : undefined}
+              />
+            );
+          })()}
 
-                      return (
-                        <div key={item.key} className="flex min-w-0 items-center gap-2">
-                          <span className={`inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full ${dotClass}`} />
-                          <span className={`truncate font-medium ${toneClass}`}>{item.label}</span>
-                          <span className={`hidden max-w-[42rem] truncate lg:inline ${detailMuted}`}>{item.detail}</span>
-                        </div>
-                      );
-                    })}
-                  </motion.div>
-                </AnimatePresence>
-              )}
-            </div>
-          )}
+          <BackgroundProcessWindow
+            processes={backgroundProcesses}
+            expanded={!activityCollapsed}
+            onExpandedChange={(open) => setActivityCollapsed(!open)}
+            studioChrome={studioBuilderChrome}
+          />
 
           {/* The input box */}
           <motion.div

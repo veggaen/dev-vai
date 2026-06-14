@@ -1,133 +1,139 @@
 import { useEffect } from 'react';
 import { useLayoutStore, type ChatMode } from '../stores/layoutStore.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { useShortcutsStore } from '../stores/shortcutsStore.js';
+import { eventMatchesShortcut, type ShortcutId } from '../lib/keyboard-shortcuts.js';
+import { FOCUS_CHAT_SEARCH_EVENT } from '../components/SidebarPanel.js';
 
-const MODE_KEYS: Record<string, ChatMode> = {
-  '1': 'chat',
-  '2': 'agent',
-  '3': 'builder',
-  '4': 'plan',
-  '5': 'debate',
+const MODE_BY_SHORTCUT: Partial<Record<ShortcutId, ChatMode>> = {
+  modeChat: 'chat',
+  modeAgent: 'agent',
+  modeBuilder: 'builder',
+  modePlan: 'plan',
+  modeDebate: 'debate',
 };
 
-/**
- * Global keyboard shortcuts:
- *   Ctrl+1-5        — Switch mode (chat / agent / builder / plan / debate)
- *   Ctrl+0          — Focus mode (chat only — hide sidebar + builder)
- *   Ctrl+K          — Quick Switch (fuzzy search conversations)
- *   Ctrl+,          — Settings sidebar (same tier as Ctrl+K / palette-style power user flow)
- *   Ctrl+S          — Cycle sidebar: expanded → rail → hidden
- *   Ctrl+Shift+L    — Toggle Dev Logs panel
- *   Ctrl+Shift+F    — Focus chat search in sidebar
- *   Ctrl+Shift+K    — Toggle Knowledge Base panel
- *   Ctrl+Shift+M    — Cycle layout: compact → open → odyssey
- *   Ctrl+J          — Toggle debug console (paired with Ctrl+K: pick chat vs inspect logs)
- *   Ctrl+E          — Toggle file explorer
- *   Ctrl+B          — Toggle builder panel
- */
 export function useKeyboardShortcuts() {
+  const overrides = useShortcutsStore((s) => s.overrides);
+  const getKeys = useShortcutsStore((s) => s.getKeys);
   const {
-    setMode, toggleDebugConsole, toggleFileExplorer,
-    toggleBuilderPanel, toggleFocusMode, cycleSidebar,
-    setShowQuickSwitch, setActivePanel, cycleLayoutMode,
+    setMode,
+    toggleDebugConsole,
+    toggleFileExplorer,
+    toggleBuilderPanel,
+    toggleFocusMode,
+    cycleSidebar,
+    setShowQuickSwitch,
+    setActivePanel,
+    cycleLayoutMode,
+    togglePreviewExpanded,
+    toggleCouncilPanel,
   } = useLayoutStore();
   const activeConversationId = useChatStore((state) => state.activeConversationId);
   const updateConversationMode = useChatStore((state) => state.updateConversationMode);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      // Ignore when typing in inputs (except Ctrl shortcuts)
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
         if (!e.ctrlKey && !e.metaKey) return;
       }
 
-      const key = e.key;
-      const ctrl = e.ctrlKey || e.metaKey;
-      const shift = e.shiftKey;
+      const match = (id: ShortcutId) => eventMatchesShortcut(e, getKeys(id));
 
-      // Ctrl+K — Quick Switch
-      if (ctrl && key.toLowerCase() === 'k') {
+      if (match('quickSwitch')) {
         e.preventDefault();
         setShowQuickSwitch(true);
         return;
       }
 
-      // Ctrl+, — Settings (VS Code–style preferences shortcut)
-      if (ctrl && key === ',') {
+      if (match('settings')) {
         e.preventDefault();
         setActivePanel('settings');
         return;
       }
 
-      // Ctrl+S — Cycle sidebar states
-      if (ctrl && !shift && key.toLowerCase() === 's') {
+      if (match('cycleSidebar')) {
         e.preventDefault();
         cycleSidebar();
         return;
       }
 
-      // Ctrl+Shift+L — Dev Logs panel
-      if (ctrl && shift && key.toLowerCase() === 'l') {
+      if (match('devLogs')) {
         e.preventDefault();
         setActivePanel('devlogs');
         return;
       }
 
-      // Ctrl+Shift+F — focus integrated chat search in sidebar
-      if (ctrl && shift && key.toLowerCase() === 'f') {
+      if (match('focusChatSearch')) {
         e.preventDefault();
         setActivePanel('chats');
-        window.dispatchEvent(new CustomEvent('vai:focus-chat-search'));
+        window.dispatchEvent(new CustomEvent(FOCUS_CHAT_SEARCH_EVENT));
         return;
       }
 
-      // Ctrl+Shift+K — Knowledge Base panel
-      if (ctrl && shift && key.toLowerCase() === 'k') {
+      if (match('knowledge')) {
         e.preventDefault();
         setActivePanel('knowledge');
         return;
       }
 
-      // Ctrl+Shift+M — Toggle layout mode (compact ↔ open)
-      if (ctrl && shift && key.toLowerCase() === 'm') {
+      if (match('cycleLayout')) {
         e.preventDefault();
         cycleLayoutMode();
         return;
       }
 
-      if (ctrl && MODE_KEYS[key]) {
+      if (match('toggleCouncil')) {
         e.preventDefault();
-        const nextMode = MODE_KEYS[key];
-        setMode(nextMode);
-        if (activeConversationId) {
-          void updateConversationMode(activeConversationId, nextMode).catch((error) => {
-            console.error('Failed to sync conversation mode from keyboard shortcut', error);
-          });
-        }
+        toggleCouncilPanel();
         return;
       }
 
-      // Ctrl+0 — Focus mode (chat-only zen mode)
-      if (ctrl && key === '0') {
+      if (match('appFullscreen')) {
+        e.preventDefault();
+        togglePreviewExpanded();
+        return;
+      }
+
+      if (match('toggleSources')) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('vai:toggle-sources-panel'));
+        return;
+      }
+
+      for (const [shortcutId, mode] of Object.entries(MODE_BY_SHORTCUT) as [ShortcutId, ChatMode][]) {
+        if (match(shortcutId)) {
+          e.preventDefault();
+          setMode(mode);
+          if (activeConversationId) {
+            void updateConversationMode(activeConversationId, mode).catch((error) => {
+              console.error('Failed to sync conversation mode from keyboard shortcut', error);
+            });
+          }
+          return;
+        }
+      }
+
+      if (match('focusMode')) {
         e.preventDefault();
         toggleFocusMode();
         return;
       }
 
-      if (ctrl && key.toLowerCase() === 'j') {
+      if (match('toggleConsole')) {
         e.preventDefault();
         toggleDebugConsole();
         return;
       }
 
-      if (ctrl && key.toLowerCase() === 'e') {
+      if (match('toggleFiles')) {
         e.preventDefault();
         toggleFileExplorer();
         return;
       }
 
-      if (ctrl && key.toLowerCase() === 'b') {
+      if (match('toggleApp')) {
         e.preventDefault();
         toggleBuilderPanel();
         return;
@@ -139,13 +145,17 @@ export function useKeyboardShortcuts() {
   }, [
     activeConversationId,
     cycleSidebar,
+    getKeys,
+    overrides,
     setActivePanel,
     setMode,
     setShowQuickSwitch,
     toggleBuilderPanel,
+    toggleCouncilPanel,
     toggleDebugConsole,
     toggleFileExplorer,
     toggleFocusMode,
+    togglePreviewExpanded,
     cycleLayoutMode,
     updateConversationMode,
   ]);

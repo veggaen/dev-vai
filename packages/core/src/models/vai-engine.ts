@@ -387,6 +387,10 @@ export class VaiEngine implements ModelAdapter {
   // into "odablock runescape" when the first web search returns nothing.
   private _priorTurnSearchTopic: string | null = null;
   private _activeMode: string = 'chat';
+
+  private isBuildExecutionMode(mode: string = this._activeMode): boolean {
+    return mode === 'builder' || mode === 'agent';
+  }
   private chatSearchBudgetMs = CHAT_SEARCH_BUDGET_MS;
   private inferredChatSearchBudgetMs = INFERRED_CHAT_SEARCH_BUDGET_MS;
   private _hasActiveSandboxContext = false;
@@ -11236,7 +11240,7 @@ export class VaiEngine implements ModelAdapter {
     // Creative requests like "make me a game" bypass this entirely.
     // Chat mode still respects hard lock system prompts, but direct build requests can use chat-first deploy actions.
     const isChatMode = activeMode === 'chat';
-    const isBuilderMode = activeMode === 'builder';
+    const isBuilderMode = this.isBuildExecutionMode(activeMode);
     const chatSandboxLocked = history.some(m => m.role === 'system' && /do not make changes to any project files, plans, or sandbox/i.test(m.content));
     const isExplicitInstall = /\b(?:install|set\s*up|setup)\s+(?:(?:me\s+)?(?:a\s+)?)?(?:pern|mern|next\.?js|nextjs|next\s+js|t3|vinext)\b/i.test(input);
     const isDirectChatBuildRequest = /\b(?:build|create|make|start|set\s*up|setup|install)\b/i.test(input)
@@ -16514,7 +16518,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       .trim();
     const langHint = projectMatch?.[2]?.trim().toLowerCase() || '';
     const isChatMode = this._activeMode === 'chat';
-    const isBuilderMode = this._activeMode === 'builder';
+    const isBuilderMode = this.isBuildExecutionMode();
     const fullDesc = `${projectSourceInput} ${cleanedProjectDesc} ${langHint}`.trim();
     const isVagueGenericBuild = this.isVagueGenericBuildPhrase(projectSourceInput)
       || this.isVagueGenericBuildPhrase(cleanedProjectDesc);
@@ -17183,7 +17187,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
   }
 
   private tryBuilderStackFollowUp(input: string, history: readonly Message[]): string | null {
-    const isBuilderMode = this._activeMode === 'builder';
+    const isBuilderMode = this.isBuildExecutionMode();
     if (!isBuilderMode) return null;
 
     const normalized = input
@@ -50654,7 +50658,7 @@ function topKLargest(nums, k) {
 
     // Skip if in Chat mode with system message (let creative code handle it there)
     const isChatMode = this._activeMode === 'chat';
-    const isBuilderMode = this._activeMode === 'builder';
+    const isBuilderMode = this.isBuildExecutionMode();
     const explicitNoScaffold = /\b(architecture first|no scaffold|no deploy|not deploy|not scaffold|do not fall|product structure|product-grade|no stack cards)\b/i;
     const builderBuildIntent = /\b(build|create|make|start|set\s*up|setup|install|scaffold|deploy|spin\s*up|bootstrap|launch)\b/i;
     const builderProductTarget = /\b(app|project|site|website|application|dashboard|planner|tracker|platform|workspace|shell|mvp|starter)\b/i;

@@ -247,6 +247,11 @@ export interface TurnThinking {
    * facts (see docs/capabilities/scis-consensus-council.md).
    */
   readonly council?: CouncilThinking;
+  /**
+   * What vai:v0 drafted before council review / escalation. Process-only —
+   * when council escalates to a generative arm, this is NOT the shipped answer.
+   */
+  readonly vaiProposedDraft?: string;
 }
 
 export interface TurnProcessTraceStage {

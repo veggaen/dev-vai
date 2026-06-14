@@ -1,6 +1,6 @@
 import { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import {
-  Brain,
+  ScrollText,
   Upload,
   Clock,
   MessageSquare,
@@ -18,6 +18,13 @@ import {
 } from 'lucide-react';
 import { useSessionStore } from '../stores/sessionStore.js';
 import type { AgentSession } from '@vai/core/browser';
+import {
+  sessionSourceKey,
+  sourceBadge,
+  visibleSessionTags,
+  SOURCE_LABELS,
+  type SessionSourceFilter,
+} from '../lib/sessionSource.js';
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 
@@ -166,18 +173,16 @@ function SessionCard({
       {/* Source badge */}
       {session.tags.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
-          {session.tags.includes('vscode-agent') && (
-            <span className="rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] text-violet-400 font-medium">
-              copilot
-            </span>
-          )}
-          {session.tags.includes('auto-capture') && (
-            <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] text-blue-400 font-medium">
-              auto
-            </span>
-          )}
-          {session.tags
-            .filter(t => t !== 'vscode-agent' && t !== 'auto-capture' && t !== 'vscode-extension')
+          {(() => {
+            const badge = sourceBadge(session);
+            if (!badge) return null;
+            return (
+              <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${badge.tone}`}>
+                {badge.label}
+              </span>
+            );
+          })()}
+          {visibleSessionTags(session.tags)
             .slice(0, 2)
             .map((tag) => (
               <span key={tag} className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">
@@ -287,7 +292,7 @@ function SessionsSummary({ sessions }: { sessions: AgentSession[] }) {
 
 /* ── Main SessionList ──────────────────────────────────────────── */
 
-export function SessionList() {
+export function SessionList({ embedded = false }: { embedded?: boolean }) {
   const {
     sessions,
     activeSessionId,
@@ -303,6 +308,7 @@ export function SessionList() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [endingAll, setEndingAll] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<SessionSourceFilter>('all');
 
   useEffect(() => {
     fetchSessions();
@@ -364,9 +370,33 @@ export function SessionList() {
     return counts;
   }, [sessions]);
 
+  const sourceCounts = useMemo(() => {
+    const counts: Record<SessionSourceFilter, number> = {
+      all: sessions.length,
+      vai: 0,
+      cursor: 0,
+      'vs-chat': 0,
+      'vs-claude': 0,
+      'vs-augment': 0,
+      'vs-codex': 0,
+      audit: 0,
+    };
+    for (const s of sessions) {
+      counts[sessionSourceKey(s)]++;
+    }
+    return counts;
+  }, [sessions]);
+
+  const SOURCE_FILTERS: SessionSourceFilter[] = [
+    'all', 'vai', 'cursor', 'vs-chat', 'vs-claude', 'vs-augment', 'vs-codex', 'audit',
+  ];
+
   const sortedSessions = useMemo(
     () => {
       let filtered = [...sessions];
+      if (sourceFilter !== 'all') {
+        filtered = filtered.filter((s) => sessionSourceKey(s) === sourceFilter);
+      }
       // Text search across title, description, agent name, model
       if (searchText.trim()) {
         const q = searchText.toLowerCase();
@@ -383,33 +413,46 @@ export function SessionList() {
         return bTime - aTime;
       });
     },
-    [sessions, searchText],
+    [sessions, searchText, sourceFilter],
   );
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="border-b border-zinc-800 p-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Brain className="h-4 w-4 text-purple-400" />
-            <h2 className="text-sm font-semibold text-zinc-200">Dev Logs</h2>
-            <span className="rounded-full bg-zinc-800 px-1.5 text-xs text-zinc-500">
-              {sessions.length}
-            </span>
+      <div className={`flex-shrink-0 ${embedded ? 'border-b border-zinc-800/80 p-2' : 'border-b border-zinc-800 p-3'}`}>
+        {!embedded && (
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ScrollText className="h-4 w-4 text-purple-400" aria-hidden />
+              <h2 className="text-sm font-semibold text-zinc-200">Dev Logs</h2>
+              <span className="rounded-full bg-zinc-800 px-1.5 text-xs text-zinc-500">
+                {sessions.length}
+              </span>
+            </div>
           </div>
+        )}
+
+        <div className={`flex items-center ${embedded ? 'justify-end gap-1' : 'justify-between'}`}>
+          {embedded && (
+            <span className="mr-auto text-[10px] tabular-nums text-zinc-600">
+              {sessions.length} session{sessions.length === 1 ? '' : 's'}
+            </span>
+          )}
           <div className="flex items-center gap-1">
             <button
+              type="button"
               onClick={() => fetchSessions()}
               className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
               title="Refresh sessions"
+              aria-label="Refresh sessions"
             >
               <RefreshCw className="h-3.5 w-3.5" />
             </button>
             <button
+              type="button"
               onClick={handleImport}
               className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
               title="Import session"
+              aria-label="Import session"
             >
               <Upload className="h-3.5 w-3.5" />
             </button>
@@ -423,11 +466,13 @@ export function SessionList() {
           />
         </div>
 
-        {/* Status filter tabs */}
-        <div className="mt-2 flex gap-1">
+        <div className="mt-2 flex flex-wrap gap-1" role="tablist" aria-label="Filter sessions by status">
           {(['all', 'active', 'completed', 'failed'] as const).map((s) => (
             <button
               key={s}
+              type="button"
+              role="tab"
+              aria-selected={statusFilter === s}
               onClick={() => setStatusFilter(s)}
               className={`rounded px-2 py-0.5 text-xs capitalize transition-colors ${
                 statusFilter === s
@@ -435,78 +480,99 @@ export function SessionList() {
                   : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
-              {s} {statusCounts[s] > 0 && `(${statusCounts[s]})`}
+              {s}{statusCounts[s] > 0 ? ` (${statusCounts[s]})` : ''}
             </button>
           ))}
         </div>
 
-        {/* Session search */}
-        <div className="mt-2 relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-zinc-600" />
+        <div className="mt-2 flex flex-wrap gap-1" role="tablist" aria-label="Filter sessions by source">
+          {SOURCE_FILTERS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              role="tab"
+              aria-selected={sourceFilter === s}
+              onClick={() => setSourceFilter(s)}
+              className={`rounded px-2 py-0.5 text-xs transition-colors ${
+                sourceFilter === s
+                  ? 'bg-purple-500/20 text-purple-200'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              {s === 'all' ? 'All sources' : SOURCE_LABELS[s]}
+              {sourceCounts[s] > 0 ? ` (${sourceCounts[s]})` : ''}
+            </button>
+          ))}
+        </div>
+
+        <div className="relative mt-2">
+          <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-zinc-600" aria-hidden />
           <input
-            type="text"
+            type="search"
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
-            placeholder="Search sessions..."
-            className="w-full rounded bg-zinc-900 border border-zinc-800 pl-7 pr-2 py-1 text-xs text-zinc-300 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
+            placeholder="Search sessions"
+            aria-label="Search sessions"
+            className="w-full rounded border border-zinc-800 bg-zinc-900 py-1 pl-7 pr-2 text-xs text-zinc-300 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none"
           />
           {searchText && (
             <button
+              type="button"
               onClick={() => setSearchText('')}
               className="absolute right-1.5 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400"
+              aria-label="Clear search"
             >
               ×
             </button>
           )}
         </div>
 
-        {/* Stale cleanup banner */}
         {staleSessions.length > 0 && (
           <button
+            type="button"
             onClick={handleEndAllStale}
             disabled={endingAll}
-            className="mt-2 flex w-full items-center gap-2 rounded-md bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 text-xs text-amber-400 hover:bg-amber-500/15 transition-colors disabled:opacity-50"
+            className="mt-2 flex w-full items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-400 transition-colors hover:bg-amber-500/15 disabled:opacity-50"
           >
-            <Archive className="h-3.5 w-3.5 shrink-0" />
+            <Archive className="h-3.5 w-3.5 shrink-0" aria-hidden />
             <span className="flex-1 text-left">
-              {endingAll ? 'Ending...' : `End ${staleSessions.length} stale session${staleSessions.length > 1 ? 's' : ''}`}
+              {endingAll ? 'Ending stale sessions…' : `End ${staleSessions.length} stale`}
             </span>
-            <span className="text-amber-500/60 text-[10px]">2h+ inactive</span>
+            <span className="text-[10px] text-amber-500/60">2h+ idle</span>
           </button>
         )}
       </div>
 
-      {/* Session cards */}
-      <div className="flex-1 space-y-2 overflow-y-auto p-2">
-        {/* Quick stats summary */}
+      <ul className="flex-1 list-none space-y-2 overflow-y-auto p-2">
         {sessions.length > 0 && !isLoading && (
-          <SessionsSummary sessions={sessions} />
+          <li>
+            <SessionsSummary sessions={sessions} />
+          </li>
         )}
 
         {isLoading && sessions.length === 0 ? (
-          <div className="flex justify-center py-8">
+          <li className="flex justify-center py-8" aria-busy="true">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-purple-500" />
-          </div>
+          </li>
         ) : sessions.length === 0 ? (
-          <div className="py-8 text-center">
-            <Brain className="mx-auto mb-2 h-8 w-8 text-zinc-700" />
+          <li className="py-8 text-center">
+            <ScrollText className="mx-auto mb-2 h-8 w-8 text-zinc-700" aria-hidden />
             <p className="text-xs text-zinc-600">No sessions yet</p>
-            <p className="mt-1 text-xs text-zinc-700">
-              Import a session or capture agent activity
-            </p>
-          </div>
+            <p className="mt-1 text-xs text-zinc-700">Import a capture or wait for agent activity.</p>
+          </li>
         ) : (
           sortedSessions.map((session) => (
-            <SessionCard
-              key={session.id}
-              session={session}
-              isActive={session.id === activeSessionId}
-              onSelect={() => selectSession(session.id)}
-              onEnd={(e) => handleEndSession(e, session.id)}
-            />
+            <li key={session.id}>
+              <SessionCard
+                session={session}
+                isActive={session.id === activeSessionId}
+                onSelect={() => selectSession(session.id)}
+                onEnd={(e) => handleEndSession(e, session.id)}
+              />
+            </li>
           ))
         )}
-      </div>
+      </ul>
     </div>
   );
 }

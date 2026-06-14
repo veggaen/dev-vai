@@ -110,6 +110,18 @@
             <button onclick="applyAllLessons()" class="flex-1 rounded-2xl border border-zinc-700 hover:bg-zinc-800 text-sm py-2 font-medium">Apply all growth proposals</button>
           </div>
           <div id="humanLog" class="mt-2 text-[10px] text-emerald-400/70 h-5"></div>
+
+          <!-- NEW: Free-form send to real/live council (what you asked for) -->
+          <div class="mt-4 pt-4 border-t border-zinc-700">
+            <div class="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-1">Send any question / message directly to council</div>
+            <textarea id="directCouncilInput" class="w-full h-16 resize-y rounded-2xl border border-zinc-700 bg-zinc-950 p-3 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/60" placeholder="e.g. 'What is the current state of the direct pipe robustness for council reviews?' or 'Debate adding niche football model to roster'"></textarea>
+            <div class="flex gap-2 mt-2">
+              <button onclick="sendToRealCouncil()" class="flex-1 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm py-2 font-medium">Send via direct channel (generates PS command + simulates)</button>
+              <button onclick="simulateAutoApplyProven()" class="flex-1 rounded-2xl border border-emerald-700 hover:bg-emerald-900/30 text-emerald-400 text-sm py-2 font-medium">Auto-apply if proven (gates first)</button>
+            </div>
+            <div id="directSendLog" class="mt-1.5 text-[10px] text-emerald-300/70"></div>
+            <div class="text-[9px] text-zinc-500 mt-1">Real sends go through the vai-grok-inbox pipe (same as this Grok session). Copy the printed PS command and run it in PowerShell for live council reaction (visible in fresh bridge monitor + desktop panels after restart).</div>
+          </div>
         </div>
       </div>
 
@@ -260,6 +272,36 @@
       setTimeout(() => {
         log.innerHTML = 'Thank you V3gga — the loop is now active. Use the desktop chat or this bridge to keep feeding the council self-improvement work.';
       }, 4200);
+    }
+
+    // NEW functions for your requests: free-form send to live council + auto-apply only if "proven"
+    function sendToRealCouncil() {
+      const ta = document.getElementById('directCouncilInput');
+      const val = (ta.value || '').trim();
+      if (!val) return alert('Type a question or message for the council first.');
+      const log = document.getElementById('directSendLog');
+
+      // Generate exact PowerShell command for the fast inbox pipe (the one this Grok session uses)
+      const psCmd = `$prompt = '${val.replace(/'/g, "''")}'; $client = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'vai-grok-inbox', [System.IO.Pipes.PipeDirection]::Out); $client.Connect(4000); $w = New-Object System.IO.StreamWriter($client); $w.WriteLine($prompt); $w.Flush(); $client.Close(); Write-Host 'Sent to live council via direct pipe. Watch the fresh bridge monitor events + restart desktop panels for member replies.'`;
+
+      log.innerHTML = `Message to council: "${val}"<br><span class="text-emerald-300">PS command (copy & run in PowerShell for real live send):</span><br><code class="text-[9px] break-all bg-zinc-950 p-1 rounded">${psCmd}</code>`;
+      
+      // Also simulate locally so the demo feels responsive (matches the "inject" behavior)
+      setTimeout(() => {
+        const humanLog = document.getElementById('humanLog');
+        humanLog.innerHTML = `Sent to live council. In real system this hits the fresh bridge → Vai ChatService → council (now with 0.1% personas) → member notes appear in desktop Council Progress + here in monitor events.`;
+        setTimeout(() => { humanLog.innerHTML = ''; }, 6000);
+      }, 800);
+
+      ta.value = '';
+    }
+
+    function simulateAutoApplyProven() {
+      const log = document.getElementById('directSendLog');
+      log.innerHTML = 'Checking gates for auto-apply: tsc clean ✓, visual/render proof simulated ✓, human steer in demo ✓, no throttle risk (balanced).';
+      setTimeout(() => {
+        log.innerHTML = 'Proven upgrades queued for automatic application on next runtime restart (backlog + safe patch path). Real system will require explicit V3gga confirmation or full proof harness before any code mutation. Council proposed; Vai (with gates) disposes.';
+      }, 1400);
     }
 
     // Keyboard support

@@ -1,23 +1,22 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Plus, Trash2, ChevronLeft, ChevronRight,
-  FolderKanban, FolderOpen, Shield, Search, Pin, PinOff, Code2,
-  Pencil, Archive, ArchiveRestore,
+  Plus, Trash2, ChevronRight, Shield, Search, Pin, PinOff, Code2,
+  Pencil, Archive, ArchiveRestore, Monitor,
 } from 'lucide-react';
-import { useChatStore } from '../stores/chatStore.js';
-import { useSettingsStore } from '../stores/settingsStore.js';
-import { useEngineStore } from '../stores/engineStore.js';
+import { useChatStore, isConversationWorking } from '../stores/chatStore.js';
 import { useLayoutStore, type SidebarPanel as PanelType } from '../stores/layoutStore.js';
-import { useSandboxStore } from '../stores/sandboxStore.js';
 import { useAuthStore } from '../stores/authStore.js';
+import { useEngineStore } from '../stores/engineStore.js';
 import { apiFetch } from '../lib/api.js';
+import { getSidebarNavItem, getSidebarPanelTitle } from '../lib/sidebar-nav.js';
 import { toast } from 'sonner';
+import { SidebarPanelHeader } from './sidebar/SidebarPrimitives.js';
 
-const SidebarSearch = lazy(async () => ({ default: (await import('./SidebarSearch.js')).SidebarSearch }));
 const SessionList = lazy(async () => ({ default: (await import('./SessionList.js')).SessionList }));
 const DockerPanel = lazy(async () => ({ default: (await import('./DockerPanel.js')).DockerPanel }));
 const KnowledgeSidePanel = lazy(async () => ({ default: (await import('./panels/KnowledgeSidePanel.js')).KnowledgeSidePanel }));
+const CouncilProgressPanel = lazy(async () => ({ default: (await import('./panels/CouncilProgressPanel.js')).CouncilProgressPanel }));
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 
@@ -31,34 +30,9 @@ function formatRelative(date: string): string {
 }
 
 
-const PANEL_TITLES: Record<PanelType, string> = {
-  chats: 'Workspace',
-  projects: 'Projects',
-  devlogs: 'Dev Logs',
-  knowledge: 'Knowledge Base',
-  docker: 'Docker Sandboxes',
-  search: 'Search',
-  settings: 'Settings',
-  vaigym: 'Vai Gymnasium',
-  thorsen: 'Thorsen Wormhole',
-  control: 'Control',
-  council: 'Council Progress',
-};
-
-interface SandboxProjectSummary {
-  id: string;
-  name: string;
-  status: string;
-  devPort: number | null;
-  createdAt: string;
-  owned: boolean;
-}
-
 const CHAT_ORDER_STORAGE_KEY = 'vai-sidebar-chat-order';
 const CHAT_PINNED_STORAGE_KEY = 'vai-sidebar-pinned-chats';
 const CHAT_ARCHIVED_STORAGE_KEY = 'vai-sidebar-archived-chats';
-const PROJECT_LIST_PAGE_SIZE = 12;
-
 function loadIdSet(key: string): Set<string> {
   try {
     const raw = typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
@@ -138,17 +112,45 @@ function saveConversationOrder(ids: string[]): void {
 
 /* ── Main Panel ────────────────────────────────────────────────── */
 
+const SIDEBAR_PANEL_IDS: PanelType[] = ['chats', 'devlogs', 'knowledge', 'docker', 'control', 'council'];
+
+function SidebarPanelBody({ panel }: { panel: PanelType }) {
+  switch (panel) {
+    case 'chats':
+      return <ChatsPanel />;
+    case 'devlogs':
+      return <DevLogsPanel />;
+    case 'knowledge':
+      return <KnowledgeSidePanel />;
+    case 'docker':
+      return <DockerPanel />;
+    case 'control':
+      return <ControlPanel />;
+    case 'council':
+      return <CouncilSidebarView />;
+    default:
+      return null;
+  }
+}
+
 export function SidebarPanel() {
   const { activePanel, toggleSidebar, themePreference, layoutMode } = useLayoutStore();
   const isLight = themePreference === 'light';
   const isOdyssey = layoutMode === 'odyssey';
+  const navItem = getSidebarNavItem(activePanel);
+  const panelTitle = getSidebarPanelTitle(activePanel);
+
+  if (!SIDEBAR_PANEL_IDS.includes(activePanel)) {
+    return null;
+  }
 
   return (
-    <motion.div
+    <motion.aside
       initial={{ width: 0, opacity: 0 }}
       animate={{ width: 'var(--layout-sidebar-effective-width)', opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
       transition={{ duration: 0.15, ease: 'easeOut' }}
+      aria-label={panelTitle}
       className={`sidebar-panel-shell flex h-full min-w-0 flex-shrink-0 flex-col overflow-hidden bg-[color:var(--sidebar-surface)] ${
         isOdyssey
           ? 'rounded-[var(--layout-radius)] border border-[color:var(--border)] shadow-[var(--layout-shadow)]'
@@ -156,36 +158,19 @@ export function SidebarPanel() {
       }`}
       style={{ width: 'var(--layout-sidebar-effective-width)', maxWidth: '100%' }}
     >
-      {/* Panel header — slim and quiet */}
-      <div className="flex h-11 flex-shrink-0 items-center justify-between px-4">
-        <div className="min-w-0">
-          <span className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${isLight ? 'text-zinc-600' : 'text-zinc-400'}`}>
-            {PANEL_TITLES[activePanel]}
-          </span>
-        </div>
-        <button
-          onClick={toggleSidebar}
-          className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors ${
-            isLight ? 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900' : 'text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200'
-          }`}
-          title="Collapse sidebar"
-          aria-label="Collapse sidebar"
-        >
-          <ChevronLeft className="h-3.5 w-3.5" />
-        </button>
-      </div>
+      <SidebarPanelHeader
+        title={panelTitle}
+        subtitle={navItem?.description}
+        isLight={isLight}
+        onCollapse={toggleSidebar}
+      />
 
-      {/* Panel content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <Suspense fallback={<PanelLoading />}>
-          {activePanel === 'chats' && <ChatsPanel />}
-          {activePanel === 'devlogs' && <DevLogsPanel />}
-          {activePanel === 'knowledge' && <KnowledgeSidePanel />}
-          {activePanel === 'docker' && <DockerPanel />}
-          {activePanel === 'control' && <ControlPanel />}
+          <SidebarPanelBody panel={activePanel} />
         </Suspense>
       </div>
-    </motion.div>
+    </motion.aside>
   );
 }
 
@@ -203,7 +188,7 @@ function ChatsPanel() {
   } = useChatStore();
   const themePreference = useLayoutStore((state) => state.themePreference);
   const isLight = themePreference === 'light';
-  const isStreaming = useChatStore((state) => state.isStreaming);
+  const streamingConversationId = useChatStore((state) => state.streamingConversationId);
   const [query, setQuery] = useState('');
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => loadPinnedChats());
   const [archivedIds, setArchivedIds] = useState<Set<string>>(() => loadIdSet(CHAT_ARCHIVED_STORAGE_KEY));
@@ -410,7 +395,7 @@ function ChatsPanel() {
   };
 
   return (
-    <div className="flex flex-col">
+    <nav className="flex flex-col" aria-label="Conversations">
       <div className="flex-shrink-0 px-3 pb-2 pt-2">
         <button
           onClick={handleNewChat}
@@ -468,7 +453,10 @@ function ChatsPanel() {
               <span className={`text-[10px] tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>{group.items.length}</span>
             </button>
             {!collapsed && group.items.map((conv) => {
-              const isWorking = isStreaming && conv.id === activeConversationId;
+              // Pin "Working…" to the chat that's ACTUALLY streaming, not whichever
+              // chat is currently selected — so switching chats mid-turn doesn't move
+              // the badge to the wrong conversation.
+              const isWorking = isConversationWorking(conv.id, streamingConversationId);
               return (
               <div
                 key={conv.id}
@@ -696,355 +684,14 @@ function ChatsPanel() {
           </div>
         );
       })()}
-    </div>
+    </nav>
   );
 }
 
 /* ── Dev Logs Panel ────────────────────────────────────────────── */
 
 function DevLogsPanel() {
-  return <SessionList />;
-}
-
-function ProjectsPanel() {
-  const projectId = useSandboxStore((state) => state.projectId);
-  const projectName = useSandboxStore((state) => state.projectName);
-  const persistentProjectId = useSandboxStore((state) => state.persistentProjectId);
-  const status = useSandboxStore((state) => state.status);
-  const devPort = useSandboxStore((state) => state.devPort);
-  const attachProject = useSandboxStore((state) => state.attachProject);
-  const conversations = useChatStore((state) => state.conversations);
-  const activeConversationId = useChatStore((state) => state.activeConversationId);
-  const fetchConversations = useChatStore((state) => state.fetchConversations);
-  const selectConversation = useChatStore((state) => state.selectConversation);
-  const createConversation = useChatStore((state) => state.createConversation);
-  const selectedModelId = useSettingsStore((state) => state.selectedModelId);
-  const setActivePanel = useLayoutStore((state) => state.setActivePanel);
-  const [projects, setProjects] = useState<SandboxProjectSummary[]>([]);
-  const [projectQuery, setProjectQuery] = useState('');
-  const [showRepeatedProjects, setShowRepeatedProjects] = useState(false);
-  const [visibleProjectLimit, setVisibleProjectLimit] = useState(PROJECT_LIST_PAGE_SIZE);
-  const [loading, setLoading] = useState(false);
-  const [attachingId, setAttachingId] = useState<string | null>(null);
-
-  const linkedConversationCounts = useMemo(() => {
-    return conversations.reduce<Record<string, number>>((counts, conversation) => {
-      if (!conversation.sandboxProjectId) return counts;
-      counts[conversation.sandboxProjectId] = (counts[conversation.sandboxProjectId] ?? 0) + 1;
-      return counts;
-    }, {});
-  }, [conversations]);
-
-  const currentProjectConversations = useMemo(() => {
-    if (!projectId) return [];
-
-    return conversations
-      .filter((conversation) => conversation.sandboxProjectId === projectId)
-      .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())
-      .slice(0, 4);
-  }, [conversations, projectId]);
-
-  const projectNameCounts = useMemo(() => {
-    return projects.reduce<Record<string, number>>((counts, project) => {
-      const key = project.name.trim().toLowerCase();
-      counts[key] = (counts[key] ?? 0) + 1;
-      return counts;
-    }, {});
-  }, [projects]);
-
-  const listedProjects = useMemo(() => {
-    if (showRepeatedProjects) return projects;
-
-    const seen = new Set<string>();
-    return projects.filter((project) => {
-      const key = project.name.trim().toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [projects, showRepeatedProjects]);
-
-  const repeatedProjectCount = projects.length - Object.keys(projectNameCounts).length;
-
-  const filteredProjects = useMemo(() => {
-    const needle = projectQuery.trim().toLowerCase();
-    if (!needle) return listedProjects;
-    return listedProjects.filter((project) => (
-      project.name.toLowerCase().includes(needle)
-      || project.status.toLowerCase().includes(needle)
-    ));
-  }, [listedProjects, projectQuery]);
-
-  const visibleProjects = useMemo(
-    () => filteredProjects.slice(0, visibleProjectLimit),
-    [filteredProjects, visibleProjectLimit],
-  );
-
-  useEffect(() => {
-    setVisibleProjectLimit(PROJECT_LIST_PAGE_SIZE);
-  }, [projectQuery]);
-
-  const loadProjects = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await apiFetch('/api/sandbox');
-      if (!response.ok) {
-        throw new Error('Unable to load projects');
-      }
-
-      const payload = await response.json() as SandboxProjectSummary[];
-      setProjects(payload.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to load projects');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadProjects();
-  }, [loadProjects]);
-
-  useEffect(() => {
-    void fetchConversations();
-  }, [fetchConversations]);
-
-  const handleAttach = async (sandboxProjectId: string) => {
-    setAttachingId(sandboxProjectId);
-    try {
-      await attachProject(sandboxProjectId);
-      await fetchConversations();
-      const latestConversations = useChatStore.getState().conversations;
-      const linkedConversation = [...latestConversations]
-        .filter((conversation) => conversation.sandboxProjectId === sandboxProjectId)
-        .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())[0];
-      const activeConversation = latestConversations.find((conversation) => conversation.id === useChatStore.getState().activeConversationId) ?? null;
-
-      if (linkedConversation) {
-        await selectConversation(linkedConversation.id);
-        toast.success('Opened project and linked chat');
-      } else if (activeConversation?.sandboxProjectId && activeConversation.sandboxProjectId !== sandboxProjectId) {
-        // The active chat belongs to a DIFFERENT project. Never leave this
-        // project rendered under another conversation's chat — bind a fresh
-        // conversation to it. (startNewChat() here would reset the sandbox
-        // store and detach the project we just opened.)
-        await createConversation(selectedModelId ?? 'vai:v0', 'builder', {
-          sandboxProjectId,
-        });
-        toast.success('Opened project in a new linked chat');
-      } else {
-        toast.success('Project opened');
-      }
-      setActivePanel('chats');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to open project');
-    } finally {
-      setAttachingId(null);
-      void loadProjects();
-    }
-  };
-
-  const handleOpenConversation = (conversationId: string) => {
-    void selectConversation(conversationId);
-    setActivePanel('chats');
-  };
-
-  const handleNewProjectChat = async () => {
-    if (!projectId) return;
-
-    try {
-      await createConversation(selectedModelId ?? 'vai:v0', 'chat', {
-        sandboxProjectId: projectId,
-      });
-      setActivePanel('chats');
-      toast.success('Opened a new chat in this project');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to open a new project chat');
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-3 p-3">
-      <div className="px-1 pb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Current project</div>
-            <div className="mt-1 text-sm font-medium text-zinc-100">{projectName ?? 'No project open'}</div>
-            <div className="mt-1 text-xs text-zinc-500">
-              {projectId
-                ? `${status}${devPort ? ` • localhost:${devPort}` : ''}${persistentProjectId ? ' • synced to project' : ''}`
-                : 'Chat with Vai to get started, then your project will appear here.'}
-            </div>
-          </div>
-          {projectId && (
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => setActivePanel('chats')}
-                className="rounded-md px-2.5 py-1.5 text-xs text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-200"
-              >
-                Open chat
-              </button>
-              <button
-                onClick={() => void handleNewProjectChat()}
-                className="rounded-md bg-[color:var(--accent-softer)] px-2.5 py-1.5 text-xs text-[color:var(--accent-text)] transition-colors hover:bg-[color:var(--accent-soft)]"
-              >
-                New project chat
-              </button>
-            </div>
-          )}
-        </div>
-
-        {projectId && (
-          <div className="mt-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Project chats</div>
-              <div className="text-[11px] text-zinc-600">
-                {currentProjectConversations.length > 0
-                  ? `${linkedConversationCounts[projectId] ?? currentProjectConversations.length} linked`
-                  : 'No linked chats yet'}
-              </div>
-            </div>
-
-            {currentProjectConversations.length > 0 ? (
-              <div className="mt-2 space-y-1.5">
-                {currentProjectConversations.map((conversation) => {
-                  const isActiveConversation = conversation.id === activeConversationId;
-                  return (
-                    <button
-                      key={conversation.id}
-                      onClick={() => handleOpenConversation(conversation.id)}
-                      className={`flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left transition-colors ${isActiveConversation
-                        ? 'bg-white/[0.065]'
-                        : 'hover:bg-white/[0.035]'
-                        }`}
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate text-sm text-zinc-100">{conversation.title}</div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
-                          <span className="whitespace-nowrap">{formatRelative(conversation.updatedAt)}</span>
-                          {conversation.mode && conversation.mode !== 'chat' && (
-                            <span className="whitespace-nowrap rounded-md border border-zinc-800 bg-zinc-900/80 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] text-zinc-500">
-                              {conversation.mode}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {isActiveConversation && (
-                        <span className="text-[9px] font-medium uppercase tracking-[0.16em] text-[color:var(--accent-text)]">
-                          active
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="mt-2 px-2 py-2 text-xs text-zinc-500">
-                New chats will stay linked to this project automatically.
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between px-1">
-        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Your projects</div>
-        <button
-          onClick={() => void loadProjects()}
-          className="touch-manipulation rounded text-xs text-zinc-500 transition-colors hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
-        >
-          Refresh
-        </button>
-      </div>
-
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-600" aria-hidden="true" />
-        <input
-          value={projectQuery}
-          onChange={(event) => setProjectQuery(event.target.value)}
-          placeholder="Filter projects"
-          aria-label="Filter projects"
-          className="w-full rounded-md bg-white/[0.035] py-1.5 pl-8 pr-3 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:bg-white/[0.055] focus:ring-1 focus:ring-white/10"
-        />
-      </div>
-
-      {repeatedProjectCount > 0 && (
-        <button
-          onClick={() => setShowRepeatedProjects((current) => !current)}
-          className="touch-manipulation self-start rounded text-xs text-zinc-500 transition-colors hover:text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
-        >
-          {showRepeatedProjects ? 'Hide repeated build names' : `Show ${repeatedProjectCount} repeated build names`}
-        </button>
-      )}
-
-      <div className="space-y-2">
-        {visibleProjects.map((project) => {
-          const isCurrent = project.id === projectId;
-          const linkedConversationCount = linkedConversationCounts[project.id] ?? 0;
-          return (
-            <button
-              key={project.id}
-              onClick={() => void handleAttach(project.id)}
-              disabled={attachingId === project.id}
-              className={`touch-manipulation w-full rounded-md px-2 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)] ${isCurrent
-                ? 'bg-white/[0.065]'
-                : 'hover:bg-white/[0.035]'
-                } disabled:cursor-wait disabled:opacity-70`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
-                    <FolderKanban className="h-4 w-4 text-zinc-500" />
-                    <span className="truncate">{project.name}</span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
-                    <span className="whitespace-nowrap">{project.status}</span>
-                    {project.devPort && <span className="whitespace-nowrap">localhost:{project.devPort}</span>}
-                    <span className="whitespace-nowrap">{formatRelative(project.createdAt)}</span>
-                    {project.owned && <span className="whitespace-nowrap">owned</span>}
-                    {!showRepeatedProjects && projectNameCounts[project.name.trim().toLowerCase()] > 1 && (
-                      <span className="whitespace-nowrap">
-                        {projectNameCounts[project.name.trim().toLowerCase()]} builds
-                      </span>
-                    )}
-                    {linkedConversationCount > 0 && (
-                      <span className="whitespace-nowrap">{linkedConversationCount} chat{linkedConversationCount === 1 ? '' : 's'}</span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex flex-shrink-0 items-center gap-1.5">
-                  {isCurrent && <span className="text-[9px] font-medium uppercase tracking-[0.16em] text-[color:var(--accent-text)]">live</span>}
-                  <FolderOpen className="h-4 w-4 text-zinc-500" />
-                </div>
-              </div>
-            </button>
-          );
-        })}
-
-        {!loading && filteredProjects.length === 0 && (
-          <div className="p-4 text-center text-sm text-zinc-500">
-            <div>{projectQuery.trim() ? 'No projects match that filter.' : 'No projects yet.'}</div>
-            {!projectQuery.trim() && <div className="mt-2 text-xs text-zinc-600">Chat with Vai to get started.</div>}
-          </div>
-        )}
-
-        {visibleProjects.length < filteredProjects.length && (
-          <button
-            onClick={() => setVisibleProjectLimit((limit) => limit + PROJECT_LIST_PAGE_SIZE)}
-            className="touch-manipulation w-full rounded-md px-3 py-2 text-sm text-zinc-400 transition-colors hover:bg-white/[0.035] hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
-          >
-            Show {Math.min(PROJECT_LIST_PAGE_SIZE, filteredProjects.length - visibleProjects.length)} more
-          </button>
-        )}
-
-        {loading && (
-          <div className="p-4 text-center text-sm text-zinc-500">
-            Loading projects...
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <SessionList embedded />;
 }
 
 function ControlPanel() {
@@ -1109,122 +756,177 @@ function ControlPanel() {
   };
 
   return (
-    <div className="flex flex-col gap-3 p-3">
-      <div className="rounded-xl border border-[color:var(--accent-ring)] bg-[color:var(--accent-soft)] p-4">
+    <div className="flex flex-col gap-4 p-3">
+      <section className="rounded-xl border border-[color:var(--accent-ring)] bg-[color:var(--accent-soft)] p-4">
         <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
-          <Shield className="h-4 w-4 text-[color:var(--accent-text)]" />
-          Owner control surface
+          <Shield className="h-4 w-4 text-[color:var(--accent-text)]" aria-hidden />
+          Owner control
         </div>
-        <div className="mt-2 text-xs text-zinc-300">
-          Signed in as {user?.email ?? 'owner'}.
-        </div>
-        <div className="mt-1 text-xs text-zinc-400">
-          Keep the main shell consistent, then layer owner-only workflow and runtime tools on top.
-        </div>
-      </div>
+        <p className="mt-2 text-xs text-zinc-400">
+          Signed in as {user?.email ?? 'owner'}. Runtime tools and training surfaces live here.
+        </p>
+      </section>
 
-      <div className="grid grid-cols-1 gap-2">
-        <button
+      <section aria-label="Owner actions" className="space-y-2">
+        <ControlAction
+          title="Hide owner features"
+          description="Switch to user-view mode and collapse admin-only navigation."
           onClick={() => setOwnerFeaturesHidden(true)}
-          className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-left transition-colors hover:bg-amber-500/20"
-        >
-          <div className="text-sm text-zinc-100">Hide owner features</div>
-          <div className="mt-1 text-xs text-zinc-500">Collapse admin-only UI so the shell behaves like a regular user session.</div>
-        </button>
-        <button
+          tone="amber"
+        />
+        <ControlAction
+          title="Open training chat"
+          description="Start an isolated owner workspace for curating what may teach Vai."
           onClick={() => void handleStartTraining()}
           disabled={startingTraining}
-          className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-left transition-colors hover:bg-emerald-500/20 disabled:cursor-wait disabled:opacity-70"
-        >
-          <div className="text-sm text-zinc-100">Training chat</div>
-          <div className="mt-1 text-xs text-zinc-500">Open the isolated owner workspace for curating what is allowed to teach Vai.</div>
-        </button>
-        <button
-          onClick={() => setActivePanel('chats')}
-          className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900"
-        >
-          <div className="text-sm text-zinc-100">Chat history</div>
-          <div className="mt-1 text-xs text-zinc-500">Browse code and build chats alongside regular conversations.</div>
-        </button>
-        <button
-          onClick={() => setActivePanel('devlogs')}
-          className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900"
-        >
-          <div className="text-sm text-zinc-100">Dev logs</div>
-          <div className="mt-1 text-xs text-zinc-500">Inspect session capture and conversation history.</div>
-        </button>
-        <button
-          onClick={() => setActivePanel('settings')}
-          className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900"
-        >
-          <div className="text-sm text-zinc-100">Group Chat and settings</div>
-          <div className="mt-1 text-xs text-zinc-500">Manage IDE peers, audits, models, and runtime defaults.</div>
-        </button>
-      </div>
+          tone="emerald"
+        />
+      </section>
 
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 text-xs text-zinc-400">
-        <div className="font-medium uppercase tracking-[0.18em] text-zinc-500">Runtime</div>
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <span>Status</span>
-          <span className="text-zinc-200">{status}</span>
+      <section className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3" aria-label="Browser automation">
+        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">
+          <Monitor className="h-3.5 w-3.5" aria-hidden />
+          Automation browser
         </div>
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <span>Indexed documents</span>
-          <span className="text-zinc-200">{stats?.documentsIndexed ?? 0}</span>
-        </div>
-      </div>
+        <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+          A ghost <code className="text-zinc-300">about:blank</code> Chrome icon on the taskbar is usually
+          Cursor&apos;s agent browser (Browser MCP), not Vai Preview. It often cannot be focused with Win+Arrow.
+          Close it from Cursor or end the agent turn. Playwright audits run headless by default —
+          use <code className="text-zinc-300">VAI_AUDIT_HEADED=1 pnpm audit:live</code> only when you want a visible window.
+        </p>
+        <p className="mt-2 text-[11px] text-zinc-500">
+          Dev Logs: <code className="text-zinc-400">pnpm devlogs:cursor:watch</code> (live) ·{' '}
+          <code className="text-zinc-400">pnpm devlogs:cursor:resync</code> (full re-import if incomplete)
+        </p>
+      </section>
 
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
+      <section className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 text-xs text-zinc-400" aria-label="Runtime status">
+        <h3 className="font-medium uppercase tracking-[0.18em] text-zinc-500">Runtime</h3>
+        <dl className="mt-2 space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <dt>Status</dt>
+            <dd className="text-zinc-200">{status}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <dt>Indexed documents</dt>
+            <dd className="text-zinc-200">{stats?.documentsIndexed ?? 0}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3" aria-label="Scale evaluation runs">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">Scale eval</div>
+          <h3 className="text-xs font-medium uppercase tracking-[0.18em] text-zinc-500">Scale eval</h3>
           <span className="text-[11px] text-zinc-500">{scaleRuns.length} recent</span>
         </div>
-        <div className="mt-3 space-y-2">
+        <ul className="mt-3 list-none space-y-2">
           {scaleRuns.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-zinc-800 px-3 py-2 text-xs text-zinc-500">
-              No scale-eval artifacts found yet. Run `pnpm vai:scale:eval --dry-run` to create a smoke artifact.
-            </div>
+            <li className="rounded-lg border border-dashed border-zinc-800 px-3 py-2 text-xs text-zinc-500">
+              No scale-eval artifacts yet. Run <code className="text-zinc-400">pnpm vai:scale:eval --dry-run</code> for a smoke artifact.
+            </li>
           ) : scaleRuns.map((run) => {
             const config = run.manifest?.config;
             const total = run.summary?.summary?.total ?? run.summary?.total ?? config?.n ?? 0;
             const failed = run.summary?.summary?.failed ?? run.summary?.failed ?? 0;
             return (
-              <div key={run.id} className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+              <li key={run.id} className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="truncate text-xs font-medium text-zinc-200">{run.id}</div>
+                  <span className="truncate text-xs font-medium text-zinc-200">{run.id}</span>
                   <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-400">
                     {run.manifest?.status ?? 'unknown'}
                   </span>
                 </div>
-                <div className="mt-1 text-[11px] text-zinc-500">
+                <p className="mt-1 text-[11px] text-zinc-500">
                   {total} conversations · {failed} failed · builder {Math.round((config?.builderRate ?? 0) * 100)}%
                   {config?.dryRun ? ' · dry run' : ''}
-                </div>
-              </div>
+                </p>
+              </li>
             );
           })}
-        </div>
-      </div>
+        </ul>
+      </section>
     </div>
   );
 }
 
-/* ── Search Panel ──────────────────────────────────────────────── */
-
-function SearchPanel() {
-  const [_selectedId, setSelectedId] = useState<string | null>(null);
+function ControlAction({
+  title,
+  description,
+  onClick,
+  disabled = false,
+  tone,
+}: {
+  title: string;
+  description: string;
+  onClick: () => void;
+  disabled?: boolean;
+  tone: 'amber' | 'emerald';
+}) {
+  const toneClass = tone === 'amber'
+    ? 'border-amber-500/20 bg-amber-500/10 hover:bg-amber-500/20'
+    : 'border-emerald-500/20 bg-emerald-500/10 hover:bg-emerald-500/20';
 
   return (
-    <SidebarSearch
-      onSelectConversation={(id) => {
-        setSelectedId(id);
-        useChatStore.getState().selectConversation(id);
-      }}
-      onClose={() => {
-        // In panel mode, search stays open — just clear selection
-        setSelectedId(null);
-      }}
-    />
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-wait disabled:opacity-70 ${toneClass}`}
+    >
+      <div className="text-sm text-zinc-100">{title}</div>
+      <div className="mt-1 text-xs text-zinc-500">{description}</div>
+    </button>
+  );
+}
+
+function CouncilSidebarView() {
+  const setActivePanel = useLayoutStore((state) => state.setActivePanel);
+  const toggleCouncilPanel = useLayoutStore((state) => state.toggleCouncilPanel);
+  const showCouncilPanel = useLayoutStore((state) => state.showCouncilPanel);
+  const messages = useChatStore((state) => state.messages);
+
+  const council = useMemo(() => {
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    return lastAssistant?.thinking?.council ?? null;
+  }, [messages]);
+
+  const returnToChat = useCallback(() => setActivePanel('chats'), [setActivePanel]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col p-2">
+      <div className="mb-2 flex items-center justify-end">
+        <button
+          type="button"
+          onClick={() => toggleCouncilPanel()}
+          className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
+            showCouncilPanel
+              ? 'border-[color:var(--accent-ring)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]'
+              : 'border-[color:var(--border)] text-zinc-500 hover:bg-white/5 hover:text-zinc-300'
+          }`}
+          aria-pressed={showCouncilPanel}
+        >
+          {showCouncilPanel ? 'Right panel on' : 'Show right panel'}
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-[color:var(--border)] bg-[color:var(--panel)]/30">
+        <CouncilProgressPanel
+          council={council}
+          isOpen
+          onClose={returnToChat}
+          onApplyLesson={() => {
+            toast.success('Lesson queued for the next review');
+            returnToChat();
+          }}
+          onReconvene={() => {
+            toast('Requesting fresh council review…');
+            returnToChat();
+          }}
+          onDesignMode={returnToChat}
+          onExportVisualPlan={returnToChat}
+        />
+      </div>
+    </div>
   );
 }
 

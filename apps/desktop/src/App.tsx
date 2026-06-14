@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { Toaster } from 'sonner';
-import { Group, Panel, Separator } from 'react-resizable-panels';
+import { Group, Panel } from 'react-resizable-panels';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ActivityRail } from './components/ActivityRail.js';
 import { SidebarPanel } from './components/SidebarPanel.js';
@@ -76,25 +76,7 @@ function BootScreen() {
   );
 }
 
-/* ── Resize handle — subtle 1px border between panels ── */
-function ResizeHandle({ direction = 'vertical' }: { direction?: 'vertical' | 'horizontal' }) {
-  const isVertical = direction === 'vertical';
-  return (
-    <Separator
-      className={`group relative flex items-center justify-center ${
-        isVertical
-          ? 'w-[3px] cursor-col-resize'
-          : 'h-[3px] cursor-row-resize'
-      } transition-colors`}
-    >
-      <div
-        className={`transition-colors bg-zinc-800 group-hover:bg-violet-500/50 group-active:bg-violet-400/60 ${
-          isVertical ? 'h-full w-px' : 'w-full h-px'
-        }`}
-      />
-    </Separator>
-  );
-}
+import { HoverResizeHandle } from './components/workspace/HoverResizeHandle.js';
 
 function PanelLoading() {
   return (
@@ -248,27 +230,49 @@ export function App() {
     if (authStatus !== 'authenticated') return;
 
     let cancelled = false;
-    const poll = async () => {
+    let idleStreak = 0;
+    let timer: number | undefined;
+    let abortCtrl: AbortController | null = null;
+
+    const schedule = (ms: number) => {
+      if (cancelled) return;
+      timer = window.setTimeout(() => { void tick(); }, ms);
+    };
+
+    const tick = async () => {
+      if (cancelled) return;
+      abortCtrl?.abort();
+      abortCtrl = new AbortController();
       try {
-        const opened = await useSandboxStore.getState().pollDesktopHandoff();
-        if (opened && !cancelled) {
+        const opened = await useSandboxStore.getState().pollDesktopHandoff(abortCtrl.signal);
+        if (cancelled) return;
+        if (opened) {
+          idleStreak = 0;
           toast.success('Opened project from web handoff intent');
+          schedule(5000);
+          return;
         }
-      } catch {
-        /* best effort */
+        idleStreak += 1;
+        const delay = idleStreak >= 8 ? 60_000 : idleStreak >= 4 ? 30_000 : idleStreak >= 2 ? 15_000 : 8_000;
+        schedule(delay);
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        idleStreak += 1;
+        schedule(Math.min(60_000, 8_000 * idleStreak));
       }
     };
 
-    void poll();
-    const interval = window.setInterval(poll, 4000);
+    void tick();
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      abortCtrl?.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [authStatus]);
 
   useEffect(() => {
-    const privilegedPanels = new Set(['control', 'devlogs', 'knowledge', 'vaigym', 'thorsen']);
+    const privilegedPanels = new Set(['control', 'devlogs', 'knowledge', 'vaigym', 'thorsen', 'docker']);
 
     if (privilegedPanels.has(activePanel) && !showOwnerFeatures) {
       useLayoutStore.getState().setActivePanel('settings');
@@ -448,7 +452,7 @@ export function App() {
                 {/* ── Builder panel — collapsible right side, or full width when expanded ── */}
                 {showBuilderWorkspace && (
                   <>
-                    {!previewExpanded && <ResizeHandle direction="vertical" />}
+                    {!previewExpanded && <HoverResizeHandle direction="vertical" />}
                     <Panel
                       id="builder"
                       defaultSize={previewExpanded ? '100' : '45'}
@@ -468,7 +472,7 @@ export function App() {
                             >
                               <FileExplorer />
                             </Panel>
-                            <ResizeHandle direction="horizontal" />
+                            <HoverResizeHandle direction="horizontal" />
                           </>
                         )}
 
@@ -480,7 +484,7 @@ export function App() {
                         {/* Console — bottom section when active */}
                         {canShowConsole && showDebugConsole && (
                           <>
-                            <ResizeHandle direction="horizontal" />
+                            <HoverResizeHandle direction="horizontal" />
                             <Panel
                               id="console"
                               defaultSize="30"

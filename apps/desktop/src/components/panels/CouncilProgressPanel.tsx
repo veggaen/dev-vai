@@ -111,17 +111,17 @@ export function CouncilProgressPanel({
             )}
           </div>
 
-          {/* Members — "who weighed in" like review cards */}
+          {/* Members — live "council chat / debate" style (0.1% niche engineers contributing) */}
           <div>
             <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium opacity-70">
-              <Users className="h-3 w-3" /> Council members
+              <Users className="h-3 w-3" /> Council members (SCIS debate)
             </div>
             <div className="space-y-1.5">
               {council.members.map((m, idx) => (
                 <div key={idx} className="rounded-lg border border-[color:var(--border)]/40 bg-[color:var(--panel)]/40 p-2">
                   <div className="flex items-baseline gap-2">
                     <span className="font-medium opacity-90">{m.name}</span>
-                    <span className="text-[9px] opacity-50">[{m.topic}]</span>
+                    <span className="text-[9px] opacity-50">[{m.topic} specialist]</span>
                     {!m.failed && (
                       <span className={`ml-auto text-[9px] ${m.verdict === 'good' ? 'text-emerald-400' : m.verdict === 'bad' ? 'text-rose-400' : 'text-amber-400'}`}>
                         {m.verdict} @ {Math.round(m.confidence * 100)}%
@@ -129,17 +129,38 @@ export function CouncilProgressPanel({
                     )}
                   </div>
                   {m.failed ? (
-                    <div className="mt-0.5 text-[10px] opacity-50">did not respond</div>
+                    <div className="mt-0.5 text-[10px] opacity-50">did not respond — synthetic or direct channel note surfaced instead</div>
                   ) : (
                     <>
                       <div className="mt-0.5 text-[10px] opacity-70">→ {m.action}</div>
-                      {m.note && <div className="mt-1 text-[10px] leading-tight opacity-50">{m.note}</div>}
+                      {m.note && <div className="mt-1 text-[10px] leading-tight opacity-60 border-l-2 border-[color:var(--accent)]/40 pl-1.5">{m.note}</div>}
+                      {/* Extra debate flavor: hidden nuance + gotchas if the note carried them (from richer 0.1% prompts) */}
+                      {(m as any).hiddenMeaning && (
+                        <div className="mt-0.5 text-[9px] opacity-50">nuance: {(m as any).hiddenMeaning}</div>
+                      )}
+                      {m.note && /edge|proof|rotate|Thorsen|file:|line/i.test(m.note) && (
+                        <div className="mt-0.5 text-[9px] text-emerald-300/70">grounded + proof/edge explicit (0.1% style)</div>
+                      )}
                     </>
                   )}
                 </div>
               ))}
             </div>
           </div>
+
+          {/* Live council debate transcript (makes member contributions feel like a streamed chat the human can watch/steer) */}
+          {council.members.filter(m => !m.failed && m.note).length > 0 && (
+            <div className="rounded-xl border border-[color:var(--border)]/30 bg-[color:var(--panel)]/30 p-2 text-[10px]">
+              <div className="mb-1 text-[9px] font-medium opacity-60">Council debate log (member contributions in order)</div>
+              <div className="space-y-1 max-h-28 overflow-auto pr-1 text-[9px] leading-snug opacity-70 font-mono">
+                {council.members.filter(m => !m.failed && m.note).map((m, i) => (
+                  <div key={i} className="pl-1 border-l border-[color:var(--accent)]/30">
+                    <span className="opacity-60">[{m.topic}] {m.name}:</span> {(m.note || '').slice(0, 140)}{(m.note || '').length > 140 ? '…' : ''}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Method lessons + missing — actionable "progress" items */}
           {(council.methodLessons.length > 0 || council.missingCapabilities.length > 0) && (
@@ -184,22 +205,27 @@ export function CouncilProgressPanel({
             </div>
           )}
 
-          {/* Self-improvement / Vai project growth (new per the council self-work loop) */}
+          {/* Self-improvement / Vai project growth (0.1% engineer council + Thorsen loop) */}
           {(council.realIntent?.toLowerCase().includes('self') ||
             council.realIntent?.toLowerCase().includes('project') ||
             council.summary?.toLowerCase().includes('self') ||
-            council.methodLessons.some((l) => /self|project|tool use|codebase|growth|capability/i.test(l))) && (
+            council.methodLessons.some((l) => /self|project|tool use|codebase|growth|capability|rotate|fastSelf/i.test(l))) && (
             <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-[10px]">
               <div className="flex items-center gap-1 text-emerald-400 font-medium mb-1">
-                <i className="fa-solid fa-seedling" /> Vai Self-Improvement / Project Growth
+                <i className="fa-solid fa-seedling" /> Vai Self-Improvement — 0.1% Council Debate + Growth
               </div>
               <div className="opacity-80">
-                This council turn is being used as a data point to grow Vai itself (primary response always produced; council investigates codebase + response; proposes validated improvements for tool use, self-orchestration, robust channels, and self-solving on the Vai project).
-                Human (V3gga) can watch here + in ThinkingPanel/LiveProcessTrace and steer via chat or the direct channel. The realIntent, lessons, and missing caps above are the "arguments + proposals".
+                Primary always produced (never silent on hard/meta about itself). Council (niche 0.1% engineers via enhanced prompts + selfContext with keyAreas) investigates the request + Vai's draft + real codebase pointers. Members debate (verdicts, lessons, gotchas, edges, proof methods), rotate when stuck (Thorsen: fastSelfPrimary, direct Grok voice via pipe, synthetic reliable note, human steer). Lessons = concrete validated proposals.
+                Human (V3gga) sees the live debate here (member cards + transcript log), in-chat LiveProcessTrace (steps) + ThinkingPanel (evidence), and the file-only activity strip above input. Steer via chat or direct channel (vai-collab). Visual process is how you rotate and improve Vai.
               </div>
-              <div className="mt-1 text-[9px] text-emerald-300/70">See docs/vai-improvement-backlog.md for the tracked item + the council-self-improvement-visual-demo.html for an immediate interactive preview of the debate.</div>
+              <div className="mt-1 text-[9px] text-emerald-300/70">Backlog: docs/vai-improvement-backlog.md • Interactive prototype (open it): council-self-improvement-visual-demo.html • Direct Grok voice participates richer for self turns.</div>
             </div>
           )}
+
+          {/* UI differentiation note (keeps the three surfaces honest and non-overlapping per spec) */}
+          <div className="text-[8px] opacity-40 pt-1">
+            Surfaces: sidebar (this) = full member debate + applyable lessons + growth. In-chat = LiveProcessTrace (streaming) + ThinkingPanel (post-turn). Activity strip (above input) = ONLY real file writes + clickable open-in-preview.
+          </div>
 
           {/* Actions footer — Codex progress actions style */}
           <div className="flex flex-wrap gap-1.5 pt-1">

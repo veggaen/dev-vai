@@ -45,7 +45,7 @@ import type {
 } from '../stores/chatStore.js';
 import type { DeployIntent, RecoveryPattern } from '../lib/intent-detector.js';
 import { ThinkingPanel } from './chat/ThinkingPanel.js';
-import { LiveProcessTrace } from './chat/LiveProcessTrace.js';
+import { ProcessTree } from './chat/ProcessTree.js';
 import { ProjectArtifactCard } from './ProjectArtifactCard.js';
 import { SourceCards } from './SourceCards.js';
 
@@ -932,8 +932,10 @@ export function MessageBubble({
               </div>
             )}
 
-            {/* Vai-native Thinking panel — strategy chain + intent + trust, above the answer */}
-            {!isUser && thinking && (
+            {/* Vai-native Thinking panel — strategy chain + intent + trust, above the answer.
+                Settled-only: while the turn streams, the live ProcessTree below owns the
+                process view, so we never render two overlapping step boxes at once. */}
+            {!isUser && thinking && !(isStreaming && content.length === 0) && (
               <ThinkingPanel
                 thinking={thinking}
                 researchTrace={researchTrace}
@@ -976,12 +978,16 @@ export function MessageBubble({
               <GroundedBuildBriefCard brief={groundedBuildBrief} onExecute={onGroundedExecute} />
             )}
 
-            {/* Live process trace — while the turn is in flight and no text has streamed yet, show
-                the real steps (search / council / consolidating) instead of a bare spinner. */}
+            {/* Live process tree — while the turn is in flight and no text has streamed yet, show
+                the real steps (search / council / consolidating) as an expandable tree instead of
+                a bare spinner. Same component renders the settled trace inside ThinkingPanel. */}
             {!isUser && isStreaming && content.length === 0 && !hasPendingFileBuild && (
-              <LiveProcessTrace
+              <ProcessTree
                 steps={progressSteps ?? []}
+                council={thinking?.council}
+                vaiProposedDraft={thinking?.vaiProposedDraft}
                 imageSteps={imageGenSteps}
+                live
               />
             )}
 

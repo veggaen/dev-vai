@@ -16,6 +16,7 @@
 
 import { createCouncilMember, createGrokCliAdapter } from '@vai/core';
 import type { CouncilMember, CouncilRoster, CouncilTopic, ModelAdapter, ModelRegistry } from '@vai/core';
+import { GrokFriendClient } from '../grok-friend/client.js';
 
 /** Topics we prefer to seat a dedicated specialist on when we have spare members. */
 const SPECIALIST_TOPICS: readonly CouncilTopic[] = ['code', 'reasoning', 'factual', 'local'];
@@ -36,7 +37,16 @@ export function buildLocalCouncilRoster(
   models: Pick<ModelRegistry, 'listByProvider'>,
   options: BuildRosterOptions = {},
 ): CouncilRoster | undefined {
-  const timeoutMs = options.timeoutMs ?? 12_000;
+  // Per-member review timeout. This is baked into each member's review() as an
+  // internal AbortController, so it must be >= a COLD model load (~15-30s for a
+  // 4.7GB local model) or that member can never finish its first load — it aborts,
+  // never warms, and times out forever. Diagnosed 2026-06-14: this 12s default was
+  // why qwen2.5:7b / Grok never participated. The council runs after the primary
+  // draft so a longer per-member budget does not delay the user. Override via
+  // VAI_COUNCIL_TIMEOUT_MS.
+  const envTimeout = Number(process.env.VAI_COUNCIL_TIMEOUT_MS);
+  const timeoutMs = options.timeoutMs
+    ?? (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 30_000);
   const maxMembers = Math.max(1, options.maxMembers ?? 3);
 
   const localAdapters = models.listByProvider('local');
@@ -44,6 +54,28 @@ export function buildLocalCouncilRoster(
 
   // Stable order: cheaper/smaller first so the generalist seat is predictable.
   const chosen = [...localAdapters].slice(0, maxMembers);
+
+  // Pre-warm council models so the FIRST real convene finds them resident, instead
+  // of paying a 15-30s cold load mid-council (the root cause of members never
+  // participating — they timed out before their first load finished, so keep_alive
+  // never kicked in). Fire-and-forget, sequential to avoid VRAM thrash, fully
+  // best-effort: a failed warm never blocks roster construction. Opt out with
+  // VAI_COUNCIL_PREWARM=0.
+  if (process.env.VAI_COUNCIL_PREWARM !== '0') {
+    void (async () => {
+      for (const adapter of chosen) {
+        try {
+          await (adapter as ModelAdapter).chat({
+            messages: [{ role: 'user', content: 'ok' }],
+            temperature: 0,
+            maxTokens: 1,
+          });
+        } catch {
+          // ignore — warming is opportunistic
+        }
+      }
+    })();
+  }
 
   const byTopic: Partial<Record<CouncilTopic, CouncilMember[]>> = {};
   const defaultMembers: CouncilMember[] = [];
@@ -103,6 +135,65 @@ export function buildLocalCouncilRoster(
       };
       defaultMembers.push(grokUnavailable);
       (byTopic.factual ??= []).push(grokUnavailable);
+    }
+  }
+
+  // NEW INTEGRATION: Grok as real high-intel council member via the friend-channel / direct
+  // persistent pipe. This is the "Grok CLI runs inside Vai's tool set" path.
+  // When the grok command is available, we seat a real participating member (not synthetic)
+  // whose review() calls the integrated client with council-specific 0.1% prompt + parses to note.
+  // This makes Grok "super close" staff: Vai can also call it as a native tool (see server.ts),
+  // and the direct pipe allows the Grok TUI instance to drive full Vai turns (including tools + council)
+  // in the genius loop. Upgrades SCIS to have a persistent external genius advisor with no local VRAM cost.
+  // Prefers the persistent direct (via bridge) for rich context; falls back to CLI friend-channel.
+  if (process.env.VAI_COUNCIL_GROK !== '0') {
+    try {
+      const grokFriend = new GrokFriendClient({ timeoutMs: Math.min(timeoutMs, 60000) });
+      // Test availability quickly (the client will throw on first real use if not).
+      // We seat it as 'reasoning' or 'factual' with high trust for self/council turns.
+      const grokDirectMember: CouncilMember = {
+        id: 'grok-direct-integrated',
+        displayName: 'Grok (direct / friend-channel)',
+        topic: 'reasoning',
+        async review(input: any) {
+          const startedAt = Date.now();
+          try {
+            const note = await grokFriend.reviewForCouncil(input);
+            return {
+              memberId: 'grok-direct-integrated',
+              memberName: 'Grok (direct / friend-channel)',
+              topic: 'reasoning' as const,
+              verdict: note.verdict || 'needs-work',
+              confidence: note.confidence ?? 0.7,
+              realIntent: note.realIntent || '',
+              hiddenMeaning: note.hiddenMeaning || '',
+              missingCapability: note.missingCapability || '',
+              suggestedAction: note.suggestedAction || 'answer-directly',
+              searchQuery: note.searchQuery || '',
+              methodLesson: note.methodLesson || 'Grok integrated review',
+              concerns: note.concerns || [],
+              durationMs: Date.now() - startedAt,
+            } as any;
+          } catch (e: any) {
+            return {
+              memberId: 'grok-direct-integrated',
+              memberName: 'Grok (direct / friend-channel)',
+              topic: 'reasoning' as const,
+              verdict: 'needs-work',
+              confidence: 0.4,
+              realIntent: 'Grok direct advisor unavailable for this review',
+              methodLesson: `Grok integration available via tool + council seating. Error: ${String(e).slice(0, 120)}. Prefer direct pipe for super-close loop.`,
+              concerns: ['Grok friend-channel or direct pipe not responding for council review'],
+              durationMs: Date.now() - startedAt,
+            } as any;
+          }
+        },
+      };
+      defaultMembers.push(grokDirectMember);
+      (byTopic.reasoning ??= []).push(grokDirectMember);
+      (byTopic.factual ??= []).push(grokDirectMember); // also strong for facts
+    } catch {
+      // Client not usable; the synthetic above already covers the "how to enable" story.
     }
   }
 

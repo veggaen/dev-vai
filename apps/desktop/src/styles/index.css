@@ -1020,6 +1020,90 @@ code, pre, kbd {
   .vai-mark-node { animation: none; }
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   VaiNode — the intelligence-node motif as a live status glyph.
+   The dot from the brand mark, breathing while Vai thinks. Hue is
+   driven by --vai-node-hue (set per phase tone); a soft halo gives
+   the spark presence without a heavy spinner. Tokens only.
+   ═══════════════════════════════════════════════════════════════ */
+.vai-node {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  border-radius: 9999px;
+  background: var(--vai-node-hue, var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--vai-node-hue, var(--accent)) 30%, transparent);
+}
+.vai-node[data-vai-node='done'] {
+  background: color-mix(in oklab, var(--phase-verify) 88%, var(--fg));
+  box-shadow: 0 0 6px color-mix(in oklab, var(--phase-verify) 35%, transparent);
+}
+.vai-node[data-vai-node='error'] {
+  background: var(--tone-bad);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--tone-bad) 40%, transparent);
+}
+/* The breathing halo — a pulsing ring that radiates from the node, echoing the
+   logo's spark. Pure ::after so the dot itself stays crisp. */
+.vai-node--thinking::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  background: radial-gradient(circle, color-mix(in oklab, var(--vai-node-hue, var(--accent)) 55%, transparent), transparent 70%);
+  animation: vai-node-breathe 1.9s var(--ease-out-expo) infinite;
+}
+@keyframes vai-node-breathe {
+  0% { transform: scale(0.7); opacity: 0.85; }
+  70% { transform: scale(1.9); opacity: 0; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vai-node--thinking::after { animation: none; opacity: 0.4; transform: scale(1.2); }
+}
+
+/* ── ProcessTree — Vai's live/settled "what I did" tree ──────────────────────
+   Inherits the thinking-* surface language. The running row gets a faint accent
+   wash + a left spark rail so the eye lands on what Vai is doing right now. */
+/* Live trace — FLAT, Claude-Code style: rows sit directly on the canvas with no
+   surrounding box or border. The only structure is the rows themselves. */
+.process-tree__flat {
+  padding: 0.125rem 0;
+}
+.process-tree__row {
+  border-radius: 0.5rem;
+  transition: background-color 150ms ease;
+}
+.process-tree__row:hover { background: color-mix(in oklab, var(--fg) 4%, transparent); }
+/* The step currently running — just a quiet 2px spark rail on the left, no
+   full-width wash. Keeps the surface calm (one clean bordered box) while still
+   marking where Vai is right now. */
+.process-tree__row--running {
+  position: relative;
+}
+.process-tree__row--running::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 50%;
+  height: 1.05rem;
+  width: 2px;
+  transform: translateY(-50%);
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(to bottom, color-mix(in oklab, var(--accent) 70%, transparent), color-mix(in oklab, var(--accent) 18%, transparent));
+}
+/* Child rail — connector for nested sub-steps (council members, search results). */
+.process-tree__children {
+  border-left: 1px solid var(--panel-border-soft);
+}
+@keyframes process-row-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.process-tree__row-in { animation: process-row-in 180ms var(--ease-out-expo) both; }
+@media (prefers-reduced-motion: reduce) {
+  .process-tree__row-in { animation: none; }
+}
+
 .shell-header {
   background: var(--shell-surface-strong);
   border-bottom: 1px solid var(--shell-line);

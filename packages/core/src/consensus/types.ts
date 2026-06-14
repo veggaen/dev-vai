@@ -68,6 +68,17 @@ export interface CouncilInput {
   readonly sources: readonly { readonly title?: string; readonly url?: string; readonly snippet?: string }[];
   /** Vai's own confidence in the draft (0..1), if known — feeds the seriousness gate. */
   readonly draftConfidence?: number;
+  /**
+   * Shared web evidence Vai gathered for this turn (the "web witness" / RAG step). Every
+   * member reads the SAME block before voting — informs reasoning, never overrides the
+   * fact-quarantine (members still emit only intent/method/action, never user-facing facts).
+   */
+  readonly webEvidence?: {
+    /** Google's AI Overview synthesized summary, when present (treat as one source, verify). */
+    readonly aiOverview?: string | null;
+    /** ISO timestamp the evidence was gathered (freshness). */
+    readonly gatheredAt?: string;
+  };
 }
 
 /** One council member's structured note. Advisory only — facts are quarantined. */

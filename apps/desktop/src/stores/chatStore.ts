@@ -6,6 +6,7 @@ import { getActiveCapture, startSessionCapture } from '../lib/sessionCapture.js'
 import type { SessionCapture } from '../lib/sessionCapture.js';
 import { mergeProjectUpdateMessage } from '../lib/project-update-message.js';
 import { useLayoutStore, type ChatMode } from './layoutStore.js';
+import { useSettingsStore } from './settingsStore.js';
 import { useAuthStore } from './authStore.js';
 import { useSandboxStore } from './sandboxStore.js';
 import { extractFilesFromMarkdown } from '../lib/file-extractor.js';
@@ -110,6 +111,8 @@ export interface TurnThinkingUI {
   routePlan?: TurnRoutePlanUI;
   /** SCIS consensus council view (who reviewed, the consensus, intent, missing method). */
   council?: CouncilThinkingUI;
+  /** vai:v0 draft before council — visible in process even when council escalated. */
+  vaiProposedDraft?: string;
 }
 
 /** The council's ephemeral consensus for one turn — rendered in the thinking panel. */
@@ -246,6 +249,10 @@ interface ChatState {
   activeConversationId: string | null;
   messages: ChatMessage[];
   isStreaming: boolean;
+  /** Which conversation is actually generating right now — independent of the
+   *  active selection, so the sidebar "Working…" badge stays pinned to the chat
+   *  that's working even after the user switches to another chat. */
+  streamingConversationId: string | null;
   /** Follow-up the user composed while a turn was streaming — sent automatically when the turn completes. */
   queuedMessage: string | null;
   /** Owner-only explicit teach toggle, only active inside training workspace. */
@@ -333,6 +340,31 @@ export function resolveConversationSandboxProjectIdOption(
     return options.sandboxProjectId ?? null;
   }
   return activeSandboxProjectId ?? null;
+}
+
+/**
+ * Whether a sidebar chat row should show the "Working…" badge. The badge belongs
+ * to the conversation that is ACTUALLY streaming, never to whichever chat is
+ * merely selected — otherwise switching chats mid-turn moves the badge to the
+ * wrong row (the bug this replaced: `isStreaming && conv.id === activeId`).
+ */
+export function isConversationWorking(
+  conversationId: string,
+  streamingConversationId: string | null,
+): boolean {
+  return streamingConversationId !== null && conversationId === streamingConversationId;
+}
+
+/**
+ * Whether opening `incoming` should eagerly reset the sandbox view. True when a
+ * project is currently loaded and the chat being opened is NOT bound to that same
+ * project — so the previous chat's code/preview can't linger during the switch.
+ */
+export function shouldResetSandboxOnSwitch(
+  currentProjectId: string | null,
+  incomingSandboxProjectId: string | null | undefined,
+): boolean {
+  return currentProjectId !== null && incomingSandboxProjectId !== currentProjectId;
 }
 
 /** Active broadcast response poller */
@@ -450,6 +482,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeConversationId: null,
   messages: [],
   isStreaming: false,
+  streamingConversationId: null,
   queuedMessage: null,
   learningEnabled: false,
   trainingWorkspace: false,
@@ -468,7 +501,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  createConversation: async (modelId: string, mode: ChatMode = 'chat', options) => {
+  createConversation: async (modelId: string, mode?: ChatMode, options) => {
+    const resolvedMode = mode ?? useSettingsStore.getState().defaultConversationMode;
     const resolvedSandboxProjectId = resolveConversationSandboxProjectIdOption(
       options,
       useSandboxStore.getState().projectId,
@@ -476,7 +510,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const res = await apiFetch('/api/conversations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ modelId, mode, sandboxProjectId: resolvedSandboxProjectId }),
+      body: JSON.stringify({ modelId, mode: resolvedMode, sandboxProjectId: resolvedSandboxProjectId }),
     });
 
     if (!res.ok) {
@@ -505,19 +539,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeWs = null;
     }
     activeStreamingAssistantId = null;
-    useLayoutStore.getState().setMode('chat');
+    useLayoutStore.getState().setMode(useSettingsStore.getState().defaultConversationMode);
     useLayoutStore.getState().collapseBuilder();
     useSandboxStore.getState().reset();
     set({
       activeConversationId: null,
       messages: [],
       isStreaming: false,
+      streamingConversationId: null,
       broadcastMode: false,
       broadcastTargetClientIds: [],
     });
   },
 
-  startOwnerTrainingSession: async (modelId?: string, mode: ChatMode = 'chat') => {
+  startOwnerTrainingSession: async (modelId?: string, mode?: ChatMode) => {
+    const resolvedMode = mode ?? useSettingsStore.getState().defaultConversationMode;
     const auth = useAuthStore.getState();
     if (!auth.isOwner) {
       return null;
@@ -527,7 +563,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ?? get().conversations.find((conversation) => conversation.id === get().activeConversationId)?.modelId
       ?? 'vai:v0';
 
-    const id = await get().createConversation(selectedModelId, mode, { sandboxProjectId: null });
+    const id = await get().createConversation(selectedModelId, resolvedMode, { sandboxProjectId: null });
     set({ trainingWorkspace: true, learningEnabled: false });
     return id;
   },
@@ -538,6 +574,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // already opened chat B and attaches A's sandbox over B's preview.
     const token = ++selectConversationToken;
     const isStale = () => token !== selectConversationToken;
+    // Eagerly drop the OUTGOING chat's sandbox view if the chat we're opening
+    // isn't bound to that same project — so the previous chat's code/preview can't
+    // linger on screen during the async message + project fetch below.
+    const incoming = get().conversations.find((c) => c.id === id);
+    const currentProjectId = useSandboxStore.getState().projectId;
+    if (shouldResetSandboxOnSwitch(currentProjectId, incoming?.sandboxProjectId ?? null)) {
+      useSandboxStore.getState().reset();
+    }
     const [res] = await Promise.all([
       apiFetch(`/api/conversations/${id}/messages`),
       get().fetchConversations(),
@@ -710,7 +754,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     const state = get();
     if (state.activeConversationId === id) {
-      useLayoutStore.getState().setMode('chat');
+      useLayoutStore.getState().setMode(useSettingsStore.getState().defaultConversationMode);
       useLayoutStore.getState().collapseBuilder();
       set({ activeConversationId: null, messages: [], broadcastMode: false, broadcastTargetClientIds: [], broadcastChats: chats });
     } else {
@@ -754,6 +798,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       messages: [...state.messages, userMsg, assistantMsg],
       isStreaming: true,
+      streamingConversationId: state.activeConversationId,
     });
     activeStreamingAssistantId = assistantMsg.id;
 
@@ -973,7 +1018,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         reasoningText += chunk.reasoningDelta;
       } else if (chunk.type === 'done') {
         flushPendingStreamDelta();
-        set({ isStreaming: false });
+        set({ isStreaming: false, streamingConversationId: null });
         // Capture assistant response + reasoning in dev logs
         const capture = getActiveCapture();
         if (capture) {
@@ -1021,7 +1066,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       } else if (chunk.type === 'error') {
         flushPendingStreamDelta();
-        set({ isStreaming: false });
+        set({ isStreaming: false, streamingConversationId: null });
         get().appendToLastMessage(`\n\nError: ${chunk.error}`);
         flushPendingStreamDelta();
         // Log error in dev logs
@@ -1038,7 +1083,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     ws.onerror = () => {
       if (activeWs !== ws) return;
       flushPendingStreamDelta();
-      set({ isStreaming: false });
+      set({ isStreaming: false, streamingConversationId: null });
       get().appendToLastMessage('\n\nConnection error');
       flushPendingStreamDelta();
       const capture = getActiveCapture();
@@ -1058,7 +1103,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     activeStreamingAssistantId = null;
     // A manual stop cancels any queued follow-up — the user chose to halt.
-    set({ isStreaming: false, queuedMessage: null });
+    set({ isStreaming: false, streamingConversationId: null, queuedMessage: null });
   },
 
   setQueuedMessage: (content: string | null) => {

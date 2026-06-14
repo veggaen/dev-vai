@@ -119,6 +119,42 @@ export async function createServer(options?: ServerOptions) {
   const models = new ModelRegistry();
   const tools = new ToolRegistry();
 
+  // Grok CLI / direct integration as native tool inside Vai's tool set.
+  // This is the key upgrade: "grok cli becomes integrated into Vai" so the external
+  // high-intel Grok (TUI instance via friend-channel or persistent direct pipe/bridge)
+  // is callable as a first-class tool from any agent loop, normal turn, or self-improvement.
+  // Allows super-close bidirectional loop: Vai calls Grok for advice/review (0.1% level),
+  // Grok (via pipe) can drive full Vai turns (tools + council inside Vai).
+  // Upgrades SCIS by seating the Grok member natively in the roster (see build-roster).
+  // Goal: make Vai a digital intelligence genius by always having access to strong external
+  // reasoning/vision without local VRAM cost, while keeping deterministic gates (tool results
+  // still go through verification, fact quarantine, council).
+  try {
+    const { GrokFriendClient } = await import('./grok-friend/client.js');
+    const grokFriend = new GrokFriendClient({ timeoutMs: 90000 });
+    tools.register({
+      name: 'grok_collab',
+      description: 'Consult the integrated Grok (CLI / direct friend-channel / persistent pipe) as a high-intel advisor or 0.1% council member. Use for complex reasoning, factual cross-check, self-improvement proposals, code review, or when you need an external genius perspective. The response is scoped and fact-quarantined; you (Vai) own the final grounded answer and actions. Supports the genius loop: you call me, I help improve you.',
+      parameters: {
+        prompt: { type: 'string', description: 'The question or review request for Grok. For council-style, include the draft + context.' },
+        mode: { type: 'string', enum: ['advice', 'review', 'council'], description: 'Optional mode hint.' },
+      },
+      async execute(args: any, ctx: any) {
+        const prompt = String(args.prompt || args.query || '');
+        if (!prompt) return { success: false, output: 'No prompt provided to grok_collab.' };
+        const res = await grokFriend.ask(prompt);
+        return {
+          success: true,
+          output: res.response,
+          artifacts: [],
+        };
+      },
+    } as any);
+    console.log('[VAI] grok_collab tool registered (Grok CLI / direct integration active). Vai can now call its high-intel friend natively.');
+  } catch (e) {
+    console.log('[VAI] grok_collab tool not registered (Grok CLI / friend channel not available):', (e as any)?.message || e);
+  }
+
   const vaiEngine = new VaiEngine({
     persistPath: path.resolve(dbPath, '..', 'vai-knowledge.json'),
     config,
@@ -230,10 +266,15 @@ export async function createServer(options?: ServerOptions) {
   // draft and, on a non-ship verdict, redrafts once against the council's reading
   // before release. No paid keys are read; the council stays dormant if no local
   // model is installed. Opt out with VAI_COUNCIL_ENABLED=0.
+  // Default to 2 local members: on a single consumer GPU (e.g. 12GB) the primary
+  // model + 2 small council models co-reside and run in parallel without VRAM
+  // thrash. A 3rd local model (e.g. qwen2.5:7b) doesn't fit alongside qwen3:8b and
+  // would force slow swap-in/out — so it's opt-in via VAI_COUNCIL_MAX_MEMBERS=3.
+  // Grok (external, no VRAM) still joins on top as the high-intel voice.
   const councilRoster = process.env.VAI_COUNCIL_ENABLED === '0'
     ? undefined
     : buildLocalCouncilRoster(models, {
-        maxMembers: Number(process.env.VAI_COUNCIL_MAX_MEMBERS) || 3,
+        maxMembers: Number(process.env.VAI_COUNCIL_MAX_MEMBERS) || 2,
       });
   if (councilRoster) {
     console.log(`[VAI] Friend council active: ${councilRoster.default.map((m) => m.displayName).join(', ')}`);

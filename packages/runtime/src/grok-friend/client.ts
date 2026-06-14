@@ -83,8 +83,9 @@ export class GrokFriendClient {
     const startedAt = Date.now();
     const scopedPrompt = [
       'You are the Grok friend-channel collaborator for Vai.',
-      'Answer the explicit question only. Do not run commands or edit files.',
-      'Distinguish verified facts from inference. Keep the answer concise.',
+      'You have full access to tools, web search, planning, and sub-agents as needed to collaborate effectively and give the highest-quality help.',
+      'Answer the explicit question. Use tools where they improve the answer.',
+      'Distinguish verified facts from inference. Be concise but complete.',
       '',
       trimmedPrompt,
     ].join('\n');
@@ -99,9 +100,6 @@ export class GrokFriendClient {
         '1',
         '--no-plan',
         '--no-subagents',
-        '--disable-web-search',
-        '--tools',
-        'none',
       ],
       {
         cwd: this.cwd,
@@ -119,6 +117,51 @@ export class GrokFriendClient {
       capturedAt: new Date().toISOString(),
       durationMs: Date.now() - startedAt,
       response,
+    };
+  }
+
+  /**
+   * Special mode for SCIS council integration: act as 0.1% world-class niche engineer
+   * reviewer. The prompt includes the full council input + strict instruction to return
+   * ONLY the JSON note (verdict, realIntent, methodLesson with proof+edge, etc.).
+   * This makes the Grok CLI a real participating high-intel council member "inside"
+   * Vai's toolset and roster (not just external or synthetic).
+   */
+  async reviewForCouncil(input: any): Promise<any> {
+    const reviewPrompt = [
+      'You are a 0.1%-level world-class engineer on Vai\'s SCIS consensus council.',
+      'Vai prepared a draft. You review only (fact-quarantine). You may use tools, web search, code inspection, or any capabilities to form the best possible review.',
+      'Return STRICT JSON ONLY matching the council note schema:',
+      'verdict: "good" | "needs-work" | "bad"',
+      'confidence: number 0-1',
+      'realIntent: short string',
+      'hiddenMeaning: short string or ""',
+      'missingCapability: short string or ""',
+      'suggestedAction: "answer-directly" | "web-search" | "reread-intent" | "ask-one-question"',
+      'searchQuery: string or ""',
+      'methodLesson: short string including proof method + 1 named edge case',
+      'concerns: array of short strings',
+      '',
+      'Ground in the provided context. For self-improvement turns use the vaiProjectSelfContext keyAreas. Use Thorsen rotate if stuck. Output only the JSON at the end.',
+      '',
+      JSON.stringify(input),
+    ].join('\n');
+
+    const result = await this.ask(reviewPrompt);
+    // Attempt to extract JSON from the response (the model is instructed to be strict).
+    const jsonMatch = result.response.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch {}
+    }
+    // Fallback note if parse fails (still useful).
+    return {
+      verdict: 'needs-work',
+      confidence: 0.5,
+      realIntent: 'Grok advisor review (parse fallback)',
+      methodLesson: result.response.slice(0, 300),
+      concerns: ['JSON parse failed on Grok response; raw output used as lesson'],
     };
   }
 }

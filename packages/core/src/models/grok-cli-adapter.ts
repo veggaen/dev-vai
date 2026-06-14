@@ -69,6 +69,26 @@ export interface GrokCliAdapterOptions {
 interface GrokHeadlessResult {
   readonly text?: string;
   readonly stopReason?: string;
+  /** Headless grok prints `{"type":"error","message":...}` to stdout (exit 0) on API failures. */
+  readonly type?: string;
+  readonly message?: string;
+}
+
+/**
+ * Detect the "out of credits / no subscription" failure so the council can surface a clean,
+ * actionable reason instead of a generic non-blocking miss. xAI returns 403 Forbidden with a
+ * `spending-limit` / `personal-team-blocked` message; grok also echoes it as a stdout error JSON.
+ */
+export class GrokCreditsError extends Error {
+  constructor(message = 'Grok (CLI): out of credits — add credits at https://grok.com/?_s=usage or upgrade at https://grok.com/supergrok') {
+    super(message);
+    this.name = 'GrokCreditsError';
+  }
+}
+
+/** True when grok's stdout/stderr indicates the account is out of credits or unsubscribed. Exported for tests. */
+export function isCreditsBlocked(text: string): boolean {
+  return /spending-limit|personal-team-blocked|run out of credits|need a Grok subscription/i.test(text);
 }
 
 /** Run grok headlessly with a single prompt + optional system-prompt override. Resolves the raw `.text`. */
@@ -105,6 +125,12 @@ function runGrokHeadless(
     child.on('close', (code) => {
       clearTimeout(timer);
       if (signal) signal.removeEventListener('abort', onAbort);
+      // Credits/subscription block: grok returns 403 — sometimes exit≠0 (stderr), sometimes
+      // exit 0 with an error JSON on stdout. Detect both so the council reports a clean reason.
+      if (isCreditsBlocked(stderr) || isCreditsBlocked(stdout)) {
+        reject(new GrokCreditsError());
+        return;
+      }
       if (code !== 0 && !stdout.trim()) {
         const hint = ' (install the Grok TUI/Build so grok.exe is at %USERPROFILE%\\.grok\\bin\\grok.exe or "grok" on PATH; this enables Grok (CLI) as a vision-capable council member with no local VRAM)';
         reject(new Error(`grok exited ${code}: ${stderr.slice(0, 200)}${hint}`));
@@ -112,6 +138,11 @@ function runGrokHeadless(
       }
       try {
         const parsed = JSON.parse(stdout.trim()) as GrokHeadlessResult;
+        // Exit 0 can still carry an error envelope (`{"type":"error","message":...}`).
+        if (parsed.type === 'error') {
+          reject(new Error(`grok headless error: ${(parsed.message ?? 'unknown').slice(0, 200)}`));
+          return;
+        }
         resolve((parsed.text ?? '').trim());
       } catch {
         // Some builds may print plain text; fall back to raw stdout.

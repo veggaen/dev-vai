@@ -23,6 +23,7 @@ import {
   evaluateChatAnswerQuality,
   type ChatAnswerQualityReport,
 } from './chat-answer-quality.js';
+import { isExplicitBuildExecutionRequest } from './build-execution-intent.js';
 import { CONVERSATION_MODE_SYSTEM_PROMPTS, DEFAULT_CONVERSATION_MODE, type ConversationMode, isConversationMode } from './modes.js';
 import { tryHandleChatMeta } from './meta-router.js';
 import {
@@ -54,6 +55,7 @@ import type {
 } from '../consensus/types.js';
 import type { CouncilRoster } from '../consensus/topic-router.js';
 import { convene, toCouncilThinking } from '../consensus/council.js';
+import { gatherWebEvidence } from '../consensus/web-evidence.js';
 import { extractCheckableClaim, assessClaimAgreement, applyCrossCheck } from '../consensus/cross-check.js';
 import { resolveIntent } from '../consensus/intent-resolver.js';
 import { detectImageIntent } from './image-intent.js';
@@ -341,6 +343,34 @@ export interface CouncilRedraftFeedback {
 export function councilScore(consensus: CouncilConsensus): number {
   const outcomeRank = consensus.outcome === 'ship' ? 2 : consensus.outcome === 'act' ? 1 : 0;
   return outcomeRank * 100 + consensus.agreement * 10 + consensus.confidence;
+}
+
+/**
+ * Outcome-aware acceptance for a redraft — proposed by the council reviewing its
+ * OWN grading (self-eval 2026-06-14): a higher score alone can reward a redraft
+ * that merely raised agreement without resolving the flagged gap. So when the
+ * FIRST review named a concrete `missingCapability`, the redraft must actually
+ * RESOLVE it to win — defined as the second review no longer escalating AND
+ * either clearing those capabilities or reaching `ship`. When the first review
+ * named no specific gap, we fall back to the plain score comparison (unchanged
+ * behavior). Pure + exported for tests.
+ */
+export function redraftResolvedConcern(
+  first: CouncilConsensus,
+  second: CouncilConsensus,
+): boolean {
+  const firstGaps = (first.missingCapabilities ?? []).map((c) => c.trim().toLowerCase()).filter(Boolean);
+  // No specific gap was flagged → grading reverts to the score comparison.
+  if (firstGaps.length === 0) return councilScore(second) >= councilScore(first);
+
+  // A gap was flagged. The redraft "resolved" it only if the council stopped
+  // escalating AND it either shipped or dropped the previously-named gaps.
+  if (second.outcome === 'escalate') return false;
+  if (second.outcome === 'ship') return true;
+  const secondGaps = new Set((second.missingCapabilities ?? []).map((c) => c.trim().toLowerCase()).filter(Boolean));
+  const stillUnresolved = firstGaps.some((gap) => secondGaps.has(gap));
+  // Resolved the named gap(s) AND didn't regress on score.
+  return !stillUnresolved && councilScore(second) >= councilScore(first);
 }
 
 /**
@@ -723,7 +753,7 @@ export class ChatService {
     };
     this.onUsage = resolvedOptions?.onUsage;
     this.primaryGenerativeFlipEnabled =
-      resolvedOptions?.primaryGenerativeFlip ?? (process.env.VAI_PRIMARY_GENERATIVE !== '0');
+      resolvedOptions?.primaryGenerativeFlip ?? (process.env.VAI_PRIMARY_GENERATIVE === '1');
     this.securityReviewEnabled = resolvedOptions?.securityReview ?? true;
     this.contractLedgerEnabled = resolvedOptions?.contractLedger ?? true;
     this.guidanceStore = resolvedOptions?.guidanceStore;
@@ -915,14 +945,36 @@ export class ChatService {
     if (isPureConversationalTurn(draft.prompt) && !isSelfImprovement) return undefined;
 
     try {
+      // Web-witness (RAG) step: when the turn isn't a self/codebase turn and Vai didn't
+      // already attach sources, Vai googles the question and brings back ranked sources +
+      // (best-effort) Google's AI Overview, shared with EVERY member (fact-quarantine intact).
+      // SearXNG-default + Chrome-fallback. Best-effort: any failure leaves evidence empty and
+      // the council convenes exactly as before. Opt out with VAI_COUNCIL_WEB_EVIDENCE=0.
+      let webSources = draft.sources ?? [];
+      let webEvidence: CouncilInput['webEvidence'];
+      const webEvidenceEnabled = process.env.VAI_COUNCIL_WEB_EVIDENCE !== '0';
+      const alreadyGrounded = (draft.sources?.length ?? 0) > 0;
+      if (webEvidenceEnabled && !isSelfImprovement && !alreadyGrounded) {
+        const evidence = await gatherWebEvidence(draft.prompt);
+        if (evidence.sources.length > 0 || evidence.aiOverview) {
+          webSources = [...webSources, ...evidence.sources];
+          webEvidence = { aiOverview: evidence.aiOverview, gatheredAt: evidence.gatheredAt };
+        }
+        if (process.env.VAI_SEARCH_DEBUG) {
+          // eslint-disable-next-line no-console
+          console.log(`[web-witness] via=${evidence.via} sources=${evidence.sources.length} aiOverview=${evidence.aiOverview ? 'yes' : 'no'} for "${draft.prompt.slice(0, 50)}"`);
+        }
+      }
+
       const input: CouncilInput = {
         prompt: draft.prompt,
         draft: draft.draftText,
         modelId: draft.modelId,
         turnKind: draft.turnKind ?? 'chat',
-        hasEvidence: !!draft.hasEvidence,
-        sources: draft.sources ?? [],
+        hasEvidence: !!draft.hasEvidence || (webEvidence?.aiOverview != null || webSources.length > 0),
+        sources: webSources,
         draftConfidence: draft.confidence,
+        webEvidence,
       };
 
       if (isSelfImprovement) {
@@ -930,30 +982,157 @@ export class ChatService {
         // This makes the member notes / lessons the "arguments + validated proposals" for growing Vai.
         (input as any).vaiProjectSelfContext = {
           goal: 'Vai (the deterministic engine) + agents (including live Grok via direct channel) continuously improve Vai itself. Humans (V3gga) must be able to see and steer the process live (AGENTS.md).',
-          currentRosterSummary: 'vai:v0 (primary) + local qwen3:8b / qwen2.5:7b / qwen2.5:3b + Grok (CLI) synthetic note + live voice via direct pipe/bridge (vai-grok-direct + vai-file-mailbox-bridge).',
+          currentRosterSummary: 'vai:v0 (primary) + local qwen3:8b / qwen2.5:7b / qwen2.5:3b + Grok (CLI) synthetic note + live voice via direct pipe/bridge (vai-grok-direct + vai-file-mailbox-bridge) + native grok_collab tool + GrokDirect council member (integrated 0.1% advisor).',
           keyAreasToInvestigateForGrowth: [
             'packages/core/src/chat/service.ts (primary always-respond generation + council attach/conveneOnce + redraft)',
             'packages/core/src/consensus/council.ts + topic-router.ts (parallel member reviews, reachConsensus, methodLessons as growth proposals)',
-            'packages/runtime/src/council/build-roster.ts (roster wiring + synthetic Grok note for reliable voice)',
+            'packages/runtime/src/council/build-roster.ts (roster wiring + synthetic Grok note + GrokDirect integrated member for reliable voice)',
             'packages/runtime/src/local-pipe-chat.ts + scripts/vai-file-mailbox-bridge.mjs (the send/receive channel to all members + human steer)',
+            'packages/runtime/src/server.ts (grok_collab tool registration so Vai can call its high-intel friend natively)',
             'apps/desktop/src/components/panels/CouncilProgressPanel.tsx + chat/ThinkingPanel.tsx + LiveProcessTrace.tsx (the visual for human to see debate + growth items and help)',
             'AGENTS.md (improvement loop, council as staff/models, Vai as the institution, "one heavy task at a time", Windows-first, no Python in core)',
-            'Current pain (from real turns): complex self/meta/council-address prompts often timeout on the direct pipe for small local members; need robust terminal frames + shorter self-review path + codebase context injection.',
+            'Current pain (from real turns): complex self/meta/council-address prompts often timeout on the direct pipe for small local members; need robust terminal frames + shorter self-review path + codebase context injection. Grok integration now makes the loop bidirectional and super-close.',
           ],
           primaryAsDataPoint: (draft.draftText || '').slice(0, 600),
-          humanCanSeeSteer: 'Desktop Council Progress + ThinkingPanel + activity (now files+links only). Use the direct channel to inject guidance.',
+          humanCanSeeSteer: 'Desktop Council Progress + ThinkingPanel + activity (now files+links only) + Vai Council sidebar. Use the direct channel or grok_collab tool to inject guidance.',
+          // fastSelfPrimary scaffolding (genius loop iteration for the timeout data): signal that primary should be quick/ack-first
+          // for self turns so the channel doesn't block on full council (which may be heavy with context). Council proposals
+          // attached for later surfacing in panels or next turn. Use this direct Grok channel as fast advisor member.
+          fastSelfPrimary: true,
         };
       }
 
-      const result = await convene(input, this.councilRoster, { timeoutMs: 12_000 });
+      const selfCtx: any = (input as any).vaiProjectSelfContext;
+      const fastSelf = !!(selfCtx && selfCtx.fastSelfPrimary);
+      // Council timeout. Diagnosis (2026-06-14): only 2/5 members responded because
+      // the timeout was SHORTER than a cold model load. With keep_alive=30m a model
+      // stays warm once loaded, but a cold 4.7GB load (qwen2.5:7b) takes ~15-30s — so
+      // at 6-12s it timed out, never finished loading, never warmed, and timed out
+      // forever (vicious cycle). The council runs AFTER the primary draft, so a longer
+      // fanout does NOT delay the user answer — it only lets every voice actually land
+      // the first time, after which warm calls are fast. 30s default; override via
+      // VAI_COUNCIL_TIMEOUT_MS.
+      const envTimeout = Number(process.env.VAI_COUNCIL_TIMEOUT_MS);
+      const councilTimeout = Number.isFinite(envTimeout) && envTimeout > 0
+        ? envTimeout
+        : (fastSelf ? 30_000 : 30_000);
+      // Council concurrency. The default roster (2 small local models that
+      // co-reside with the primary on one GPU + external Grok) can safely run in
+      // PARALLEL — they fit, so no VRAM thrash, and the council finishes fast.
+      // If you raise VAI_COUNCIL_MAX_MEMBERS to seat a model that won't fit, also
+      // set VAI_COUNCIL_CONCURRENCY=1 so members swap the GPU sequentially instead
+      // of thrashing. Default 3 (all fitting members at once).
+      const envConcurrency = Number(process.env.VAI_COUNCIL_CONCURRENCY);
+      const concurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? envConcurrency : 3;
+      const result = await convene(input, this.councilRoster, { timeoutMs: councilTimeout, concurrency });
       if (!result.convened) return undefined;
       const consensus = await this.crossCheckConsensus(draft, result.consensus);
+
+      // Auto-append proven self-improvement lessons to the shared backlog (no human gate for purely additive proven items).
+      // "Proven" heuristic: lesson mentions gates (tsc, visual, test, verified, proof) or is explicitly growth-oriented.
+      // This upgrades the loop so Vai helps itself more autonomously while keeping visibility (backlog is human-readable)
+      // and the "refuse junk" principle (only additive, dated, with source). Grok integration + council personas make
+      // the lessons higher quality to begin with.
+      if (isSelfImprovement && consensus.methodLessons?.length) {
+        const proven = consensus.methodLessons.filter(l =>
+          /tsc|visual|render|proof|verified|tested|gate|backlog|auto-apply|0\.1%|genius|digital intelligence/i.test(l)
+        );
+        if (proven.length > 0) {
+          try {
+            const fs = await import('node:fs/promises');
+            const path = await import('node:path');
+            const backlogPath = path.resolve(process.cwd(), 'docs/vai-improvement-backlog.md');
+            const entry = `\n- **Auto-proven (self-improvement + Grok integrated council)** (${new Date().toISOString().slice(0,10)}): ${proven.slice(0,3).join(' • ')} (source: direct Grok voice / grok_collab tool + SCIS with 0.1% personas). See full lessons in the turn thinking.`;
+            await fs.appendFile(backlogPath, entry, 'utf8').catch(() => {});
+          } catch {}
+        }
+      }
+
+      // Close the loop: when the council did NOT clear the draft and taught a
+      // concrete method, persist that lesson as class-scope RouteGuidance so the
+      // NEXT similar turn is steered by it *before* the model writes. Without
+      // this the council's lessons only ever reached a human-read doc/panel and
+      // evaporated — Vai never actually got more capable across turns.
+      this.persistCouncilLessons(draft, consensus);
+
       return {
         thinking: toCouncilThinking(result.topic, consensus, result.assessment),
         consensus,
       };
+    } catch (err) {
+      // Council is advisory — a failure must never break the turn. But silently
+      // swallowing it hid a real bug for a long time (council showed as "not
+      // attached" with zero signal). Surface it on a dedicated channel so the
+      // cause is visible without affecting the user-facing answer.
+      // eslint-disable-next-line no-console
+      console.warn(`[council] conveneOnce failed (advisory, turn unaffected): ${err instanceof Error ? err.message : String(err)}\n${err instanceof Error ? err.stack : ''}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * Turn a non-ship council consensus into durable, self-applying RouteGuidance.
+   *
+   * The council points at intent + method; we save that as a `class`-scope hint
+   * keyed on the turn's salient tokens, so on a future turn of the same class the
+   * existing guidance loader injects it into the draft prompt automatically (same
+   * path as human steers). This is the behavioral half of the self-improvement
+   * loop — the backlog append above is the human-visible half.
+   *
+   * Bounded and conservative:
+   *  - Only runs when a guidanceStore exists and the council did NOT ship.
+   *  - Skips when there is no actionable lesson.
+   *  - Deduplicates against active hints that target the same handler with
+   *    overlapping tokens, so repeated similar turns can't flood the store.
+   *  - Hints expire (default 30 days) so stale method advice decays on its own.
+   *  - Fact-quarantine holds: only the method lesson + intent flow through; the
+   *    note never carries a council-authored fact.
+   */
+  private persistCouncilLessons(draft: CouncilDraftInput, consensus: CouncilConsensus): void {
+    if (!this.guidanceStore) return;
+    if (consensus.outcome === 'ship') return;
+    const lessons = (consensus.methodLessons ?? []).map((l) => l.trim()).filter(Boolean);
+    if (lessons.length === 0) return;
+
+    // Map the council's recommended action to the handler the next turn should prefer.
+    const handler =
+      consensus.recommendedAction === 'web-search' ? 'bridge-evidence-discipline'
+        : consensus.recommendedAction === 'ask-one-question' ? 'single-clarifying-question'
+          : 'conversation-reasoning'; // reread-intent / answer-directly / default → the careful path
+
+    const tokens = salientTokens(draft.prompt);
+    if (tokens.length === 0) return;
+
+    // Dedupe: if an active class hint already targets this handler and shares
+    // ≥half its tokens with this turn, treat the lesson as already captured.
+    const existing = this.guidanceStore.loadActive(null);
+    const already = existing.some((g) => {
+      if (!g.active || g.scope !== 'class' || g.handler !== handler || g.from !== 'ai') return false;
+      const gTokens = g.matchTokens ?? [];
+      if (gTokens.length === 0) return false;
+      const overlap = gTokens.filter((t) => tokens.includes(t)).length;
+      return overlap / gTokens.length >= 0.5;
+    });
+    if (already) return;
+
+    const note = lessons.slice(0, 2).join(' ');
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+    try {
+      this.guidanceStore.save({
+        conversationId: null,
+        from: 'ai',
+        author: 'SCIS council',
+        signal: 'prefer',
+        handler,
+        note: `Council lesson (${consensus.recommendedAction}): ${note}`,
+        scope: 'class',
+        matchTokens: tokens,
+        intent: classifyQuestionIntent(draft.prompt),
+        weight: 1,
+        expiresAt: new Date(Date.now() + THIRTY_DAYS),
+      });
     } catch {
-      return undefined; // advisory only
+      // Persistence is advisory — a failed write must never break the turn.
     }
   }
 
@@ -1115,7 +1294,10 @@ export class ChatService {
       // Council couldn't re-grade — trust the redraft only if the first call wanted action.
       return { council: first.thinking, finalText: cleaned, revised: true };
     }
-    const improved = councilScore(second.consensus) >= councilScore(first.consensus);
+    // Outcome-aware: a redraft only wins if it actually resolved the flagged gap
+    // (not just nudged agreement up). Falls back to score-only when no specific
+    // capability was named. (Council self-eval recommendation, 2026-06-14.)
+    const improved = redraftResolvedConcern(first.consensus, second.consensus);
     return improved
       ? { council: second.thinking, finalText: cleaned, revised: true }
       : { council: first.thinking, finalText: draft.draftText, revised: false };
@@ -2259,6 +2441,7 @@ export class ChatService {
       // a generic scaffold (files but near-zero feature coverage) escalates to
       // the generative module instead of shipping boilerplate as "done".
       const isBuilderMode = resolvedMode === 'builder' || resolvedMode === 'agent';
+      const buildExecutionRequired = isBuilderMode && isExplicitBuildExecutionRequest(content);
       const builderFiles = isBuilderMode && hasBuilderFileBlocks(bufferedText);
       const builderSatisfies = builderFiles
         && evaluateBuilderRequestSatisfaction(content, bufferedText).satisfied;
@@ -2312,6 +2495,67 @@ export class ChatService {
           },
         } as ChatChunk;
       }
+
+      // Process visibility: show what vai:v0 produced before council / escalation.
+      const vaiProposedDraft = !primaryFlip && bufferedText.trim() ? bufferedText.trim() : '';
+      if (!primaryFlip) {
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'vai-draft',
+            label: vaiProposedDraft ? 'Vai proposed an answer' : 'Vai has no confident draft yet',
+            detail: vaiProposedDraft || undefined,
+            status: 'done',
+          },
+        } as ChatChunk;
+      }
+
+      // Council grades vai:v0 FIRST. Only escalate to the generative arm when the
+      // council splits (escalate) or the draft fails the existing fallback gates.
+      let councilThinking: CouncilThinking | undefined;
+      let councilEscalateToGenerative = false;
+      if (!primaryFlip && !builderFiles && !codeReviewRejected && bufferedText.trim()) {
+        yield {
+          type: 'progress',
+          progress: { stage: 'council-vai', label: 'Council reviewing Vai\'s proposal', status: 'running' },
+        } as ChatChunk;
+        const loop = await this.runCouncilLoop(
+          {
+            prompt: content,
+            draftText: bufferedText,
+            modelId: bufferedModelId,
+            turnKind,
+            confidence: latestConfidence,
+            hasEvidence: primaryHadEvidence,
+            sources: bufferedSourceChunks.flatMap((chunk) => chunk.sources ?? []),
+            history: history.map((m) => ({ role: m.role, content: m.content })),
+            conversationId,
+          },
+          (feedback) => this.redraftWithCouncilFeedback(adapter, primaryMessages, feedback, noLearn),
+        );
+        councilThinking = loop.council;
+        if (loop.revised) {
+          bufferedText = loop.finalText;
+          reviewReplacedPrimary = true;
+        }
+        councilEscalateToGenerative = councilThinking?.outcome === 'escalate';
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'council-vai',
+            label: councilEscalateToGenerative
+              ? 'Council rejected Vai\'s proposal — escalating'
+              : loop.revised
+                ? 'Council asked Vai to revise — redrafted'
+                : councilThinking?.outcome === 'ship'
+                  ? 'Council cleared Vai\'s proposal'
+                  : 'Council reviewed Vai\'s proposal',
+            detail: councilThinking?.summary,
+            status: 'done',
+          },
+        } as ChatChunk;
+      }
+
       const confidenceFallbackDecision = decideVaiFallback({
         text: bufferedText,
         confidence: latestConfidence,
@@ -2337,7 +2581,7 @@ export class ChatService {
         reviewReplacedPrimary,
         builderSatisfies,
         builderFiles,
-      });
+      }) && !councilThinking;
       const evidenceAwareFallbackDecision: { shouldFallback: boolean; reason: 'low-confidence' | 'no-knowledge' | null } =
         preferGroundedFallback
           ? { shouldFallback: true, reason: 'low-confidence' }
@@ -2347,6 +2591,12 @@ export class ChatService {
       const initialFallbackDecision: { shouldFallback: boolean; reason: 'low-confidence' | 'no-knowledge' | null } =
         primaryFlip
           ? { shouldFallback: true, reason: 'low-confidence' }
+          : buildExecutionRequired && !builderSatisfies
+            ? { shouldFallback: true, reason: 'no-knowledge' }
+          : councilEscalateToGenerative
+            ? { shouldFallback: true, reason: 'low-confidence' }
+          : councilThinking?.outcome === 'ship' && !buildExecutionRequired
+            ? { shouldFallback: false, reason: null }
           : reviewReplacedPrimary
           ? { shouldFallback: false, reason: null }
           : codeReviewRejected
@@ -2364,55 +2614,8 @@ export class ChatService {
         ? { shouldFallback: true, reason: 'low-confidence' as const }
         : initialFallbackDecision;
       if (!fallbackDecision.shouldFallback || !fallbackDecision.reason) {
-        // Thorsen loop: the friend council grades this buffered draft and, when it
-        // does not clear it for release, feeds its reading (real intent + method +
-        // concerns — never facts) back into one bounded redraft from the SAME model,
-        // re-grades, and keeps the better. The draft is still buffered (not shown),
-        // so a revision replaces the text cleanly with no streaming to unwind.
-        // Builder file artifacts and code peer-review escalations are left alone.
-        let councilThinking: CouncilThinking | undefined;
-        if (!builderFiles && !codeReviewRejected && bufferedText.trim()) {
-          yield {
-            type: 'progress',
-            progress: { stage: 'council', label: 'Friend council reviewing the draft', status: 'running' },
-          } as ChatChunk;
-          const loop = await this.runCouncilLoop(
-            {
-              prompt: content,
-              draftText: bufferedText,
-              modelId: bufferedModelId,
-              turnKind,
-              confidence: latestConfidence,
-              hasEvidence: primaryHadEvidence,
-              sources: bufferedSourceChunks.flatMap((chunk) => chunk.sources ?? []),
-              history: history.map((m) => ({ role: m.role, content: m.content })),
-              conversationId,
-            },
-            (feedback) => this.redraftWithCouncilFeedback(adapter, primaryMessages, feedback, noLearn),
-          );
-          councilThinking = loop.council;
-          if (loop.revised) {
-            bufferedText = loop.finalText;
-            reviewReplacedPrimary = true; // re-emit the revised text on flush
-          }
-          yield {
-            type: 'progress',
-            progress: {
-              stage: 'council',
-              label: loop.revised
-                ? 'Council asked for a revision — Vai redrafted'
-                : councilThinking?.outcome === 'ship'
-                  ? 'Council cleared the draft'
-                  : 'Council reviewed the draft',
-              detail: councilThinking?.summary,
-              status: 'done',
-            },
-          } as ChatChunk;
-        }
         // §12.5.3 exit gate: verify + sanitize the deterministic-core arm's
-        // output before it reaches the user. The primary vai:v0 arm is already
-        // buffered, so this costs no streaming latency. Builder file artifacts
-        // skip it (they carry their own quality gates and must not be rewritten).
+        // output before it reaches the user. Council already ran on vai:v0 above.
         const primaryThinking = bufferedChunks.find((chunk) => chunk.type === 'done')?.thinking;
         const primaryVerificationConfig = primaryThinking?.trustBadge === 'local-curated'
           ? { ...this.verificationConfig, requireEvidenceForFactualClaims: false }
@@ -2456,10 +2659,11 @@ export class ChatService {
         // Carry the council projection onto the `done` chunk so the ThinkingPanel
         // can render the "How this answer was made" council section.
         const withCouncil = (chunk: ChatChunk): ChatChunk => {
-          if (chunk.type !== 'done' || !councilThinking) return chunk;
+          if (chunk.type !== 'done') return chunk;
           const done = chunk as any;
           const thinking = { ...(done.thinking ?? { strategy: 'vai-buffered', modelTag: bufferedModelId, confidence: latestConfidence ?? 0.6 }) };
-          thinking.council = councilThinking;
+          if (councilThinking) thinking.council = councilThinking;
+          if (vaiProposedDraft) thinking.vaiProposedDraft = vaiProposedDraft;
           return { ...done, thinking } as ChatChunk;
         };
 
@@ -2504,7 +2708,12 @@ export class ChatService {
             stage: 'escalate',
             label: primaryFlip
               ? `Handing this to ${fallbackLabel} — my generative arm`
+              : councilEscalateToGenerative
+                ? `Council escalated — handing to ${fallbackLabel}`
               : `Not in my memory yet — asking ${fallbackLabel}`,
+            detail: councilEscalateToGenerative && councilThinking?.summary
+              ? councilThinking.summary
+              : undefined,
             status: 'running',
           },
         } as ChatChunk;
@@ -2820,13 +3029,13 @@ export class ChatService {
         // Builder file artifacts keep their own gates and are left alone.
         let fallbackCouncilThinking: CouncilThinking | undefined;
         const fbHasFileBlocksForCouncil = isBuilderMode && hasBuilderFileBlocks(fbText);
-        if (!fbHasFileBlocksForCouncil && fbText.trim()) {
+        if (!fbHasFileBlocksForCouncil && fbText.trim() && !councilEscalateToGenerative) {
           const fbCouncilHasEvidence = fallbackResult.sourceChunks.some(
             (chunk) => Array.isArray(chunk.sources) && chunk.sources.length > 0,
           );
           yield {
             type: 'progress',
-            progress: { stage: 'council', label: 'Friend council reviewing the draft', status: 'running' },
+            progress: { stage: 'council-fallback', label: 'Friend council reviewing the draft', status: 'running' },
           } as ChatChunk;
           const loop = await this.runCouncilLoop(
             {
@@ -2847,7 +3056,7 @@ export class ChatService {
           yield {
             type: 'progress',
             progress: {
-              stage: 'council',
+              stage: 'council-fallback',
               label: loop.revised
                 ? 'Council asked for a revision — Vai redrafted'
                 : fallbackCouncilThinking?.outcome === 'ship'
@@ -2947,7 +3156,12 @@ export class ChatService {
         if (turnPlan) {
           fallbackThinking.routePlan = buildRoutePlan(turnPlan, turnShadowScores);
         }
-        if (fallbackCouncilThinking) {
+        if (vaiProposedDraft) {
+          fallbackThinking.vaiProposedDraft = vaiProposedDraft;
+        }
+        if (councilEscalateToGenerative && councilThinking) {
+          fallbackThinking.council = councilThinking;
+        } else if (fallbackCouncilThinking) {
           fallbackThinking.council = fallbackCouncilThinking;
         }
 

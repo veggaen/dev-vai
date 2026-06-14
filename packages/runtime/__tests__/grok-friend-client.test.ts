@@ -28,10 +28,8 @@ describe('GrokFriendClient', () => {
     expect(receivedArgs).toContain('1');
     expect(receivedArgs).toContain('--no-plan');
     expect(receivedArgs).toContain('--no-subagents');
-    expect(receivedArgs).toContain('--disable-web-search');
-    expect(receivedArgs).toContain('--tools');
-    expect(receivedArgs).toContain('none');
-    expect(receivedArgs.join('\n')).toMatch(/Do not run commands or edit files/i);
+    // Grok friend-channel now allows full tools/web/etc (per user request for integrated high-intel advisor).
+    // We no longer force --tools none or --disable-web-search.
     expect(receivedArgs.filter((arg) => arg.includes('SHOULD_NOT_EXECUTE'))).toHaveLength(1);
     expect(receivedArgs.join('\n')).toMatch(/Review this bridge; echo SHOULD_NOT_EXECUTE\./i);
     expect(result).toMatchObject({

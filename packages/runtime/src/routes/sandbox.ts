@@ -28,6 +28,32 @@ async function getViewerUserId(auth: PlatformAuthService, request: FastifyReques
   return viewer.user?.id ?? null;
 }
 
+/**
+ * Line-level diff stats between two file snapshots. A line-multiset comparison
+ * (not a true LCS) — cheap and good enough for the "+added / −removed" badge:
+ * lines present only in `after` count as added, lines only in `before` as
+ * removed. A pure create counts every after-line as added; a pure delete counts
+ * every before-line as removed.
+ */
+export function lineDiffStats(before: string | null, after: string | null): { added: number; removed: number } {
+  if (before === null && after !== null) return { added: after ? after.split('\n').length : 0, removed: 0 };
+  if (after === null && before !== null) return { added: 0, removed: before ? before.split('\n').length : 0 };
+  if (before === null || after === null) return { added: 0, removed: 0 };
+
+  const count = (text: string): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const line of text.split('\n')) m.set(line, (m.get(line) ?? 0) + 1);
+    return m;
+  };
+  const a = count(before);
+  const b = count(after);
+  let added = 0;
+  let removed = 0;
+  for (const [line, n] of b) added += Math.max(0, n - (a.get(line) ?? 0));
+  for (const [line, n] of a) removed += Math.max(0, n - (b.get(line) ?? 0));
+  return { added, removed };
+}
+
 function getOrRestoreProject(
   projects: ProjectService,
   sandbox: SandboxManager,
@@ -413,6 +439,33 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
         }
         throw err;
       }
+    },
+  );
+
+  /** Per-file diff stats for a recorded revision — powers the chat FileChangesBar
+   *  (true +added/−removed, no fabricated numbers). Reuses the before/after content
+   *  already captured by recordSandboxRevision, so no new snapshot storage. */
+  app.get<{ Params: { id: string; revisionId: string } }>(
+    '/api/sandbox/:id/revisions/:revisionId/diff',
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'read');
+      if ('error' in project) {
+        return project;
+      }
+      const revision = projects.getSandboxRevision(request.params.revisionId);
+      if (!revision || revision.sandboxProjectId !== request.params.id) {
+        reply.code(404);
+        return { error: 'Revision not found' };
+      }
+      const files = revision.files.map((file) => {
+        const { added, removed } = lineDiffStats(file.beforeContent, file.afterContent);
+        return { path: file.path, changeType: file.changeType, added, removed };
+      });
+      const totals = files.reduce(
+        (acc, f) => ({ added: acc.added + f.added, removed: acc.removed + f.removed }),
+        { added: 0, removed: 0 },
+      );
+      return { revisionId: revision.id, version: revision.version, files, totals };
     },
   );
 
