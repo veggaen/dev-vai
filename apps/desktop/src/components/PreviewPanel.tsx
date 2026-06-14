@@ -3,7 +3,7 @@ import { apiFetch } from '../lib/api.js';
 import {
   RefreshCw, Smartphone, Tablet, Monitor, Copy, ExternalLink,
   Code2, Eye, Trash2, Download, CheckCircle, XCircle, Loader2,
-  Camera, Terminal, FolderTree, Play, Square, Maximize2, Minimize2,
+  Camera, Terminal, FolderTree, Play, Square,
   ArrowLeft, ArrowRight, Save, RotateCcw, MessageSquare, File, Moon, Sun,
 } from 'lucide-react';
 import { useState, useCallback, useRef, useEffect } from 'react';
@@ -15,6 +15,7 @@ import { useLayoutStore } from '../stores/layoutStore.js';
 import { useCursorStore } from '../stores/cursorStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { SandboxAppToggle } from './SandboxAppToggle.js';
+import { WorkspaceLayoutControls } from './workspace/WorkspaceLayoutControls.js';
 
 /* ── Types ── */
 
@@ -636,6 +637,27 @@ function CodeView({ projectId }: { projectId: string }) {
     setIsEditing(false);
   }, [selectedFile]);
 
+  // Reveal a file requested from elsewhere (e.g. the chat "Files changed this
+  // turn" strip). Tolerant match: exact path, else the first file whose path
+  // ends with the requested path so a bare "src/App.tsx" still resolves.
+  useEffect(() => {
+    const onReveal = (event: Event) => {
+      const raw = (event as CustomEvent<{ path?: string }>).detail?.path?.trim();
+      if (!raw) return;
+      const norm = raw.replace(/\\/g, '/');
+      const match = files.includes(norm)
+        ? norm
+        : files.find((f) => f.replace(/\\/g, '/').endsWith(norm))
+          ?? files.find((f) => f.replace(/\\/g, '/').endsWith(norm.split('/').pop() ?? norm));
+      if (match) {
+        setSelectedFile(match);
+        setIsEditing(false);
+      }
+    };
+    window.addEventListener('vai:reveal-file', onReveal);
+    return () => window.removeEventListener('vai:reveal-file', onReveal);
+  }, [files]);
+
   // Fetch file content
   useEffect(() => {
     if (!selectedFile || !projectId) return;
@@ -930,7 +952,6 @@ function Toolbar({
   const {
     showDebugConsole, showFileExplorer,
     toggleDebugConsole, toggleFileExplorer,
-    previewExpanded, togglePreviewExpanded,
     toggleThemePreference,
   } = useLayoutStore();
   const showViewToggle = true;
@@ -982,7 +1003,7 @@ function Toolbar({
             className={`preview-toolbar-tab ${viewMode === 'preview' ? 'preview-toolbar-tab--active' : 'preview-toolbar-tab--idle'}`}
           >
             <Eye className="h-3 w-3" />
-            Live view
+            Preview
           </button>
           {hasFiles && (
             <button
@@ -1090,19 +1111,7 @@ function Toolbar({
           </>
         )}
         <SandboxAppToggle studioChrome={studioChrome} size="toolbar" />
-        <button
-          onClick={togglePreviewExpanded}
-          title={previewExpanded ? 'Restore split layout' : 'Expand app to full width'}
-          className={`flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
-            previewExpanded ? 'text-[color:var(--accent)]' : 'preview-toolbar-btn'
-          }`}
-        >
-          {previewExpanded
-            ? <Minimize2 className="h-3 w-3" />
-            : <Maximize2 className="h-3 w-3" />
-          }
-          <span className="hidden sm:inline">{previewExpanded ? 'Restore' : 'Expand'}</span>
-        </button>
+        <WorkspaceLayoutControls surface="app" studio={studioChrome} compact />
         <button
           onClick={toggleThemePreference}
           title={studioChrome ? 'Switch to dark theme' : 'Switch to light theme'}
@@ -1260,7 +1269,7 @@ export function PreviewPanel() {
         ? buildStatus.message || 'Vai answered in chat, but it did not emit files or a preview action yet. Ask for a concrete screen, route, or component so it can generate something runnable.'
         : isStreaming
           ? 'The preview stays neutral until files or a deploy action arrive. As soon as a sandbox exists, it will replace this waiting state automatically.'
-          : 'Ask for a concrete app, screen, or edit in Builder mode. As soon as files or a starter land, this panel becomes the live app automatically.';
+          : 'Ask for a concrete app, screen, or edit in Agent or Builder mode. As soon as files or a starter land, this panel becomes the live app automatically.';
 
       return (
         <div className="preview-panel-root flex h-full flex-col">

@@ -63,7 +63,15 @@ export function setApiSessionToken(token: string | null): void {
   window.localStorage.removeItem(SESSION_TOKEN_KEY);
 }
 
-export function buildApiHeaders(headers?: HeadersInit): Headers {
+/** Dev auth bypass applies only to runtime API calls — not fonts, CDN, or sandbox assets. */
+function shouldAttachDevAuthBypass(path: string): boolean {
+  const normalized = path.startsWith('http')
+    ? new URL(path).pathname
+    : path.split('?')[0] ?? path;
+  return normalized.startsWith('/api');
+}
+
+export function buildApiHeaders(headers?: HeadersInit, requestPath?: string): Headers {
   const nextHeaders = new Headers(headers ?? undefined);
   const sessionToken = getApiSessionToken();
 
@@ -71,7 +79,7 @@ export function buildApiHeaders(headers?: HeadersInit): Headers {
     nextHeaders.set('authorization', `Bearer ${sessionToken}`);
   }
 
-  if (isDevAuthBypassEnabled()) {
+  if (isDevAuthBypassEnabled() && requestPath && shouldAttachDevAuthBypass(requestPath)) {
     nextHeaders.set(DEV_AUTH_BYPASS_HEADER, '1');
   }
 
@@ -79,7 +87,7 @@ export function buildApiHeaders(headers?: HeadersInit): Headers {
 }
 
 export function apiFetch(input: string, init?: RequestInit): Promise<Response> {
-  const headers = buildApiHeaders(init?.headers);
+  const headers = buildApiHeaders(init?.headers, input);
 
   return fetch(`${API_BASE}${input}`, {
     credentials: 'include',

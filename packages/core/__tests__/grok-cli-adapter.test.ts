@@ -4,7 +4,36 @@
  * VAI_TEST_GROK_LIVE=1 is set — so CI without grok stays green and we don't spend tokens.
  */
 import { describe, it, expect } from 'vitest';
-import { createGrokCliAdapter, isGrokCliAvailable } from '../src/models/grok-cli-adapter.js';
+import { createGrokCliAdapter, isGrokCliAvailable, isCreditsBlocked, GrokCreditsError } from '../src/models/grok-cli-adapter.js';
+
+describe('grok-cli adapter — credits detection', () => {
+  it('detects the real 403 spending-limit message grok prints', () => {
+    const real =
+      'ERROR responses API error status=403 Forbidden error_message=personal-team-blocked:spending-limit: ' +
+      'You have run out of credits or need a Grok subscription. Add credits at https://grok.com/?_s=usage';
+    expect(isCreditsBlocked(real)).toBe(true);
+  });
+
+  it('matches each credits signal independently and is case-insensitive', () => {
+    expect(isCreditsBlocked('SPENDING-LIMIT')).toBe(true);
+    expect(isCreditsBlocked('personal-team-blocked')).toBe(true);
+    expect(isCreditsBlocked('you have run out of credits')).toBe(true);
+    expect(isCreditsBlocked('need a Grok subscription')).toBe(true);
+  });
+
+  it('does not false-positive on a normal answer or unrelated error', () => {
+    expect(isCreditsBlocked('{"text":"the limit of this function is 5"}')).toBe(false);
+    expect(isCreditsBlocked('grok exited 1: connection refused')).toBe(false);
+    expect(isCreditsBlocked('')).toBe(false);
+  });
+
+  it('GrokCreditsError carries an actionable, panel-ready message', () => {
+    const err = new GrokCreditsError();
+    expect(err.name).toBe('GrokCreditsError');
+    expect(err.message).toMatch(/out of credits/i);
+    expect(err.message).toMatch(/grok\.com/);
+  });
+});
 
 describe('grok-cli adapter — gating', () => {
   it('isGrokCliAvailable returns a boolean and is stable across calls', () => {

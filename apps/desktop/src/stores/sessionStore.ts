@@ -28,6 +28,7 @@ import type {
 } from '@vai/core/browser';
 
 const SESSION_EVENT_PAGE_SIZE = 200;
+const CURSOR_SESSION_MAX_EVENTS = 5000;
 const AUTO_INTELLIGENCE_EVENT_LIMIT = 2000;
 
 interface SessionState {
@@ -57,6 +58,9 @@ interface SessionState {
   eventTypeFilter: Set<string>;
   /** Quick preset: 'all' | 'conversation' | 'message:user' | 'message:assistant' */
   filterPreset: string | null;
+  /** Server-fetched events for role presets — every user/assistant message, not just loaded page. */
+  presetEvents: SessionEvent[] | null;
+  presetEventsFor: string | null;
 
   /* Search */
   searchQuery: string;
@@ -96,6 +100,7 @@ interface SessionState {
   updateTitle: (sessionId: string, title: string) => Promise<void>;
   refreshActiveSession: () => Promise<void>;
   loadOlderEvents: () => Promise<void>;
+  loadAllEvents: () => Promise<void>;
   refreshSessionIntelligence: (sessionId: string, includeGlobal?: boolean) => Promise<void>;
   refreshRecentInsights: (limit?: number) => Promise<void>;
   startPolling: (intervalMs?: number) => void;
@@ -141,6 +146,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   statusFilter: 'all',
   eventTypeFilter: new Set<string>(),
   filterPreset: 'all',
+  presetEvents: null,
+  presetEventsFor: null,
   searchQuery: '',
   searchResults: [],
   isSearching: false,
@@ -155,7 +162,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const { statusFilter, sessions: prevSessions } = get();
       if (prevSessions.length === 0) set({ isLoading: true });
 
-      const params = new URLSearchParams({ limit: '100' });
+      const params = new URLSearchParams({ limit: '250' });
       if (statusFilter !== 'all') params.set('status', statusFilter);
 
       const res = await apiFetch(`/api/sessions?${params}`);
@@ -183,19 +190,27 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         sessionInsights: null,
         pinnedEvents: [],
         pinnedNotes: [],
+        presetEvents: null,
+        presetEventsFor: null,
       });
 
-      const [sessionRes, eventsRes] = await Promise.all([
-        apiFetch(`/api/sessions/${id}`),
-        apiFetch(`/api/sessions/${id}/events?limit=${SESSION_EVENT_PAGE_SIZE}&order=desc`),
-      ]);
-
-      if (!sessionRes.ok || !eventsRes.ok) throw new Error('Session not found');
+      const sessionRes = await apiFetch(`/api/sessions/${id}`);
+      if (!sessionRes.ok) throw new Error('Session not found');
 
       const data = await sessionRes.json() as SessionDetailResponse;
+      const eventTotal = data.eventCount ?? 0;
+      const isCursorSession = data.session.tags?.includes('cursor-agent');
+      const initialLimit = isCursorSession && eventTotal <= CURSOR_SESSION_MAX_EVENTS
+        ? Math.max(eventTotal, 1)
+        : SESSION_EVENT_PAGE_SIZE;
+
+      const eventsRes = await apiFetch(
+        `/api/sessions/${id}/events?limit=${initialLimit}&order=desc`,
+      );
+      if (!eventsRes.ok) throw new Error('Session not found');
+
       const newestFirstEvents = await eventsRes.json() as SessionEventListResponse;
       const initialEvents = [...newestFirstEvents].reverse();
-      const eventTotal = data.eventCount ?? initialEvents.length;
       const isIntelligenceDeferred = eventTotal > AUTO_INTELLIGENCE_EVENT_LIMIT;
 
       set({
@@ -352,7 +367,40 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   setFilterPreset: (preset) => {
-    set({ filterPreset: preset, eventTypeFilter: new Set<string>() });
+    set({
+      filterPreset: preset,
+      eventTypeFilter: new Set<string>(),
+      presetEvents: null,
+      presetEventsFor: null,
+    });
+    const { activeSessionId } = get();
+    if (!activeSessionId || !preset || preset === 'all') return;
+
+    void (async () => {
+      try {
+        if (preset === 'message:user' || preset === 'message:assistant') {
+          const role = preset === 'message:user' ? 'user' : 'assistant';
+          const res = await apiFetch(
+            `/api/sessions/${activeSessionId}/events?type=message&role=${role}&limit=5000&order=asc`,
+          );
+          if (!res.ok) return;
+          const rows = await res.json() as SessionEventListResponse;
+          set({ presetEvents: rows, presetEventsFor: preset });
+          return;
+        }
+        if (preset === 'conversation') {
+          const res = await apiFetch(
+            `/api/sessions/${activeSessionId}/events?limit=${CURSOR_SESSION_MAX_EVENTS}&order=asc`,
+          );
+          if (!res.ok) return;
+          const rows = (await res.json() as SessionEventListResponse)
+            .filter((e) => e.type === 'message' || e.type === 'thinking');
+          set({ presetEvents: rows, presetEventsFor: preset });
+        }
+      } catch {
+        /* filter falls back to loaded page */
+      }
+    })();
   },
 
   toggleEventType: (type) => {
@@ -495,6 +543,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           eventTotal: Math.max(state.eventTotal, state.events.length + newEvents.length),
         }));
 
+        const { filterPreset } = get();
+        if (filterPreset === 'message:user' || filterPreset === 'message:assistant' || filterPreset === 'conversation') {
+          get().setFilterPreset(filterPreset);
+        }
+
         const { activeSession, lastIntelligenceRefreshAt } = get();
         if (
           activeSession?.status === 'active' &&
@@ -505,6 +558,31 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
     } catch {
       // Silent fail for polling — no UI changes
+    }
+  },
+
+  loadAllEvents: async () => {
+    const { activeSessionId, eventTotal, events } = get();
+    if (!activeSessionId || events.length >= eventTotal) {
+      set({ hasMoreEvents: false });
+      return;
+    }
+    try {
+      set({ isLoadingMoreEvents: true });
+      const res = await apiFetch(
+        `/api/sessions/${activeSessionId}/events?limit=${Math.min(eventTotal, CURSOR_SESSION_MAX_EVENTS)}&order=desc`,
+      );
+      if (!res.ok) throw new Error('Failed to load all events');
+      const newestFirst = await res.json() as SessionEventListResponse;
+      const allEvents = [...newestFirst].reverse();
+      set({
+        events: allEvents,
+        hasMoreEvents: allEvents.length < eventTotal,
+        isLoadingMoreEvents: false,
+      });
+    } catch (err) {
+      console.error('Failed to load all events:', err);
+      set({ isLoadingMoreEvents: false });
     }
   },
 

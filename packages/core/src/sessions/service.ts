@@ -282,8 +282,21 @@ export class SessionService {
 
   deleteSession(id: string): void {
     this.rawExec('DELETE FROM pinned_notes WHERE session_id = ?', [id]);
+    this.deleteLessonsForSession(id);
+    this.rawExec('DELETE FROM session_scores WHERE session_id = ?', [id]);
     this.rawExec('DELETE FROM session_events WHERE session_id = ?', [id]);
     this.rawExec('DELETE FROM agent_sessions WHERE id = ?', [id]);
+  }
+
+  /** Wipe all events for a session (keeps the session row + title). Used by cursor resync. */
+  clearSessionEvents(sessionId: string): number {
+    const raw = this.getRawDb();
+    const beforeRow = raw.prepare('SELECT COUNT(*) as cnt FROM session_events WHERE session_id = ?').get(sessionId) as { cnt: number };
+    const before = beforeRow?.cnt ?? 0;
+    this.rawExec('DELETE FROM pinned_notes WHERE session_id = ?', [sessionId]);
+    this.rawExec('DELETE FROM session_events WHERE session_id = ?', [sessionId]);
+    this.updateSession(sessionId, { stats: createEmptyStats(), status: 'active', endedAt: undefined });
+    return before;
   }
 
   /* ── Events ── */
@@ -333,6 +346,8 @@ export class SessionService {
     sessionId: string,
     options?: {
       type?: SessionEventType;
+      /** Filter message events by meta.role (user | assistant). */
+      messageRole?: 'user' | 'assistant';
       limit?: number;
       offset?: number;
       after?: number;
@@ -346,6 +361,11 @@ export class SessionService {
     if (options?.type) {
       sql += ' AND type = ?';
       params.push(options.type);
+    }
+
+    if (options?.messageRole) {
+      sql += ` AND type = 'message' AND json_extract(meta, '$.role') = ?`;
+      params.push(options.messageRole);
     }
 
     if (options?.after) {

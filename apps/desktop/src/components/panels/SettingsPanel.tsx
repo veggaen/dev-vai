@@ -11,12 +11,12 @@ import { useChatStore } from '../../stores/chatStore.js';
 import { useCursorStore } from '../../stores/cursorStore.js';
 import { useVinextStore, type VinextState } from '../../stores/vinextStore.js';
 import { BuildStatusBadge } from '../BuildStatusBadge.js';
+import { KnowledgeEngineMetrics } from './KnowledgeEngineMetrics.js';
 import { apiFetch } from '../../lib/api.js';
 import { MODE_DESCRIPTIONS } from '../../stores/layoutStore.js';
 import {
   applyThemeById,
   getActiveThemeId,
-  listCustomThemeEntries,
   withThemeTransition,
 } from '../../lib/odysseus-theme.js';
 import type { ProjectHandoffIntentResponse } from '@vai/api-types/project-responses';
@@ -27,30 +27,15 @@ import {
   SettingsField,
   SettingsSelect,
   SettingsSwitch,
-  SettingsShortcutRow,
-  ThemePresetGrid,
   type SettingsTabId,
 } from './settings/SettingsShell.js';
+import { ThemeManager } from './settings/ThemeManager.js';
+import { ShortcutCustomizer } from './settings/ShortcutCustomizer.js';
 
 const LAYOUT_MODES = [
   { id: 'compact' as const, label: 'Compact', hint: 'VS Code — edge-to-edge, minimal chrome' },
   { id: 'open' as const, label: 'Open', hint: 'Floating panels with soft shadows' },
   { id: 'odyssey' as const, label: 'Odyssey', hint: 'Odysseus-style — airy canvas, bubble panels' },
-];
-
-const KEYBOARD_SHORTCUTS: { keys: string; description: string }[] = [
-  { keys: 'Ctrl+K', description: 'Quick switch — fuzzy search conversations' },
-  { keys: 'Ctrl+,', description: 'Open settings' },
-  { keys: 'Ctrl+S', description: 'Cycle sidebar: expanded → rail → hidden' },
-  { keys: 'Ctrl+0', description: 'Focus mode — chat only' },
-  { keys: 'Ctrl+1 … Ctrl+5', description: 'Switch mode (chat, agent, builder, plan, debate)' },
-  { keys: 'Ctrl+B', description: 'Toggle builder / preview panel' },
-  { keys: 'Ctrl+E', description: 'Toggle file explorer' },
-  { keys: 'Ctrl+J', description: 'Toggle debug console' },
-  { keys: 'Ctrl+Shift+F', description: 'Focus chat search in sidebar' },
-  { keys: 'Ctrl+Shift+L', description: 'Open dev logs' },
-  { keys: 'Ctrl+Shift+K', description: 'Open knowledge base' },
-  { keys: 'Ctrl+Shift+M', description: 'Cycle layout: Compact → Open → Odyssey' },
 ];
 
 function loadActiveThemeId(): string {
@@ -125,7 +110,6 @@ export function SettingsPanel() {
   const trustLevel = useVinextStore((state: VinextState) => state.trustLevel);
   const [activeTab, setActiveTab] = useState<SettingsTabId>('appearance');
   const [activeThemeId, setActiveThemeId] = useState(loadActiveThemeId);
-  const [customThemes, setCustomThemes] = useState(() => listCustomThemeEntries());
   const setThemeEditingBaseId = useLayoutStore((state) => state.setThemeEditingBaseId);
   const [editingThemePresetId, setEditingThemePresetIdLocal] = useState<string | null>(null);
   const setEditingThemePresetId = useCallback((id: string | null) => {
@@ -136,16 +120,11 @@ export function SettingsPanel() {
   const [_expandedResults, _setExpandedResults] = useState<Set<string>>(new Set());
   const [_launchingTargetId, setLaunchingTargetId] = useState<string | null>(null);
 
-  const refreshCustomThemes = useCallback(() => {
-    setCustomThemes(listCustomThemeEntries());
-  }, []);
-
   useEffect(() => {
     if (activeTab === 'appearance') {
       setActiveThemeId(getActiveThemeId());
-      refreshCustomThemes();
     }
-  }, [activeTab, refreshCustomThemes]);
+  }, [activeTab]);
 
   useEffect(() => {
     fetchBootstrap();
@@ -372,20 +351,6 @@ export function SettingsPanel() {
     setActiveThemeId(themeId);
   }, []);
 
-  const handleThemeSelect = useCallback((themeId: string) => {
-    setEditingThemePresetId(null);
-    applyThemeId(themeId);
-  }, [applyThemeId, setEditingThemePresetId]);
-
-  const customThemeCards = useMemo(() => {
-    return customThemes.map((theme) => ({
-      id: theme.id,
-      label: theme.label,
-      basePresetId: theme.basePresetId,
-      swatch: [theme.bg, theme.fg, theme.panel, theme.red],
-    }));
-  }, [customThemes]);
-
   return (
     <div className="h-full min-h-0">
     <SettingsShell
@@ -397,27 +362,13 @@ export function SettingsPanel() {
         <>
           <SettingsSection
             title="Theme"
-            description="Five core colors drive the whole UI — same model as Odysseus. Pick a preset or use Light/Dark in the chat header."
+            description="Presets cover the whole shell. Customize any preset, save your own themes, duplicate, or delete when you are done experimenting."
           >
-            <ThemePresetGrid
+            <ThemeManager
               activeId={activeThemeId}
-              onSelect={handleThemeSelect}
-              editingPresetId={editingThemePresetId}
-              onStartEdit={setEditingThemePresetId}
-              onEndEdit={() => {
-                applyThemeId(activeThemeId);
-                setEditingThemePresetId(null);
-              }}
-              onThemeSaved={(themeId) => {
-                refreshCustomThemes();
-                applyThemeId(themeId);
-                toast.success(
-                  themeId.endsWith('-custom') && editingThemePresetId === themeId
-                    ? 'Theme updated'
-                    : 'Custom theme saved',
-                );
-              }}
-              customThemes={customThemeCards}
+              onActiveChange={applyThemeId}
+              editingId={editingThemePresetId}
+              onEditingChange={setEditingThemePresetId}
             />
           </SettingsSection>
 
@@ -717,18 +668,16 @@ export function SettingsPanel() {
               </div>
             </SettingsCard>
           </SettingsSection>
+
+          <SettingsSection title="Memory health" description="Ingest and retrieval diagnostics for the knowledge engine.">
+            <SettingsCard>
+              <KnowledgeEngineMetrics />
+            </SettingsCard>
+          </SettingsSection>
         </>
       )}
 
-      {activeTab === 'shortcuts' && (
-        <SettingsSection title="Keyboard shortcuts" description="Global shortcuts work outside text fields unless noted.">
-          <SettingsCard className="overflow-hidden p-0">
-            {KEYBOARD_SHORTCUTS.map((row) => (
-              <SettingsShortcutRow key={row.keys} keys={row.keys} description={row.description} />
-            ))}
-          </SettingsCard>
-        </SettingsSection>
-      )}
+      {activeTab === 'shortcuts' && <ShortcutCustomizer />}
 
       {activeTab === 'account' && showOwnerFeatures && isOwner && (
         <SettingsSection title="Owner view" description="Switch between owner tools and the standard user experience.">

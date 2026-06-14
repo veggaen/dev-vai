@@ -78,6 +78,7 @@ function createFramedMessageHandler(
         source: 'direct-local',
       });
 
+      let sawDone = false;
       try {
         // Full real path — same as user chat in the desktop. Exercises 100% of intelligence layers (normalization, turn-class, compounds, context, risk, verify, vai-chat-quality-direction etc).
         for await (const ch of chatService.sendMessage(convId, content, undefined, undefined, true)) {
@@ -87,6 +88,7 @@ function createFramedMessageHandler(
           } else if (c.type === 'reasoning_delta' && c.reasoningDelta) {
             sendFramed(socket, { type: 'delta', textDelta: c.reasoningDelta });
           } else if (c.type === 'done') {
+            sawDone = true;
             sendFramed(socket, { type: 'done', usage: c.usage, durationMs: c.durationMs, thinking: c.thinking });
             // Also emit thinking event for clients that expect separate 'thinking' (compat with old direct/WS listeners)
             if (c.thinking) {
@@ -105,6 +107,13 @@ function createFramedMessageHandler(
         }
       } catch (e: any) {
         sendFramed(socket, { type: 'error', error: e?.message || String(e) });
+      } finally {
+        // Genius loop robustness for self-improvement / council turns (which may stream long or have complex council progress):
+        // Always emit a terminal 'done' frame so clients (bridge, agent-speak, direct) don't timeout waiting.
+        // This fixes the [timeout] we see on meta/self-review prompts that trigger council.
+        if (!sawDone) {
+          sendFramed(socket, { type: 'done', note: 'guaranteed terminal for self-improvement council turn (genius loop)', partial: true });
+        }
       }
     }
   };

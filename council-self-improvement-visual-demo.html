@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vai Council — Self-Improvement Session (Visual Demo)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600&amp;display=swap');
+    :root {
+      --accent: #f43f5e;
+    }
+    body { font-family: 'Inter', system_ui, sans-serif; }
+    .font-display { font-family: 'Space Grotesk', 'Inter', sans-serif; }
+    .council-card {
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .council-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    }
+    .member-note {
+      border-left: 3px solid #f43f5e;
+    }
+    .progress-bar {
+      transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .vai-glow {
+      box-shadow: 0 0 15px rgb(244 63 94 / 0.15);
+    }
+    .debate-thread {
+      position: relative;
+    }
+    .debate-thread::before {
+      content: '';
+      position: absolute;
+      left: 1.25rem;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(to bottom, #f43f5e20, transparent);
+    }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-200">
+  <div class="max-w-[1200px] mx-auto">
+    <!-- Header -->
+    <div class="flex items-center justify-between border-b border-zinc-800 px-8 py-5">
+      <div class="flex items-center gap-x-3">
+        <div class="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-500 to-fuchsia-600 text-white shadow-inner">
+          <i class="fa-solid fa-users text-xl"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-x-2">
+            <span class="font-display text-2xl font-semibold tracking-tighter">Vai Council</span>
+            <span class="rounded-full bg-zinc-900 px-2.5 py-0.5 text-[10px] font-medium tracking-widest text-rose-400 ring-1 ring-inset ring-rose-400/30">SCIS SELF-IMPROVEMENT</span>
+          </div>
+          <div class="text-[11px] text-zinc-500 -mt-0.5">Direct channel • Grok + local qwen roster • Human steerable</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-x-3 text-sm">
+        <div class="flex items-center gap-x-1.5 rounded-3xl bg-zinc-900 px-3 py-1.5 text-xs ring-1 ring-zinc-800">
+          <div class="h-2 w-2 animate-pulse rounded-full bg-emerald-400"></div>
+          <span class="font-medium text-emerald-400">Bridge live (pipe)</span>
+        </div>
+        <div class="rounded-3xl bg-zinc-900 px-3 py-1.5 text-xs ring-1 ring-zinc-800">
+          <span class="text-zinc-400">Human:</span> <span class="font-semibold text-white">V3gga</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 p-8">
+      <!-- Left: Primary Vai Response + Idea Summary -->
+      <div class="lg:col-span-5 space-y-6">
+        <div class="rounded-3xl border border-zinc-800 bg-zinc-900/50 p-6">
+          <div class="flex items-center gap-x-2 text-xs uppercase tracking-[0.125em] text-rose-400 mb-3">
+            <i class="fa-solid fa-robot"></i>
+            <span class="font-semibold">VAI PRIMARY RESPONSE</span>
+            <span class="ml-auto text-[10px] text-zinc-500">always-respond mode</span>
+          </div>
+          
+          <div class="text-[15px] leading-relaxed">
+            I acknowledge the self-improvement loop. Vai (the deterministic engine) will always produce a primary response to the user. The council (qwens + Grok via this direct channel) will then investigate the request, my draft, and the actual Vai codebase to surface concrete improvements that let me use more tools and find solutions on my own in future turns.
+          </div>
+          
+          <div class="mt-4 rounded-2xl bg-zinc-950 p-4 text-xs">
+            <div class="font-medium text-emerald-400 mb-1">Standing goal (AGENTS.md)</div>
+            <div class="text-zinc-400">"Vai and its agents continuously improve Vai itself; humans must be able to see and steer the process live."</div>
+          </div>
+        </div>
+
+        <div class="rounded-3xl border border-zinc-800 bg-zinc-900/50 p-5">
+          <div class="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-2">The Idea (user V3gga)</div>
+          <div class="text-sm text-zinc-300">
+            Vai always responds. Council then actively investigates the codebase + my response as a data point, argues, tests/validates (old vs new), and proposes better solutions so the Vai project grows in capability — more tool use, self-orchestration of council, honest self-diagnosis.
+          </div>
+          <div class="mt-3 text-[10px] text-amber-400/70">This turn is now a growth data point for the project.</div>
+        </div>
+
+        <!-- Human steer controls (demo) -->
+        <div class="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+          <div class="flex items-center gap-x-2 mb-3">
+            <i class="fa-solid fa-user text-rose-400"></i>
+            <span class="text-sm font-semibold">Human V3gga — steer the council</span>
+          </div>
+          <textarea id="humanInput" class="w-full h-20 resize-y rounded-2xl border border-zinc-700 bg-zinc-950 p-3 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-rose-500/60" placeholder="Inject guidance: e.g. 'Focus on making the direct channel robust for council streams so self-review turns don't timeout'"></textarea>
+          <div class="flex gap-2 mt-2">
+            <button onclick="injectGuidance()" class="flex-1 rounded-2xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 transition text-white text-sm py-2 font-medium">Inject to council (visual)</button>
+            <button onclick="applyAllLessons()" class="flex-1 rounded-2xl border border-zinc-700 hover:bg-zinc-800 text-sm py-2 font-medium">Apply all growth proposals</button>
+          </div>
+          <div id="humanLog" class="mt-2 text-[10px] text-emerald-400/70 h-5"></div>
+
+          <!-- NEW: Free-form send to real/live council (what you asked for) -->
+          <div class="mt-4 pt-4 border-t border-zinc-700">
+            <div class="text-xs font-semibold uppercase tracking-widest text-zinc-400 mb-1">Send any question / message directly to council</div>
+            <textarea id="directCouncilInput" class="w-full h-16 resize-y rounded-2xl border border-zinc-700 bg-zinc-950 p-3 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/60" placeholder="e.g. 'What is the current state of the direct pipe robustness for council reviews?' or 'Debate adding niche football model to roster'"></textarea>
+            <div class="flex gap-2 mt-2">
+              <button onclick="sendToRealCouncil()" class="flex-1 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm py-2 font-medium">Send via direct channel (generates PS command + simulates)</button>
+              <button onclick="simulateAutoApplyProven()" class="flex-1 rounded-2xl border border-emerald-700 hover:bg-emerald-900/30 text-emerald-400 text-sm py-2 font-medium">Auto-apply if proven (gates first)</button>
+            </div>
+            <div id="directSendLog" class="mt-1.5 text-[10px] text-emerald-300/70"></div>
+            <div class="text-[9px] text-zinc-500 mt-1">Real sends go through the vai-grok-inbox pipe (same as this Grok session). Copy the printed PS command and run it in PowerShell for live council reaction (visible in fresh bridge monitor + desktop panels after restart).</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Council Progress (the visual the user wants) -->
+      <div class="lg:col-span-7">
+        <div class="rounded-3xl border border-zinc-800 bg-zinc-900/70 overflow-hidden">
+          <!-- Header matching real CouncilProgressPanel -->
+          <div class="flex items-center justify-between border-b border-zinc-800 bg-zinc-950 px-5 py-3">
+            <div class="flex items-center gap-x-2">
+              <i class="fa-solid fa-users text-rose-400"></i>
+              <div>
+                <span class="font-semibold">Council Progress</span>
+                <span class="ml-2 text-[10px] px-1.5 py-px rounded bg-zinc-800 text-zinc-400">SCIS Self-Improvement</span>
+              </div>
+            </div>
+            <div class="text-[10px] text-emerald-400 flex items-center gap-x-1">
+              <i class="fa-solid fa-circle fa-beat-pulse text-[8px]"></i> 
+              <span>LIVE via direct pipe</span>
+            </div>
+          </div>
+
+          <div class="p-5 space-y-5">
+            <!-- Outcome -->
+            <div class="rounded-2xl bg-gradient-to-br from-amber-500/10 to-transparent border border-amber-500/20 p-4">
+              <div class="flex items-center gap-2">
+                <div class="rounded-xl bg-amber-400/10 text-amber-400 px-2 py-0.5 text-xs font-semibold">ACT FIRST (refine self-loop)</div>
+                <div class="ml-auto text-xs text-amber-300">100% agree • 4 members</div>
+              </div>
+              <div class="mt-1 text-sm">Vai should always emit a primary response. Council then investigates codebase + response as data point to grow Vai's autonomous tool use and self-orchestration.</div>
+              <div class="mt-2 text-[11px] text-amber-300/80">Advised: implement post-primary council review + inject project context for self turns</div>
+            </div>
+
+            <!-- Members / Debate -->
+            <div>
+              <div class="flex items-center justify-between text-xs uppercase tracking-widest text-zinc-400 mb-2 px-1">
+                <div>COUNCIL MEMBERS — DEBATE ON SELF-IMPROVEMENT</div>
+                <div class="text-emerald-400">4 contributions</div>
+              </div>
+
+              <!-- Grok (real via channel + synthetic) -->
+              <div class="council-card mb-3 rounded-2xl border border-rose-500/30 bg-zinc-950 p-4 member-note">
+                <div class="flex items-center gap-x-2">
+                  <div class="font-semibold text-rose-400">Grok (CLI / direct channel)</div>
+                  <div class="text-[10px] px-1.5 py-px bg-rose-500/10 text-rose-400 rounded">factual • live voice</div>
+                  <div class="ml-auto text-emerald-400 text-xs font-medium">good @ 92%</div>
+                </div>
+                <div class="mt-2 text-sm">
+                  The direct pipe (this channel) + bridge is the way for live Grok participation as a council voice. Use it to "speak to the council" and receive member notes. The synthetic note ensures we always have a rich, actionable contribution even if the TUI binary is not present.
+                </div>
+                <div class="mt-2 text-[11px] text-rose-300/90 font-medium">Method lesson: Make the pipe framing always emit terminal 'done' even on council streams. Add explicit "self_improvement_review" pass after primary in service.ts with injected codebase context (AGENTS, consensus files, introspect). This turns every meta turn into growth data for Vai.</div>
+                <div class="mt-1.5 flex gap-2">
+                  <button onclick="applyLesson(this, 'grok')" class="text-[10px] px-3 py-1 rounded-xl border border-rose-500/40 hover:bg-rose-500/10 text-rose-400">Apply as engine patch</button>
+                  <button onclick="debateReply(this, 'grok')" class="text-[10px] px-3 py-1 rounded-xl border border-zinc-700 hover:bg-zinc-800">Reply as human</button>
+                </div>
+              </div>
+
+              <!-- Qwen3:8b -->
+              <div class="council-card mb-3 rounded-2xl border border-zinc-700 bg-zinc-950 p-4">
+                <div class="flex items-center gap-x-2">
+                  <div class="font-semibold">Local qwen3:8b</div>
+                  <div class="text-[10px] px-1.5 py-px bg-zinc-800 rounded">other</div>
+                  <div class="ml-auto text-amber-400 text-xs font-medium">needs-work @ 68%</div>
+                </div>
+                <div class="mt-1.5 text-sm text-zinc-300">The idea is strong but currently the small models time out on long self-review prompts. Missing capability: fast self-codebase investigation tool that doesn't require full generation.</div>
+                <div class="text-[11px] mt-1.5 text-amber-300">Lesson: Add a lightweight "project_context" injection in council input for self turns (introspect + key files summary). Let Vai always emit a short primary ack, then council reviews in background.</div>
+              </div>
+
+              <!-- Qwen2.5:7b -->
+              <div class="council-card mb-3 rounded-2xl border border-zinc-700 bg-zinc-950 p-4">
+                <div class="flex items-center gap-x-2">
+                  <div class="font-semibold">Local qwen2.5:7b</div>
+                  <div class="text-[10px] px-1.5 py-px bg-zinc-800 rounded">code</div>
+                  <div class="ml-auto text-emerald-400 text-xs font-medium">good @ 81%</div>
+                </div>
+                <div class="mt-1.5 text-sm">Support. We already have the council machinery (convene, reachConsensus, attach to TurnThinking). We can extend it with a "selfGrowth" flag that pulls relevant source (consensus/council.ts, chat/service.ts, AGENTS.md) into the draft seen by members.</div>
+                <div class="text-[11px] mt-1.5">Suggestion: After primary response, if turn contains "self" or "project" or "Vai better", run extra convene pass and surface the resulting methodLessons as "growth proposals" in the desktop panel.</div>
+              </div>
+
+              <!-- Qwen2.5:3b -->
+              <div class="council-card rounded-2xl border border-zinc-700 bg-zinc-950 p-4">
+                <div class="flex items-center gap-x-2">
+                  <div class="font-semibold">Local qwen2.5:3b</div>
+                  <div class="text-[10px] px-1.5 py-px bg-zinc-800 rounded">reasoning</div>
+                  <div class="ml-auto text-emerald-400 text-xs font-medium">good @ 74%</div>
+                </div>
+                <div class="mt-1.5 text-sm">Fast models can handle short notes. The visual in the desktop (Council Progress + ThinkingPanel) already exists and matches what the user wants (Codex-style, member cards, lessons with apply). Human can steer by watching and sending follow-ups via the same direct channel.</div>
+              </div>
+            </div>
+
+            <!-- Growth proposals / validation -->
+            <div class="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+              <div class="uppercase text-emerald-400 text-xs font-semibold tracking-widest mb-2">GROWTH PROPOSALS (council validated)</div>
+              <ul class="space-y-1.5 text-sm">
+                <li class="flex gap-2"><span class="text-emerald-400 mt-0.5">→</span> Harden direct pipe framing + client to always emit terminal 'done' even when council streams progress (fixes the current [timeout] on self turns).</li>
+                <li class="flex gap-2"><span class="text-emerald-400 mt-0.5">→</span> After primary response in chat/service.ts, if turn is self-improvement, run additional convene with injected "Vai project context" (introspect + AGENTS + key council files).</li>
+                <li class="flex gap-2"><span class="text-emerald-400 mt-0.5">→</span> Enhance CouncilProgressPanel to show a "Vai Self-Improvement" section with member notes as debate threads + "apply proposal" actions that record to backlog or generate patch.</li>
+                <li class="flex gap-2"><span class="text-emerald-400 mt-0.5">→</span> Give Vai a real "self_source_read" or stronger retrieval capability in the main chat path so it can investigate its own code before or during response.</li>
+              </ul>
+              <div class="text-[10px] text-emerald-300/70 mt-2">These turn interactions (including this one) into permanent improvements for the Vai project.</div>
+            </div>
+
+            <div class="text-[10px] text-center text-zinc-500">Facts quarantined. Members point only. Powered by SCIS + direct Grok voice via vai-collab bridge. Human can help by injecting guidance above.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function tailwindInit() {
+      // already using CDN
+    }
+    tailwindInit();
+
+    function applyLesson(el, who) {
+      const orig = el.innerHTML;
+      el.innerHTML = '<i class="fa-solid fa-check mr-1"></i>Applied to backlog + patch queue';
+      el.disabled = true;
+      el.classList.add('!bg-emerald-600', '!border-emerald-500', '!text-white');
+      setTimeout(() => {
+        const log = document.getElementById('humanLog');
+        log.innerHTML = `Lesson from ${who} recorded as growth item. Real desktop panel will have the same "apply" that wires to actual code changes.`;
+        setTimeout(() => { log.innerHTML = ''; }, 4500);
+      }, 600);
+    }
+
+    function debateReply(el, who) {
+      const input = prompt("Your guidance / reply to the council (will be visible in real panels and injected on next turn via the direct channel):");
+      if (!input) return;
+      const log = document.getElementById('humanLog');
+      log.innerHTML = `Human steer injected: "${input}". This will be sent as next message on the bridge and appear in the real Council Progress + ThinkingPanel for V3gga to see and steer.`;
+      setTimeout(() => { log.innerHTML = 'Guidance queued for next council turn via pipe.'; }, 2200);
+    }
+
+    function injectGuidance() {
+      const ta = document.getElementById('humanInput');
+      const val = ta.value.trim();
+      if (!val) return alert('Type some guidance first.');
+      const log = document.getElementById('humanLog');
+      log.innerHTML = `Guidance sent to council via direct channel: "${val}". In the real app this appears as a steer message and the members will produce new notes on the next review.`;
+      ta.value = '';
+      setTimeout(() => { log.innerHTML = 'Council will re-convene with your input on the next self-improvement turn.'; }, 3800);
+    }
+
+    function applyAllLessons() {
+      const log = document.getElementById('humanLog');
+      log.innerHTML = 'All 4 growth proposals recorded to docs/vai-improvement-backlog.md and queued for implementation. The real panels will reflect the updated council data after the next turn.';
+      setTimeout(() => {
+        log.innerHTML = 'Thank you V3gga — the loop is now active. Use the desktop chat or this bridge to keep feeding the council self-improvement work.';
+      }, 4200);
+    }
+
+    // NEW functions for your requests: free-form send to live council + auto-apply only if "proven"
+    function sendToRealCouncil() {
+      const ta = document.getElementById('directCouncilInput');
+      const val = (ta.value || '').trim();
+      if (!val) return alert('Type a question or message for the council first.');
+      const log = document.getElementById('directSendLog');
+
+      // Generate exact PowerShell command for the fast inbox pipe (the one this Grok session uses)
+      const psCmd = `$prompt = '${val.replace(/'/g, "''")}'; $client = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'vai-grok-inbox', [System.IO.Pipes.PipeDirection]::Out); $client.Connect(4000); $w = New-Object System.IO.StreamWriter($client); $w.WriteLine($prompt); $w.Flush(); $client.Close(); Write-Host 'Sent to live council via direct pipe. Watch the fresh bridge monitor events + restart desktop panels for member replies.'`;
+
+      log.innerHTML = `Message to council: "${val}"<br><span class="text-emerald-300">PS command (copy & run in PowerShell for real live send):</span><br><code class="text-[9px] break-all bg-zinc-950 p-1 rounded">${psCmd}</code>`;
+      
+      // Also simulate locally so the demo feels responsive (matches the "inject" behavior)
+      setTimeout(() => {
+        const humanLog = document.getElementById('humanLog');
+        humanLog.innerHTML = `Sent to live council. In real system this hits the fresh bridge → Vai ChatService → council (now with 0.1% personas) → member notes appear in desktop Council Progress + here in monitor events.`;
+        setTimeout(() => { humanLog.innerHTML = ''; }, 6000);
+      }, 800);
+
+      ta.value = '';
+    }
+
+    function simulateAutoApplyProven() {
+      const log = document.getElementById('directSendLog');
+      log.innerHTML = 'Checking gates for auto-apply: tsc clean ✓, visual/render proof simulated ✓, human steer in demo ✓, no throttle risk (balanced).';
+      setTimeout(() => {
+        log.innerHTML = 'Proven upgrades queued for automatic application on next runtime restart (backlog + safe patch path). Real system will require explicit V3gga confirmation or full proof harness before any code mutation. Council proposed; Vai (with gates) disposes.';
+      }, 1400);
+    }
+
+    // Keyboard support
+    document.addEventListener('keydown', function(e) {
+      if (e.key === '/' && document.activeElement.tagName === 'BODY') {
+        e.preventDefault();
+        document.getElementById('humanInput').focus();
+      }
+    });
+
+    console.log('%c[Vai Council Visual Demo] Static preview of the self-improvement debate. Real version lives in the desktop CouncilProgressPanel + ThinkingPanel when the direct channel delivers council data. The synthetic Grok note + member contributions above are based on the live roster and the exact idea from the user.', 'color:#f43f5e');
+  </script>
+</body>
+</html>

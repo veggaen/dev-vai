@@ -222,7 +222,7 @@ async function fetchSandboxStatus(projectId: string, apiBase: string): Promise<{
     const res = await fetch(`${apiBase}/api/sandbox/${projectId}`, {
       signal: ctrl.signal,
       credentials: 'include',
-      headers: buildApiHeaders(),
+      headers: buildApiHeaders(undefined, `/api/sandbox/${projectId}`),
     });
     clearTimeout(timer);
     if (!res.ok) return { alive: true, stderr: [] };

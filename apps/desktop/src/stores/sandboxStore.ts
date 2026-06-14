@@ -28,6 +28,14 @@ export interface BuildActivityItem {
   at: number;
 }
 
+/** True per-file diff stats from a recorded revision (server-computed). */
+export interface SandboxFileDiff {
+  path: string;
+  changeType: 'create' | 'update' | 'delete';
+  added: number;
+  removed: number;
+}
+
 const MAX_BUILD_ACTIVITY = 120;
 const MAX_CLIENT_LOG_ENTRIES = 500;
 
@@ -77,6 +85,10 @@ interface SandboxState {
   logs: string[];
   /** File writes and similar steps shown in the builder chat sidebar */
   buildActivity: BuildActivityItem[];
+  /** Most recent write revision id — lets the chat fetch its diff + offer revert. */
+  lastRevisionId: string | null;
+  /** Per-file diff stats for the latest revision (true +added/−removed). */
+  lastDiff: SandboxFileDiff[];
   error: string | null;
   templates: SandboxTemplateInfo[];
 
@@ -99,10 +111,14 @@ interface SandboxState {
   cancelDeploy: () => void;
   reset: () => void;
   attachProject: (sandboxProjectId: string) => Promise<void>;
-  pollDesktopHandoff: () => Promise<boolean>;
+  pollDesktopHandoff: (signal?: AbortSignal) => Promise<boolean>;
   markPreviewLoading: (port: number | null) => void;
   markPreviewReady: (port: number | null) => void;
   clearBuildActivity: () => void;
+  /** Fetch true per-file +added/−removed for a revision (defaults to the last write). */
+  fetchRevisionDiff: (revisionId?: string) => Promise<SandboxFileDiff[]>;
+  /** Revert a revision to its pre-write content (the FileChangesBar "Discard"). */
+  revertRevision: (revisionId?: string) => Promise<boolean>;
 
   /** Full pipeline: create → write files → install → start */
   scaffold: (name: string, files: SandboxFile[]) => Promise<void>;
@@ -163,10 +179,12 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
   files: [],
   logs: [],
   buildActivity: [],
+  lastRevisionId: null,
+  lastDiff: [],
   error: null,
   templates: [],
 
-  clearBuildActivity: () => set({ buildActivity: [] }),
+  clearBuildActivity: () => set({ buildActivity: [], lastRevisionId: null, lastDiff: [] }),
 
   createProject: async (name: string) => {
     set({ status: 'creating', error: null, buildActivity: [] });
@@ -199,11 +217,12 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
         const payload = await res.json().catch(() => null) as { error?: string } | null;
         throw new Error(payload?.error ?? 'Unable to write files');
       }
-      const data = await res.json() as { version?: number };
+      const data = await res.json() as { version?: number; revisionId?: string | null };
       await get().fetchFiles();
       const now = Date.now();
       set((state) => ({
         projectVersion: data.version ?? state.projectVersion,
+        lastRevisionId: data.revisionId ?? state.lastRevisionId,
         buildActivity: [
           ...state.buildActivity,
           ...files.map((f, i) => ({
@@ -214,8 +233,50 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
           })),
         ].slice(-MAX_BUILD_ACTIVITY),
       }));
+      // Fetch true diff stats for this write so the FileChangesBar shows real +/−.
+      if (data.revisionId) {
+        void get().fetchRevisionDiff(data.revisionId);
+      }
     } catch (err) {
       set({ status: 'failed', error: (err as Error).message });
+    }
+  },
+
+  fetchRevisionDiff: async (revisionId?: string) => {
+    const { projectId, lastRevisionId } = get();
+    const id = revisionId ?? lastRevisionId;
+    if (!projectId || !id) return [];
+    try {
+      const res = await apiFetch(`/api/sandbox/${projectId}/revisions/${id}/diff`);
+      if (!res.ok) return [];
+      const data = await res.json() as { files?: SandboxFileDiff[] };
+      const diff = data.files ?? [];
+      set({ lastDiff: diff });
+      return diff;
+    } catch {
+      return [];
+    }
+  },
+
+  revertRevision: async (revisionId?: string) => {
+    const { projectId, lastRevisionId } = get();
+    const id = revisionId ?? lastRevisionId;
+    if (!projectId || !id) return false;
+    try {
+      const res = await apiFetch(`/api/sandbox/${projectId}/revisions/${id}/revert`, { method: 'POST' });
+      if (!res.ok) return false;
+      const data = await res.json() as { version?: number };
+      await get().fetchFiles();
+      set((state) => ({
+        projectVersion: data.version ?? state.projectVersion,
+        // The reverted write is undone — clear its activity + diff from the bar.
+        buildActivity: [],
+        lastRevisionId: null,
+        lastDiff: [],
+      }));
+      return true;
+    } catch {
+      return false;
     }
   },
 
@@ -375,8 +436,15 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
     // Last attach wins: when two attaches race (fast conversation switches),
     // a stale response must never overwrite the newer project binding.
     const token = ++attachProjectToken;
+    const switchingProject = get().projectId !== null && get().projectId !== sandboxProjectId;
     set((state) => ({
       ...state,
+      // Switching to a DIFFERENT project: immediately drop the previous project's
+      // view state so the old chat's files/preview/diff never flash during the
+      // async fetch below. Re-attaching the same project keeps its files in place.
+      ...(switchingProject
+        ? { projectId: null, files: [], devPort: null, previewReady: false, lastPreviewPort: null, lastRevisionId: null, lastDiff: [], status: 'idle' as SandboxStatus }
+        : {}),
       buildActivity: [],
       error: null,
     }));
@@ -427,11 +495,12 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
     }
   },
 
-  pollDesktopHandoff: async () => {
+  pollDesktopHandoff: async (signal?: AbortSignal) => {
     const res = await apiFetch('/api/projects/handoff/poll-consume', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ target: 'desktop' }),
+      signal,
     });
 
     if (res.status === 204) {

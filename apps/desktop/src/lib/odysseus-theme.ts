@@ -494,6 +494,46 @@ export function isStoredCustomThemeId(themeId: string): boolean {
   return themeId in loadCustomThemes();
 }
 
+/** Remove a saved custom theme. Falls back to its base preset if it was active. */
+export function deleteCustomTheme(themeId: string): boolean {
+  const all = loadCustomThemes();
+  const existing = all[themeId];
+  if (!existing) return false;
+
+  delete all[themeId];
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(VAI_CUSTOM_THEMES_KEY, JSON.stringify(all));
+    if (getActiveThemeId() === themeId) {
+      const base = existing.basePresetId;
+      applyThemeById(BUILTIN_THEME_IDS.has(base) ? base : 'dark');
+    }
+  }
+  return true;
+}
+
+/** Duplicate a custom theme under a new storage id. */
+export function duplicateCustomTheme(themeId: string, label?: string): string | null {
+  const all = loadCustomThemes();
+  const source = all[themeId];
+  if (!source) return null;
+
+  let index = 2;
+  let newId = `${themeId}-copy`;
+  while (all[newId]) {
+    newId = `${themeId}-copy-${index++}`;
+  }
+
+  all[newId] = {
+    ...pickOdysseusCoreColors(source),
+    label: label?.trim() || `${source.label} copy`,
+    basePresetId: source.basePresetId,
+  };
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(VAI_CUSTOM_THEMES_KEY, JSON.stringify(all));
+  }
+  return newId;
+}
+
 export function saveCustomTheme(name: string, colors: StoredCustomTheme | OdysseusCoreColors): void {
   const all = loadCustomThemes();
   const basePresetId = 'basePresetId' in colors && colors.basePresetId

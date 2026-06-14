@@ -1,4 +1,4 @@
-import { isProductEngineeringPlanningPrompt } from '@vai/core/browser';
+import { isProductEngineeringPlanningPrompt, isExplicitBuildExecutionRequest } from '@vai/core';
 import { detectEditIntent } from './intent-detector.js';
 
 export type AutoSandboxMode = 'chat' | 'agent' | 'builder' | 'plan' | 'debate';
@@ -97,6 +97,8 @@ export function resolveSendTimeWorkIntent(input: ResolveSendTimeWorkIntentInput)
     };
   }
 
+  const agentNewBuildRequest = mode === 'agent'
+    && isExplicitBuildExecutionRequest(userPrompt);
   const builderNewBuildRequest = mode === 'builder'
     && NEW_BUILD_REQUEST.test(userPrompt)
     && EXPLICIT_BUILD_TARGET.test(userPrompt);
@@ -109,6 +111,7 @@ export function resolveSendTimeWorkIntent(input: ResolveSendTimeWorkIntentInput)
 
   const shouldPrimeBuilder = sandboxIntent.explicitStarterRequest
     || builderNewBuildRequest
+    || agentNewBuildRequest
     || sandboxIntent.explicitChatBuildRequest
     || sandboxIntent.explicitChatEditRequest;
   const stickyBuilderEdit = mode === 'builder'

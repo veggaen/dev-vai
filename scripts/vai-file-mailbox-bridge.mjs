@@ -110,6 +110,8 @@ function ensureVaiConnection() {
       connected = false;
     });
     vaiSocket.on('close', () => { vaiSocket = null; connected = false; });
+    // Prevent listener leak on long-lived persistent socket after many council/self prompts (root cause of repeated len=9 + MaxListenersExceededWarning)
+    vaiSocket.setMaxListeners(30);
   }
   return vaiSocket;
 }
@@ -213,7 +215,8 @@ function sendToVai(prompt) {
     sock._pendingHandler = pendingHandler;
 
     // On error during the send (e.g. pipe not connected), immediately fallback to in-process instead of waiting for timeout.
-    sock.on('error', (e) => {
+    // Use .once() (not .on) + setMaxListeners on connect to prevent accumulation/leak after repeated council/self prompts (the exact cause of persistent "Response ready (len=9)" + MaxListenersExceededWarning).
+    sock.once('error', (e) => {
       if (!settled) {
         settled = true;
         sock._pendingHandler = null;
@@ -248,11 +251,39 @@ function checkAndProcess() {
           const outEntry = { ts: new Date().toISOString(), prompt: content, response: res.text, meta: res.meta };
           fs.appendFileSync(OUT_FILE, JSON.stringify(outEntry) + '\n');
           logToDialogue({ type: 'response', prompt: content, response: res.text, meta: { ...res.meta, via: 'file-mailbox-bridge' } });
-          console.log(`[vai-mailbox-bridge] Response ready (len=${res.text.length})`);
-          // Clean, monitor-friendly output so Grok TUI sees it as native events without extra "node client" spawns
-          console.log(`\n**Vai (via persistent mailbox bridge, pipe-framed):**\n${res.text}\n`);
+
+          const textLen = (res.text || '').length;
+          const isShortOrTimeout = textLen <= 12 || res.meta?.timeout || res.text === '[timeout]';
+          const hasRichCouncil = !!(res.meta?.thinking && (res.meta.thinking.council || res.meta.thinking.methodLessons || (res.meta.thinking.members && res.meta.thinking.members.length)));
+          const logPrefix = isShortOrTimeout && hasRichCouncil
+            ? `[vai-mailbox-bridge] Response ready (primary text len=${textLen} — expected for fastSelf/ack self-growth; RICH council debate + proposals captured in meta.thinking for panels)`
+            : `[vai-mailbox-bridge] Response ready (len=${textLen})`;
+
+          console.log(logPrefix);
+          // Always surface the primary text (may be short ack for self)
+          console.log(`\n**Vai (via persistent mailbox bridge, pipe-framed):**\n${res.text || '[short primary + council in meta]'}\n`);
+
           if (res.meta?.thinking) {
-            console.log(`[strategy] ${res.meta.thinking.strategy || res.meta.thinking.modelTag || ''}`);
+            const t = res.meta.thinking;
+            console.log(`[strategy] ${t.strategy || t.modelTag || ''}`);
+            // Council upgrade for visibility (all participants + self loop): when council data present, print scannable member contributions + lessons
+            // so the monitor stream here shows the "live council chats" / debate even when the text response is a fast primary ack.
+            if (t.council || t.methodLessons || t.members) {
+              const c = t.council || t;
+              console.log('[council] outcome:', c.outcome || '—', 'agreement:', c.agreement != null ? Math.round(c.agreement*100)+'%' : '—');
+              if (Array.isArray(c.members) && c.members.length) {
+                console.log('[council members]');
+                c.members.forEach(m => {
+                  const note = (m.note || m.methodLesson || '').slice(0, 120);
+                  console.log(`  - ${m.name} [${m.topic}] ${m.verdict || ''} @${Math.round((m.confidence||0)*100)}% → ${m.action || ''} :: ${note}`);
+                });
+              }
+              if (Array.isArray(c.methodLessons) && c.methodLessons.length) {
+                console.log('[council method lessons / growth proposals]');
+                c.methodLessons.slice(0, 5).forEach((l, i) => console.log(`  ${i+1}. ${l}`));
+              }
+              if (c.realIntent) console.log('[council realIntent]', c.realIntent);
+            }
           }
         }).catch(e => {
           const errEntry = { ts: new Date().toISOString(), error: e.message };
@@ -293,10 +324,37 @@ const inboxServer = net.createServer((socket) => {
           const outEntry = { ts: new Date().toISOString(), prompt: line, response: res.text, meta: res.meta };
           fs.appendFileSync(OUT_FILE, JSON.stringify(outEntry) + '\n');
           logToDialogue({ type: 'response', prompt: line, response: res.text, meta: { ...res.meta, via: 'pipe-inbox' } });
-          console.log(`[vai-mailbox-bridge] Response ready (len=${res.text.length})`);
-          console.log(`\n**Vai (via persistent mailbox bridge, pipe-framed):**\n${res.text}\n`);
+
+          const textLen = (res.text || '').length;
+          const isShortOrTimeout = textLen <= 12 || res.meta?.timeout || res.text === '[timeout]';
+          const hasRichCouncil = !!(res.meta?.thinking && (res.meta.thinking.council || res.meta.thinking.methodLessons || (res.meta.thinking.members && res.meta.thinking.members.length)));
+          const logPrefix = isShortOrTimeout && hasRichCouncil
+            ? `[vai-mailbox-bridge] Response ready (primary text len=${textLen} — expected for fastSelf/ack self-growth; RICH council debate + proposals captured in meta.thinking for panels)`
+            : `[vai-mailbox-bridge] Response ready (len=${textLen})`;
+
+          console.log(logPrefix);
+          console.log(`\n**Vai (via persistent mailbox bridge, pipe-framed):**\n${res.text || '[short primary + council in meta]'}\n`);
+
           if (res.meta?.thinking) {
-            console.log(`[strategy] ${res.meta.thinking.strategy || res.meta.thinking.modelTag || ''}`);
+            const t = res.meta.thinking;
+            console.log(`[strategy] ${t.strategy || t.modelTag || ''}`);
+            // Same council visibility upgrade for pipe-inbox sends (the fast path we use for 0.1% self debate)
+            if (t.council || t.methodLessons || t.members) {
+              const c = t.council || t;
+              console.log('[council] outcome:', c.outcome || '—', 'agreement:', c.agreement != null ? Math.round(c.agreement*100)+'%' : '—');
+              if (Array.isArray(c.members) && c.members.length) {
+                console.log('[council members]');
+                c.members.forEach(m => {
+                  const note = (m.note || m.methodLesson || '').slice(0, 120);
+                  console.log(`  - ${m.name} [${m.topic}] ${m.verdict || ''} @${Math.round((m.confidence||0)*100)}% → ${m.action || ''} :: ${note}`);
+                });
+              }
+              if (Array.isArray(c.methodLessons) && c.methodLessons.length) {
+                console.log('[council method lessons / growth proposals]');
+                c.methodLessons.slice(0, 5).forEach((l, i) => console.log(`  ${i+1}. ${l}`));
+              }
+              if (c.realIntent) console.log('[council realIntent]', c.realIntent);
+            }
           }
         }).catch(e => {
           console.error('[vai-mailbox-bridge] Error processing pipe prompt:', e.message);

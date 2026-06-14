@@ -158,7 +158,7 @@ function FileViewer({ filePath }: { filePath: string }) {
     setLoading(true);
     fetch(`${API_BASE}/api/sandbox/${projectId}/file?path=${encodeURIComponent(filePath)}`, {
       credentials: 'include',
-      headers: buildApiHeaders(),
+      headers: buildApiHeaders(undefined, `/api/sandbox/${projectId}/file`),
     })
       .then((r) => r.json())
       .then((data: { content: string }) => setContent(data.content))

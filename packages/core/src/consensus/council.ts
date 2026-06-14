@@ -37,6 +37,16 @@ export interface RunCouncilOptions {
   readonly onConsensus?: (consensus: CouncilConsensus) => void;
   /** Injectable clock for tests. Default `Date.now`. */
   readonly now?: () => number;
+  /**
+   * How many members may run at once. Local council models share ONE GPU; running
+   * them in parallel thrashes VRAM and big models never load (diagnosed: a 12GB GPU
+   * can't co-resident qwen3:8b + qwen2.5:7b + qwen2.5:3b, so the 7b always timed
+   * out). Default 1 (sequential) so each member gets the GPU in turn and actually
+   * participates. The council runs after the primary draft, so the added latency
+   * doesn't delay the user. Set higher only when members are on independent
+   * backends. Override via VAI_COUNCIL_CONCURRENCY at the call site.
+   */
+  readonly concurrency?: number;
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -156,9 +166,9 @@ export function reachConsensus(
     outcome,
     agreement,
     confidence,
-    realIntent: intentSource?.realIntent.trim() ?? '',
+    realIntent: (intentSource?.realIntent ?? '').trim(),
     recommendedAction,
-    searchQuery: searchSource?.searchQuery.trim() ?? '',
+    searchQuery: (searchSource?.searchQuery ?? '').trim(),
     missingCapabilities: rankUnique(usable.map((n) => n.missingCapability), maxItems),
     methodLessons: rankUnique(usable.map((n) => n.methodLesson), maxItems),
     summary: buildSummary(usable.length, outcome, modalVerdict, agreement, recommendedAction),
@@ -166,6 +176,30 @@ export function reachConsensus(
     memberIds: usable.map((n) => n.memberId),
     factsQuarantined: true,
   };
+}
+
+/**
+ * Map over items with at most `limit` running at once, preserving result order.
+ * A pool, not batches: as soon as one slot frees, the next item starts — so a slow
+ * member never holds up the others beyond the concurrency bound.
+ */
+async function runWithConcurrency<T, R>(
+  items: readonly T[],
+  fn: (item: T) => Promise<R>,
+  limit: number,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  };
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
 }
 
 /** Run a set of already-selected members against a draft. */
@@ -176,7 +210,14 @@ export async function runCouncil(
 ): Promise<CouncilConsensus> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const now = options.now ?? Date.now;
-  const settled = await Promise.all(members.map((m) => runOneMember(m, input, timeoutMs, now)));
+  // Run members with a bounded concurrency (default 1 = sequential) so GPU-bound
+  // local models don't contend for VRAM and each actually gets to load + answer.
+  const concurrency = Math.max(1, options.concurrency ?? 1);
+  const settled = await runWithConcurrency(
+    members,
+    (m) => runOneMember(m, input, timeoutMs, now),
+    concurrency,
+  );
   const notes = settled.filter((n): n is CouncilMemberNote => n !== null);
   const consensus = reachConsensus(notes, { escalateBelow: options.escalateBelow, maxItems: options.maxItems, weightFor: options.weightFor });
   if (options.onConsensus) {
@@ -233,12 +274,18 @@ export function toCouncilThinking(
   consensus: CouncilConsensus,
   assessment?: SeriousnessAssessment,
 ): CouncilThinking {
+  const cc = consensus.crossCheck;
+  const summary = cc?.verified
+    ? `${consensus.summary} · web-confirmed${cc.confirmsValue ? ` (${cc.confirmsValue})` : ''}`
+    : cc?.contradicted
+      ? `${consensus.summary} · web search disagreed — redrafting`
+      : consensus.summary;
   return {
     outcome: consensus.outcome,
     agreement: consensus.agreement,
     confidence: consensus.confidence,
     topic,
-    summary: consensus.summary,
+    summary,
     realIntent: consensus.realIntent,
     recommendedAction: consensus.recommendedAction,
     missingCapabilities: consensus.missingCapabilities,
@@ -255,6 +302,7 @@ export function toCouncilThinking(
       note: n.error ? `did not respond (${n.error})` : n.realIntent || n.missingCapability || n.methodLesson || '—',
       failed: Boolean(n.error),
     })),
+    crossCheck: cc,
   };
 }
 
@@ -273,7 +321,12 @@ function rankUnique(items: readonly string[], cap: number): string[] {
   const order: string[] = [];
   const counts = new Map<string, { display: string; count: number; at: number }>();
   for (const raw of items) {
-    const display = raw.trim();
+    // A member's parsed note can carry null/undefined/non-string entries in its
+    // methodLessons / missingCapabilities arrays (model output is not guaranteed
+    // clean). A bare `raw.trim()` then throws and — because conveneOnce swallows
+    // errors — the ENTIRE council silently fails to attach. Coerce defensively so
+    // one malformed entry can never sink the whole consensus.
+    const display = typeof raw === 'string' ? raw.trim() : '';
     if (!display) continue;
     const key = display.toLowerCase();
     const existing = counts.get(key);

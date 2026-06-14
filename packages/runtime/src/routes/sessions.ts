@@ -217,6 +217,18 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
     },
   );
 
+  /* ── Clear all events (session shell preserved — cursor resync) ── */
+  app.post<{ Params: { id: string } }>(
+    '/api/sessions/:id/clear-events',
+    async (request) => {
+      const { id } = request.params;
+      const session = sessions.getSession(id);
+      if (!session) return { error: 'Session not found' };
+      const deleted = sessions.clearSessionEvents(id);
+      return { success: true, eventsDeleted: deleted };
+    },
+  );
+
   /* ── Purge duplicate events + recompute stats ── */
   app.post<{ Params: { id: string } }>(
     '/api/sessions/:id/purge-duplicates',
@@ -275,10 +287,19 @@ export function registerSessionRoutes(app: FastifyInstance, sessions: SessionSer
   /* ── Get events (filterable) ── */
   app.get<{
     Params: { id: string };
-    Querystring: { type?: SessionEventType; limit?: string; offset?: string; after?: string; before?: string; order?: 'asc' | 'desc' };
+    Querystring: {
+      type?: SessionEventType;
+      role?: 'user' | 'assistant';
+      limit?: string;
+      offset?: string;
+      after?: string;
+      before?: string;
+      order?: 'asc' | 'desc';
+    };
   }>('/api/sessions/:id/events', async (request) => {
     return sessions.getEvents(request.params.id, {
       type: request.query.type,
+      messageRole: request.query.role,
       limit: request.query.limit ? Number(request.query.limit) : undefined,
       offset: request.query.offset ? Number(request.query.offset) : undefined,
       after: request.query.after ? Number(request.query.after) : undefined,

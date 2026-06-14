@@ -322,3 +322,55 @@ export class InMemoryGuidanceStore implements GuidanceStore {
     }
   }
 }
+
+/**
+ * Per-lesson efficacy signal — how a persisted AI council lesson has fared once it
+ * actually started firing on later turns. `helpfulTurns` / `unhelpfulTurns` come
+ * from the existing outcome data (positive vs negative/neutral lift on turns where
+ * the lesson applied).
+ */
+export interface LessonEfficacy {
+  readonly guidanceId: string;
+  readonly appliedCount: number;
+  readonly helpfulTurns: number;
+  readonly unhelpfulTurns: number;
+}
+
+export interface LessonEfficacyVerdict {
+  readonly guidanceId: string;
+  /** keep = earning its place; watch = too few samples; decay = applied enough, no benefit. */
+  readonly verdict: 'keep' | 'watch' | 'decay';
+  readonly reason: string;
+}
+
+/**
+ * The measurement half of "apply council lessons intelligently" (council self-eval
+ * recommendation, 2026-06-14): a persisted lesson that has fired several times and
+ * never improved an outcome is noise — it should DECAY rather than keep nudging the
+ * router. This is the honest version of the council's `applyCouncilLessons` ask:
+ * you apply lessons better by pruning the ones the data shows don't help, instead
+ * of letting every stored lesson live forever.
+ *
+ * Pure + deterministic so it is unit-testable without the DB. The caller
+ * (GuidanceStore-backed) decays a `decay` verdict by deactivating / shortening
+ * expiry on the matching RouteGuidance.
+ */
+export function evaluateLessonEfficacy(
+  efficacy: LessonEfficacy,
+  opts: { minSamples?: number } = {},
+): LessonEfficacyVerdict {
+  const minSamples = opts.minSamples ?? 3;
+  const { guidanceId, appliedCount, helpfulTurns, unhelpfulTurns } = efficacy;
+  const judged = helpfulTurns + unhelpfulTurns;
+
+  // Not enough evidence yet — let it keep working and gather data.
+  if (appliedCount < minSamples || judged < minSamples) {
+    return { guidanceId, verdict: 'watch', reason: `only ${judged} judged of ${appliedCount} applications (need ${minSamples})` };
+  }
+  // Any real, repeated benefit → keep it.
+  if (helpfulTurns > 0 && helpfulTurns >= unhelpfulTurns) {
+    return { guidanceId, verdict: 'keep', reason: `${helpfulTurns} helpful vs ${unhelpfulTurns} unhelpful` };
+  }
+  // Applied enough, judged enough, and it never (net) helped → decay.
+  return { guidanceId, verdict: 'decay', reason: `${helpfulTurns} helpful vs ${unhelpfulTurns} unhelpful over ${appliedCount} applications — not earning its place` };
+}

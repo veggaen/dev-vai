@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { Command } from 'cmdk';
 import { AnimatePresence, motion } from 'framer-motion';
-import { MessageSquare, Brain, Search, Settings, Clock, Zap } from 'lucide-react';
+import { MessageSquare, Search, Settings, Zap } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
-import { useLayoutStore } from '../stores/layoutStore.js';
+import { useLayoutStore, type SidebarPanel } from '../stores/layoutStore.js';
 import { useSessionStore } from '../stores/sessionStore.js';
 import { useAuthStore } from '../stores/authStore.js';
-
-/* ── Helpers ───────────────────────────────────────────────────── */
+import { FOCUS_CHAT_SEARCH_EVENT } from './SidebarPanel.js';
+import { getQuickSwitchNavItems } from '../lib/sidebar-nav.js';
 
 function formatRelative(date: string): string {
   const diff = Date.now() - new Date(date).getTime();
@@ -17,60 +17,64 @@ function formatRelative(date: string): string {
   return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-/* ── Quick Switch ──────────────────────────────────────────────── */
-
 export function QuickSwitch() {
   const { showQuickSwitch, setShowQuickSwitch, setActivePanel, setSidebarState } = useLayoutStore();
   const { conversations, selectConversation, startNewChat } = useChatStore();
   const sessions = useSessionStore((s) => s.sessions);
+  const role = useAuthStore((state) => state.role);
   const isOwner = useAuthStore((state) => state.isOwner);
   const ownerFeaturesHidden = useAuthStore((state) => state.ownerFeaturesHidden);
   const inputRef = useRef<HTMLInputElement>(null);
   const showOwnerFeatures = isOwner && !ownerFeaturesHidden;
+  const navItems = getQuickSwitchNavItems(role, ownerFeaturesHidden).filter((item) => item.id !== 'chats');
 
-  // Focus input when opened
   useEffect(() => {
     if (showQuickSwitch) {
-      // cmdk handles focus internally, but let's be safe
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [showQuickSwitch]);
+
+  const close = () => setShowQuickSwitch(false);
 
   const handleSelectChat = (id: string) => {
     selectConversation(id);
     setActivePanel('chats');
     setSidebarState('expanded');
-    setShowQuickSwitch(false);
+    close();
   };
 
   const handleSelectSession = (id: string) => {
     useSessionStore.getState().selectSession(id);
     setActivePanel('devlogs');
     setSidebarState('expanded');
-    setShowQuickSwitch(false);
+    close();
   };
 
-  const handleSelectPanel = (panel: 'chats' | 'projects' | 'devlogs' | 'search' | 'settings') => {
+  const handleSelectPanel = (panel: SidebarPanel) => {
+    if (panel === 'search') {
+      setActivePanel('chats');
+      window.dispatchEvent(new CustomEvent(FOCUS_CHAT_SEARCH_EVENT));
+      close();
+      return;
+    }
     setActivePanel(panel);
-    setSidebarState('expanded');
-    setShowQuickSwitch(false);
+    setSidebarState(panel === 'settings' ? 'rail' : 'expanded');
+    close();
   };
 
   return (
     <AnimatePresence>
       {showQuickSwitch && (
         <>
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.1 }}
             className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
-            onClick={() => setShowQuickSwitch(false)}
+            onClick={close}
           />
 
-          {/* Dialog */}
           <motion.div
             initial={{ opacity: 0, scale: 0.96, y: -10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -81,14 +85,14 @@ export function QuickSwitch() {
             <Command
               className="overflow-hidden rounded-xl border border-zinc-700/50 bg-zinc-900 shadow-2xl shadow-black/50"
               onKeyDown={(e) => {
-                if (e.key === 'Escape') setShowQuickSwitch(false);
+                if (e.key === 'Escape') close();
               }}
             >
               <div className="flex items-center gap-2 border-b border-zinc-800 px-4">
-                <Zap className="h-4 w-4 text-violet-400" />
+                <Zap className="h-4 w-4 text-violet-400" aria-hidden />
                 <Command.Input
                   ref={inputRef}
-                  placeholder="Search conversations, logs, actions..."
+                  placeholder="Search conversations, sessions, destinations…"
                   className="flex-1 bg-transparent py-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
                 />
                 <kbd className="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">
@@ -101,34 +105,46 @@ export function QuickSwitch() {
                   No results found.
                 </Command.Empty>
 
-                {/* Quick actions */}
                 <Command.Group heading="Actions" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-zinc-600">
                   <QuickItem
                     onSelect={() => {
                       startNewChat();
-                      setShowQuickSwitch(false);
+                      close();
                     }}
                     icon={<MessageSquare className="h-3.5 w-3.5" />}
-                    label="New Chat"
+                    label="New chat"
                   />
                   <QuickItem
                     onSelect={() => handleSelectPanel('search')}
                     icon={<Search className="h-3.5 w-3.5" />}
-                    label="Search Conversations"
-                  />
-                  <QuickItem
-                    onSelect={() => handleSelectPanel('projects')}
-                    icon={<Clock className="h-3.5 w-3.5" />}
-                    label="Projects"
+                    label="Search chats"
+                    meta="Ctrl+Shift+F"
                   />
                   <QuickItem
                     onSelect={() => handleSelectPanel('settings')}
                     icon={<Settings className="h-3.5 w-3.5" />}
                     label="Settings"
+                    meta="Ctrl+,"
                   />
                 </Command.Group>
 
-                {/* Conversations */}
+                {navItems.length > 0 && (
+                  <Command.Group heading="Go to" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-zinc-600">
+                    {navItems.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <QuickItem
+                          key={item.id}
+                          onSelect={() => handleSelectPanel(item.id)}
+                          icon={<Icon className="h-3.5 w-3.5" />}
+                          label={item.label}
+                          meta={item.shortcut}
+                        />
+                      );
+                    })}
+                  </Command.Group>
+                )}
+
                 {conversations.length > 0 && (
                   <Command.Group heading="Conversations" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-zinc-600">
                     {conversations.slice(0, 8).map((conv) => (
@@ -141,20 +157,19 @@ export function QuickSwitch() {
                           conv.mode && conv.mode !== 'chat' ? conv.mode : null,
                           conv.projectName,
                           formatRelative(conv.updatedAt),
-                        ].filter(Boolean).join(' • ')}
+                        ].filter(Boolean).join(' · ')}
                       />
                     ))}
                   </Command.Group>
                 )}
 
-                {/* Dev Log Sessions */}
                 {showOwnerFeatures && sessions.length > 0 && (
-                  <Command.Group heading="Dev Logs" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-zinc-600">
+                  <Command.Group heading="Dev logs" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-zinc-600">
                     {sessions.slice(0, 5).map((session) => (
                       <QuickItem
                         key={session.id}
                         onSelect={() => handleSelectSession(session.id)}
-                        icon={<Brain className="h-3.5 w-3.5" />}
+                        icon={<MessageSquare className="h-3.5 w-3.5" />}
                         label={session.title}
                         meta={formatRelative(new Date(session.startedAt).toISOString())}
                       />
@@ -163,7 +178,6 @@ export function QuickSwitch() {
                 )}
               </Command.List>
 
-              {/* Footer */}
               <div className="flex items-center gap-3 border-t border-zinc-800 px-4 py-2 text-[10px] text-zinc-600">
                 <span className="flex items-center gap-1">
                   <kbd className="rounded border border-zinc-700 bg-zinc-800 px-1 text-zinc-500">↑↓</kbd>
@@ -185,8 +199,6 @@ export function QuickSwitch() {
     </AnimatePresence>
   );
 }
-
-/* ── Quick Item ────────────────────────────────────────────────── */
 
 function QuickItem({
   onSelect,

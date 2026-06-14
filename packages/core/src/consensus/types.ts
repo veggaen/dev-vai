@@ -68,6 +68,17 @@ export interface CouncilInput {
   readonly sources: readonly { readonly title?: string; readonly url?: string; readonly snippet?: string }[];
   /** Vai's own confidence in the draft (0..1), if known — feeds the seriousness gate. */
   readonly draftConfidence?: number;
+  /**
+   * Shared web evidence Vai gathered for this turn (the "web witness" / RAG step). Every
+   * member reads the SAME block before voting — informs reasoning, never overrides the
+   * fact-quarantine (members still emit only intent/method/action, never user-facing facts).
+   */
+  readonly webEvidence?: {
+    /** Google's AI Overview synthesized summary, when present (treat as one source, verify). */
+    readonly aiOverview?: string | null;
+    /** ISO timestamp the evidence was gathered (freshness). */
+    readonly gatheredAt?: string;
+  };
 }
 
 /** One council member's structured note. Advisory only — facts are quarantined. */
@@ -94,6 +105,32 @@ export interface CouncilMemberNote {
   readonly durationMs: number;
   /** Set when the member could not produce a usable note (timeout / parse fail). Never blocks. */
   readonly error?: string;
+}
+
+/**
+ * Result of the optional fact cross-check (see `cross-check.ts`). When a turn carries a
+ * checkable claim, ChatService runs ONE web search and folds the outcome in here. A
+ * confirmation strongly boosts {@link CouncilConsensus.agreement}; a contradiction flips the
+ * action to `reread-intent`. The `sources` are the exact snippets the boost was calibrated on,
+ * surfaced so a human can opt in to double-check what the verification relied on.
+ */
+export interface CouncilCrossCheck {
+  /** The search ran and the evidence confirms the draft's claim. */
+  readonly verified: boolean;
+  /** A high-confidence confirmation — treated as a verified pass in the UI. */
+  readonly pass: boolean;
+  /** The evidence actively contradicts the draft's claim. */
+  readonly contradicted: boolean;
+  /** The specific value the evidence confirmed (e.g. "$63,450"), or null. */
+  readonly confirmsValue: string | null;
+  /** The query that was searched. */
+  readonly query: string;
+  /** Agreement BEFORE the boost — so the UI can show "73% → 96%". */
+  readonly boostedFrom: number;
+  /** The search engine's own confidence in its answer, 0..1. */
+  readonly searchConfidence: number;
+  /** The exact sources the boost was calibrated on — powers the human double-check UI. */
+  readonly sources: ReadonlyArray<{ readonly title?: string; readonly url?: string; readonly snippet?: string }>;
 }
 
 /** The ephemeral consensus the council reached — attached to the turn, never stored. */
@@ -125,6 +162,8 @@ export interface CouncilConsensus {
    * fact. Surfaced so the guardrail is visible, not just assumed.
    */
   readonly factsQuarantined: true;
+  /** Set when a fact cross-check ran for this turn (confirmation / contradiction). */
+  readonly crossCheck?: CouncilCrossCheck;
 }
 
 /** A council member. Implementations live in `member.ts` or are injected in tests. */
@@ -166,4 +205,6 @@ export interface CouncilThinking {
     readonly note: string;
     readonly failed?: boolean;
   }[];
+  /** Fact cross-check outcome, when one ran — drives the "web-confirmed" badge + human review. */
+  readonly crossCheck?: CouncilCrossCheck;
 }

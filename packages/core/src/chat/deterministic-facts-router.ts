@@ -1680,6 +1680,34 @@ function tryConceptualPrimer(content: string): FactShimResult | null {
 }
 
 // ── public entry point ───────────────────────────────────────────────────
+/**
+ * True when the prompt is a *task* or open collaboration request that merely
+ * mentions an entity, rather than a crisp definitional fact lookup. The
+ * entity-definition handlers (company/country/person/brand) match on a bare
+ * entity word anywhere in the text, so without this gate a long brief like
+ * "review the app at github.com/... and fill the gaps" gets answered with a
+ * canned "GITHUB was founded in 2008". We keep the gate narrow so genuine
+ * one-line fact questions ("where is BMW headquartered?") still pass through.
+ */
+export function looksLikeTaskNotFactLookup(content: string): boolean {
+  const c = content.trim();
+  const lower = c.toLowerCase();
+
+  // A URL almost always means "do something with this thing", not "define it".
+  if (/https?:\/\/|\bwww\.|\b[\w-]+\.(?:com|io|dev|org|net|app|ai)\b/i.test(c)) return true;
+
+  // Long multi-sentence briefs are tasks, not lookups. A real fact question is short.
+  const sentenceCount = (c.match(/[.!?](?:\s|$)/g) ?? []).length;
+  if (c.length > 240 || sentenceCount >= 3) return true;
+
+  // Imperative / collaboration verbs that signal an action request. Anchored so
+  // they only count near the start of a clause, not buried mid-sentence.
+  const taskVerb = /(?:^|\b)(?:review|build|create|make me|help( me)?|let'?s|let us|fix|refactor|implement|design|write me|generate|set up|debug|analyze|analyse|improve|finish|complete|walk me through|tell me a (?:story|joke|poem)|i have a|i'?m working on|i started|i'?ve been (?:building|working))\b/i;
+  if (taskVerb.test(lower)) return true;
+
+  return false;
+}
+
 export function tryEmitFactShim(input: { content: string; intent?: string; priorIdiom?: IdiomContext; codeSnippetOnly?: boolean; explainConcept?: ConceptExplainer }): FactShimResult | null {
   const content = (input.content || '').trim();
   if (!content) return null;
@@ -1713,6 +1741,16 @@ export function tryEmitFactShim(input: { content: string; intent?: string; prior
   // must be answered yes/no — so we defer those to the yes/no pipeline instead
   // of dumping an entity definition.
   if (input.intent === 'action-yesno') return null;
+
+  // Task gate: the entity-definition handlers below match on a bare entity word
+  // anywhere in the prompt (findEntity + word boundary). That silently hijacks
+  // real *tasks* that merely mention an entity — e.g.
+  //   "review the web app at github.com/... and find the gaps"  → "GITHUB was founded in 2008"
+  //   "I have a web app I started long ago"                     → "<company> was founded…"
+  // Those proved live in the bridge transcript at 0.96 confidence. If the prompt
+  // reads as a task or open request (URL, imperative verb, long multi-sentence
+  // brief) rather than a crisp fact lookup, defer to the real pipeline.
+  if (looksLikeTaskNotFactLookup(content)) return null;
 
   return (
     tryConceptualPrimer(content)

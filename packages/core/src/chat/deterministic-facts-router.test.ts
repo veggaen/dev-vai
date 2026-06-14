@@ -62,6 +62,41 @@ describe('brand facts do not hijack action yes/no questions', () => {
   });
 });
 
+describe('entity facts do not hijack tasks that merely mention an entity', () => {
+  // These are the exact failures captured live in the Grok↔Vai bridge
+  // transcript: long task briefs mentioning GitHub/a company answered at 0.96
+  // confidence with "GITHUB was founded in 2008" / "<company> was founded…".
+  it('defers a project-review brief that mentions a github URL', () => {
+    const result = tryEmitFactShim({
+      content:
+        "let's do a full review of the web app at https://github.com/veggaen/DEV-VEGGASTARE and find the project gaps and fill them so we get it to 100%.",
+    });
+    expect(result?.kind).not.toBe('fact-company');
+    expect(result).toBeNull();
+  });
+
+  it('defers "I have a web app I started long ago" instead of a founded-date card', () => {
+    const result = tryEmitFactShim({
+      content:
+        'I have a web app that I started to work on long time ago and never finished. I would like us to do a full review and understand the UI and find what features are not connected.',
+    });
+    expect(result?.kind).not.toBe('fact-company');
+    expect(result).toBeNull();
+  });
+
+  it('defers a "tell me a story" creative request even if it names an entity', () => {
+    const result = tryEmitFactShim({
+      content: 'Tell me a short original story about an inventor at Tesla and a robot.',
+    });
+    expect(result?.kind).not.toBe('fact-company');
+  });
+
+  it('still answers a crisp definitional company question', () => {
+    expect(tryEmitFactShim({ content: 'where is BMW headquartered?' })?.kind).toBe('fact-company');
+    expect(tryEmitFactShim({ content: 'who is the CEO of Spotify?' })?.kind).toBe('fact-company');
+  });
+});
+
 describe('conceptual primers', () => {
   it('answers a conversational CAP-theorem tradeoff prompt directly', () => {
     const result = tryEmitFactShim({ content: "i'm fuzzy on CAP theorem tradeoffs for a chat app. honest read?" });

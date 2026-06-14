@@ -78,6 +78,10 @@ export {
   SANDBOX_TEMPLATE_DEPLOY_CONTEXT,
 } from './chat/modes.js';
 export {
+  isBuildExecutionMode,
+  isExplicitBuildExecutionRequest,
+} from './chat/build-execution-intent.js';
+export {
   CHAT_STRUCTURE_SYSTEM_HINT,
   KNOWLEDGE_RETRIEVAL_SCORE_MIN,
   shouldInjectChatStructureHint,

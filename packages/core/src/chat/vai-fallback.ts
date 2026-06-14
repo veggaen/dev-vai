@@ -189,7 +189,7 @@ export interface PrimaryGenerativeFlipInput {
  * answer once a turn has already reached the model path. Builder/agent modes
  * keep the vai:v0-first contract (file-artifact emission has its own gates),
  * and conversational turns stay on the fast deterministic path.
- * Reversible via VAI_PRIMARY_GENERATIVE=0.
+ * Reversible via VAI_PRIMARY_GENERATIVE=1 (opt-in; default is vai-first).
  */
 export function shouldFlipPrimaryToGenerative(input: PrimaryGenerativeFlipInput): boolean {
   if (input.enabled === false) return false;

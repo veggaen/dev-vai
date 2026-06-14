@@ -21,12 +21,13 @@ import {
   ShieldCheck,
   Save,
   Users,
-  Scale,
 } from 'lucide-react';
 import type { ChatProgressStep, CouncilThinkingUI, ResearchTraceUI, ResponseVerificationUI, TurnThinkingUI } from '../../stores/chatStore.js';
 import type { PipelinePhaseUI, TurnEvidenceUI } from './ThinkingPanel.logic.js';
 import { buildAdvisorLessons, buildPipelinePhases, buildThinkingPanelModel, buildReasoningNarrative, describeAdvisorContribution, humanizeStrategy, formatDuration, summarizeProcessTrace, buildTurnEvidence } from './ThinkingPanel.logic.js';
 import { useChatStore } from '../../stores/chatStore.js';
+import { useLayoutStore } from '../../stores/layoutStore.js';
+import { ProcessTree } from './ProcessTree.js';
 
 interface ThinkingPanelProps {
   readonly thinking: TurnThinkingUI;
@@ -196,25 +197,34 @@ export function ThinkingPanel({ thinking, researchTrace, verification, respondin
             <p className="text-[12px] leading-6 text-[color:var(--chat-body)]">{narrative.why}</p>
           </section>
 
-          {/* Steps timeline */}
+          {/* Steps taken — the SAME ProcessTree as the live trace, now settled. One
+              source of truth for "what ran", with council members nested under the
+              council step. The rich council debate lives only in the right panel. */}
           <section className="thinking-surface-soft rounded-lg p-3.5">
-            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--chat-eyebrow)]">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--chat-eyebrow)]">
               Steps taken
             </div>
-            <ol className="relative space-y-0 border-l border-[color:var(--panel-border)] pl-4">
-              {narrative.steps.map((line, index) => (
-                <li key={index} className="relative pb-3 text-[11px] leading-5 text-[color:var(--chat-body)] last:pb-0">
-                  <span
-                    aria-hidden
-                    className="absolute -left-[calc(0.5rem+1px)] top-1.5 h-2 w-2 rounded-full border border-[color:var(--panel-border)] bg-[color:var(--panel-bg-elevated)]"
-                  />
-                  {line}
-                </li>
-              ))}
-            </ol>
+            {progressSteps && progressSteps.length > 0 ? (
+              <ProcessTree steps={progressSteps} council={thinking.council} vaiProposedDraft={thinking.vaiProposedDraft} durationMs={model.durationMs} />
+            ) : (
+              <ol className="relative space-y-0 border-l border-[color:var(--panel-border)] pl-4">
+                {narrative.steps.map((line, index) => (
+                  <li key={index} className="relative pb-3 text-[11px] leading-5 text-[color:var(--chat-body)] last:pb-0">
+                    <span
+                      aria-hidden
+                      className="absolute -left-[calc(0.5rem+1px)] top-1.5 h-2 w-2 rounded-full border border-[color:var(--panel-border)] bg-[color:var(--panel-bg-elevated)]"
+                    />
+                    {line}
+                  </li>
+                ))}
+              </ol>
+            )}
           </section>
 
-          {thinking.council && <CouncilSection council={thinking.council} />}
+          {/* Council: a single pointer, NOT the full debate. The member cards,
+              transcript, lessons and growth box live in the right Council panel so
+              the two surfaces never duplicate. */}
+          {thinking.council && <CouncilPointer council={thinking.council} />}
 
           {verification && verification.action !== 'pass' && (
             <section className="thinking-callout px-3.5 py-3" data-verification={verification.action}>
@@ -660,96 +670,41 @@ function EvidenceItem({
 }
 
 /**
- * SCIS council consensus — who weighed in on Vai's draft and what they agreed he
- * should do. Renders the read intent, the consensus outcome (ship / act /
- * escalate), each member's call, and what method was missing. Members only point;
- * Vai fetches — so no member-authored fact appears here.
+ * Council pointer — a single quiet line summarising the consensus outcome with a
+ * button that opens the right Council panel. The full debate (member cards,
+ * transcript, method lessons, growth box) lives there, NOT here, so the in-chat
+ * panel and the right rail never show the same thing twice.
  */
-function CouncilSection({ council }: { council: CouncilThinkingUI }) {
+function CouncilPointer({ council }: { council: CouncilThinkingUI }) {
+  const showCouncilPanel = useLayoutStore((s) => s.showCouncilPanel);
+  const toggleCouncilPanel = useLayoutStore((s) => s.toggleCouncilPanel);
+
   const outcomeStyle =
     council.outcome === 'ship'
       ? { label: 'Cleared for release', tone: 'text-[color:var(--tone-good)]', dot: 'bg-emerald-400/80' }
       : council.outcome === 'act'
-        ? { label: 'Vai should act first', tone: 'text-[color:var(--tone-warn)]', dot: 'bg-amber-400/80' }
-        : { label: 'Escalated for stronger help', tone: 'text-[color:var(--tone-info)]', dot: 'bg-sky-400/80' };
-  const actionLabel = humanizeStrategy(council.recommendedAction);
+        ? { label: 'Act first', tone: 'text-[color:var(--tone-warn)]', dot: 'bg-amber-400/80' }
+        : { label: 'Escalated', tone: 'text-[color:var(--tone-info)]', dot: 'bg-sky-400/80' };
 
   return (
-    <section className="space-y-3 rounded-xl thinking-surface-soft p-3.5" data-council={council.outcome}>
-      <div className="flex flex-wrap items-center gap-2">
-        <Users aria-hidden="true" className="h-3.5 w-3.5 text-[color:var(--accent-text)]" />
-        <span className="text-[11px] font-medium text-[color:var(--chat-strong)]">Council consensus</span>
-        <span className={`flex items-center gap-1.5 text-[10px] font-medium ${outcomeStyle.tone}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${outcomeStyle.dot}`} />
-          {outcomeStyle.label}
-        </span>
-        <span className="ml-auto flex items-center gap-1 text-[10px] tabular-nums text-zinc-500" title="Inter-member agreement">
-          <Scale aria-hidden="true" className="h-3 w-3" />
-          {Math.round(council.agreement * 100)}% agree · {council.topic}
-        </span>
-      </div>
-
-      <p className="text-[11px] leading-5 text-[color:var(--chat-eyebrow)]">{council.summary}</p>
-
-      {council.realIntent && (
-        <p className="text-[11px] leading-5 text-zinc-500">
-          <span className="text-[color:var(--chat-eyebrow)]">Read the real ask as:</span> {council.realIntent}
-        </p>
-      )}
-
-      {council.outcome !== 'ship' && (
-        <p className="text-[11px] leading-5 text-[color:var(--chat-eyebrow)]">
-          <span className="text-zinc-500">Recommendation:</span> {actionLabel}
-        </p>
-      )}
-
-      <ol className="space-y-1.5">
-        {council.members.map((member, index) => {
-          const verdictTone =
-            member.failed ? 'text-zinc-600'
-              : member.verdict === 'good' ? 'text-[color:var(--tone-good)]'
-                : member.verdict === 'bad' ? 'text-[color:var(--tone-bad)]'
-                  : 'text-[color:var(--tone-warn)]';
-          return (
-            <li key={`${member.name}-${index}`} className="flex min-w-0 items-start gap-2 text-[10px] leading-4">
-              <span className={`mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full ${member.failed ? 'bg-zinc-700' : 'bg-[color:var(--accent)]'}`} />
-              <span className="min-w-0">
-                <span className="text-[color:var(--chat-body)]">{member.name}</span>
-                <span className="text-zinc-600"> [{member.topic}]</span>
-                {!member.failed && (
-                  <>
-                    {' · '}<span className={verdictTone}>{member.verdict}</span>
-                    <span className="text-zinc-600"> @ {Math.round(member.confidence * 100)}% → {humanizeStrategy(member.action)}</span>
-                  </>
-                )}
-                {member.note && <span className="mt-0.5 block text-zinc-600">{member.note}</span>}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
-
-      {(council.missingCapabilities.length > 0 || council.methodLessons.length > 0) && (
-        <div className="space-y-1.5 border-t border-[color:var(--shell-line-soft)] pt-2.5">
-          {council.missingCapabilities.length > 0 && (
-            <div className="text-[10px] leading-4">
-              <span className="text-zinc-600">Missing capability: </span>
-              <span className="text-[color:var(--tone-warn)]">{council.missingCapabilities.join('; ')}</span>
-            </div>
-          )}
-          {council.methodLessons.length > 0 && (
-            <div className="text-[10px] leading-4">
-              <span className="flex items-center gap-1 text-zinc-600"><BookOpen className="h-3 w-3" /> How to fish this next time</span>
-              <ul className="mt-1 space-y-0.5">
-                {council.methodLessons.map((lesson, i) => (
-                  <li key={i} className="text-[color:var(--chat-eyebrow)]">— {lesson}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-    </section>
+    <button
+      type="button"
+      onClick={() => { if (!showCouncilPanel) toggleCouncilPanel(); }}
+      data-council-pointer={council.outcome}
+      className="flex w-full items-center gap-2 rounded-lg thinking-surface-soft px-3.5 py-2.5 text-left text-[11px] transition-colors hover:text-[color:var(--chat-strong)] focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
+      title="Open the Council panel to see the full member debate, lessons and outcome"
+    >
+      <Users aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[color:var(--accent-text)]" />
+      <span className="font-medium text-[color:var(--chat-strong)]">Council</span>
+      <span className={`flex items-center gap-1.5 font-medium ${outcomeStyle.tone}`}>
+        <span className={`h-1.5 w-1.5 rounded-full ${outcomeStyle.dot}`} />
+        {outcomeStyle.label}
+      </span>
+      <span className="text-zinc-600">· {council.members.length} members · {Math.round(council.agreement * 100)}% agree</span>
+      <span className="ml-auto flex items-center gap-1 text-[10px] text-[color:var(--accent-text)]">
+        {showCouncilPanel ? 'open →' : 'view debate →'}
+      </span>
+    </button>
   );
 }
 

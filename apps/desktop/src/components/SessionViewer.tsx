@@ -2161,6 +2161,9 @@ export function SessionViewer() {
     compactMode,
     toggleCompactMode,
     loadOlderEvents,
+    loadAllEvents,
+    presetEvents,
+    presetEventsFor,
     pinnedEvents,
     pinEvent,
     unpinEvent,
@@ -2202,8 +2205,13 @@ export function SessionViewer() {
   }, [events.length, isPolling]);
 
   const filteredEvents = useMemo(() => {
+    const sourceEvents =
+      presetEvents && presetEventsFor === filterPreset
+        ? presetEvents
+        : events;
+
     // First: filter out noise (git fsmonitor cookies, zero-error diagnostics)
-    let filtered = events.filter(e => !isNoiseEvent(e));
+    let filtered = sourceEvents.filter(e => !isNoiseEvent(e));
 
     // Dedup safety net: remove events with identical type + content (keep first occurrence)
     const seen = new Set<string>();
@@ -2223,7 +2231,8 @@ export function SessionViewer() {
     } else if (filterPreset === 'message:user') {
       filtered = filtered.filter((e) => {
         const nType = normalizeEventType(e.type);
-        return nType === 'message' && (e.meta as unknown as Record<string, unknown>)?.role === 'user';
+        const role = (e.meta as unknown as Record<string, unknown>)?.role;
+        return nType === 'message' && role === 'user';
       });
     } else if (filterPreset === 'message:assistant') {
       filtered = filtered.filter((e) => {
@@ -2247,7 +2256,7 @@ export function SessionViewer() {
 
     // Newest first — reverse chronological order
     return [...filtered].reverse();
-  }, [events, eventTypeFilter, filterPreset, searchQuery]);
+  }, [events, presetEvents, presetEventsFor, eventTypeFilter, filterPreset, searchQuery]);
 
   // Copy filtered events as markdown
   const handleCopyFiltered = useCallback(async () => {
@@ -2331,15 +2340,25 @@ export function SessionViewer() {
         </button>
 
         {hasMoreEvents && (
-          <button
-            onClick={() => void loadOlderEvents()}
-            disabled={isLoadingMoreEvents}
-            className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 disabled:cursor-wait disabled:opacity-50"
-            title="Load older events"
-          >
-            <ArrowLeft className="h-3 w-3" />
-            {isLoadingMoreEvents ? 'Loading older…' : 'Load older'}
-          </button>
+          <>
+            <button
+              onClick={() => void loadAllEvents()}
+              disabled={isLoadingMoreEvents}
+              className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-emerald-500/90 transition-colors hover:bg-zinc-800 hover:text-emerald-400 disabled:cursor-wait disabled:opacity-50"
+              title="Load every event in this session"
+            >
+              Load all ({eventTotal.toLocaleString()})
+            </button>
+            <button
+              onClick={() => void loadOlderEvents()}
+              disabled={isLoadingMoreEvents}
+              className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 disabled:cursor-wait disabled:opacity-50"
+              title="Load older events"
+            >
+              <ArrowLeft className="h-3 w-3" />
+              {isLoadingMoreEvents ? 'Loading older…' : 'Load older'}
+            </button>
+          </>
         )}
 
         <span className="text-xs text-zinc-600">

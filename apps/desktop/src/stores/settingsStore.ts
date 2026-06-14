@@ -134,7 +134,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   frontends: [],
   ideTargets: [],
   workflowModes: ['chat', 'agent', 'builder', 'plan', 'debate'],
-  defaultConversationMode: 'chat',
+  defaultConversationMode: 'agent',
   bootstrap: null,
 
   setSelectedModelId: (id) => set({ selectedModelId: id }),

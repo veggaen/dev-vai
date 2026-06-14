@@ -25,7 +25,7 @@ Tier meanings:
 Do not auto-emit deploy or template markers from vague small talk — only when the user clearly wants a new app, starter, or stack.
 `;
 
-export const DEFAULT_CONVERSATION_MODE: ConversationMode = 'chat';
+export const DEFAULT_CONVERSATION_MODE: ConversationMode = 'agent';
 
 /**
  * Shared charter: explicit reasoning, minimal solutions, minimal diffs, verifiable outcomes.

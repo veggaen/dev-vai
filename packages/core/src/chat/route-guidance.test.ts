@@ -4,6 +4,7 @@ import {
   selectApplicableGuidance,
   toTurnGuidance,
   InMemoryGuidanceStore,
+  evaluateLessonEfficacy,
   type RouteGuidance,
 } from './route-guidance.js';
 
@@ -138,5 +139,34 @@ describe('InMemoryGuidanceStore — write path for reference data', () => {
     store.recordApplication(g.id);
     // (internal count not exposed on interface, but no throw = ok)
     expect(true).toBe(true);
+  });
+});
+
+describe('evaluateLessonEfficacy — prune council lessons that never help', () => {
+  it('watches a lesson with too few samples (let it gather data)', () => {
+    const v = evaluateLessonEfficacy({ guidanceId: 'g', appliedCount: 1, helpfulTurns: 0, unhelpfulTurns: 1 });
+    expect(v.verdict).toBe('watch');
+  });
+
+  it('keeps a lesson that has helped at least as often as not', () => {
+    const v = evaluateLessonEfficacy({ guidanceId: 'g', appliedCount: 6, helpfulTurns: 4, unhelpfulTurns: 2 });
+    expect(v.verdict).toBe('keep');
+  });
+
+  it('decays a lesson applied enough times that never (net) helped', () => {
+    const v = evaluateLessonEfficacy({ guidanceId: 'g', appliedCount: 8, helpfulTurns: 0, unhelpfulTurns: 6 });
+    expect(v.verdict).toBe('decay');
+  });
+
+  it('does not decay before the minSamples threshold even if all unhelpful', () => {
+    const v = evaluateLessonEfficacy({ guidanceId: 'g', appliedCount: 2, helpfulTurns: 0, unhelpfulTurns: 2 });
+    expect(v.verdict).toBe('watch');
+  });
+
+  it('respects a custom minSamples', () => {
+    const strict = evaluateLessonEfficacy({ guidanceId: 'g', appliedCount: 4, helpfulTurns: 0, unhelpfulTurns: 4 }, { minSamples: 5 });
+    expect(strict.verdict).toBe('watch');
+    const lenient = evaluateLessonEfficacy({ guidanceId: 'g', appliedCount: 4, helpfulTurns: 0, unhelpfulTurns: 4 }, { minSamples: 3 });
+    expect(lenient.verdict).toBe('decay');
   });
 });

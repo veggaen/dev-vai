@@ -22,9 +22,9 @@ export type SidebarPanel = 'chats' | 'projects' | 'devlogs' | 'knowledge' | 'sea
  * Owner: everything including platform tools.
  */
 export const ROLE_NAV_ITEMS: Record<AppRole, SidebarPanel[]> = {
-  builder: ['chats', 'settings'],
-  admin:   ['chats', 'devlogs', 'settings', 'docker'],
-  owner:   ['chats', 'control', 'devlogs', 'knowledge', 'vaigym', 'docker', 'thorsen', 'settings'],
+  builder: ['chats', 'council', 'settings'],
+  admin:   ['chats', 'council', 'devlogs', 'settings'],
+  owner:   ['chats', 'council', 'control', 'devlogs', 'knowledge', 'vaigym', 'thorsen', 'settings'],
 };
 
 /** Three-state sidebar: rail (icons only), expanded (full panel), hidden */
@@ -146,7 +146,7 @@ const savedThemePreference = (typeof localStorage !== 'undefined'
   : null) ?? 'dark';
 
 export const useLayoutStore = create<LayoutState>((set, get) => ({
-  mode: 'chat',
+  mode: 'agent',
   view: 'chat',
   sidebarState: 'rail',
   activePanel: 'chats',
@@ -198,8 +198,12 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       window.dispatchEvent(new CustomEvent('vai:focus-chat-search'));
       return;
     }
-    if (panel === 'projects' || panel === 'council') {
+    if (panel === 'projects') {
       set({ activePanel: 'chats', sidebarState: 'expanded', showSidebar: true, view: 'chat' });
+      return;
+    }
+    if (panel === 'council') {
+      set({ activePanel: 'council', sidebarState: 'expanded', showSidebar: true, view: 'chat', showCouncilPanel: true });
       return;
     }
 
