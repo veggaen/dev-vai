@@ -176,7 +176,16 @@ function gatherCandidates(claim: CheckableClaim, search: SearchResponse): number
     if (claim.hasCurrencyUnit && !CURRENCY_RE.test(block.text)) continue;
     for (const tok of block.text.match(NUMBER_RE) ?? []) {
       const n = parseNumeric(tok);
-      if (n !== null && n > 0) out.push(n);
+      if (n === null || n <= 0) continue;
+      // For a price claim, only count tokens that look like money — carry a currency symbol,
+      // or thousands-grouping/decimals — so a bare year ("2024") in a price snippet is not a
+      // candidate. A plain 4-digit integer with no money markers is rejected.
+      if (claim.hasCurrencyUnit) {
+        const looksLikeMoney = /[$€£]/.test(tok) || /[,.]/.test(tok);
+        const isBareYear = /^\d{4}$/.test(tok.trim()) && n >= 1900 && n <= 2099;
+        if (!looksLikeMoney || isBareYear) continue;
+      }
+      out.push(n);
     }
   }
   return out;
