@@ -74,6 +74,35 @@ export function buildLocalCouncilRoster(
       const grokMember = createCouncilMember({ adapter: grokAdapter, topic: 'factual', timeoutMs });
       defaultMembers.push(grokMember);
       (byTopic.factual ??= []).push(grokMember);
+    } else {
+      // Always surface a Grok (CLI) entry with a rich, actionable note so the council panel
+      // and user can see exactly why it is absent and how to enable it (addresses "grok cli did not respond").
+      // This member never reaches a live model; it short-circuits to a clear "install to participate" note.
+      const grokUnavailable: CouncilMember = {
+        id: 'grok-cli',
+        displayName: 'Grok (CLI)',
+        topic: 'factual',
+        async review() {
+          const note = {
+            memberId: 'grok-cli',
+            memberName: 'Grok (CLI)',
+            topic: 'factual' as const,
+            verdict: 'needs-work' as const,
+            confidence: 0,
+            realIntent: 'User wants Grok (the xAI Grok TUI/CLI) as a council advisor for vision, facts, and strong reasoning reviews.',
+            hiddenMeaning: '',
+            missingCapability: 'grok CLI binary not found on this machine',
+            suggestedAction: 'answer-directly' as const,
+            searchQuery: '',
+            methodLesson: 'Install the Grok Build TUI (the `grok` command) so Vai can shell out for council reviews. On Windows the binary must be at %USERPROFILE%\\.grok\\bin\\grok.exe (or "grok" on PATH that responds to `grok version`). Once present, restart the Vai engine/runtime; the council roster will auto-include Grok (CLI) as a factual/vision member with no VRAM cost. The named pipe/TCP channels (\\\\.\\pipe\\vai-grok-direct and 127.0.0.1:48765) are for full ChatService direct access / vai-collab, separate from this headless council adapter. Use the direct channel (this Grok instance via vai-collab bridge) as a live participating council voice for project self-improvement discussions.',
+            concerns: ['grok CLI not installed or not discoverable', 'no listener means no participation in SCIS council', 'for self-growth of Vai, prefer direct Grok voice via pipe for rich reviews of codebase changes and capability gaps'],
+            durationMs: 0,
+          };
+          return note as any;
+        },
+      };
+      defaultMembers.push(grokUnavailable);
+      (byTopic.factual ??= []).push(grokUnavailable);
     }
   }
 

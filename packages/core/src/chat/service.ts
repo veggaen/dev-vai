@@ -902,7 +902,18 @@ export class ChatService {
     { thinking: CouncilThinking; consensus: CouncilConsensus } | undefined
   > {
     if (!this.councilRoster || !draft.prompt || !draft.draftText) return undefined;
-    if (isPureConversationalTurn(draft.prompt)) return undefined;
+
+    // Self-improvement / Vai project growth mode (user V3gga explicit request):
+    // - Vai *always* produces a primary response (never hand off everything to small models or stay silent on hard/meta questions about itself).
+    // - Council then investigates: the user's request + Vai's primary as a data point + the actual Vai codebase.
+    // - Members argue, "test/validate" (old vs new behavior via context), confirm, and surface concrete small improvements.
+    // - Goal: grow Vai's own capabilities (more tool use in main chat, self-orchestration of council for future turns, honest self-diagnosis on its project).
+    // - Human (V3gga) sees it visually in desktop panels (Council Progress, ThinkingPanel, LiveProcessTrace) and can steer/help.
+    // - Send/receive to members via direct channel (bridge + pipe) + engine roster (qwens + Grok voice/synthetic).
+    const isSelfImprovement = /self.?improvement|self.?review|project.?growth|make Vai (better|stronger|more capable)|council work on vai|investigate.*codebase.*(self|vai)|grow.*tool.*use|self.?solve on its own|always respond.*council|primary response.*council/i.test(draft.prompt || '');
+
+    if (isPureConversationalTurn(draft.prompt) && !isSelfImprovement) return undefined;
+
     try {
       const input: CouncilInput = {
         prompt: draft.prompt,
@@ -913,6 +924,27 @@ export class ChatService {
         sources: draft.sources ?? [],
         draftConfidence: draft.confidence,
       };
+
+      if (isSelfImprovement) {
+        // Inject explicit project self context so the council members can "investigate the codebase".
+        // This makes the member notes / lessons the "arguments + validated proposals" for growing Vai.
+        (input as any).vaiProjectSelfContext = {
+          goal: 'Vai (the deterministic engine) + agents (including live Grok via direct channel) continuously improve Vai itself. Humans (V3gga) must be able to see and steer the process live (AGENTS.md).',
+          currentRosterSummary: 'vai:v0 (primary) + local qwen3:8b / qwen2.5:7b / qwen2.5:3b + Grok (CLI) synthetic note + live voice via direct pipe/bridge (vai-grok-direct + vai-file-mailbox-bridge).',
+          keyAreasToInvestigateForGrowth: [
+            'packages/core/src/chat/service.ts (primary always-respond generation + council attach/conveneOnce + redraft)',
+            'packages/core/src/consensus/council.ts + topic-router.ts (parallel member reviews, reachConsensus, methodLessons as growth proposals)',
+            'packages/runtime/src/council/build-roster.ts (roster wiring + synthetic Grok note for reliable voice)',
+            'packages/runtime/src/local-pipe-chat.ts + scripts/vai-file-mailbox-bridge.mjs (the send/receive channel to all members + human steer)',
+            'apps/desktop/src/components/panels/CouncilProgressPanel.tsx + chat/ThinkingPanel.tsx + LiveProcessTrace.tsx (the visual for human to see debate + growth items and help)',
+            'AGENTS.md (improvement loop, council as staff/models, Vai as the institution, "one heavy task at a time", Windows-first, no Python in core)',
+            'Current pain (from real turns): complex self/meta/council-address prompts often timeout on the direct pipe for small local members; need robust terminal frames + shorter self-review path + codebase context injection.',
+          ],
+          primaryAsDataPoint: (draft.draftText || '').slice(0, 600),
+          humanCanSeeSteer: 'Desktop Council Progress + ThinkingPanel + activity (now files+links only). Use the direct channel to inject guidance.',
+        };
+      }
+
       const result = await convene(input, this.councilRoster, { timeoutMs: 12_000 });
       if (!result.convened) return undefined;
       const consensus = await this.crossCheckConsensus(draft, result.consensus);

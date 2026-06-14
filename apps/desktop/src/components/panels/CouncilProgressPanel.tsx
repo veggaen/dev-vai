@@ -184,6 +184,23 @@ export function CouncilProgressPanel({
             </div>
           )}
 
+          {/* Self-improvement / Vai project growth (new per the council self-work loop) */}
+          {(council.realIntent?.toLowerCase().includes('self') ||
+            council.realIntent?.toLowerCase().includes('project') ||
+            council.summary?.toLowerCase().includes('self') ||
+            council.methodLessons.some((l) => /self|project|tool use|codebase|growth|capability/i.test(l))) && (
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-[10px]">
+              <div className="flex items-center gap-1 text-emerald-400 font-medium mb-1">
+                <i className="fa-solid fa-seedling" /> Vai Self-Improvement / Project Growth
+              </div>
+              <div className="opacity-80">
+                This council turn is being used as a data point to grow Vai itself (primary response always produced; council investigates codebase + response; proposes validated improvements for tool use, self-orchestration, robust channels, and self-solving on the Vai project).
+                Human (V3gga) can watch here + in ThinkingPanel/LiveProcessTrace and steer via chat or the direct channel. The realIntent, lessons, and missing caps above are the "arguments + proposals".
+              </div>
+              <div className="mt-1 text-[9px] text-emerald-300/70">See docs/vai-improvement-backlog.md for the tracked item + the council-self-improvement-visual-demo.html for an immediate interactive preview of the debate.</div>
+            </div>
+          )}
+
           {/* Actions footer — Codex progress actions style */}
           <div className="flex flex-wrap gap-1.5 pt-1">
             <button

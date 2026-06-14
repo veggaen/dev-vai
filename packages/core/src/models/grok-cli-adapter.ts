@@ -106,7 +106,8 @@ function runGrokHeadless(
       clearTimeout(timer);
       if (signal) signal.removeEventListener('abort', onAbort);
       if (code !== 0 && !stdout.trim()) {
-        reject(new Error(`grok exited ${code}: ${stderr.slice(0, 200)}`));
+        const hint = ' (install the Grok TUI/Build so grok.exe is at %USERPROFILE%\\.grok\\bin\\grok.exe or "grok" on PATH; this enables Grok (CLI) as a vision-capable council member with no local VRAM)';
+        reject(new Error(`grok exited ${code}: ${stderr.slice(0, 200)}${hint}`));
         return;
       }
       try {

@@ -233,12 +233,18 @@ export function toCouncilThinking(
   consensus: CouncilConsensus,
   assessment?: SeriousnessAssessment,
 ): CouncilThinking {
+  const cc = consensus.crossCheck;
+  const summary = cc?.verified
+    ? `${consensus.summary} · web-confirmed${cc.confirmsValue ? ` (${cc.confirmsValue})` : ''}`
+    : cc?.contradicted
+      ? `${consensus.summary} · web search disagreed — redrafting`
+      : consensus.summary;
   return {
     outcome: consensus.outcome,
     agreement: consensus.agreement,
     confidence: consensus.confidence,
     topic,
-    summary: consensus.summary,
+    summary,
     realIntent: consensus.realIntent,
     recommendedAction: consensus.recommendedAction,
     missingCapabilities: consensus.missingCapabilities,
@@ -255,6 +261,7 @@ export function toCouncilThinking(
       note: n.error ? `did not respond (${n.error})` : n.realIntent || n.missingCapability || n.methodLesson || '—',
       failed: Boolean(n.error),
     })),
+    crossCheck: cc,
   };
 }
 
