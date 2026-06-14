@@ -105,7 +105,7 @@ export function App() {
   const trustLevel = useVinextStore((state) => state.trustLevel);
   const {
     showDebugConsole, showFileExplorer, showBuilderPanel,
-    sidebarState, focusMode, previewExpanded, expandBuilder, view, activePanel,
+    sidebarState, focusMode, previewExpanded, view, activePanel,
     layoutMode, themePreference, updateScreenClass, screenClass,
   } = useLayoutStore();
   const { projectId, deployPhase, status: sandboxStatus } = useSandboxStore();
@@ -208,7 +208,6 @@ export function App() {
   // visual snapshot. Here we only hydrate the persisted theme on mount.
   useEffect(() => {
     applyThemeById(getActiveThemeId());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const hasActiveSandbox = projectId !== null;

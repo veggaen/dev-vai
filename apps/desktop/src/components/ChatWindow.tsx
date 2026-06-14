@@ -26,9 +26,9 @@ import { useAutoScroll } from '../hooks/useAutoScroll.js';
 import { useIntentStore, computeFallbackMap } from '../stores/intentStore.js';
 import { apiFetch } from '../lib/api.js';
 import {
-  BookOpen, MessageCircle, Sparkles, Shield, Globe,
+  BookOpen, MessageCircle,
   Paperclip, X, FileText, ArrowUp, Square, ImagePlus,
-  Eye, Brain, Bot, Wifi, Plus, Moon, Sun, ChevronDown, ChevronRight,
+  Brain, Bot, Wifi, Plus, Moon, Sun,
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { WorkspaceLayoutControls } from './workspace/WorkspaceLayoutControls.js';
@@ -173,7 +173,6 @@ export function ChatWindow() {
     toggleBuilderPanel,
     expandBuilder,
     setActivePanel,
-    buildStatus,
     setBuildStatus,
     setMode,
     themePreference,
@@ -201,7 +200,6 @@ export function ChatWindow() {
   const studioBuilderChrome = themePreference === 'light';
   const isOwner = useAuthStore((state) => state.isOwner);
   const ownerFeaturesHidden = useAuthStore((state) => state.ownerFeaturesHidden);
-  const authUser = useAuthStore((state) => state.user);
   const persistentProjectId = useSandboxStore((state) => state.persistentProjectId);
   const buildActivity = useSandboxStore((state) => state.buildActivity);
   const clearBuildActivity = useSandboxStore((state) => state.clearBuildActivity);
@@ -213,8 +211,6 @@ export function ChatWindow() {
   const sandboxProjectName = useSandboxStore((state) => state.projectName);
   const sandboxProjectId = useSandboxStore((state) => state.projectId);
   const sandboxDevPort = useSandboxStore((state) => state.devPort);
-  const deployPhase = useSandboxStore((state) => state.deployPhase);
-  const deploySteps = useSandboxStore((state) => state.deploySteps);
   const fetchPeers = useCollabStore((state) => state.fetchPeers);
   const peers = useCollabStore((state) => state.peers);
   const createAudit = useCollabStore((state) => state.createAudit);
@@ -968,83 +964,6 @@ export function ChatWindow() {
   const charCount = input.length;
   const canSend = input.trim().length > 0 && !isStreaming && (!pastedImage || imageDescription.trim().length > 0);
 
-  const streamingProgressSteps = isStreaming
-    ? messages[messages.length - 1]?.progressSteps ?? []
-    : [];
-  const activeDeployStep = useMemo(
-    () => deploySteps.find((step) => step.status === 'running')
-      ?? deploySteps.find((step) => step.status === 'failed')
-      ?? null,
-    [deploySteps],
-  );
-  const transientActivity = useMemo(() => {
-    const items: Array<{ key: string; tone: 'violet' | 'blue' | 'emerald' | 'amber' | 'orange'; label: string; detail: string }> = [];
-
-    if (isStreaming) {
-      // Stream the REAL pipeline steps (council architect/coder/stylist/
-      // validate/review/repair, search, escalation…) instead of a canned
-      // "thinking…" line — the user steers Vai by watching what it actually
-      // does, live, not after the fact.
-      const steps = streamingProgressSteps;
-      const latest = steps[steps.length - 1];
-      if (latest) {
-        const toneFor = (stage: string): 'violet' | 'blue' | 'emerald' | 'amber' | 'orange' =>
-          stage.startsWith('council') ? 'orange'
-            : stage === 'search' || stage === 'escalate' ? 'blue'
-              : stage === 'quality-check' ? 'amber'
-                : 'violet';
-        items.push({
-          key: `live-${steps.length}`,
-          tone: toneFor(latest.stage),
-          label: latest.label,
-          detail: latest.detail ?? (latest.status === 'running' ? 'in progress…' : 'done'),
-        });
-        const previous = steps[steps.length - 2];
-        if (previous) {
-          items.push({
-            key: `live-${steps.length - 1}`,
-            tone: 'violet',
-            label: `✓ ${previous.label}`,
-            detail: previous.detail ?? '',
-          });
-        }
-      } else {
-        const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content?.toLowerCase() ?? '';
-        const isSearchLikely = /\b(?:what|who|when|where|why|how|latest|current|news|price|weather|search|find|look up|research)\b/.test(lastUserMsg);
-        items.push({
-          key: 'thinking',
-          tone: mode === 'builder' ? 'orange' : isSearchLikely ? 'blue' : 'violet',
-          label: mode === 'builder' ? 'Starting the build pipeline…' : isSearchLikely ? 'Searching the web...' : 'Thinking...',
-          detail: mode === 'builder'
-            ? 'routing your request to the builder council'
-            : isSearchLikely
-              ? 'fetching sources and composing cited answer'
-              : 'composing response',
-        });
-      }
-    }
-
-    if (deployPhase === 'deploying' && activeDeployStep) {
-      items.push({
-        key: 'deploy',
-        tone: 'blue',
-        label: activeDeployStep.label,
-        detail: activeDeployStep.message || 'working through the live preview pipeline',
-      });
-    } else if (buildStatus.step !== 'idle' && buildStatus.step !== 'ready') {
-      const isSoftMiss = buildStatus.step === 'failed' && /(?:no files|no preview|text only|unchanged|ended early)/i.test(buildStatus.message || '');
-      items.push({
-        key: 'build-status',
-        tone: buildStatus.step === 'failed' ? 'amber' : 'blue',
-        label: buildStatus.step === 'failed'
-          ? (isSoftMiss ? 'No preview update yet' : 'Build path hit an issue')
-          : `Working: ${buildStatus.step}`,
-        detail: buildStatus.message || 'processing the current request',
-      });
-    }
-
-    return items.slice(0, 3);
-  }, [activeDeployStep, buildStatus.message, buildStatus.step, deployPhase, isStreaming, messages, mode, streamingProgressSteps]);
   const showProjectContextStrip = Boolean(sandboxProjectId);
   const draftWouldAttachProjectContext = Boolean(sandboxProjectId && shouldAttachSandboxContext(input));
   const draftContextPaths = useMemo(
@@ -1143,52 +1062,6 @@ export function ChatWindow() {
 
     return hints.slice(0, 2);
   }, [onlineIdeCount, pastedImage]);
-  const activitySummary = useMemo(() => {
-    if (transientActivity.length > 0) {
-      return transientActivity[0]?.label ?? 'Working';
-    }
-    if (buildActivity.length > 0) {
-      return `${buildActivity.length} update${buildActivity.length === 1 ? '' : 's'}`;
-    }
-    return 'Idle';
-  }, [buildActivity.length, transientActivity]);
-  const contextualComposerActions = useMemo(() => {
-    if (!hasMessages) return [];
-
-    if (deliveryRoute === 'broadcast') {
-      return [
-        { label: 'Ask for fixes', prompt: 'Review the current issue and propose the best fix with tradeoffs.', icon: Shield },
-        { label: 'Different approach', prompt: 'Give me a materially different approach to this problem.', icon: Sparkles },
-        { label: 'Implementation plan', prompt: 'Turn this into a concrete implementation plan with steps.', icon: BookOpen },
-        { label: 'Challenge it', prompt: 'Challenge the current direction and call out the weak assumptions.', icon: Globe },
-      ];
-    }
-
-    if (mode === 'builder' || mode === 'agent' || showProjectContextStrip) {
-      return [
-        { label: 'Tighten the layout', prompt: 'Tighten the layout, spacing, and hierarchy without changing the core functionality.', icon: Sparkles },
-        { label: 'Make it mobile-ready', prompt: 'Improve the mobile layout and touch behavior without breaking desktop.', icon: Globe },
-        { label: 'Explain the structure', prompt: 'Explain what you built, where the important files live, and how the pieces connect.', icon: BookOpen },
-      ];
-    }
-
-    if (hasResearchRailContext) {
-      return [
-        { label: 'Short summary', prompt: 'Summarize that in 3 crisp bullets.', icon: BookOpen },
-        { label: 'Why it matters', prompt: 'Why does this matter in practice?', icon: Shield },
-        { label: 'Turn into a plan', prompt: 'Turn that into an actionable plan.', icon: Sparkles },
-        { label: 'Best source first', prompt: 'Which source matters most here, and why?', icon: Globe },
-      ];
-    }
-
-    return [
-      { label: 'Make it shorter', prompt: 'Make that shorter and sharper.', icon: Sparkles },
-      { label: 'Give examples', prompt: 'Give me two concrete examples.', icon: BookOpen },
-      { label: 'Challenge assumptions', prompt: 'Challenge that answer and point out weak assumptions.', icon: Shield },
-      { label: 'Turn into steps', prompt: 'Turn that into clear step-by-step actions.', icon: Globe },
-    ];
-  }, [deliveryRoute, hasMessages, hasResearchRailContext, mode, showProjectContextStrip]);
-
   useEffect(() => {
     setActivityCollapsed(false);
   }, [activeConversationId]);

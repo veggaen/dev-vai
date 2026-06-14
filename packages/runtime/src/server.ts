@@ -139,7 +139,7 @@ export async function createServer(options?: ServerOptions) {
         prompt: { type: 'string', description: 'The question or review request for Grok. For council-style, include the draft + context.' },
         mode: { type: 'string', enum: ['advice', 'review', 'council'], description: 'Optional mode hint.' },
       },
-      async execute(args: any, ctx: any) {
+      async execute(args: any, _ctx: any) {
         const prompt = String(args.prompt || args.query || '');
         if (!prompt) return { success: false, output: 'No prompt provided to grok_collab.' };
         const res = await grokFriend.ask(prompt);
