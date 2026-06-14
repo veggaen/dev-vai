@@ -246,6 +246,8 @@ interface ChatState {
   activeConversationId: string | null;
   messages: ChatMessage[];
   isStreaming: boolean;
+  /** Follow-up the user composed while a turn was streaming — sent automatically when the turn completes. */
+  queuedMessage: string | null;
   /** Owner-only explicit teach toggle, only active inside training workspace. */
   learningEnabled: boolean;
   /** Separate owner workspace for curating what can train Vai. */
@@ -266,6 +268,7 @@ interface ChatState {
   updateConversationMode: (id: string, mode: ChatMode) => Promise<void>;
   setConversationSandbox: (id: string, sandboxProjectId: string | null) => Promise<void>;
   setConversationVisibility: (id: string, visibility: 'private' | 'unlisted' | 'public') => Promise<string | null>;
+  renameConversation: (id: string, title: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
   sendMessage: (content: string, image?: ImageAttachment, systemPrompt?: string, opts?: { isAutoRepair?: boolean; repairAttempt?: number; imageMode?: boolean }) => void;
   /** Inject a message from an IDE agent (group chat) */
@@ -279,6 +282,8 @@ interface ChatState {
   /** Update broadcast target client IDs without changing mode */
   setBroadcastTargetClientIds: (ids: string[]) => void;
   stopStreaming: () => void;
+  /** Queue a follow-up to auto-send when the current turn finishes (null clears it). */
+  setQueuedMessage: (content: string | null) => void;
   appendToLastMessage: (text: string) => void;
   setFeedback: (messageId: string, helpful: boolean) => void;
   setLearningEnabled: (enabled: boolean) => void;
@@ -445,6 +450,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeConversationId: null,
   messages: [],
   isStreaming: false,
+  queuedMessage: null,
   learningEnabled: false,
   trainingWorkspace: false,
   activeBroadcastId: null,
@@ -665,6 +671,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     return updated.shareSlug ?? null;
+  },
+
+  renameConversation: async (id: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    // Optimistic — show the new title immediately, reconcile from the server.
+    set((state) => ({
+      conversations: state.conversations.map((conversation) => (
+        conversation.id === id ? { ...conversation, title: trimmed } : conversation
+      )),
+    }));
+    const res = await apiFetch(`/api/conversations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: trimmed }),
+    });
+    if (!res.ok) {
+      // Reconcile from the server on failure (restores the prior title).
+      void get().fetchConversations();
+      return;
+    }
+    const updated = await res.json() as Conversation;
+    set((state) => ({
+      conversations: state.conversations.map((conversation) => (
+        conversation.id === id ? updated : conversation
+      )),
+    }));
   },
 
   deleteConversation: async (id: string) => {
@@ -977,6 +1010,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         activeStreamingAssistantId = null;
         // Refresh conversations to get updated titles/timestamps
         get().fetchConversations();
+        // Drain a queued follow-up the user composed mid-turn — send it now that
+        // the turn has settled. Defer a tick so isStreaming:false commits first.
+        const queued = get().queuedMessage;
+        if (queued && queued.trim()) {
+          set({ queuedMessage: null });
+          setTimeout(() => {
+            if (!get().isStreaming) get().sendMessage(queued);
+          }, 0);
+        }
       } else if (chunk.type === 'error') {
         flushPendingStreamDelta();
         set({ isStreaming: false });
@@ -1015,7 +1057,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeWs = null;
     }
     activeStreamingAssistantId = null;
-    set({ isStreaming: false });
+    // A manual stop cancels any queued follow-up — the user chose to halt.
+    set({ isStreaming: false, queuedMessage: null });
+  },
+
+  setQueuedMessage: (content: string | null) => {
+    set({ queuedMessage: content && content.trim() ? content : null });
   },
 
   injectAgentMessage: (content: string, sender: MessageSender) => {

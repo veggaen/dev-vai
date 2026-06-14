@@ -1158,6 +1158,15 @@ export class ChatService {
     return this.getConversation(conversationId);
   }
 
+  updateConversationTitle(conversationId: string, title: string) {
+    this.db.update(conversations)
+      .set({ title: title.trim().slice(0, 200), updatedAt: new Date() })
+      .where(eq(conversations.id, conversationId))
+      .run();
+
+    return this.getConversation(conversationId);
+  }
+
   updateConversationSandbox(conversationId: string, sandboxProjectId: string | null) {
     this.db.update(conversations)
       .set({ sandboxProjectId, updatedAt: new Date() })

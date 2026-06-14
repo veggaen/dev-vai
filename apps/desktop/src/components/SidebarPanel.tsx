@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import {
   Plus, Trash2, ChevronLeft, ChevronRight,
   FolderKanban, FolderOpen, Shield, Search, Pin, PinOff, Code2,
+  Pencil, Archive, ArchiveRestore,
 } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore.js';
 import { useSettingsStore } from '../stores/settingsStore.js';
@@ -55,7 +56,27 @@ interface SandboxProjectSummary {
 
 const CHAT_ORDER_STORAGE_KEY = 'vai-sidebar-chat-order';
 const CHAT_PINNED_STORAGE_KEY = 'vai-sidebar-pinned-chats';
+const CHAT_ARCHIVED_STORAGE_KEY = 'vai-sidebar-archived-chats';
 const PROJECT_LIST_PAGE_SIZE = 12;
+
+function loadIdSet(key: string): Set<string> {
+  try {
+    const raw = typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
+    return new Set(raw ? JSON.parse(raw) as string[] : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveIdSet(key: string, ids: Set<string>): void {
+  try {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(key, JSON.stringify([...ids]));
+    }
+  } catch {
+    // ignore local persistence failures
+  }
+}
 
 function loadPinnedChats(): Set<string> {
   try {
@@ -177,12 +198,19 @@ function ChatsPanel() {
     fetchConversations,
     selectConversation,
     deleteConversation,
+    renameConversation,
     startNewChat,
   } = useChatStore();
   const themePreference = useLayoutStore((state) => state.themePreference);
   const isLight = themePreference === 'light';
+  const isStreaming = useChatStore((state) => state.isStreaming);
   const [query, setQuery] = useState('');
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => loadPinnedChats());
+  const [archivedIds, setArchivedIds] = useState<Set<string>>(() => loadIdSet(CHAT_ARCHIVED_STORAGE_KEY));
+  const [showArchived, setShowArchived] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   const [manualOrder, setManualOrder] = useState<string[]>(() => loadConversationOrder());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [draggedConversationId, setDraggedConversationId] = useState<string | null>(null);
@@ -272,6 +300,44 @@ function ChatsPanel() {
     });
   }, []);
 
+  const toggleArchived = useCallback((conversationId: string) => {
+    setArchivedIds((current) => {
+      const next = new Set(current);
+      if (next.has(conversationId)) next.delete(conversationId);
+      else next.add(conversationId);
+      saveIdSet(CHAT_ARCHIVED_STORAGE_KEY, next);
+      return next;
+    });
+  }, []);
+
+  const beginRename = useCallback((id: string, currentTitle: string) => {
+    setRenamingId(id);
+    setRenameDraft(currentTitle);
+    setContextMenu(null);
+  }, []);
+
+  const commitRename = useCallback(() => {
+    if (renamingId) {
+      const draft = renameDraft.trim();
+      if (draft) void renameConversation(renamingId, draft);
+    }
+    setRenamingId(null);
+    setRenameDraft('');
+  }, [renamingId, renameDraft, renameConversation]);
+
+  // Close the context menu on any outside click or Escape.
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setContextMenu(null); };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [contextMenu]);
+
   // Pinned first, then chronological Today / Yesterday / Older for all chats.
   const grouped = useMemo(() => {
     const groups = new Map<string, {
@@ -285,7 +351,11 @@ function ChatsPanel() {
       let key: string;
       let label: string;
       let order: number;
-      if (pinnedIds.has(conv.id)) {
+      if (archivedIds.has(conv.id)) {
+        key = 'archived';
+        label = 'Archived';
+        order = 99;
+      } else if (pinnedIds.has(conv.id)) {
         key = 'pinned';
         label = 'Pinned';
         order = -1;
@@ -308,19 +378,27 @@ function ChatsPanel() {
       group.items.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     }
     return sorted;
-  }, [filteredConversations, pinnedIds]);
+  }, [filteredConversations, pinnedIds, archivedIds]);
+
+  const archivedCount = useMemo(
+    () => filteredConversations.filter((conv) => archivedIds.has(conv.id)).length,
+    [filteredConversations, archivedIds],
+  );
 
   const visibleGroups = useMemo(() => {
-    if (!query.trim()) return grouped;
-    if (filteredConversations.length === 0) return [];
-    return [{
-      key: 'search-results',
-      label: 'Matches',
-      projectId: null,
-      order: 0,
-      items: filteredConversations,
-    }];
-  }, [grouped, query, filteredConversations]);
+    if (query.trim()) {
+      if (filteredConversations.length === 0) return [];
+      return [{
+        key: 'search-results',
+        label: 'Matches',
+        projectId: null,
+        order: 0,
+        items: filteredConversations,
+      }];
+    }
+    // Hide the Archived group unless the user opts to show it.
+    return showArchived ? grouped : grouped.filter((group) => group.key !== 'archived');
+  }, [grouped, query, filteredConversations, showArchived]);
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups((current) => {
@@ -389,7 +467,9 @@ function ChatsPanel() {
               <span className={`min-w-0 flex-1 truncate text-[11px] font-semibold ${group.key.startsWith('bucket:') || group.key === 'search-results' ? 'uppercase tracking-[0.14em] opacity-80' : ''}`}>{group.label}</span>
               <span className={`text-[10px] tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>{group.items.length}</span>
             </button>
-            {!collapsed && group.items.map((conv) => (
+            {!collapsed && group.items.map((conv) => {
+              const isWorking = isStreaming && conv.id === activeConversationId;
+              return (
               <div
                 key={conv.id}
                 draggable
@@ -445,6 +525,11 @@ function ChatsPanel() {
                   if (Date.now() < suppressSelectUntilRef.current) return;
                   void selectConversation(conv.id);
                 }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setContextMenu({ id: conv.id, x: e.clientX, y: e.clientY });
+                }}
               >
                 {conv.id === activeConversationId && (
                   <span
@@ -463,10 +548,40 @@ function ChatsPanel() {
                       </span>
                     )}
                     <div className="flex min-w-0 flex-1 items-baseline gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{conv.title}</span>
-                      <span className={`flex-shrink-0 text-[10px] tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>
-                        {formatRelative(conv.updatedAt)}
-                      </span>
+                      {renamingId === conv.id ? (
+                        <input
+                          autoFocus
+                          value={renameDraft}
+                          onChange={(e) => setRenameDraft(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onBlur={commitRename}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+                            if (e.key === 'Escape') { e.preventDefault(); setRenamingId(null); setRenameDraft(''); }
+                          }}
+                          className={`min-w-0 flex-1 rounded border px-1 py-0.5 text-[13px] leading-tight outline-none ${
+                            isLight
+                              ? 'border-zinc-300 bg-white text-zinc-900'
+                              : 'border-white/15 bg-zinc-900 text-zinc-100'
+                          }`}
+                        />
+                      ) : (
+                        <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{conv.title}</span>
+                      )}
+                      {isWorking ? (
+                        <span className="flex flex-shrink-0 items-center gap-1 text-[10px] font-medium text-[color:var(--accent-text)]">
+                          <span aria-hidden className="relative flex h-1.5 w-1.5">
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[color:var(--accent)] opacity-70" />
+                            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[color:var(--accent)]" />
+                          </span>
+                          Working…
+                        </span>
+                      ) : (
+                        <span className={`flex-shrink-0 text-[10px] tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>
+                          {formatRelative(conv.updatedAt)}
+                        </span>
+                      )}
                     </div>
                   </div>
                   {conv.projectName && (
@@ -514,10 +629,24 @@ function ChatsPanel() {
                   <Trash2 className="h-3 w-3" />
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
           );
         })}
+
+        {!query.trim() && archivedCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowArchived((v) => !v)}
+            className={`mt-2 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] transition-colors ${
+              isLight ? 'text-zinc-500 hover:bg-zinc-200/60' : 'text-zinc-500 hover:bg-white/[0.035]'
+            }`}
+          >
+            <Archive className="h-3 w-3" />
+            {showArchived ? 'Hide archived' : `Show ${archivedCount} archived`}
+          </button>
+        )}
 
         {filteredConversations.length === 0 && (
           <p className={`px-3 py-8 text-center text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-600'}`}>
@@ -525,6 +654,48 @@ function ChatsPanel() {
           </p>
         )}
       </div>
+
+      {contextMenu && (() => {
+        const conv = conversations.find((c) => c.id === contextMenu.id);
+        if (!conv) return null;
+        const isPinned = pinnedIds.has(conv.id);
+        const isArchived = archivedIds.has(conv.id);
+        const itemClass = `flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors ${
+          isLight ? 'text-zinc-700 hover:bg-zinc-100' : 'text-zinc-300 hover:bg-white/[0.06]'
+        }`;
+        // Clamp x so a menu opened near the right edge stays on screen.
+        const left = Math.min(contextMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 0) - 184);
+        return (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ top: contextMenu.y, left }}
+            className={`fixed z-50 w-44 overflow-hidden rounded-lg border py-1 shadow-xl ${
+              isLight ? 'border-zinc-200 bg-white' : 'border-white/10 bg-zinc-900'
+            }`}
+          >
+            <button className={itemClass} onClick={() => beginRename(conv.id, conv.title)}>
+              <Pencil className="h-3.5 w-3.5 opacity-70" /> Rename
+            </button>
+            <button className={itemClass} onClick={() => { togglePinned(conv.id); setContextMenu(null); }}>
+              {isPinned ? <PinOff className="h-3.5 w-3.5 opacity-70" /> : <Pin className="h-3.5 w-3.5 opacity-70" />}
+              {isPinned ? 'Unpin' : 'Pin to top'}
+            </button>
+            <button className={itemClass} onClick={() => { toggleArchived(conv.id); setContextMenu(null); }}>
+              {isArchived ? <ArchiveRestore className="h-3.5 w-3.5 opacity-70" /> : <Archive className="h-3.5 w-3.5 opacity-70" />}
+              {isArchived ? 'Unarchive' : 'Archive'}
+            </button>
+            <div className={`my-1 h-px ${isLight ? 'bg-zinc-200' : 'bg-white/10'}`} />
+            <button
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors ${
+                isLight ? 'text-red-600 hover:bg-red-50' : 'text-red-400 hover:bg-red-500/10'
+              }`}
+              onClick={() => { void deleteConversation(conv.id); setContextMenu(null); }}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }

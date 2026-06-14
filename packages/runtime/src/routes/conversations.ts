@@ -204,14 +204,14 @@ export function registerConversationRoutes(
   );
 
   /** Update conversation mode/sandbox */
-  app.patch<{ Params: { id: string }; Body: { mode?: string; sandboxProjectId?: string | null; visibility?: string } }>(
+  app.patch<{ Params: { id: string }; Body: { title?: string; mode?: string; sandboxProjectId?: string | null; visibility?: string } }>(
     '/api/conversations/:id',
     async (request, reply) => {
       const parsed = patchConversationBodySchema.safeParse(request.body ?? {});
       if (!parsed.success) {
         return invalidRequestBody(reply, parsed.error);
       }
-      const { mode, sandboxProjectId, visibility } = parsed.data;
+      const { title, mode, sandboxProjectId, visibility } = parsed.data;
 
       let conversation = chatService.getConversation(request.params.id);
       if (!conversation) {
@@ -239,6 +239,10 @@ export function registerConversationRoutes(
       if (!access.allowed) {
         reply.code(access.statusCode ?? 403);
         return { error: access.error ?? 'Not your conversation' };
+      }
+
+      if (title !== undefined) {
+        conversation = chatService.updateConversationTitle(request.params.id, title);
       }
 
       if (mode !== undefined) {

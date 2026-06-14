@@ -15,6 +15,7 @@ export const createConversationBodySchema = z
 /** PATCH /api/conversations/:id */
 export const patchConversationBodySchema = z
   .object({
+    title: z.string().min(1, 'Title cannot be empty').max(200, 'Title is too long').optional(),
     mode: conversationModeSchema.optional(),
     sandboxProjectId: z.union([z.string(), z.null()]).optional(),
     visibility: z.enum(['private', 'unlisted', 'public']).optional(),

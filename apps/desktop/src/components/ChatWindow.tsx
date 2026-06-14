@@ -155,6 +155,8 @@ export function ChatWindow() {
     setBroadcastMode,
     setBroadcastTargetClientIds,
     stopStreaming,
+    queuedMessage,
+    setQueuedMessage,
     createConversation,
     updateConversationMode,
     learningEnabled,
@@ -693,10 +695,45 @@ export function ChatWindow() {
     setImageQuestion('');
   }, []);
 
+  /** Queue the typed text to auto-send when the current turn finishes. */
+  const handleQueue = () => {
+    const text = input.trim();
+    if (!text || !isStreaming) return;
+    setQueuedMessage(text);
+    setInput('');
+  };
+
+  /** Inject the typed text as live steering for the running turn. Falls back to
+   *  queueing if there's no conversation to steer (shouldn't happen mid-stream). */
+  const handleSteer = async () => {
+    const text = input.trim();
+    if (!text || !isStreaming) return;
+    if (!activeConversationId) { handleQueue(); return; }
+    try {
+      await useChatStore.getState().postSteer({
+        conversationId: activeConversationId,
+        signal: 'prefer',
+        handler: 'conversation-reasoning',
+        note: text,
+        scope: 'conversation',
+      });
+      setInput('');
+    } catch {
+      // If steering fails, don't lose the user's text — queue it instead.
+      handleQueue();
+    }
+  };
+
   const handleSend = async (overrideText?: string, options?: SendOptions) => {
     const isOverrideSend = typeof overrideText === 'string';
     const text = (overrideText ?? input).trim();
-    if (isStreaming || !text) return;
+    // Mid-stream submits become a queued follow-up rather than a no-op, so the
+    // Enter key still does something useful while a turn is running.
+    if (isStreaming) {
+      if (!isOverrideSend && text) handleQueue();
+      return;
+    }
+    if (!text) return;
     if (!isOverrideSend && pastedImage && !imageDescription.trim()) {
       descriptionRef.current?.focus();
       return;
@@ -1740,6 +1777,44 @@ export function ChatWindow() {
                 ))}
               </div>
             </div>
+
+            {/* While a turn streams, typed text can steer the run now or queue
+                for after — instead of the Enter key silently doing nothing. */}
+            {isStreaming && input.trim().length > 0 && (
+              <div className="flex items-center gap-2 px-4 pt-2 text-[11px]">
+                <span className="text-[color:var(--accent-text)]">Vai is working —</span>
+                <button
+                  type="button"
+                  onClick={() => void handleSteer()}
+                  className="rounded-md border border-[color:var(--accent-ring)] bg-[color:var(--accent-soft)] px-2 py-0.5 font-medium text-[color:var(--accent-text)] transition-colors hover:bg-[color:var(--accent-softer)]"
+                  title="Inject this as guidance for the current turn"
+                >
+                  Steer now
+                </button>
+                <button
+                  type="button"
+                  onClick={handleQueue}
+                  className="rounded-md border border-zinc-700 px-2 py-0.5 font-medium text-zinc-300 transition-colors hover:bg-white/[0.05]"
+                  title="Send this automatically when the current turn finishes (Enter)"
+                >
+                  Queue ↵
+                </button>
+              </div>
+            )}
+            {queuedMessage && (
+              <div className="flex items-center gap-2 px-4 pt-2 text-[11px] text-zinc-400">
+                <span className="rounded-full bg-zinc-800 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-zinc-400">Queued</span>
+                <span className="min-w-0 flex-1 truncate">{queuedMessage}</span>
+                <button
+                  type="button"
+                  onClick={() => setQueuedMessage(null)}
+                  className="flex-shrink-0 text-zinc-500 transition-colors hover:text-zinc-200"
+                  title="Cancel queued message"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
 
             <textarea
               ref={textareaRef}
