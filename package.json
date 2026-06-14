@@ -12,6 +12,7 @@
     "build": "pnpm -r build",
     "build:desktop": "pnpm --filter @vai/desktop build:tauri",
     "app:update": "node scripts/update-desktop-app.mjs",
+    "app:update:runtime": "node scripts/update-desktop-runtime.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
