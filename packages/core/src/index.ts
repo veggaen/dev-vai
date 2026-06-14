@@ -204,6 +204,8 @@ export {
 export type { CheckableClaim, ClaimAssessment } from './consensus/cross-check.js';
 export { createGrokCliAdapter, isGrokCliAvailable } from './models/grok-cli-adapter.js';
 export type { GrokCliAdapterOptions } from './models/grok-cli-adapter.js';
+export { NullVisionAdapter, createGrokVisionAdapter } from './vision/index.js';
+export type { VisionAdapter, VisionDescribeInput, VisionDescription, GrokVisionOptions } from './vision/index.js';
 export { tryEmitConversationReasoning } from './chat/conversation-reasoning.js';
 export {
   LIVE_CONTEXT_MAX_AGE_MS,
