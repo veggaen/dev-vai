@@ -487,6 +487,15 @@ html, body, #root {
   animation: vai-cursor-blink 0.75s ease-in-out infinite;
 }
 
+/* Subtle shimmer for the live "Thinking…" line before the first process step arrives. */
+@keyframes vai-process-shimmer {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.vai-process-shimmer {
+  animation: vai-process-shimmer 1.4s ease-in-out infinite;
+}
+
 html {
   background-color: var(--app-chrome-background);
 }

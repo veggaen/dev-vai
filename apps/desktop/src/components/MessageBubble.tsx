@@ -45,6 +45,7 @@ import type {
 } from '../stores/chatStore.js';
 import type { DeployIntent, RecoveryPattern } from '../lib/intent-detector.js';
 import { ThinkingPanel } from './chat/ThinkingPanel.js';
+import { LiveProcessTrace } from './chat/LiveProcessTrace.js';
 import { ProjectArtifactCard } from './ProjectArtifactCard.js';
 import { SourceCards } from './SourceCards.js';
 
@@ -973,6 +974,15 @@ export function MessageBubble({
 
             {!isUser && groundedBuildBrief && (
               <GroundedBuildBriefCard brief={groundedBuildBrief} onExecute={onGroundedExecute} />
+            )}
+
+            {/* Live process trace — while the turn is in flight and no text has streamed yet, show
+                the real steps (search / council / consolidating) instead of a bare spinner. */}
+            {!isUser && isStreaming && content.length === 0 && !hasPendingFileBuild && (
+              <LiveProcessTrace
+                steps={progressSteps ?? []}
+                imageSteps={imageGenSteps}
+              />
             )}
 
             {/* Text — low confidence responses get subtle visual decay */}
