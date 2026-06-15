@@ -2,6 +2,7 @@ import type { TurnClassification } from './turn-classifier.js';
 import type { QuestionIntent } from './question-intent.js';
 import type { GitEvidence } from '../tools/git-evidence.js';
 import type { RunEvidence } from '../tools/run-evidence.js';
+import type { PageEvidence } from '../tools/page-evidence.js';
 
 /**
  * Async-gathered evidence attached to a turn BEFORE dispatch. The dispatcher and
@@ -16,6 +17,8 @@ export interface TurnEvidence {
   readonly git?: GitEvidence;
   /** Result of running a safe verification command (tests/build/typecheck), when the turn asked. */
   readonly run?: RunEvidence;
+  /** Real browser observation of a page (title/status/selectors), when the turn named a URL to inspect. */
+  readonly page?: PageEvidence;
 }
 
 /**

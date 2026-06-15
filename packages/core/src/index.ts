@@ -325,6 +325,20 @@ export type {
 } from './tools/git-evidence.js';
 export { gitCapability, classifyGitQuery } from './chat/capabilities/git-capability.js';
 export { execCapability, isExecQuery } from './chat/capabilities/exec-capability.js';
+export { pageCapability, isPageQuery } from './chat/capabilities/page-capability.js';
+export {
+  gatherPageEvidence,
+  pageEvidenceIds,
+  hasPageEvidence,
+} from './tools/page-evidence.js';
+export type {
+  PageEvidence,
+  PageSelectorEvidence,
+  PageObserver,
+  GatherPageEvidenceOptions,
+} from './tools/page-evidence.js';
+export { observePage } from './search/browser-search.js';
+export type { PageObservation, SelectorObservation } from './search/browser-search.js';
 export {
   runCommandEvidence,
   isAllowlistedCommand,

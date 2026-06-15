@@ -50,6 +50,7 @@ import { shadowScore, type ShadowScore } from './capability-kernel.js';
 import { liveContextCapability } from './capabilities/live-context-capability.js';
 import { gitCapability, classifyGitQuery } from './capabilities/git-capability.js';
 import { execCapability } from './capabilities/exec-capability.js';
+import { pageCapability } from './capabilities/page-capability.js';
 import { gatherGitEvidence, type GitEvidence } from '../tools/git-evidence.js';
 import type {
   CouncilInput,
@@ -2029,11 +2030,12 @@ export class ChatService {
       // Shadow-score the kernel capabilities against the same context. Pure
       // observation: the live `outcome` above already decided the turn; these
       // only annotate the visible plan. A null means inapplicable → dropped.
-      // exec is shadow-only here: running a test suite from a chat turn is a heavier,
-      // riskier action than read-only git, so it is NOT auto-wired into live dispatch —
-      // the builder loop / agentic OODA invokes it deliberately. Shadowing surfaces when
-      // it WOULD apply so its scoring can be trusted before any future promotion.
-      const shadowCapabilities = [liveContextCapability, gitCapability, execCapability];
+      // exec + page are shadow-only here: running a test suite or driving a real browser
+      // from a chat turn is heavier/riskier than read-only git, so they are NOT auto-wired
+      // into live dispatch — the builder loop / agentic OODA invokes them deliberately.
+      // Shadowing surfaces when they WOULD apply so their scoring can be trusted before any
+      // future promotion. (The web-evidence path already handles pasted-URL reads live.)
+      const shadowCapabilities = [liveContextCapability, gitCapability, execCapability, pageCapability];
       turnShadowScores = shadowCapabilities
         .map((cap) => shadowScore(cap, turnContext))
         .filter((s): s is ShadowScore => s !== null);

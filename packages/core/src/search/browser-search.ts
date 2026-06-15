@@ -417,6 +417,101 @@ async function renderPage(url: string, timeoutMs: number): Promise<string | null
   }
 }
 
+// ── Verifiable page OBSERVATION (browser-interaction evidence) ───────────────
+
+/** What a single selector observation captured. */
+export interface SelectorObservation {
+  readonly selector: string;
+  readonly exists: boolean;
+  /** innerText of the first match, trimmed (empty when absent). */
+  readonly text: string;
+}
+
+/** A real, structured observation of a page — the bindable browser evidence. */
+export interface PageObservation {
+  readonly ok: boolean;
+  readonly url: string;
+  /** URL after any redirects (what the browser actually landed on). */
+  readonly finalUrl: string;
+  /** HTTP status of the main response (null when unknown). */
+  readonly status: number | null;
+  readonly title: string;
+  /** Per-requested-selector existence + text. */
+  readonly selectors: readonly SelectorObservation[];
+  readonly observedAt: string;
+  readonly durationMs: number;
+  readonly error?: string;
+}
+
+/**
+ * Navigate to `url` in the real browser and capture a STRUCTURED, verifiable observation:
+ * the final URL, HTTP status, page title, and — for each requested CSS selector — whether
+ * it exists and its text. This is the deterministic core of browser interaction: the facts
+ * come from real DOM observation, so a downstream capability binds claims to them instead
+ * of letting a model invent page content. The caller MUST have SSRF-validated `url` first.
+ *
+ * Returns `{ ok: false }` (never throws) when no browser is available or navigation fails.
+ */
+export async function observePage(
+  url: string,
+  selectors: readonly string[] = [],
+  timeoutMs = 15_000,
+): Promise<PageObservation> {
+  const started = Date.now();
+  const base = (error?: string): PageObservation => ({
+    ok: false, url, finalUrl: url, status: null, title: '', selectors: [],
+    observedAt: new Date().toISOString(), durationMs: Date.now() - started, error,
+  });
+  if (!isBrowserSearchEnabled()) return base('no browser available');
+  try {
+    return await enqueue(() => runObservation(url, selectors, Math.max(timeoutMs, 8_000), started));
+  } catch (error) {
+    return base(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function runObservation(
+  url: string,
+  selectors: readonly string[],
+  timeoutMs: number,
+  started: number,
+): Promise<PageObservation> {
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    );
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    await page.evaluate(() => new Promise<void>((r) => setTimeout(r, 800))).catch(() => undefined);
+
+    const title = await page.title().catch(() => '');
+    const finalUrl = page.url();
+    const status = response ? response.status() : null;
+
+    const observations: SelectorObservation[] = [];
+    for (const selector of selectors) {
+      try {
+        const text = await page.$eval(selector, (el) => (el.textContent ?? '').trim());
+        observations.push({ selector, exists: true, text });
+      } catch {
+        observations.push({ selector, exists: false, text: '' });
+      }
+    }
+
+    return {
+      ok: true, url, finalUrl, status, title, selectors: observations,
+      observedAt: new Date().toISOString(), durationMs: Date.now() - started,
+    };
+  } finally {
+    await page.close().catch(() => undefined);
+  }
+}
+
 /**
  * Search Google through the installed browser. Returns [] on cooldown, when
  * no browser is available, or when extraction fails — the HTTP provider
