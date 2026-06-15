@@ -433,6 +433,17 @@ export type { UsageRecord, UsageSummary } from './usage/index.js';
 // Eval Framework
 export { EvalRunner, registerEvalTasks, getEvalTasks, getEvalTracks, computeGrade, ConversationScorer, extractTurnPairs, LearningExtractor, extractLessons, aggregateLessons, formatContextInjection, extractScenarios, runMultiTurn, computeRegression, runABTest, buildTestReport } from './eval/index.js';
 export { runMemoryRetrievalEval } from './eval/index.js';
+export { judgeAnswers, runParityBench, shouldContinueParityLoop, describeParityReport } from './eval/index.js';
+export type {
+  JudgeCandidate,
+  JudgeVerdict,
+  JudgeContext,
+  JudgeOptions,
+  ParityTask,
+  ParityTaskResult,
+  ParityReport,
+  ParityBenchOptions,
+} from './eval/index.js';
 export type {
   EvalTrack, EvalTask, EvalExpectation, EvalTaskResult,
   EvalRunResult, EvalRunConfig, EvalRunSummary,
