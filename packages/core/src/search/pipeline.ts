@@ -32,7 +32,7 @@ import {
   isFreshLocalBusinessContactRequest,
   isFreshLocalRecommendationRequest,
 } from '../models/web-conclude-policy.js';
-import { fetchGoogleViaBrowser, isBrowserSearchEnabled } from './browser-search.js';
+import { fetchGoogleViaBrowser, fetchGooglePageViaBrowser, isBrowserSearchEnabled } from './browser-search.js';
 import { classifyFreshFactKind, extractFreshFact, type ReadSource } from './fresh-fact-extract.js';
 
 // ── Query Normalization (Step 1: CLARIFY) ──
@@ -3737,8 +3737,11 @@ async function readTopPages(
     // Only read from trusted sources with real URLs
     if (s.trust.tier === 'untrusted') continue;
     if (urlsSeen.has(s.url)) continue;
-    // Skip DuckDuckGo internal URLs
+    // Skip DuckDuckGo internal URLs and Google search-result URLs (the AI Overview source
+    // is a google.com/search link whose snippet IS the answer — re-fetching it returns the
+    // results-page HTML, not the synthesized text we already captured).
     if (s.url.includes('duckduckgo.com')) continue;
+    if (/google\.[a-z.]+\/search/i.test(s.url)) continue;
     try {
       const hostname = new URL(s.url).hostname.replace(/^www\./, '');
       if (REGISTRY_METADATA_HOSTS.has(hostname) || STRUCTURED_METADATA_HOSTS.has(hostname)) continue;
@@ -3922,6 +3925,29 @@ export class SearchPipeline {
     const batchResults = await Promise.all(fetchPromises);
     for (const batch of batchResults) {
       allRaw.push(...batch);
+    }
+
+    // AI-OVERVIEW-FIRST (the human-equivalent answer): for a fresh-fact question with a
+    // browser available, grab Google's AI Overview box — the same synthesized, cited answer
+    // a human reads off the results page (the BTC/ETH screenshot). It's injected as a
+    // top-trust synthetic source so the read+extract step surfaces it directly, instead of
+    // Vai scraping snippets and guessing. Best-effort and bounded: skipped with no browser /
+    // CAPTCHA cooldown, and it never throws (the headless read+extract path is the fallback).
+    if (isFreshData && isBrowserSearchEnabled()) {
+      try {
+        const page = await fetchGooglePageViaBrowser(query, this.config.fetchTimeoutMs);
+        if (page.aiOverview && page.aiOverview.trim().length > 0) {
+          allRaw.unshift({
+            title: 'Google AI Overview',
+            snippet: page.aiOverview.trim(),
+            url: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+            queryIndex: 0,
+          });
+          audit.push({ step: 'fetch', detail: 'AI Overview captured (synthesized live answer)', durationMs: 0 });
+        }
+      } catch {
+        // Browser/Google unavailable or cooling down — headless read+extract covers it.
+      }
     }
 
     audit.push({ step: 'fan-out', detail: `${queries.length} queries, ${allRaw.length} raw results`, durationMs: Date.now() - fanOutStart });
