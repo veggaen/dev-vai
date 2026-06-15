@@ -114,7 +114,10 @@ describe('ChatService', () => {
     const id = chatService.createConversation('mock:test', 'Test Chat');
     expect(id).toBeTruthy();
     expect(typeof id).toBe('string');
-    expect(chatService.getConversation(id)?.mode).toBe('chat');
+    // Default mode is 'agent' (the workspace/agent-builds default, set deliberately in
+    // bf618a9). Factual questions are kept out of the builder by the anti-hijack guard
+    // regardless of mode, so an agent default is safe here.
+    expect(chatService.getConversation(id)?.mode).toBe('agent');
   });
 
   it('persists the selected conversation mode', () => {
@@ -415,7 +418,7 @@ describe('ChatService', () => {
   });
 
   it('answers strict yes/no benchmark wrappers before brand fact shims', async () => {
-    const convId = chatService.createConversation('mock:test');
+    const convId = chatService.createConversation('mock:test', undefined, 'chat');
 
     let text = '';
     for await (const chunk of chatService.sendMessage(
@@ -430,7 +433,7 @@ describe('ChatService', () => {
   });
 
   it('honors one-word capital prompts before country fact shims', async () => {
-    const convId = chatService.createConversation('mock:test');
+    const convId = chatService.createConversation('mock:test', undefined, 'chat');
 
     let text = '';
     for await (const chunk of chatService.sendMessage(convId, 'Please answer this cleanly: Capital of Japan. One word only.')) {
@@ -538,7 +541,7 @@ describe('ChatService', () => {
       // arm to have produced the weak draft first.
       primaryGenerativeFlip: false,
     });
-    const convId = svc.createConversation('vai:v0');
+    const convId = svc.createConversation('vai:v0', undefined, 'chat');
 
     const chunks: ChatChunk[] = [];
     for await (const chunk of svc.sendMessage(convId, 'Help me')) {
@@ -591,7 +594,7 @@ describe('ChatService', () => {
     const svc = new ChatService(createDb(':memory:'), registry, {
       vaiFallbackChain: ['mock:test'],
     });
-    const convId = svc.createConversation('vai:v0');
+    const convId = svc.createConversation('vai:v0', undefined, 'chat');
 
     const chunks: ChatChunk[] = [];
     for await (const chunk of svc.sendMessage(convId, 'Help me')) {
@@ -745,7 +748,7 @@ describe('ChatService', () => {
       vaiFallbackChain: ['vai:v0', 'mock:test'],
       primaryGenerativeFlip: true,
     });
-    const convId = svc.createConversation('vai:v0');
+    const convId = svc.createConversation('vai:v0', undefined, 'chat');
 
     const chunks: ChatChunk[] = [];
     for await (const chunk of svc.sendMessage(
@@ -982,7 +985,7 @@ describe('ChatService', () => {
     const svc = new ChatService(createDb(':memory:'), registry, {
       vaiFallbackChain: ['mock:test'],
     });
-    const convId = svc.createConversation('vai:v0');
+    const convId = svc.createConversation('vai:v0', undefined, 'chat');
 
     const chunks: ChatChunk[] = [];
     for await (const chunk of svc.sendMessage(convId, 'Help me design a humanizer for test prompts.')) {
@@ -1012,7 +1015,7 @@ describe('ChatService', () => {
     const svc = new ChatService(createDb(':memory:'), registry, {
       vaiFallbackChain: ['mock:test'],
     });
-    const convId = svc.createConversation('vai:v0');
+    const convId = svc.createConversation('vai:v0', undefined, 'chat');
 
     const chunks: ChatChunk[] = [];
     for await (const chunk of svc.sendMessage(
