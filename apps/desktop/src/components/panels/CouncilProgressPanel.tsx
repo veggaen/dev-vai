@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Users, Scale, BookOpen, Zap, Eye, RefreshCw, Sparkles, Brain } from 'lucide-react';
 import type { CouncilThinkingUI } from '../../stores/chatStore.js';
-import { motion } from 'framer-motion';
+import { stripAnsi } from '../../lib/strip-ansi.js';
 
 /**
  * CouncilProgressPanel — Codex-inspired right contextual panel for the SCIS Consensus Council.
@@ -100,10 +100,10 @@ export function CouncilProgressPanel({
                 {Math.round(council.agreement * 100)}% agree
               </span>
             </div>
-            <p className="mt-1 text-[11px] leading-snug opacity-70">{council.summary}</p>
+            <p className="mt-1 text-[11px] leading-snug opacity-70">{stripAnsi(council.summary)}</p>
             {council.realIntent && (
               <p className="mt-1.5 text-[10px] opacity-50">
-                <span className="opacity-80">Read as:</span> {council.realIntent}
+                <span className="opacity-80">Read as:</span> {stripAnsi(council.realIntent)}
               </p>
             )}
             {council.recommendedAction && council.outcome !== 'ship' && (
@@ -133,7 +133,7 @@ export function CouncilProgressPanel({
                   ) : (
                     <>
                       <div className="mt-0.5 text-[10px] opacity-70">→ {m.action}</div>
-                      {m.note && <div className="mt-1 text-[10px] leading-tight opacity-60 border-l-2 border-[color:var(--accent)]/40 pl-1.5">{m.note}</div>}
+                      {m.note && <div className="mt-1 text-[10px] leading-tight opacity-60 border-l-2 border-[color:var(--accent)]/40 pl-1.5">{stripAnsi(m.note)}</div>}
                       {/* Extra debate flavor: hidden nuance + gotchas if the note carried them (from richer 0.1% prompts) */}
                       {(m as any).hiddenMeaning && (
                         <div className="mt-0.5 text-[9px] opacity-50">nuance: {(m as any).hiddenMeaning}</div>
@@ -180,7 +180,7 @@ export function CouncilProgressPanel({
                     {council.methodLessons.map((lesson, i) => (
                       <li key={i} className="flex items-start gap-2 text-[10px]">
                         <span className="mt-0.5 block h-1 w-1 shrink-0 rounded-full bg-[color:var(--accent)]/60" />
-                        <span className="flex-1 opacity-70">{lesson}</span>
+                        <span className="flex-1 opacity-70">{stripAnsi(lesson)}</span>
                         <div className="flex shrink-0 gap-1">
                           <button
                             onClick={() => onApplyLesson?.(lesson)}

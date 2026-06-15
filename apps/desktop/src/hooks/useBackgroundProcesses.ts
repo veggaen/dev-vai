@@ -60,16 +60,7 @@ export function useBackgroundProcesses(): ProcessRow[] {
     }
   }, [isStreaming, deployPhase, sandboxStatus, buildStatus.step, manualTasks]);
 
-  const chatRows = useMemo(() => {
-    if (!isStreaming) return [];
-    return [{
-      id: 'chat:turn',
-      label: 'Processing your request',
-      startedAt: stamp('chat:turn'),
-      status: 'running' as const,
-      source: 'chat' as const,
-    }];
-  }, [isStreaming]);
+  const chatRows = useMemo(() => [], []);
 
   const sandboxRows = useMemo(() => {
     const sandboxBusy = deployPhase === 'deploying'

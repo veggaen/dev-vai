@@ -9,6 +9,19 @@ export {
   safeContent, stripCodeBlocks, safeSlice, countWords,
   computeNgrams, ngramOverlap, clamp, detectRetryChains,
 } from './eval-utils.js';
+// Fair, blind, evidence-grounded judge + parity benchmark (fixes the LLM-self-rates bias;
+// answers "is Vai at par with the model?" and gates the self-improvement loop safely).
+export { judgeAnswers } from './answer-judge.js';
+export type {
+  JudgeCandidate,
+  JudgeCriterionScore,
+  JudgedCandidate,
+  JudgeVerdict,
+  JudgeContext,
+  JudgeOptions,
+} from './answer-judge.js';
+export { runParityBench, shouldContinueParityLoop, describeParityReport } from './parity-bench.js';
+export type { ParityTask, ParityTaskResult, ParityReport, ParityBenchOptions } from './parity-bench.js';
 export type {
   EvalTrack,
   EvalTask,

@@ -41,7 +41,11 @@ import { FileChangesBar, type FileChangeEntry } from './chat/FileChangesBar.js';
 import { BackgroundProcessWindow } from './chat/BackgroundProcessWindow.js';
 import { useBackgroundProcesses, useBackgroundTaskEvents } from '../hooks/useBackgroundProcesses.js';
 import { CouncilProgressPanel } from './panels/CouncilProgressPanel.js';
+import { deriveLiveCouncilFromProgressSteps } from './chat/process-step-enrich.js';
+import { ComposerProcessStrip } from './chat/ComposerProcessStrip.js';
+import { useComposerActivity } from '../hooks/useComposerActivity.js';
 import { resolveSendTimeWorkIntent } from '../lib/auto-sandbox-intent.js';
+import { extractFilesFromMarkdown } from '../lib/file-extractor.js';
 import { resolveLatestResearchContext } from '../lib/research-context.js';
 import {
   buildIdeMentionItems,
@@ -237,11 +241,21 @@ export function ChatWindow() {
   // Collapsed by default: the strip sits above the composer and expands on
   // demand — it must never crowd the message input (direct user feedback).
   const [activityCollapsed, setActivityCollapsed] = useState(true);
-  // …but while a turn is streaming, the live pipeline steps ARE the point:
-  // auto-expand so the user can watch (and steer) what Vai is actually doing.
+  const [processStripExpanded, setProcessStripExpanded] = useState(false);
+  // …but while a turn is streaming, background tasks auto-expand.
+  // Composer strip stays collapsed (headline only) — full timeline lives in the message bubble.
   useEffect(() => {
     if (isStreaming) setActivityCollapsed(false);
+    if (!isStreaming) setProcessStripExpanded(false);
   }, [isStreaming]);
+
+  const streamingProgressSteps = useMemo(() => {
+    if (!isStreaming) return [];
+    const last = messages[messages.length - 1];
+    return last?.role === 'assistant' ? (last.progressSteps ?? []) : [];
+  }, [isStreaming, messages]);
+
+  const composerActivity = useComposerActivity(streamingProgressSteps, isStreaming);
 
   useBackgroundTaskEvents();
   const backgroundProcesses = useBackgroundProcesses();
@@ -331,7 +345,7 @@ export function ChatWindow() {
       toggleBuilderPanel();
     }
   // Only trigger on new assistant message arrival (messages.length change)
-  }, [messages.length]); // eslint-disable-line -- intentional dep subset
+  }, [messages.length]);  
   useEffect(() => {
     setHasActiveProject(!!sandboxProjectId);
     // Reset context hash so the next message always sends the full file tree for this project.
@@ -1485,6 +1499,14 @@ export function ChatWindow() {
               .filter((f) => f.path.length > 0);
             if (fileEntries.length === 0) return null;
 
+            const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
+            const assistantHasFileBlocks = lastAssistant
+              ? extractFilesFromMarkdown(lastAssistant.content).length > 0
+              : false;
+            if (!assistantHasFileBlocks || lastAssistant?.turnKind === 'research' || lastAssistant?.turnKind === 'conversational') {
+              return null;
+            }
+
             const openFile = (path: string) => {
               if (!path) return;
               if (!showBuilderPanel) toggleBuilderPanel();
@@ -1505,6 +1527,13 @@ export function ChatWindow() {
               />
             );
           })()}
+
+          <ComposerProcessStrip
+            activity={composerActivity}
+            expanded={processStripExpanded}
+            onExpandedChange={setProcessStripExpanded}
+            studioChrome={studioBuilderChrome}
+          />
 
           <BackgroundProcessWindow
             processes={backgroundProcesses}
@@ -1965,13 +1994,19 @@ export function ChatWindow() {
         a transparent, steerable friend rather than a black box. */}
     {(showCouncilPanel || (() => {
       const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-      return !!lastAssistant?.thinking?.council;
+      if (lastAssistant?.thinking?.council) return true;
+      if (isStreaming && lastAssistant) {
+        return !!deriveLiveCouncilFromProgressSteps(lastAssistant.progressSteps ?? [], true);
+      }
+      return false;
     })()) && (
       <div className="flex h-full w-80 flex-shrink-0 border-l border-zinc-800 overflow-hidden">
         <CouncilProgressPanel
           council={(() => {
             const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-            return lastAssistant?.thinking?.council ?? null;
+            return lastAssistant?.thinking?.council
+              ?? deriveLiveCouncilFromProgressSteps(lastAssistant?.progressSteps ?? [], isStreaming)
+              ?? null;
           })()}
           isOpen={true}
           onClose={() => toggleCouncilPanel()}

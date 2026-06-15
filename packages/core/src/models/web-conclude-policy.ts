@@ -86,6 +86,75 @@ const LOCAL_PROJECT_GUIDANCE_PATTERN =
 const CURRENT_INFO_PATTERN =
   /\b(?:today|current(?:ly)?|latest|newest|recent(?:ly)?|right\s+now|in\s+202\d|version|release(?:d)?|out\s+yet|available\s+now|still\s+accurate)\b/i;
 
+/** Product/build context — "price" means UI tier or effort, not a live market quote. */
+const VOLATILE_VALUE_BUILD_EXCLUSION =
+  /\b(?:(?:this|my|the|our)\s+(?:app|project|codebase|feature|component|page|build|saas|product|refactor|migration|pricing\s+(?:page|tier|model|plan|section|table|component))|\b(?:pricing\s+page|price\s+tier|cost\s+estimate\s+for\s+(?:the\s+)?(?:build|project|feature)))\b/i;
+
+/**
+ * Grammar for asking the current quantitative value of something external — no
+ * ticker/asset allowlist. Matches "price of <anything>", "how much is …", etc.
+ */
+const VOLATILE_VALUE_LOOKUP_PATTERNS = [
+  /\b(?:price|prices|cost|worth|value|quote|quotes?|rate|rates|market\s+cap(?:italization)?|trading\s+(?:at|for)|exchange\s+rate|spot\s+price|share\s+price|stock\s+price)\s+(?:of|for|on)\s+/i,
+  /\bhow\s+much\s+(?:is|are|does|do|would|should|was|were)\b/i,
+  /\bhow\s+much\s+for\b/i,
+  /\bwhat(?:'s|\s+is|\s+are)\s+.+?\s+(?:worth|trading\s+(?:at|for))\b/i,
+] as const;
+
+function matchesVolatileValueLookupGrammar(trimmed: string): boolean {
+  return VOLATILE_VALUE_LOOKUP_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+/** Domain cues where answers are inherently time-volatile — still no entity lists. */
+const TIME_VOLATILE_DOMAIN =
+  /\b(?:weather|forecast|temperature|score|final\s+score|standings|poll(?:s|ing)?|election\s+results?|unemployment\s+rate|interest\s+rate|inflation\s+rate|gas\s+price|fuel\s+price|airfare)\b/i;
+
+const REALTIME_CUE =
+  /\b(?:live|real[\s-]?time|realtime|up[\s-]?to[\s-]?date|as\s+of\s+(?:now|today))\b/i;
+
+function isPureBuildImperative(trimmed: string): boolean {
+  if (/\?/.test(trimmed)) return false;
+  return /^(?:please\s+)?(?:make|build|create|generate|design|develop|scaffold|implement|code)\b/i.test(trimmed)
+    && isGenerationIntent(trimmed);
+}
+
+/**
+ * Structural policy: does this turn need live external evidence (web search)?
+ * Entity-agnostic — driven by grammar and freshness, not hardcoded tickers.
+ */
+export function needsLiveExternalEvidence(
+  input: string,
+  context: WebConclusionContext = {},
+): boolean {
+  const trimmed = normalizeWebConclusionInput(input);
+  if (!trimmed) return false;
+
+  if (isExplicitResearchRequest(trimmed)) return true;
+  if (isFreshLocalRecommendationRequest(trimmed)) return true;
+  if (isFreshLocalBusinessContactRequest(trimmed)) return true;
+  if (BLOCKS_WEB_PATTERN.test(trimmed.toLowerCase())) return false;
+
+  const asksVolatileValue =
+    matchesVolatileValueLookupGrammar(trimmed)
+    && !VOLATILE_VALUE_BUILD_EXCLUSION.test(trimmed)
+    && (!isPureBuildImperative(trimmed) || /\?/.test(trimmed));
+  if (asksVolatileValue) return true;
+
+  const isQuestion = /\?/.test(trimmed) || FACTUAL_QUESTION_PATTERN.test(trimmed);
+  if (TIME_VOLATILE_DOMAIN.test(trimmed) && isQuestion) return true;
+
+  if ((CURRENT_INFO_PATTERN.test(trimmed) || REALTIME_CUE.test(trimmed)) && isQuestion) {
+    if (shouldDeferWebConclusionToLocalRoutes(trimmed)) return false;
+    return true;
+  }
+
+  void context;
+  return false;
+}
+
+/** @deprecated Prefer {@link needsLiveExternalEvidence} — kept for call-site compat. */
+export const isLiveFactualLookupQuery = needsLiveExternalEvidence;
+
 const LOCAL_RECOMMENDATION_TARGET_PATTERN =
   /\b(?:restaurants?|resturants?|restuarants?|places?\s+to\s+eat|eater(?:y|ies)|caf(?:e|é)s?|coffee\s+shops?|bars?|pubs?|hotels?|hostels?|shops?|stores?|hairdressers?|barbers?|dentists?|doctors?|plumbers?|electricians?|mechanics?|gyms?|cinemas?|movie\s+theaters?|things?\s+to\s+do|attractions?)\b/iu;
 
@@ -207,7 +276,10 @@ export function shouldSkipWebConclusion(
   }
 
   const mode = context.activeMode?.toLowerCase();
-  if (mode === 'builder' || mode === 'agent') return true;
+  if (mode === 'builder' || mode === 'agent') {
+    if (needsLiveExternalEvidence(input, context)) return false;
+    return true;
+  }
   if (context.hasActiveSandbox && /\b(?:change|edit|update|fix|polish|improve|refactor|restyle|tweak|make|apply|adjust)\b[\s\S]{0,80}\b(?:button|color|background|spacing|layout|text|font|image|animation|hero|section|card|nav|page|app|ui|ux|preview|current)\b/i.test(lower)) {
     return true;
   }

@@ -121,6 +121,29 @@ describe('reachConsensus', () => {
     expect(c.memberIds).toEqual([]);
     expect(c.summary).toMatch(/no council member returned a usable view/i);
   });
+
+  it('an errored leader note does NOT pollute realIntent or the action (BTC-trace fix)', () => {
+    // A failed Grok leader emitting "advisor unavailable" must be excluded; the LOCAL
+    // members' real verdict + web-search recommendation must win.
+    const c = reachConsensus([
+      note({ verdict: 'needs-work', memberId: 'grok', error: 'grok-direct unavailable: 403', realIntent: 'Grok direct advisor unavailable for this review' }),
+      note({ verdict: 'needs-work', memberId: 'qwen3', confidence: 0.9, realIntent: 'User wants the current price of Bitcoin', suggestedAction: 'web-search', searchQuery: 'btc price today' }),
+    ]);
+    expect(c.realIntent).toBe('User wants the current price of Bitcoin');
+    expect(c.realIntent).not.toMatch(/unavailable/i);
+    expect(c.recommendedAction).toBe('web-search');
+    expect(c.searchQuery).toBe('btc price today');
+  });
+
+  it('surfaces a member searchQuery even when the modal action is not web-search', () => {
+    // One member wants web-search; the consensus exposes its searchQuery so the service
+    // can ACT on it (the directed-search trigger broadened in fetchCouncilDirectedEvidence).
+    const c = reachConsensus([
+      note({ verdict: 'needs-work', memberId: 'a', confidence: 0.9, suggestedAction: 'answer-directly' }),
+      note({ verdict: 'needs-work', memberId: 'b', confidence: 0.6, suggestedAction: 'web-search', searchQuery: 'btc price now' }),
+    ]);
+    expect(c.searchQuery).toBe('btc price now');
+  });
 });
 
 describe('runCouncil / convene', () => {

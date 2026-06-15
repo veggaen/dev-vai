@@ -2662,7 +2662,7 @@ export class VaiEngine implements ModelAdapter {
     const cleaned = text.replace(/\*\*/g, '');
     // Use the first paragraph (before any bullet list or section break).
     const paraEnd = cleaned.search(/\n\s*\n|\n\s*[-*•]\s/);
-    let head = paraEnd > 30 ? cleaned.slice(0, paraEnd).trim() : cleaned.trim();
+    const head = paraEnd > 30 ? cleaned.slice(0, paraEnd).trim() : cleaned.trim();
     if (head.length <= maxChars) return head;
     // Trim to first 1-2 sentences that fit under maxChars.
     const sentences = head.split(/(?<=[.!?])\s+/);
@@ -4098,7 +4098,7 @@ export class VaiEngine implements ModelAdapter {
       // volume to liters
       const toLiters: Record<string, number> = { l: 1, ml: 0.001, gal: 3.785411784 };
       let result: number | null = null;
-      let unitOut = t;
+      const unitOut = t;
       if (toMeters[f] !== undefined && toMeters[t] !== undefined) {
         result = (value * toMeters[f]) / toMeters[t];
       } else if (toGrams[f] !== undefined && toGrams[t] !== undefined) {
@@ -4464,7 +4464,7 @@ export class VaiEngine implements ModelAdapter {
     {
       const numTok = '-?\\d+(?:\\.\\d+)?';
       // Shape A: which/what is bigger/larger/greater, A or B
-      let cmpM = trimmed.match(new RegExp(`^(?:please\\s+)?(?:which|what)(?:'s|\\s+is)\\s+(?:the\\s+)?(?:bigger|larger|greater|higher|more|biggest|largest|greatest)(?:\\s+number)?[,:]?\\s+(${numTok})\\s+or\\s+(${numTok})\\s*\\??\\.?$`, 'i'))
+      const cmpM = trimmed.match(new RegExp(`^(?:please\\s+)?(?:which|what)(?:'s|\\s+is)\\s+(?:the\\s+)?(?:bigger|larger|greater|higher|more|biggest|largest|greatest)(?:\\s+number)?[,:]?\\s+(${numTok})\\s+or\\s+(${numTok})\\s*\\??\\.?$`, 'i'))
         // Shape B: between A and B, which is bigger?
         ?? trimmed.match(new RegExp(`^(?:please\\s+)?between\\s+(${numTok})\\s+and\\s+(${numTok})[,]?\\s+which\\s+(?:is|one\\s+is)\\s+(?:bigger|larger|greater|higher|more)\\s*\\??\\.?$`, 'i'))
         // Shape C: tell me / pick / compare …  A or B / A and B
@@ -4559,7 +4559,7 @@ export class VaiEngine implements ModelAdapter {
         if (/^[\d\s+\-*/().^]+$/.test(raw)) {
           const expr = raw.replace(/\^/g, '**');
           try {
-            // eslint-disable-next-line no-new-func
+             
             const v = Function(`"use strict"; return (${expr});`)() as number;
             if (Number.isFinite(v)) {
               const out = Number.isInteger(v) ? v.toString() : (Math.round(v * 10000) / 10000).toString();
@@ -4697,7 +4697,7 @@ export class VaiEngine implements ModelAdapter {
     {
       const ordMap: Record<string, number> = { last: 1, '1st': 1, '2nd': 2, '3rd': 3, '4th': 4, '5th': 5, '6th': 6, '7th': 7, '8th': 8 };
       // "what's the ORD from the end of [LIST]?" / "give me the ORD-to-last item of [LIST]"
-      let nfeM = trimmed.match(/^(?:please\s+)?(?:what(?:'s|\s+is)?\s+the\s+|give\s+me\s+the\s+|in\s+\[[^\]]+\][,]?\s+what(?:'s|\s+is)?\s+the\s+)?(last|\d+(?:st|nd|rd|th))(?:[-\s]+to[-\s]+last)?\s+(?:item\s+)?(?:from\s+the\s+end)?(?:\s+of\s+\[([^\]]+)\])?\s*\??\.?$/i);
+      const nfeM = trimmed.match(/^(?:please\s+)?(?:what(?:'s|\s+is)?\s+the\s+|give\s+me\s+the\s+|in\s+\[[^\]]+\][,]?\s+what(?:'s|\s+is)?\s+the\s+)?(last|\d+(?:st|nd|rd|th))(?:[-\s]+to[-\s]+last)?\s+(?:item\s+)?(?:from\s+the\s+end)?(?:\s+of\s+\[([^\]]+)\])?\s*\??\.?$/i);
       // Need explicit list — try a more targeted form.
       const formA = trimmed.match(/^(?:please\s+)?what(?:'s|\s+is)?\s+the\s+(last|\d+(?:st|nd|rd|th))\s+(?:from\s+the\s+end|item\s+from\s+the\s+end|-?\s*to\s*-?\s*last\s+item)\s*(?:of|[:])\s*\[([^\]]+)\]\s*\??\.?$/i);
       const formB = trimmed.match(/^(?:please\s+)?give\s+me\s+the\s+(last|\d+(?:st|nd|rd|th))[-\s]+to[-\s]+last\s+item\s+of\s+\[([^\]]+)\]\s*\??\.?$/i);
@@ -5246,7 +5246,7 @@ export class VaiEngine implements ModelAdapter {
           expr = expr.replace(/\bF\b/g, 'false');
           // Validate: only allow safe chars
           if (/^[\s!&|()truefals]+$/i.test(expr)) {
-            // eslint-disable-next-line no-new-func
+             
             const result = new Function(`return (${expr});`)() as boolean;
             return result ? `**true**` : `**false**`;
           }
@@ -8095,8 +8095,8 @@ export class VaiEngine implements ModelAdapter {
         const k1 = `${a}|${b}`;
         const k2 = `${b}|${a}`;
         let rows = TABLES[k1];
-        let colA = a;
-        let colB = b;
+        const colA = a;
+        const colB = b;
         let flip = false;
         if (!rows && TABLES[k2]) {
           rows = TABLES[k2];

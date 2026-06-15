@@ -41,6 +41,8 @@ interface ThinkingPanelProps {
   readonly progressSteps?: readonly ChatProgressStep[];
   /** Code blocks Vai produced this turn (from the answer markdown). */
   readonly fileChanges?: readonly { path: string; content?: string; language?: string }[];
+  /** When true, steps are shown in TurnProcessSection above — skip duplicate tree. */
+  readonly hideProcessTree?: boolean;
 }
 
 /**
@@ -50,7 +52,7 @@ interface ThinkingPanelProps {
  * log. Flat throughout: no pills, no nested rounded boxes. A suspected misroute
  * starts expanded for quick diagnosis.
  */
-export function ThinkingPanel({ thinking, researchTrace, verification, respondingModelId, fallback, progressSteps, fileChanges }: ThinkingPanelProps) {
+export function ThinkingPanel({ thinking, researchTrace, verification, respondingModelId, fallback, progressSteps, fileChanges, hideProcessTree = false }: ThinkingPanelProps) {
   const model = buildThinkingPanelModel(thinking);
   const [expanded, setExpanded] = useState(model.defaultExpanded);
   const flagged = model.misrouteSuspected;
@@ -200,6 +202,7 @@ export function ThinkingPanel({ thinking, researchTrace, verification, respondin
           {/* Steps taken — the SAME ProcessTree as the live trace, now settled. One
               source of truth for "what ran", with council members nested under the
               council step. The rich council debate lives only in the right panel. */}
+          {!hideProcessTree && (
           <section className="thinking-surface-soft rounded-lg p-3.5">
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--chat-eyebrow)]">
               Steps taken
@@ -220,6 +223,7 @@ export function ThinkingPanel({ thinking, researchTrace, verification, respondin
               </ol>
             )}
           </section>
+          )}
 
           {/* Council: a single pointer, NOT the full debate. The member cards,
               transcript, lessons and growth box live in the right Council panel so
@@ -728,10 +732,10 @@ function RoutePlanDetails({ plan }: { plan: NonNullable<TurnThinkingUI['routePla
         note: 'steered from thinking panel (UI)',
         scope: 'class',
       });
-      // eslint-disable-next-line no-console
+       
       console.log('[steer] posted', { signal, handler });
     } catch (e) {
-      // eslint-disable-next-line no-console
+       
       console.warn('[steer] failed', e);
     }
   };

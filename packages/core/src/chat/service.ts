@@ -23,7 +23,7 @@ import {
   evaluateChatAnswerQuality,
   type ChatAnswerQualityReport,
 } from './chat-answer-quality.js';
-import { isExplicitBuildExecutionRequest } from './build-execution-intent.js';
+import { isExplicitBuildExecutionRequest, looksLikeFactualQuestion } from './build-execution-intent.js';
 import { CONVERSATION_MODE_SYSTEM_PROMPTS, DEFAULT_CONVERSATION_MODE, type ConversationMode, isConversationMode } from './modes.js';
 import { tryHandleChatMeta } from './meta-router.js';
 import {
@@ -48,14 +48,31 @@ import {
 } from './turn-pipeline.js';
 import { shadowScore, type ShadowScore } from './capability-kernel.js';
 import { liveContextCapability } from './capabilities/live-context-capability.js';
+import { gitCapability, classifyGitQuery } from './capabilities/git-capability.js';
+import { execCapability } from './capabilities/exec-capability.js';
+import { pageCapability } from './capabilities/page-capability.js';
+import { scoreWithHistory } from './capability-kernel.js';
+import { CapabilityOutcomeLedger } from '../learning/capability-ledger.js';
+import { judgeAnswers, type JudgeCandidate } from '../eval/answer-judge.js';
+import { gatherGitEvidence, type GitEvidence } from '../tools/git-evidence.js';
 import type {
   CouncilInput,
   CouncilThinking,
   CouncilConsensus,
 } from '../consensus/types.js';
 import type { CouncilRoster } from '../consensus/topic-router.js';
-import { convene, toCouncilThinking } from '../consensus/council.js';
+import { convene, conveneStreaming, toCouncilThinking, type ConveneResult } from '../consensus/council.js';
 import { gatherWebEvidence } from '../consensus/web-evidence.js';
+import { buildCouncilReviewPacket } from '../consensus/review-packet.js';
+import {
+  buildCouncilFeedbackBody,
+  buildCouncilRoundProcessLog,
+  buildMemberDeliberationLog,
+  buildVaiDraftProcessLog,
+  buildVaiRedraftProcessLog,
+  councilMembersFromNotes,
+} from './council-process-log.js';
+import { buildSearchProcessLog } from './search-process-log.js';
 import { extractCheckableClaim, assessClaimAgreement, applyCrossCheck } from '../consensus/cross-check.js';
 import { resolveIntent } from '../consensus/intent-resolver.js';
 import { detectImageIntent } from './image-intent.js';
@@ -84,6 +101,7 @@ import {
   shouldEscalateDeterministicDecline,
   shouldFlipPrimaryToGenerative,
   shouldPreferGroundedFallback,
+  looksLikeDecline,
   VAI_FALLBACK_CONFIDENCE_THRESHOLD,
 } from './vai-fallback.js';
 import { sanitizeLeakage, verifyResponse, type ResponseVerificationConfig } from './response-verification.js';
@@ -117,6 +135,8 @@ import {
 } from './bridge-evidence-discipline.js';
 import {
   isFreshLocalBusinessContactRequest,
+  isLiveFactualLookupQuery,
+  needsLiveExternalEvidence,
   isFreshLocalRecommendationRequest,
   isPureConversationalTurn,
   shouldSkipWebConclusion,
@@ -137,6 +157,36 @@ import {
 interface ServiceResolution extends Resolution {
   readonly strategy: string;
   readonly preChunks?: readonly ChatChunk[];
+}
+
+/**
+ * Pull a repo-relative file path out of a "who wrote …" blame question so git
+ * evidence can blame the right file. Matches a token containing a dot-extension
+ * or a slash (e.g. `src/foo.ts`, `app.ts`). Returns undefined when none is found —
+ * the gather then skips blame rather than guessing.
+ */
+function extractBlamePath(text: string): string | undefined {
+  const m = (text ?? '').match(/\b([\w.-]+\/)*[\w.-]+\.[a-z0-9]{1,8}\b/i);
+  return m ? m[0] : undefined;
+}
+
+/**
+ * Extract the evidence ids a draft's claims are bound to, for the fair judge. Real
+ * bindings beat a self-asserted confidence: we pull capability evidence ids the answer
+ * cites (git:/page:/run:/web:/note:), plus any explicit source URLs. When the arm reported
+ * it HAD evidence but cited no inline id, we credit one synthetic 'arm:evidence' binding so
+ * a genuinely-grounded answer isn't scored as ungrounded — without inflating it. An arm
+ * with no evidence at all returns [] (ungrounded), which is exactly what the judge should see.
+ */
+function extractDraftEvidenceIds(text: string, hadEvidence: boolean): string[] {
+  const ids = new Set<string>();
+  const t = text ?? '';
+  // Capability evidence ids cited inline (the verifiable, deterministic bindings).
+  for (const m of t.matchAll(/\b(git|page|run|web|note|fs):[^\s`)\]]+/gi)) ids.add(m[0]);
+  // Explicit source URLs in the answer.
+  for (const m of t.matchAll(/https?:\/\/[^\s<>"'`)\]]+/gi)) ids.add(`url:${m[0]}`);
+  if (ids.size === 0 && hadEvidence) ids.add('arm:evidence');
+  return [...ids];
 }
 
 export interface ImageInput {
@@ -336,6 +386,36 @@ export interface CouncilRedraftFeedback {
   readonly recommendedAction: string;
 }
 
+type CouncilLoopProgressStep = NonNullable<ChatChunk['progress']>;
+type CouncilLoopResult = { council?: CouncilThinking; finalText: string; revised: boolean };
+
+function buildCouncilFeedbackDetail(feedback: CouncilRedraftFeedback): string {
+  return buildCouncilFeedbackBody(feedback).replace(/\n\n/g, ' · ').slice(0, 480);
+}
+
+function councilRoundDoneLabel(thinking: CouncilThinking, round: 1 | 2): string {
+  if (thinking.outcome === 'escalate') {
+    return round === 2 ? 'Council still split after revision' : 'Council rejected Vai\'s proposal — escalating';
+  }
+  if (thinking.outcome === 'ship') {
+    return round === 2 ? 'Council cleared the revised draft' : 'Council cleared Vai\'s proposal';
+  }
+  return round === 2 ? 'Council re-reviewed Vai\'s revision' : 'Council asked Vai to revise';
+}
+
+function toReviewPacketDraft(draft: CouncilDraftInput) {
+  return {
+    prompt: draft.prompt,
+    draftText: draft.draftText,
+    modelId: draft.modelId,
+    turnKind: draft.turnKind,
+    confidence: draft.confidence,
+    hasEvidence: draft.hasEvidence,
+    sources: draft.sources,
+    history: draft.history,
+  };
+}
+
 /**
  * Rank a consensus so the loop can keep the better of two drafts. Higher is better:
  * ship beats act beats escalate; ties break on agreement then confidence.
@@ -385,6 +465,9 @@ export function buildCouncilRedraftInstruction(feedback: CouncilRedraftFeedback)
   if (feedback.realIntent) lines.push(`What the user actually wants: ${feedback.realIntent}`);
   if (feedback.recommendedAction === 'reread-intent') {
     lines.push('You likely misread the ask. Re-read the true intent above and answer THAT, directly.');
+  }
+  if (feedback.recommendedAction === 'web-search' || feedback.recommendedAction === 'local-business-search') {
+    lines.push('The council requires live web evidence for this answer. Use the search results attached to this turn — quote concrete current facts (numbers, dates, sources). Do not say you lack API access when evidence is present.');
   }
   if (feedback.methodLessons.length) {
     lines.push(`How to handle this kind of message: ${feedback.methodLessons.slice(0, 3).join('; ')}.`);
@@ -725,6 +808,19 @@ export class ChatService {
   private readonly securityReviewEnabled: boolean;
   private readonly contractLedgerEnabled: boolean;
   private readonly guidanceStore?: GuidanceStore;
+  /**
+   * Learned per-capability success rates (the kernel's `history` term, finally alive).
+   * Records verify outcomes per turn and feeds them back into capability scoring so a
+   * capability that reliably grounds its answers out-ranks one that often fails verify.
+   * In-memory per service; serialize()/restore() round-trips it through persistence.
+   */
+  private readonly capabilityLedger = new CapabilityOutcomeLedger();
+
+  /** Read-only access to the learned capability outcomes (for persistence / inspection). */
+  get capabilityOutcomes(): CapabilityOutcomeLedger {
+    return this.capabilityLedger;
+  }
+
   private readonly responseReviewers: readonly ResponseReviewer[];
   private readonly loadActiveGuidance?: (conversationId: string) => readonly RouteGuidance[]; // legacy fallback
   /** Optional SCIS council roster. When present, substantive turns run the council for consensus + method lessons. */
@@ -928,143 +1024,185 @@ export class ChatService {
     yield { type: 'done', modelId: producer.id, durationMs } as ChatChunk;
   }
 
-  private async conveneOnce(draft: CouncilDraftInput): Promise<
-    { thinking: CouncilThinking; consensus: CouncilConsensus } | undefined
+  private async prepareCouncilConveneInput(draft: CouncilDraftInput): Promise<
+    { input: CouncilInput; councilTimeout: number; isSelfImprovement: boolean } | undefined
   > {
     if (!this.councilRoster || !draft.prompt || !draft.draftText) return undefined;
 
-    // Self-improvement / Vai project growth mode (user V3gga explicit request):
-    // - Vai *always* produces a primary response (never hand off everything to small models or stay silent on hard/meta questions about itself).
-    // - Council then investigates: the user's request + Vai's primary as a data point + the actual Vai codebase.
-    // - Members argue, "test/validate" (old vs new behavior via context), confirm, and surface concrete small improvements.
-    // - Goal: grow Vai's own capabilities (more tool use in main chat, self-orchestration of council for future turns, honest self-diagnosis on its project).
-    // - Human (V3gga) sees it visually in desktop panels (Council Progress, ThinkingPanel, LiveProcessTrace) and can steer/help.
-    // - Send/receive to members via direct channel (bridge + pipe) + engine roster (qwens + Grok voice/synthetic).
     const isSelfImprovement = /self.?improvement|self.?review|project.?growth|make Vai (better|stronger|more capable)|council work on vai|investigate.*codebase.*(self|vai)|grow.*tool.*use|self.?solve on its own|always respond.*council|primary response.*council/i.test(draft.prompt || '');
-
     if (isPureConversationalTurn(draft.prompt) && !isSelfImprovement) return undefined;
 
-    try {
-      // Web-witness (RAG) step: when the turn isn't a self/codebase turn and Vai didn't
-      // already attach sources, Vai googles the question and brings back ranked sources +
-      // (best-effort) Google's AI Overview, shared with EVERY member (fact-quarantine intact).
-      // SearXNG-default + Chrome-fallback. Best-effort: any failure leaves evidence empty and
-      // the council convenes exactly as before. Opt out with VAI_COUNCIL_WEB_EVIDENCE=0.
-      let webSources = draft.sources ?? [];
-      let webEvidence: CouncilInput['webEvidence'];
-      const webEvidenceEnabled = process.env.VAI_COUNCIL_WEB_EVIDENCE !== '0';
-      const alreadyGrounded = (draft.sources?.length ?? 0) > 0;
-      if (webEvidenceEnabled && !isSelfImprovement && !alreadyGrounded) {
-        const evidence = await gatherWebEvidence(draft.prompt);
-        if (evidence.sources.length > 0 || evidence.aiOverview) {
-          webSources = [...webSources, ...evidence.sources];
-          webEvidence = { aiOverview: evidence.aiOverview, gatheredAt: evidence.gatheredAt };
-        }
-        if (process.env.VAI_SEARCH_DEBUG) {
-          // eslint-disable-next-line no-console
-          console.log(`[web-witness] via=${evidence.via} sources=${evidence.sources.length} aiOverview=${evidence.aiOverview ? 'yes' : 'no'} for "${draft.prompt.slice(0, 50)}"`);
-        }
+    let webSources = draft.sources ?? [];
+    let webEvidence: CouncilInput['webEvidence'];
+    const webEvidenceEnabled = process.env.VAI_COUNCIL_WEB_EVIDENCE !== '0';
+    const alreadyGrounded = (draft.sources?.length ?? 0) > 0;
+    if (webEvidenceEnabled && !isSelfImprovement && !alreadyGrounded) {
+      const evidence = await gatherWebEvidence(draft.prompt);
+      if (evidence.sources.length > 0 || evidence.aiOverview) {
+        webSources = [...webSources, ...evidence.sources];
+        webEvidence = { aiOverview: evidence.aiOverview, gatheredAt: evidence.gatheredAt };
       }
+      if (process.env.VAI_SEARCH_DEBUG) {
+        console.log(`[web-witness] via=${evidence.via} sources=${evidence.sources.length} aiOverview=${evidence.aiOverview ? 'yes' : 'no'} for "${draft.prompt.slice(0, 50)}"`);
+      }
+    }
 
-      const input: CouncilInput = {
+    const input: CouncilInput = {
+      prompt: draft.prompt,
+      draft: draft.draftText,
+      modelId: draft.modelId,
+      turnKind: draft.turnKind ?? 'chat',
+      hasEvidence: !!draft.hasEvidence || (webEvidence?.aiOverview != null || webSources.length > 0),
+      sources: webSources,
+      draftConfidence: draft.confidence,
+      webEvidence,
+      ...buildCouncilReviewPacket({
         prompt: draft.prompt,
-        draft: draft.draftText,
+        draftText: draft.draftText,
         modelId: draft.modelId,
-        turnKind: draft.turnKind ?? 'chat',
-        hasEvidence: !!draft.hasEvidence || (webEvidence?.aiOverview != null || webSources.length > 0),
-        sources: webSources,
-        draftConfidence: draft.confidence,
-        webEvidence,
-      };
+        turnKind: draft.turnKind,
+        confidence: draft.confidence,
+        hasEvidence: draft.hasEvidence,
+        sources: draft.sources,
+        history: draft.history,
+      }),
+    };
 
-      if (isSelfImprovement) {
-        // Inject explicit project self context so the council members can "investigate the codebase".
-        // This makes the member notes / lessons the "arguments + validated proposals" for growing Vai.
-        (input as any).vaiProjectSelfContext = {
-          goal: 'Vai (the deterministic engine) + agents (including live Grok via direct channel) continuously improve Vai itself. Humans (V3gga) must be able to see and steer the process live (AGENTS.md).',
-          currentRosterSummary: 'vai:v0 (primary) + local qwen3:8b / qwen2.5:7b / qwen2.5:3b + Grok (CLI) synthetic note + live voice via direct pipe/bridge (vai-grok-direct + vai-file-mailbox-bridge) + native grok_collab tool + GrokDirect council member (integrated 0.1% advisor).',
-          keyAreasToInvestigateForGrowth: [
-            'packages/core/src/chat/service.ts (primary always-respond generation + council attach/conveneOnce + redraft)',
-            'packages/core/src/consensus/council.ts + topic-router.ts (parallel member reviews, reachConsensus, methodLessons as growth proposals)',
-            'packages/runtime/src/council/build-roster.ts (roster wiring + synthetic Grok note + GrokDirect integrated member for reliable voice)',
-            'packages/runtime/src/local-pipe-chat.ts + scripts/vai-file-mailbox-bridge.mjs (the send/receive channel to all members + human steer)',
-            'packages/runtime/src/server.ts (grok_collab tool registration so Vai can call its high-intel friend natively)',
-            'apps/desktop/src/components/panels/CouncilProgressPanel.tsx + chat/ThinkingPanel.tsx + LiveProcessTrace.tsx (the visual for human to see debate + growth items and help)',
-            'AGENTS.md (improvement loop, council as staff/models, Vai as the institution, "one heavy task at a time", Windows-first, no Python in core)',
-            'Current pain (from real turns): complex self/meta/council-address prompts often timeout on the direct pipe for small local members; need robust terminal frames + shorter self-review path + codebase context injection. Grok integration now makes the loop bidirectional and super-close.',
-          ],
-          primaryAsDataPoint: (draft.draftText || '').slice(0, 600),
-          humanCanSeeSteer: 'Desktop Council Progress + ThinkingPanel + activity (now files+links only) + Vai Council sidebar. Use the direct channel or grok_collab tool to inject guidance.',
-          // fastSelfPrimary scaffolding (genius loop iteration for the timeout data): signal that primary should be quick/ack-first
-          // for self turns so the channel doesn't block on full council (which may be heavy with context). Council proposals
-          // attached for later surfacing in panels or next turn. Use this direct Grok channel as fast advisor member.
-          fastSelfPrimary: true,
-        };
+    if (isSelfImprovement) {
+      (input as any).vaiProjectSelfContext = {
+        goal: 'Vai (the deterministic engine) + agents (including live Grok via direct channel) continuously improve Vai itself. Humans (V3gga) must be able to see and steer the process live (AGENTS.md).',
+        currentRosterSummary: 'vai:v0 (primary) + local qwen3:8b / qwen2.5:7b / qwen2.5:3b + Grok (CLI) synthetic note + live voice via direct pipe/bridge (vai-grok-direct + vai-file-mailbox-bridge) + native grok_collab tool + GrokDirect council member (integrated 0.1% advisor).',
+        keyAreasToInvestigateForGrowth: [
+          'packages/core/src/chat/service.ts (primary always-respond generation + council attach/conveneOnce + redraft)',
+          'packages/core/src/consensus/council.ts + topic-router.ts (parallel member reviews, reachConsensus, methodLessons as growth proposals)',
+          'packages/runtime/src/council/build-roster.ts (roster wiring + synthetic Grok note + GrokDirect integrated member for reliable voice)',
+          'packages/runtime/src/local-pipe-chat.ts + scripts/vai-file-mailbox-bridge.mjs (the send/receive channel to all members + human steer)',
+          'packages/runtime/src/server.ts (grok_collab tool registration so Vai can call its high-intel friend natively)',
+          'apps/desktop/src/components/panels/CouncilProgressPanel.tsx + chat/ThinkingPanel.tsx + LiveProcessTrace.tsx (the visual for human to see debate + growth items and help)',
+          'AGENTS.md (improvement loop, council as staff/models, Vai as the institution, "one heavy task at a time", Windows-first, no Python in core)',
+          'Current pain (from real turns): complex self/meta/council-address prompts often timeout on the direct pipe for small local members; need robust terminal frames + shorter self-review path + codebase context injection. Grok integration now makes the loop bidirectional and super-close.',
+        ],
+        primaryAsDataPoint: (draft.draftText || '').slice(0, 600),
+        humanCanSeeSteer: 'Desktop Council Progress + ThinkingPanel + activity (now files+links only) + Vai Council sidebar. Use the direct channel or grok_collab tool to inject guidance.',
+        fastSelfPrimary: true,
+      };
+    }
+
+    const selfCtx: any = (input as any).vaiProjectSelfContext;
+    const fastSelf = !!(selfCtx && selfCtx.fastSelfPrimary);
+    const envTimeout = Number(process.env.VAI_COUNCIL_TIMEOUT_MS);
+    const councilTimeout = Number.isFinite(envTimeout) && envTimeout > 0
+      ? envTimeout
+      : (fastSelf ? 30_000 : 30_000);
+
+    return { input, councilTimeout, isSelfImprovement };
+  }
+
+  private async finalizeCouncilConvene(
+    draft: CouncilDraftInput,
+    result: ConveneResult,
+    isSelfImprovement: boolean,
+  ): Promise<{ thinking: CouncilThinking; consensus: CouncilConsensus }> {
+    const consensus = await this.crossCheckConsensus(draft, result.consensus);
+
+    if (isSelfImprovement && consensus.methodLessons?.length) {
+      const proven = consensus.methodLessons.filter(l =>
+        /tsc|visual|render|proof|verified|tested|gate|backlog|auto-apply|0\.1%|genius|digital intelligence/i.test(l)
+      );
+      if (proven.length > 0) {
+        try {
+          const fs = await import('node:fs/promises');
+          const path = await import('node:path');
+          const backlogPath = path.resolve(process.cwd(), 'docs/vai-improvement-backlog.md');
+          const entry = `\n- **Auto-proven (self-improvement + Grok integrated council)** (${new Date().toISOString().slice(0,10)}): ${proven.slice(0,3).join(' • ')} (source: direct Grok voice / grok_collab tool + SCIS with 0.1% personas). See full lessons in the turn thinking.`;
+          await fs.appendFile(backlogPath, entry, 'utf8').catch(() => {});
+        } catch {}
+      }
+    }
+
+    this.persistCouncilLessons(draft, consensus);
+
+    return {
+      thinking: toCouncilThinking(result.topic, consensus, result.assessment),
+      consensus,
+    };
+  }
+
+  private async *streamConveneOnce(
+    draft: CouncilDraftInput,
+    stage: string,
+  ): AsyncGenerator<CouncilLoopProgressStep, { thinking: CouncilThinking; consensus: CouncilConsensus } | undefined> {
+    try {
+      const prepared = await this.prepareCouncilConveneInput(draft);
+      if (!prepared) return undefined;
+
+      const { input, councilTimeout, isSelfImprovement } = prepared;
+      yield { stage, label: 'Council reviewing Vai\'s proposal', status: 'running' };
+
+      const partialLogs: ReturnType<typeof buildMemberDeliberationLog>[] = [];
+      const stream = conveneStreaming(input, this.councilRoster!, { timeoutMs: councilTimeout });
+      let iter = await stream.next();
+      while (!iter.done) {
+        const progress = iter.value;
+        if (progress.pendingMember) {
+          const { pendingMember, partialNotes, index, total } = progress;
+          yield {
+            stage,
+            label: total > 1
+              ? `Council member ${index + 1}/${total}: ${pendingMember.name}`
+              : `Asking ${pendingMember.name}`,
+            status: 'running',
+            councilMembers: [
+              ...councilMembersFromNotes(partialNotes),
+              {
+                name: pendingMember.name,
+                verdict: 'needs-work' as const,
+                confidence: 0,
+                pending: true,
+              },
+            ],
+            processLog: partialLogs.length ? [...partialLogs] : undefined,
+          };
+        } else if (progress.note) {
+          const { note, partialNotes, index, total } = progress;
+          partialLogs.push(buildMemberDeliberationLog(note));
+          const hasMore = index + 1 < total;
+          yield {
+            stage,
+            label: hasMore
+              ? `${note.memberName} responded · ${note.error ? 'no response' : note.suggestedAction || note.verdict}`
+              : `${note.memberName} finished review`,
+            status: 'running',
+            councilMembers: councilMembersFromNotes(partialNotes),
+            processLog: [...partialLogs],
+          };
+        }
+        iter = await stream.next();
       }
 
-      const selfCtx: any = (input as any).vaiProjectSelfContext;
-      const fastSelf = !!(selfCtx && selfCtx.fastSelfPrimary);
-      // Council timeout. Diagnosis (2026-06-14): only 2/5 members responded because
-      // the timeout was SHORTER than a cold model load. With keep_alive=30m a model
-      // stays warm once loaded, but a cold 4.7GB load (qwen2.5:7b) takes ~15-30s — so
-      // at 6-12s it timed out, never finished loading, never warmed, and timed out
-      // forever (vicious cycle). The council runs AFTER the primary draft, so a longer
-      // fanout does NOT delay the user answer — it only lets every voice actually land
-      // the first time, after which warm calls are fast. 30s default; override via
-      // VAI_COUNCIL_TIMEOUT_MS.
-      const envTimeout = Number(process.env.VAI_COUNCIL_TIMEOUT_MS);
-      const councilTimeout = Number.isFinite(envTimeout) && envTimeout > 0
-        ? envTimeout
-        : (fastSelf ? 30_000 : 30_000);
-      // Council concurrency. The default roster (2 small local models that
-      // co-reside with the primary on one GPU + external Grok) can safely run in
-      // PARALLEL — they fit, so no VRAM thrash, and the council finishes fast.
-      // If you raise VAI_COUNCIL_MAX_MEMBERS to seat a model that won't fit, also
-      // set VAI_COUNCIL_CONCURRENCY=1 so members swap the GPU sequentially instead
-      // of thrashing. Default 3 (all fitting members at once).
+      const result = iter.value;
+      if (!result.convened) return undefined;
+      return await this.finalizeCouncilConvene(draft, result, isSelfImprovement);
+    } catch (err) {
+      console.warn(`[council] streamConveneOnce failed (advisory, turn unaffected): ${err instanceof Error ? err.message : String(err)}\n${err instanceof Error ? err.stack : ''}`);
+      return undefined;
+    }
+  }
+
+  private async conveneOnce(draft: CouncilDraftInput): Promise<
+    { thinking: CouncilThinking; consensus: CouncilConsensus } | undefined
+  > {
+    try {
+      const prepared = await this.prepareCouncilConveneInput(draft);
+      if (!prepared) return undefined;
+
+      const { input, councilTimeout, isSelfImprovement } = prepared;
       const envConcurrency = Number(process.env.VAI_COUNCIL_CONCURRENCY);
       const concurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? envConcurrency : 3;
-      const result = await convene(input, this.councilRoster, { timeoutMs: councilTimeout, concurrency });
+      const result = await convene(input, this.councilRoster!, { timeoutMs: councilTimeout, concurrency });
       if (!result.convened) return undefined;
-      const consensus = await this.crossCheckConsensus(draft, result.consensus);
-
-      // Auto-append proven self-improvement lessons to the shared backlog (no human gate for purely additive proven items).
-      // "Proven" heuristic: lesson mentions gates (tsc, visual, test, verified, proof) or is explicitly growth-oriented.
-      // This upgrades the loop so Vai helps itself more autonomously while keeping visibility (backlog is human-readable)
-      // and the "refuse junk" principle (only additive, dated, with source). Grok integration + council personas make
-      // the lessons higher quality to begin with.
-      if (isSelfImprovement && consensus.methodLessons?.length) {
-        const proven = consensus.methodLessons.filter(l =>
-          /tsc|visual|render|proof|verified|tested|gate|backlog|auto-apply|0\.1%|genius|digital intelligence/i.test(l)
-        );
-        if (proven.length > 0) {
-          try {
-            const fs = await import('node:fs/promises');
-            const path = await import('node:path');
-            const backlogPath = path.resolve(process.cwd(), 'docs/vai-improvement-backlog.md');
-            const entry = `\n- **Auto-proven (self-improvement + Grok integrated council)** (${new Date().toISOString().slice(0,10)}): ${proven.slice(0,3).join(' • ')} (source: direct Grok voice / grok_collab tool + SCIS with 0.1% personas). See full lessons in the turn thinking.`;
-            await fs.appendFile(backlogPath, entry, 'utf8').catch(() => {});
-          } catch {}
-        }
-      }
-
-      // Close the loop: when the council did NOT clear the draft and taught a
-      // concrete method, persist that lesson as class-scope RouteGuidance so the
-      // NEXT similar turn is steered by it *before* the model writes. Without
-      // this the council's lessons only ever reached a human-read doc/panel and
-      // evaporated — Vai never actually got more capable across turns.
-      this.persistCouncilLessons(draft, consensus);
-
-      return {
-        thinking: toCouncilThinking(result.topic, consensus, result.assessment),
-        consensus,
-      };
+      return await this.finalizeCouncilConvene(draft, result, isSelfImprovement);
     } catch (err) {
-      // Council is advisory — a failure must never break the turn. But silently
-      // swallowing it hid a real bug for a long time (council showed as "not
-      // attached" with zero signal). Surface it on a dedicated channel so the
-      // cause is visible without affecting the user-facing answer.
-      // eslint-disable-next-line no-console
       console.warn(`[council] conveneOnce failed (advisory, turn unaffected): ${err instanceof Error ? err.message : String(err)}\n${err instanceof Error ? err.stack : ''}`);
       return undefined;
     }
@@ -1229,8 +1367,73 @@ export class ChatService {
     });
   }
 
+  private async fetchCouncilDirectedEvidence(
+    draft: CouncilDraftInput,
+    consensus: CouncilConsensus,
+  ): Promise<
+    | {
+        draft: CouncilDraftInput;
+        systemHint: string;
+        progress: CouncilLoopProgressStep;
+      }
+    | undefined
+  > {
+    if (!this.searchForEvidence) return undefined;
+    // ACT on the council's recommendation, don't just log it. The council asks to search
+    // either via its consensus recommendedAction OR when any member explicitly supplied a
+    // searchQuery (which `reachConsensus` surfaces even when a polluting member — e.g. a
+    // failed Grok leader emitting "advisor unavailable" — drags the weighted modal action
+    // elsewhere). This is the fix for the BTC trace where local members all said
+    // "web-search" but no search ran because the consensus action was diluted.
+    const consensusWantsSearch =
+      consensus.recommendedAction === 'web-search' || consensus.recommendedAction === 'local-business-search';
+    const aMemberWantsSearch = consensus.searchQuery.trim().length > 0;
+    if (!consensusWantsSearch && !aMemberWantsSearch) {
+      return undefined;
+    }
+    if ((draft.sources?.length ?? 0) > 0 || draft.hasEvidence) return undefined;
+
+    const query = consensus.searchQuery.trim() || draft.prompt;
+    try {
+      const searchResult = await fetchTurnWebEvidence(
+        query,
+        (draft.history ?? []).map((message) => ({ role: message.role, content: message.content })),
+        {
+          testMode: false,
+          search: (searchQuery, budgetMs) => this.searchForEvidence!(searchQuery, budgetMs),
+          searchBudgetMs: 15_000,
+        },
+        {},
+        { ignoreLocalDefer: true },
+      );
+      if (!searchResult?.sources?.length) return undefined;
+
+      const sources = searchResult.sources;
+      const systemHint = buildEvidenceContextSystemHint(query, searchResult);
+      return {
+        draft: {
+          ...draft,
+          sources: [...(draft.sources ?? []), ...sources],
+          hasEvidence: true,
+        },
+        systemHint,
+        progress: {
+          stage: 'search',
+          label: `Council directed search: ${query.slice(0, 64)}${query.length > 64 ? '…' : ''}`,
+          detail: `${sources.length} source${sources.length === 1 ? '' : 's'}`,
+          status: 'done',
+          processLog: buildSearchProcessLog({
+            prompt: query,
+            sources,
+          }),
+        },
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
   /**
-   * Run the SCIS council on a draft (if a roster is configured). Returns the UI projection
    * (CouncilThinking) or undefined. Never throws; failures are silent (council is advisory).
    * Enforces the fact-quarantine: only intent/action/lessons flow downstream.
    *
@@ -1248,59 +1451,153 @@ export class ChatService {
    * intent, the method lessons, the concerns — back into ONE bounded redraft, then
    * re-convene against the new draft and keep whichever the council rates higher.
    *
-   * Fact-quarantine holds: only intent/method/action/concerns are passed to the redraft.
-   * The friends never supply facts — they tell Vai how to think about the turn, and Vai
-   * regenerates the answer itself. Capped at one extra round so it can never spin, and a
-   * no-op (returns the original) whenever there is no roster, no `redraft`, or the council
-   * already says ship.
+   * Yields live progress steps (round-1 review → optional redraft → round-2 review)
+   * so ProcessTree can show the full Vai ↔ council ping-pong.
    */
-  private async runCouncilLoop(
+  private async *runCouncilLoopGen(
     draft: CouncilDraftInput,
-    redraft?: (feedback: CouncilRedraftFeedback) => Promise<string | undefined>,
-  ): Promise<{ council?: CouncilThinking; finalText: string; revised: boolean }> {
-    const first = await this.conveneOnce(draft);
-    if (!first) return { council: undefined, finalText: draft.draftText, revised: false };
+    redraft?: (feedback: CouncilRedraftFeedback, evidenceHint?: string) => Promise<string | undefined>,
+    stages: { round1: string; redraft: string; round2: string } = {
+      round1: 'council-vai-round-1',
+      redraft: 'vai-redraft',
+      round2: 'council-vai-round-2',
+    },
+  ): AsyncGenerator<CouncilLoopProgressStep, CouncilLoopResult> {
+    const firstStream = this.streamConveneOnce(draft, stages.round1);
+    let firstIter = await firstStream.next();
+    while (!firstIter.done) {
+      yield firstIter.value;
+      firstIter = await firstStream.next();
+    }
+    const first = firstIter.value;
+    if (!first) {
+      yield { stage: stages.round1, label: 'Council could not convene', status: 'done' };
+      return { finalText: draft.draftText, revised: false };
+    }
+
+    yield {
+      stage: stages.round1,
+      label: councilRoundDoneLabel(first.thinking, 1),
+      detail: first.thinking.summary,
+      status: 'done',
+      councilMembers: councilMembersFromNotes(first.consensus.notes),
+      processLog: buildCouncilRoundProcessLog(toReviewPacketDraft(draft), first.consensus),
+    };
+
+    let workingDraft = draft;
+    let councilEvidenceHint: string | undefined;
+    const directedEvidence = await this.fetchCouncilDirectedEvidence(draft, first.consensus);
+    if (directedEvidence) {
+      yield directedEvidence.progress;
+      workingDraft = directedEvidence.draft;
+      councilEvidenceHint = directedEvidence.systemHint;
+    }
 
     const shouldRedraft =
       Boolean(redraft) &&
       first.consensus.outcome !== 'ship' &&
       (first.consensus.recommendedAction === 'reread-intent' ||
         first.consensus.recommendedAction === 'answer-directly' ||
+        first.consensus.recommendedAction === 'web-search' ||
+        first.consensus.recommendedAction === 'local-business-search' ||
         first.consensus.outcome === 'act');
     if (!shouldRedraft) {
       return { council: first.thinking, finalText: draft.draftText, revised: false };
     }
 
+    const feedback: CouncilRedraftFeedback = {
+      realIntent: first.consensus.realIntent,
+      methodLessons: first.consensus.methodLessons,
+      missingCapabilities: first.consensus.missingCapabilities,
+      concerns: first.consensus.notes.flatMap((note) => note.concerns).filter(Boolean),
+      recommendedAction: first.consensus.recommendedAction,
+    };
+
+    yield {
+      stage: stages.redraft,
+      label: 'Vai revising from council feedback',
+      detail: buildCouncilFeedbackDetail(feedback) || undefined,
+      status: 'running',
+    };
+
     let revisedText: string | undefined;
     try {
-      revisedText = await redraft!({
-        realIntent: first.consensus.realIntent,
-        methodLessons: first.consensus.methodLessons,
-        missingCapabilities: first.consensus.missingCapabilities,
-        concerns: first.consensus.notes.flatMap((note) => note.concerns).filter(Boolean),
-        recommendedAction: first.consensus.recommendedAction,
-      });
+      revisedText = await redraft!(feedback, councilEvidenceHint);
     } catch {
-      revisedText = undefined; // redraft failure must never break the turn
+      revisedText = undefined;
     }
     const cleaned = revisedText?.trim();
     if (!cleaned || cleaned === draft.draftText.trim()) {
+      yield {
+        stage: stages.redraft,
+        label: 'Vai kept the original draft',
+        detail: buildCouncilFeedbackDetail(feedback) || undefined,
+        status: 'done',
+        processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, draft.draftText),
+      };
       return { council: first.thinking, finalText: draft.draftText, revised: false };
     }
 
-    // Re-convene against the regenerated draft and keep the better-rated of the two.
-    const second = await this.conveneOnce({ ...draft, draftText: cleaned });
+    yield {
+      stage: stages.redraft,
+      label: 'Vai redrafted from council feedback',
+      detail: buildCouncilFeedbackDetail(feedback) || undefined,
+      status: 'done',
+      processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, cleaned),
+    };
+
+    yield {
+      stage: stages.round2,
+      label: 'Council re-reviewing the revised draft',
+      status: 'running',
+    };
+
+    const secondStream = this.streamConveneOnce({ ...workingDraft, draftText: cleaned }, stages.round2);
+    let secondIter = await secondStream.next();
+    while (!secondIter.done) {
+      yield secondIter.value;
+      secondIter = await secondStream.next();
+    }
+    const second = secondIter.value;
     if (!second) {
-      // Council couldn't re-grade — trust the redraft only if the first call wanted action.
+      yield {
+        stage: stages.round2,
+        label: 'Council could not re-review — keeping revision',
+        status: 'done',
+      };
       return { council: first.thinking, finalText: cleaned, revised: true };
     }
-    // Outcome-aware: a redraft only wins if it actually resolved the flagged gap
-    // (not just nudged agreement up). Falls back to score-only when no specific
-    // capability was named. (Council self-eval recommendation, 2026-06-14.)
+
     const improved = redraftResolvedConcern(first.consensus, second.consensus);
+    const winningCouncil = improved ? second.thinking : first.thinking;
+    yield {
+      stage: stages.round2,
+      label: improved
+        ? councilRoundDoneLabel(second.thinking, 2)
+        : 'Council kept the original draft',
+      detail: winningCouncil.summary,
+      status: 'done',
+      councilMembers: councilMembersFromNotes(second.consensus.notes),
+      processLog: buildCouncilRoundProcessLog(
+        { ...toReviewPacketDraft(draft), draftText: cleaned },
+        second.consensus,
+      ),
+    };
+
     return improved
       ? { council: second.thinking, finalText: cleaned, revised: true }
       : { council: first.thinking, finalText: draft.draftText, revised: false };
+  }
+
+  private async runCouncilLoop(
+    draft: CouncilDraftInput,
+    redraft?: (feedback: CouncilRedraftFeedback) => Promise<string | undefined>,
+    stages?: { round1: string; redraft: string; round2: string },
+  ): Promise<CouncilLoopResult> {
+    const gen = this.runCouncilLoopGen(draft, redraft, stages);
+    let next = await gen.next();
+    while (!next.done) next = await gen.next();
+    return next.value ?? { finalText: draft.draftText, revised: false };
   }
 
   /**
@@ -1314,9 +1611,11 @@ export class ChatService {
     baseMessages: readonly Message[],
     feedback: CouncilRedraftFeedback,
     noLearn?: boolean,
+    evidenceHint?: string,
   ): Promise<string | undefined> {
     const messages: Message[] = [
       ...baseMessages,
+      ...(evidenceHint ? [{ role: 'system' as const, content: evidenceHint }] : []),
       { role: 'user', content: buildCouncilRedraftInstruction(feedback) },
     ];
     try {
@@ -1578,7 +1877,7 @@ export class ChatService {
     if (!conv) {
       const fallbackModel = autoCreateOptions?.fallbackModelId ?? 'vai:v0';
       const fallbackMode = autoCreateOptions?.fallbackMode ?? DEFAULT_CONVERSATION_MODE;
-      // eslint-disable-next-line no-console
+       
       console.warn(
         `[chat-service] conversation ${conversationIdParam} not found — auto-creating with model=${fallbackModel} mode=${fallbackMode}`,
       );
@@ -1921,6 +2220,39 @@ export class ChatService {
         }, Boolean(mostRecentAssistantText), 'Continues the previous answer on "go on" / "more".'),
       ];
 
+      // Deterministic git capability — answers "what changed / who wrote / recent
+      // history / branch state" from attached read-only git evidence, NO model call.
+      // Wrapped here so its kernel `verify` gate is enforced: a composed answer that
+      // can't bind every cited SHA/file to real evidence is refused (resolve → null)
+      // and the dispatcher falls through, exactly as the kernel intends. It scores
+      // via the capability's own inspectable estimate, read off the attached evidence.
+      const turnClass = turnClassification.kind;
+      const makeGitHandler = (ctx: TurnContext): TurnHandler<ServiceResolution> => ({
+        name: 'git',
+        score: () => {
+          const breakdown = gitCapability.estimate(ctx);
+          if (breakdown === null) return null;
+          // Fold the LEARNED history (from past verify outcomes) into the score instead of
+          // the capability's hardcoded neutral — the kernel's history term, alive.
+          const score = scoreWithHistory(breakdown, 'git', this.capabilityLedger, turnClass);
+          return { score, reason: breakdown.reason };
+        },
+        resolve: () => {
+          const r = gitCapability.resolve(ctx);
+          if (!r) {
+            this.capabilityLedger.record('git', 'declined', turnClass);
+            return null;
+          }
+          let ok = false;
+          try { ok = gitCapability.verify(r, ctx).ok; } catch { ok = false; }
+          // Record the real outcome: a passing verify is the success signal; a failing one
+          // is a grounding miss that should cost the capability rank over time.
+          this.capabilityLedger.record('git', ok ? 'verifyPassed' : 'verifyFailed', turnClass);
+          if (!ok) return null;
+          return { text: r.text, turnKind: r.turnKind, confidence: r.confidence, strategy: 'git' };
+        },
+      });
+
       // One understanding, scored once. `guidance` is the friend hint channel
       // (human + AI "that process wasn't good" steers). Stage 1: load the
       // conversation's persisted hints, keep the ones that apply to THIS turn
@@ -1944,6 +2276,23 @@ export class ChatService {
           activeGuidance,
         ).map(toTurnGuidance)
         : [];
+      // ── Async evidence gather (git) ─────────────────────────────────
+      // The dispatcher and resolve() are synchronous; anything needing
+      // subprocess I/O is gathered HERE, before dispatch, and attached to the
+      // context so the deterministic git capability answers from real read-only
+      // git output WITHOUT a model call. Gated on git-shaped phrasing so we only
+      // pay the (small, read-only) cost when the turn is actually about the repo.
+      let gitEvidence: GitEvidence | undefined;
+      const gitShape = classifyGitQuery(understoodContent || content);
+      if (gitShape.any) {
+        const blamePath = gitShape.wantsBlame ? extractBlamePath(content) : undefined;
+        gitEvidence = await gatherGitEvidence({
+          cwd: process.cwd(),
+          blamePath,
+          blameRev: blamePath ? 'HEAD' : undefined,
+        }).catch(() => undefined);
+      }
+
       const turnContext: TurnContext = {
         content,
         understood: understoodContent,
@@ -1951,15 +2300,21 @@ export class ChatService {
         classification: turnClassification,
         intent: questionIntent,
         guidance: turnGuidance,
+        evidence: gitEvidence ? { git: gitEvidence } : undefined,
       };
-      const outcome = dispatchTurn(turnContext, handlers, { confidenceFloor: 0.5 });
+      // Append the git capability (closes over the just-built context) only when the
+      // turn is git-shaped — keeps the handler list unchanged for every other turn.
+      const gitHandlers = gitShape.any
+        ? [...handlers, makeGitHandler(turnContext)]
+        : handlers;
+      const outcome = dispatchTurn(turnContext, gitHandlers, { confidenceFloor: 0.5 });
 
       // Shadow baseline (unsteered) for reference when guidance was present.
       // Persisted alongside so we have direct pre/post for analysis.
       let baselinePlan: DispatchPlan | undefined;
       if (turnGuidance.length > 0) {
         const baselineCtx: TurnContext = { ...turnContext, guidance: [] };
-        const baseline = dispatchTurn(baselineCtx, handlers, { confidenceFloor: 0.5 });
+        const baseline = dispatchTurn(baselineCtx, gitShape.any ? [...handlers, makeGitHandler(baselineCtx)] : handlers, { confidenceFloor: 0.5 });
         baselinePlan = baseline.plan;
         // Record application for the guidances that fired (efficacy tracking).
         for (const g of activeGuidance) {
@@ -1973,7 +2328,12 @@ export class ChatService {
       // Shadow-score the kernel capabilities against the same context. Pure
       // observation: the live `outcome` above already decided the turn; these
       // only annotate the visible plan. A null means inapplicable → dropped.
-      const shadowCapabilities = [liveContextCapability];
+      // exec + page are shadow-only here: running a test suite or driving a real browser
+      // from a chat turn is heavier/riskier than read-only git, so they are NOT auto-wired
+      // into live dispatch — the builder loop / agentic OODA invokes them deliberately.
+      // Shadowing surfaces when they WOULD apply so their scoring can be trusted before any
+      // future promotion. (The web-evidence path already handles pasted-URL reads live.)
+      const shadowCapabilities = [liveContextCapability, gitCapability, execCapability, pageCapability];
       turnShadowScores = shadowCapabilities
         .map((cap) => shadowScore(cap, turnContext))
         .filter((s): s is ShadowScore => s !== null);
@@ -2285,6 +2645,7 @@ export class ChatService {
       && (
         turnKind === 'analysis'
         || turnKind === 'research'
+        || needsLiveExternalEvidence(effectiveContent, webConclusionContext)
         || shouldAttemptWebConclusion(effectiveContent, webConclusionContext)
       );
 
@@ -2351,7 +2712,16 @@ export class ChatService {
     if (shouldAttachWebEvidence) {
       yield {
         type: 'progress',
-        progress: { stage: 'search', label: 'Checking the web for sources', status: 'running' },
+        progress: {
+          stage: 'search',
+          label: 'Checking the web for sources',
+          status: 'running',
+          processLog: [{
+            kind: 'action',
+            label: 'Search query',
+            body: effectiveContent.trim(),
+          }],
+        },
       } as ChatChunk;
       await resolvePrefetchedEvidence();
       const resolvedEvidence = currentTurnEvidence();
@@ -2360,8 +2730,29 @@ export class ChatService {
           type: 'progress',
           progress: {
             stage: 'search',
-            label: `Found ${resolvedEvidence.sources.length} source${resolvedEvidence.sources.length === 1 ? '' : 's'}`,
+            label: resolvedEvidence.researchTrace?.fanOutQueries?.length
+              ? `Searched: ${resolvedEvidence.researchTrace.fanOutQueries[0]?.slice(0, 64)}${(resolvedEvidence.researchTrace.fanOutQueries[0]?.length ?? 0) > 64 ? '…' : ''}`
+              : `Found ${resolvedEvidence.sources.length} source${resolvedEvidence.sources.length === 1 ? '' : 's'}`,
+            detail: `${resolvedEvidence.sources.length} source${resolvedEvidence.sources.length === 1 ? '' : 's'}`,
             status: 'done',
+            processLog: buildSearchProcessLog({
+              prompt: effectiveContent,
+              sources: resolvedEvidence.sources,
+              researchTrace: resolvedEvidence.researchTrace,
+            }),
+          },
+        } as ChatChunk;
+      } else {
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'search',
+            label: 'No web sources found',
+            status: 'done',
+            processLog: buildSearchProcessLog({
+              prompt: effectiveContent,
+              sources: [],
+            }),
           },
         } as ChatChunk;
       }
@@ -2394,6 +2785,19 @@ export class ChatService {
       let bufferedSawDone = false;
 
       if (!primaryFlip) {
+      yield {
+        type: 'progress',
+        progress: {
+          stage: 'reason',
+          label: 'Working through it — checking what I know',
+          status: 'done',
+          processLog: [{
+            kind: 'thought',
+            label: 'Turn focus',
+            body: effectiveContent.trim(),
+          }],
+        },
+      } as ChatChunk;
       for await (const chunk of adapter.chatStream({ messages: primaryMessages, noLearn })) {
         if (chunk.modelId) bufferedModelId = chunk.modelId;
         if (chunk.type === 'sources') {
@@ -2440,7 +2844,13 @@ export class ChatService {
       // suppresses escalation when its artifact *actually satisfies* the request;
       // a generic scaffold (files but near-zero feature coverage) escalates to
       // the generative module instead of shipping boilerplate as "done".
-      const isBuilderMode = resolvedMode === 'builder' || resolvedMode === 'agent';
+      // Anti-hijack guard: a factual/informational question ("what is the price of btc",
+      // "who is the PM") must be ANSWERED, never turned into a code build — even in
+      // builder/agent mode. This is the structural fix for the failure where a price
+      // question became a 260s HTML-widget build. When the turn is factual and there is no
+      // explicit build request, the builder lane is OFF for this turn.
+      const factualQuestionTurn = looksLikeFactualQuestion(content);
+      const isBuilderMode = (resolvedMode === 'builder' || resolvedMode === 'agent') && !factualQuestionTurn;
       const buildExecutionRequired = isBuilderMode && isExplicitBuildExecutionRequest(content);
       const builderFiles = isBuilderMode && hasBuilderFileBlocks(bufferedText);
       const builderSatisfies = builderFiles
@@ -2506,6 +2916,7 @@ export class ChatService {
             label: vaiProposedDraft ? 'Vai proposed an answer' : 'Vai has no confident draft yet',
             detail: vaiProposedDraft || undefined,
             status: 'done',
+            processLog: buildVaiDraftProcessLog(vaiProposedDraft),
           },
         } as ChatChunk;
       }
@@ -2515,45 +2926,34 @@ export class ChatService {
       let councilThinking: CouncilThinking | undefined;
       let councilEscalateToGenerative = false;
       if (!primaryFlip && !builderFiles && !codeReviewRejected && bufferedText.trim()) {
-        yield {
-          type: 'progress',
-          progress: { stage: 'council-vai', label: 'Council reviewing Vai\'s proposal', status: 'running' },
-        } as ChatChunk;
-        const loop = await this.runCouncilLoop(
-          {
-            prompt: content,
-            draftText: bufferedText,
-            modelId: bufferedModelId,
-            turnKind,
-            confidence: latestConfidence,
-            hasEvidence: primaryHadEvidence,
-            sources: bufferedSourceChunks.flatMap((chunk) => chunk.sources ?? []),
-            history: history.map((m) => ({ role: m.role, content: m.content })),
-            conversationId,
-          },
-          (feedback) => this.redraftWithCouncilFeedback(adapter, primaryMessages, feedback, noLearn),
+        const councilDraft = {
+          prompt: content,
+          draftText: bufferedText,
+          modelId: bufferedModelId,
+          turnKind,
+          confidence: latestConfidence,
+          hasEvidence: primaryHadEvidence,
+          sources: bufferedSourceChunks.flatMap((chunk) => chunk.sources ?? []),
+          history: history.map((m) => ({ role: m.role, content: m.content })),
+          conversationId,
+        };
+        const councilGen = this.runCouncilLoopGen(
+          councilDraft,
+          (feedback, evidenceHint) => this.redraftWithCouncilFeedback(adapter, primaryMessages, feedback, noLearn, evidenceHint),
         );
+        let councilStep = await councilGen.next();
+        let loop: CouncilLoopResult = { finalText: bufferedText, revised: false };
+        while (!councilStep.done) {
+          yield { type: 'progress', progress: councilStep.value } as ChatChunk;
+          councilStep = await councilGen.next();
+        }
+        loop = councilStep.value ?? loop;
         councilThinking = loop.council;
         if (loop.revised) {
           bufferedText = loop.finalText;
           reviewReplacedPrimary = true;
         }
         councilEscalateToGenerative = councilThinking?.outcome === 'escalate';
-        yield {
-          type: 'progress',
-          progress: {
-            stage: 'council-vai',
-            label: councilEscalateToGenerative
-              ? 'Council rejected Vai\'s proposal — escalating'
-              : loop.revised
-                ? 'Council asked Vai to revise — redrafted'
-                : councilThinking?.outcome === 'ship'
-                  ? 'Council cleared Vai\'s proposal'
-                  : 'Council reviewed Vai\'s proposal',
-            detail: councilThinking?.summary,
-            status: 'done',
-          },
-        } as ChatChunk;
       }
 
       const confidenceFallbackDecision = decideVaiFallback({
@@ -2782,7 +3182,7 @@ export class ChatService {
         let councilResult: Awaited<ReturnType<typeof collectFallback>> | null = null;
         let councilEditUsed = false;
         console.log(`[builder-arm] isBuilderMode=${isBuilderMode} mode=${resolvedMode} turnKind=${turnKind} councilFlag=${process.env.VAI_COUNCIL_CODEGEN !== '0'} brief=${JSON.stringify(content.slice(0, 60))}`);
-        if (isBuilderMode && process.env.VAI_COUNCIL_CODEGEN !== '0') {
+        if (isBuilderMode && process.env.VAI_COUNCIL_CODEGEN !== '0' && buildExecutionRequired && !needsLiveExternalEvidence(content, webConclusionContext)) {
           const councilMembers = this.builderCouncilMembers();
           // Active-sandbox awareness: when the desktop attached the running
           // project (name + file snapshots), an iteration-shaped prompt must
@@ -3033,39 +3433,35 @@ export class ChatService {
           const fbCouncilHasEvidence = fallbackResult.sourceChunks.some(
             (chunk) => Array.isArray(chunk.sources) && chunk.sources.length > 0,
           );
-          yield {
-            type: 'progress',
-            progress: { stage: 'council-fallback', label: 'Friend council reviewing the draft', status: 'running' },
-          } as ChatChunk;
-          const loop = await this.runCouncilLoop(
+          const councilDraft = {
+            prompt: content,
+            draftText: fbText,
+            modelId: responseModelId,
+            turnKind,
+            confidence: latestConfidence,
+            hasEvidence: fbCouncilHasEvidence,
+            sources: fallbackResult.sourceChunks.flatMap((chunk) => chunk.sources ?? []),
+            history: history.map((m) => ({ role: m.role, content: m.content })),
+            conversationId,
+          };
+          const councilGen = this.runCouncilLoopGen(
+            councilDraft,
+            (feedback, evidenceHint) => this.redraftWithCouncilFeedback(fallbackAdapter, fallbackMessages, feedback, noLearn, evidenceHint),
             {
-              prompt: content,
-              draftText: fbText,
-              modelId: responseModelId,
-              turnKind,
-              confidence: latestConfidence,
-              hasEvidence: fbCouncilHasEvidence,
-              sources: fallbackResult.sourceChunks.flatMap((chunk) => chunk.sources ?? []),
-              history: history.map((m) => ({ role: m.role, content: m.content })),
-              conversationId,
+              round1: 'council-fallback-round-1',
+              redraft: 'vai-redraft',
+              round2: 'council-fallback-round-2',
             },
-            (feedback) => this.redraftWithCouncilFeedback(fallbackAdapter, fallbackMessages, feedback, noLearn),
           );
+          let councilStep = await councilGen.next();
+          let loop: CouncilLoopResult = { finalText: fbText, revised: false };
+          while (!councilStep.done) {
+            yield { type: 'progress', progress: councilStep.value } as ChatChunk;
+            councilStep = await councilGen.next();
+          }
+          loop = councilStep.value ?? loop;
           fallbackCouncilThinking = loop.council;
           if (loop.revised) fbText = loop.finalText;
-          yield {
-            type: 'progress',
-            progress: {
-              stage: 'council-fallback',
-              label: loop.revised
-                ? 'Council asked for a revision — Vai redrafted'
-                : fallbackCouncilThinking?.outcome === 'ship'
-                  ? 'Council cleared the draft'
-                  : 'Council reviewed the draft',
-              detail: fallbackCouncilThinking?.summary,
-              status: 'done',
-            },
-          } as ChatChunk;
         }
 
         // Builder file output from the escalated model is kept verbatim (its own
@@ -3158,6 +3554,54 @@ export class ChatService {
         }
         if (vaiProposedDraft) {
           fallbackThinking.vaiProposedDraft = vaiProposedDraft;
+          // FAIR-JUDGE GATE (fixes the "model always wins because it ran last" bias):
+          // when Vai had an EVIDENCE-GROUNDED proposed draft, judge it BLIND against the
+          // escalated model's answer on groundedness/task-fit/honesty — NOT fluency. If
+          // Vai's grounded draft wins outright, keep it instead of the model's. Conservative
+          // by design: only fires when Vai's draft was grounded and clearly wins (never
+          // at-par), so a genuinely better model answer is never displaced. Env-disableable.
+          const judgeEnabled = process.env.VAI_FAIR_JUDGE_FALLBACK !== '0';
+          if (
+            judgeEnabled
+            && primaryHadEvidence
+            // A decline-shaped Vai draft ("I don't know this one") is a FALL-THROUGH, not a
+            // winning answer — it must never beat a substantive model answer. Only judge a
+            // real Vai answer against the model.
+            && !looksLikeDecline(vaiProposedDraft)
+            && !fbBuilderFiles
+            && !usedConservativeQualityFallback
+            && fbText.trim()
+            && fbText.trim() !== vaiProposedDraft
+          ) {
+            const vaiCand: JudgeCandidate = {
+              id: 'c0',
+              text: vaiProposedDraft,
+              boundEvidence: extractDraftEvidenceIds(vaiProposedDraft, primaryHadEvidence),
+              verified: true,
+            };
+            const modelCand: JudgeCandidate = {
+              id: 'c1',
+              text: fbText,
+              boundEvidence: extractDraftEvidenceIds(fbText, fbHasEvidence),
+              verified: fbVerdict ? fbVerdict.action !== 'decline' : undefined,
+            };
+            const verdict = judgeAnswers([vaiCand, modelCand], { prompt: content });
+            // Record the outcome for the capability-learning ledger (the deterministic
+            // arm is the 'vai-fallback-draft' capability here).
+            this.capabilityLedger.record(
+              'vai-fallback-draft',
+              verdict.winnerId === 'c0' ? 'verifyPassed' : verdict.winnerId === 'c1' ? 'verifyFailed' : 'declined',
+              turnKind,
+            );
+            if (verdict.winnerId === 'c0') {
+              // Vai's grounded draft won the blind, evidence-based judge — keep it.
+              fbText = vaiProposedDraft;
+              responseModelId = bufferedModelId;
+              fallbackThinking.fairJudge = { winner: 'vai', rationale: verdict.rationale };
+            } else {
+              fallbackThinking.fairJudge = { winner: verdict.atPar ? 'par' : 'model', rationale: verdict.rationale };
+            }
+          }
         }
         if (councilEscalateToGenerative && councilThinking) {
           fallbackThinking.council = councilThinking;

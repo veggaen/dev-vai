@@ -581,7 +581,7 @@ function describeIntentReading(model: ThinkingPanelModel): string {
  * the best take speaking up, not a mechanical model-switch log.
  */
 export function buildReasoningNarrative(model: ThinkingPanelModel, extras: ReasoningExtras = {}): ReasoningNarrative {
-  const { respondingModelId, fallback, candidateCount, belowFloor, chosenCandidate, chosenScore, researchSourceCount } = extras;
+  const { respondingModelId, fallback, candidateCount, belowFloor, chosenCandidate, researchSourceCount } = extras;
   const handedOff = Boolean(fallback);
   const responder = prettyModelName(fallback?.toModelId ?? respondingModelId);
   const qualityProtected =

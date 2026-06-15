@@ -1,40 +1,38 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, ChevronRight } from 'lucide-react';
+import { Check, ChevronRight, Copy } from 'lucide-react';
 import type { ChatProgressStep, CouncilThinkingUI } from '../../stores/chatStore.js';
+import { useProcessChildReveal } from '../../hooks/useProcessChildReveal.js';
+import { useAnimatedEllipsis } from '../../hooks/useAnimatedEllipsis.js';
 import { VaiNode, type VaiNodeProps } from '../brand/VaiNode.js';
 import { buildProcessTree, isExpandable, type ProcessNode, type ProcessTone } from './ProcessTree.logic.js';
+import { ProcessTreeCopyActions } from './ProcessTreeCopyActions.js';
+import { copyProcessText } from './ProcessTree.copy.js';
 
 /**
- * ProcessTree — the single, brand-native process view for a turn.
+ * ProcessTree — top-down live trace that collapses in place when the turn settles.
  *
- * One component, two states:
- *   • LIVE (streaming): rows animate in; the running step's glyph is the breathing
- *     intelligence node from the Vai mark, so the surface reads as Vai's mind
- *     ticking — not a generic spinner. Auto-expanded so the user can watch + steer.
- *   • SETTLED (after the turn): collapses to a quiet one-line summary; click to
- *     re-open the same tree.
- *
- * Two-level nesting: a top step with sub-work (council members, image steps) gets
- * its own chevron and expands IN PLACE under a connector rail. Everything rides
- * the design tokens (--chat-*, --panel-*, --accent, phase tones) and the
- * .process-tree / .vai-node CSS, so it is correct in both themes and silenced
- * under prefers-reduced-motion.
+ * LIVE: rows append downward; completed steps compact; running step may expand.
+ * SETTLING: expanded tree fades/shrinks (~320ms) — no pop-out remount.
+ * SETTLED: one quiet summary line; click to re-open the same tree.
  */
 
 interface ProcessTreeProps {
   readonly steps: readonly ChatProgressStep[];
   readonly council?: CouncilThinkingUI | null;
-  /** When true the turn is in flight: auto-expanded, node breathing, no collapse line. */
   readonly live?: boolean;
   readonly imageSteps?: readonly { phase: string; label: string; flaws?: string[] }[];
-  /** Process-only draft from thinking — shown when council escalated away from vai:v0. */
   readonly vaiProposedDraft?: string;
-  /** Total elapsed for the settled summary line. */
   readonly durationMs?: number;
+  /** Steps the backend sent but the drip reveal has not shown yet. */
+  readonly pendingStepCount?: number;
 }
 
-/** Map the tree's process tones onto the brand node's phase-tone vocabulary. */
+type TreePhase = 'live' | 'settling' | 'settled';
+
+const ease = [0.25, 0.1, 0.25, 1] as const;
+const SETTLE_MS = 340;
+
 function nodeTone(tone: ProcessTone | undefined): VaiNodeProps['tone'] {
   switch (tone) {
     case 'search': return 'evidence';
@@ -42,161 +40,423 @@ function nodeTone(tone: ProcessTone | undefined): VaiNodeProps['tone'] {
     case 'verify': return 'verify';
     case 'build': return 'compose';
     case 'compose': return 'compose';
+    case 'tool': return 'verify';
     case 'image': return 'route';
     default: return 'accent';
   }
 }
 
-export function ProcessTree({ steps, council, live = false, imageSteps, vaiProposedDraft, durationMs }: ProcessTreeProps) {
-  const nodes = buildProcessTree(steps, council ?? undefined, imageSteps, vaiProposedDraft);
+export function ProcessTree({ steps, council, live = false, imageSteps, vaiProposedDraft, durationMs, pendingStepCount: _pendingStepCount = 0 }: ProcessTreeProps) {
+  const nodes = buildProcessTree(steps, council ?? undefined, imageSteps, vaiProposedDraft, live);
   const hasNodes = nodes.length > 0;
-  const [open, setOpen] = useState(live);
-  const expanded = live || open;
+  const showLiveTail = live;
+  const tailLabel = live ? 'Working' : 'Working';
+  const summaryDuration = durationMs !== undefined && durationMs >= 500 ? durationMs : undefined;
+  const [phase, setPhase] = useState<TreePhase>(live ? 'live' : 'settled');
+  const [open, setOpen] = useState(false);
+  const wasLiveRef = useRef(live);
 
-  if (!hasNodes && !live) return null;
+  useEffect(() => {
+    if (live) {
+      setPhase('live');
+      wasLiveRef.current = true;
+      return;
+    }
+    if (!wasLiveRef.current) {
+      setPhase('settled');
+      return;
+    }
+    wasLiveRef.current = false;
+    setPhase('settling');
+    setOpen(false);
+    const id = window.setTimeout(() => setPhase('settled'), SETTLE_MS);
+    return () => window.clearTimeout(id);
+  }, [live]);
 
-  const summary = live ? 'Working…' : buildSummaryLine(nodes, durationMs);
+  if (!hasNodes && phase === 'settled') return null;
+
+  const summary = buildSummaryLine(nodes, durationMs);
+  const showExpandedTree = phase === 'live' || phase === 'settling' || (phase === 'settled' && open);
+  const treeLive = phase === 'live';
+  const settledExpanded = phase === 'settled' && open;
 
   return (
-    <div className="mb-3 text-[12px]" data-testid="process-tree" data-live={live ? '1' : '0'}>
-      {/* Settled summary / toggle — one quiet line, brand node + verified check. */}
-      {!live && (
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={expanded}
-          className="group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[color:var(--chat-muted)] transition-colors thinking-hover hover:text-[color:var(--chat-body)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
-        >
-          <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`} />
-          <VaiNode state="done" size={9} />
-          <span className="min-w-0 flex-1 truncate text-[11px]">{summary}</span>
-          {durationMs !== undefined && (
-            <span className="shrink-0 tabular-nums text-[10px] text-[color:var(--chat-muted)]">{formatMs(durationMs)}</span>
-          )}
-        </button>
-      )}
+    <div className="mb-3 text-[12px]" data-testid="process-tree" data-live={treeLive ? '1' : '0'} data-phase={phase}>
+      <AnimatePresence initial={false}>
+        {(phase === 'settled' || phase === 'settling') && (
+          <motion.button
+            key="summary"
+            type="button"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: phase === 'settling' ? 0.92 : 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: phase === 'settling' ? SETTLE_MS / 1000 : 0.24, ease }}
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="group mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[color:var(--chat-muted)] transition-colors thinking-hover hover:text-[color:var(--chat-body)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
+          >
+            <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
+            <VaiNode state="done" size={9} />
+            <span className="min-w-0 flex-1 truncate text-[11px]">{summary}</span>
+            {summaryDuration !== undefined && (
+              <span className="shrink-0 tabular-nums text-[10px] text-[color:var(--chat-muted)]">{formatMs(summaryDuration)}</span>
+            )}
+          </motion.button>
+        )}
+      </AnimatePresence>
 
-      {expanded && (
-        <div className={live ? 'process-tree__flat' : 'mt-0.5 pl-1'}>
-          {live && !hasNodes && (
-            <div className="flex items-center gap-2 px-1 py-1 text-[color:var(--chat-body)]">
-              <VaiNode state="thinking" size={10} />
-              <span className="vai-process-shimmer">Thinking…</span>
+      <AnimatePresence initial={false}>
+        {showExpandedTree && (
+          settledExpanded ? (
+            <div key="tree-body-settled" className="mt-0.5 pl-1" data-testid="process-tree-body">
+              <TimelineList nodes={nodes} allNodes={nodes} live={false} expandAll showLiveTail={false} />
             </div>
-          )}
-          <ol className="space-y-0">
-            <AnimatePresence initial={false}>
-              {nodes.map((node) => (
-                <StepRow key={node.id} node={node} live={live} />
-              ))}
-            </AnimatePresence>
-          </ol>
-        </div>
-      )}
+          ) : (
+          <motion.div
+            key="tree-body"
+            className={treeLive || phase === 'settling' ? 'process-tree__flat' : 'mt-0.5 pl-1'}
+            initial={false}
+            animate={{
+              opacity: phase === 'settling' ? 0 : 1,
+              height: phase === 'settling' ? 0 : 'auto',
+            }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: phase === 'settling' ? SETTLE_MS / 1000 : 0.22, ease }}
+            style={{ overflow: 'hidden' }}
+          >
+            {treeLive && !hasNodes && (
+              <div className="flex items-center gap-2 px-1 py-1 text-[color:var(--chat-body)]">
+                <VaiNode state="thinking" size={10} />
+                <span className="vai-process-shimmer">Thinking…</span>
+              </div>
+            )}
+            <TimelineList nodes={nodes} allNodes={nodes} live={treeLive} showLiveTail={showLiveTail} tailLabel={tailLabel} />
+          </motion.div>
+          )
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-/** One top-level step. Expandable when it has structured children OR a longer
- *  note body — click reveals "what actually happened" (results, output, debate). */
-function StepRow({ node, live }: { node: ProcessNode; live: boolean }) {
+function ProcessLiveTail({ label }: { label: string }) {
+  const animated = useAnimatedEllipsis(true, label);
+  return (
+    <li
+      className="process-tree__tail process-tree__step--last flex items-center gap-2 px-1.5 py-1"
+      aria-live="polite"
+    >
+      <span className="flex h-3.5 w-3 shrink-0 items-center justify-center">
+        <VaiNode state="thinking" size={7} tone="accent" />
+      </span>
+      <span className="vai-process-shimmer text-[11px] text-[color:var(--chat-muted)]">{animated}</span>
+    </li>
+  );
+}
+
+function TimelineList({
+  nodes,
+  allNodes,
+  live,
+  expandAll = false,
+  showLiveTail = false,
+  tailLabel = 'Working',
+}: {
+  nodes: readonly ProcessNode[];
+  allNodes: readonly ProcessNode[];
+  live: boolean;
+  expandAll?: boolean;
+  showLiveTail?: boolean;
+  tailLabel?: string;
+}) {
+  return (
+    <ol className="process-tree__timeline space-y-0">
+      <AnimatePresence initial={false}>
+        {nodes.map((node, index) => (
+          <StepRow
+            key={node.id}
+            node={node}
+            allNodes={allNodes}
+            live={live}
+            expandAll={expandAll}
+            isLast={index === nodes.length - 1 && !showLiveTail}
+            enterAnimate={live && index === nodes.length - 1}
+            showTreeCopy={index === 0}
+          />
+        ))}
+        {showLiveTail && <ProcessLiveTail key="live-tail" label={tailLabel} />}
+      </AnimatePresence>
+    </ol>
+  );
+}
+
+function StepRow({
+  node,
+  allNodes,
+  live,
+  expandAll = false,
+  isLast,
+  enterAnimate = false,
+  showTreeCopy = false,
+}: {
+  node: ProcessNode;
+  allNodes: readonly ProcessNode[];
+  live: boolean;
+  expandAll?: boolean;
+  isLast: boolean;
+  enterAnimate?: boolean;
+  showTreeCopy?: boolean;
+}) {
   const expandable = isExpandable(node);
-  const [open, setOpen] = useState(live && node.status === 'running' && node.children.length > 0);
   const running = node.status === 'running';
+  const userToggledRef = useRef(false);
+  const [open, setOpen] = useState(false);
+  const childCount = node.children.length;
+  const rowElapsed = useRowElapsed(running && live);
+  const autoExpandCouncil = live && running && node.tone === 'council';
+  const streamChildren = autoExpandCouncil && open;
+  const visibleChildCount = useProcessChildReveal(childCount, streamChildren);
+  const visibleChildren = node.children.slice(0, visibleChildCount);
+
+  useEffect(() => {
+    if (expandAll && expandable) {
+      setOpen(true);
+      return;
+    }
+    if (!live || userToggledRef.current) return;
+    if (autoExpandCouncil && expandable) setOpen(true);
+    else if (node.status === 'done' && !running) setOpen(false);
+  }, [expandAll, expandable, live, autoExpandCouncil, running, node.status]);
+
+  useEffect(() => {
+    if (!live || !autoExpandCouncil || userToggledRef.current) return;
+    if (childCount > 0) setOpen(true);
+  }, [childCount, live, autoExpandCouncil]);
+
+  const toggle = () => {
+    if (!expandable) return;
+    userToggledRef.current = true;
+    setOpen((v) => !v);
+  };
+
+  const displayLabel = live && running && node.tone === 'council'
+    ? (node.shortLabel ?? node.label)
+    : node.label;
 
   return (
     <motion.li
-      layout
-      initial={{ opacity: 0, y: -3 }}
+      layout="position"
+      className={`process-tree__step group/process-row ${isLast ? 'process-tree__step--last' : ''}`}
+      initial={enterAnimate ? { opacity: 0, y: 3 } : false}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.16 }}
+      transition={{ duration: 0.16, ease }}
     >
+      <div className="process-tree__row-wrap flex items-start gap-0.5">
       <button
         type="button"
         disabled={!expandable}
-        onClick={() => expandable && setOpen((v) => !v)}
+        onClick={toggle}
         aria-expanded={expandable ? open : undefined}
-        className={`process-tree__row ${running ? 'process-tree__row--running' : ''} flex w-full items-start gap-2 px-1.5 py-1 text-left ${expandable ? '' : 'cursor-default'}`}
+        className={`process-tree__row ${running ? 'process-tree__row--running' : ''} min-w-0 flex-1 flex items-start gap-2 px-1.5 py-1 text-left ${expandable ? '' : 'cursor-default'}`}
       >
-        {/* chevron slot — drawn whenever there's something deeper to reveal */}
-        <span className="mt-px flex h-3.5 w-3 shrink-0 items-center justify-center">
+        <span className="process-tree__chevron mt-px flex h-3.5 w-3 shrink-0 items-center justify-center">
           {expandable && (
             <ChevronRight className={`h-3 w-3 text-[color:var(--chat-muted)] transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
           )}
         </span>
-        <StepGlyph node={node} />
+        <StepGlyph node={node} livePulse={false} />
         <span className="min-w-0 flex-1">
-          <span className={running ? 'text-[color:var(--chat-strong)]' : 'text-[color:var(--chat-muted)]'}>{node.label}</span>
-          {node.children.length > 0 && (
-            <span className="ml-1.5 text-[10px] text-[color:var(--chat-muted)] opacity-70">{node.children.length}</span>
+          <span className={running ? 'text-[color:var(--chat-strong)]' : 'text-[color:var(--chat-muted)]'}>
+            {displayLabel}
+          </span>
+        {childCount > 0 && (
+            <span className="ml-1.5 text-[10px] text-[color:var(--chat-muted)] opacity-70" title="Expand for in/out details">
+              {childCount} detail{childCount === 1 ? '' : 's'}
+            </span>
           )}
-          {node.detail && <span className="ml-1.5 text-[11px] text-[color:var(--chat-muted)] opacity-80">{node.detail}</span>}
+          {node.detail && (
+            <span className="ml-1.5 text-[11px] text-[color:var(--chat-muted)] opacity-80">{node.detail}</span>
+          )}
         </span>
+        {running && live && node.tone !== 'council' && (
+          <span className="shrink-0 tabular-nums text-[10px] text-[color:var(--chat-muted)] opacity-70">
+            {formatMs(rowElapsed)}
+          </span>
+        )}
       </button>
+      <ProcessTreeCopyActions
+        node={node}
+        allNodes={allNodes}
+        showTreeCopy={showTreeCopy}
+        compact
+      />
+      </div>
 
-      {expandable && open && (
-        <div className="process-tree__children ml-[1.05rem] pl-3">
-          {/* Leaf note — the "what happened" body for a step with no structured children. */}
+      {expandable && (
+        <motion.div
+          className="process-tree__children ml-[1.05rem] pl-3"
+          initial={false}
+          animate={{ height: open ? 'auto' : 0, opacity: open ? 1 : 0 }}
+          transition={{ duration: 0.2, ease }}
+          style={{ overflow: 'hidden' }}
+        >
           {node.note && node.children.length === 0 && (
-            <p className="py-1 text-[11px] leading-relaxed text-[color:var(--chat-muted)]">{node.note}</p>
+            <ProcessNotePanel label={node.label} body={node.note} />
           )}
-          {/* Structured children (council members, image steps), each itself expandable. */}
           {node.children.length > 0 && (
             <ol className="space-y-0">
-              {node.children.map((child) => (
-                <ChildRow key={child.id} node={child} />
-              ))}
+              <AnimatePresence initial={false}>
+                {visibleChildren.map((child, childIndex) => (
+                  <motion.li
+                    key={child.id}
+                    layout="position"
+                    initial={live && running && childIndex === visibleChildren.length - 1 ? { opacity: 0, y: 2 } : false}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.14, ease }}
+                  >
+                    <ChildRow node={child} allNodes={allNodes} live={live} parentRunning={running} expandAll={expandAll} />
+                  </motion.li>
+                ))}
+              </AnimatePresence>
             </ol>
           )}
-        </div>
+        </motion.div>
       )}
     </motion.li>
   );
 }
 
-/** A second-level row (e.g. a council member). Expands to its own note body. */
-function ChildRow({ node }: { node: ProcessNode }) {
+function ChildRow({
+  node,
+  allNodes,
+  live = false,
+  parentRunning = false,
+  expandAll = false,
+}: {
+  node: ProcessNode;
+  allNodes: readonly ProcessNode[];
+  live?: boolean;
+  parentRunning?: boolean;
+  expandAll?: boolean;
+}) {
   const expandable = isExpandable(node);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(expandAll && expandable);
+  const running = node.status === 'running';
+  const streamChildren = live && (running || parentRunning);
+  const visibleChildCount = useProcessChildReveal(node.children.length, streamChildren);
+  const visibleChildren = node.children.slice(0, visibleChildCount);
+  useEffect(() => {
+    if (expandAll && expandable) setOpen(true);
+  }, [expandAll, expandable]);
   return (
-    <li>
+    <li className="group/process-row">
+      <div className="process-tree__row-wrap flex items-start gap-0.5">
       <button
         type="button"
         disabled={!expandable}
         onClick={() => expandable && setOpen((v) => !v)}
         aria-expanded={expandable ? open : undefined}
-        className={`process-tree__row flex w-full items-start gap-2 px-1 py-0.5 text-left ${expandable ? '' : 'cursor-default'}`}
+        className={`process-tree__row min-w-0 flex-1 flex items-start gap-2 px-1 py-0.5 text-left ${expandable ? '' : 'cursor-default'} ${running ? 'process-tree__row--running' : ''}`}
       >
         <span className="mt-px flex h-3.5 w-3 shrink-0 items-center justify-center">
           {expandable && (
             <ChevronRight className={`h-3 w-3 text-[color:var(--chat-muted)] transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
           )}
         </span>
-        <StepGlyph node={node} small />
+        <StepGlyph node={node} small livePulse={false} />
         <span className="min-w-0 flex-1 text-[11px]">
-          <span className="text-[color:var(--chat-body)]">{node.label}</span>
+          <span className={running ? 'text-[color:var(--chat-strong)]' : 'text-[color:var(--chat-body)]'}>
+            {node.label}
+          </span>
+          {node.children.length > 0 && (
+            <span className="ml-1.5 text-[10px] text-[color:var(--chat-muted)] opacity-70">{node.children.length}</span>
+          )}
           {node.detail && <span className="ml-1.5 text-[color:var(--chat-muted)] opacity-80">{node.detail}</span>}
         </span>
       </button>
-      {expandable && open && node.note && (
-        <p className="ml-[1.05rem] border-l border-[color:var(--panel-border-soft)] py-1 pl-3 text-[11px] leading-relaxed text-[color:var(--chat-muted)]">
-          {node.note}
-        </p>
+      <ProcessTreeCopyActions node={node} allNodes={allNodes} compact />
+      </div>
+      {expandable && (
+        <motion.div
+          className="process-tree__children ml-[1.05rem] pl-3"
+          initial={false}
+          animate={{ height: open ? 'auto' : 0, opacity: open ? 1 : 0 }}
+          transition={{ duration: 0.2, ease }}
+          style={{ overflow: 'hidden' }}
+        >
+          {node.note && node.children.length === 0 && (
+            <ProcessNotePanel label={node.label} body={node.note} />
+          )}
+          {node.note && node.children.length > 0 && (
+            <ProcessNotePanel label="Summary" body={node.note} />
+          )}
+          {node.children.length > 0 && (
+            <ol className="space-y-0">
+              <AnimatePresence initial={false}>
+                {visibleChildren.map((child) => (
+                  <motion.li
+                    key={child.id}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.14, ease }}
+                  >
+                    <ChildRow node={child} allNodes={allNodes} live={live} parentRunning={running || parentRunning} expandAll={expandAll} />
+                  </motion.li>
+                ))}
+              </AnimatePresence>
+            </ol>
+          )}
+        </motion.div>
       )}
     </li>
   );
 }
 
-/**
- * The status glyph. Done → a crisp check; error → the node in error tone; running
- * → the breathing intelligence node tinted by the step's phase. This is where the
- * brand lives: the live indicator IS the logo's spark.
- */
-function StepGlyph({ node, small }: { node: ProcessNode; small?: boolean }) {
+function ProcessNotePanel({ label, body }: { label: string; body: string }) {
+  const ioLabel = /^(In|Out|Input|Output|Response|Result|Details)$/i.test(label) ? label : 'Details';
+  const [copied, setCopied] = useState(false);
+  const copyBody = useCallback(async () => {
+    const ok = await copyProcessText(body);
+    if (ok) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    }
+  }, [body]);
+
+  return (
+    <div className="process-tree__panel group/panel relative py-1">
+      <div className="mb-0.5 flex items-center justify-between gap-2">
+        <div className="process-tree__panel-label text-[10px] font-medium uppercase tracking-wide text-[color:var(--chat-muted)]">
+          {ioLabel}
+        </div>
+        <button
+          type="button"
+          className="process-tree__copy-btn process-tree__copy-btn--sm process-tree__copy-btn--panel"
+          title="Copy panel text"
+          aria-label="Copy panel text"
+          onClick={() => { void copyBody(); }}
+        >
+          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        </button>
+      </div>
+      <pre className="process-tree__panel-body m-0 whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-[color:var(--chat-body)]">
+        {body}
+      </pre>
+    </div>
+  );
+}
+
+function StepGlyph({ node, small, livePulse = false }: { node: ProcessNode; small?: boolean; livePulse?: boolean }) {
   const px = small ? 12 : 14;
   if (node.status === 'done') {
     return <Check className="mt-px shrink-0 text-[color:var(--phase-verify)]" style={{ width: px, height: px }} aria-hidden="true" />;
+  }
+  if (node.status === 'running' && !livePulse) {
+    return (
+      <span className="mt-0.5 flex shrink-0 items-center justify-center" style={{ width: px, height: px }}>
+        <VaiNode state="done" size={small ? 7 : 9} tone={nodeTone(node.tone)} />
+      </span>
+    );
   }
   return (
     <span className="mt-0.5 flex shrink-0 items-center justify-center" style={{ width: px, height: px }}>
@@ -215,6 +475,21 @@ function buildSummaryLine(nodes: readonly ProcessNode[], durationMs?: number): s
 function formatMs(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+}
+
+function useRowElapsed(running: boolean) {
+  const startRef = useRef(Date.now());
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!running) {
+      setElapsed(0);
+      return;
+    }
+    startRef.current = Date.now();
+    const id = window.setInterval(() => setElapsed(Date.now() - startRef.current), 250);
+    return () => window.clearInterval(id);
+  }, [running]);
+  return elapsed;
 }
 
 export default ProcessTree;

@@ -16,7 +16,7 @@
 
 import type { VaiDatabase } from '@vai/core';
 import { schema } from '@vai/core';
-import { eq, desc } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 
 export interface SteeringLiftSummary {
   totalSteeredTurns: number;
@@ -32,9 +32,9 @@ export interface SteeringLiftSummary {
   roughLiftSignal: 'positive' | 'neutral' | 'needs-review' | 'insufficient-data';
 }
 
-export function computeSteeringLift(db: VaiDatabase, opts: { conversationId?: string; sinceMs?: number } = {}): SteeringLiftSummary {
+export function computeSteeringLift(db: VaiDatabase, _opts: { conversationId?: string; sinceMs?: number } = {}): SteeringLiftSummary {
   // Count messages that had steering (plan JSON indicates hadGuidance)
-  let msgQuery = db
+  const msgQuery = db
     .select({ plan: schema.messages.plan, feedback: schema.messages.feedback, modelId: schema.messages.modelId })
     .from(schema.messages)
     .where(eq(schema.messages.role, 'assistant'));
@@ -65,7 +65,9 @@ export function computeSteeringLift(db: VaiDatabase, opts: { conversationId?: st
           handlerCounts.set('(model-fallback)', (handlerCounts.get('(model-fallback)') ?? 0) + 1);
         }
       }
-    } catch {}
+    } catch {
+      // Malformed plan JSON — skip this row's steering signal.
+    }
   }
 
   // Also count guidance rows for applications

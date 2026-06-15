@@ -32,7 +32,7 @@ import {
 } from '../lib/file-extractor.js';
 import { selectNextAutoSandboxMessage } from '../lib/auto-sandbox-message-selection.js';
 import { extractDeployActions, extractTemplateActions } from '../lib/sandbox-actions.js';
-import { resolveAutoSandboxIntent } from '../lib/auto-sandbox-intent.js';
+import { resolveAutoSandboxIntent, isChatOnlyAssistantTurn } from '../lib/auto-sandbox-intent.js';
 import {
   buildGroundedExecutionRepairPlan,
   shouldTriggerGroundedExecutionRepair,
@@ -246,13 +246,13 @@ export function useAutoSandbox() {
   const injectProjectUpdate = useChatStore((s) => s.injectProjectUpdate);
   const mode = useLayoutStore((s) => s.mode);
   const setBuildStatus = useLayoutStore((s) => s.setBuildStatus);
-  const expandBuilder = useLayoutStore((s) => s.expandBuilder);
 
   const _projectId = useSandboxStore((s) => s.projectId);
   const _status = useSandboxStore((s) => s.status);
   const createProject = useSandboxStore((s) => s.createProject);
   const attachProject = useSandboxStore((s) => s.attachProject);
   const writeFiles = useSandboxStore((s) => s.writeFiles);
+  const clearBuildActivity = useSandboxStore((s) => s.clearBuildActivity);
   const installDeps = useSandboxStore((s) => s.installDeps);
   const scaffoldFromTemplate = useSandboxStore((s) => s.scaffoldFromTemplate);
   const deployStack = useSandboxStore((s) => s.deployStack);
@@ -1330,7 +1330,15 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
       deployCount: deployActions.length,
       explicitChatBuildRequest: sandboxIntent.explicitChatBuildRequest,
       explicitChatEditRequest: sandboxIntent.explicitChatEditRequest,
+      turnKind: lastMsg.turnKind,
     });
+
+    // Chat/research/analysis answers must not trigger builder recovery or stale file bars.
+    if (isChatOnlyAssistantTurn(lastMsg, files.length)) {
+      clearBuildActivity();
+      console.info('[auto-sandbox] chat-only-turn-skip', { messageId: lastMsg.id, turnKind: lastMsg.turnKind });
+      return;
+    }
 
     // ── Files: primary path in builder/agent mode ──
     // Vai writes files directly from scratch in builder/agent mode,
@@ -1426,5 +1434,5 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
     if (!hasActiveProject) {
       toast.info('No runnable update was generated from the last Builder reply');
     }
-  }, [effectiveMode, enqueue, isStreaming, messages, processDeploy, processFiles, processTemplate, setBuildStatus, triggerMissingActionRepair]);
+  }, [effectiveMode, enqueue, isStreaming, messages, processDeploy, processFiles, processTemplate, setBuildStatus, triggerMissingActionRepair, clearBuildActivity]);
 }

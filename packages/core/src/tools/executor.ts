@@ -19,6 +19,11 @@ import type { Message, ToolCall, ToolDefinition, ChatChunk, ChatRequest, ModelAd
 import type { ToolRegistry } from './registry.js';
 import type { ToolContext } from './interface.js';
 import { ThorsenAdaptiveController, type ThorsenSyncState } from '../thorsen/types.js';
+import {
+  applyToolExecution,
+  buildToolBatchProgress,
+  toolRunsFromCalls,
+} from './tool-progress.js';
 
 // ── Types ──
 
@@ -220,6 +225,12 @@ export class ToolExecutor {
       };
       messages.push(assistantMsg);
 
+      let batchRuns = toolRunsFromCalls(toolCalls);
+      yield {
+        type: 'progress',
+        progress: buildToolBatchProgress(iteration, batchRuns, 'running'),
+      };
+
       // Execute tool calls in adaptive batches based on Thorsen Curve
       const batchSize = Math.max(1, this.controller.concurrency);
       for (let i = 0; i < toolCalls.length; i += batchSize) {
@@ -230,15 +241,24 @@ export class ToolExecutor {
         for (const result of results) {
           allToolExecutions.push(result);
           maxLatency = Math.max(maxLatency, result.durationMs);
+          batchRuns = applyToolExecution(batchRuns, result);
 
-          // Emit a tool execution event so the UI can show progress
+          yield {
+            type: 'progress',
+            progress: buildToolBatchProgress(
+              iteration,
+              batchRuns,
+              batchRuns.every((run) => run.status !== 'running') ? 'done' : 'running',
+            ),
+          };
+
+          // Legacy hook — callers/tests may still read _toolExecution on text_delta.
           yield {
             type: 'text_delta',
-            textDelta: '', // empty delta — the _toolExecution carries the info
+            textDelta: '',
             _toolExecution: result,
           } as ChatChunk & { _toolExecution: ToolExecutionResult };
 
-          // Append tool result as a message for the next model call
           messages.push({
             role: 'tool',
             content: result.output,
@@ -246,7 +266,6 @@ export class ToolExecutor {
           });
         }
 
-        // Feed observed latency back to the controller
         this.controller.observe(maxLatency);
       }
 

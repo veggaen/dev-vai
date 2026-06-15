@@ -4,6 +4,8 @@ import {
   isExplicitResearchRequest,
   isFreshLocalBusinessContactRequest,
   isFreshLocalRecommendationRequest,
+  isLiveFactualLookupQuery,
+  needsLiveExternalEvidence,
   isGameFranchiseOverviewQuestion,
   isPureConversationalTurn,
   normalizeWebConclusionInput,
@@ -45,6 +47,24 @@ describe('web-conclude-policy', () => {
     expect(shouldSkipWebConclusion('heya')).toBe(true);
     expect(shouldSkipWebConclusion('build me a todo app', { activeMode: 'builder' })).toBe(true);
     expect(shouldConcludeWithWebSearch('build me a todo app', { activeMode: 'builder' })).toBe(false);
+  });
+
+  it('allows live factual lookups in agent mode', () => {
+    expect(needsLiveExternalEvidence('price of eth and btc?')).toBe(true);
+    expect(needsLiveExternalEvidence('whats the price of solana?')).toBe(true);
+    expect(needsLiveExternalEvidence('how much is a barrel of oil today?')).toBe(true);
+    expect(needsLiveExternalEvidence('what is NVIDIA trading at?')).toBe(true);
+    expect(shouldSkipWebConclusion('price of eth and btc?', { activeMode: 'agent' })).toBe(false);
+    expect(shouldSkipWebConclusion('whats the price of solana?', { activeMode: 'agent' })).toBe(false);
+    expect(shouldSkipWebConclusion('what is the capital of France?', { activeMode: 'agent' })).toBe(true);
+  });
+
+  it('detects volatile value lookups without ticker allowlists', () => {
+    expect(needsLiveExternalEvidence('price of chainlink?')).toBe(true);
+    expect(needsLiveExternalEvidence('how much is a Model Y worth right now?')).toBe(true);
+    expect(needsLiveExternalEvidence('build me a pricing page for my SaaS')).toBe(false);
+    expect(needsLiveExternalEvidence('create a crypto tracker app')).toBe(false);
+    expect(needsLiveExternalEvidence('what is the weather in Bergen today?')).toBe(true);
   });
 
   it('classifies pure conversational turns structurally instead of per-word lists', () => {

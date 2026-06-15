@@ -17,6 +17,8 @@ function tokenizeFollowUpSeed(value: string): string[] {
 function isReasonableFollowUp(question: string, content: string): boolean {
   const normalized = question.trim();
   if (normalized.length < 12 || normalized.length > 120) return false;
+  if (/\b(?:most important thing to know about|concrete example of)\b.{40,}/i.test(normalized)) return false;
+  if (/\b(?:please cite|show your reasoning|as of 20\d{2})\b/i.test(normalized)) return false;
   if (!/[?a-z]/i.test(normalized)) return false;
   if (/\b(?:practical example|common mistakes?|cleanest project structure)\s+(?:with|for|about)\s+(?:who|what|why|how|when|where|which)\b/i.test(normalized)) {
     return false;

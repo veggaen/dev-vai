@@ -8,7 +8,6 @@
  */
 import { NEXTJS_PNPM_LOCK, REACT_VITE_PNPM_LOCK } from './lockfiles.gen.js';
 import {
-  appendScaffoldMotionCss,
   generateNextGlobalsCss,
   generateNextLaunchPage,
   generateReactViteLaunchApp,

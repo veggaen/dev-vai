@@ -80,6 +80,17 @@ function buildUserPrompt(input: CouncilInput): string {
   // It informs reasoning, but fact-quarantine still holds — do NOT echo these claims to the
   // user as fact; Vai's own grounded tools own every surfaced number/name. Treat the AI
   // Overview as ONE synthesized source to corroborate or challenge, never as ground truth.
+  if (input.contextSummary) {
+    base.push('', `contextSummary: ${JSON.stringify(input.contextSummary)}`);
+  }
+  if (input.relevantHistory?.length) {
+    base.push('', 'relevantHistory (trimmed — only what Vai considered for this draft, not the full thread):');
+    base.push(JSON.stringify(input.relevantHistory));
+  }
+  if (input.retrievedSnippets?.length) {
+    base.push('', 'retrievedSnippets (only what Vai retrieved and used):');
+    base.push(JSON.stringify(input.retrievedSnippets));
+  }
   if (input.webEvidence?.aiOverview) {
     base.push(
       '',

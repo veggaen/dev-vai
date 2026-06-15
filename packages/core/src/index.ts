@@ -303,6 +303,128 @@ export { ToolRegistry } from './tools/registry.js';
 export { ToolExecutor } from './tools/executor.js';
 export type { Tool, ToolContext, ToolResult } from './tools/interface.js';
 export type { ToolExecutorConfig, ToolExecutionResult, AgentLoopResult } from './tools/executor.js';
+export { readUrl, formatReadUrlForContext } from './tools/read-url.js';
+export type { ReadUrlOptions, ReadUrlResult } from './tools/read-url.js';
+
+// Deterministic, evidence-bound power-user capabilities (read-only git as evidence,
+// no-model synthesis). See plan: evidence-bound capabilities ("wormhole tools").
+export {
+  gatherGitEvidence,
+  gitEvidenceIds,
+  hasGitEvidence,
+} from './tools/git-evidence.js';
+export type {
+  GitEvidence,
+  GitChangedFile,
+  GitDiffHunk,
+  GitBlameLine,
+  GitLogEntry,
+  GitBranchState,
+  GitRunner,
+  GatherGitEvidenceOptions,
+} from './tools/git-evidence.js';
+export { gitCapability, classifyGitQuery } from './chat/capabilities/git-capability.js';
+export { execCapability, isExecQuery } from './chat/capabilities/exec-capability.js';
+export { pageCapability, isPageQuery } from './chat/capabilities/page-capability.js';
+export {
+  gatherPageEvidence,
+  pageEvidenceIds,
+  hasPageEvidence,
+} from './tools/page-evidence.js';
+export type {
+  PageEvidence,
+  PageSelectorEvidence,
+  PageObserver,
+  GatherPageEvidenceOptions,
+} from './tools/page-evidence.js';
+export { observePage } from './search/browser-search.js';
+export type { PageObservation, SelectorObservation } from './search/browser-search.js';
+export {
+  runCommandEvidence,
+  isAllowlistedCommand,
+  hasRunEvidence,
+  SAFE_COMMAND_BASENAMES,
+} from './tools/run-evidence.js';
+export type {
+  RunEvidence,
+  RawRunResult,
+  CommandRunner,
+  RunCommandOptions,
+} from './tools/run-evidence.js';
+export {
+  proposeFsEdit,
+  applyFsEdit,
+  verifyFsEdit,
+  rollbackFsEdit,
+  confinePath,
+  lineDiff,
+  contentHash,
+  isRegularFile,
+  ABSENT_HASH,
+} from './tools/fs-edit.js';
+export type {
+  FsEditPlan,
+  FsProposeResult,
+  FsApplyResult,
+  FsVerification,
+  FsEditOptions,
+  FsApplyOptions,
+} from './tools/fs-edit.js';
+export {
+  synthesizeFromEvidence,
+  gitEvidenceToItems,
+  webEvidenceToItems,
+  aiOverviewToItem,
+  pageEvidenceToItems,
+  notesToItems,
+  synthesizeAcrossSources,
+  formatSummaryBrief,
+  formatContradictions,
+  formatDecisionRecord,
+} from './synthesis/index.js';
+export type {
+  EvidenceItem,
+  SynthesizedClaim,
+  SynthesizedContradiction,
+  SynthesisResult,
+  SynthesizeOptions,
+  WebSourceLike,
+  NoteLike,
+  CrossSourceInputs,
+  CrossSourceSynthesis,
+} from './synthesis/index.js';
+export type { TurnEvidence } from './chat/turn-pipeline.js';
+
+// Capability kernel + learned-history loop (the kernel's `history` term, alive).
+export {
+  scoreFromBreakdown,
+  scoreWithHistory,
+  withLearnedHistory,
+  describeBreakdown,
+  asTurnHandler,
+  shadowScore,
+  DEFAULT_SCORE_WEIGHTS,
+} from './chat/capability-kernel.js';
+export type {
+  Capability,
+  ScoreBreakdown,
+  ScoreWeights,
+  VerificationResult,
+  ShadowScore,
+  CapabilityHistory,
+} from './chat/capability-kernel.js';
+export {
+  CapabilityOutcomeLedger,
+  KnowledgeConfidenceLedger,
+  classifyFeedback,
+} from './learning/index.js';
+export type {
+  CapabilityStat,
+  CapabilityOutcomeKind,
+  CapabilityLedgerSnapshot,
+  CapabilityLedgerOptions,
+  HistoryProvider,
+} from './learning/index.js';
 
 // Usage Tracking
 export { UsageService } from './usage/index.js';
@@ -311,6 +433,17 @@ export type { UsageRecord, UsageSummary } from './usage/index.js';
 // Eval Framework
 export { EvalRunner, registerEvalTasks, getEvalTasks, getEvalTracks, computeGrade, ConversationScorer, extractTurnPairs, LearningExtractor, extractLessons, aggregateLessons, formatContextInjection, extractScenarios, runMultiTurn, computeRegression, runABTest, buildTestReport } from './eval/index.js';
 export { runMemoryRetrievalEval } from './eval/index.js';
+export { judgeAnswers, runParityBench, shouldContinueParityLoop, describeParityReport } from './eval/index.js';
+export type {
+  JudgeCandidate,
+  JudgeVerdict,
+  JudgeContext,
+  JudgeOptions,
+  ParityTask,
+  ParityTaskResult,
+  ParityReport,
+  ParityBenchOptions,
+} from './eval/index.js';
 export type {
   EvalTrack, EvalTask, EvalExpectation, EvalTaskResult,
   EvalRunResult, EvalRunConfig, EvalRunSummary,

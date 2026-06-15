@@ -18,3 +18,7 @@ export {
   hasProductEngineeringSignal,
   isProductEngineeringPlanningPrompt,
 } from './chat/product-engineering-intent.js';
+
+export { isExplicitBuildExecutionRequest } from './chat/build-execution-intent.js';
+
+export { needsLiveExternalEvidence } from './models/web-conclude-policy.js';

@@ -189,7 +189,6 @@ export function ThemeManager({
 }
 
 function ThemeCard({
-  id,
   label,
   swatch,
   selected,

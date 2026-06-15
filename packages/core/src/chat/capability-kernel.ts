@@ -146,6 +146,49 @@ export function scoreFromBreakdown(
 }
 
 /**
+ * A read-only learned-history source. The {@link CapabilityOutcomeLedger} implements this:
+ * `history(name, turnClass)` returns the capability's learned success rate in [0,1], or 0.5
+ * when there is no data yet (the kernel's cold-start). Kept as a tiny interface so the
+ * kernel depends on the SIGNAL, not the whole ledger.
+ */
+export interface CapabilityHistory {
+  history(name: string, turnClass?: string): number;
+}
+
+/**
+ * Replace a breakdown's hardcoded `history` term with the LEARNED value for `name` from a
+ * history source. Every capability ships `history: 0.5` (neutral) because it cannot know
+ * its own track record; this is where the dispatcher injects what the ledger has actually
+ * observed, so a capability that reliably verify-passes outranks one that often fails — the
+ * kernel's `history` term finally does what it was designed to. Returns the breakdown
+ * unchanged when no source is given (backward-compatible).
+ */
+export function withLearnedHistory(
+  breakdown: ScoreBreakdown,
+  name: string,
+  source?: CapabilityHistory,
+  turnClass?: string,
+): ScoreBreakdown {
+  if (!source) return breakdown;
+  return { ...breakdown, history: source.history(name, turnClass) };
+}
+
+/**
+ * Fold a breakdown into a score, but with the `history` term taken from the learned source
+ * (when given). Convenience wrapper combining {@link withLearnedHistory} and
+ * {@link scoreFromBreakdown} so the dispatcher has one call site.
+ */
+export function scoreWithHistory(
+  breakdown: ScoreBreakdown,
+  name: string,
+  source?: CapabilityHistory,
+  turnClass?: string,
+  weights: ScoreWeights = DEFAULT_SCORE_WEIGHTS,
+): number {
+  return scoreFromBreakdown(withLearnedHistory(breakdown, name, source, turnClass), weights);
+}
+
+/**
  * The result of a capability verifying its own resolution before release.
  * `ok: false` means the capability could NOT stand behind its answer — the
  * dispatcher treats that exactly like a decline and falls through, recording
