@@ -395,6 +395,37 @@ export type {
 } from './synthesis/index.js';
 export type { TurnEvidence } from './chat/turn-pipeline.js';
 
+// Capability kernel + learned-history loop (the kernel's `history` term, alive).
+export {
+  scoreFromBreakdown,
+  scoreWithHistory,
+  withLearnedHistory,
+  describeBreakdown,
+  asTurnHandler,
+  shadowScore,
+  DEFAULT_SCORE_WEIGHTS,
+} from './chat/capability-kernel.js';
+export type {
+  Capability,
+  ScoreBreakdown,
+  ScoreWeights,
+  VerificationResult,
+  ShadowScore,
+  CapabilityHistory,
+} from './chat/capability-kernel.js';
+export {
+  CapabilityOutcomeLedger,
+  KnowledgeConfidenceLedger,
+  classifyFeedback,
+} from './learning/index.js';
+export type {
+  CapabilityStat,
+  CapabilityOutcomeKind,
+  CapabilityLedgerSnapshot,
+  CapabilityLedgerOptions,
+  HistoryProvider,
+} from './learning/index.js';
+
 // Usage Tracking
 export { UsageService } from './usage/index.js';
 export type { UsageRecord, UsageSummary } from './usage/index.js';

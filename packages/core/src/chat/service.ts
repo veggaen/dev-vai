@@ -51,6 +51,8 @@ import { liveContextCapability } from './capabilities/live-context-capability.js
 import { gitCapability, classifyGitQuery } from './capabilities/git-capability.js';
 import { execCapability } from './capabilities/exec-capability.js';
 import { pageCapability } from './capabilities/page-capability.js';
+import { scoreWithHistory } from './capability-kernel.js';
+import { CapabilityOutcomeLedger } from '../learning/capability-ledger.js';
 import { gatherGitEvidence, type GitEvidence } from '../tools/git-evidence.js';
 import type {
   CouncilInput,
@@ -740,6 +742,19 @@ export class ChatService {
   private readonly securityReviewEnabled: boolean;
   private readonly contractLedgerEnabled: boolean;
   private readonly guidanceStore?: GuidanceStore;
+  /**
+   * Learned per-capability success rates (the kernel's `history` term, finally alive).
+   * Records verify outcomes per turn and feeds them back into capability scoring so a
+   * capability that reliably grounds its answers out-ranks one that often fails verify.
+   * In-memory per service; serialize()/restore() round-trips it through persistence.
+   */
+  private readonly capabilityLedger = new CapabilityOutcomeLedger();
+
+  /** Read-only access to the learned capability outcomes (for persistence / inspection). */
+  get capabilityOutcomes(): CapabilityOutcomeLedger {
+    return this.capabilityLedger;
+  }
+
   private readonly responseReviewers: readonly ResponseReviewer[];
   private readonly loadActiveGuidance?: (conversationId: string) => readonly RouteGuidance[]; // legacy fallback
   /** Optional SCIS council roster. When present, substantive turns run the council for consensus + method lessons. */
@@ -1942,14 +1957,28 @@ export class ChatService {
       // can't bind every cited SHA/file to real evidence is refused (resolve → null)
       // and the dispatcher falls through, exactly as the kernel intends. It scores
       // via the capability's own inspectable estimate, read off the attached evidence.
+      const turnClass = turnClassification.kind;
       const makeGitHandler = (ctx: TurnContext): TurnHandler<ServiceResolution> => ({
         name: 'git',
-        score: () => gitCapability.score(ctx),
+        score: () => {
+          const breakdown = gitCapability.estimate(ctx);
+          if (breakdown === null) return null;
+          // Fold the LEARNED history (from past verify outcomes) into the score instead of
+          // the capability's hardcoded neutral — the kernel's history term, alive.
+          const score = scoreWithHistory(breakdown, 'git', this.capabilityLedger, turnClass);
+          return { score, reason: breakdown.reason };
+        },
         resolve: () => {
           const r = gitCapability.resolve(ctx);
-          if (!r) return null;
+          if (!r) {
+            this.capabilityLedger.record('git', 'declined', turnClass);
+            return null;
+          }
           let ok = false;
           try { ok = gitCapability.verify(r, ctx).ok; } catch { ok = false; }
+          // Record the real outcome: a passing verify is the success signal; a failing one
+          // is a grounding miss that should cost the capability rank over time.
+          this.capabilityLedger.record('git', ok ? 'verifyPassed' : 'verifyFailed', turnClass);
           if (!ok) return null;
           return { text: r.text, turnKind: r.turnKind, confidence: r.confidence, strategy: 'git' };
         },
