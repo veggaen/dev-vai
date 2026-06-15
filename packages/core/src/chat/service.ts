@@ -53,6 +53,7 @@ import { execCapability } from './capabilities/exec-capability.js';
 import { pageCapability } from './capabilities/page-capability.js';
 import { scoreWithHistory } from './capability-kernel.js';
 import { CapabilityOutcomeLedger } from '../learning/capability-ledger.js';
+import { judgeAnswers, type JudgeCandidate } from '../eval/answer-judge.js';
 import { gatherGitEvidence, type GitEvidence } from '../tools/git-evidence.js';
 import type {
   CouncilInput,
@@ -90,6 +91,7 @@ import {
   shouldEscalateDeterministicDecline,
   shouldFlipPrimaryToGenerative,
   shouldPreferGroundedFallback,
+  looksLikeDecline,
   VAI_FALLBACK_CONFIDENCE_THRESHOLD,
 } from './vai-fallback.js';
 import { sanitizeLeakage, verifyResponse, type ResponseVerificationConfig } from './response-verification.js';
@@ -154,6 +156,25 @@ interface ServiceResolution extends Resolution {
 function extractBlamePath(text: string): string | undefined {
   const m = (text ?? '').match(/\b([\w.-]+\/)*[\w.-]+\.[a-z0-9]{1,8}\b/i);
   return m ? m[0] : undefined;
+}
+
+/**
+ * Extract the evidence ids a draft's claims are bound to, for the fair judge. Real
+ * bindings beat a self-asserted confidence: we pull capability evidence ids the answer
+ * cites (git:/page:/run:/web:/note:), plus any explicit source URLs. When the arm reported
+ * it HAD evidence but cited no inline id, we credit one synthetic 'arm:evidence' binding so
+ * a genuinely-grounded answer isn't scored as ungrounded — without inflating it. An arm
+ * with no evidence at all returns [] (ungrounded), which is exactly what the judge should see.
+ */
+function extractDraftEvidenceIds(text: string, hadEvidence: boolean): string[] {
+  const ids = new Set<string>();
+  const t = text ?? '';
+  // Capability evidence ids cited inline (the verifiable, deterministic bindings).
+  for (const m of t.matchAll(/\b(git|page|run|web|note|fs):[^\s`)\]]+/gi)) ids.add(m[0]);
+  // Explicit source URLs in the answer.
+  for (const m of t.matchAll(/https?:\/\/[^\s<>"'`)\]]+/gi)) ids.add(`url:${m[0]}`);
+  if (ids.size === 0 && hadEvidence) ids.add('arm:evidence');
+  return [...ids];
 }
 
 export interface ImageInput {
@@ -3249,6 +3270,54 @@ export class ChatService {
         }
         if (vaiProposedDraft) {
           fallbackThinking.vaiProposedDraft = vaiProposedDraft;
+          // FAIR-JUDGE GATE (fixes the "model always wins because it ran last" bias):
+          // when Vai had an EVIDENCE-GROUNDED proposed draft, judge it BLIND against the
+          // escalated model's answer on groundedness/task-fit/honesty — NOT fluency. If
+          // Vai's grounded draft wins outright, keep it instead of the model's. Conservative
+          // by design: only fires when Vai's draft was grounded and clearly wins (never
+          // at-par), so a genuinely better model answer is never displaced. Env-disableable.
+          const judgeEnabled = process.env.VAI_FAIR_JUDGE_FALLBACK !== '0';
+          if (
+            judgeEnabled
+            && primaryHadEvidence
+            // A decline-shaped Vai draft ("I don't know this one") is a FALL-THROUGH, not a
+            // winning answer — it must never beat a substantive model answer. Only judge a
+            // real Vai answer against the model.
+            && !looksLikeDecline(vaiProposedDraft)
+            && !fbBuilderFiles
+            && !usedConservativeQualityFallback
+            && fbText.trim()
+            && fbText.trim() !== vaiProposedDraft
+          ) {
+            const vaiCand: JudgeCandidate = {
+              id: 'c0',
+              text: vaiProposedDraft,
+              boundEvidence: extractDraftEvidenceIds(vaiProposedDraft, primaryHadEvidence),
+              verified: true,
+            };
+            const modelCand: JudgeCandidate = {
+              id: 'c1',
+              text: fbText,
+              boundEvidence: extractDraftEvidenceIds(fbText, fbHasEvidence),
+              verified: fbVerdict ? fbVerdict.action !== 'decline' : undefined,
+            };
+            const verdict = judgeAnswers([vaiCand, modelCand], { prompt: content });
+            // Record the outcome for the capability-learning ledger (the deterministic
+            // arm is the 'vai-fallback-draft' capability here).
+            this.capabilityLedger.record(
+              'vai-fallback-draft',
+              verdict.winnerId === 'c0' ? 'verifyPassed' : verdict.winnerId === 'c1' ? 'verifyFailed' : 'declined',
+              turnKind,
+            );
+            if (verdict.winnerId === 'c0') {
+              // Vai's grounded draft won the blind, evidence-based judge — keep it.
+              fbText = vaiProposedDraft;
+              responseModelId = bufferedModelId;
+              fallbackThinking.fairJudge = { winner: 'vai', rationale: verdict.rationale };
+            } else {
+              fallbackThinking.fairJudge = { winner: verdict.atPar ? 'par' : 'model', rationale: verdict.rationale };
+            }
+          }
         }
         if (councilEscalateToGenerative && councilThinking) {
           fallbackThinking.council = councilThinking;
