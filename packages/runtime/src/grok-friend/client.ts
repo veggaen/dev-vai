@@ -153,7 +153,9 @@ export class GrokFriendClient {
     if (jsonMatch) {
       try {
         return JSON.parse(jsonMatch[0]);
-      } catch {}
+      } catch {
+        // Malformed JSON in the model's reply — fall through to the note below.
+      }
     }
     // Fallback note if parse fails (still useful).
     return {

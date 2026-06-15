@@ -26,10 +26,10 @@ export function validateSearchUrl(raw: string): URL {
     return validatePublicUrl(raw);
   } catch (error) {
     if (error instanceof Error && error.message === 'Only HTTP(S) URLs are allowed') {
-      throw new Error('Only HTTP/HTTPS URLs are allowed');
+      throw new Error('Only HTTP/HTTPS URLs are allowed', { cause: error });
     }
     if (error instanceof Error && error.message === 'Private or local URLs are not allowed') {
-      throw new Error('Private/internal URLs are not allowed');
+      throw new Error('Private/internal URLs are not allowed', { cause: error });
     }
     throw error;
   }

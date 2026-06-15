@@ -29,6 +29,11 @@ export default tseslint.config(
       'tests/**',
       '**/*.cjs',
       '**/out/**',
+      // Throwaway experiment / debug / one-off scripts — not shipped code.
+      '**/bench/**',
+      '.debug-*.mts',
+      'temp-*.mjs',
+      'temp-*.mts',
       'apps/vcus/**',
       'apps/extension/**',
       'apps/vscode-extension/**',

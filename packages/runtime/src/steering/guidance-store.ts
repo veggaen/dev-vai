@@ -17,8 +17,6 @@ import { eq, and, desc } from 'drizzle-orm';
 import type { VaiDatabase } from '@vai/core';
 import { schema } from '@vai/core';
 import type { GuidanceStore, RouteGuidance } from '@vai/core';
-// QuestionIntent is a string union; we cast to avoid deep import resolution in this context.
-type QuestionIntent = string;
 
 function parseMatchTokens(raw: string | null | undefined): string[] | undefined {
   if (!raw) return undefined;
@@ -39,13 +37,8 @@ export function createGuidanceStore(db: VaiDatabase): GuidanceStore {
   return {
     loadActive(conversationId?: string | null): readonly RouteGuidance[] {
       const nowMs = Date.now();
-      const conditions = [
-        eq(schema.routeGuidances.active, 1),
-        // not expired or no expiry
-      ];
-
       // Global + conversation-specific (class scope are further filtered by selectApplicableGuidance)
-      let q = db
+      const q = db
         .select()
         .from(schema.routeGuidances)
         .where(
