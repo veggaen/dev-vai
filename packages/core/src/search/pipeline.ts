@@ -38,6 +38,11 @@ import { fetchGoogleViaBrowser, isBrowserSearchEnabled } from './browser-search.
 
 /** Common query intent markers */
 const INTENT_PATTERNS: ReadonlyArray<{ pattern: RegExp; intent: string }> = [
+  // Fresh-data MUST be first: a question like "what is the price of btc" matches
+  // "what is" → definition otherwise, and gets encyclopedia fan-out instead of a
+  // real-time source. Anything asking for a price / rate / score / current value is a
+  // fresh-data lookup that needs a live source READ, not a wikipedia article.
+  { pattern: /\b(price|cost|worth|how much (?:is|are|does)|exchange rate|conversion rate|stock price|market cap|score|standings|odds|weather|temperature|forecast)\b/i, intent: 'fresh-data' },
   { pattern: /^(what is|what are|what's|define)\b/i, intent: 'definition' },
   { pattern: /^(hva\s+er)\b/i, intent: 'definition' },
   { pattern: /^(how to|how do|how can|how does)\b/i, intent: 'how-to' },
@@ -182,6 +187,13 @@ function normalizeSearchQuery(query: string): string {
   return withoutBuildTail || trimmed;
 }
 
+function capFollowUpSubject(subject: string, maxLen = 48): string {
+  const trimmed = subject.replace(/\s+/g, ' ').trim();
+  if (trimmed.length <= maxLen) return trimmed;
+  const shortened = trimmed.slice(0, maxLen).replace(/\s+\S*$/, '').trim();
+  return shortened.length > 0 ? shortened : trimmed.slice(0, maxLen);
+}
+
 function extractPrimarySubject(query: string, entities: readonly string[]): string {
   const stripped = query
     .replace(/^(?:what\s+(?:is|are|was|were|caused|led\s+to|triggered|drove)|what's|what\s+do\s+you\s+know(?:\s+(?:about|of|on|regarding))?|do\s+you\s+know(?:\s+(?:about|of|on|regarding))?|have\s+you\s+heard\s+(?:of|about)|causes?\s+(?:of|for)|reasons?\s+(?:of|for)|define|explain|describe|tell\s+me\s+about|who\s+(?:is|are|was|were)|how\s+(?:does|do)|why\s+(?:does|is|are|would|should)|hva\s+er|forklar|beskriv|fortell\s+meg\s+om|hvordan(?:\s+fungerer)?)\s+/i, '')
@@ -190,7 +202,13 @@ function extractPrimarySubject(query: string, entities: readonly string[]): stri
     .replace(/^(?:of|about|on|regarding)\s+/i, '')
     .trim();
 
-  if (/\b(?:current|latest|stable|version|release|lts)\b/i.test(stripped)) {
+  const focused = (stripped.split('?')[0] ?? stripped)
+    .replace(/\bas of 20\d{2}\b.*$/i, '')
+    .replace(/\bplease\b.*$/i, '')
+    .replace(/,\s*and\b.*$/i, '')
+    .trim();
+
+  if (/\b(?:current|latest|stable|version|release|lts)\b/i.test(focused)) {
     const focusedEntity = entities.find((entity) => {
       const normalized = entity.toLowerCase();
       return entity.length > 1 && !PACKAGE_QUERY_NOISE.has(normalized) && normalized !== 'pypi';
@@ -198,10 +216,10 @@ function extractPrimarySubject(query: string, entities: readonly string[]): stri
     if (focusedEntity) return cleanQuerySubject(focusedEntity);
   }
 
-  const beforeComparison = stripped.split(/\b(?:over|vs\.?|versus|instead of|compared? to)\b/i)[0] ?? stripped;
+  const beforeComparison = focused.split(/\b(?:over|vs\.?|versus|instead of|compared? to)\b/i)[0] ?? focused;
   const cleaned = cleanQuerySubject(beforeComparison);
-  if (cleaned.length > 0) return cleaned;
-  return entities[0] ?? query.trim();
+  if (cleaned.length > 0) return capFollowUpSubject(cleaned);
+  return capFollowUpSubject(entities[0] ?? query.trim());
 }
 
 function extractComparisonSubject(query: string): string | null {
@@ -946,6 +964,14 @@ function generateFanOutQueries(query: string, intent: string, entities: readonly
     case 'current':
       queries.push(`${entityStr} latest 2025`);
       queries.push(`${entityStr} release notes changelog`);
+      break;
+    case 'fresh-data':
+      // Real-time lookup: time-anchored queries pointed at live sources, NOT encyclopedia.
+      // "btc price" → "btc price today", "btc current price usd", "btc live price" — these
+      // surface current-value pages a reader can actually extract a number from.
+      queries.push(`${primarySubject || entityStr} price today`);
+      queries.push(`${primarySubject || entityStr} current price usd`);
+      queries.push(`${primarySubject || entityStr} live price now`);
       break;
     default:
       queries.push(`${primarySubject || entityStr} overview`);
@@ -3846,11 +3872,19 @@ export class SearchPipeline {
     const fanOutStart = Date.now();
     const preSnapshot = this.controller.snapshot();
     const adaptiveMaxFanOut = Math.max(1, Math.min(this.config.maxFanOut, preSnapshot.concurrency));
-    const adaptiveReadTopN = preSnapshot.state === 'linear'
-      ? 1
-      : preSnapshot.state === 'parallel'
-        ? Math.min(this.config.readTopN, 2)
-        : this.config.readTopN;
+    // Fresh-data lookups (price/score/weather) MUST read real pages — a snippet rarely
+    // carries the live number, and reading only 1 page (then having it fail, as Reddit did
+    // for "btc price") yields the empty answer that drove the live failure. So for
+    // fresh-data we read several of the top trusted results regardless of Thorsen state,
+    // so one blocked fetch doesn't sink the whole answer.
+    const isFreshData = plan.intent === 'fresh-data' || plan.intent === 'current';
+    const adaptiveReadTopN = isFreshData
+      ? Math.max(3, Math.min(this.config.readTopN, 4))
+      : preSnapshot.state === 'linear'
+        ? 1
+        : preSnapshot.state === 'parallel'
+          ? Math.min(this.config.readTopN, 2)
+          : this.config.readTopN;
     const queries = plan.fanOutQueries.slice(0, adaptiveMaxFanOut);
     const allRaw: Array<RawSearchResult & { queryIndex: number }> = [];
 
