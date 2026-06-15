@@ -324,6 +324,25 @@ export type {
   GatherGitEvidenceOptions,
 } from './tools/git-evidence.js';
 export { gitCapability, classifyGitQuery } from './chat/capabilities/git-capability.js';
+export {
+  proposeFsEdit,
+  applyFsEdit,
+  verifyFsEdit,
+  rollbackFsEdit,
+  confinePath,
+  lineDiff,
+  contentHash,
+  isRegularFile,
+  ABSENT_HASH,
+} from './tools/fs-edit.js';
+export type {
+  FsEditPlan,
+  FsProposeResult,
+  FsApplyResult,
+  FsVerification,
+  FsEditOptions,
+  FsApplyOptions,
+} from './tools/fs-edit.js';
 export { synthesizeFromEvidence, gitEvidenceToItems } from './synthesis/index.js';
 export type {
   EvidenceItem,
