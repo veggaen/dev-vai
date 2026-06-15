@@ -48,6 +48,8 @@ import {
 } from './turn-pipeline.js';
 import { shadowScore, type ShadowScore } from './capability-kernel.js';
 import { liveContextCapability } from './capabilities/live-context-capability.js';
+import { gitCapability, classifyGitQuery } from './capabilities/git-capability.js';
+import { gatherGitEvidence, type GitEvidence } from '../tools/git-evidence.js';
 import type {
   CouncilInput,
   CouncilThinking,
@@ -137,6 +139,17 @@ import {
 interface ServiceResolution extends Resolution {
   readonly strategy: string;
   readonly preChunks?: readonly ChatChunk[];
+}
+
+/**
+ * Pull a repo-relative file path out of a "who wrote …" blame question so git
+ * evidence can blame the right file. Matches a token containing a dot-extension
+ * or a slash (e.g. `src/foo.ts`, `app.ts`). Returns undefined when none is found —
+ * the gather then skips blame rather than guessing.
+ */
+function extractBlamePath(text: string): string | undefined {
+  const m = (text ?? '').match(/\b([\w.-]+\/)*[\w.-]+\.[a-z0-9]{1,8}\b/i);
+  return m ? m[0] : undefined;
 }
 
 export interface ImageInput {
@@ -1921,6 +1934,25 @@ export class ChatService {
         }, Boolean(mostRecentAssistantText), 'Continues the previous answer on "go on" / "more".'),
       ];
 
+      // Deterministic git capability — answers "what changed / who wrote / recent
+      // history / branch state" from attached read-only git evidence, NO model call.
+      // Wrapped here so its kernel `verify` gate is enforced: a composed answer that
+      // can't bind every cited SHA/file to real evidence is refused (resolve → null)
+      // and the dispatcher falls through, exactly as the kernel intends. It scores
+      // via the capability's own inspectable estimate, read off the attached evidence.
+      const makeGitHandler = (ctx: TurnContext): TurnHandler<ServiceResolution> => ({
+        name: 'git',
+        score: () => gitCapability.score(ctx),
+        resolve: () => {
+          const r = gitCapability.resolve(ctx);
+          if (!r) return null;
+          let ok = false;
+          try { ok = gitCapability.verify(r, ctx).ok; } catch { ok = false; }
+          if (!ok) return null;
+          return { text: r.text, turnKind: r.turnKind, confidence: r.confidence, strategy: 'git' };
+        },
+      });
+
       // One understanding, scored once. `guidance` is the friend hint channel
       // (human + AI "that process wasn't good" steers). Stage 1: load the
       // conversation's persisted hints, keep the ones that apply to THIS turn
@@ -1944,6 +1976,23 @@ export class ChatService {
           activeGuidance,
         ).map(toTurnGuidance)
         : [];
+      // ── Async evidence gather (git) ─────────────────────────────────
+      // The dispatcher and resolve() are synchronous; anything needing
+      // subprocess I/O is gathered HERE, before dispatch, and attached to the
+      // context so the deterministic git capability answers from real read-only
+      // git output WITHOUT a model call. Gated on git-shaped phrasing so we only
+      // pay the (small, read-only) cost when the turn is actually about the repo.
+      let gitEvidence: GitEvidence | undefined;
+      const gitShape = classifyGitQuery(understoodContent || content);
+      if (gitShape.any) {
+        const blamePath = gitShape.wantsBlame ? extractBlamePath(content) : undefined;
+        gitEvidence = await gatherGitEvidence({
+          cwd: process.cwd(),
+          blamePath,
+          blameRev: blamePath ? 'HEAD' : undefined,
+        }).catch(() => undefined);
+      }
+
       const turnContext: TurnContext = {
         content,
         understood: understoodContent,
@@ -1951,15 +2000,21 @@ export class ChatService {
         classification: turnClassification,
         intent: questionIntent,
         guidance: turnGuidance,
+        evidence: gitEvidence ? { git: gitEvidence } : undefined,
       };
-      const outcome = dispatchTurn(turnContext, handlers, { confidenceFloor: 0.5 });
+      // Append the git capability (closes over the just-built context) only when the
+      // turn is git-shaped — keeps the handler list unchanged for every other turn.
+      const gitHandlers = gitShape.any
+        ? [...handlers, makeGitHandler(turnContext)]
+        : handlers;
+      const outcome = dispatchTurn(turnContext, gitHandlers, { confidenceFloor: 0.5 });
 
       // Shadow baseline (unsteered) for reference when guidance was present.
       // Persisted alongside so we have direct pre/post for analysis.
       let baselinePlan: DispatchPlan | undefined;
       if (turnGuidance.length > 0) {
         const baselineCtx: TurnContext = { ...turnContext, guidance: [] };
-        const baseline = dispatchTurn(baselineCtx, handlers, { confidenceFloor: 0.5 });
+        const baseline = dispatchTurn(baselineCtx, gitShape.any ? [...handlers, makeGitHandler(baselineCtx)] : handlers, { confidenceFloor: 0.5 });
         baselinePlan = baseline.plan;
         // Record application for the guidances that fired (efficacy tracking).
         for (const g of activeGuidance) {
@@ -1973,7 +2028,7 @@ export class ChatService {
       // Shadow-score the kernel capabilities against the same context. Pure
       // observation: the live `outcome` above already decided the turn; these
       // only annotate the visible plan. A null means inapplicable → dropped.
-      const shadowCapabilities = [liveContextCapability];
+      const shadowCapabilities = [liveContextCapability, gitCapability];
       turnShadowScores = shadowCapabilities
         .map((cap) => shadowScore(cap, turnContext))
         .filter((s): s is ShadowScore => s !== null);

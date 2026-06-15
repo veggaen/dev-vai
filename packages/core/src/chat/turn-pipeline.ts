@@ -1,5 +1,19 @@
 import type { TurnClassification } from './turn-classifier.js';
 import type { QuestionIntent } from './question-intent.js';
+import type { GitEvidence } from '../tools/git-evidence.js';
+
+/**
+ * Async-gathered evidence attached to a turn BEFORE dispatch. The dispatcher and
+ * `resolve()` are synchronous and pure; anything that needs subprocess/network I/O
+ * (git, fs, sandbox, web) is gathered ahead of time by the caller and dropped here,
+ * so a capability's sync `resolve`/`verify` can read real evidence without doing I/O.
+ * This mirrors how web/live-context evidence is already attached. Every field is
+ * optional and additive — existing handlers that don't read it are unaffected.
+ */
+export interface TurnEvidence {
+  /** Read-only git evidence (diff/blame/log/branch), when the turn looked git-shaped. */
+  readonly git?: GitEvidence;
+}
 
 /**
  * Scored turn-dispatch core.
@@ -68,6 +82,12 @@ export interface TurnContext {
   readonly intent: QuestionIntent;
   /** Friend steering hints in effect for this turn. */
   readonly guidance: readonly TurnGuidance[];
+  /**
+   * Evidence gathered asynchronously before dispatch (git/fs/sandbox/web). Optional
+   * so existing callers and handlers that never set/read it are unaffected. A
+   * capability reads from here instead of doing its own I/O at resolve time.
+   */
+  readonly evidence?: TurnEvidence;
 }
 
 /**

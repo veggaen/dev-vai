@@ -303,6 +303,36 @@ export { ToolRegistry } from './tools/registry.js';
 export { ToolExecutor } from './tools/executor.js';
 export type { Tool, ToolContext, ToolResult } from './tools/interface.js';
 export type { ToolExecutorConfig, ToolExecutionResult, AgentLoopResult } from './tools/executor.js';
+export { readUrl, formatReadUrlForContext } from './tools/read-url.js';
+export type { ReadUrlOptions, ReadUrlResult } from './tools/read-url.js';
+
+// Deterministic, evidence-bound power-user capabilities (read-only git as evidence,
+// no-model synthesis). See plan: evidence-bound capabilities ("wormhole tools").
+export {
+  gatherGitEvidence,
+  gitEvidenceIds,
+  hasGitEvidence,
+} from './tools/git-evidence.js';
+export type {
+  GitEvidence,
+  GitChangedFile,
+  GitDiffHunk,
+  GitBlameLine,
+  GitLogEntry,
+  GitBranchState,
+  GitRunner,
+  GatherGitEvidenceOptions,
+} from './tools/git-evidence.js';
+export { gitCapability, classifyGitQuery } from './chat/capabilities/git-capability.js';
+export { synthesizeFromEvidence, gitEvidenceToItems } from './synthesis/index.js';
+export type {
+  EvidenceItem,
+  SynthesizedClaim,
+  SynthesizedContradiction,
+  SynthesisResult,
+  SynthesizeOptions,
+} from './synthesis/index.js';
+export type { TurnEvidence } from './chat/turn-pipeline.js';
 
 // Usage Tracking
 export { UsageService } from './usage/index.js';
