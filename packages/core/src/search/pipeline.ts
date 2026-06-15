@@ -33,6 +33,7 @@ import {
   isFreshLocalRecommendationRequest,
 } from '../models/web-conclude-policy.js';
 import { fetchGoogleViaBrowser, isBrowserSearchEnabled } from './browser-search.js';
+import { classifyFreshFactKind, extractFreshFact, type ReadSource } from './fresh-fact-extract.js';
 
 // ── Query Normalization (Step 1: CLARIFY) ──
 
@@ -3310,6 +3311,22 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[], had
   }
   const used = relevantUsed.slice(0, 5);
 
+  // FRESH-FACT FAST PATH (the scalable web→answer fix): when the question asks for a fresh
+  // value (a price, temperature, version, date, count), pull the answer-bearing line
+  // straight out of the READ page content — the same thing a human reads off Google. This
+  // is domain-agnostic: it works for crypto prices, weather, "latest version of X", etc.,
+  // and it never fabricates (returns nothing if no read source contains the figure). This
+  // is what teaches Vai to USE what it found instead of giving a vague "no useful results".
+  const freshKind = classifyFreshFactKind(query);
+  if (freshKind) {
+    const readSources: ReadSource[] = used.map((s, i) => ({ index: i, title: s.title, url: s.url, text: s.text }));
+    const fact = extractFreshFact(query, readSources, freshKind);
+    if (fact) {
+      const cite = collectCitationMarks([fact.sourceIndex]);
+      return `${fact.text} ${cite}\n\n_Live value read from the source above; it changes over time._`;
+    }
+  }
+
   if (isFreshLocalBusinessContactRequest(query) && used.some((snippet) => snippet.domain === 'openstreetmap.org')) {
     const listing = used.find((snippet) => snippet.domain === 'openstreetmap.org');
     if (listing) {
@@ -3710,7 +3727,12 @@ async function readTopPages(
   const urlsSeen = new Set<string>();
   const toRead: Array<{ index: number; url: string }> = [];
 
-  for (let i = 0; i < snippets.length && toRead.length < topN; i++) {
+  // RESILIENCE: gather MORE candidates than topN so a failed/blocked fetch (the exact
+  // "read: 0 pages" failure — one Reddit URL that didn't return content sank the whole
+  // answer) is backfilled by the next trusted result. We attempt up to topN + a buffer and
+  // count successes toward topN, so Vai reads real page content instead of giving up.
+  const candidateBudget = Math.min(snippets.length, topN + 4);
+  for (let i = 0; i < snippets.length && toRead.length < candidateBudget; i++) {
     const s = snippets[i];
     // Only read from trusted sources with real URLs
     if (s.trust.tier === 'untrusted') continue;
@@ -3736,6 +3758,9 @@ async function readTopPages(
   let pagesRead = 0;
   const enriched = [...snippets];
   for (let j = 0; j < toRead.length; j++) {
+    // Stop once we have topN successful reads — the extra candidates were only insurance
+    // against failures, not a request to read everything.
+    if (pagesRead >= topN) break;
     const pageContent = pageResults[j];
     if (!pageContent || pageContent.length < 100) continue;
     pagesRead++;
