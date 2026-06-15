@@ -50,6 +50,19 @@ describe('filterStructuredFollowUps', () => {
     })).toEqual([]);
   });
 
+  it('filters follow-ups that echo the full user prompt', () => {
+    expect(filterStructuredFollowUps({
+      followUps: [
+        'What\'s the most important thing to know about Who is Norway\'s current prime minister as of 2026? Please cite an official source?',
+        'Can you give a concrete example of Who is Norway\'s current prime minister as of 2026?',
+      ],
+      content: 'Jonas Gahr Støre is the Prime Minister of Norway.',
+      isUser: false,
+      isProjectUpdate: false,
+      hasAppliedFileBlocks: false,
+    })).toEqual([]);
+  });
+
   it('keeps concise action follow-ups for discovery answers', () => {
     expect(filterStructuredFollowUps({
       followUps: [

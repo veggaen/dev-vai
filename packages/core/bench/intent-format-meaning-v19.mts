@@ -200,11 +200,11 @@ function genExpr(rand: () => number): { expr: string; val: number } {
   const ops = ['+','-','*'];
   const intN = () => 1 + Math.floor(rand() * 12);
   const shape = Math.floor(rand() * 5);
-  let a = intN(), b = intN(), c = intN();
-  let op1 = pick(rand, ops), op2 = pick(rand, ops);
+  const a = intN(), b = intN(), c = intN();
+  const op1 = pick(rand, ops), op2 = pick(rand, ops);
   const safeEval = (s: string): number => {
     if (!/^[\d+\-*/() .]+$/.test(s)) return NaN;
-    // eslint-disable-next-line no-new-func
+     
     return Function(`"use strict"; return (${s});`)() as number;
   };
   let expr: string;

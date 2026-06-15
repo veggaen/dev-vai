@@ -40,7 +40,7 @@ interface Props {
   onPrompt?: (prompt: string) => void;
 }
 
-export function ProjectArtifactCard({ artifact, summary, details, onPrompt }: Props) {
+export function ProjectArtifactCard({ artifact, summary, details }: Props) {
   const expandBuilder = useLayoutStore((state) => state.expandBuilder);
   const themePreference = useLayoutStore((state) => state.themePreference);
   const isLight = themePreference === 'light';

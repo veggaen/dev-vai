@@ -128,6 +128,34 @@ export interface ChatChunk {
     readonly label: string;
     readonly detail?: string;
     readonly status: 'running' | 'done';
+    readonly councilMembers?: readonly {
+      readonly name: string;
+      readonly topic?: string;
+      readonly verdict: 'good' | 'needs-work' | 'bad';
+      readonly confidence: number;
+      readonly note?: string;
+      readonly failed?: boolean;
+      readonly realIntent?: string;
+      readonly hiddenMeaning?: string;
+      readonly missingCapability?: string;
+      readonly methodLesson?: string;
+      readonly suggestedAction?: string;
+      readonly concerns?: readonly string[];
+    }[];
+    readonly processLog?: readonly {
+      readonly kind: 'thought' | 'action' | 'artifact' | 'feedback' | 'verdict';
+      readonly label: string;
+      readonly body?: string;
+    }[];
+    readonly toolRuns?: readonly {
+      readonly id: string;
+      readonly name: string;
+      readonly status: 'running' | 'done' | 'failed';
+      readonly success?: boolean;
+      readonly durationMs?: number;
+      readonly input?: string;
+      readonly output?: string;
+    }[];
   };
   /** High-level routing classification for the current assistant turn. */
   readonly turnKind?: ChatTurnKind;

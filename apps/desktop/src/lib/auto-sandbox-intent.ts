@@ -1,4 +1,4 @@
-import { isProductEngineeringPlanningPrompt, isExplicitBuildExecutionRequest } from '@vai/core';
+import { isProductEngineeringPlanningPrompt, isExplicitBuildExecutionRequest, needsLiveExternalEvidence } from '@vai/core/browser';
 import { detectEditIntent } from './intent-detector.js';
 
 export type AutoSandboxMode = 'chat' | 'agent' | 'builder' | 'plan' | 'debate';
@@ -47,6 +47,18 @@ const NEW_BUILD_REQUEST = /^(?:now\s+)?(?:can\s+you\s+|could\s+you\s+|please\s+)
 const EXPLICIT_BUILD_REQUEST =
   /^(?:now\s+)?(?:(?:can|could|would|will)\s+you\s+|please\s+|let['â€™]?s\s+)?(?:make|build|create|generate|design|develop|scaffold|start|spin\s*up|launch|ship|prototype)\b|\b(?:i\s+(?:want|need|would\s+like)\s+(?:you\s+)?to)\s+(?:make|build|create|generate|design|develop|scaffold|start|spin\s*up|launch|ship|prototype)\b/i;
 const DISCUSSION_OR_RECOMMENDATION_REQUEST = /\b(?:what\s+(?:is|are|would|should|could)|which\s+(?:is|are|would|should)|why\s+(?:is|are|would|should)|(?:how|where)\s+(?:would|should|could|can)\s+(?:i|we|you)|single\s+best|best\s+next|engineering\s+task|recommend|recommendation|advice|strategy|plan|explain|help\s+(?:me|us)\b|go\s+deeper|tell\s+me\s+exactly\s+what\s+you\s+would\s+implement)\b/i;
+function isFactualMarketQuery(prompt: string): boolean {
+  return needsLiveExternalEvidence(prompt);
+}
+
+export function isChatOnlyAssistantTurn(message: {
+  readonly turnKind?: 'conversational' | 'research' | 'builder' | 'analysis';
+  readonly content: string;
+}, fileCount: number): boolean {
+  if (fileCount > 0) return false;
+  if (!message.turnKind || message.turnKind === 'builder') return false;
+  return true;
+}
 
 export function resolveAutoSandboxIntent(input: ResolveAutoSandboxIntentInput): ResolvedAutoSandboxIntent {
   const { userPrompt, mode, hasActiveProject, hasPackageJsonOutput } = input;
@@ -91,6 +103,13 @@ export function resolveAutoSandboxIntent(input: ResolveAutoSandboxIntentInput): 
 export function resolveSendTimeWorkIntent(input: ResolveSendTimeWorkIntentInput): ResolvedSendTimeWorkIntent {
   const { userPrompt, mode, hasActiveProject } = input;
   if (isProductEngineeringPlanningPrompt(userPrompt)) {
+    return {
+      intent: 'none',
+      shouldPrimeBuilder: false,
+    };
+  }
+
+  if (isFactualMarketQuery(userPrompt)) {
     return {
       intent: 'none',
       shouldPrimeBuilder: false,

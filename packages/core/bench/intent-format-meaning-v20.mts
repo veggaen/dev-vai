@@ -74,8 +74,8 @@ function genSequence(rand: () => number): { seq: number[]; next: number } {
     return { seq, next: start * Math.pow(ratio, len) };
   } else {
     // fibonacci-like
-    let a = 1 + Math.floor(rand() * 4);
-    let b = a + Math.floor(rand() * 4);
+    const a = 1 + Math.floor(rand() * 4);
+    const b = a + Math.floor(rand() * 4);
     const seq: number[] = [a, b];
     for (let i = 2; i < len; i++) {
       const c = seq[i - 1] + seq[i - 2];

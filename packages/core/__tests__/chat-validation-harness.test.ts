@@ -441,7 +441,7 @@ function printReport(results: ConversationResult[]): void {
   const avg = (k: keyof ResponseScore) =>
     (results.reduce((s, r) => s + r.scores[k], 0) / results.length).toFixed(2);
 
-  /* eslint-disable no-console */
+   
   console.log('\n══ Vai Chat Validation Report ══');
   console.log(`runs: ${results.length}`);
   console.log(`avg overall: ${avg('overall')} / 5`);
@@ -462,5 +462,5 @@ function printReport(results: ConversationResult[]): void {
     for (const w of r.weaknesses) console.log(`      - ${w}`);
   }
   console.log('═════════════════════════════════\n');
-  /* eslint-enable no-console */
+   
 }

@@ -158,6 +158,17 @@ describe('resolveAutoSandboxIntent', () => {
     expect(sendTime.shouldPrimeBuilder).toBe(false);
   });
 
+  it('does not prime builder for crypto price lookup questions', () => {
+    const result = resolveSendTimeWorkIntent({
+      userPrompt: 'what is the price of btc and eth?',
+      mode: 'agent',
+      hasActiveProject: false,
+    });
+
+    expect(result.intent).toBe('none');
+    expect(result.shouldPrimeBuilder).toBe(false);
+  });
+
   it('primes agent-mode explicit clone builds for execution', () => {
     const result = resolveSendTimeWorkIntent({
       userPrompt: 'Build a 100% accurate Tinder clone with React + Vite. Ship complete runnable files.',

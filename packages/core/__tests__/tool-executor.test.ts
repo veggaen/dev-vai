@@ -154,9 +154,13 @@ describe('ToolExecutor', () => {
 
       const chunks = await collectChunks(executor.runAgentLoop(adapter, request));
       const toolExecs = chunks.filter(c => (c as any)._toolExecution);
+      const progress = chunks.filter(c => c.type === 'progress' && c.progress?.toolRuns?.length);
       const textChunks = chunks.filter(c => c.type === 'text_delta' && c.textDelta);
 
       expect(toolExecs).toHaveLength(1);
+      expect(progress.length).toBeGreaterThan(0);
+      expect(progress.some((chunk) => chunk.progress?.label.includes('1 tool'))).toBe(true);
+      expect(progress.at(-1)?.progress?.toolRuns?.[0]?.output).toBe('echo: ping');
       expect((toolExecs[0] as any)._toolExecution.output).toBe('echo: ping');
       expect(textChunks.some(c => c.textDelta?.includes('Got: echo result'))).toBe(true);
     });

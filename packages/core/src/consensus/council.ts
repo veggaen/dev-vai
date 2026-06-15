@@ -210,8 +210,6 @@ export async function runCouncil(
 ): Promise<CouncilConsensus> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const now = options.now ?? Date.now;
-  // Run members with a bounded concurrency (default 1 = sequential) so GPU-bound
-  // local models don't contend for VRAM and each actually gets to load + answer.
   const concurrency = Math.max(1, options.concurrency ?? 1);
   const settled = await runWithConcurrency(
     members,
@@ -219,7 +217,65 @@ export async function runCouncil(
     concurrency,
   );
   const notes = settled.filter((n): n is CouncilMemberNote => n !== null);
-  const consensus = reachConsensus(notes, { escalateBelow: options.escalateBelow, maxItems: options.maxItems, weightFor: options.weightFor });
+  const consensus = reachConsensus(notes, {
+    escalateBelow: options.escalateBelow,
+    maxItems: options.maxItems,
+    weightFor: options.weightFor,
+  });
+  if (options.onConsensus) {
+    try { options.onConsensus(consensus); } catch { /* observability must not break the turn */ }
+  }
+  return consensus;
+}
+
+export interface CouncilMemberProgress {
+  readonly note?: CouncilMemberNote;
+  /** Emitted immediately before a member starts reviewing — UI shows who's being asked. */
+  readonly pendingMember?: { readonly name: string; readonly id: string };
+  readonly partialNotes: readonly CouncilMemberNote[];
+  readonly index: number;
+  readonly total: number;
+}
+
+/**
+ * Run council members one at a time, yielding after each response so the UI can
+ * show deliberation depth instead of a static "members deliberating…" placeholder.
+ */
+export async function* runCouncilStreaming(
+  members: readonly CouncilMember[],
+  input: CouncilInput,
+  options: RunCouncilOptions = {},
+): AsyncGenerator<CouncilMemberProgress, CouncilConsensus> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const now = options.now ?? Date.now;
+  const partialNotes: CouncilMemberNote[] = [];
+
+  for (let index = 0; index < members.length; index++) {
+    const member = members[index];
+    yield {
+      pendingMember: { name: member.displayName, id: member.id },
+      partialNotes: [...partialNotes],
+      index,
+      total: members.length,
+    };
+
+    const note = await runOneMember(member, input, timeoutMs, now);
+    if (note) {
+      partialNotes.push(note);
+      yield {
+        note,
+        partialNotes: [...partialNotes],
+        index,
+        total: members.length,
+      };
+    }
+  }
+
+  const consensus = reachConsensus(partialNotes, {
+    escalateBelow: options.escalateBelow,
+    maxItems: options.maxItems,
+    weightFor: options.weightFor,
+  });
   if (options.onConsensus) {
     try { options.onConsensus(consensus); } catch { /* observability must not break the turn */ }
   }
@@ -264,6 +320,51 @@ export async function convene(
   // Topic-fit trust weighting: a member reviewing in its own niche counts fully.
   const weightFor = (note: CouncilMemberNote) => (note.topic === topic ? 1 : OFF_TOPIC_WEIGHT);
   const raw = await runCouncil(members, input, { ...options, weightFor });
+  const consensus = governConsensus(raw, plan.assessment);
+  return { topic, assessment: plan.assessment, convened: true, consensus };
+}
+
+export interface ConveneStreamingProgress extends CouncilMemberProgress {
+  readonly topic: CouncilTopic;
+  readonly assessment: SeriousnessAssessment;
+}
+
+/**
+ * Like `convene`, but yields after each member responds so callers can stream
+ * partial deliberation to the desktop ProcessTree.
+ */
+export async function* conveneStreaming(
+  input: CouncilInput,
+  roster: CouncilRoster,
+  options: RunCouncilOptions = {},
+): AsyncGenerator<ConveneStreamingProgress, ConveneResult> {
+  const topic = routeTopic(input.prompt);
+  const plan = councilPlan(input.prompt, input.draftConfidence);
+
+  if (!plan.convene) {
+    return {
+      topic,
+      assessment: plan.assessment,
+      convened: false,
+      consensus: {
+        outcome: 'ship', agreement: 1, confidence: clamp01(input.draftConfidence ?? 0.9),
+        realIntent: '', recommendedAction: 'answer-directly', searchQuery: '',
+        missingCapabilities: [], methodLessons: [],
+        summary: `Trivial turn — no council needed (${plan.reason}).`,
+        notes: [], memberIds: [], factsQuarantined: true,
+      },
+    };
+  }
+
+  const members = selectMembers(topic, roster);
+  const weightFor = (note: CouncilMemberNote) => (note.topic === topic ? 1 : OFF_TOPIC_WEIGHT);
+  const stream = runCouncilStreaming(members, input, { ...options, weightFor });
+  let iter = await stream.next();
+  while (!iter.done) {
+    yield { ...iter.value, topic, assessment: plan.assessment };
+    iter = await stream.next();
+  }
+  const raw = iter.value;
   const consensus = governConsensus(raw, plan.assessment);
   return { topic, assessment: plan.assessment, convened: true, consensus };
 }

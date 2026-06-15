@@ -79,6 +79,12 @@ export interface CouncilInput {
     /** ISO timestamp the evidence was gathered (freshness). */
     readonly gatheredAt?: string;
   };
+  /** What Vai considered important when drafting — not the full thread dump. */
+  readonly contextSummary?: string;
+  /** Snippets Vai actually retrieved and used for this draft. */
+  readonly retrievedSnippets?: readonly { readonly title?: string; readonly url?: string; readonly snippet?: string }[];
+  /** Trimmed chat history relevant to this turn. */
+  readonly relevantHistory?: readonly { readonly role: 'user' | 'assistant' | 'system' | 'tool'; readonly content: string }[];
 }
 
 /** One council member's structured note. Advisory only — facts are quarantined. */

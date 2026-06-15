@@ -208,6 +208,7 @@ function BuildStepProgress({ status, studioChrome = false }: { status: string; s
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- retained for an upcoming build-dashboard surface
 function BuildDashboard({
   projectName,
   previewUrl,
@@ -919,7 +920,7 @@ function CodeView({ projectId }: { projectId: string }) {
    Toolbar — Preview/Code toggle, URL bar, responsive breakpoints, actions
    ═══════════════════════════════════════════════════════════════════════ */
 function Toolbar({
-  viewMode, setViewMode, projectName, previewUrl, devPort,
+  viewMode, setViewMode, previewUrl, devPort,
   breakpoint, setBreakpoint, onRefresh, onOpenExternal, onCopyUrl,
   onScreenshot, onDestroy, showActions, copied, hasFiles, hasActiveSandbox,
   canShowConsoleChrome = false,
@@ -1132,7 +1133,7 @@ export function PreviewPanel() {
     status, devPort, projectName, projectId, files,
     deployPhase, deploySteps, deployStartTime, deployStackName, deployTierName,
     deployStack, destroyProject, cancelDeploy, scaffoldFromTemplate,
-    markPreviewLoading, markPreviewReady, previewReady, fetchFiles,
+    markPreviewLoading, markPreviewReady, fetchFiles,
   } = useSandboxStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>('preview');

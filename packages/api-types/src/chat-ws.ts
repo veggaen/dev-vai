@@ -88,12 +88,51 @@ export const advisorTraceSchema = z.object({
   error: z.string().min(1).optional(),
 }).strict();
 
+const councilProgressMemberSchema = z.object({
+  name: z.string().min(1),
+  topic: z.string().optional(),
+  verdict: z.enum(['good', 'needs-work', 'bad']),
+  confidence: z.number().min(0).max(1),
+  note: z.string().optional(),
+  /** True while the member is still being consulted (before their note arrives). */
+  pending: z.boolean().optional(),
+  failed: z.boolean().optional(),
+  realIntent: z.string().optional(),
+  hiddenMeaning: z.string().optional(),
+  missingCapability: z.string().optional(),
+  methodLesson: z.string().optional(),
+  suggestedAction: z.string().optional(),
+  concerns: z.array(z.string()).optional(),
+}).strict();
+
+const processLogEntrySchema = z.object({
+  kind: z.enum(['thought', 'action', 'artifact', 'feedback', 'verdict']),
+  label: z.string().min(1),
+  body: z.string().optional(),
+}).strict();
+
+const toolRunProgressSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  status: z.enum(['running', 'done', 'failed']),
+  success: z.boolean().optional(),
+  durationMs: z.number().nonnegative().optional(),
+  input: z.string().optional(),
+  output: z.string().optional(),
+}).strict();
+
 export const chatProgressStepSchema = z.object({
   stage: z.string().min(1),
   label: z.string().min(1),
   detail: z.string().optional(),
   status: z.enum(['running', 'done']),
   advisor: advisorTraceSchema.optional(),
+  /** Per-round council member snapshots for ProcessTree nesting. */
+  councilMembers: z.array(councilProgressMemberSchema).optional(),
+  /** Structured work/thought/action history for expandable process rows. */
+  processLog: z.array(processLogEntrySchema).optional(),
+  /** Agent tool batch — each tool expands to input/output in ProcessTree. */
+  toolRuns: z.array(toolRunProgressSchema).optional(),
 }).strict();
 
 export type AdvisorQualityContract = z.infer<typeof advisorQualityContractSchema>;

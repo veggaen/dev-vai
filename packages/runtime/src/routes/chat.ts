@@ -147,12 +147,18 @@ function advisorProgressFromPacket(
   modelId: string,
   durationMs: number,
 ): ChatProgressStep {
+  const detail = summarizeSteeringPacket(packet);
   return {
     stage: 'local-steering',
     label: packet ? 'Local model friend returned advice' : 'Local model friend returned invalid advice',
-    detail: summarizeSteeringPacket(packet),
+    detail,
     status: 'done',
     advisor: advisorTraceFromPacket(packet, modelId, durationMs),
+    processLog: detail ? [{
+      kind: 'feedback',
+      label: packet ? 'Advisor steering packet' : 'Advisor could not steer this turn',
+      body: detail,
+    }] : undefined,
   };
 }
 
@@ -174,6 +180,11 @@ function advisorUnavailableProgress(modelId: string, error: unknown, durationMs:
       durationMs,
       error: reason,
     },
+    processLog: [{
+      kind: 'feedback',
+      label: 'Advisor error',
+      body: reason,
+    }],
   };
 }
 
@@ -442,6 +453,11 @@ export function registerChatRoutes(
                 label: 'Asking local model friend',
                 detail: `${localSteeringWorker.modelId} is producing shadow steering in the background. Vai will not let it answer directly.`,
                 status: 'running',
+                processLog: [{
+                  kind: 'action',
+                  label: 'Advisor input',
+                  body: data.content.trim().slice(0, 4_000),
+                }],
                 advisor: {
                   schemaVersion: 1,
                   actorId: `local:${localSteeringWorker.modelId}`,

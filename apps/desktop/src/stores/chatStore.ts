@@ -212,6 +212,19 @@ export interface ChatMessage {
   progressSteps?: ChatProgressStep[];
 }
 
+/** Preserve nested payloads when the backend re-emits the same stage (e.g. council members arriving late). */
+function mergeProgressStep(existing: ChatProgressStep | undefined, incoming: ChatProgressStep): ChatProgressStep {
+  if (!existing) return incoming;
+  return {
+    ...existing,
+    ...incoming,
+    advisor: incoming.advisor ?? existing.advisor,
+    councilMembers: incoming.councilMembers?.length ? incoming.councilMembers : existing.councilMembers,
+    processLog: incoming.processLog?.length ? incoming.processLog : existing.processLog,
+    toolRuns: incoming.toolRuns?.length ? incoming.toolRuns : existing.toolRuns,
+  };
+}
+
 function parseEvidenceFromMessagePlan(plan: string | null | undefined): Partial<Pick<
   ChatMessage,
   'sources' | 'sourcePresentation' | 'researchTrace' | 'followUps' | 'confidence'
@@ -501,7 +514,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  createConversation: async (modelId: string, mode?: ChatMode, options) => {
+  createConversation: async (modelId: string, mode?: ChatMode, options?: { sandboxProjectId?: string | null }) => {
     const resolvedMode = mode ?? useSettingsStore.getState().defaultConversationMode;
     const resolvedSandboxProjectId = resolveConversationSandboxProjectIdOption(
       options,
@@ -904,12 +917,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ? msgs.findIndex((message) => message.id === activeStreamingAssistantId)
             : msgs.length - 1;
           const target = targetIndex >= 0 ? msgs[targetIndex] : null;
-          if (target && target.role === 'assistant') {
+          const incoming = chunk.progress;
+          if (target && target.role === 'assistant' && incoming) {
             const existing = target.progressSteps ?? [];
+            const normalizedExisting = existing.map((step) =>
+              step.status === 'running' && step.stage !== incoming.stage
+                ? { ...step, status: 'done' as const }
+                : step,
+            );
+            const prior = normalizedExisting.find((step) => step.stage === incoming.stage);
+            const merged = mergeProgressStep(prior, incoming);
             const next = [
-              ...existing.filter((step) => step.stage !== chunk.progress?.stage),
-              chunk.progress,
-            ].filter((step): step is ChatProgressStep => Boolean(step)).slice(-6);
+              ...normalizedExisting.filter((step) => step.stage !== incoming.stage),
+              merged,
+            ].filter((step): step is ChatProgressStep => Boolean(step)).slice(-20);
             msgs[targetIndex] = {
               ...target,
               progressSteps: next,

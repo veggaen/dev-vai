@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterMCPExecution": [
+      {
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File .cursor/hooks/reveal-cursor-browser.ps1",
+        "matcher": "cursor-ide-browser"
+      }
+    ]
+  }
+}

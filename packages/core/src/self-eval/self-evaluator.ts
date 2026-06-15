@@ -52,7 +52,7 @@ export class SelfEvaluator {
     this._predicates = opts.predicates;
     this._generateRevision = opts.generateRevision;
     if (opts.debug) {
-      // eslint-disable-next-line no-console
+       
       console.debug(
         `[self-eval] registered ${this._predicates.length} predicate(s): ${this._predicates
           .map((p) => p.id)

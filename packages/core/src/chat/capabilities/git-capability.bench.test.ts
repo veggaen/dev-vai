@@ -102,7 +102,7 @@ describe('wormhole-rate bench — deterministic git resolution', () => {
     const avgResolveMs = totalResolveMs / Math.max(1, matched);
 
     // Surface the numbers (the "measurable benchmark before claiming it works").
-    // eslint-disable-next-line no-console
+     
     console.log(
       `\n  [wormhole-rate bench]\n` +
       `    turns:                 ${TURNS.length}\n` +

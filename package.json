@@ -61,6 +61,8 @@
     "verify:express-hexa": "node scripts/verify-express-hexa-template.mjs",
     "vai:test": "node scripts/test-live.mjs",
     "visual:chat:drive": "node scripts/drive-vai-chat-visual.mjs",
+    "record:process-demo": "node scripts/record-vai-process-demo.mjs",
+    "capture:process": "node scripts/capture-vai-process-progression.mjs",
     "visual:chat:audit": "node scripts/vai-visual-conversation-audit.mjs",
     "visual:chat:audit:generated": "node scripts/vai-visual-conversation-audit.mjs --generated 16",
     "visual:chat:audit:adversarial": "node scripts/vai-visual-conversation-audit.mjs --adversarial 16",

@@ -7,7 +7,8 @@
  * Deploy markers, nudge/clarify pickers preserved from previous version.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
+import { motion } from 'framer-motion';
 import { MarkdownRenderer } from '@vai/ui';
 import { API_BASE } from '../lib/api.js';
 import { VaiMark } from './brand/VaiMark.js';
@@ -45,7 +46,8 @@ import type {
 } from '../stores/chatStore.js';
 import type { DeployIntent, RecoveryPattern } from '../lib/intent-detector.js';
 import { ThinkingPanel } from './chat/ThinkingPanel.js';
-import { ProcessTree } from './chat/ProcessTree.js';
+import { TurnProcessSection } from './chat/TurnProcessSection.js';
+import { deriveLiveCouncilFromProgressSteps } from './chat/process-step-enrich.js';
 import { ProjectArtifactCard } from './ProjectArtifactCard.js';
 import { SourceCards } from './SourceCards.js';
 
@@ -632,6 +634,12 @@ export function MessageBubble({
       || /title="[^"]+"/.test(normalizedContent)
       || (/```/.test(normalizedContent) && /(?:package\.json|src\/|app\/|index\.html|tsconfig\.json|vite\.config)/i.test(normalizedContent))
     );
+  const liveCouncil = useMemo(
+    () => (isStreaming
+      ? deriveLiveCouncilFromProgressSteps(progressSteps ?? [], true) ?? thinking?.council ?? null
+      : thinking?.council ?? null),
+    [isStreaming, progressSteps, thinking?.council],
+  );
   const projectUpdateBody = isProjectUpdate ? parseProjectUpdateBody(normalizedContent) : null;
   const allowFallbackRecoveryChrome = shouldShowFallbackRecoveryChrome({
     isUser,
@@ -932,10 +940,20 @@ export function MessageBubble({
               </div>
             )}
 
-            {/* Vai-native Thinking panel — strategy chain + intent + trust, above the answer.
-                Settled-only: while the turn streams, the live ProcessTree below owns the
-                process view, so we never render two overlapping step boxes at once. */}
-            {!isUser && thinking && !(isStreaming && content.length === 0) && (
+            {/* Single process seed — always visible when we have progress (never hide for file streaming). */}
+            {(isStreaming || (progressSteps?.length ?? 0) > 0) && !isUser && (
+              <TurnProcessSection
+                isStreaming={Boolean(isStreaming)}
+                steps={progressSteps ?? []}
+                council={liveCouncil}
+                vaiProposedDraft={thinking?.vaiProposedDraft}
+                imageSteps={imageGenSteps}
+                durationMs={thinking?.durationMs}
+              />
+            )}
+
+            {/* Legacy turns without engine progress — fallback narrative panel only. */}
+            {!isUser && thinking && !isStreaming && (progressSteps?.length ?? 0) === 0 && (
               <ThinkingPanel
                 thinking={thinking}
                 researchTrace={researchTrace}
@@ -976,19 +994,6 @@ export function MessageBubble({
 
             {!isUser && groundedBuildBrief && (
               <GroundedBuildBriefCard brief={groundedBuildBrief} onExecute={onGroundedExecute} />
-            )}
-
-            {/* Live process tree — while the turn is in flight and no text has streamed yet, show
-                the real steps (search / council / consolidating) as an expandable tree instead of
-                a bare spinner. Same component renders the settled trace inside ThinkingPanel. */}
-            {!isUser && isStreaming && content.length === 0 && !hasPendingFileBuild && (
-              <ProcessTree
-                steps={progressSteps ?? []}
-                council={thinking?.council}
-                vaiProposedDraft={thinking?.vaiProposedDraft}
-                imageSteps={imageGenSteps}
-                live
-              />
             )}
 
             {/* Text — low confidence responses get subtle visual decay */}
@@ -1037,7 +1042,11 @@ export function MessageBubble({
             ) : (
               <div className="space-y-3">
                 <div className={isResearchMessage ? 'space-y-3' : ''}>
-                  <div>
+                  <motion.div
+                    initial={false}
+                    animate={{ opacity: isStreaming && content.length === 0 ? 0.55 : 1 }}
+                    transition={{ duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
+                  >
                     <div
                       className={`transition-opacity duration-300 ${
                         confidence !== undefined && confidence < 0.3 ? 'opacity-75' : ''
@@ -1054,7 +1063,7 @@ export function MessageBubble({
                         <span className="vai-streaming-cursor text-zinc-400" />
                       )}
                     </div>
-                  </div>
+                  </motion.div>
 
                   {showExpandedSources && (
                     <div className="border-t border-zinc-800/70 pt-3">

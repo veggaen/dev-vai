@@ -535,11 +535,11 @@ export async function createServer(options?: ServerOptions) {
     // Table may already exist.
   }
 
-  // eslint-disable-next-line no-empty
+   
   try { db.run(/* sql */ `ALTER TABLE platform_companion_clients ADD COLUMN available_models TEXT`); } catch { /* column already exists */ }
-  // eslint-disable-next-line no-empty
+   
   try { db.run(/* sql */ `ALTER TABLE platform_companion_clients ADD COLUMN available_chat_info TEXT`); } catch { /* column already exists */ }
-  // eslint-disable-next-line no-empty
+   
   try { db.run(/* sql */ `ALTER TABLE conversations ADD COLUMN sandbox_project_id TEXT`); } catch { /* column already exists */ }
 
   try {
@@ -555,7 +555,7 @@ export async function createServer(options?: ServerOptions) {
       created_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL
     )`);
-    // eslint-disable-next-line no-empty
+     
     try { db.run(/* sql */ `ALTER TABLE platform_broadcast_messages ADD COLUMN meta TEXT`); } catch { /* column already exists */ }
     db.run(/* sql */ `CREATE TABLE IF NOT EXISTS platform_broadcast_deliveries (
       id TEXT PRIMARY KEY,
