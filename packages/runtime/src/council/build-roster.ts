@@ -14,12 +14,68 @@
  * stays on `default` for breadth. De-dupe in `selectMembers` keeps that honest.
  */
 
-import { createCouncilMember, createGrokCliAdapter } from '@vai/core';
-import type { CouncilMember, CouncilRoster, CouncilTopic, ModelAdapter, ModelRegistry } from '@vai/core';
+import { createCouncilMember, createGrokCliAdapter, MemberAvailabilityStore } from '@vai/core';
+import type { CouncilMember, CouncilMemberNote, CouncilRoster, CouncilTopic, ModelAdapter, ModelRegistry } from '@vai/core';
 import { GrokFriendClient } from '../grok-friend/client.js';
 
 /** Topics we prefer to seat a dedicated specialist on when we have spare members. */
 const SPECIALIST_TOPICS: readonly CouncilTopic[] = ['code', 'reasoning', 'factual', 'local'];
+
+/**
+ * Shared, process-lifetime availability tracker. The roster is rebuilt per turn but this
+ * persists, so a member that failed (e.g. Grok out of credits / 403) is SKIPPED on the next
+ * turns until its cooldown elapses — the council stops wasting cycles on a dead member, and
+ * the recorded reason + fix hint can be surfaced to the user. Exposed for the UI / a status
+ * route.
+ */
+export const councilAvailability = new MemberAvailabilityStore();
+
+/**
+ * Wrap a member's review so its availability is tracked: SKIP (return an error-marked note,
+ * which reachConsensus excludes) while the member is in its failure cooldown; on a real
+ * failure (throw, null, or an error-marked note) record WHY so we back off; on a usable note
+ * record success so the member is trusted again. This is what makes "know why a member is
+ * down, stop retrying until resolved" real.
+ */
+function wrapWithAvailability(member: CouncilMember): CouncilMember {
+  return {
+    ...member,
+    async review(input) {
+      if (!councilAvailability.shouldTry(member.id)) {
+        const state = councilAvailability.get(member.id);
+        return {
+          memberId: member.id,
+          memberName: member.displayName,
+          topic: member.topic,
+          verdict: 'needs-work',
+          confidence: 0,
+          realIntent: '',
+          hiddenMeaning: '',
+          missingCapability: '',
+          suggestedAction: 'answer-directly',
+          searchQuery: '',
+          methodLesson: '',
+          concerns: [],
+          durationMs: 0,
+          // Error-marked → excluded from consensus; carries the reason + fix for the trace.
+          error: `skipped (${state?.reason ?? 'unavailable'}): ${state?.fixHint ?? 'in cooldown'}`,
+        } satisfies CouncilMemberNote;
+      }
+      try {
+        const note = await member.review(input);
+        if (!note || note.error) {
+          councilAvailability.recordFailure(member.id, member.displayName, note?.error ?? 'no usable response');
+          return note;
+        }
+        councilAvailability.recordSuccess(member.id);
+        return note;
+      } catch (error) {
+        councilAvailability.recordFailure(member.id, member.displayName, error);
+        throw error;
+      }
+    },
+  };
+}
 
 export interface BuildRosterOptions {
   /** Per-member review timeout. Council is advisory, so keep it tight. Default 12_000. */
@@ -203,7 +259,25 @@ export function buildLocalCouncilRoster(
     }
   }
 
-  return { byTopic, default: defaultMembers };
+  // Wrap every member with availability tracking so a failing member (Grok 0 credits / 403,
+  // a timing-out local model) is recorded with its reason and skipped on subsequent turns
+  // until its cooldown elapses — and trusted again the moment it succeeds.
+  const wrappedDefault = defaultMembers.map(wrapWithAvailability);
+  const wrappedByTopic: Partial<Record<CouncilTopic, CouncilMember[]>> = {};
+  // Preserve identity across topic buckets: wrap each distinct member once, reuse the wrapper.
+  const wrapperById = new Map(wrappedDefault.map((m) => [m.id, m] as const));
+  const wrapOnce = (m: CouncilMember): CouncilMember => {
+    const existing = wrapperById.get(m.id);
+    if (existing) return existing;
+    const w = wrapWithAvailability(m);
+    wrapperById.set(m.id, w);
+    return w;
+  };
+  for (const [topic, members] of Object.entries(byTopic)) {
+    if (members) wrappedByTopic[topic as CouncilTopic] = members.map(wrapOnce);
+  }
+
+  return { byTopic: wrappedByTopic, default: wrappedDefault };
 }
 
 /*

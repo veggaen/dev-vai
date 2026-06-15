@@ -33,3 +33,13 @@ export {
   parseCouncilNote,
   type CouncilMemberOptions,
 } from './member.js';
+
+export {
+  MemberAvailabilityStore,
+  classifyUnavailability,
+  fixHintFor,
+  needsUserAction,
+  type MemberAvailability,
+  type UnavailabilityReason,
+  type MemberAvailabilitySnapshot,
+} from './member-availability.js';

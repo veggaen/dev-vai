@@ -210,6 +210,17 @@ export { checkCorrectionGuard, collectDisputedValues } from './consensus/correct
 export type { CorrectionTurn, CorrectionGuardResult } from './consensus/correction-guard.js';
 export { logGrounding } from './consensus/grounding-log.js';
 export type { GroundingErrorType, GroundingVerdict, GroundingLogEntry } from './consensus/grounding-log.js';
+export {
+  MemberAvailabilityStore,
+  classifyUnavailability,
+  fixHintFor,
+  needsUserAction,
+} from './consensus/member-availability.js';
+export type {
+  MemberAvailability,
+  UnavailabilityReason,
+  MemberAvailabilitySnapshot,
+} from './consensus/member-availability.js';
 export { createGrokCliAdapter, isGrokCliAvailable } from './models/grok-cli-adapter.js';
 export type { GrokCliAdapterOptions } from './models/grok-cli-adapter.js';
 export { NullVisionAdapter, createGrokVisionAdapter } from './vision/index.js';
