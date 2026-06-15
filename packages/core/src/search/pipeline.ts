@@ -3919,8 +3919,14 @@ export class SearchPipeline {
     // fresh-data we read several of the top trusted results regardless of Thorsen state,
     // so one blocked fetch doesn't sink the whole answer.
     const isFreshData = plan.intent === 'fresh-data' || plan.intent === 'current';
+    // Multi-entity asks ("price of eth AND btc") need EACH entity's dedicated page read, or
+    // one entity gets a wrong/empty value — so read more pages when the query names several
+    // subjects (each typically has its own price page).
+    const freshSubjectCount = isFreshData ? Math.max(1, extractFreshFactSubjects(query).length) : 1;
+    // Multi-entity fresh-data reads a few extra pages so each entity has a chance at its own
+    // page, capped so we don't thrash (heavier reads work against the crash-safe budget).
     const adaptiveReadTopN = isFreshData
-      ? Math.max(3, Math.min(this.config.readTopN, 4))
+      ? (freshSubjectCount > 1 ? Math.min(5, this.config.readTopN + 2) : Math.max(3, this.config.readTopN))
       : preSnapshot.state === 'linear'
         ? 1
         : preSnapshot.state === 'parallel'
