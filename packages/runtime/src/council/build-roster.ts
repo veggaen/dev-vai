@@ -181,6 +181,12 @@ export function buildLocalCouncilRoster(
               topic: 'reasoning' as const,
               verdict: 'needs-work',
               confidence: 0.4,
+              // CRITICAL: mark this as an ERROR note. A failed Grok leader is NOT a real
+              // review — without this flag, reachConsensus treats "advisor unavailable" as a
+              // usable member view and its realIntent pollutes the consensus (the BTC trace
+              // showed the whole council's realIntent becoming "Grok ... unavailable"). The
+              // error flag excludes it so the LOCAL members' real verdicts decide the turn.
+              error: `grok-direct unavailable: ${String(e).slice(0, 80)}`,
               realIntent: 'Grok direct advisor unavailable for this review',
               methodLesson: `Grok integration available via tool + council seating. Error: ${String(e).slice(0, 120)}. Prefer direct pipe for super-close loop.`,
               concerns: ['Grok friend-channel or direct pipe not responding for council review'],

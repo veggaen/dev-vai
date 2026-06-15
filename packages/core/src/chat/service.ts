@@ -1379,7 +1379,16 @@ export class ChatService {
     | undefined
   > {
     if (!this.searchForEvidence) return undefined;
-    if (consensus.recommendedAction !== 'web-search' && consensus.recommendedAction !== 'local-business-search') {
+    // ACT on the council's recommendation, don't just log it. The council asks to search
+    // either via its consensus recommendedAction OR when any member explicitly supplied a
+    // searchQuery (which `reachConsensus` surfaces even when a polluting member — e.g. a
+    // failed Grok leader emitting "advisor unavailable" — drags the weighted modal action
+    // elsewhere). This is the fix for the BTC trace where local members all said
+    // "web-search" but no search ran because the consensus action was diluted.
+    const consensusWantsSearch =
+      consensus.recommendedAction === 'web-search' || consensus.recommendedAction === 'local-business-search';
+    const aMemberWantsSearch = consensus.searchQuery.trim().length > 0;
+    if (!consensusWantsSearch && !aMemberWantsSearch) {
       return undefined;
     }
     if ((draft.sources?.length ?? 0) > 0 || draft.hasEvidence) return undefined;
