@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   extractFreshFact,
   extractFreshFactsForEntities,
+  extractFreshFactSubjects,
   classifyFreshFactKind,
   type ReadSource,
 } from './fresh-fact-extract.js';
@@ -43,6 +44,16 @@ describe('extractFreshFact — price (the BTC failure case)', () => {
     expect(fact!.sourceIndex).toBe(1);
   });
 
+  it('picks the PRICE line over a market-cap line (the ETH $1.3T bug)', () => {
+    const mixed = [
+      src(0, 'Ethereum market cap is $1,318,970,239,036 today. The price of Ethereum is currently $1,763.94 USD.', 'Ethereum', 'https://x.com/eth'),
+    ];
+    const fact = extractFreshFact('price of eth', mixed, 'price');
+    expect(fact).not.toBeNull();
+    expect(fact!.text).toMatch(/1,763\.94/);
+    expect(fact!.text).not.toMatch(/1,318,970,239,036/);
+  });
+
   it('does NOT fabricate when no source has a price', () => {
     const noPriceSources = [src(0, 'Bitcoin is a decentralized digital currency with no central authority.')];
     expect(extractFreshFact('what is the price of btc', noPriceSources, 'price')).toBeNull();
@@ -52,6 +63,19 @@ describe('extractFreshFact — price (the BTC failure case)', () => {
     // A price figure that is NOT about the subject (gold, not btc) should not be returned for btc.
     const wrongSubject = [src(0, 'The price of gold is $2,300 per ounce today.')];
     expect(extractFreshFact('what is the price of btc', wrongSubject, 'price')).toBeNull();
+  });
+});
+
+describe('extractFreshFactSubjects — split a multi-entity question (the "both" case)', () => {
+  it('pulls distinct subjects from "price of eth and btc"', () => {
+    expect(extractFreshFactSubjects('price of eth and btc tell me price of both please')).toEqual(['eth', 'btc']);
+  });
+  it('handles comma + vs + weather phrasing', () => {
+    expect(extractFreshFactSubjects('weather in Oslo and Bergen')).toEqual(['oslo', 'bergen']);
+    expect(extractFreshFactSubjects('btc vs eth price')).toContain('btc');
+  });
+  it('returns [] for a single-subject question', () => {
+    expect(extractFreshFactSubjects('what is the price of btc')).toEqual([]);
   });
 });
 

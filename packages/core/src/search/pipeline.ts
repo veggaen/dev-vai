@@ -33,7 +33,7 @@ import {
   isFreshLocalRecommendationRequest,
 } from '../models/web-conclude-policy.js';
 import { fetchGoogleViaBrowser, fetchGooglePageViaBrowser, isBrowserSearchEnabled } from './browser-search.js';
-import { classifyFreshFactKind, extractFreshFact, type ReadSource } from './fresh-fact-extract.js';
+import { classifyFreshFactKind, extractFreshFact, extractFreshFactSubjects, type ReadSource } from './fresh-fact-extract.js';
 
 // ── Query Normalization (Step 1: CLARIFY) ──
 
@@ -3320,6 +3320,19 @@ function synthesizeAnswer(query: string, snippets: readonly SearchSnippet[], had
   const freshKind = classifyFreshFactKind(query);
   if (freshKind) {
     const readSources: ReadSource[] = used.map((s, i) => ({ index: i, title: s.title, url: s.url, text: s.text }));
+    // Multi-entity asks ("price of eth AND btc", "weather in Oslo and Bergen") are several
+    // questions in one. Pull the distinct subjects and extract a fact PER subject so the
+    // answer covers all of them, not just the first. Falls back to single-fact extraction.
+    const subjects = extractFreshFactSubjects(query);
+    if (subjects.length >= 2) {
+      const perSubject = subjects
+        .map((subj) => ({ subj, fact: extractFreshFact(subj, readSources, freshKind, { strictSubject: true }) }))
+        .filter((r) => r.fact);
+      if (perSubject.length >= 2) {
+        const lines = perSubject.map((r) => `- ${r.fact!.text} ${collectCitationMarks([r.fact!.sourceIndex])}`);
+        return `${lines.join('\n')}\n\n_Live values read from the sources above; they change over time._`;
+      }
+    }
     const fact = extractFreshFact(query, readSources, freshKind);
     if (fact) {
       const cite = collectCitationMarks([fact.sourceIndex]);
