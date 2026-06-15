@@ -26,7 +26,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [20, 22]
+        # Node 22 only: the runtime depends on the `node:sqlite` builtin, which does not
+        # exist on Node 20 (ERR_UNKNOWN_BUILTIN_MODULE). Node 22 is the project's stack
+        # requirement — testing Node 20 fails on an unsupported runtime.
+        node-version: [22]
 
     steps:
       - name: Checkout
@@ -214,7 +217,10 @@ jobs:
     needs: verify
     strategy:
       matrix:
-        node-version: [20, 22]
+        # Node 22 only: the runtime depends on the `node:sqlite` builtin, which does not
+        # exist on Node 20 (ERR_UNKNOWN_BUILTIN_MODULE). Node 22 is the project's stack
+        # requirement — testing Node 20 fails on an unsupported runtime.
+        node-version: [22]
 
     steps:
       - name: Checkout

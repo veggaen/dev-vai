@@ -2,6 +2,9 @@
   "name": "vai",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "predev": "node scripts/predev.mjs",
     "dev": "concurrently --kill-others --names runtime,desktop -c cyan,magenta \"pnpm dev:web\" \"node scripts/wait-for-runtime.mjs && node scripts/dev-desktop-or-reuse.mjs\"",
