@@ -143,6 +143,7 @@ import type { CitedAnswer, LearnedUnit } from '../skills/types.js';
 import { normalizeInputForUnderstanding, detectRegister, extractTopicFromQuery, topicContentTokens, textConcernsTopic, detectShapeIntent, type ShapeIntent } from '../input-normalization.js';
 import { analyze, type CognitiveFrame } from '../cognitive/index.js';
 import type { KindShape } from '../cognitive/shaper.js';
+import { detectTrickQuestion } from '../trick-questions/index.js';
 import { KnowledgeConfidenceLedger, classifyFeedback, type DreamReport } from '../learning/confidence-ledger.js';
 import { preAct, act as oodaAct, type OodaTrace } from '../agentic/index.js';
 
@@ -8967,6 +8968,36 @@ export class VaiEngine implements ModelAdapter {
       this.tracePerf('chat:smart-bridge-route-preflight', userContent, performance.now());
       return {
         message: { content: bridgeRoutePreflight, role: 'assistant' as const },
+        finishReason: 'stop' as const,
+        usage: { promptTokens: 0, completionTokens: 0 },
+        durationMs,
+      } as ChatResponse;
+    }
+
+    // ── Trick-question preflight ──────────────────────────────────────
+    // Pure deterministic detection for viral riddles and cognitive traps.
+    // Fires BEFORE any web search or model call — Vai answers these from
+    // code, not from scraping or generation.  Only short-circuits when
+    // confidence >= 0.8 (high-confidence = the detector is sure it matched
+    // the exact riddle class). Lower-confidence detections are left as
+    // advisory signals for downstream strategies.
+    const trickDetection = detectTrickQuestion(userContent);
+    if (trickDetection && trickDetection.confidence >= 0.8) {
+      const durationMs = Math.round(performance.now() - start);
+      this.tracePerf('chat:trick-question-preflight', userContent, performance.now());
+      this._lastMeta = {
+        strategy: `trick-question:${trickDetection.kind}`,
+        confidence: trickDetection.confidence,
+        topicDetected: trickDetection.kind,
+        knowledgeDepth: 'deep' as const,
+        responseLength: trickDetection.answer.length,
+        durationMs,
+        matchedPattern: trickDetection.kind,
+        trustBadge: 'computed' as const,
+        cognitiveFrame: this._lastCognitiveFrame ?? undefined,
+      };
+      return {
+        message: { content: trickDetection.answer, role: 'assistant' as const },
         finishReason: 'stop' as const,
         usage: { promptTokens: 0, completionTokens: 0 },
         durationMs,

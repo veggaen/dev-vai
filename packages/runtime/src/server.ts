@@ -15,7 +15,6 @@ import {
   ToolRegistry,
   ToolExecutor,
   UsageService,
-  ThorsenAdaptiveController,
   EvalRunner,
   SearchPipeline,
   resolveEffectiveLocalChain,
@@ -61,6 +60,7 @@ import { buildLocalCouncilRoster } from './council/build-roster.js';
 import { CompanionContextBroker } from './companion-context/broker.js';
 import { GrokFriendClient } from './grok-friend/client.js';
 import { WorkspaceStatusReader } from './workspace-status/reader.js';
+import { createRuntimeAdaptiveDomains } from './adaptive-domains.js';
 
 export interface ServerOptions {
   port?: number;
@@ -205,14 +205,14 @@ export async function createServer(options?: ServerOptions) {
   console.log(`[VAI] Default model: ${config.defaultModelId}`);
 
   const usageService = new UsageService(db);
-  const adaptiveController = new ThorsenAdaptiveController();
+  const adaptiveDomains = createRuntimeAdaptiveDomains();
 
   const toolExecutor = new ToolExecutor(
     tools,
     {
       maxIterations: config.maxToolIterations,
     },
-    adaptiveController,
+    adaptiveDomains.tools,
   );
 
   const pipeline = new IngestPipeline(db, vaiEngine);
@@ -292,7 +292,7 @@ export async function createServer(options?: ServerOptions) {
   const chatService = new ChatService(
     db,
     models,
-    adaptiveController,
+    adaptiveDomains.chat,
     {
       ...buildChatServiceOptions(effectiveConfig, vaiEngine, pipeline),
       searchForEvidence: async (query) => {
@@ -371,7 +371,8 @@ export async function createServer(options?: ServerOptions) {
     status: 'ok',
     engine: 'vai:v0',
     stats: vaiEngine.getStats(),
-    adaptive: adaptiveController.snapshot(),
+    adaptive: adaptiveDomains.tools.snapshot(),
+    adaptiveDomains: adaptiveDomains.snapshot(),
   }));
 
   app.get('/api/vai/diagnose', async () => vaiEngine.diagnose());

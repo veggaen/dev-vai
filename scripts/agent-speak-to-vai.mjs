@@ -283,7 +283,12 @@ async function speakViaDirectLocal(content, conversationId) {
           finish({ terminal: true });
         } else if (msg.type === 'error') {
           sawTerminal = true;
-          finish({ error: msg.error, terminal: true });
+          finish({
+            error: msg.error,
+            errorCode: msg.code,
+            retryable: msg.retryable,
+            terminal: true,
+          });
         }
       });
     });
@@ -382,8 +387,12 @@ async function main() {
           responseData.connectFailed
           || responseData.timedOut
           || responseData.missingTerminal
-          || responseData.error
-          || (!responseData.text && !responseData.thinking)
+          || (responseData.error && !responseData.terminal)
+          || (
+            !responseData.text
+            && !responseData.thinking
+            && !(responseData.terminal && responseData.error)
+          )
         ) {
           throw new Error('direct local incomplete');
         }
@@ -401,8 +410,12 @@ async function main() {
 
   console.log('\n[agent-channel] === FULL RESPONSE CAPTURED ===');
   const hasRealText = responseData.text && responseData.text.length > 20;
+  const hasTerminalRuntimeError = Boolean(responseData.terminal && responseData.error);
   if (responseData.text) {
     if (!hasRealText) console.log('(partial or empty response from this path)');
+  }
+  if (hasTerminalRuntimeError) {
+    console.log(`[agent-channel] Runtime terminal error${responseData.errorCode ? ` (${responseData.errorCode})` : ''}: ${responseData.error}`);
   }
   if (responseData.sources?.length) {
     console.log(`[sources: ${responseData.sources.length}]`);
@@ -422,11 +435,13 @@ async function main() {
       confidence: responseData.confidence,
       sources: responseData.sources?.length || 0,
       turnKind: responseData.turnKind,
+      terminal: !!responseData.terminal,
+      errorCode: responseData.errorCode,
     },
   });
 
   console.log('\n[agent-channel] Interaction logged to .vai-agent-dialogue.log');
-  if (!hasRealText && !responseData.direct) {
+  if (!hasRealText && !responseData.direct && !hasTerminalRuntimeError) {
     console.log('[agent-channel] No substantial text from runtime WS — falling back to direct for this turn (still high fidelity for intelligence code).');
     // one-shot fallback
     const fb = await speakDirectEngine(message);

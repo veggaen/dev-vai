@@ -44,12 +44,12 @@ export interface OdysseusThemePreset extends OdysseusCoreColors {
 export const ODYSSEUS_THEME_PRESETS: Record<string, OdysseusThemePreset> = {
   dark: {
     id: 'dark',
-    label: 'Dark',
-    bg: '#282c34',
-    fg: '#9cdef2',
-    panel: '#111111',
-    border: '#355a66',
-    red: '#e06c75',
+    label: 'Vai Ink',
+    bg: '#0b0d10',
+    fg: '#f2eee8',
+    panel: '#15181d',
+    border: '#303640',
+    red: '#ff6b5f',
   },
   light: {
     id: 'light',

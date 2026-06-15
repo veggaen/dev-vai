@@ -5,6 +5,9 @@ export {
   detectSisterBrother,
   detectMaryDaughters,
   detectCrossingBridge,
+  detectImplicitConstraint,
+  detectFalsePremise,
+  detectAnchoringTrap,
   type TrickAnswer,
   type TrickKind,
 } from './detector.js';

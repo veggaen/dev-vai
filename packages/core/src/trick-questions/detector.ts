@@ -29,7 +29,10 @@ export type TrickKind =
   | 'equal-weight'
   | 'sister-brother'
   | 'mary-daughters'
-  | 'crossing-bridge';
+  | 'crossing-bridge'
+  | 'implicit-constraint'
+  | 'false-premise'
+  | 'anchoring-trap';
 
 export interface TrickAnswer {
   kind: TrickKind;
@@ -183,6 +186,178 @@ export function detectCrossingBridge(input: string): TrickAnswer | null {
   };
 }
 
+// ─────────────────────────── 6. implicit-constraint (car-wash class) ────────────────────────────
+
+/**
+ * STRUCTURAL implicit-constraint detector.
+ *
+ * Instead of hardcoding phrasings, we detect THREE independent signals and
+ * check their RELATIONSHIP:
+ *
+ *   1. ITEM — a physical object mentioned in the question (car, piano, boat, etc.)
+ *   2. SERVICE — an action/destination that requires that item physically present
+ *      (wash, repair, tune, ship, deliver, park, etc.)
+ *   3. TRANSPORT Q — the user asks about how to GET THERE (walk vs drive, carry vs ship)
+ *
+ * The trick fires when: the ITEM is itself the TRANSPORT MEANS. "Should I walk
+ * or drive my car to the car wash?" → the car IS both the service subject AND
+ * the way you'd drive there. Walking defeats the purpose.
+ *
+ * This generalizes beyond cars:
+ *   - "Should I walk or ride to the bike shop to fix my bike?" (bike = transport)
+ *   - "Should I carry or ship this piano?" (piano can't be carried)
+ *   - "Should I walk or sail to get my boat repaired?" (boat = transport)
+ */
+
+/** Items that are ALSO a mode of transport when you "drive/ride/sail" them. */
+const SELF_TRANSPORT_ITEMS: ReadonlyArray<{ item: RegExp; transportVerb: string }> = [
+  { item: /\b(?:car|vehicle|truck|van|suv|automobile|sedan|coupe|hatchback|pickup)\b/i, transportVerb: 'drive' },
+  { item: /\b(?:motorcycle|motorbike|scooter|moped|vespa)\b/i, transportVerb: 'ride' },
+  { item: /\b(?:bicycle|bike|e-?bike|cycle)\b/i, transportVerb: 'ride' },
+  { item: /\b(?:boat|yacht|ship|sailboat|kayak|canoe|jet\s*ski)\b/i, transportVerb: 'sail' },
+];
+
+/** Services/actions that require the item to be PHYSICALLY PRESENT. Matches inflected forms (repaired, inspected, cleaning, etc.) via word-start anchoring. */
+const REQUIRES_ITEM_PRESENT_RE =
+  /\b(?:wash|clean|repair|fix|servic|inspect|detail|tune[\s-]?up|maintain|oil\s+change|paint|wrap|tint|polish|wax|dent|scratch|brak|tire|tyre|align|diagnostic|smog|mot\b|check|deliver|return|drop\s*off|pick\s*up|apprais|valet)/i;
+
+/** Service DESTINATIONS (places where the service happens). */
+const SERVICE_DESTINATION_RE =
+  /\b(?:car\s*wash|mechanic|garage|auto\s*shop|body\s*shop|service\s*(?:center|station|centre)|repair\s*shop|tire\s*shop|tyre\s*shop|dealership|workshop|detailer|marina|dock|harbor|harbour|bike\s*shop|cycle\s*shop)\b/i;
+
+/** The user is asking a transport-mode question. */
+const TRANSPORT_QUESTION_RE =
+  /\b(?:walk|drive|ride|cycle|sail|take\s+(?:the\s+)?(?:bus|taxi|uber|lyft)|on\s+foot|carry|go\s+(?:by\s+foot|there))\b|\b(?:walk|ride|drive|sail)\s+there\b/i;
+
+export function detectImplicitConstraint(input: string): TrickAnswer | null {
+  const lower = input.toLowerCase();
+
+  // Step 1: Is there a transport-mode question?
+  if (!TRANSPORT_QUESTION_RE.test(lower)) return null;
+
+  // Step 2: Is there an item that is ALSO a mode of transport?
+  let detectedItem: (typeof SELF_TRANSPORT_ITEMS)[number] | null = null;
+  for (const entry of SELF_TRANSPORT_ITEMS) {
+    if (entry.item.test(lower)) {
+      detectedItem = entry;
+      break;
+    }
+  }
+  if (!detectedItem) return null;
+
+  // Step 3: Is there a service or destination that needs the item present?
+  const hasService = REQUIRES_ITEM_PRESENT_RE.test(lower);
+  const hasDestination = SERVICE_DESTINATION_RE.test(lower);
+  if (!hasService && !hasDestination) return null;
+
+  // Step 4: Does the transport question include a NON-ITEM option (walk/bus/foot)?
+  // If they only ask "should I drive or take an uber", there's no trick —
+  // the trick is when one option (walk) would leave the item behind.
+  const hasNonItemTransport = /\b(?:walk|on\s+foot|take\s+(?:the\s+)?(?:bus|taxi|uber|lyft)|carry|go\s+by\s+foot|uber|lyft|taxi|cab)\b/i.test(lower);
+  if (!hasNonItemTransport) return null;
+
+  // Extract the item name for a natural answer
+  const itemMatch = lower.match(detectedItem.item);
+  const itemName = itemMatch ? itemMatch[0] : 'the item';
+
+  return {
+    kind: 'implicit-constraint',
+    answer: `${detectedItem.transportVerb.charAt(0).toUpperCase()}${detectedItem.transportVerb.slice(1)}. The ${itemName} needs to physically be at the destination to be worked on — walking (or any non-${itemName} transport) would leave it behind.`,
+    reasoning: `Implicit-constraint: the ${itemName} is both the SUBJECT of the service AND the MEANS of ${detectedItem.transportVerb === 'drive' ? 'driving' : detectedItem.transportVerb + 'ing'} — using non-item transport defeats the purpose.`,
+    confidence: 0.92,
+  };
+}
+
+
+// ─────────────────────────── 7. false-premise ────────────────────────────
+
+/**
+ * Detect questions built on a provably false assumption. When a question
+ * embeds a factual claim that is widely known to be wrong, Vai should
+ * correct the premise rather than answer within the false frame.
+ *
+ * Examples:
+ *   "Since the Earth is flat, how far is the horizon?" — premise is false
+ *   "Why did Einstein fail math?" — he didn't
+ *   "What country does the Great Wall of China separate it from?" — ambiguous/misleading
+ *
+ * NOTE: Only fires on WELL-KNOWN false premises that Vai can deterministically
+ * verify (hardcoded corrections). This is NOT a general fact-checker — it's
+ * a guard against the most common trick framings.
+ */
+const FALSE_PREMISES: ReadonlyArray<{ pattern: RegExp; correction: string }> = [
+  { pattern: /\b(?:since|because|given\s+that|as\s+we\s+know)\s+(?:the\s+)?earth\s+is\s+flat\b/i,
+    correction: 'The premise is false — the Earth is not flat. It is an oblate spheroid, confirmed by centuries of evidence including satellite imagery, circumnavigation, and physics.' },
+  { pattern: /\bwhy\s+did\s+einstein\s+fail\s+(?:math|school|his\s+exams?)\b/i,
+    correction: 'The premise is false — Einstein did NOT fail math. He excelled at mathematics from a young age; this is a persistent urban legend.' },
+  { pattern: /\bhow\s+many\s+(?:states|countries)\s+(?:are|does)\s+(?:there\s+)?in\s+(?:the\s+)?(?:european\s+union|eu)\b[\s\S]{0,40}\b(?:28|29|30)\b/i,
+    correction: 'The premise may be outdated — the EU had 28 members until the UK left (Brexit, 2020). As of 2024, there are 27 EU member states.' },
+  { pattern: /\b(?:since|because|given)\s+(?:humans?|we|people)\s+only\s+use\s+(?:10|ten)\s*%?\s+(?:of\s+)?(?:our|their|the)\s+brain/i,
+    correction: 'The premise is false — the "10% of the brain" claim is a myth. Neuroimaging shows that virtually all parts of the brain are active, just not all simultaneously.' },
+  { pattern: /\b(?:since|because|given)\s+(?:the\s+)?great\s+wall\s+(?:of\s+china\s+)?(?:is|can\s+be)\s+(?:seen|visible)\s+from\s+(?:space|the\s+moon)\b/i,
+    correction: 'The premise is false — the Great Wall of China is NOT visible from space with the naked eye. It is too narrow (~5-8 meters wide). This is a common myth.' },
+];
+
+export function detectFalsePremise(input: string): TrickAnswer | null {
+  for (const { pattern, correction } of FALSE_PREMISES) {
+    if (pattern.test(input)) {
+      return {
+        kind: 'false-premise',
+        answer: correction,
+        reasoning: 'Question contains a provably false premise; correcting before answering.',
+        confidence: 0.88,
+      };
+    }
+  }
+  return null;
+}
+
+// ─────────────────────────── 8. anchoring-trap ────────────────────────────
+
+/**
+ * Detect anchoring-trap questions: the question leads with an irrelevant
+ * number or detail designed to bias the answer.
+ *
+ * Classic example: "A bat and a ball cost $1.10 in total. The bat costs
+ * $1.00 more than the ball. How much does the ball cost?" — The intuitive
+ * (wrong) answer is $0.10; the correct answer is $0.05.
+ *
+ * This is one of the most famous cognitive biases (Kahneman's CRT).
+ */
+const BAT_BALL_RE =
+  /\bbat\s+and\s+(?:a\s+)?ball\b[\s\S]{0,120}\bcosts?\s+\$?1[.,]?(?:00)?\s+more\b[\s\S]{0,80}\bhow\s+much\b/i;
+
+const BAT_BALL_ALT_RE =
+  /\bcosts?\s+\$?1[.,]?(?:10|1\.10)\b[\s\S]{0,120}\b(?:bat|racket|paddle)\b[\s\S]{0,80}\bmore\s+than\b[\s\S]{0,80}\bhow\s+much\b/i;
+
+/** Lily pad doubling problem: "covers the lake in 48 days, on what day is it half covered?" */
+const LILY_PAD_RE =
+  /\b(?:lily\s*pad|algae|bacteria|weed)s?\b[\s\S]{0,200}\bdoubles?\b[\s\S]{0,200}\b(?:half|50\s*%)\b/i;
+
+export function detectAnchoringTrap(input: string): TrickAnswer | null {
+  if (BAT_BALL_RE.test(input) || BAT_BALL_ALT_RE.test(input)) {
+    return {
+      kind: 'anchoring-trap',
+      answer: 'The ball costs $0.05 (5 cents). If the ball costs $0.05, the bat costs $1.05 ($1.00 more), totaling $1.10.',
+      reasoning: 'Bat-and-ball problem (Kahneman CRT): the intuitive $0.10 answer is wrong because $1.10 - $0.10 = $1.00 (not "$1.00 MORE").',
+      confidence: 0.95,
+    };
+  }
+  if (LILY_PAD_RE.test(input)) {
+    // Extract the total number of days from the question for a precise answer
+    const daysMatch = input.match(/(\d+)\s*days?/);
+    const totalDays = daysMatch ? Number(daysMatch[1]) : 48;
+    const halfDay = totalDays - 1;
+    return {
+      kind: 'anchoring-trap',
+      answer: `Day ${halfDay}. If it doubles every day and covers the whole lake on day ${totalDays}, then it was half-covered the day before — day ${halfDay}.`,
+      reasoning: `Exponential-growth intuition trap: doubling means half-coverage is always one day before full coverage (day ${totalDays} - 1 = ${halfDay}).`,
+      confidence: 0.93,
+    };
+  }
+  return null;
+}
+
 // ─────────────────────────── Public dispatcher ────────────────────────────
 
 const ALL: ReadonlyArray<(input: string) => TrickAnswer | null> = [
@@ -191,6 +366,9 @@ const ALL: ReadonlyArray<(input: string) => TrickAnswer | null> = [
   detectSisterBrother,
   detectMaryDaughters,
   detectCrossingBridge,
+  detectImplicitConstraint,
+  detectFalsePremise,
+  detectAnchoringTrap,
 ];
 
 /**

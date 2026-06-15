@@ -4,6 +4,7 @@ import path from 'node:path';
 import dotenv from 'dotenv';
 import { createServer } from './server.js';
 import { startLocalDirectChatListener } from './local-pipe-chat.js';
+import { resolveRuntimePrewarmPlan } from './prewarm.js';
 import {
   assertSecureRuntimeExposure,
   resolveRuntimeHost,
@@ -188,10 +189,11 @@ async function main() {
   // keep reference so it stays alive
   (globalThis as any).__vaiDirectListener = directListener;
 
-  // Pre-warm: fire a synthetic templated message so the constrained-code-emitter,
-  // intent matcher, and any lazy modules are hot before the first real request.
-  // Fire-and-forget; never block startup, never crash on failure.
-  if (process.env.VAI_DISABLE_PREWARM !== '1') {
+  // Keep startup warmup off the scarce local-model queue by default. A cheap
+  // deterministic greeting exercises the real ChatService path without
+  // launching council codegen while the first user turn is waiting.
+  const prewarmPlan = resolveRuntimePrewarmPlan();
+  if (prewarmPlan) {
     void (async () => {
       try {
         const t0 = Date.now();
@@ -199,12 +201,12 @@ async function main() {
         let chunks = 0;
         for await (const _chunk of chatService.sendMessage(
           convId,
-          'build a simple counter in pure HTML and CSS',
+          prewarmPlan.prompt,
           undefined,
           undefined,
           true, // noLearn — don't pollute knowledge with the warm-up
         )) { chunks++; }
-        console.log(`[VAI] prewarm ok (${Date.now() - t0}ms · ${chunks} chunks)`);
+        console.log(`[VAI] ${prewarmPlan.kind} prewarm ok (${Date.now() - t0}ms · ${chunks} chunks)`);
       } catch (e: unknown) {
         console.log(`[VAI] prewarm skipped: ${(e as Error)?.message || e}`);
       }

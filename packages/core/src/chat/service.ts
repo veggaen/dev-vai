@@ -1612,6 +1612,7 @@ export class ChatService {
     feedback: CouncilRedraftFeedback,
     noLearn?: boolean,
     evidenceHint?: string,
+    signal?: AbortSignal,
   ): Promise<string | undefined> {
     const messages: Message[] = [
       ...baseMessages,
@@ -1620,7 +1621,7 @@ export class ChatService {
     ];
     try {
       let text = '';
-      for await (const chunk of adapter.chatStream({ messages, noLearn })) {
+      for await (const chunk of adapter.chatStream({ messages, noLearn, signal })) {
         if (chunk.type === 'text_delta' && chunk.textDelta) text += chunk.textDelta;
       }
       return text.trim() || undefined;
@@ -1863,8 +1864,14 @@ export class ChatService {
     systemPrompt?: string,
     noLearn?: boolean,
     promptRewriteOverrides?: ChatPromptRewriteOverrides,
-    autoCreateOptions?: { fallbackModelId?: string; fallbackMode?: ConversationMode; imageMode?: boolean },
+    autoCreateOptions?: {
+      fallbackModelId?: string;
+      fallbackMode?: ConversationMode;
+      imageMode?: boolean;
+      signal?: AbortSignal;
+    },
   ): AsyncGenerator<ChatChunk> {
+    const turnSignal = autoCreateOptions?.signal;
     // Auto-create on missing conversation: covers the well-known race where
     // the desktop client opens a WebSocket and sends a message before the
     // newly-created conversation row has been persisted (or after a stale
@@ -2798,7 +2805,7 @@ export class ChatService {
           }],
         },
       } as ChatChunk;
-      for await (const chunk of adapter.chatStream({ messages: primaryMessages, noLearn })) {
+      for await (const chunk of adapter.chatStream({ messages: primaryMessages, noLearn, signal: turnSignal })) {
         if (chunk.modelId) bufferedModelId = chunk.modelId;
         if (chunk.type === 'sources') {
           if (typeof chunk.confidence === 'number') latestConfidence = chunk.confidence;
@@ -2939,7 +2946,14 @@ export class ChatService {
         };
         const councilGen = this.runCouncilLoopGen(
           councilDraft,
-          (feedback, evidenceHint) => this.redraftWithCouncilFeedback(adapter, primaryMessages, feedback, noLearn, evidenceHint),
+          (feedback, evidenceHint) => this.redraftWithCouncilFeedback(
+            adapter,
+            primaryMessages,
+            feedback,
+            noLearn,
+            evidenceHint,
+            turnSignal,
+          ),
         );
         let councilStep = await councilGen.next();
         let loop: CouncilLoopResult = { finalText: bufferedText, revised: false };
@@ -3148,7 +3162,7 @@ export class ChatService {
           let sawDone = false;
           let attemptDurationMs: number | undefined;
           let usage: TokenUsage = { promptTokens: 0, completionTokens: 0 };
-          for await (const chunk of fallbackAdapter.chatStream({ messages, noLearn })) {
+          for await (const chunk of fallbackAdapter.chatStream({ messages, noLearn, signal: turnSignal })) {
             if (chunk.modelId) responseModelId = chunk.modelId;
             if (chunk.type === 'sources') {
               if (typeof chunk.confidence === 'number') latestConfidence = chunk.confidence;
@@ -3446,7 +3460,14 @@ export class ChatService {
           };
           const councilGen = this.runCouncilLoopGen(
             councilDraft,
-            (feedback, evidenceHint) => this.redraftWithCouncilFeedback(fallbackAdapter, fallbackMessages, feedback, noLearn, evidenceHint),
+            (feedback, evidenceHint) => this.redraftWithCouncilFeedback(
+              fallbackAdapter,
+              fallbackMessages,
+              feedback,
+              noLearn,
+              evidenceHint,
+              turnSignal,
+            ),
             {
               round1: 'council-fallback-round-1',
               redraft: 'vai-redraft',
@@ -3679,7 +3700,7 @@ export class ChatService {
           yield chunk;
         }
       }
-      for await (const chunk of adapter.chatStream({ messages: primaryMessages, noLearn })) {
+      for await (const chunk of adapter.chatStream({ messages: primaryMessages, noLearn, signal: turnSignal })) {
         if (chunk.modelId) responseModelId = chunk.modelId;
         if (chunk.type === 'sources') {
           const normalizedSourceChunk = normalizeSourceChunkForTurn(chunk);

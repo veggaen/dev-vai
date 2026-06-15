@@ -14,24 +14,25 @@ import {
 } from './odysseus-theme.js';
 
 describe('odysseus-theme', () => {
-  it('matches Odysseus dark preset core colors', () => {
+  it('uses the high-contrast Vai Ink preset as the default dark theme', () => {
     expect(ODYSSEUS_THEME_PRESETS.dark).toMatchObject({
-      bg: '#282c34',
-      fg: '#9cdef2',
-      panel: '#111111',
-      border: '#355a66',
-      red: '#e06c75',
+      label: 'Vai Ink',
+      bg: '#0b0d10',
+      fg: '#f2eee8',
+      panel: '#15181d',
+      border: '#303640',
+      red: '#ff6b5f',
     });
   });
 
   it('derives sidebar and input from panel/border', () => {
     const adv = computeAdvancedDefaults(ODYSSEUS_THEME_PRESETS.dark);
-    expect(adv.sidebarBg).toBe('#111111');
-    expect(adv.inputBg).toBe('#111111');
-    expect(adv.inputBorder).toBe('#355a66');
-    expect(adv.sendBtnBg).toBe('#e06c75');
-    expect(adv.userBubbleBg).toBe('#282c34');
-    expect(adv.aiBubbleBg).toBe('#111111');
+    expect(adv.sidebarBg).toBe('#15181d');
+    expect(adv.inputBg).toBe('#15181d');
+    expect(adv.inputBorder).toBe('#303640');
+    expect(adv.sendBtnBg).toBe('#ff6b5f');
+    expect(adv.userBubbleBg).toBe('#0b0d10');
+    expect(adv.aiBubbleBg).toBe('#15181d');
   });
 
   it('theme card active state is mutually exclusive by id', () => {
@@ -94,7 +95,7 @@ describe('odysseus-theme', () => {
       loadCustomThemes();
       applyThemeById('dark');
 
-      expect(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()).toBe('#282c34');
+      expect(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()).toBe('#0b0d10');
       expect(getActiveThemeId()).toBe('dark');
     });
 

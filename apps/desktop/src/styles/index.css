@@ -68,11 +68,11 @@
      existing components pick up Odysseus colors without a full rewrite. */
 
   /* Defaults = Odysseus "dark" preset (overridden at runtime by odysseus-theme.ts) */
-  --bg: #282c34;
-  --fg: #9cdef2;
-  --panel: #111111;
-  --border: #355a66;
-  --red: #e06c75;
+  --bg: #0b0d10;
+  --fg: #f2eee8;
+  --panel: #15181d;
+  --border: #303640;
+  --red: #ff6b5f;
   --accent: var(--red);
 
   --sidebar-bg: var(--panel);
@@ -96,9 +96,9 @@
   --hl-comment: #828997;
   --hl-function: #61afef;
 
-  --color-muted: #888888;
-  --color-muted-alt: #6b7280;
-  --color-subheader: #6b8a94;
+  --color-muted: color-mix(in srgb, var(--fg) 62%, var(--bg));
+  --color-muted-alt: color-mix(in srgb, var(--fg) 52%, var(--bg));
+  --color-subheader: color-mix(in srgb, var(--fg) 70%, var(--bg));
   --color-accent: #00aaff;
 
   --app-chrome-background: var(--bg);
@@ -718,12 +718,11 @@ code, pre, kbd {
   pointer-events: none;
   background-color: var(--shell-bg);
   background-image: radial-gradient(
-    ellipse 90% 80% at 50% 40% in oklch,
-    color-mix(in oklch, var(--shell-accent) 30%, var(--shell-bg)) 0%,
-    color-mix(in oklch, var(--shell-accent) 16%, var(--shell-bg)) 22%,
-    color-mix(in oklch, var(--shell-accent) 8%, var(--shell-bg)) 40%,
-    color-mix(in oklch, var(--shell-accent) 3%, var(--shell-bg)) 58%,
-    var(--shell-bg) 82%
+    ellipse 86% 76% at 42% 36% in oklch,
+    color-mix(in oklch, var(--shell-accent) 14%, var(--shell-bg)) 0%,
+    color-mix(in oklch, var(--shell-accent) 7%, var(--shell-bg)) 28%,
+    color-mix(in oklch, var(--shell-accent) 3%, var(--shell-bg)) 48%,
+    var(--shell-bg) 78%
   );
   background-repeat: no-repeat;
   background-size: 130% 130%;
@@ -738,6 +737,180 @@ code, pre, kbd {
     color-mix(in oklch, var(--shell-accent) 8%, var(--shell-bg)) 28%,
     var(--shell-bg) 75%
   );
+}
+
+/* Keep the launchpad composed above the anchored composer on laptop-height screens. */
+@media (min-width: 1024px) and (max-height: 820px) {
+  .vai-launchpad {
+    align-items: flex-start;
+    padding-top: 2.25rem;
+    padding-bottom: 10.5rem;
+  }
+
+  .vai-launchpad-grid {
+    align-items: start;
+    gap: 1.75rem;
+  }
+
+  .vai-launchpad-brand {
+    gap: 0.75rem;
+  }
+
+  .vai-launchpad-brand .vai-welcome-mark {
+    margin-left: -0.4rem;
+    margin-right: -0.4rem;
+    transform: scale(0.78);
+  }
+
+  .vai-launchpad-title {
+    margin-top: 1.15rem;
+    font-size: clamp(2.2rem, 4vw, 3.35rem);
+    line-height: 0.98;
+  }
+
+  .vai-launchpad-lede {
+    margin-top: 0.8rem;
+    line-height: 1.5;
+  }
+
+  .vai-launchpad-workflow {
+    margin-top: 1.25rem;
+  }
+
+  .vai-starter-card {
+    min-height: 116px;
+    padding: 0.75rem;
+  }
+
+  .vai-starter-card > span:nth-child(2) {
+    margin-top: 0.7rem;
+  }
+
+  .vai-starter-card > span:last-child {
+    padding-top: 0.55rem;
+  }
+
+  .vai-launchpad[data-workspace="split"] {
+    padding-top: 1.5rem;
+    padding-bottom: 9.5rem;
+  }
+
+  .vai-launchpad[data-workspace="split"] .vai-launchpad-grid {
+    max-width: 680px;
+    grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+    align-items: end;
+    gap: 1.5rem;
+  }
+
+  .vai-launchpad[data-workspace="split"] .vai-launchpad-title {
+    margin-top: 1.15rem;
+    font-size: clamp(2.1rem, 3.1vw, 2.65rem);
+    line-height: 0.98;
+  }
+
+  .vai-launchpad[data-workspace="split"] .vai-launchpad-lede {
+    margin-top: 0.8rem;
+    font-size: 0.75rem;
+    line-height: 1.5;
+  }
+
+  .vai-launchpad[data-workspace="split"] .vai-launchpad-workflow {
+    margin-top: 1rem;
+  }
+
+  .vai-launchpad[data-workspace="split"] .vai-launchpad-workflow li {
+    padding: 0.65rem 0.55rem;
+  }
+
+  .vai-launchpad[data-workspace="split"] .vai-launchpad-workflow li > p,
+  .vai-launchpad[data-workspace="split"] .vai-launchpad-workflow li span:last-child {
+    display: none;
+  }
+
+  .vai-launchpad[data-workspace="split"] .vai-starter-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.45rem;
+  }
+
+  .vai-launchpad[data-workspace="split"] .vai-starter-card {
+    min-height: 66px;
+    padding: 0.7rem 0.8rem;
+  }
+
+  .vai-launchpad[data-workspace="split"] .vai-starter-card > span:first-child,
+  .vai-launchpad[data-workspace="split"] .vai-starter-card > span:last-child {
+    display: none;
+  }
+
+  .vai-launchpad[data-workspace="split"] .vai-starter-card > span:nth-child(2) {
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  .vai-launchpad {
+    align-items: flex-start;
+    padding: 1.5rem 1.25rem 12rem;
+  }
+
+  .vai-launchpad-grid {
+    gap: 1.5rem;
+  }
+
+  .vai-launchpad-title {
+    margin-top: 1.5rem;
+    font-size: clamp(2.15rem, 10.5vw, 3rem);
+    line-height: 0.98;
+  }
+
+  .vai-launchpad-lede {
+    margin-top: 1.15rem;
+    line-height: 1.55;
+  }
+
+  .vai-launchpad-workflow {
+    margin-top: 1.4rem;
+  }
+
+  .vai-launchpad-workflow li {
+    padding: 0.8rem 0.65rem;
+  }
+
+  .vai-launchpad-workflow li > p {
+    display: none;
+  }
+
+  .vai-starter-grid {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(17rem, 82vw);
+    grid-template-columns: none;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding-bottom: 0.5rem;
+    scroll-snap-type: inline mandatory;
+    scrollbar-width: none;
+  }
+
+  .vai-starter-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .vai-starter-grid > li {
+    scroll-snap-align: start;
+  }
+
+  .vai-starter-card {
+    min-height: 112px;
+    padding: 0.75rem;
+  }
+
+  .vai-starter-card > span:nth-child(2) {
+    margin-top: 0.7rem;
+  }
+
+  .vai-starter-card > span:last-child {
+    display: none;
+  }
 }
 
 /* ── Thinking panel + composer surfaces — 1:1 light/dark parity ── */

@@ -16,6 +16,7 @@ import { useCursorStore } from '../stores/cursorStore.js';
 import { useChatStore } from '../stores/chatStore.js';
 import { SandboxAppToggle } from './SandboxAppToggle.js';
 import { WorkspaceLayoutControls } from './workspace/WorkspaceLayoutControls.js';
+import { createPreviewRepairPrompt, PreviewFailureState } from './preview/PreviewFailureState.js';
 
 /* ── Types ── */
 
@@ -1130,10 +1131,10 @@ function Toolbar({
    ═══════════════════════════════════════════════════════════════════════ */
 export function PreviewPanel() {
   const {
-    status, devPort, projectName, projectId, files,
+    status, devPort, projectName, projectId, files, error,
     deployPhase, deploySteps, deployStartTime, deployStackName, deployTierName,
     deployStack, destroyProject, cancelDeploy, scaffoldFromTemplate,
-    markPreviewLoading, markPreviewReady, fetchFiles,
+    markPreviewLoading, markPreviewReady, fetchFiles, startDev,
   } = useSandboxStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
@@ -1146,6 +1147,8 @@ export function PreviewPanel() {
   const mode = useLayoutStore((s) => s.mode);
   const themePreference = useLayoutStore((s) => s.themePreference);
   const buildStatus = useLayoutStore((s) => s.buildStatus);
+  const showDebugConsole = useLayoutStore((s) => s.showDebugConsole);
+  const toggleDebugConsole = useLayoutStore((s) => s.toggleDebugConsole);
   const isStreaming = useChatStore((s) => s.isStreaming);
   // Live pipeline steps of the streaming turn — shown in the handoff card so
   // the wait displays REAL process (council stages), not a fake skeleton.
@@ -1174,6 +1177,7 @@ export function PreviewPanel() {
   const previewCacheKey = projectId && devPort ? `${projectId}:${devPort}` : null;
   const hasWarmPreview = previewCacheKey ? seenPreviewKeysRef.current.has(previewCacheKey) : false;
   const shouldShowPreviewOverlay = status === 'running' && Boolean(devPort) && !iframeReady && !hasWarmPreview;
+  const failureMessage = error || buildStatus.message || 'The sandbox stopped before the preview became available.';
 
   // Reset to preview if code tab becomes unavailable
   useEffect(() => {
@@ -1408,17 +1412,19 @@ export function PreviewPanel() {
               className="preview-panel-canvas flex h-full items-stretch justify-stretch"
             >
               {status === 'failed' ? (
-                <div className="text-center">
-                  <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/10 ring-1 ring-red-500/20">
-                    <XCircle className="h-7 w-7 text-red-400" />
-                  </div>
-                  <p className="text-sm font-medium text-red-400">Build Failed</p>
-                  <p className="mt-1 text-xs text-zinc-600">Check the console for error details</p>
-                  <button onClick={refresh}
-                    className="mt-3 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:bg-zinc-800">
-                    Retry
-                  </button>
-                </div>
+                <PreviewFailureState
+                  message={failureMessage}
+                  canRestart={Boolean(projectId)}
+                  onRestart={() => { void startDev(); }}
+                  onRepair={() => {
+                    window.dispatchEvent(new CustomEvent('vai:prefill-chat', {
+                      detail: { prompt: createPreviewRepairPrompt(failureMessage) },
+                    }));
+                  }}
+                  onViewConsole={() => {
+                    if (!showDebugConsole) toggleDebugConsole();
+                  }}
+                />
               ) : status === 'running' && devPort ? (
                 <div
                   ref={previewContainerRef}

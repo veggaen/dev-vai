@@ -35,6 +35,16 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
   deadline, with cancellation propagated through search/model/review stages.
   Evidence: the current-facts direct-agent probe streamed a stale answer but did
   not terminate within 120 seconds, then fell through to weaker transports.
+  - Progress 2026-06-15: the direct local transport now owns a configurable
+    60-second deadline, propagates `AbortSignal` into ChatService model requests,
+    and emits exactly one structured `turn_timeout` error. `agent-speak` now
+    treats that frame as terminal instead of duplicating the expensive turn over
+    WebSocket or direct-engine fallback. Live proof: the same probe exited 0 in
+    60.4 seconds with one terminal error; the earlier path waited 120 seconds,
+    returned no terminal metadata, then retried. Remaining: apply the same
+    cancellation contract to WebSocket turns and reduce the underlying
+    conversational route enough that ordinary one-sentence prompts answer
+    rather than reaching the deadline.
 
 - **PRIORITY 0 — Runtime supervisor** (2026-06-13) — a phantom pnpm dev wrapper keeps respawning runtimes that race/kill each other (ERR_PNPM_RECURSIVE_RUN in log, port 3006 dies repeatedly). Find ALL respawners (concurrently, dev-desktop-or-reuse, vai-server.mjs watchdog?), then make `pnpm nuke && pnpm dev` the ONLY supported launch; add a single-instance lock (port+pidfile) to src/index.ts so a second runtime refuses to boot.
 - **PRIORITY 1 — Modernize ALL scaffolds/templates** (V3gga, 2026-06-13) — every stack/tier (PERN/MERN/Next/T3/Vinext/Game) upgraded to award-winning modern quality: Tailwind everywhere, framer-motion micro-interactions, GSAP entrance/scroll animations, three.js where it fits (hero/Game), dark-mode-first design system, polished empty/loading states. Verify each template BOOTS + looks premium (user tested old scaffolds: broken).
@@ -110,10 +120,12 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 - **Chat-based grading of council work** (V3gga, 2026-06-13) — after a build,
   let the user grade it in chat ("rate this 3/10, the cards are ugly") and
   persist structured grades per member/stage to steer future trust weighting.
-- **Preview panel waiting-state UX** (V3gga, 2026-06-13) — the "Starting
-  preview / Preparing live preview…" skeleton card looks broken while waiting
-  and after refusals; it should show the live build stages while building and
-  collapse quietly when a turn ends with no files.
+- **DONE 2026-06-15 - Preview panel waiting/failure UX** (V3gga, 2026-06-13)
+  - The no-project state now remains neutral until files arrive, active builds
+    show real streamed handoff stages, and failed sandboxes preserve the actual
+    reported cause with explicit restart, grounded repair-prompt, and console
+    actions. The split workspace also has a dedicated short-desktop composition
+    so the launchpad and all four starter workflows stay above the composer.
 
 - **Runtime visual self-check in the pipeline** — after sandbox apply, screenshot
   the running app (or computed-style probe) and feed failures back to the
@@ -138,6 +150,47 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
   code until a verified build passes and the update is run.
 
 ## Done
+
+- 2026-06-15 - Runtime startup and adaptive-domain isolation. Chat/model latency
+  and tool-batch latency now use separate `ThorsenAdaptiveController` instances,
+  so a slow council/model turn cannot throttle unrelated tool execution.
+  `/health` preserves the previous flat tool snapshot and adds explicit
+  `adaptiveDomains.chat` / `adaptiveDomains.tools` evidence. Startup prewarm is
+  deterministic and light by default; the old builder prewarm remains opt-in
+  behind `VAI_HEAVY_PREWARM=1`. Measured startup work fell from 160,960ms and
+  56 chunks to 219ms and 9 chunks. After the bounded slow-chat probe, tool
+  concurrency remained 5 with zero tool observations. Proof: runtime typecheck
+  passed outside the managed declaration-file ACL restriction; 25 focused
+  runtime/core tests passed; `/api/agent/introspect` returned 200; the desktop
+  reconnected as `Engine online` with no browser error entries.
+
+- 2026-06-15 - Split-workspace and preview recovery pass. Opening App now
+  changes the launchpad from a viewport-based two-column landing page into an
+  intentional workspace layout. At 1280x720 the copy/workflow column and four
+  condensed starter actions all fit above the anchored composer (last card
+  bottom 486px; composer top 595px; no root overflow). At taller desktop sizes
+  the full 2x2 cards return. Preview failures no longer discard the real error
+  behind "Build Failed / check console": the panel shows the reported cause,
+  keeps files in place, can restart an active project, stages a repair prompt
+  containing the exact failure, and opens the console. Proof: 14 focused tests
+  passed, desktop typecheck passed, the compact "Audit this workspace" action
+  staged the complete prompt in the rendered app, and browser logs contained
+  no warnings or errors.
+
+- 2026-06-15 — Award-quality first viewport and theme baseline. Replaced the
+  generic centered empty chat with an asymmetric Vai software-studio launchpad
+  that makes the real `Plan -> Build -> Verify` contract visible, upgraded the
+  default dark preset to high-contrast `Vai Ink`, and restored proper button
+  semantics for starter workflows. Mobile now uses a horizontal snap rail so
+  the anchored composer does not cover the first action. Proof: desktop
+  typecheck passed; 11 focused desktop tests passed; browser verification at
+  1280x720 showed all four workflows above the composer with no page overflow;
+  390x844 showed one complete starter card plus the next-card affordance; dark
+  and light themes rendered without console warnings/errors; clicking "Audit
+  this workspace" staged the full prompt and focused the composer. Baseline
+  strengths: clear workspace modes, engine status, live-preview promise, and
+  focused composer. Remaining visible gaps: recent project continuity on the
+  launchpad and very high runtime tail latency.
 
 - 2026-06-13 - Mainline consolidation and routing-precedence cleanup. Broad
   preflights no longer steal builder screens, wellness labels, URL builds,

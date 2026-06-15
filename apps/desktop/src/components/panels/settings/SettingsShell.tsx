@@ -212,7 +212,7 @@ export function ThemePresetGrid({
   customThemes?: { id: string; label: string; swatch: string[]; basePresetId: string }[];
 }) {
   const presets = [
-    { id: 'dark', label: 'Dark', swatch: ['#282c34', '#9cdef2', '#111111', '#e06c75'] },
+    { id: 'dark', label: 'Vai Ink', swatch: ['#0b0d10', '#f2eee8', '#15181d', '#ff6b5f'] },
     { id: 'light', label: 'Light', swatch: ['#f0ebe3', '#5a5248', '#faf6f0', '#c47d5a'] },
     { id: 'midnight', label: 'Midnight', swatch: ['#0d1117', '#c9d1d9', '#161b22', '#f85149'] },
     { id: 'claude', label: 'Claude', swatch: ['#262624', '#f5f4f0', '#30302e', '#c6613f'] },
