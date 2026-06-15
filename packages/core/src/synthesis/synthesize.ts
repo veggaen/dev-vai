@@ -36,6 +36,14 @@ export interface EvidenceItem {
   readonly value: string;
   /** Optional human-readable locator within the source (line, span, quote). */
   readonly span?: string;
+  /**
+   * Whether this item's value is a COMPARABLE structured claim (e.g. a page title, a git
+   * status, a version) that should participate in contradiction detection. Default true.
+   * Free-text items — a web snippet or a note that merely "mentions" the topic — set this
+   * false: two sources discussing a topic with different prose are corroboration, NOT a
+   * contradiction, so they must not be flagged as one.
+   */
+  readonly comparable?: boolean;
 }
 
 /** A synthesized claim: one (subject, attribute, value) backed by ≥1 source. */
@@ -45,6 +53,8 @@ export interface SynthesizedClaim {
   readonly value: string;
   /** The sources asserting this value — always ≥1 (unbound claims are dropped). */
   readonly sources: readonly EvidenceItem[];
+  /** Whether this claim participated in contradiction detection (structured vs free-text). */
+  readonly comparable: boolean;
   /** 0..1, rising with the number of corroborating sources (deterministic). */
   readonly confidence: number;
 }
@@ -150,13 +160,15 @@ export function synthesizeFromEvidence(
   const working = focused.length > 0 ? focused : bound;
 
   // 3) Cluster by subject|attribute|value.
-  type Cluster = { subject: string; attribute: string; value: string; sources: EvidenceItem[] };
+  type Cluster = { subject: string; attribute: string; value: string; sources: EvidenceItem[]; comparable: boolean };
   const byTriple = new Map<string, Cluster>();
   for (const it of working) {
     const key = `${norm(it.subject)}${norm(it.attribute)}${norm(it.value)}`;
     let c = byTriple.get(key);
     if (!c) {
-      c = { subject: it.subject, attribute: it.attribute, value: it.value, sources: [] };
+      // A cluster is comparable only if its items are structured claims (default true);
+      // free-text 'mention'/'overview' items opt out so prose isn't mistaken for a conflict.
+      c = { subject: it.subject, attribute: it.attribute, value: it.value, sources: [], comparable: it.comparable !== false };
       byTriple.set(key, c);
     }
     // De-dupe identical (source, span) so the same source isn't double-counted.
@@ -172,13 +184,17 @@ export function synthesizeFromEvidence(
       attribute: c.attribute,
       value: c.value,
       sources: c.sources,
+      comparable: c.comparable,
       confidence: confidenceFromCorroboration(new Set(c.sources.map((s) => s.sourceId)).size),
     }))
     .sort((a, b) => b.confidence - a.confidence || a.subject.localeCompare(b.subject));
 
   // 4) Contradictions: same (subject, attribute) with ≥2 distinct values.
+  // ONLY among COMPARABLE structured claims — free-text mentions/overviews are
+  // corroboration from different angles, not conflicts, so they are excluded here.
   const byAttr = new Map<string, SynthesizedClaim[]>();
   for (const claim of claims) {
+    if (claim.comparable === false) continue;
     const key = `${norm(claim.subject)}${norm(claim.attribute)}`;
     const arr = byAttr.get(key) ?? [];
     arr.push(claim);

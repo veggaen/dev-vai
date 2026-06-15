@@ -370,13 +370,28 @@ export type {
   FsEditOptions,
   FsApplyOptions,
 } from './tools/fs-edit.js';
-export { synthesizeFromEvidence, gitEvidenceToItems } from './synthesis/index.js';
+export {
+  synthesizeFromEvidence,
+  gitEvidenceToItems,
+  webEvidenceToItems,
+  aiOverviewToItem,
+  pageEvidenceToItems,
+  notesToItems,
+  synthesizeAcrossSources,
+  formatSummaryBrief,
+  formatContradictions,
+  formatDecisionRecord,
+} from './synthesis/index.js';
 export type {
   EvidenceItem,
   SynthesizedClaim,
   SynthesizedContradiction,
   SynthesisResult,
   SynthesizeOptions,
+  WebSourceLike,
+  NoteLike,
+  CrossSourceInputs,
+  CrossSourceSynthesis,
 } from './synthesis/index.js';
 export type { TurnEvidence } from './chat/turn-pipeline.js';
 
