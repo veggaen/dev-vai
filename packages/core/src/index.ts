@@ -324,6 +324,19 @@ export type {
   GatherGitEvidenceOptions,
 } from './tools/git-evidence.js';
 export { gitCapability, classifyGitQuery } from './chat/capabilities/git-capability.js';
+export { execCapability, isExecQuery } from './chat/capabilities/exec-capability.js';
+export {
+  runCommandEvidence,
+  isAllowlistedCommand,
+  hasRunEvidence,
+  SAFE_COMMAND_BASENAMES,
+} from './tools/run-evidence.js';
+export type {
+  RunEvidence,
+  RawRunResult,
+  CommandRunner,
+  RunCommandOptions,
+} from './tools/run-evidence.js';
 export {
   proposeFsEdit,
   applyFsEdit,

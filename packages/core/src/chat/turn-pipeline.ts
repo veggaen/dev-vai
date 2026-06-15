@@ -1,6 +1,7 @@
 import type { TurnClassification } from './turn-classifier.js';
 import type { QuestionIntent } from './question-intent.js';
 import type { GitEvidence } from '../tools/git-evidence.js';
+import type { RunEvidence } from '../tools/run-evidence.js';
 
 /**
  * Async-gathered evidence attached to a turn BEFORE dispatch. The dispatcher and
@@ -13,6 +14,8 @@ import type { GitEvidence } from '../tools/git-evidence.js';
 export interface TurnEvidence {
   /** Read-only git evidence (diff/blame/log/branch), when the turn looked git-shaped. */
   readonly git?: GitEvidence;
+  /** Result of running a safe verification command (tests/build/typecheck), when the turn asked. */
+  readonly run?: RunEvidence;
 }
 
 /**
