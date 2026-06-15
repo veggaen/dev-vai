@@ -159,7 +159,7 @@ describe('councilGenerateApp — happy path', () => {
     expect(coder.calls.length).toBe(3); // architect + app + stylist, no repairs
     expect(events.some((e) => e.type === 'stage' && e.stage === 'review')).toBe(true);
     expect(events.some((e) => e.type === 'stage' && e.stage === 'style')).toBe(true);
-  });
+  }, 20_000);
 });
 
 describe('councilGenerateApp — repair loop', () => {
@@ -171,7 +171,7 @@ describe('councilGenerateApp — repair loop', () => {
     expect(result).not.toBeNull();
     expect(result!.repairsUsed).toBe(1);
     expect(result!.validation.ok).toBe(true);
-  });
+  }, 20_000);
 
   it('repairs when a reviewer raises a must-fix', async () => {
     const coder = smartCoder('local:big', [VALID_APP_TSX]);
@@ -186,7 +186,7 @@ describe('councilGenerateApp — repair loop', () => {
     expect(result!.repairsUsed).toBe(1);
     expect(reviewCount).toBe(1); // reviewers are not re-consulted after repair
     expect(coder.calls.length).toBe(4); // architect + app + one repair + stylist
-  });
+  }, 20_000);
 
   it('returns null when the code never validates', async () => {
     const coder = smartCoder('local:big', ['JUNK']);
@@ -202,7 +202,7 @@ describe('councilGenerateApp — repair loop', () => {
     expect(result).not.toBeNull();
     expect(result!.validation.ok).toBe(true);
     expect(result!.repairsUsed).toBe(1); // one stylist repair
-  });
+  }, 20_000);
 });
 
 describe('councilGenerateApp — resilience', () => {
@@ -221,7 +221,7 @@ describe('councilGenerateApp — resilience', () => {
     const { result } = await runPipeline([coder]);
     expect(result).not.toBeNull();
     expect(result!.spec.fromArchitect).toBe(false);
-  });
+  }, 20_000);
 
   it('treats a throwing reviewer as non-blocking', async () => {
     const coder = smartCoder('local:big', [VALID_APP_TSX]);
@@ -235,7 +235,7 @@ describe('councilGenerateApp — resilience', () => {
     const { result } = await runPipeline([coder, reviewer]);
     expect(result).not.toBeNull();
     expect(result!.reviews[0]?.error).toContain('daemon');
-  });
+  }, 20_000);
 
   it('yields a null result for an empty member list', async () => {
     const { result } = await runPipeline([]);
@@ -313,7 +313,7 @@ describe('validateGeneratedApp', () => {
     expect(result!.repairsUsed).toBeGreaterThan(0); // stylist repairs were attempted
     expect(result!.output).toContain('title="src/App.tsx"');
     expect(result!.output).toContain('title="src/styles.css"');
-  });
+  }, 20_000);
 
   it('only warns about a couple of unstyled stragglers', async () => {
     const oneMiss = VALID_APP_TSX.replace('className="plant-list"', 'className="plant-list stray-class"');

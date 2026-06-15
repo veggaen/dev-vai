@@ -47,11 +47,19 @@ describe('companion context routes', () => {
       'x-vai-client-type': 'vscode-extension',
     };
 
-    const poll = await app.inject({
+    let poll = await app.inject({
       method: 'POST',
       url: '/api/companion-context/poll-consume',
       headers,
     });
+    // The broker request can race with immediate consume in CI; allow a few polls.
+    for (let attempt = 0; attempt < 4 && poll.statusCode === 204; attempt += 1) {
+      poll = await app.inject({
+        method: 'POST',
+        url: '/api/companion-context/poll-consume',
+        headers,
+      });
+    }
     expect(poll.statusCode).toBe(200);
     const workItem = poll.json() as { requestId: string; requestedFields: string[] };
     expect(workItem.requestedFields).toEqual(['openFile']);

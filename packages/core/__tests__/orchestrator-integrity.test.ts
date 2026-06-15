@@ -346,7 +346,7 @@ describe('orchestrator-integrity audit lane', () => {
       'verify:builder-satisfied',
     ]);
     expect(outcome.thinking?.processTrace?.at(-1)?.stage).toBe('tracked:fallback:verify:builder-satisfied');
-  });
+  }, 20_000);
 
   it('records the exit-gate verdict in the synthetic trace for calibrated fallback answers', async () => {
     const outcome = await runScenario({

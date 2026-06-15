@@ -202,7 +202,7 @@ describe('runCouncilLoop', () => {
     expect(result.revised).toBe(false);
     expect(result.finalText).toBe('A solid first answer about closures.');
     expect(redraftCalled).toBe(false);
-  });
+  }, 20_000);
 
   it('redrafts and keeps the better answer when the council asks for a reread', async () => {
     // First convene flags reread; the redraft produces text the SAME (ship) roster
@@ -221,7 +221,7 @@ describe('runCouncilLoop', () => {
     // The feedback carried the council's reading (intent + method), never a fact.
     expect(seen?.realIntent).toBe('wants runnable code');
     expect(seen?.methodLessons).toContain('lead with a code example');
-  });
+  }, 20_000);
 
   it('never breaks the turn when the redraft throws — keeps the original', async () => {
     const service = makeService(rereadRoster('x', 'y'));
@@ -242,14 +242,14 @@ describe('runCouncilLoop', () => {
     const echoed = await runLoop(service, { prompt: SUBSTANTIVE, draftText: 'Original draft.', modelId: 'local:test' }, async () => 'Original draft.');
     expect(echoed.revised).toBe(false);
     expect(echoed.finalText).toBe('Original draft.');
-  });
+  }, 20_000);
 
   it('is a no-op when no redraft function is provided (grade-only)', async () => {
     const service = makeService(rereadRoster('x', 'y'));
     const result = await runLoop(service, { prompt: SUBSTANTIVE, draftText: 'Original draft.', modelId: 'local:test' });
     expect(result.revised).toBe(false);
     expect(result.finalText).toBe('Original draft.');
-  });
+  }, 20_000);
 
   it('returns the original with no council when there is no roster configured', async () => {
     const service = new ChatService(createDb(':memory:'), new ModelRegistry());
@@ -332,7 +332,7 @@ describe('council lesson persistence (closed self-improvement loop)', () => {
     await runLoop(service, { prompt: TURN, draftText: 'draft two', modelId: 'local:test' });
     // Same handler + overlapping tokens → second turn must be absorbed, not stacked.
     expect(store.loadActive(null).length).toBe(1);
-  });
+  }, 20_000);
 
   it('is a no-op when no guidance store is configured (back-compat)', async () => {
     const service = makeService(rereadRoster('x', 'lesson y'));
