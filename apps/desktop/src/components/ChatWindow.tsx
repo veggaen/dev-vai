@@ -86,6 +86,8 @@ const FALLBACK_MODELS: { family: string; label: string }[] = [
 type DeliveryRoute = 'vai' | 'group' | 'broadcast';
 type SendOptions = {
   forceMode?: ChatMode;
+  /** Set when the user answered the "build or answer?" confirm — skip the ambiguity gate. */
+  buildConfirmResolved?: 'build' | 'answer';
 };
 
 function formatRelativeTime(value: string): string {
@@ -224,6 +226,9 @@ export function ChatWindow() {
   const fetchGlobalClients = useCollabStore((state) => state.fetchGlobalClients);
 
   const [input, setInput] = useState('');
+  // Agent-mode build confirm: when set, the composer asks "answer this, or build an app?" instead
+  // of silently scaffolding. Holds the original text so either choice re-sends it correctly.
+  const [pendingBuildConfirm, setPendingBuildConfirm] = useState<{ text: string } | null>(null);
   const [pastedImage, setPastedImage] = useState<PastedImage | null>(null);
   const [imageDescription, setImageDescription] = useState('');
   const [imageQuestion, setImageQuestion] = useState('');
@@ -778,8 +783,20 @@ export function ChatWindow() {
       mode: effectiveMode,
       hasActiveProject,
     });
+
+    // Anti-hijack: agent mode saw a build-ish ask but isn't sure you want an app scaffolded.
+    // Ask once instead of silently entering the builder. The choice re-sends via handleSend with
+    // buildConfirmResolved set, which forces the lane and skips this gate. 'answer' stays a normal
+    // chat turn; 'build' forces builder mode.
+    if (sendTimeWorkIntent.needsBuildConfirm && !options?.buildConfirmResolved && !forcedMode) {
+      setPendingBuildConfirm({ text });
+      return;
+    }
+    const confirmedBuild = options?.buildConfirmResolved === 'build';
+
     const nextConversationMode = forcedMode
-      ?? (effectiveMode === 'chat' && sendTimeWorkIntent.shouldPrimeBuilder
+      ?? (confirmedBuild ? 'builder'
+        : effectiveMode === 'chat' && sendTimeWorkIntent.shouldPrimeBuilder
         ? 'builder'
         : effectiveMode);
 
@@ -865,13 +882,13 @@ export function ChatWindow() {
       toast.success(`Sent to ${roundtablePeers.length} IDE${roundtablePeers.length === 1 ? '' : 's'}`);
     }
 
-    if (nextConversationMode === 'builder' || sendTimeWorkIntent.shouldPrimeBuilder) {
+    if (nextConversationMode === 'builder' || sendTimeWorkIntent.shouldPrimeBuilder || confirmedBuild) {
       expandBuilder();
       setBuildStatus({
         step: 'generating',
         message: forcedMode === 'builder'
           ? 'Turning grounded brief into runnable output...'
-          : sendTimeWorkIntent.buildStatusMessage,
+          : sendTimeWorkIntent.buildStatusMessage ?? (confirmedBuild ? 'Preparing a runnable preview from this request...' : undefined),
       });
     }
 
@@ -1421,6 +1438,49 @@ export function ChatWindow() {
 
       <div className="composer-dock">
         <div className={`composer-dock-inner relative z-[1] mx-auto w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100%-2rem))]' : 'max-w-[min(68rem,calc(100%-2rem))]'} px-4 pb-3 pt-2 md:px-5 md:pb-4`}>
+
+          {/* Agent-mode build confirm: don't silently scaffold an app on an ambiguous ask. */}
+          {pendingBuildConfirm && (
+            <div className="mb-2 rounded-xl border border-[color:var(--accent)]/40 bg-[color:var(--accent-soft)] px-3.5 py-3">
+              <div className="text-[13px] font-medium text-[color:var(--fg)]">
+                Did you want an answer, or should I build an app for this?
+              </div>
+              <div className="mt-1 text-[11px] leading-4 text-[color:var(--color-muted)]">
+                “{pendingBuildConfirm.text.length > 90 ? `${pendingBuildConfirm.text.slice(0, 90)}…` : pendingBuildConfirm.text}”
+              </div>
+              <div className="mt-2.5 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const t = pendingBuildConfirm.text;
+                    setPendingBuildConfirm(null);
+                    void handleSend(t, { buildConfirmResolved: 'answer' });
+                  }}
+                  className="rounded-lg border border-[color:var(--border)] bg-[color:var(--panel)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--fg)] transition-colors hover:opacity-90"
+                >
+                  Just answer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const t = pendingBuildConfirm.text;
+                    setPendingBuildConfirm(null);
+                    void handleSend(t, { buildConfirmResolved: 'build' });
+                  }}
+                  className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/15 px-3 py-1.5 text-[12px] font-medium text-[color:var(--fg)] transition-colors hover:opacity-90"
+                >
+                  Build an app
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingBuildConfirm(null)}
+                  className="ml-auto rounded-lg px-2 py-1.5 text-[11px] text-[color:var(--color-muted)] transition-colors hover:text-[color:var(--fg)]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Image preview row */}
           {pastedImage && (

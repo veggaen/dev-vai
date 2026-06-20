@@ -1,7 +1,9 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ChatProgressStep, CouncilThinkingUI } from '../../stores/chatStore.js';
 import { useProcessStepReveal } from '../../hooks/useProcessStepReveal.js';
 import { ProcessTree } from './ProcessTree.js';
+import { Timeline } from './Timeline.js';
+import { isTimelineViewEnabled } from '../../lib/timeline-flag.js';
 
 export interface TurnProcessSectionProps {
   readonly isStreaming: boolean;
@@ -29,8 +31,22 @@ export function TurnProcessSection({
     [isStreaming, steps, revealedCount],
   );
   const pendingStepCount = isStreaming ? Math.max(0, steps.length - revealedCount) : 0;
+  const timelineView = useTimelineView();
 
   if (!isStreaming && steps.length === 0) return null;
+
+  // Loop-aware Timeline (behind a flag) renders the same flat steps as phases/rounds/gates. Falls
+  // back to the classic ProcessTree when the flag is off — fully additive, nothing else changes.
+  if (timelineView) {
+    return (
+      <Timeline
+        live={isStreaming}
+        steps={visibleSteps}
+        council={council}
+        durationMs={durationMs}
+      />
+    );
+  }
 
   return (
     <ProcessTree
@@ -43,6 +59,21 @@ export function TurnProcessSection({
       pendingStepCount={pendingStepCount}
     />
   );
+}
+
+/** Subscribe to the Timeline-view flag (same-tab + cross-tab changes). */
+function useTimelineView(): boolean {
+  const [enabled, setEnabled] = useState(isTimelineViewEnabled);
+  useEffect(() => {
+    const update = () => setEnabled(isTimelineViewEnabled());
+    window.addEventListener('vai-timeline-view-change', update);
+    window.addEventListener('storage', update);
+    return () => {
+      window.removeEventListener('vai-timeline-view-change', update);
+      window.removeEventListener('storage', update);
+    };
+  }, []);
+  return enabled;
 }
 
 export default TurnProcessSection;

@@ -47,64 +47,127 @@ export class IngestPipeline {
   /**
    * Hydrate the engine from persisted data on startup.
    * Loads L0 chunks into the n-gram model and L1 summaries as knowledge entries.
+   *
+   * Note: the dominant cost here is {@link VaiEngine.train} building n-grams (~14s on a
+   * 1.3k-source store), NOT the SQL. Callers that care about startup latency should prefer
+   * {@link hydrateAsync}, which yields to the event loop between batches so the server can
+   * accept and answer turns WHILE knowledge loads in the background. This synchronous
+   * version is kept for tests and tools where blocking is fine.
    */
   hydrate(): { sourcesLoaded: number; chunksLoaded: number; imagesLoaded: number } {
-    const allSources = this.db.select().from(sources).all();
+    const { sourceRows, chunksBySource } = this.loadHydrationRows();
     let chunksLoaded = 0;
     let skippedSources = 0;
 
-    for (const src of allSources) {
-      // Load L0 chunks into n-gram model + TF-IDF
-      const l0Chunks = this.db.select().from(chunks)
-        .where(eq(chunks.sourceId, src.id))
-        .all()
-        .filter(c => c.level === 0)
-        .sort((a, b) => a.ordinal - b.ordinal);
-
-      const fullText = l0Chunks.length > 0 ? l0Chunks.map(c => c.content).join(' ') : '';
-
-      // Iter-10 — PubMed UI chrome leak guard. Scientific abstract pages get scraped
-      // with their navigation chrome ("Full text links / CiteDisplay options /
-      // AbstractPubMedPMID Abstract") intact. Phrases like "database inception to
-      // November 2025" then hijack unrelated polysemous queries (e.g. "summarize the
-      // plot of inception" returns a laryngeal dystonia abstract). Skip the entire
-      // contaminated source so neither n-gram chunks nor the L1 summary leak through.
-      if (IngestPipeline.isPubmedChromeContaminated(fullText)) {
-        skippedSources++;
-        continue;
-      }
-
-      if (l0Chunks.length > 0) {
-        const language = this.detectLanguage(fullText);
-        this.engine.train(fullText, src.url ?? src.title, language);
-        chunksLoaded += l0Chunks.length;
-      }
-
-      // Load L1 summary as a knowledge entry for direct retrieval
-      const l1 = this.db.select().from(chunks)
-        .where(eq(chunks.sourceId, src.id))
-        .all()
-        .find(c => c.level === 1);
-
-      if (l1) {
-        if (IngestPipeline.isPubmedChromeContaminated(l1.content)) {
-          continue;
-        }
-        const language = this.detectLanguage(l1.content);
-        this.engine.knowledge.addEntry(
-          src.title,
-          l1.content,
-          src.url ?? src.title,
-          language,
-        );
-      }
+    for (const src of sourceRows) {
+      const r = this.hydrateOneSource(src, chunksBySource.get(src.id) ?? []);
+      chunksLoaded += r.chunksLoaded;
+      if (r.skipped) skippedSources++;
     }
 
     if (skippedSources > 0) {
       console.log(`[IngestPipeline] Skipped ${skippedSources} contaminated sources during hydrate (PubMed chrome leak)`);
     }
 
-    // Hydrate image descriptions into the engine
+    const imagesLoaded = this.hydrateImages();
+    return { sourcesLoaded: sourceRows.length, chunksLoaded, imagesLoaded };
+  }
+
+  /**
+   * Non-blocking hydrate. Same result as {@link hydrate} but processes sources in batches,
+   * yielding to the event loop between batches (via `setImmediate`) so incoming chat turns
+   * are served during the ~14s of n-gram training instead of stalling behind it. The engine
+   * degrades gracefully while empty (answers without the persisted corpus), then strengthens
+   * as sources land — so the user gets an app that responds in well under a second and
+   * "warms up" rather than a 15s blank-screen boot.
+   *
+   * @param batchSize sources processed per event-loop tick (default 5 — measured to keep the
+   *        worst uninterrupted block ~1.5s while finishing in ~10s; smaller batches yield more
+   *        often so live turns interleave, at no real cost to total time).
+   * @param onProgress optional callback after each batch, for a "warming up" indicator.
+   */
+  async hydrateAsync(
+    batchSize = 5,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<{ sourcesLoaded: number; chunksLoaded: number; imagesLoaded: number }> {
+    const { sourceRows, chunksBySource } = this.loadHydrationRows();
+    let chunksLoaded = 0;
+    let skippedSources = 0;
+
+    for (let i = 0; i < sourceRows.length; i += batchSize) {
+      const batch = sourceRows.slice(i, i + batchSize);
+      for (const src of batch) {
+        const r = this.hydrateOneSource(src, chunksBySource.get(src.id) ?? []);
+        chunksLoaded += r.chunksLoaded;
+        if (r.skipped) skippedSources++;
+      }
+      onProgress?.(Math.min(i + batchSize, sourceRows.length), sourceRows.length);
+      // Yield: let the server process queued I/O (incoming turns) before the next batch.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    if (skippedSources > 0) {
+      console.log(`[IngestPipeline] Skipped ${skippedSources} contaminated sources during hydrate (PubMed chrome leak)`);
+    }
+
+    const imagesLoaded = this.hydrateImages();
+    return { sourcesLoaded: sourceRows.length, chunksLoaded, imagesLoaded };
+  }
+
+  /**
+   * Load every source + its chunks in TWO queries (not 2-per-source), grouping chunks by
+   * source id in JS. Eliminates the old N+1 pattern (~2.7k queries → 2).
+   */
+  private loadHydrationRows() {
+    const sourceRows = this.db.select().from(sources).all();
+    const allChunks = this.db.select().from(chunks).all();
+    const chunksBySource = new Map<string, typeof allChunks>();
+    for (const c of allChunks) {
+      if (c.sourceId == null) continue;
+      const list = chunksBySource.get(c.sourceId);
+      if (list) list.push(c);
+      else chunksBySource.set(c.sourceId, [c]);
+    }
+    return { sourceRows, chunksBySource };
+  }
+
+  /** Train the engine on one source's chunks. Shared by sync + async hydrate. */
+  private hydrateOneSource(
+    src: { id: string; title: string; url: string | null },
+    sourceChunks: { level: number; ordinal: number; content: string }[],
+  ): { chunksLoaded: number; skipped: boolean } {
+    const l0Chunks = sourceChunks
+      .filter((c) => c.level === 0)
+      .sort((a, b) => a.ordinal - b.ordinal);
+
+    const fullText = l0Chunks.length > 0 ? l0Chunks.map((c) => c.content).join(' ') : '';
+
+    // Iter-10 — PubMed UI chrome leak guard. Scientific abstract pages get scraped
+    // with their navigation chrome intact; phrases like "database inception to November
+    // 2025" then hijack unrelated polysemous queries. Skip the entire contaminated
+    // source so neither n-gram chunks nor the L1 summary leak through.
+    if (IngestPipeline.isPubmedChromeContaminated(fullText)) {
+      return { chunksLoaded: 0, skipped: true };
+    }
+
+    let chunksLoaded = 0;
+    if (l0Chunks.length > 0) {
+      const language = this.detectLanguage(fullText);
+      this.engine.train(fullText, src.url ?? src.title, language);
+      chunksLoaded = l0Chunks.length;
+    }
+
+    const l1 = sourceChunks.find((c) => c.level === 1);
+    if (l1 && !IngestPipeline.isPubmedChromeContaminated(l1.content)) {
+      const language = this.detectLanguage(l1.content);
+      this.engine.knowledge.addEntry(src.title, l1.content, src.url ?? src.title, language);
+    }
+
+    return { chunksLoaded, skipped: false };
+  }
+
+  /** Hydrate image descriptions into the engine. Returns count loaded. */
+  private hydrateImages(): number {
     const allImages = this.db.select({
       id: images.id,
       filename: images.filename,
@@ -120,8 +183,7 @@ export class IngestPipeline {
       this.engine.train(text, `image:${img.id}`, language);
       this.engine.knowledge.addEntry(img.filename, text, `image:${img.id}`, language);
     }
-
-    return { sourcesLoaded: allSources.length, chunksLoaded, imagesLoaded: allImages.length };
+    return allImages.length;
   }
 
   /**

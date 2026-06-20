@@ -1199,8 +1199,45 @@ function tryCasualCheer(content: string): FactShimResult | null {
 }
 
 // ── meta about Vai ────────────────────────────────────────────────────────
-function tryMeta(content: string): FactShimResult | null {
-  const lower = content.toLowerCase();
+//
+// Grounded self-knowledge. Without this, "tell me about your engine" / "what is Vai" /
+// "what can you do" fell through to the n-gram corpus and returned irrelevant soup
+// (V8/Spark/dockerfile fragments — a real live failure). These are the things Vai can state
+// about ITSELF with certainty, so they are answered deterministically and accurately rather
+// than retrieved. Kept factual and free of invented numbers — describes architecture/behavior,
+// not metrics that could drift.
+
+/**
+ * Does the prompt ask about VAI'S OWN engine / architecture / how IT works? Must reference Vai
+ * itself ("your", "vai", "you") — NOT a generic "the engine", which would wrongly capture real
+ * engineering asks like "design a repo-native prediction engine". The self-reference is required.
+ */
+function asksAboutVaiEngine(lower: string): boolean {
+  const selfRef = /\b(?:vai'?s?|your|yourself|you)\b/.test(lower);
+  if (!selfRef) return false;
+  // A clear build/design task is never a question about Vai's engine, even if it says "your".
+  if (/\b(?:design|build|create|make|implement|scaffold|architect)\b/.test(lower)) return false;
+  const aboutEngine = /\b(?:engine|architecture|how (?:does\s+)?(?:you|it|vai)\s+(?:work|run|operate)|internals?|under the hood|how (?:are|were) you (?:built|made)|tech stack)\b/.test(lower);
+  return aboutEngine;
+}
+
+/** Does the prompt ask what Vai is, or what it can do (capabilities/identity)? */
+function asksWhatVaiIs(lower: string): boolean {
+  if (/\bwhat\s+(?:is|are)\s+vai\b|\bwho\s+are\s+you\b|\btell me about\s+(?:vai|yourself)\b/.test(lower)) return true;
+  if (/\bwhat\s+can\s+you\s+do\b|\bwhat\s+are\s+your\s+(?:capabilities|features)\b|\bhow can you help\b/.test(lower)) return true;
+  return false;
+}
+
+/**
+ * Grounded answers to questions about Vai ITSELF — identity, capabilities, engine/architecture,
+ * and chat-vs-IDE mode. Exported so the dispatcher can seat it at a HIGH priority tier: these
+ * self-questions must beat the grounding-based "simpler"/"best next task" engine templates that
+ * otherwise hijack "tell me about your engine" (a real live failure). Returns null when the
+ * prompt isn't about Vai, so the normal pipeline takes over.
+ */
+export function tryVaiSelfKnowledge(content: string): FactShimResult | null {
+  const lower = (content || '').toLowerCase();
+
   if (/\bchat\b.*\bide\s+mode\b|\bide\s+mode\b.*\bchat\b/.test(lower)) {
     return {
       reply:
@@ -1213,7 +1250,45 @@ Switch between them in the mode selector below the message box. You can also lin
       kind: 'meta-vai',
     };
   }
+
+  // "tell me about your engine" / "how does Vai work" — grounded architecture answer.
+  if (asksAboutVaiEngine(lower)) {
+    return {
+      reply:
+`**Vai's engine** is a local-first AI system that runs on your machine — no external APIs by default.
+
+- **Core engine** (\`packages/core\`) owns the intelligence: ingestion of what you browse, knowledge retrieval, and the response pipeline. Vai itself is a *deterministic* engine — it routes, grounds, and verifies; the language models are staff it consults, not the thing answering.
+- **Consensus council** — when a turn is substantive, Vai drafts an answer and a panel of local models (run via Ollama) reviews it from several angles (skeptic, pragmatist, intent-reader). They critique *intent and method*; Vai still owns every user-facing fact (fact-quarantine). The draft is redrafted if the council isn't satisfied.
+- **Runtime** (\`packages/runtime\`) serves it over Fastify + WebSockets to the desktop app.
+- **Grounding** — answers are checked against retrieved evidence before you see them, so Vai stays honest about uncertainty rather than guessing confidently.
+
+Everything runs locally for privacy and zero API cost. Ask about any one part and I'll go deeper.`,
+      kind: 'meta-vai',
+    };
+  }
+
+  // "what is Vai" / "what can you do" — identity + capabilities.
+  if (asksWhatVaiIs(lower)) {
+    return {
+      reply:
+`**Vai** is a local-first AI that learns from what you browse and runs entirely on your machine — no external APIs by default, so your data stays private and there are no usage costs.
+
+What I can do:
+- **Answer & reason** over what you've shown me, grounded in real retrieved context (I stay honest about uncertainty rather than guessing).
+- **Build & edit code** in a live sandbox (IDE/agent mode): read files, write code, run commands, stage changes.
+- **Deliberate with a council** of local models that review my drafts before you see them, so answers are checked, not just generated.
+- **Show my work** — every turn exposes its process (drafts, council verdicts, tool calls) so you can see and steer how I reached the answer.
+
+Tell me what you're working on and I'll point you at the right mode.`,
+      kind: 'meta-vai',
+    };
+  }
+
   return null;
+}
+
+function tryMeta(content: string): FactShimResult | null {
+  return tryVaiSelfKnowledge(content);
 }
 
 // ── person facts ──────────────────────────────────────────────────────────

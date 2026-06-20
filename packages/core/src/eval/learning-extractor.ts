@@ -23,11 +23,10 @@ import type { SessionEvent } from '../sessions/types.js';
 import type {
   ConversationScore,
   TurnPair,
-  AntiPatternDetection,
   AntiPatternType,
 } from './conversation-scorer.js';
 import {
-  safeContent as _safeContent, stripCodeBlocks, safeSlice,
+  safeContent as _safeContent, safeSlice,
   computeNgrams, ngramOverlap, clamp,
   detectRetryChains,
 } from './eval-utils.js';

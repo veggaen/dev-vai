@@ -15,6 +15,25 @@ describe('flattenStepsForLive', () => {
     expect(rows).toHaveLength(2);
     expect(rows[1]?.subLines).toHaveLength(1);
   });
+
+  it('surfaces process kinds and ready tool responses in live sublines', () => {
+    const rows = flattenStepsForLive([{
+      stage: 'inspect',
+      label: 'Inspecting workspace',
+      status: 'done',
+      processLog: [{ kind: 'read', label: 'Read ProcessTree', body: 'ProcessTree.tsx' }],
+      toolRuns: [{
+        id: 'read-1',
+        name: 'read_file',
+        status: 'done',
+        success: true,
+        output: 'file body',
+      }],
+    }]);
+
+    expect(rows[0]?.subLines[0]?.label).toBe('Read · Read ProcessTree');
+    expect(rows[0]?.subLines[1]?.detail).toBe('ok · response ready');
+  });
 });
 
 describe('partitionLiveRows', () => {

@@ -21,6 +21,8 @@ import {
   createGrokVisionAdapter,
   createComfyUiProducer,
   createGrokCliAdapter,
+  memberStatuses,
+  councilUserActionHints,
 } from '@vai/core';
 import type { ChatServiceOptions, ResponseReviewInput, VaiConfig } from '@vai/core';
 import { registerChatRoutes } from './routes/chat.js';
@@ -56,7 +58,7 @@ import { PlatformAuthService } from './auth/platform-auth.js';
 import { registerPlatformAuthRoutes } from './routes/platform-auth.js';
 import { ProjectService } from './projects/service.js';
 import { registerProjectRoutes } from './routes/projects.js';
-import { buildLocalCouncilRoster } from './council/build-roster.js';
+import { buildLocalCouncilRoster, grokEnabledFromEnv } from './council/build-roster.js';
 import { CompanionContextBroker } from './companion-context/broker.js';
 import { GrokFriendClient } from './grok-friend/client.js';
 import { WorkspaceStatusReader } from './workspace-status/reader.js';
@@ -217,10 +219,22 @@ export async function createServer(options?: ServerOptions) {
 
   const pipeline = new IngestPipeline(db, vaiEngine);
 
-  const hydrated = pipeline.hydrate();
-  console.log(
-    `[VAI] Hydrated: ${hydrated.sourcesLoaded} sources, ${hydrated.chunksLoaded} chunks, ${hydrated.imagesLoaded} images loaded into engine`,
-  );
+  // Knowledge hydrate is the dominant startup cost (~14s of synchronous n-gram training on
+  // a 1.3k-source store) and used to block the server from listening. We now defer it: the
+  // caller starts it in the BACKGROUND after `listen()`, so the app responds in well under a
+  // second and warms up as sources land. The engine degrades gracefully while empty. See
+  // `startBackgroundHydrate` in the return value.
+  const startBackgroundHydrate = async (): Promise<void> => {
+    const t0 = Date.now();
+    try {
+      const hydrated = await pipeline.hydrateAsync();
+      console.log(
+        `[VAI] Hydrated (background, ${Date.now() - t0}ms): ${hydrated.sourcesLoaded} sources, ${hydrated.chunksLoaded} chunks, ${hydrated.imagesLoaded} images loaded into engine`,
+      );
+    } catch (err) {
+      console.error('[VAI] Background hydrate failed:', err);
+    }
+  };
 
   try {
     const rows = db.select().from(schema.taughtEntries).all();
@@ -271,11 +285,34 @@ export async function createServer(options?: ServerOptions) {
   // thrash. A 3rd local model (e.g. qwen2.5:7b) doesn't fit alongside qwen3:8b and
   // would force slow swap-in/out — so it's opt-in via VAI_COUNCIL_MAX_MEMBERS=3.
   // Grok (external, no VRAM) still joins on top as the high-intel voice.
-  const councilRoster = process.env.VAI_COUNCIL_ENABLED === '0'
-    ? undefined
-    : buildLocalCouncilRoster(models, {
-        maxMembers: Number(process.env.VAI_COUNCIL_MAX_MEMBERS) || 2,
-      });
+  // Live council config — mutable so the desktop "council members" settings can enable Grok or
+  // change the number of local lens passes without a runtime restart (see /api/council/config).
+  const councilConfig = {
+    enabled: process.env.VAI_COUNCIL_ENABLED !== '0',
+    enableGrok: grokEnabledFromEnv(),
+    localLensCount: (() => {
+      const n = Number(process.env.VAI_COUNCIL_LENSES);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
+    })(),
+    maxMembers: Number(process.env.VAI_COUNCIL_MAX_MEMBERS) || 2,
+  };
+  // Pull-model context root: where council members may read code from to ground their notes.
+  // Defaults to the runtime cwd (the source repo in dev). The builder treats this as opt-in and
+  // sandboxes all reads under it; an explicit VAI_COUNCIL_CONTEXT_ROOT env always wins. Set to
+  // '' (VAI_COUNCIL_CONTEXT_ROOT='') to disable the filesystem tools entirely.
+  const councilContextRoot = process.env.VAI_COUNCIL_CONTEXT_ROOT !== undefined
+    ? process.env.VAI_COUNCIL_CONTEXT_ROOT.trim() || undefined
+    : process.cwd();
+  const buildRosterFromConfig = () =>
+    councilConfig.enabled
+      ? buildLocalCouncilRoster(models, {
+          maxMembers: councilConfig.maxMembers,
+          enableGrok: councilConfig.enableGrok,
+          localLensCount: councilConfig.localLensCount,
+          contextRoot: councilContextRoot,
+        })
+      : undefined;
+  const councilRoster = buildRosterFromConfig();
   if (councilRoster) {
     console.log(`[VAI] Friend council active: ${councilRoster.default.map((m) => m.displayName).join(', ')}`);
   }
@@ -376,6 +413,56 @@ export async function createServer(options?: ServerOptions) {
   }));
 
   app.get('/api/vai/diagnose', async () => vaiEngine.diagnose());
+
+  // Council members config — read + live-update which voices sit on the SCIS council. Drives the
+  // desktop "Council members" settings card: enable/disable Grok (off by default, paid), and set
+  // how many local lens passes (skeptic/pragmatist/etc.) the local model runs. Changes rebuild the
+  // roster and hot-swap it into the live ChatService — no runtime restart.
+  // Project the live roster + per-member health into the shape the desktop card consumes.
+  // Status is a by-product of the convene loop (recorded on each member run), so this is a
+  // cheap read — the desktop polls it to keep the "green when active" dots truthful.
+  const councilConfigPayload = () => {
+    const roster = buildRosterFromConfig();
+    const members = roster?.default ?? [];
+    const statuses = memberStatuses(members.map((m) => m.id));
+    const statusById = new Map(statuses.map((s) => [s.memberId, s] as const));
+    return {
+      ...councilConfig,
+      activeMembers: members.map((m) => {
+        const s = statusById.get(m.id);
+        return {
+          id: m.id,
+          name: m.displayName,
+          topic: m.topic,
+          status: s?.status ?? 'available',
+          reason: s?.reason,
+          detail: s?.detail,
+          fixHint: s?.fixHint,
+        };
+      }),
+      actionHints: councilUserActionHints(),
+    };
+  };
+
+  app.get('/api/council/config', async () => councilConfigPayload());
+  app.post<{ Body: { enabled?: boolean; enableGrok?: boolean; localLensCount?: number; maxMembers?: number } }>(
+    '/api/council/config',
+    async (request) => {
+      const body = request.body ?? {};
+      if (typeof body.enabled === 'boolean') councilConfig.enabled = body.enabled;
+      if (typeof body.enableGrok === 'boolean') councilConfig.enableGrok = body.enableGrok;
+      if (typeof body.localLensCount === 'number' && Number.isFinite(body.localLensCount)) {
+        councilConfig.localLensCount = Math.max(1, Math.floor(body.localLensCount));
+      }
+      if (typeof body.maxMembers === 'number' && Number.isFinite(body.maxMembers)) {
+        councilConfig.maxMembers = Math.max(1, Math.floor(body.maxMembers));
+      }
+      const roster = buildRosterFromConfig();
+      chatService.setCouncilRoster(roster);
+      console.log(`[VAI] Council reconfigured: grok=${councilConfig.enableGrok} lenses=${councilConfig.localLensCount} → ${roster?.default.map((m) => m.displayName).join(', ') ?? 'dormant'}`);
+      return councilConfigPayload();
+    },
+  );
 
   app.post<{ Body: { text: string; source: string; language?: string } }>(
     '/api/train',
@@ -683,5 +770,6 @@ export async function createServer(options?: ServerOptions) {
     toolExecutor,
     tools,
     localSteeringWorker,
+    startBackgroundHydrate,
   };
 }

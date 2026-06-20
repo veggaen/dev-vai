@@ -53,6 +53,7 @@ import {
   shouldConcludeWithWebSearch,
 } from './explicit-web-search.js';
 import {
+  isBusinessOpportunityRequest,
   isConversationalWebFollowUpCue,
   isFreshLocalBusinessContactRequest,
   isFreshLocalRecommendationRequest,
@@ -7984,11 +7985,18 @@ export class VaiEngine implements ModelAdapter {
       return null;
     };
 
-    if (
+    // Only answer with the legal-FORMS catalogue when the user actually asks which
+    // company types/forms/structures exist — NOT for opportunity/advice questions
+    // like "what's a great idea when creating a company in Norway?" (which want
+    // business ideas, not an ENK/AS enumeration). The setup verbs (start/register/
+    // incorporate) are intentionally dropped here: they wrongly captured idea asks.
+    const wantsNorwayCompanyForms =
       /\b(?:norway|norwegian|norge)\b/i.test(input)
       && /\b(?:company|companies|business|corporate)\b/i.test(input)
-      && /\b(?:types?|forms?|structures?|entities|start|starting|found|register|incorporate)\b/i.test(input)
-    ) {
+      && /\b(?:types?|forms?|structures?|entities|legal\s+(?:form|structure|entity))\b/i.test(input);
+    const asksForIdeasNotForms =
+      /\b(?:idea|ideas|opportunit\w*|what\s+(?:should|could|to)\s+\w+|good\s+business|smart|sector|niche)\b/i.test(input);
+    if (wantsNorwayCompanyForms && !asksForIdeasNotForms) {
       return this.formatNorwayCompanyTypesAnswer();
     }
 
@@ -9384,7 +9392,15 @@ export class VaiEngine implements ModelAdapter {
     const browsingMemoryPreflight = this.tryAnswerFromLearnedBrowsingMemory(userContent, request.messages);
     let response: string;
     let structuredFormatFired = false;
-    if (formatOnlyPreflight !== null) {
+    // STRUCTURAL GATE: a business-opportunity/ideas question ("a great idea when
+    // creating a company in Norway") must go straight to the real generate path
+    // (research + synthesis), bypassing the curated-template preflight gauntlet
+    // that otherwise hijacks it with legal-forms, "Best next task", or refactoring
+    // answers. This is the one-place fix for the whole class of curated-trap
+    // hijacks on opportunity questions, instead of guarding each template.
+    if (isBusinessOpportunityRequest(userContent) && request.messages.length <= 2) {
+      response = await this.generateResponse(userContent, request.messages);
+    } else if (formatOnlyPreflight !== null) {
       response = this.tracked('format-only-followup', formatOnlyPreflight, originalUserContent, { confidenceOverride: 0.85 });
       structuredFormatFired = true;
     } else if (vaiChatQualityPreflight !== null) {
@@ -15800,6 +15816,10 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
   // ─── REFACTORING GUIDANCE ─────────────────────────────────────────────────
 
   private tryVaiChatQualityDirection(input: string, _lower: string): string | null {
+    // Never let the Vai-self-improvement direction responder answer a user's
+    // business-opportunity question — that produced the "Best next task" meta-answer
+    // for "a great idea when creating a company in Norway". Those go to synthesis.
+    if (isBusinessOpportunityRequest(input)) return null;
     const mentionsVaiChat = /\b(?:vai|veggaai|chat\s+(?:app|product|service|system)|chatbot|vai-chat-quality-direction)\b/i.test(input)
       && /\b(?:responses?|answers?|reply|replies|context|relevance|relevant|accuracy|accurate|responsive|helpful|useful|real\s+chat|live\s+chat|off[-\s]?topic|weird|quality|bridge|PS send|monitor|tsx|in-process|fallback)\b/i.test(input);
     const asksForActionableDirection = /\b(?:single\s+best|best\s+next|optimal|highest[-\s]?leverage|engineering\s+task|next\s+(?:thing|step|task|move)|what\s+(?:would|should)\s+.*(?:implement|fix|build|make)|teacher\s+loops?|quality\s+(?:test|gate|loop)|validation|make\s+.+(?:better|stronger|more\s+relevant|accurate|responsive)|patch|strengthen|gate|overlap)\b/i.test(input);
@@ -16005,6 +16025,11 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     const trimmed = input.trim();
     if (!trimmed || history.length < 2) return null;
     if (shouldDeferContextGroundedFollowUp(trimmed, history)) return null;
+    // An opportunity/ideas question ("a great idea when creating a company in
+    // Norway") is a fresh standalone ask for business ideas — never a context-
+    // grounded self-improvement follow-up. Without this guard the over-broad
+    // "Best next task" responder hijacks it with an engineering meta-answer.
+    if (isBusinessOpportunityRequest(trimmed)) return null;
 
     const grounding = buildConversationGrounding(trimmed, history, this.conversationGroundingDependencies());
     if (!grounding) return null;
@@ -18107,10 +18132,13 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       return this.formatReactPerformanceDiagnosis();
     }
 
+    // Same narrowing as the primary trigger: legal-forms catalogue only when the
+    // user asks which types/forms/structures exist, never for an ideas/advice ask.
     const asksNorwayCompanyTypes =
       /\b(?:norway|norwegian|norge)\b/i.test(taskBody)
       && /\b(?:company|companies|business|corporate)\b/i.test(taskBody)
-      && /\b(?:types?|forms?|structures?|entities|start|starting|found|register|incorporate)\b/i.test(taskBody);
+      && /\b(?:types?|forms?|structures?|entities|legal\s+(?:form|structure|entity))\b/i.test(taskBody)
+      && !/\b(?:idea|ideas|opportunit\w*|good\s+business|smart|sector|niche)\b/i.test(taskBody);
     const correctsNorwayCompanyTypes =
       /\b(?:didn'?t|did\s+not|wrong|incorrect|not\s+answer|asked|asking|i\s+mean|no[, ]|not\s+what)\b/i.test(input)
       && /\b(?:norway|norwegian|norge)\b/i.test(context)

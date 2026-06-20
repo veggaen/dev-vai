@@ -1193,6 +1193,70 @@ code, pre, kbd {
   .vai-mark-node { animation: none; }
 }
 
+/* ── VaiPlanetMark — empty-chat centerpiece (planet body + halo + orbit + particles) ── */
+.vai-planet {
+  isolation: isolate;
+  pointer-events: none;
+}
+.vai-planet-atmosphere {
+  position: absolute;
+  inset: 14%;
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle at 50% 45%,
+    color-mix(in srgb, var(--accent) 30%, transparent) 0%,
+    color-mix(in srgb, var(--accent) 12%, transparent) 38%,
+    transparent 68%
+  );
+  filter: blur(8px);
+  animation: vai-planet-breathe 7s ease-in-out infinite;
+}
+@keyframes vai-planet-breathe {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+.vai-planet-body {
+  background:
+    radial-gradient(circle at 36% 30%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%),
+    radial-gradient(circle at 70% 78%, color-mix(in srgb, var(--accent-deep, var(--accent)) 26%, transparent), transparent 64%),
+    color-mix(in srgb, var(--shell-surface) 88%, var(--accent) 12%);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  box-shadow:
+    inset 0 1px 14px color-mix(in srgb, var(--accent) 22%, transparent),
+    inset 0 -8px 24px color-mix(in srgb, #000 28%, transparent),
+    0 10px 48px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.vai-planet-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 9999px;
+  translate: -50% -50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  /* Tilt the ring into an orbital plane */
+  transform: rotateX(72deg);
+  pointer-events: none;
+}
+.vai-planet-ring-a {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.vai-planet-ring-b {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.vai-planet-particle {
+  position: absolute;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--accent) 85%, #fff 15%);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 70%, transparent);
+  margin-left: -1px;
+  margin-top: -1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vai-planet-atmosphere { animation: none; }
+}
+
 /* ═══════════════════════════════════════════════════════════════
    VaiNode — the intelligence-node motif as a live status glyph.
    The dot from the brand mark, breathing while Vai thinks. Hue is
@@ -1232,6 +1296,39 @@ code, pre, kbd {
 }
 @media (prefers-reduced-motion: reduce) {
   .vai-node--thinking::after { animation: none; opacity: 0.4; transform: scale(1.2); }
+}
+
+/* ── StatusDot — council member health (green active / amber resting / red down) ──
+   Same "alive" language as .vai-node but tone-driven by --status-tone. Only the
+   healthy/active state breathes; trouble states sit solid so the eye reads them as
+   steady-but-attention, not busy. Crisp core dot + soft halo via ::after. */
+.status-dot {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  border-radius: 9999px;
+  background: var(--status-tone, var(--color-muted));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--status-tone, var(--color-muted)) 35%, transparent);
+  transition: background 220ms var(--ease-out-expo), box-shadow 220ms var(--ease-out-expo);
+}
+.status-dot[data-status='down'] {
+  box-shadow: 0 0 6px color-mix(in oklab, var(--status-tone) 45%, transparent);
+}
+.status-dot--breathe::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: radial-gradient(circle, color-mix(in oklab, var(--status-tone) 60%, transparent), transparent 70%);
+  animation: status-dot-breathe 2.4s var(--ease-out-expo) infinite;
+}
+@keyframes status-dot-breathe {
+  0% { transform: scale(0.75); opacity: 0.8; }
+  70% { transform: scale(2); opacity: 0; }
+  100% { transform: scale(2); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-dot--breathe::after { animation: none; opacity: 0.35; transform: scale(1.25); }
 }
 
 /* ── ProcessTree — Vai's live/settled "what I did" tree ──────────────────────
@@ -1287,6 +1384,27 @@ code, pre, kbd {
   opacity: 1;
   pointer-events: auto;
 }
+
+/* Loop-aware Timeline view — phase rail with a connecting spine, mirrors the process-tree idiom. */
+.timeline-rail {
+  position: relative;
+  margin: 0;
+  padding: 0 0 0 0.35rem;
+  list-style: none;
+}
+.timeline-rail::before {
+  content: '';
+  position: absolute;
+  left: 1.05rem;
+  top: 0.85rem;
+  bottom: 0.85rem;
+  width: 1px;
+  background: color-mix(in oklab, var(--panel-border-soft) 80%, transparent);
+  pointer-events: none;
+}
+.timeline-phase {
+  position: relative;
+}
 .process-tree__copy-btn {
   display: inline-flex;
   align-items: center;
@@ -1336,30 +1454,41 @@ code, pre, kbd {
   transition: background-color 150ms ease;
 }
 .process-tree__row:hover { background: color-mix(in oklab, var(--fg) 4%, transparent); }
-/* The step currently running — just a quiet 2px spark rail on the left, no
-   full-width wash. Keeps the surface calm (one clean bordered box) while still
-   marking where Vai is right now. */
+/* The step currently running — the eye must land here instantly. A soft accent
+   wash + a breathing left rail clearly says "Vai is HERE right now", distinct from
+   the settled (checkmarked) rows above it. Token-driven; calm, not loud. */
 .process-tree__row--running {
   position: relative;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--accent) 9%, transparent),
+    color-mix(in oklab, var(--accent) 3%, transparent) 60%,
+    transparent
+  );
+  /* Static inset border for definition. The MOTION lives on the ::before rail (transform +
+     opacity only — no animated box-shadow), per the web-interface guideline against animating
+     paint-heavy properties every frame. The wash + rail + bold text already read clearly. */
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 16%, transparent);
 }
 .process-tree__row--running::before {
   content: '';
   position: absolute;
   left: -1px;
   top: 50%;
-  height: 1.05rem;
-  width: 2px;
+  height: 1.15rem;
+  width: 2.5px;
   transform: translateY(-50%);
-  border-radius: 0 2px 2px 0;
-  background: linear-gradient(to bottom, color-mix(in oklab, var(--accent) 70%, transparent), color-mix(in oklab, var(--accent) 18%, transparent));
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(to bottom, var(--accent), color-mix(in oklab, var(--accent) 30%, transparent));
+  box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 45%, transparent);
   animation: process-running-pulse 1.4s ease-in-out infinite;
 }
 @keyframes process-running-pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
+  0%, 100% { opacity: 0.6; transform: translateY(-50%) scaleY(0.9); }
+  50% { opacity: 1; transform: translateY(-50%) scaleY(1); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .process-tree__row--running::before { animation: none; opacity: 0.85; }
+  .process-tree__row--running::before { animation: none; opacity: 0.9; }
 }
 /* Child rail — connector for nested sub-steps (council members, search results). */
 .process-tree__children {

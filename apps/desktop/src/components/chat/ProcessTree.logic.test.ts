@@ -16,10 +16,13 @@ describe('buildProcessTree council rounds', () => {
           body: 'First draft text',
         }],
         councilMembers: [{
+          memberId: 'local:qwen-code',
           name: 'Qwen Code',
           topic: 'code',
           verdict: 'needs-work',
           confidence: 0.82,
+          durationMs: 1234,
+          realIntent: 'wants runnable code',
           methodLesson: 'Add runnable example',
           missingCapability: 'concrete code sample',
         }],
@@ -28,8 +31,52 @@ describe('buildProcessTree council rounds', () => {
 
     const nodes = buildProcessTree(steps);
     expect(nodes[1]?.children.length).toBeGreaterThanOrEqual(2);
-    expect(nodes[1]?.children.some((child) => child.label === 'Qwen Code')).toBe(true);
+    const qwen = nodes[1]?.children.find((child) => child.label === 'Qwen Code');
+    expect(qwen).toBeTruthy();
+    expect(qwen?.detail).toContain('1.2s');
+    expect(qwen?.children.map((child) => child.label)).toEqual(expect.arrayContaining([
+      'Submodel call',
+      'Verdict',
+      'Intent read',
+      'Missing capability',
+      'Method lesson',
+      'Fact quarantine',
+    ]));
     expect(nodes[1]?.children.some((child) => child.label === 'Draft under review')).toBe(true);
+  });
+
+  it('adds a settled activity map with stage, event, tool, and submodel inventory', () => {
+    const steps: ChatProgressStep[] = [{
+      stage: 'local-steering',
+      label: 'Local model friend returned advice',
+      status: 'done',
+      advisor: {
+        schemaVersion: 1,
+        actorId: 'local:qwen3:8b',
+        modelId: 'qwen3:8b',
+        state: 'ready',
+        taskShape: 'debugging',
+        routeGuidance: [],
+        riskFlags: ['generic-fallback-risk'],
+        retrievalHints: [],
+        confidence: 0.9,
+        durationMs: 321,
+      },
+      processLog: [{ kind: 'event', label: 'Advisor packet received' }],
+      toolRuns: [{ id: 't1', name: 'read_file', status: 'done', success: true, output: 'body' }],
+    }, {
+      stage: 'council-vai-round-1',
+      label: 'Council reviewed Vai\'s draft',
+      status: 'done',
+      councilMembers: [{ memberId: 'qwen', name: 'Qwen', verdict: 'good', confidence: 0.91, durationMs: 100 }],
+    }];
+
+    const nodes = buildProcessTree(steps, undefined, undefined, undefined, false, true);
+    expect(nodes[0]?.label).toBe('Turn activity map');
+    expect(nodes[0]?.detail).toContain('2 stages');
+    expect(nodes[0]?.children.some((child) => child.label === 'Submodels (2)')).toBe(true);
+    expect(nodes[1]?.children[0]?.label).toBe('local:qwen3:8b');
+    expect(nodes[1]?.children[0]?.detail).toContain('qwen3:8b');
   });
 
   it('nests tool runs with input and output grandchildren', () => {
@@ -61,9 +108,13 @@ describe('buildProcessTree council rounds', () => {
 
     const nodes = buildProcessTree(steps);
     expect(nodes[0]?.children).toHaveLength(2);
-    expect(nodes[0]?.children[0]?.children).toHaveLength(2);
-    expect(nodes[0]?.children[0]?.children[0]?.label).toBe('Input');
-    expect(nodes[0]?.children[0]?.children[1]?.label).toBe('Output');
+    expect(nodes[0]?.children[0]?.children).toHaveLength(3);
+    expect(nodes[0]?.children[0]?.children.map((child) => child.label)).toEqual([
+      'Tool request',
+      'Tool event',
+      'Tool response',
+    ]);
+    expect(nodes[0]?.children[0]?.detail).toBe('read · ok · 15ms');
   });
 
   it('uses stable stage-based node ids so council completion does not remount the tree', () => {
@@ -91,7 +142,7 @@ describe('buildProcessTree council rounds', () => {
     expect(buildProcessTree(done)[0]?.id).toBe('step-council-vai-round-1');
   });
 
-  it('nests process log bodies as In/Out children', () => {
+  it('nests process log bodies under specific action/artifact panels', () => {
     const steps: ChatProgressStep[] = [{
       stage: 'search',
       label: 'Found 2 sources',
@@ -103,8 +154,26 @@ describe('buildProcessTree council rounds', () => {
     }];
     const nodes = buildProcessTree(steps);
     const search = nodes[0];
-    expect(search?.children[0]?.children[0]?.label).toBe('In');
-    expect(search?.children[1]?.children[0]?.label).toBe('Out');
+    expect(search?.children[0]?.children[0]?.label).toBe('Action');
+    expect(search?.children[1]?.children[0]?.label).toBe('Artifact');
+  });
+
+  it('renders reads, shows, and events as first-class process kinds', () => {
+    const steps: ChatProgressStep[] = [{
+      stage: 'inspect',
+      label: 'Inspected the workspace',
+      status: 'done',
+      processLog: [
+        { kind: 'read', label: 'Read active file', body: 'apps/desktop/src/components/chat/ProcessTree.tsx' },
+        { kind: 'show', label: 'Showed preview state', body: 'Preview panel was open' },
+        { kind: 'event', label: 'User expanded trace', body: 'Opened process tree details' },
+      ],
+    }];
+
+    const nodes = buildProcessTree(steps);
+    expect(nodes[0]?.children.map((child) => child.detail)).toEqual(['read', 'show', 'event']);
+    expect(nodes[0]?.children.map((child) => child.children[0]?.label)).toEqual(['Read', 'Show', 'Event']);
+    expect(nodes[0]?.children.map((child) => child.kind)).toEqual(['read', 'show', 'event']);
   });
 
   it('shows pending council members as running children while deliberating', () => {

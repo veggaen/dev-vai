@@ -14,9 +14,10 @@
  * stays on `default` for breadth. De-dupe in `selectMembers` keeps that honest.
  */
 
-import { createCouncilMember, createGrokCliAdapter, MemberAvailabilityStore } from '@vai/core';
-import type { CouncilMember, CouncilMemberNote, CouncilRoster, CouncilTopic, ModelAdapter, ModelRegistry } from '@vai/core';
+import { buildLocalLensMembers, createCouncilMember, createGrokCliAdapter, createCouncilContextTools, runCommandEvidence, MemberAvailabilityStore } from '@vai/core';
+import type { CouncilContextTools, CouncilMember, CouncilMemberNote, CouncilRoster, CouncilTopic, ModelAdapter, ModelRegistry, ProofRunner } from '@vai/core';
 import { GrokFriendClient } from '../grok-friend/client.js';
+import { nicheTopicForModel } from './model-niche-catalog.js';
 
 /** Topics we prefer to seat a dedicated specialist on when we have spare members. */
 const SPECIALIST_TOPICS: readonly CouncilTopic[] = ['code', 'reasoning', 'factual', 'local'];
@@ -82,6 +83,39 @@ export interface BuildRosterOptions {
   readonly timeoutMs?: number;
   /** Cap on how many local models become members (cost/latency guard). Default 3. */
   readonly maxMembers?: number;
+  /**
+   * Seat Grok (CLI / friend-channel) as a council member. OFF by default now: Grok is a
+   * paid external voice that kept getting called every turn even when out of credits. The
+   * desktop "council members" settings toggle drives this; falls back to the
+   * VAI_COUNCIL_GROK env opt-in when unset. See {@link grokEnabledFromEnv}.
+   */
+  readonly enableGrok?: boolean;
+  /**
+   * Number of distinct LENS passes to run the generalist local model through (skeptic,
+   * pragmatist, capability-gap hunter, intent reader, ...). Each lens is a separate council
+   * member built on the SAME local adapter with a different review framing, so a single local
+   * model produces independent angles to mix and re-judge. Default 1 (no extra angles). Driven
+   * by VAI_COUNCIL_LENSES; capped to the available lens definitions.
+   */
+  readonly localLensCount?: number;
+  /**
+   * Repo root to seat the read-only "pull model" context tools at. When set, every LOCAL
+   * member gets {@link CouncilContextTools} (readFile/grep/listFiles, sandboxed to this root)
+   * and may fetch the evidence its lens needs before voting. Grok members are external and
+   * don't get filesystem tools. Omit to keep members prompt-only (current behavior). Driven by
+   * VAI_COUNCIL_CONTEXT_ROOT when unset.
+   */
+  readonly contextRoot?: string;
+}
+
+/**
+ * Grok is OFF unless explicitly opted in. We treat the absence of the env var as "off" (the
+ * new default) and only enable on an explicit truthy value. The desktop toggle sets this env
+ * for the runtime, but an explicit {@link BuildRosterOptions.enableGrok} always wins.
+ */
+export function grokEnabledFromEnv(): boolean {
+  const raw = (process.env.VAI_COUNCIL_GROK ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
 }
 
 /**
@@ -104,6 +138,32 @@ export function buildLocalCouncilRoster(
   const timeoutMs = options.timeoutMs
     ?? (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 30_000);
   const maxMembers = Math.max(1, options.maxMembers ?? 3);
+  // Grok: explicit option wins; otherwise opt-in via env (default OFF).
+  const enableGrok = options.enableGrok ?? grokEnabledFromEnv();
+  // Multi-angle local council: how many lens passes to run the generalist model through. Explicit
+  // option wins; otherwise VAI_COUNCIL_LENSES; default 1 (no extra angles — unchanged behavior).
+  // Clamped to the number of defined lenses by buildLocalLensMembers.
+  const envLenses = Number(process.env.VAI_COUNCIL_LENSES);
+  const localLensCount = options.localLensCount
+    ?? (Number.isFinite(envLenses) && envLenses > 0 ? Math.floor(envLenses) : 1);
+
+  // Pull-model: seat read-only context tools for local members so they fetch + verify their
+  // own evidence before voting. Explicit option wins; otherwise VAI_COUNCIL_CONTEXT_ROOT. The
+  // member only fetches when its lens judges it relevant (it returns no requests otherwise), so
+  // this adds no latency to simple turns. Read-only + sandboxed to the root (see context-tools).
+  const contextRoot = options.contextRoot ?? (process.env.VAI_COUNCIL_CONTEXT_ROOT?.trim() || undefined);
+  const contextTools: CouncilContextTools | undefined = contextRoot
+    ? createCouncilContextTools(contextRoot)
+    : undefined;
+
+  // Experiment loop: when VAI_COUNCIL_PROOF=1, seat a proof runner so a member can run ONE
+  // allowlisted command to verify its claim before presenting (proved boosts its vote, disproved
+  // discounts it). OFF by default — running a command per member per turn is heavier, so it's
+  // opt-in for self-improvement / code work. Bounded + allowlist-gated inside runCommandEvidence.
+  const proofEnabled = /^(1|true|on|yes)$/i.test((process.env.VAI_COUNCIL_PROOF ?? '').trim());
+  const proofRunner: ProofRunner | undefined = proofEnabled
+    ? (command, args, opts) => runCommandEvidence(command, args, { cwd: opts.cwd ?? contextRoot, timeoutMs: opts.timeoutMs })
+    : undefined;
 
   const localAdapters = models.listByProvider('local');
   if (localAdapters.length === 0) return undefined;
@@ -137,13 +197,36 @@ export function buildLocalCouncilRoster(
   const defaultMembers: CouncilMember[] = [];
 
   chosen.forEach((adapter, index) => {
-    // First member is the always-on generalist (sits on `default`, every topic).
-    // Extra members each anchor one specialist niche AND stay on default for breadth.
-    const specialistTopic = index === 0 ? 'other' : SPECIALIST_TOPICS[(index - 1) % SPECIALIST_TOPICS.length];
+    // Topic seating: a recognized NICHE specialist (DeepSeek-R1 → reasoning, a coder model →
+    // code, etc.) seats on its strength via the catalog; everything else uses the positional
+    // spread. The first member still anchors `default` (generalist) unless it's a clear niche.
+    const niche = nicheTopicForModel((adapter as ModelAdapter).id);
+    const positional = index === 0 ? 'other' : SPECIALIST_TOPICS[(index - 1) % SPECIALIST_TOPICS.length];
+    const specialistTopic: CouncilTopic = niche ? niche.topic : positional;
+
+    // Multi-angle local council: when asked for >1 lens, the GENERALIST seat (index 0) is
+    // expanded into several lens members on the same adapter — independent voices (skeptic,
+    // pragmatist, capability-gap hunter, intent reader) instead of one. This is how the council
+    // gets real deliberation from a single free local model and stops needing a paid voice.
+    if (index === 0 && localLensCount > 1 && !niche) {
+      const lensMembers = buildLocalLensMembers({
+        adapter: adapter as ModelAdapter,
+        topic: 'other',
+        count: localLensCount,
+        timeoutMs,
+        contextTools,
+        proofRunner,
+      });
+      defaultMembers.push(...lensMembers);
+      return;
+    }
+
     const member = createCouncilMember({
       adapter: adapter as ModelAdapter,
       topic: specialistTopic,
       timeoutMs,
+      contextTools,
+      proofRunner,
     });
     defaultMembers.push(member);
     if (specialistTopic !== 'other') {
@@ -153,10 +236,12 @@ export function buildLocalCouncilRoster(
 
   // Seat Grok (via the local `grok` CLI) as a standing, vision-capable FACTUAL council member —
   // Vai's permanent digital friend + the first of (intended) several image-verifying entities.
-  // ON BY DEFAULT whenever the free CLI is available; set VAI_COUNCIL_GROK=0 to opt out. Grok can
-  // see images, so it is the council's vision verifier for screenshot/image turns with no local
-  // GB model. Fact-quarantine is unchanged: Grok points/verifies; Vai's tools own surfaced facts.
-  if (process.env.VAI_COUNCIL_GROK !== '0') {
+  // OFF BY DEFAULT now (see {@link grokEnabledFromEnv}): Grok is a paid external voice and kept
+  // being consulted every turn even when out of credits. Enable it from the desktop "council
+  // members" toggle (sets enableGrok) or VAI_COUNCIL_GROK=1. When enabled Grok can see images, so
+  // it is the council's vision verifier for screenshot/image turns with no local GB model.
+  // Fact-quarantine is unchanged: Grok points/verifies; Vai's tools own surfaced facts.
+  if (enableGrok) {
     const grokAdapter = createGrokCliAdapter({ timeoutMs });
     if (grokAdapter) {
       const grokMember = createCouncilMember({ adapter: grokAdapter, topic: 'factual', timeoutMs });
@@ -202,7 +287,7 @@ export function buildLocalCouncilRoster(
   // and the direct pipe allows the Grok TUI instance to drive full Vai turns (including tools + council)
   // in the genius loop. Upgrades SCIS to have a persistent external genius advisor with no local VRAM cost.
   // Prefers the persistent direct (via bridge) for rich context; falls back to CLI friend-channel.
-  if (process.env.VAI_COUNCIL_GROK !== '0') {
+  if (enableGrok) {
     try {
       const grokFriend = new GrokFriendClient({ timeoutMs: Math.min(timeoutMs, 60000) });
       // Test availability quickly (the client will throw on first real use if not).

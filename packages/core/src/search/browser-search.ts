@@ -299,6 +299,15 @@ async function runGoogleSearch(query: string, timeoutMs: number): Promise<Google
       return { results: [], aiOverview: null };
     }
 
+    // `domcontentloaded` fires BEFORE Google's JS paints the organic results and the (lazy)
+    // AI Overview — extracting then yielded ~1 result and a null overview. Wait for the real
+    // results container to exist, then give the AI Overview a brief beat to lazy-render. Bounded
+    // and best-effort: a miss just proceeds to extraction (which still finds whatever is there).
+    await page.waitForSelector('#search a h3, #rso a h3', { timeout: 6_000 }).catch(() => undefined);
+    // Nudge the lazy AI Overview to render (it hydrates on viewport/idle) and settle.
+    await page.evaluate(() => window.scrollTo(0, 240)).catch(() => undefined);
+    await page.waitForSelector('[data-attrid="AIOverview"], [aria-label*="AI Overview" i]', { timeout: 2_500 }).catch(() => undefined);
+
     // AI Overview box (generative summary). Google renders it lazily and renames
     // its containers constantly, so we try a few stable-ish anchors and fall back
     // to scanning for the labelled block. Best-effort: any miss yields null, never

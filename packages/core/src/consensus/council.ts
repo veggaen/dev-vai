@@ -11,6 +11,8 @@
 
 import { councilPlan, governConsensus } from './seriousness.js';
 import { routeTopic, selectMembers, type CouncilRoster } from './topic-router.js';
+import { MemberAvailabilityStore, type MemberAvailability } from './member-availability.js';
+import { proofTrustWeight, type ProofStatus } from './member-experiment.js';
 import type {
   CouncilAction,
   CouncilConsensus,
@@ -57,6 +59,64 @@ const OFF_TOPIC_WEIGHT = 0.6;
 
 const VERDICT_RANK: Record<CouncilVerdict, number> = { good: 0, 'needs-work': 1, bad: 2 };
 
+/**
+ * Live, process-wide record of which council members are currently healthy vs. down and
+ * why. Updated as a side effect of every member run (success clears, failure classifies +
+ * records). The runtime reads this to give the desktop a truthful "green when active"
+ * status — no extra calls, no added turn latency: the status is a by-product of work the
+ * council already does. Pure data; safe to read at any time.
+ */
+const liveAvailability = new MemberAvailabilityStore();
+
+/** A member's live status for the UI: seated & healthy, on cooldown, or down. */
+export type MemberLiveStatus = 'available' | 'cooldown' | 'down';
+
+export interface MemberStatusSnapshot {
+  readonly memberId: string;
+  readonly status: MemberLiveStatus;
+  /** Present only when not `available`. */
+  readonly reason?: MemberAvailability['reason'];
+  readonly detail?: string;
+  readonly fixHint?: string;
+  /** True while a down member is still within its retry cooldown. */
+  readonly onCooldown?: boolean;
+}
+
+/**
+ * Live status for a set of member ids — what the council-config API hands the UI.
+ * A member with no recorded failure is `available` (green). A failed member is `down`
+ * (red); if it's still inside its retry cooldown it's reported as `cooldown` (amber)
+ * since the council is intentionally resting it rather than it being hard-failed.
+ */
+export function memberStatuses(
+  memberIds: readonly string[],
+  now: number = Date.now(),
+): MemberStatusSnapshot[] {
+  return memberIds.map((memberId) => {
+    const state = liveAvailability.get(memberId);
+    if (!state || state.status === 'available') return { memberId, status: 'available' };
+    const onCooldown = !liveAvailability.shouldTry(memberId, now);
+    return {
+      memberId,
+      status: onCooldown ? 'cooldown' : 'down',
+      reason: state.reason,
+      detail: state.detail,
+      fixHint: state.fixHint,
+      onCooldown,
+    };
+  });
+}
+
+/** User-facing fix hints for any seated member that needs the user to act (credits/auth). */
+export function councilUserActionHints(): string[] {
+  return liveAvailability.userActionHints();
+}
+
+/** Test/maintenance hook: clear all recorded availability state. */
+export function resetCouncilAvailability(): void {
+  liveAvailability.clear();
+}
+
 async function runOneMember(
   member: CouncilMember,
   input: CouncilInput,
@@ -69,8 +129,14 @@ async function runOneMember(
     timer = setTimeout(() => reject(new Error(`council member timed out after ${timeoutMs}ms`)), timeoutMs);
   });
   try {
-    return await Promise.race([member.review(input), timeout]);
+    const note = await Promise.race([member.review(input), timeout]);
+    // A returned note clears any prior down-state — the member is healthy again (green).
+    liveAvailability.recordSuccess(member.id);
+    return note;
   } catch (error) {
+    // Classify + record WHY this member is down so the council can rest it and the UI can
+    // show a truthful status with a concrete fix. By-product of the run — no extra work.
+    liveAvailability.recordFailure(member.id, member.displayName, error, now());
     return {
       memberId: member.id,
       memberName: member.displayName,
@@ -317,8 +383,11 @@ export async function convene(
   }
 
   const members = selectMembers(topic, roster);
-  // Topic-fit trust weighting: a member reviewing in its own niche counts fully.
-  const weightFor = (note: CouncilMemberNote) => (note.topic === topic ? 1 : OFF_TOPIC_WEIGHT);
+  // Trust weighting combines TWO signals: topic-fit (a member in its own niche counts fully) and
+  // PROOF (the experiment loop) — a member that ran a test and PROVED its claim counts more; one
+  // whose proof FAILED counts less. So the council leans toward verified voices over speculation.
+  const weightFor = (note: CouncilMemberNote) =>
+    (note.topic === topic ? 1 : OFF_TOPIC_WEIGHT) * proofTrustWeight(note.proof?.status as ProofStatus | undefined);
   const raw = await runCouncil(members, input, { ...options, weightFor });
   const consensus = governConsensus(raw, plan.assessment);
   return { topic, assessment: plan.assessment, convened: true, consensus };

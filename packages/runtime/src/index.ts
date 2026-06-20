@@ -112,7 +112,7 @@ function removeLockFile(): void {
 }
 
 async function main() {
-  const { app, port, vaiEngine, chatService, config, localSteeringWorker, sandboxManager } = await createServer();
+  const { app, port, vaiEngine, chatService, config, localSteeringWorker, sandboxManager, startBackgroundHydrate } = await createServer();
   const host = resolveRuntimeHost();
   assertSecureRuntimeExposure(host, config.authEnabled && config.apiKeys.length > 0);
 
@@ -181,6 +181,12 @@ async function main() {
   }
 
   await listenSingleInstance();
+
+  // Knowledge hydrate runs in the BACKGROUND now that we're listening — it used to block
+  // startup for ~14s (synchronous n-gram training). The server answers turns immediately and
+  // the corpus warms up over the next few seconds; the engine degrades gracefully while empty.
+  // Fire-and-forget: hydrateAsync yields to the event loop between batches so live turns win.
+  void startBackgroundHydrate();
 
   // Direct local channel (private 127.0.0.1 high port) for fast Grok (this .grok window) <-> Vai friendship.
   // Lighter than main server, local-only, reuses full ChatService (all intelligence).

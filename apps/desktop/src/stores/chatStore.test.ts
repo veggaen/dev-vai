@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveConversationSandboxProjectIdOption,
   isConversationWorking,
+  mergeProgressStepsForMessage,
   shouldResetSandboxOnSwitch,
 } from './chatStore.js';
 
@@ -57,5 +58,45 @@ describe('shouldResetSandboxOnSwitch — no cross-chat code leak', () => {
 
   it('does nothing when no project is currently loaded', () => {
     expect(shouldResetSandboxOnSwitch(null, 'proj-2')).toBe(false);
+  });
+});
+
+describe('mergeProgressStepsForMessage — stable process timeline identity', () => {
+  it('updates a council round in place instead of moving it below newer rounds', () => {
+    const afterRound2 = mergeProgressStepsForMessage([
+      { stage: 'council-vai-round-1', label: 'Council R1 running', status: 'done' },
+      { stage: 'vai-redraft', label: 'Vai redrafted', status: 'done' },
+      { stage: 'council-vai-round-2', label: 'Council R2 running', status: 'running' },
+    ], {
+      stage: 'council-vai-round-1',
+      label: 'Council R1 completed late',
+      status: 'done',
+      detail: 'late member result arrived',
+    });
+
+    expect(afterRound2.map((step) => step.stage)).toEqual([
+      'council-vai-round-1',
+      'vai-redraft',
+      'council-vai-round-2',
+    ]);
+    expect(afterRound2[0]?.label).toBe('Council R1 completed late');
+    expect(afterRound2[2]?.status).toBe('running');
+  });
+
+  it('appends a genuinely new round below the completed prior round', () => {
+    const steps = mergeProgressStepsForMessage([
+      { stage: 'council-vai-round-1', label: 'Council R1', status: 'done' },
+      { stage: 'vai-redraft', label: 'Vai redrafted', status: 'done' },
+    ], {
+      stage: 'council-vai-round-2',
+      label: 'Council R2',
+      status: 'running',
+    });
+
+    expect(steps.map((step) => step.stage)).toEqual([
+      'council-vai-round-1',
+      'vai-redraft',
+      'council-vai-round-2',
+    ]);
   });
 });

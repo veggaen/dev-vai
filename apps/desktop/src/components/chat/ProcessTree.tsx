@@ -47,7 +47,7 @@ function nodeTone(tone: ProcessTone | undefined): VaiNodeProps['tone'] {
 }
 
 export function ProcessTree({ steps, council, live = false, imageSteps, vaiProposedDraft, durationMs, pendingStepCount: _pendingStepCount = 0 }: ProcessTreeProps) {
-  const nodes = buildProcessTree(steps, council ?? undefined, imageSteps, vaiProposedDraft, live);
+  const nodes = buildProcessTree(steps, council ?? undefined, imageSteps, vaiProposedDraft, live, !live);
   const hasNodes = nodes.length > 0;
   const showLiveTail = live;
   const tailLabel = live ? 'Working' : 'Working';
@@ -239,7 +239,7 @@ function StepRow({
     setOpen((v) => !v);
   };
 
-  const displayLabel = live && running && node.tone === 'council'
+  const displayLabel = live && node.tone === 'council'
     ? (node.shortLabel ?? node.label)
     : node.label;
 
@@ -264,9 +264,9 @@ function StepRow({
             <ChevronRight className={`h-3 w-3 text-[color:var(--chat-muted)] transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
           )}
         </span>
-        <StepGlyph node={node} livePulse={false} />
+        <StepGlyph node={node} livePulse={running && live} />
         <span className="min-w-0 flex-1">
-          <span className={running ? 'text-[color:var(--chat-strong)]' : 'text-[color:var(--chat-muted)]'}>
+          <span className={running ? 'text-[color:var(--chat-strong)] font-medium' : 'text-[color:var(--chat-muted)]'}>
             {displayLabel}
           </span>
         {childCount > 0 && (
@@ -306,16 +306,8 @@ function StepRow({
           {node.children.length > 0 && (
             <ol className="space-y-0">
               <AnimatePresence initial={false}>
-                {visibleChildren.map((child, childIndex) => (
-                  <motion.li
-                    key={child.id}
-                    layout="position"
-                    initial={live && running && childIndex === visibleChildren.length - 1 ? { opacity: 0, y: 2 } : false}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.14, ease }}
-                  >
-                    <ChildRow node={child} allNodes={allNodes} live={live} parentRunning={running} expandAll={expandAll} />
-                  </motion.li>
+                {visibleChildren.map((child) => (
+                  <ChildRow key={child.id} node={child} allNodes={allNodes} live={live} parentRunning={running} expandAll={expandAll} />
                 ))}
               </AnimatePresence>
             </ol>
@@ -363,7 +355,7 @@ function ChildRow({
             <ChevronRight className={`h-3 w-3 text-[color:var(--chat-muted)] transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
           )}
         </span>
-        <StepGlyph node={node} small livePulse={false} />
+        <StepGlyph node={node} small livePulse={running && live} />
         <span className="min-w-0 flex-1 text-[11px]">
           <span className={running ? 'text-[color:var(--chat-strong)]' : 'text-[color:var(--chat-body)]'}>
             {node.label}
@@ -394,14 +386,7 @@ function ChildRow({
             <ol className="space-y-0">
               <AnimatePresence initial={false}>
                 {visibleChildren.map((child) => (
-                  <motion.li
-                    key={child.id}
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.14, ease }}
-                  >
-                    <ChildRow node={child} allNodes={allNodes} live={live} parentRunning={running || parentRunning} expandAll={expandAll} />
-                  </motion.li>
+                  <ChildRow key={child.id} node={child} allNodes={allNodes} live={live} parentRunning={running || parentRunning} expandAll={expandAll} />
                 ))}
               </AnimatePresence>
             </ol>
@@ -413,7 +398,7 @@ function ChildRow({
 }
 
 function ProcessNotePanel({ label, body }: { label: string; body: string }) {
-  const ioLabel = /^(In|Out|Input|Output|Response|Result|Details)$/i.test(label) ? label : 'Details';
+  const ioLabel = processPanelDisplayLabel(label);
   const [copied, setCopied] = useState(false);
   const copyBody = useCallback(async () => {
     const ok = await copyProcessText(body);
@@ -446,6 +431,15 @@ function ProcessNotePanel({ label, body }: { label: string; body: string }) {
   );
 }
 
+function processPanelDisplayLabel(label: string): string {
+  const normalized = label.trim();
+  if (/^(In|Out|Input|Output|Request|Response|Result|Details|Summary)$/i.test(normalized)) return normalized;
+  if (/^(Thought|Read|Action|Event|Show|Artifact|Feedback|Verdict)$/i.test(normalized)) return normalized;
+  if (/^Tool (request|event|response|call)$/i.test(normalized)) return normalized;
+  if (/^(Step context|Quality contract|Route hints|Risk flags|Retrieval hints|Advisor confidence)$/i.test(normalized)) return normalized;
+  return 'Details';
+}
+
 function StepGlyph({ node, small, livePulse = false }: { node: ProcessNode; small?: boolean; livePulse?: boolean }) {
   const px = small ? 12 : 14;
   if (node.status === 'done') {
@@ -466,7 +460,9 @@ function StepGlyph({ node, small, livePulse = false }: { node: ProcessNode; smal
 }
 
 function buildSummaryLine(nodes: readonly ProcessNode[], durationMs?: number): string {
-  const labels = nodes.map((n) => n.shortLabel ?? n.label);
+  const labels = nodes
+    .filter((n) => n.kind !== 'activity-map')
+    .map((n) => n.shortLabel ?? n.label);
   if (labels.length === 0) return durationMs !== undefined ? `Worked for ${formatMs(durationMs)}` : 'Answered';
   if (labels.length <= 3) return labels.join(' · ');
   return `${labels.slice(0, 2).join(' · ')} · +${labels.length - 2} more`;

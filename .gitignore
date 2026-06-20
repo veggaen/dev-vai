@@ -103,3 +103,7 @@ vai.db-wal
 
 # TypeScript incremental build info
 *.tsbuildinfo
+
+# improve-loop generated corpus DB
+scripts/improve-loop/.corpus.sqlite
+scripts/improve-loop/*.sqlite

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TurnProcessSection } from './TurnProcessSection.js';
+import { ProcessTree } from './ProcessTree.js';
 import type { ChatProgressStep } from '../../stores/chatStore.js';
 
 describe('TurnProcessSection', () => {
@@ -28,5 +29,30 @@ describe('TurnProcessSection', () => {
     const html = renderToStaticMarkup(<TurnProcessSection isStreaming steps={steps} />);
     expect(html).toContain('process-tree');
     expect(html).toContain('Working through it');
+  });
+
+  it('keeps Council R1 visible when Council R2 is added below it live', () => {
+    const steps: ChatProgressStep[] = [
+      {
+        stage: 'council-vai-round-1',
+        label: 'Council asked Vai to revise',
+        status: 'done',
+      },
+      {
+        stage: 'vai-redraft',
+        label: 'Vai redrafted from council feedback',
+        status: 'done',
+      },
+      {
+        stage: 'council-vai-round-2',
+        label: 'Council re-reviewing the revised draft',
+        status: 'running',
+      },
+    ];
+
+    const html = renderToStaticMarkup(<ProcessTree live steps={steps} />);
+    expect(html).toContain('Council R1');
+    expect(html).toContain('Council R2');
+    expect(html.indexOf('Council R1')).toBeLessThan(html.indexOf('Council R2'));
   });
 });

@@ -10,18 +10,12 @@
 
 import type {
   ConversationScore,
-  SubScore,
   TurnPair,
-  CurvePoint,
-  AntiPatternDetection,
-  SpeakingDimensionScores,
 } from './conversation-scorer.js';
 import type {
   CognitiveLesson,
-  AggregatedPattern,
-  ContextInjection,
 } from './learning-extractor.js';
-import type { EvalRunSummary, EvalExpectation } from './types.js';
+import type { EvalRunSummary } from './types.js';
 import { computeGrade } from './types.js';
 
 /* ═══════════════════════════════════════════════════════════════ */

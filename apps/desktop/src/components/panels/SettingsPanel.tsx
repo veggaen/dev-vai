@@ -11,8 +11,11 @@ import { useChatStore } from '../../stores/chatStore.js';
 import { useCursorStore } from '../../stores/cursorStore.js';
 import { useVinextStore, type VinextState } from '../../stores/vinextStore.js';
 import { BuildStatusBadge } from '../BuildStatusBadge.js';
+import { StatusDot } from '../brand/StatusDot.js';
+import { presentStatus, rosterHasTrouble } from '../brand/StatusDot.logic.js';
 import { KnowledgeEngineMetrics } from './KnowledgeEngineMetrics.js';
 import { apiFetch } from '../../lib/api.js';
+import { isTimelineViewEnabled, setTimelineViewEnabled } from '../../lib/timeline-flag.js';
 import { MODE_DESCRIPTIONS } from '../../stores/layoutStore.js';
 import {
   applyThemeById,
@@ -117,6 +120,23 @@ export function SettingsPanel() {
     setThemeEditingBaseId(id);
   }, [setThemeEditingBaseId]);
   const [auditPrompt, setAuditPrompt] = useState('Audit this project for correctness, regressions, and architecture risks.');
+  const [councilConfig, setCouncilConfig] = useState<{
+    enabled: boolean;
+    enableGrok: boolean;
+    localLensCount: number;
+    activeMembers: {
+      id: string;
+      name: string;
+      topic?: string;
+      status?: 'available' | 'cooldown' | 'down';
+      reason?: string;
+      detail?: string;
+      fixHint?: string;
+    }[];
+    actionHints?: string[];
+  } | null>(null);
+  const [councilSaving, setCouncilSaving] = useState(false);
+  const [timelineView, setTimelineViewState] = useState(isTimelineViewEnabled);
   const [_expandedResults, _setExpandedResults] = useState<Set<string>>(new Set());
   const [_launchingTargetId, setLaunchingTargetId] = useState<string | null>(null);
 
@@ -137,6 +157,46 @@ export function SettingsPanel() {
     void fetchPeers(persistentProjectId);
     void fetchAudits(persistentProjectId);
   }, [persistentProjectId, fetchAudits, fetchCompanionClients, fetchPeers]);
+
+  useEffect(() => {
+    if (activeTab !== 'engine' || !showOwnerFeatures) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await apiFetch('/api/council/config');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setCouncilConfig(data);
+      } catch {
+        // council config is best-effort; the card simply stays hidden if unreachable
+      }
+    };
+    void load();
+    // Member status is a by-product of the convene loop, so it only changes as turns run.
+    // Poll while the card is visible so "green when active" stays truthful instead of a
+    // stale first-load snapshot (the exact edge case the council flagged). Cheap read.
+    const timer = window.setInterval(() => void load(), 8_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [activeTab, showOwnerFeatures]);
+
+  const updateCouncilConfig = useCallback(async (patch: { enableGrok?: boolean; localLensCount?: number; enabled?: boolean }) => {
+    setCouncilSaving(true);
+    try {
+      const res = await apiFetch('/api/council/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error('save failed');
+      const data = await res.json();
+      setCouncilConfig(data);
+      toast.success('Council updated');
+    } catch {
+      toast.error('Unable to update council');
+    } finally {
+      setCouncilSaving(false);
+    }
+  }, []);
 
   const ideClientStatus = useMemo(() => {
     const ONLINE_THRESHOLD = 30 * 60_000;
@@ -668,6 +728,128 @@ export function SettingsPanel() {
               </div>
             </SettingsCard>
           </SettingsSection>
+
+          <SettingsSection
+            title="Turn process view"
+            description="How each turn's work is shown in chat. Timeline groups it into phases, deliberation rounds, approval gates, and a lane of notes for improving Vai."
+          >
+            <SettingsCard>
+              <SettingsSwitch
+                checked={timelineView}
+                onChange={(on) => {
+                  setTimelineViewEnabled(on);
+                  setTimelineViewState(on);
+                  toast.success(on ? 'Timeline view on' : 'Classic process tree');
+                }}
+                label="Loop-aware timeline"
+                description={timelineView
+                  ? 'Showing phases, rounds, gates, and the self-improvement notes lane.'
+                  : 'Showing the classic top-down process tree.'}
+              />
+            </SettingsCard>
+          </SettingsSection>
+
+          {councilConfig && (
+            <SettingsSection
+              title="Council members"
+              description="Who deliberates on each substantive turn. Local lenses run the on-device model from several angles; Grok is an external paid voice (off by default)."
+            >
+              <SettingsCard className="space-y-3">
+                <SettingsSwitch
+                  checked={councilConfig.enableGrok}
+                  onChange={(on) => void updateCouncilConfig({ enableGrok: on })}
+                  label="Grok (external)"
+                  description={councilConfig.enableGrok
+                    ? 'Seated. Calls the Grok CLI / friend-channel — uses credits.'
+                    : 'Off. Enable only when you have Grok credits and want its voice.'}
+                />
+                <SettingsField label={`Local lens passes · ${councilConfig.localLensCount}`}>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[1, 2, 3, 4].map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        disabled={councilSaving}
+                        onClick={() => void updateCouncilConfig({ localLensCount: n })}
+                        className={`rounded-lg border px-3 py-1.5 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                          councilConfig.localLensCount === n
+                            ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--fg)]'
+                            : 'border-[color:var(--border)] text-[color:var(--color-muted)]'
+                        }`}
+                      >
+                        {n === 1 ? '1 (single)' : `${n} angles`}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-[10px] leading-4 text-[color:var(--color-muted)]">
+                    More angles = the local model reviews as skeptic, pragmatist, capability-gap hunter, and intent reader — independent voices mixed and re-judged. Higher = slower + more VRAM.
+                  </p>
+                </SettingsField>
+                {councilConfig.activeMembers.length > 0 && (
+                  <div className="border-t border-[color:var(--border)] pt-2.5">
+                    <div className="mb-2 flex items-center justify-between">
+                      <div className="text-[10px] font-medium uppercase tracking-wide text-[color:var(--color-muted)]">
+                        Seated voices ({councilConfig.activeMembers.length})
+                      </div>
+                      {(() => {
+                        const statuses = councilConfig.activeMembers.map((m) => m.status);
+                        const trouble = rosterHasTrouble(statuses);
+                        const allActive = statuses.every((s) => (s ?? 'available') === 'available');
+                        return (
+                          <span
+                            className="inline-flex items-center gap-1.5 text-[10px] font-medium"
+                            style={{ color: trouble ? 'var(--tone-warn)' : allActive ? 'var(--tone-good)' : 'var(--color-muted)' }}
+                          >
+                            <StatusDot status={trouble ? 'cooldown' : 'available'} size={7} />
+                            {trouble ? 'Some resting' : allActive ? 'All active' : 'Idle'}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      {councilConfig.activeMembers.map((m) => {
+                        const p = presentStatus(m.status);
+                        return (
+                          <div
+                            key={m.id}
+                            className="group flex items-center gap-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--panel-bg-muted)] px-2.5 py-1.5 transition-colors hover:border-[color:var(--selection-border)]"
+                            title={m.fixHint ?? p.title}
+                          >
+                            <StatusDot status={m.status} size={8} />
+                            <span className="min-w-0 flex-1 truncate text-[11px] text-[color:var(--fg)]">{m.name}</span>
+                            {m.topic && m.topic !== 'other' && (
+                              <span className="rounded border border-[color:var(--border)] px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-[color:var(--color-muted)]">
+                                {m.topic}
+                              </span>
+                            )}
+                            <span
+                              className="text-[10px] font-medium tabular-nums"
+                              style={{ color: `var(${p.toneVar})` }}
+                            >
+                              {p.label}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {councilConfig.actionHints && councilConfig.actionHints.length > 0 && (
+                      <div
+                        className="mt-2 space-y-1 rounded-lg px-2.5 py-1.5"
+                        style={{
+                          border: '1px solid color-mix(in srgb, var(--tone-warn) 30%, transparent)',
+                          background: 'color-mix(in srgb, var(--tone-warn) 8%, transparent)',
+                        }}
+                      >
+                        {councilConfig.actionHints.map((hint, i) => (
+                          <p key={i} className="text-[10px] leading-4 text-[color:var(--fg)]">{hint}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </SettingsCard>
+            </SettingsSection>
+          )}
 
           <SettingsSection title="Memory health" description="Ingest and retrieval diagnostics for the knowledge engine.">
             <SettingsCard>
