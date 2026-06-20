@@ -35,6 +35,15 @@ export interface ChatRequest {
   readonly modelOverride?: string;
   /** When true, Vai will NOT learn from this exchange (protective parenting mode) */
   readonly noLearn?: boolean;
+  /**
+   * Per-call model residency hint for LOCAL models (Ollama `keep_alive`). Overrides the
+   * adapter default for THIS request only. Council members pass a SHORT value (e.g. '20s')
+   * so each council model is evicted promptly after its turn — on a single consumer GPU
+   * that keeps only one council model resident at a time, trading latency for VRAM safety
+   * (the "seat all models, take longer instead of crash" contract). Ignored by hosted
+   * adapters. Accepts any Ollama keep_alive form ('20s', '5m', '0' = unload now, '-1' = never).
+   */
+  readonly keepAlive?: string;
 }
 
 export interface TokenUsage {

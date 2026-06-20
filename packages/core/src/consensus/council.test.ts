@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { reachConsensus, runCouncil, convene, toCouncilThinking } from './council.js';
+import { reachConsensus, runCouncil, convene, toCouncilThinking, runCouncilStreaming } from './council.js';
 import { routeTopic, selectMembers } from './topic-router.js';
 import { createCouncilMember, parseCouncilNote } from './member.js';
 import type { CouncilInput, CouncilMember, CouncilMemberNote } from './types.js';
@@ -170,6 +170,37 @@ describe('runCouncil / convene', () => {
     const { topic, consensus } = await convene(INPUT, { default: [member] });
     expect(topic).toBe('local');
     expect(consensus.outcome).toBe('act');
+  });
+
+  it('overall deadline stops asking new members but always hears the first (anti-stall)', async () => {
+    // A controllable clock: each note bumps the clock past the deadline so member 2+ is
+    // skipped — the buffered answer ships from member 1 instead of waiting on the panel.
+    let clock = 1000;
+    const advancingReview = (id: string) => async () => { clock += 100; return note({ verdict: 'good', memberId: id }); };
+    const members: CouncilMember[] = [
+      { id: 'm1', displayName: 'M1', topic: 'local', review: advancingReview('m1') },
+      { id: 'm2', displayName: 'M2', topic: 'local', review: advancingReview('m2') },
+      { id: 'm3', displayName: 'M3', topic: 'local', review: advancingReview('m3') },
+    ];
+    const stream = runCouncilStreaming(members, INPUT, { now: () => clock, overallDeadlineMs: 50 });
+    let iter = await stream.next();
+    while (!iter.done) iter = await stream.next();
+    const consensus = iter.value;
+    // First member always heard; the deadline (50ms, already blown after m1's +100) cuts the rest.
+    expect(consensus.memberIds).toEqual(['m1']);
+  });
+
+  it('with no overall deadline, every member is heard', async () => {
+    let clock = 1000;
+    const advancingReview = (id: string) => async () => { clock += 100; return note({ verdict: 'good', memberId: id }); };
+    const members: CouncilMember[] = [
+      { id: 'm1', displayName: 'M1', topic: 'local', review: advancingReview('m1') },
+      { id: 'm2', displayName: 'M2', topic: 'local', review: advancingReview('m2') },
+    ];
+    const stream = runCouncilStreaming(members, INPUT, { now: () => clock });
+    let iter = await stream.next();
+    while (!iter.done) iter = await stream.next();
+    expect([...iter.value.memberIds].sort()).toEqual(['m1', 'm2']);
   });
 });
 

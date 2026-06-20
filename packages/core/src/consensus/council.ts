@@ -49,6 +49,16 @@ export interface RunCouncilOptions {
    * backends. Override via VAI_COUNCIL_CONCURRENCY at the call site.
    */
   readonly concurrency?: number;
+  /**
+   * Overall WALL-CLOCK budget (ms) for the whole streaming convene, across all members.
+   * Once spent, no further members are asked and consensus is built from the notes
+   * already collected. This is what stops a panel of slow cold models (e.g. all installed
+   * models incl. a thinking model) from holding the user's buffered answer hostage for
+   * minutes — the council is advisory, so it must yield the floor when its time is up.
+   * Undefined = no overall cap (only per-member `timeoutMs` applies). Used by the chat
+   * loop's VAI_COUNCIL_LOOP_BUDGET_MS.
+   */
+  readonly overallDeadlineMs?: number;
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -315,8 +325,13 @@ export async function* runCouncilStreaming(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const now = options.now ?? Date.now;
   const partialNotes: CouncilMemberNote[] = [];
+  // Overall wall-clock budget: once spent, stop asking new members and finalize from the
+  // notes we have. The first member is ALWAYS asked (so a single voice is always heard);
+  // the deadline only gates whether to start the NEXT one.
+  const deadline = options.overallDeadlineMs !== undefined ? now() + options.overallDeadlineMs : undefined;
 
   for (let index = 0; index < members.length; index++) {
+    if (deadline !== undefined && index > 0 && now() >= deadline) break;
     const member = members[index];
     yield {
       pendingMember: { name: member.displayName, id: member.id },

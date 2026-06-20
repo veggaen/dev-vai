@@ -5,7 +5,7 @@ import type { ChatProgressStep, CouncilThinkingUI } from '../../stores/chatStore
 import { useProcessChildReveal } from '../../hooks/useProcessChildReveal.js';
 import { useAnimatedEllipsis } from '../../hooks/useAnimatedEllipsis.js';
 import { VaiNode, type VaiNodeProps } from '../brand/VaiNode.js';
-import { buildProcessTree, isExpandable, type ProcessNode, type ProcessTone } from './ProcessTree.logic.js';
+import { buildProcessTree, isExpandable, shouldAutoExpand, type ProcessNode, type ProcessTone } from './ProcessTree.logic.js';
 import { ProcessTreeCopyActions } from './ProcessTreeCopyActions.js';
 import { copyProcessText } from './ProcessTree.copy.js';
 
@@ -213,25 +213,21 @@ function StepRow({
   const [open, setOpen] = useState(false);
   const childCount = node.children.length;
   const rowElapsed = useRowElapsed(running && live);
-  const autoExpandCouncil = live && running && node.tone === 'council';
-  const streamChildren = autoExpandCouncil && open;
+  // Stream the ACTIVE step open, whatever it is — not just council. The latest running
+  // step auto-expands so the user watches its detail arrive live instead of clicking
+  // each node to see its final element. A user toggle always wins, and a step
+  // collapses itself once it completes (keeping the finished trace quiet). Council
+  // still gets the slower drip-reveal of its member notes for readability.
+  const autoExpandRunning = live && running && expandable;
+  const autoExpandCouncil = autoExpandRunning && node.tone === 'council';
+  const streamChildren = autoExpandRunning && open;
   const visibleChildCount = useProcessChildReveal(childCount, streamChildren);
   const visibleChildren = node.children.slice(0, visibleChildCount);
 
   useEffect(() => {
-    if (expandAll && expandable) {
-      setOpen(true);
-      return;
-    }
-    if (!live || userToggledRef.current) return;
-    if (autoExpandCouncil && expandable) setOpen(true);
-    else if (node.status === 'done' && !running) setOpen(false);
-  }, [expandAll, expandable, live, autoExpandCouncil, running, node.status]);
-
-  useEffect(() => {
-    if (!live || !autoExpandCouncil || userToggledRef.current) return;
-    if (childCount > 0) setOpen(true);
-  }, [childCount, live, autoExpandCouncil]);
+    const next = shouldAutoExpand({ live, expandable, status: node.status, expandAll, userToggled: userToggledRef.current });
+    if (next !== null) setOpen(next);
+  }, [expandAll, expandable, live, node.status, childCount]);
 
   const toggle = () => {
     if (!expandable) return;
@@ -332,21 +328,25 @@ function ChildRow({
   expandAll?: boolean;
 }) {
   const expandable = isExpandable(node);
-  const [open, setOpen] = useState(expandAll && expandable);
   const running = node.status === 'running';
+  const userToggledRef = useRef(false);
+  const [open, setOpen] = useState(expandAll && expandable);
   const streamChildren = live && (running || parentRunning);
   const visibleChildCount = useProcessChildReveal(node.children.length, streamChildren);
   const visibleChildren = node.children.slice(0, visibleChildCount);
   useEffect(() => {
-    if (expandAll && expandable) setOpen(true);
-  }, [expandAll, expandable]);
+    // Reveal the deepest ACTIVE element: a running child auto-opens while live so the
+    // user sees the latest detail without drilling in; it collapses once it completes.
+    const next = shouldAutoExpand({ live, expandable, status: node.status, expandAll, userToggled: userToggledRef.current });
+    if (next !== null) setOpen(next);
+  }, [expandAll, expandable, live, node.status]);
   return (
     <li className="group/process-row">
       <div className="process-tree__row-wrap flex items-start gap-0.5">
       <button
         type="button"
         disabled={!expandable}
-        onClick={() => expandable && setOpen((v) => !v)}
+        onClick={() => { if (expandable) { userToggledRef.current = true; setOpen((v) => !v); } }}
         aria-expanded={expandable ? open : undefined}
         className={`process-tree__row min-w-0 flex-1 flex items-start gap-2 px-1 py-0.5 text-left ${expandable ? '' : 'cursor-default'} ${running ? 'process-tree__row--running' : ''}`}
       >

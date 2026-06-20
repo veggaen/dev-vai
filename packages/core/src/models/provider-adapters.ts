@@ -482,7 +482,10 @@ export class LocalOpenAICompatibleAdapter extends BaseHttpAdapter {
       model: this.profile.modelName,
       messages: request.messages.map((message) => ({ role: message.role, content: messageText(message) })),
       stream: false,
-      keep_alive: runtime.keepAlive,
+      // Per-call residency override wins (council members pass a short keep_alive so each
+      // model is evicted promptly → only one council model resident at a time on a single
+      // GPU). Falls back to the adapter default (30m) for the hot-path chat model.
+      keep_alive: request.keepAlive ?? runtime.keepAlive,
       options: {
         temperature: this.temperature(request),
         num_predict: this.maxTokens(request),

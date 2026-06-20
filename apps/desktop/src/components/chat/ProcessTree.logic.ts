@@ -27,6 +27,31 @@ export function isExpandable(node: ProcessNode): boolean {
   return node.children.length > 0 || Boolean(node.note && node.note.trim());
 }
 
+/**
+ * Auto-expand policy for a process step/child while the turn is LIVE.
+ *
+ * The user complaint this encodes: previously only council rows auto-expanded, so every
+ * other active step (search, build, verify, the proposed-answer) stayed collapsed and had
+ * to be clicked to watch. Now ANY running, expandable step streams open so the latest
+ * detail is visible without drilling in — and collapses itself once done, keeping the
+ * settled trace quiet. A user toggle always wins over this. Pure so it can be unit-tested
+ * without a DOM (desktop tests run in node).
+ */
+export function shouldAutoExpand(params: {
+  live: boolean;
+  expandable: boolean;
+  status: ProcessNode['status'];
+  expandAll?: boolean;
+  userToggled?: boolean;
+}): boolean | null {
+  const { live, expandable, status, expandAll = false, userToggled = false } = params;
+  if (expandAll && expandable) return true;
+  if (userToggled) return null; // user decided — don't override
+  if (live && status === 'running' && expandable) return true; // stream the active step open
+  if (status === 'done') return false; // a finished step folds away
+  return null; // no change
+}
+
 function toneForStage(stage: string): ProcessTone {
   if (stage.startsWith('tool-batch')) return 'tool';
   if (stage.startsWith('council')) return 'council';

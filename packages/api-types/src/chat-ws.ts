@@ -40,6 +40,15 @@ export const chatWebSocketInboundSchema = z
     mode: z.enum(['chat', 'agent', 'builder', 'plan', 'debate']).optional(),
     /** Explicit "Image" input mode — when true the turn is answered with a generated image. */
     imageMode: z.boolean().optional(),
+    /**
+     * How much deliberation the user wants on THIS turn (composer depth control):
+     *  - 'quick'    → ship the first good draft; skip the advisory council loop & escalation.
+     *  - 'balanced' → default; one council review + bounded redraft within a normal budget.
+     *  - 'deep'     → full multi-pass council (all seated models, thinking models included),
+     *                 round-2 re-review, larger wall-clock budget. Slower but most thorough.
+     * Maps to council budget + how many passes are allowed in the chat service.
+     */
+    processDepth: z.enum(['quick', 'balanced', 'deep']).optional(),
     // Timestamped evidence supplied by the VS Code companion. The runtime only
     // incorporates matching fields while this capture is fresh.
     editorContext: companionContextEvidenceSchema.refine(

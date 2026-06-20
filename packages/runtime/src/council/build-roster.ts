@@ -168,23 +168,49 @@ export function buildLocalCouncilRoster(
   const localAdapters = models.listByProvider('local');
   if (localAdapters.length === 0) return undefined;
 
-  // Stable order: cheaper/smaller first so the generalist seat is predictable.
-  const chosen = [...localAdapters].slice(0, maxMembers);
+  // Selection order matters when maxMembers caps the panel: a recognized NICHE
+  // specialist (DeepSeek-R1 → reasoning, a coder model → code) must win a seat over a
+  // generic generalist, otherwise the first-discovered models fill the cap and the
+  // specialist you deliberately pulled never participates (the bug where deepseek-r1:8b
+  // sat unused behind two qwen generalists). We keep a STABLE sort: specialists first,
+  // generalists after, original order preserved within each group. The first generalist
+  // still anchors the `default` seat below. When maxMembers is large enough to seat
+  // everyone (the "all installed models" default), the sort is a no-op on membership and
+  // only affects which model anchors which topic.
+  const ranked = [...localAdapters]
+    .map((adapter, originalIndex) => ({
+      adapter,
+      originalIndex,
+      isSpecialist: nicheTopicForModel((adapter as ModelAdapter).id) !== null,
+    }))
+    .sort((a, b) => {
+      if (a.isSpecialist !== b.isSpecialist) return a.isSpecialist ? -1 : 1;
+      return a.originalIndex - b.originalIndex;
+    })
+    .map((entry) => entry.adapter);
+  const chosen = ranked.slice(0, maxMembers);
 
-  // Pre-warm council models so the FIRST real convene finds them resident, instead
-  // of paying a 15-30s cold load mid-council (the root cause of members never
-  // participating — they timed out before their first load finished, so keep_alive
-  // never kicked in). Fire-and-forget, sequential to avoid VRAM thrash, fully
-  // best-effort: a failed warm never blocks roster construction. Opt out with
-  // VAI_COUNCIL_PREWARM=0.
-  if (process.env.VAI_COUNCIL_PREWARM !== '0') {
+  // Pre-warm so the FIRST real convene finds a member resident instead of paying a
+  // 15-30s cold load mid-council (the root cause of members never participating — they
+  // timed out before their first load finished). ANTI-CRASH: warm only the FIRST member
+  // (the anchor) and with a SHORT keep_alive, so we don't pin every installed model in
+  // VRAM at boot — with "seat all models" that would be the combined-load crash. The
+  // remaining members load lazily on their turn and evict promptly (short keep_alive in
+  // member.review), so only one council model is resident at a time. Set
+  // VAI_COUNCIL_PREWARM=all to warm every member (only safe with plenty of VRAM), or
+  // VAI_COUNCIL_PREWARM=0 to disable.
+  const prewarmMode = (process.env.VAI_COUNCIL_PREWARM ?? '').trim().toLowerCase();
+  if (prewarmMode !== '0') {
+    const toWarm = prewarmMode === 'all' ? chosen : chosen.slice(0, 1);
+    const warmKeepAlive = process.env.VAI_COUNCIL_KEEP_ALIVE?.trim() || '20s';
     void (async () => {
-      for (const adapter of chosen) {
+      for (const adapter of toWarm) {
         try {
           await (adapter as ModelAdapter).chat({
             messages: [{ role: 'user', content: 'ok' }],
             temperature: 0,
             maxTokens: 1,
+            keepAlive: warmKeepAlive,
           });
         } catch {
           // ignore — warming is opportunistic

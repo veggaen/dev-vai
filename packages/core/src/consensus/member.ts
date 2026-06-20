@@ -257,6 +257,13 @@ export function createCouncilMember(options: CouncilMemberOptions): CouncilMembe
           temperature,
           maxTokens,
           signal: controller.signal,
+          // Anti-crash: evict this council model promptly after its turn so the next
+          // member's model can load without co-residing in VRAM. With the council running
+          // sequentially, this keeps only ONE council model resident at a time on a single
+          // consumer GPU — the "seat all models, take longer instead of crash" contract.
+          // Override window via VAI_COUNCIL_KEEP_ALIVE (default 20s — long enough that a
+          // member retried within the same turn reuses the resident model).
+          keepAlive: process.env.VAI_COUNCIL_KEEP_ALIVE?.trim() || '20s',
         });
         const parsedNote = parseCouncilNote(response.message.content, {
           memberId: id, memberName: displayName, topic, durationMs: Math.max(0, now() - startedAt),
