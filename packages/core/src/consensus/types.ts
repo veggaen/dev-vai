@@ -201,6 +201,13 @@ export interface CouncilMember {
   /** The niche this member is trusted for. */
   readonly topic: CouncilTopic;
   readonly review: (input: CouncilInput) => Promise<CouncilMemberNote | null>;
+  /**
+   * True for a reasoning model (DeepSeek-R1 et al.) that emits a long chain-of-thought
+   * before answering. The council's OUTER per-member timeout (`runOneMember`) extends
+   * for these so they aren't aborted mid-think — the internal review budget alone is not
+   * enough because a separate Promise.race cap also bounds the call.
+   */
+  readonly slowThinking?: boolean;
 }
 
 /**

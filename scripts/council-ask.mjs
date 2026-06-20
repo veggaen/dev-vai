@@ -38,11 +38,17 @@ const ws = new WebSocket(wsUrl);
 const startedAt = Date.now();
 let text = '';
 let council = null;
-const timer = setTimeout(() => { console.error('timeout 220s'); ws.close(); process.exit(2); }, 220_000);
+// Deep-depth convenes (web search + Vai draft + sequential members incl. a slow reasoning
+// model) can run several minutes; give the client room so it captures the full council.
+const CLIENT_TIMEOUT_MS = Number(process.env.COUNCIL_ASK_TIMEOUT_MS) || 360_000;
+const timer = setTimeout(() => { console.error(`timeout ${Math.round(CLIENT_TIMEOUT_MS / 1000)}s`); ws.close(); process.exit(2); }, CLIENT_TIMEOUT_MS);
 
 ws.on('open', () => ws.send(JSON.stringify({
   conversationId: `council-ask-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   content, modelId: 'vai:v0', mode: 'chat', allowLearn: false,
+  // Deep depth = the 180s council budget, so slow reasoning members (DeepSeek-R1) have
+  // room to actually contribute instead of being cut off by the 45s 'balanced' cap.
+  processDepth: 'deep',
 })));
 
 ws.on('message', (raw) => {

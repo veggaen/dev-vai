@@ -243,6 +243,10 @@ export function createCouncilMember(options: CouncilMemberOptions): CouncilMembe
     id,
     displayName,
     topic,
+    // Surfaced so the council's OUTER per-member timeout extends for this member too — the
+    // internal review budget below is not enough on its own (a separate Promise.race in
+    // runOneMember also bounds the call, and at 30s it aborted DeepSeek mid-think).
+    slowThinking: isThinkingModel,
     async review(input: CouncilInput): Promise<CouncilMemberNote | null> {
       const startedAt = now();
       const controller = new AbortController();
