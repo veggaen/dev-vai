@@ -38541,9 +38541,26 @@ app.listen(3000, () => console.log('Server running'));
    * Each algorithm has the ONE correct textbook implementation.
    */
   private tryAlgorithmCodeGen(input: string): string | null {
-    // Must look like a code generation request
-    const codeIntent = /(?:write|implement|create|code|generate|make|build|show|give)\s+/i.test(input)
-      || /(?:how\s+(?:to|do\s+(?:i|you))\s+(?:implement|write|create|code|make|build))/i.test(input);
+    // Must look like a code generation request. The old gate matched a bare build
+    // verb ("make"/"create") ANYWHERE — so a prose/architect prompt that merely
+    // *contained* "creating" ("...tasked with creating a complete spec...") or an
+    // idea question fell into the algorithm-template lane and got answered with a
+    // Python snippet (the "what is a good idea / how to tell if it's unique" →
+    // combinations-snippet hijack). Require the build verb to actually be asking for
+    // CODE: a code/algorithm/function noun must be present, and clearly non-code
+    // framing (idea/concept/strategy/spec/architect prose) disqualifies the turn.
+    // Non-code framing: idea/concept/strategy/spec/architect prose. When the prompt
+    // is ABOUT an idea or a specification (not asking for a runnable algorithm), the
+    // algorithm-template lane is off-limits even though the text contains a build verb
+    // ("creating a spec", "make this prompt general"). This is the fix for the
+    // "what is a good idea / how to tell if it's unique" → Python-combinations hijack.
+    // "unique" only disqualifies when it's about an idea/concept/it ("is the idea
+    // unique", "unique business idea") — NOT "unique values in an array" (real code).
+    const NON_CODE_FRAMING = /\b(?:idea|ideas|concept|strateg(?:y|ies)|philosoph|advice|opinion|specification|architect|revival|revive|business|product\s+idea|what\s+makes\s+a|how\s+(?:do\s+i\s+)?(?:know|tell|decide|evaluate|judge)\s+(?:if|whether|how))\b/i;
+    const UNIQUE_IDEA = /\b(?:idea|concept|it|this|that)\s+(?:is\s+)?unique\b|\bunique\s+(?:idea|concept|business|product|approach|angle|selling)\b/i;
+    const buildVerb = /(?:write|implement|create|code|generate|make|build|show|give)\s+/i.test(input);
+    const howToCode = /(?:how\s+(?:to|do\s+(?:i|you))\s+(?:implement|write|create|code|make|build))/i.test(input);
+    const codeIntent = (buildVerb || howToCode) && !NON_CODE_FRAMING.test(input) && !UNIQUE_IDEA.test(input);
     if (!codeIntent) return null;
 
     // Detect language

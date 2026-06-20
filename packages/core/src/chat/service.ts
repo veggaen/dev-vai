@@ -832,6 +832,25 @@ export class ChatService {
    * swap the live roster via {@link setCouncilRoster} with no runtime restart.
    */
   private councilRoster?: CouncilRoster;
+  /** Deliberation depth for the in-flight turn (composer slider). Reset per turn. */
+  private turnProcessDepth: 'quick' | 'balanced' | 'deep' = 'balanced';
+
+  /**
+   * Wall-clock budget (ms) for the advisory council loop, derived from the turn's depth.
+   * 'quick' returns 0 so the loop guard ships the first draft without the council;
+   * 'balanced' is the normal bounded review; 'deep' gives slow thinking models (DeepSeek
+   * et al.) the room to actually contribute. An explicit VAI_COUNCIL_LOOP_BUDGET_MS env
+   * overrides all three (operator escape hatch).
+   */
+  private councilLoopBudgetMs(): number {
+    const envOverride = Number(process.env.VAI_COUNCIL_LOOP_BUDGET_MS);
+    if (Number.isFinite(envOverride) && envOverride > 0) return envOverride;
+    switch (this.turnProcessDepth) {
+      case 'quick': return 0;
+      case 'deep': return 180_000;
+      default: return 45_000;
+    }
+  }
 
   /** Live-swap the council roster (driven by the council-config settings route). */
   setCouncilRoster(roster: CouncilRoster | undefined): void {
@@ -1143,6 +1162,7 @@ export class ChatService {
   private async *streamConveneOnce(
     draft: CouncilDraftInput,
     stage: string,
+    overallDeadlineMs?: number,
   ): AsyncGenerator<CouncilLoopProgressStep, { thinking: CouncilThinking; consensus: CouncilConsensus } | undefined> {
     try {
       const prepared = await this.prepareCouncilConveneInput(draft);
@@ -1152,7 +1172,10 @@ export class ChatService {
       yield { stage, label: 'Council reviewing Vai\'s proposal', status: 'running' };
 
       const partialLogs: ReturnType<typeof buildMemberDeliberationLog>[] = [];
-      const stream = conveneStreaming(input, this.councilRoster!, { timeoutMs: councilTimeout });
+      // Bound the WHOLE round by the loop's remaining wall-clock budget so slow cold
+      // models can't hold the buffered answer hostage — the council yields the floor when
+      // its time is up and consensus is built from whoever answered in time.
+      const stream = conveneStreaming(input, this.councilRoster!, { timeoutMs: councilTimeout, overallDeadlineMs });
       let iter = await stream.next();
       while (!iter.done) {
         const progress = iter.value;
@@ -1209,8 +1232,15 @@ export class ChatService {
       if (!prepared) return undefined;
 
       const { input, councilTimeout, isSelfImprovement } = prepared;
+      // ANTI-CRASH: run council members SEQUENTIALLY by default (concurrency=1). With
+      // "seat all installed models", a concurrency of 3 would load three local models
+      // into VRAM at once — on a single 12GB GPU that thrashes/BSODs and was the cause
+      // of the 90s first-turn stall. Sequential keeps one council model resident at a
+      // time (paired with the short council keep_alive that evicts it after its turn):
+      // more members = a longer turn, never a VRAM pile-up. Opt into parallelism only on
+      // a box with the VRAM headroom via VAI_COUNCIL_CONCURRENCY=N.
       const envConcurrency = Number(process.env.VAI_COUNCIL_CONCURRENCY);
-      const concurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? envConcurrency : 3;
+      const concurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? envConcurrency : 1;
       const result = await convene(input, this.councilRoster!, { timeoutMs: councilTimeout, concurrency });
       if (!result.convened) return undefined;
       return await this.finalizeCouncilConvene(draft, result, isSelfImprovement);
@@ -1475,7 +1505,26 @@ export class ChatService {
       round2: 'council-vai-round-2',
     },
   ): AsyncGenerator<CouncilLoopProgressStep, CouncilLoopResult> {
-    const firstStream = this.streamConveneOnce(draft, stages.round1);
+    // Wall-clock budget for the WHOLE council loop. The buffered answer is held until the
+    // loop finishes, so an unbounded loop (4 cold sequential models + a redraft + a
+    // round-2 re-convene) can make the user wait ~90s for the first token. This caps the
+    // ADVISORY work: once the budget is spent we ship round-1's result and skip the
+    // expensive redraft + round-2 re-review. More members still get heard within the
+    // budget; they just can't hold the answer hostage. Tune via VAI_COUNCIL_LOOP_BUDGET_MS
+    // (default 45s — enough for a couple of warm members, bounded for cold ones).
+    const loopBudgetMs = this.councilLoopBudgetMs();
+    // Quick depth: skip the advisory council loop entirely and ship the draft. This is the
+    // structural fix for the multi-pass cascade running away on slow models — the user
+    // chose speed, so no council, no redraft, no round-2.
+    if (loopBudgetMs <= 0) {
+      return { finalText: draft.draftText, revised: false };
+    }
+    const loopDeadline = Date.now() + loopBudgetMs;
+    const budgetSpent = () => Date.now() >= loopDeadline;
+    const remainingBudget = () => Math.max(0, loopDeadline - Date.now());
+    // Give round-1 most of the budget; reserve a slice so a redraft + round-2 can still
+    // run when round-1 finishes quickly.
+    const firstStream = this.streamConveneOnce(draft, stages.round1, Math.round(loopBudgetMs * 0.6));
     let firstIter = await firstStream.next();
     while (!firstIter.done) {
       yield firstIter.value;
@@ -1514,6 +1563,17 @@ export class ChatService {
         first.consensus.recommendedAction === 'local-business-search' ||
         first.consensus.outcome === 'act');
     if (!shouldRedraft) {
+      return { council: first.thinking, finalText: draft.draftText, revised: false };
+    }
+    // Budget guard: if round-1 already spent the loop's wall-clock budget (slow cold
+    // models), ship round-1's verdict instead of paying for a redraft + a second full
+    // convene. The answer stops waiting; the council stays advisory.
+    if (budgetSpent()) {
+      yield {
+        stage: stages.redraft,
+        label: 'Skipped redraft — council budget spent (answer shipped)',
+        status: 'done',
+      };
       return { council: first.thinking, finalText: draft.draftText, revised: false };
     }
 
@@ -1558,13 +1618,27 @@ export class ChatService {
       processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, cleaned),
     };
 
+    // Budget gate for round-2: a re-convene asks the whole panel again. Only do it when
+    // enough budget remains for a meaningful re-review (~one member). Otherwise ship the
+    // redrafted text now — the redraft already incorporated the council's feedback, so we
+    // keep the improvement without paying for a second full panel pass on slow cold models.
+    const ROUND2_MIN_BUDGET_MS = 8_000;
+    if (remainingBudget() < ROUND2_MIN_BUDGET_MS) {
+      yield {
+        stage: stages.round2,
+        label: 'Shipped revision — council budget spent (skipped re-review)',
+        status: 'done',
+      };
+      return { council: first.thinking, finalText: cleaned, revised: true };
+    }
+
     yield {
       stage: stages.round2,
       label: 'Council re-reviewing the revised draft',
       status: 'running',
     };
 
-    const secondStream = this.streamConveneOnce({ ...workingDraft, draftText: cleaned }, stages.round2);
+    const secondStream = this.streamConveneOnce({ ...workingDraft, draftText: cleaned }, stages.round2, remainingBudget());
     let secondIter = await secondStream.next();
     while (!secondIter.done) {
       yield secondIter.value;
@@ -1881,9 +1955,14 @@ export class ChatService {
       fallbackMode?: ConversationMode;
       imageMode?: boolean;
       signal?: AbortSignal;
+      /** Per-turn deliberation depth from the composer control. Default 'balanced'. */
+      processDepth?: 'quick' | 'balanced' | 'deep';
     },
   ): AsyncGenerator<ChatChunk> {
     const turnSignal = autoCreateOptions?.signal;
+    // Per-turn deliberation depth (composer slider). Stored on the instance so the deep
+    // council loop / escalation gates can read it without threading through every frame.
+    this.turnProcessDepth = autoCreateOptions?.processDepth ?? 'balanced';
     // Auto-create on missing conversation: covers the well-known race where
     // the desktop client opens a WebSocket and sends a message before the
     // newly-created conversation row has been persisted (or after a stale
@@ -2574,9 +2653,17 @@ export class ChatService {
     }
 
     const buildMessagesForModel = (modelId: string, dispatch?: { readonly fallback?: boolean }): Message[] => {
+      // The builder fallback hint tells the model to ship runnable files (HTML/app). It must
+      // ONLY apply when this turn is actually a build — keying it off `resolvedMode === 'agent'`
+      // alone hijacked prose questions ("what makes a startup idea worth pursuing?") into an
+      // HTML document, because the live app runs in agent mode. Gate on real build intent
+      // (explicit build request, or classifyAgentBuildIntent==='build'), matching isBuilderMode.
+      const buildIntended =
+        isExplicitBuildExecutionRequest(content)
+        || (resolvedMode === 'agent' && classifyAgentBuildIntent(content) === 'build');
       const isBuilderFallback =
         dispatch?.fallback === true
-        && (turnKind === 'builder' || resolvedMode === 'builder' || resolvedMode === 'agent');
+        && (turnKind === 'builder' || resolvedMode === 'builder' || (resolvedMode === 'agent' && buildIntended));
       const requestSystemMessages: Message[] = isBuilderFallback
         ? [
           ...(securityHardenDirective ? [{ role: 'system' as const, content: securityHardenDirective }] : []),

@@ -280,11 +280,15 @@ export async function createServer(options?: ServerOptions) {
   // draft and, on a non-ship verdict, redrafts once against the council's reading
   // before release. No paid keys are read; the council stays dormant if no local
   // model is installed. Opt out with VAI_COUNCIL_ENABLED=0.
-  // Default to 2 local members: on a single consumer GPU (e.g. 12GB) the primary
-  // model + 2 small council models co-reside and run in parallel without VRAM
-  // thrash. A 3rd local model (e.g. qwen2.5:7b) doesn't fit alongside qwen3:8b and
-  // would force slow swap-in/out — so it's opt-in via VAI_COUNCIL_MAX_MEMBERS=3.
-  // Grok (external, no VRAM) still joins on top as the high-intel voice.
+  // Seat ALL installed local models by default. The council runs members
+  // SEQUENTIALLY (concurrency=1, see council.ts) — only one council model is
+  // GPU-resident at a time, and Ollama's keep_alive evicts the previous one — so on a
+  // single 12GB GPU the panel scales to every installed model by trading latency, NOT
+  // VRAM (each member adds a load+inference pass in turn). This is the "take longer
+  // instead of crash" contract: more voices = a longer turn, never a VRAM blowout. The
+  // old default of 2 left deliberately-pulled specialists (deepseek-r1) on the bench.
+  // Cap it with VAI_COUNCIL_MAX_MEMBERS=N if you want faster turns with fewer voices.
+  // Grok (external, no VRAM) still joins on top as the high-intel voice when enabled.
   // Live council config — mutable so the desktop "council members" settings can enable Grok or
   // change the number of local lens passes without a runtime restart (see /api/council/config).
   const councilConfig = {
@@ -294,7 +298,12 @@ export async function createServer(options?: ServerOptions) {
       const n = Number(process.env.VAI_COUNCIL_LENSES);
       return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
     })(),
-    maxMembers: Number(process.env.VAI_COUNCIL_MAX_MEMBERS) || 2,
+    // 0 / unset → seat all installed models (the new default). An explicit positive
+    // env value caps the panel for faster turns.
+    maxMembers: (() => {
+      const n = Number(process.env.VAI_COUNCIL_MAX_MEMBERS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : Number.POSITIVE_INFINITY;
+    })(),
   };
   // Pull-model context root: where council members may read code from to ground their notes.
   // Defaults to the runtime cwd (the source repo in dev). The builder treats this as opt-in and
@@ -428,6 +437,10 @@ export async function createServer(options?: ServerOptions) {
     const statusById = new Map(statuses.map((s) => [s.memberId, s] as const));
     return {
       ...councilConfig,
+      // Infinity isn't valid JSON (serializes to null). Report the uncapped default as
+      // 'all' so the desktop card can show "all installed models" instead of a blank.
+      maxMembers: Number.isFinite(councilConfig.maxMembers) ? councilConfig.maxMembers : 'all',
+      seatedCount: members.length,
       activeMembers: members.map((m) => {
         const s = statusById.get(m.id);
         return {

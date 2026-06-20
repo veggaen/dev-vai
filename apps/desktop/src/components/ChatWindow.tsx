@@ -43,6 +43,7 @@ import { useBackgroundProcesses, useBackgroundTaskEvents } from '../hooks/useBac
 import { CouncilProgressPanel } from './panels/CouncilProgressPanel.js';
 import { deriveLiveCouncilFromProgressSteps } from './chat/process-step-enrich.js';
 import { ComposerProcessStrip } from './chat/ComposerProcessStrip.js';
+import { ProcessDepthControl } from './chat/ProcessDepthControl.js';
 import { useComposerActivity } from '../hooks/useComposerActivity.js';
 import { resolveSendTimeWorkIntent } from '../lib/auto-sandbox-intent.js';
 import { extractFilesFromMarkdown } from '../lib/file-extractor.js';
@@ -171,6 +172,8 @@ export function ChatWindow() {
     setLearningEnabled,
     trainingWorkspace,
     setTrainingWorkspace,
+    processDepth,
+    setProcessDepth,
   } = useChatStore();
   const { selectedModelId, selectedFrontendId, frontends, ideTargets } = useSettingsStore();
   const {
@@ -1674,6 +1677,11 @@ export function ChatWindow() {
                     {hint.label}
                   </span>
                 ))}
+                <ProcessDepthControl
+                  value={processDepth}
+                  onChange={setProcessDepth}
+                  disabled={isStreaming}
+                />
               </div>
             </div>
 

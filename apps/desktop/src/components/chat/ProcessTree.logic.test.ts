@@ -1,6 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { buildProcessTree } from './ProcessTree.logic.js';
+import { buildProcessTree, shouldAutoExpand } from './ProcessTree.logic.js';
 import type { ChatProgressStep } from '../../stores/chatStore.js';
+
+describe('shouldAutoExpand — stream the active step open (any tone, not just council)', () => {
+  it('auto-expands ANY running expandable step while live', () => {
+    // The fix: a running search/build/verify step opens itself so the user watches it
+    // stream, instead of only council steps opening (the manual-click complaint).
+    expect(shouldAutoExpand({ live: true, expandable: true, status: 'running' })).toBe(true);
+  });
+
+  it('collapses a step once it completes (settled trace stays quiet)', () => {
+    expect(shouldAutoExpand({ live: true, expandable: true, status: 'done' })).toBe(false);
+  });
+
+  it('never overrides a user toggle', () => {
+    expect(shouldAutoExpand({ live: true, expandable: true, status: 'running', userToggled: true })).toBeNull();
+  });
+
+  it('does not auto-expand a non-expandable step', () => {
+    expect(shouldAutoExpand({ live: true, expandable: false, status: 'running' })).toBeNull();
+  });
+
+  it('expandAll forces expansion regardless of live/status (settled re-open)', () => {
+    expect(shouldAutoExpand({ live: false, expandable: true, status: 'done', expandAll: true })).toBe(true);
+  });
+
+  it('makes no change for a non-live running step (no spurious open)', () => {
+    expect(shouldAutoExpand({ live: false, expandable: true, status: 'running' })).toBeNull();
+  });
+});
 
 describe('buildProcessTree council rounds', () => {
   it('nests council members on each round step from progress payloads', () => {

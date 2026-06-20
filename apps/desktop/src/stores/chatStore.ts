@@ -292,6 +292,8 @@ interface ChatState {
   queuedMessage: string | null;
   /** Owner-only explicit teach toggle, only active inside training workspace. */
   learningEnabled: boolean;
+  /** Composer deliberation depth for the next turn: quick / balanced / deep. */
+  processDepth: 'quick' | 'balanced' | 'deep';
   /** Separate owner workspace for curating what can train Vai. */
   trainingWorkspace: boolean;
   /** Active broadcast ID being polled for IDE responses */
@@ -329,6 +331,8 @@ interface ChatState {
   appendToLastMessage: (text: string) => void;
   setFeedback: (messageId: string, helpful: boolean) => void;
   setLearningEnabled: (enabled: boolean) => void;
+  /** Set the composer deliberation depth for subsequent turns. */
+  setProcessDepth: (depth: 'quick' | 'balanced' | 'deep') => void;
   setTrainingWorkspace: (enabled: boolean) => void;
   startOwnerTrainingSession: (modelId?: string, mode?: ChatMode) => Promise<string | null>;
   /** Post a steering guidance (avoid/prefer a handler) so it persists and affects future routing for this convo/class/global. */
@@ -520,6 +524,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingConversationId: null,
   queuedMessage: null,
   learningEnabled: false,
+  processDepth: (() => {
+    try {
+      const saved = localStorage.getItem('vai:processDepth');
+      if (saved === 'quick' || saved === 'balanced' || saved === 'deep') return saved;
+    } catch { /* SSR / no storage */ }
+    return 'balanced' as const;
+  })(),
   trainingWorkspace: false,
   activeBroadcastId: null,
   broadcastMode: false,
@@ -877,6 +888,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       const auth = useAuthStore.getState();
       payload.allowLearn = Boolean(auth.isOwner && get().trainingWorkspace && get().learningEnabled);
+      // Per-turn deliberation depth (composer control). Omit 'balanced' (the server default).
+      const depth = get().processDepth;
+      if (depth && depth !== 'balanced') payload.processDepth = depth;
 
       ws.send(JSON.stringify(payload));
 
@@ -1440,6 +1454,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  setProcessDepth: (depth: 'quick' | 'balanced' | 'deep') => {
+    try { localStorage.setItem('vai:processDepth', depth); } catch { /* no storage */ }
+    set({ processDepth: depth });
+  },
   setLearningEnabled: (enabled: boolean) => {
     const auth = useAuthStore.getState();
     if (!auth.isOwner || !get().trainingWorkspace) {

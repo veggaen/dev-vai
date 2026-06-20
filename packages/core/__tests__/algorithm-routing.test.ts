@@ -302,6 +302,32 @@ describe('tryAlgorithmCodeGen routing matrix (Part 1: strings, arrays, sort, mat
   }
 });
 
+describe('tryAlgorithmCodeGen anti-hijack (prose/idea/spec must NOT route to a code snippet)', () => {
+  let engine: VaiEngine;
+  beforeAll(() => { engine = new VaiEngine(); });
+
+  // Regression for the "what is a good idea / how to tell if it's unique" → Python
+  // combinations-snippet hijack: a prose/idea/spec/architect prompt that merely
+  // *contains* a build verb ("creating", "make") must never fall into the
+  // algorithm-template lane. These must all return null (answered as prose elsewhere).
+  const MUST_NOT_ROUTE = [
+    'What is a good idea and how to tell if the idea is unique?',
+    'You are an expert systems architect tasked with creating complete revival specification',
+    "what's a unique business idea for norway?",
+    'how do I know if my concept is original',
+    'make this prompt into a general prompt I can use anywhere',
+    'tell me about a creative idea for a startup',
+    'what makes a good product idea',
+  ];
+
+  for (const phrasing of MUST_NOT_ROUTE) {
+    it(`does NOT route "${phrasing.slice(0, 50)}"`, () => {
+      const result = (engine as unknown as { tryAlgorithmCodeGen(input: string): string | null }).tryAlgorithmCodeGen(phrasing);
+      expect(result, `prose/idea prompt wrongly routed to a code snippet: "${phrasing}"`).toBeNull();
+    });
+  }
+});
+
 describe('tryAlgorithmCodeGen language preservation', () => {
   it('keeps a natural TypeScript helper request in a TypeScript fence', () => {
     const engine = new VaiEngine();
