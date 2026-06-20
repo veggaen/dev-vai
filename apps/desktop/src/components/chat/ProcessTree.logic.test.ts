@@ -63,7 +63,7 @@ describe('buildProcessTree council rounds', () => {
     expect(qwen).toBeTruthy();
     expect(qwen?.detail).toContain('1.2s');
     expect(qwen?.children.map((child) => child.label)).toEqual(expect.arrayContaining([
-      'Submodel call',
+      'What happened',
       'Verdict',
       'Intent read',
       'Missing capability',
@@ -103,8 +103,8 @@ describe('buildProcessTree council rounds', () => {
     expect(nodes[0]?.label).toBe('Turn activity map');
     expect(nodes[0]?.detail).toContain('2 stages');
     expect(nodes[0]?.children.some((child) => child.label === 'Submodels (2)')).toBe(true);
-    expect(nodes[1]?.children[0]?.label).toBe('local:qwen3:8b');
-    expect(nodes[1]?.children[0]?.detail).toContain('qwen3:8b');
+    expect(nodes[1]?.children[0]?.label).toBe('qwen3:8b');
+    expect(nodes[1]?.children[0]?.note).toMatch(/qwen3:8b/);
   });
 
   it('nests tool runs with input and output grandchildren', () => {
@@ -218,6 +218,6 @@ describe('buildProcessTree council rounds', () => {
     const nodes = buildProcessTree(steps);
     const councilStep = nodes.find((n) => n.id === 'step-council-vai-round-2');
     expect(councilStep?.children.some((c) => c.label === 'Grok (CLI)' && c.status === 'running')).toBe(true);
-    expect(councilStep?.children.some((c) => c.label === 'Local qwen3:8b' && c.status === 'done')).toBe(true);
+    expect(councilStep?.children.some((c) => c.label === 'qwen3:8b' && c.status === 'done')).toBe(true);
   });
 });

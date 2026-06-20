@@ -32,6 +32,16 @@ const councilNoteSchema = z.object({
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_TOKENS = 600;
+// Thinking models burn most of their budget inside their reasoning channel; they need
+// enough num_predict to FINISH thinking AND still emit the structured JSON note after it.
+// Measured on deepseek-r1:8b for a council review: the think phase alone runs ~2k tokens
+// (~8k chars). A 2k cap was cut off mid-think (done_reason=length, empty content → the
+// member was dropped). 5k leaves clear headroom for the reasoning + the JSON note.
+const THINKING_MODEL_MAX_TOKENS = 5_000;
+// Generating ~5k tokens of reasoning + the note takes longer than a non-thinking member's
+// terse reply, so a thinking model needs a higher timeout FLOOR or it aborts mid-think and
+// is excluded — the exact failure that kept deepseek-r1 out of the panel.
+const THINKING_MODEL_TIMEOUT_MS = 60_000;
 const MAX_DRAFT_CHARS = 6_000;
 
 const BASE_SYSTEM = [
@@ -214,8 +224,18 @@ export function createCouncilMember(options: CouncilMemberOptions): CouncilMembe
   const { adapter, topic, lens, contextTools, proofRunner, proofCwd } = options;
   const id = options.id ?? adapter.id;
   const displayName = options.displayName ?? adapter.displayName;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
+  // Thinking models (DeepSeek-R1 et al.) emit a long <think> block before their answer
+  // — and distilled-R1 does so even with think=false. With the normal 600-token budget
+  // the entire allowance is spent inside <think>, leaving NOTHING after stripping → an
+  // empty note → the member is silently excluded (the "deepseek seated but never
+  // responds" bug). Give thinking-capable models room to think AND emit the JSON note,
+  // plus more wall-clock (generating ~2k tokens of reasoning takes longer than a qwen's
+  // terse note). Both are floors: an explicit option/env still wins when larger.
+  const isThinkingModel = adapter.capabilities?.extendedThinking === true;
+  const baseTimeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = isThinkingModel ? Math.max(baseTimeoutMs, THINKING_MODEL_TIMEOUT_MS) : baseTimeoutMs;
+  const baseMaxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
+  const maxTokens = isThinkingModel ? Math.max(baseMaxTokens, THINKING_MODEL_MAX_TOKENS) : baseMaxTokens;
   const now = options.now ?? Date.now;
   const temperature = lens?.temperature ?? 0;
 
@@ -256,6 +276,11 @@ export function createCouncilMember(options: CouncilMemberOptions): CouncilMembe
           ],
           temperature,
           maxTokens,
+          // Reasoning models review with thinking ON: their chain-of-thought goes to a
+          // separate channel and `content` comes back as clean JSON. With it OFF a distilled
+          // DeepSeek-R1 crams reasoning into content, burns the budget, and returns empty —
+          // why it sat seated-but-silent. Non-thinking models ignore this.
+          think: isThinkingModel ? true : undefined,
           signal: controller.signal,
           // Anti-crash: evict this council model promptly after its turn so the next
           // member's model can load without co-residing in VRAM. With the council running
