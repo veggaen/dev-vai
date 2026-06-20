@@ -14,6 +14,7 @@ export type ProcessTone = 'default' | 'search' | 'council' | 'image' | 'verify' 
 export interface ProcessNode {
   id: string;
   label: string;
+  kind?: string;
   shortLabel?: string;
   detail?: string;
   note?: string;
@@ -38,9 +39,12 @@ function toneForStage(stage: string): ProcessTone {
 }
 
 function toneForProcessLog(kind: string): ProcessTone {
+  if (kind === 'read') return 'search';
+  if (kind === 'show') return 'compose';
   if (kind === 'artifact') return 'compose';
   if (kind === 'feedback' || kind === 'verdict') return 'council';
-  if (kind === 'action') return 'tool';
+  if (kind === 'action' || kind === 'tool' || kind === 'tool-response') return 'tool';
+  if (kind === 'event') return 'verify';
   return 'default';
 }
 
@@ -111,12 +115,18 @@ function formatMemberProcessBody(
   return stripAnsi(lines.join('\n\n') || member.note?.trim() || '—');
 }
 
-function panelLabelForLogKind(kind: string): string {
+export function panelLabelForLogKind(kind: string): string {
   switch (kind) {
-    case 'action': return 'In';
-    case 'artifact': return 'Out';
-    case 'feedback': return 'Response';
-    case 'verdict': return 'Result';
+    case 'thought': return 'Thought';
+    case 'read': return 'Read';
+    case 'action': return 'Action';
+    case 'event': return 'Event';
+    case 'show': return 'Show';
+    case 'artifact': return 'Artifact';
+    case 'tool': return 'Tool call';
+    case 'tool-response': return 'Tool response';
+    case 'feedback': return 'Feedback';
+    case 'verdict': return 'Verdict';
     default: return 'Details';
   }
 }
@@ -131,6 +141,7 @@ function mapProcessLog(
       ? [{
           id: `${prefix}-log-${index}-body`,
           label: panelLabelForLogKind(entry.kind),
+          kind: entry.kind,
           note: body,
           status: 'done' as const,
           tone: toneForProcessLog(entry.kind),
@@ -140,6 +151,8 @@ function mapProcessLog(
     return {
       id: `${prefix}-log-${index}-${entry.kind}`,
       label: entry.label,
+      kind: entry.kind,
+      detail: panelLabelForLogKind(entry.kind).toLowerCase(),
       status: 'done' as const,
       tone: toneForProcessLog(entry.kind),
       children,
@@ -149,6 +162,26 @@ function mapProcessLog(
 
 function mapAdvisorTrace(advisor: AdvisorTrace, prefix: string): ProcessNode[] {
   const nodes: ProcessNode[] = [];
+  nodes.push({
+    id: `${prefix}-model`,
+    label: advisor.actorId,
+    kind: 'submodel',
+    detail: `${advisor.modelId} · ${advisor.state}${advisor.durationMs !== undefined ? ` · ${formatCompactMs(advisor.durationMs)}` : ''}`,
+    note: [
+      `Actor: ${advisor.actorId}`,
+      `Model: ${advisor.modelId}`,
+      `State: ${advisor.state}`,
+      advisor.durationMs !== undefined ? `Duration: ${advisor.durationMs}ms` : undefined,
+      advisor.confidence !== undefined ? `Confidence: ${Math.round(advisor.confidence * 100)}%` : undefined,
+    ].filter(Boolean).join('\n'),
+    status: advisor.state === 'invalid' || advisor.state === 'unavailable'
+      ? 'bad'
+      : advisor.state === 'running' || advisor.state === 'background'
+        ? 'running'
+        : 'done',
+    tone: advisor.state === 'invalid' || advisor.state === 'unavailable' ? 'verify' : 'council',
+    children: [],
+  });
   if (advisor.taskShape?.trim()) {
     nodes.push({
       id: `${prefix}-task`,
@@ -236,28 +269,117 @@ function mapCouncilMembers(
   prefix: string,
 ): ProcessNode[] {
   return members.map((member) => {
+    const memberKey = member.memberId || member.name;
     if (member.pending) {
       return {
-        id: `${prefix}-council-pending-${member.name}`,
+        id: `${prefix}-council-pending-${memberKey}`,
         label: member.name,
+        kind: 'submodel',
+        detail: `${member.topic ?? 'review'} · waiting`,
         status: 'running' as const,
         tone: 'council',
-        children: [],
+        children: [{
+          id: `${prefix}-council-pending-${memberKey}-event`,
+          label: 'Submodel event',
+          kind: 'event',
+          note: [
+            `Member: ${member.name}`,
+            member.memberId ? `ID: ${member.memberId}` : undefined,
+            `Topic: ${member.topic ?? 'review'}`,
+            'Status: waiting for response',
+          ].filter(Boolean).join('\n'),
+          status: 'running' as const,
+          tone: 'council',
+          children: [],
+        }],
       };
     }
     const body = formatMemberProcessBody(member);
+    const children = buildCouncilMemberTimeline(member);
     return {
-      id: `${prefix}-council-${member.name}`,
+      id: `${prefix}-council-${memberKey}`,
       label: member.name,
+      kind: 'submodel',
       detail: member.failed
         ? 'no response'
-        : `${member.verdict} @ ${Math.round(member.confidence * 100)}%`,
+        : `${member.verdict} @ ${Math.round(member.confidence * 100)}%${member.durationMs !== undefined ? ` · ${formatCompactMs(member.durationMs)}` : ''}`,
       note: body,
       status: verdictTone(member.verdict, member.failed),
       tone: 'council',
-      children: [],
+      children,
     };
   });
+}
+
+function buildCouncilMemberTimeline(
+  member: NonNullable<ChatProgressStep['councilMembers']>[number],
+): ProcessNode[] {
+  const memberKey = member.memberId || member.name;
+  const nodes: ProcessNode[] = [{
+    id: `${memberKey}-submodel-call`,
+    label: 'Submodel call',
+    kind: 'event',
+    note: [
+      `Member: ${member.name}`,
+      member.memberId ? `ID: ${member.memberId}` : undefined,
+      `Topic: ${member.topic ?? 'review'}`,
+      member.durationMs !== undefined ? `Duration: ${member.durationMs}ms` : undefined,
+      member.failed ? 'Status: failed/no usable note' : 'Status: returned structured review',
+    ].filter(Boolean).join('\n'),
+    status: member.failed ? 'bad' : 'done',
+    tone: 'council',
+    children: [],
+  }, {
+    id: `${memberKey}-verdict`,
+    label: 'Verdict',
+    kind: 'verdict',
+    note: [
+      `Verdict: ${member.verdict}`,
+      `Confidence: ${Math.round(member.confidence * 100)}%`,
+      member.suggestedAction ? `Suggested action: ${member.suggestedAction}` : undefined,
+    ].filter(Boolean).join('\n'),
+    status: verdictTone(member.verdict, member.failed),
+    tone: 'council',
+    children: [],
+  }];
+
+  if (member.realIntent?.trim()) nodes.push(memberTimelineNode(memberKey, 'Intent read', 'read', member.realIntent, 'default'));
+  if (member.hiddenMeaning?.trim()) nodes.push(memberTimelineNode(memberKey, 'Hidden meaning', 'thought', member.hiddenMeaning, 'default'));
+  if (member.missingCapability?.trim()) nodes.push(memberTimelineNode(memberKey, 'Missing capability', 'event', member.missingCapability, 'verify'));
+  if (member.methodLesson?.trim()) nodes.push(memberTimelineNode(memberKey, 'Method lesson', 'feedback', member.methodLesson, 'council'));
+  if (member.concerns?.length) nodes.push(memberTimelineNode(memberKey, 'Concerns', 'feedback', member.concerns.map((item) => `- ${item}`).join('\n'), 'verify'));
+  if (member.note?.trim()) nodes.push(memberTimelineNode(memberKey, 'Raw note', 'artifact', stripAnsi(member.note.trim()), member.failed ? 'verify' : 'compose', member.failed ? 'bad' : 'done'));
+
+  nodes.push({
+    id: `${memberKey}-fact-quarantine`,
+    label: 'Fact quarantine',
+    kind: 'event',
+    note: 'Council members supply intent, method, and routing guidance only. Vai still owns every user-facing fact and verification step.',
+    status: 'done',
+    tone: 'verify',
+    children: [],
+  });
+
+  return nodes;
+}
+
+function memberTimelineNode(
+  memberKey: string,
+  label: string,
+  kind: string,
+  note: string,
+  tone: ProcessTone,
+  status: ProcessNode['status'] = 'done',
+): ProcessNode {
+  return {
+    id: `${memberKey}-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    label,
+    kind,
+    note: stripAnsi(note.trim()),
+    status,
+    tone,
+    children: [],
+  };
 }
 
 function mapToolRuns(
@@ -266,20 +388,32 @@ function mapToolRuns(
 ): ProcessNode[] {
   return runs.map((run, index) => {
     const children: ProcessNode[] = [];
+    const operation = classifyToolRun(run.name);
     if (run.input?.trim()) {
       children.push({
-        id: `${prefix}-tool-${run.id}-in`,
-        label: 'Input',
-        note: run.input.trim(),
+        id: `${prefix}-tool-${run.id}-request`,
+        label: 'Tool request',
+        kind: 'tool-request',
+        note: [`Tool: ${run.name}`, `Kind: ${operation}`, '', run.input.trim()].join('\n'),
         status: 'done',
         tone: 'tool',
         children: [],
       });
     }
+    children.push({
+      id: `${prefix}-tool-${run.id}-event`,
+      label: 'Tool event',
+      kind: 'tool-event',
+      note: formatToolEvent(run, operation),
+      status: run.status === 'failed' || run.success === false ? 'bad' : run.status === 'running' ? 'running' : 'done',
+      tone: 'tool',
+      children: [],
+    });
     if (run.output?.trim()) {
       children.push({
-        id: `${prefix}-tool-${run.id}-out`,
-        label: 'Output',
+        id: `${prefix}-tool-${run.id}-response`,
+        label: 'Tool response',
+        kind: 'tool-response',
         note: run.output.trim(),
         status: run.success === false ? 'bad' : 'done',
         tone: 'tool',
@@ -289,16 +423,40 @@ function mapToolRuns(
     return {
       id: `${prefix}-tool-${run.id || index}`,
       label: run.name,
+      kind: 'tool',
       detail: run.status === 'running'
-        ? 'running…'
+        ? `${operation} · running…`
         : run.durationMs !== undefined
-          ? `${run.success === false ? 'failed' : 'ok'} · ${run.durationMs}ms`
-          : run.status,
+          ? `${operation} · ${run.success === false ? 'failed' : 'ok'} · ${run.durationMs}ms`
+          : `${operation} · ${run.status}`,
       status: run.status === 'running' ? 'running' : run.success === false ? 'bad' : 'done',
       tone: 'tool',
       children,
     };
   });
+}
+
+function classifyToolRun(name: string): string {
+  const normalized = name.toLowerCase();
+  if (['read', 'fetch', 'get', 'list', 'view', 'cat', 'open'].some((token) => normalized.includes(token))) return 'read';
+  if (['search', 'grep', 'rg', 'find', 'query', 'semantic'].some((token) => normalized.includes(token))) return 'search';
+  if (['apply', 'patch', 'edit', 'write', 'create', 'delete', 'rename', 'move'].some((token) => normalized.includes(token))) return 'write';
+  if (['run', 'terminal', 'shell', 'exec', 'command'].some((token) => normalized.includes(token))) return 'command';
+  if (['show', 'render', 'preview', 'image', 'screenshot'].some((token) => normalized.includes(token))) return 'show';
+  return 'tool';
+}
+
+function formatToolEvent(
+  run: NonNullable<ChatProgressStep['toolRuns']>[number],
+  operation: string,
+): string {
+  return [
+    `Tool: ${run.name}`,
+    `Kind: ${operation}`,
+    `Status: ${run.status}`,
+    run.success !== undefined ? `Success: ${run.success ? 'yes' : 'no'}` : undefined,
+    run.durationMs !== undefined ? `Duration: ${run.durationMs}ms` : undefined,
+  ].filter(Boolean).join('\n');
 }
 
 function isCouncilReviewStage(stage: string): boolean {
@@ -323,6 +481,7 @@ export function buildProcessTree(
   imageSteps?: readonly { phase: string; label: string; flaws?: string[] }[],
   vaiProposedDraft?: string,
   compactLive = false,
+  includeActivityMap = false,
 ): ProcessNode[] {
   const enrichedSteps = enrichProgressStepsWithCouncil(steps, council);
   const nodes: ProcessNode[] = [];
@@ -430,5 +589,114 @@ export function buildProcessTree(
     });
   }
 
+  if (includeActivityMap) {
+    const map = buildActivityMap(enrichedSteps);
+    if (map) nodes.unshift(map);
+  }
+
   return nodes;
+}
+
+function buildActivityMap(steps: readonly ChatProgressStep[]): ProcessNode | null {
+  if (steps.length === 0) return null;
+  const processKinds = new Map<string, number>();
+  const submodels = new Set<string>();
+  const toolLines: string[] = [];
+  let toolRuns = 0;
+  let toolResponses = 0;
+  let councilRounds = 0;
+  let councilMembers = 0;
+
+  for (const step of steps) {
+    if (step.stage.startsWith('council')) councilRounds += 1;
+    if (step.advisor) submodels.add(step.advisor.actorId || step.advisor.modelId);
+    for (const entry of step.processLog ?? []) {
+      processKinds.set(entry.kind, (processKinds.get(entry.kind) ?? 0) + 1);
+    }
+    for (const member of step.councilMembers ?? []) {
+      councilMembers += 1;
+      submodels.add(member.name);
+    }
+    for (const tool of step.toolRuns ?? []) {
+      toolRuns += 1;
+      if (tool.output?.trim()) toolResponses += 1;
+      toolLines.push(`${tool.name}: ${tool.status}${tool.success === false ? ' (failed)' : ''}${tool.durationMs !== undefined ? ` · ${tool.durationMs}ms` : ''}`);
+    }
+  }
+
+  const kindLines = [...processKinds.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([kind, count]) => `${panelLabelForLogKind(kind)}: ${count}`);
+  const summaryBits = [
+    `${steps.length} stages`,
+    processKinds.size ? `${[...processKinds.values()].reduce((sum, count) => sum + count, 0)} events` : undefined,
+    toolRuns ? `${toolRuns} tools` : undefined,
+    councilMembers ? `${councilMembers} member notes` : undefined,
+  ].filter(Boolean);
+
+  const children: ProcessNode[] = [{
+    id: 'activity-map-inventory',
+    label: 'Timeline inventory',
+    kind: 'event',
+    note: [
+      `Stages: ${steps.length}`,
+      `Council rounds: ${councilRounds}`,
+      `Council/submodel notes: ${councilMembers}`,
+      `Tool calls: ${toolRuns}`,
+      `Tool responses: ${toolResponses}`,
+    ].join('\n'),
+    status: 'done',
+    tone: 'default',
+    children: [],
+  }];
+
+  if (submodels.size) {
+    children.push({
+      id: 'activity-map-submodels',
+      label: `Submodels (${submodels.size})`,
+      kind: 'submodel',
+      note: [...submodels].sort().join('\n'),
+      status: 'done',
+      tone: 'council',
+      children: [],
+    });
+  }
+  if (kindLines.length) {
+    children.push({
+      id: 'activity-map-process-events',
+      label: 'Process event kinds',
+      kind: 'event',
+      note: kindLines.join('\n'),
+      status: 'done',
+      tone: 'verify',
+      children: [],
+    });
+  }
+  if (toolLines.length) {
+    children.push({
+      id: 'activity-map-tools',
+      label: 'Tool usage',
+      kind: 'tool',
+      note: toolLines.join('\n'),
+      status: toolLines.some((line) => line.includes('(failed)')) ? 'bad' : 'done',
+      tone: 'tool',
+      children: [],
+    });
+  }
+
+  return {
+    id: 'turn-activity-map',
+    label: 'Turn activity map',
+    kind: 'activity-map',
+    shortLabel: 'Activity',
+    detail: summaryBits.join(' · '),
+    status: 'done',
+    tone: 'default',
+    children,
+  };
+}
+
+function formatCompactMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
 }

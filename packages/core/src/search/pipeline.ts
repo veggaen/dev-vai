@@ -31,6 +31,7 @@ import { normalizeInputForUnderstanding } from '../input-normalization.js';
 import {
   isFreshLocalBusinessContactRequest,
   isFreshLocalRecommendationRequest,
+  isBusinessOpportunityRequest,
 } from '../models/web-conclude-policy.js';
 import { fetchGoogleViaBrowser, fetchGooglePageViaBrowser, isBrowserSearchEnabled } from './browser-search.js';
 import { classifyFreshFactKind, extractFreshFact, extractFreshFactSubjects, type ReadSource } from './fresh-fact-extract.js';
@@ -247,6 +248,8 @@ export function buildSearchPlan(query: string): VaiSearchPlan {
   const matched = INTENT_PATTERNS.find(p => p.pattern.test(lower));
   const intent = hasComparisonMarkers(lower)
     ? 'comparison'
+    : isBusinessOpportunityRequest(normalizedQuery)
+      ? 'recommendation'           // ideas/opportunity → synthesize concrete options
     : isFreshLocalRecommendationRequest(normalizedQuery)
       ? 'recommendation'
       : isFreshLocalBusinessContactRequest(normalizedQuery)

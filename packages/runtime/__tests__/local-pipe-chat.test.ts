@@ -43,11 +43,21 @@ describe('streamDirectChatTurn', () => {
     let observedSignal: AbortSignal | undefined;
 
     const turn = streamDirectChatTurn({
-      createChunks: async function* (signal) {
+      // A stream that produces NO chunks and hangs until aborted — models a stalled turn.
+      // Expressed as an async iterable (not a yield-less generator) so it reads as exactly
+      // that: an iterator whose first `next()` never resolves until the abort rejects it.
+      createChunks: (signal) => {
         observedSignal = signal;
-        await new Promise<void>((_resolve, reject) => {
-          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-        });
+        return {
+          [Symbol.asyncIterator]() {
+            return {
+              next: () =>
+                new Promise((_resolve, reject) => {
+                  signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+                }),
+            };
+          },
+        };
       },
       send: (frame) => frames.push(frame),
       timeoutMs: 25,

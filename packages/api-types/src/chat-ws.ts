@@ -89,10 +89,12 @@ export const advisorTraceSchema = z.object({
 }).strict();
 
 const councilProgressMemberSchema = z.object({
+  memberId: z.string().min(1).optional(),
   name: z.string().min(1),
   topic: z.string().optional(),
   verdict: z.enum(['good', 'needs-work', 'bad']),
   confidence: z.number().min(0).max(1),
+  durationMs: z.number().nonnegative().optional(),
   note: z.string().optional(),
   /** True while the member is still being consulted (before their note arrives). */
   pending: z.boolean().optional(),
@@ -106,7 +108,7 @@ const councilProgressMemberSchema = z.object({
 }).strict();
 
 const processLogEntrySchema = z.object({
-  kind: z.enum(['thought', 'action', 'artifact', 'feedback', 'verdict']),
+  kind: z.enum(['thought', 'read', 'action', 'event', 'show', 'artifact', 'tool', 'tool-response', 'feedback', 'verdict']),
   label: z.string().min(1),
   body: z.string().optional(),
 }).strict();

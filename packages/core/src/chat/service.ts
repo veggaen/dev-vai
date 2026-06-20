@@ -23,7 +23,7 @@ import {
   evaluateChatAnswerQuality,
   type ChatAnswerQualityReport,
 } from './chat-answer-quality.js';
-import { isExplicitBuildExecutionRequest, looksLikeFactualQuestion } from './build-execution-intent.js';
+import { isExplicitBuildExecutionRequest, looksLikeFactualQuestion, classifyAgentBuildIntent } from './build-execution-intent.js';
 import { CONVERSATION_MODE_SYSTEM_PROMPTS, DEFAULT_CONVERSATION_MODE, type ConversationMode, isConversationMode } from './modes.js';
 import { tryHandleChatMeta } from './meta-router.js';
 import {
@@ -35,7 +35,7 @@ import {
 import { tryEmitConstrainedCode } from './constrained-code-emitter.js';
 import { tryEmitContinuation } from './chat-continuation.js';
 import { tryEmitFormatStrict } from './format-strict-router.js';
-import { tryEmitFactShim } from './deterministic-facts-router.js';
+import { tryEmitFactShim, tryVaiSelfKnowledge } from './deterministic-facts-router.js';
 import { extractIdiomContext } from './programming-idioms.js';
 import { splitCompoundQuestion, classifyQuestionIntent } from './question-intent.js';
 import { classifyTurn } from './turn-classifier.js';
@@ -135,7 +135,6 @@ import {
 } from './bridge-evidence-discipline.js';
 import {
   isFreshLocalBusinessContactRequest,
-  isLiveFactualLookupQuery,
   needsLiveExternalEvidence,
   isFreshLocalRecommendationRequest,
   isPureConversationalTurn,
@@ -787,6 +786,10 @@ function shouldKeepDeterministicDespiteQualityGate(strategy: string): boolean {
     || strategy === 'chat-boundary-response'
     || strategy.startsWith('chat-meta')
     || strategy.startsWith('chat-facts')
+    // Grounded Vai self-knowledge ("tell me about your engine", "what can you do") is
+    // authoritative by construction — keep it instead of escalating to the engine, which
+    // produced irrelevant "engine, simpler"/"best next task" templates for these turns.
+    || strategy.startsWith('chat-vai-identity')
     || strategy.startsWith('chat-format-strict');
 }
 
@@ -823,8 +826,17 @@ export class ChatService {
 
   private readonly responseReviewers: readonly ResponseReviewer[];
   private readonly loadActiveGuidance?: (conversationId: string) => readonly RouteGuidance[]; // legacy fallback
-  /** Optional SCIS council roster. When present, substantive turns run the council for consensus + method lessons. */
-  private readonly councilRoster?: CouncilRoster;
+  /**
+   * Optional SCIS council roster. When present, substantive turns run the council for consensus +
+   * method lessons. Mutable so the desktop "council members" settings (enable Grok, lens count) can
+   * swap the live roster via {@link setCouncilRoster} with no runtime restart.
+   */
+  private councilRoster?: CouncilRoster;
+
+  /** Live-swap the council roster (driven by the council-config settings route). */
+  setCouncilRoster(roster: CouncilRoster | undefined): void {
+    this.councilRoster = roster;
+  }
   private readonly searchForEvidence?: ChatServiceOptions['searchForEvidence'];
   private readonly visionAdapter?: ChatServiceOptions['visionAdapter'];
   private readonly imageProducer?: ChatServiceOptions['imageProducer'];
@@ -2081,9 +2093,21 @@ export class ChatService {
       }
       const modeForDeterministicShortcuts = isConversationMode(conv.mode) ? conv.mode : DEFAULT_CONVERSATION_MODE;
       const productEngineeringPlanning = isProductEngineeringPlanningPrompt(content);
+      // Agent mode is the desktop DEFAULT, and it used to disable EVERY deterministic shortcut —
+      // so self-questions ("tell me about your engine"), facts, and prose all fell through to the
+      // draft→council path and came back as n-gram soup or a redraft template. But a pure ANSWER
+      // turn in agent mode (classifyAgentBuildIntent === 'answer': a question/discussion, never a
+      // build) should still get the grounded deterministic answers. Only 'build'/'ambiguous' agent
+      // turns keep shortcuts off (they may legitimately scaffold). Builder mode is an explicit build
+      // choice, so it stays off. This is the structural fix for the weird self/prose answers.
+      // Build-intent grade for this turn (pure fn of content). Reused below for the builder gate.
+      const agentBuildIntent = classifyAgentBuildIntent(content);
+      const agentAnswerTurn =
+        modeForDeterministicShortcuts === 'agent' && agentBuildIntent === 'answer';
       const allowConstrainedCodeShortcut =
-        modeForDeterministicShortcuts !== 'builder'
-        && modeForDeterministicShortcuts !== 'agent'
+        (modeForDeterministicShortcuts !== 'builder'
+          && modeForDeterministicShortcuts !== 'agent'
+          || agentAnswerTurn)
         && !conv.sandboxProjectId
         && !productEngineeringPlanning;
 
@@ -2148,6 +2172,15 @@ export class ChatService {
             ? { text: reply, turnKind: 'analysis', confidence: 0.99, strategy: 'bridge-evidence-discipline' }
             : null;
         }, true, 'Live-context / capability questions — answer only from real captured evidence, never guess.'),
+        det('chat-vai-identity', 0.975, () => {
+          // Grounded answers about Vai itself ("tell me about your engine", "what can you do",
+          // "what is Vai", chat-vs-IDE mode). Seated ABOVE conversation-reasoning so it beats the
+          // grounding-based "simpler"/"best next task" engine templates that hijacked these
+          // self-questions into irrelevant meta-text (a real live failure). Always-on: identity
+          // questions are never builds, so this works in agent mode too.
+          const r = tryVaiSelfKnowledge(content);
+          return r ? { text: r.reply, turnKind: 'analysis', confidence: 0.97, strategy: `chat-vai-identity:${r.kind}` } : null;
+        }, true, 'Grounded questions about Vai itself — identity, capabilities, engine, modes.'),
         det('conversation-reasoning', 0.97, () => {
           const r = tryEmitConversationReasoning({ content: understoodContent, history: metaHistory });
           return r
@@ -2857,7 +2890,18 @@ export class ChatService {
       // question became a 260s HTML-widget build. When the turn is factual and there is no
       // explicit build request, the builder lane is OFF for this turn.
       const factualQuestionTurn = looksLikeFactualQuestion(content);
-      const isBuilderMode = (resolvedMode === 'builder' || resolvedMode === 'agent') && !factualQuestionTurn;
+      // Build-intent gate. The old rule ("agent/builder mode AND not a factual question → build")
+      // hijacked PROSE turns: "tell me about life before the cloud" isn't an interrogative factual
+      // question, so it slipped past !factualQuestionTurn and got answered with a build-failure
+      // message ("only 3 CSS rules…"). Fix: grade the actual intent. In agent mode we only enter
+      // the builder arm when the intent is clearly 'build' (explicit ship/new-app/clone request);
+      // 'answer' (questions, discussion, prose) and 'ambiguous' never auto-build — the desktop
+      // confirm-banner handles the "did you mean build?" case for ambiguous turns. Builder mode is
+      // an explicit user choice, so it still builds for anything that isn't a plain factual lookup.
+      const agentBuildIntent = classifyAgentBuildIntent(content);
+      const isBuilderMode = resolvedMode === 'agent'
+        ? agentBuildIntent === 'build'
+        : resolvedMode === 'builder' && !factualQuestionTurn;
       const buildExecutionRequired = isBuilderMode && isExplicitBuildExecutionRequest(content);
       const builderFiles = isBuilderMode && hasBuilderFileBlocks(bufferedText);
       const builderSatisfies = builderFiles

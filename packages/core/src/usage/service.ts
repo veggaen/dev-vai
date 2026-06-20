@@ -10,7 +10,7 @@
  * - Cost is computed at write time from the model profile
  */
 
-import { eq, and, gte, lte, sql } from 'drizzle-orm';
+import { and, gte, lte } from 'drizzle-orm';
 import type { VaiDatabase } from '../db/client.js';
 import { usageRecords } from '../db/schema.js';
 import type { ModelCost } from '../config/types.js';

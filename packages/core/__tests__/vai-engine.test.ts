@@ -442,6 +442,22 @@ describe('VaiEngine', () => {
     expect(response.message.content).not.toMatch(/fjords|midnight sun|northern lights/i);
   });
 
+  it('does NOT dump legal company forms for a Norway IDEAS/opportunity question', async () => {
+    // Regression: "great idea when creating a company in norway" wrongly triggered the
+    // ENK/AS legal-forms catalogue because the trigger captured any norway+company+
+    // setup-verb. An ideas/opportunity ask must NOT get the forms dump.
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.chat },
+        { role: 'user', content: 'What is a great idea when creating a company in norway?' },
+      ],
+      noLearn: true,
+    });
+    // The tell-tale legal-forms catalogue must be absent.
+    expect(response.message.content).not.toMatch(/enkeltpersonforetak|aksjeselskap/i);
+    expect(response.message.content).not.toMatch(/-\s+\*\*ENK\b.*\*\*ASA\b/is);
+  });
+
   it('recovers Norway company-type corrections into the clarified topic', async () => {
     const response = await engine.chat({
       messages: [

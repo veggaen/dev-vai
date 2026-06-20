@@ -2,6 +2,7 @@ import type { ProcessNode } from './ProcessTree.logic.js';
 
 export interface ProcessNodeSnapshot {
   readonly label: string;
+  readonly kind?: string;
   readonly status: ProcessNode['status'];
   readonly detail?: string;
   readonly note?: string;
@@ -12,6 +13,7 @@ export interface ProcessNodeSnapshot {
 export function nodeToSnapshot(node: ProcessNode): ProcessNodeSnapshot {
   const snap: ProcessNodeSnapshot = {
     label: node.label,
+    kind: node.kind,
     status: node.status,
     tone: node.tone,
     detail: node.detail?.trim() || undefined,

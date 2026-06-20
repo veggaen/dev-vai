@@ -6,7 +6,7 @@
 import { buildCouncilReviewPacket, type CouncilReviewPacketDraft } from '../consensus/review-packet.js';
 import type { CouncilConsensus, CouncilMemberNote } from '../consensus/types.js';
 
-export type ProcessLogKind = 'thought' | 'action' | 'artifact' | 'feedback' | 'verdict';
+export type ProcessLogKind = 'thought' | 'read' | 'action' | 'event' | 'show' | 'artifact' | 'tool' | 'tool-response' | 'feedback' | 'verdict';
 
 export interface ProcessLogEntry {
   readonly kind: ProcessLogKind;
@@ -23,10 +23,12 @@ export interface CouncilFeedbackSnapshot {
 }
 
 export interface CouncilProgressMember {
+  readonly memberId?: string;
   readonly name: string;
   readonly topic?: string;
   readonly verdict: 'good' | 'needs-work' | 'bad';
   readonly confidence: number;
+  readonly durationMs?: number;
   readonly note?: string;
   readonly pending?: boolean;
   readonly failed?: boolean;
@@ -58,10 +60,12 @@ export function formatMemberProcessBody(member: CouncilProgressMember): string {
 
 export function councilMembersFromNotes(notes: readonly CouncilMemberNote[]): CouncilProgressMember[] {
   return notes.map((note) => ({
+    memberId: note.memberId,
     name: note.memberName,
     topic: note.topic,
     verdict: note.verdict,
     confidence: note.confidence,
+    durationMs: note.durationMs,
     failed: Boolean(note.error),
     note: note.error
       ? `did not respond (${note.error})`

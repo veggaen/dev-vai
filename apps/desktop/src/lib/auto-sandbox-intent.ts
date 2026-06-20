@@ -1,4 +1,4 @@
-import { isProductEngineeringPlanningPrompt, isExplicitBuildExecutionRequest, needsLiveExternalEvidence } from '@vai/core/browser';
+import { isProductEngineeringPlanningPrompt, classifyAgentBuildIntent, needsLiveExternalEvidence } from '@vai/core/browser';
 import { detectEditIntent } from './intent-detector.js';
 
 export type AutoSandboxMode = 'chat' | 'agent' | 'builder' | 'plan' | 'debate';
@@ -34,6 +34,13 @@ export interface ResolvedSendTimeWorkIntent {
   readonly shouldPrimeBuilder: boolean;
   readonly buildStatusMessage?: string;
   readonly requestSystemPrompt?: string;
+  /**
+   * True when agent mode saw a build-ISH ask but isn't sure the user wants an app scaffolded
+   * (e.g. "make this more useful", "improve the timeline"). The composer should ask one short
+   * confirm ("answer this, or build an app for it?") instead of silently entering the builder.
+   * Never set when {@link shouldPrimeBuilder} is true — a clear build doesn't need confirming.
+   */
+  readonly needsBuildConfirm?: boolean;
 }
 
 const BUILD_MODES = new Set<AutoSandboxMode>(['builder', 'agent']);
@@ -116,8 +123,17 @@ export function resolveSendTimeWorkIntent(input: ResolveSendTimeWorkIntentInput)
     };
   }
 
-  const agentNewBuildRequest = mode === 'agent'
-    && isExplicitBuildExecutionRequest(userPrompt);
+  // Agent mode: grade the build intent so we don't silently scaffold an app on an ambiguous ask.
+  // 'build' → prime the builder; 'ambiguous' → ask the user; 'answer' → stay a chat turn.
+  const agentBuildIntent = mode === 'agent' ? classifyAgentBuildIntent(userPrompt) : 'answer';
+  const agentNewBuildRequest = mode === 'agent' && agentBuildIntent === 'build';
+  if (mode === 'agent' && agentBuildIntent === 'ambiguous') {
+    return {
+      intent: 'none',
+      shouldPrimeBuilder: false,
+      needsBuildConfirm: true,
+    };
+  }
   const builderNewBuildRequest = mode === 'builder'
     && NEW_BUILD_REQUEST.test(userPrompt)
     && EXPLICIT_BUILD_TARGET.test(userPrompt);

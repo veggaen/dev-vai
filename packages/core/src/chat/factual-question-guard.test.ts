@@ -67,3 +67,20 @@ describe('looksLikeFactualQuestion — edge cases', () => {
     expect(looksLikeFactualQuestion('add a dark mode toggle to the settings panel')).toBe(false);
   });
 });
+
+describe('looksLikeFactualQuestion — build-gerund poisoning (the Norway class)', () => {
+  // A clean QUESTION that merely mentions a build gerund must stay factual, not be
+  // disqualified by BUILD_VERB_ANYWHERE. Found by the self-improvement loop.
+  it('treats "what is a great idea when creating a company in norway?" as a question', () => {
+    expect(looksLikeFactualQuestion('what is a great idea when creating a company in norway?')).toBe(true);
+  });
+  it('treats other innocent build-gerund questions as questions', () => {
+    expect(looksLikeFactualQuestion("what's smart to know when building a saas?")).toBe(true);
+    expect(looksLikeFactualQuestion('what matters most when making a video game?')).toBe(true);
+  });
+  it('still blocks IMPERATIVE build asks (no regression on the price-widget guard)', () => {
+    expect(looksLikeFactualQuestion('how do I build a price widget')).toBe(false);
+    expect(looksLikeFactualQuestion('build me a dashboard that shows the btc price')).toBe(false);
+    expect(looksLikeFactualQuestion('create a price tracker app')).toBe(false);
+  });
+});

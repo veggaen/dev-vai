@@ -27,6 +27,49 @@ export function isExplicitBuildExecutionRequest(content: string): boolean {
 }
 
 /**
+ * Three-band build intent for AGENT mode. The old binary "build verb + target word → scaffold an
+ * app" silently hijacked plain asks ("can you make this more useful", "tell me a story about X")
+ * into 260-second builds. This grades the intent so agent mode can CONFIRM before building when it
+ * is unsure, instead of guessing:
+ *
+ *  - 'build'     → ship-now phrasing or a clear new-app/clone request. Go straight to the builder.
+ *  - 'ambiguous' → a build-ish verb but no clear app target, OR a question wrapper around a verb.
+ *                  Agent mode should ask one short confirm ("answer this, or build an app for it?").
+ *  - 'answer'    → a question / discussion / fresh-fact lookup. Never build.
+ *
+ * This is intent classification only — no side effects. The confirm UX lives in the desktop layer.
+ */
+export type AgentBuildIntent = 'build' | 'ambiguous' | 'answer';
+
+/** Verbs that, on their own, only HINT at a build (improve/update/change/add) vs. ship a new app. */
+const SOFT_BUILD_VERB = /\b(?:improve|update|change|tweak|adjust|enhance|refine|fix|edit|modify|extend|refactor|polish|add|implement|wire|hook\s+up)\b/i;
+/** Clearly conversational / non-build asks even if they contain a stray verb. */
+const CONVERSATIONAL_LEAD = /^\s*(?:tell me|write me|explain|describe|summari[sz]e|what|who|when|where|why|which|how (?:much|many|do|does|did|to)|is|are|was|were|can you (?:explain|tell|help|describe)|help me understand|i('?m| am) (?:asking|wondering|curious)|just (?:asking|wondering|curious))\b/i;
+
+export function classifyAgentBuildIntent(content: string): AgentBuildIntent {
+  const text = (content || '').trim();
+  if (!text) return 'answer';
+  // Strongest signal: explicit ship-now / new-app / clone request. Always build.
+  if (isExplicitBuildExecutionRequest(text)) return 'build';
+  // Planning/advice and fresh-fact questions are never builds (reuse existing guards).
+  if (isProductEngineeringPlanningPrompt(text)) return 'answer';
+  if (looksLikeFactualQuestion(text)) return 'answer';
+
+  const hasHardBuildVerb = EXPLICIT_BUILD_REQUEST.test(text);
+  const hasSoftBuildVerb = SOFT_BUILD_VERB.test(text);
+  const hasTarget = EXPLICIT_BUILD_TARGET.test(text) || NAMED_PRODUCT_CLONE.test(text);
+  const isQuestion = text.endsWith('?') || CONVERSATIONAL_LEAD.test(text);
+
+  // A clear build verb AND a clear app target, phrased as a request (not a question) → build.
+  if (hasHardBuildVerb && hasTarget && !isQuestion) return 'build';
+  // Any build-ish intent that ISN'T a clean build request, and isn't clearly conversational, is
+  // ambiguous: a verb without a target, a question wrapping a build verb, or a soft "improve X".
+  if ((hasHardBuildVerb || hasSoftBuildVerb) && !CONVERSATIONAL_LEAD.test(text)) return 'ambiguous';
+  // Everything else is an answer turn.
+  return 'answer';
+}
+
+/**
  * A short, information-seeking question — "what is the price of btc", "who is the PM of
  * Norway", "when was X founded", "how much is Y", "what's the latest version of Z". These
  * are FACTUAL/ANALYSIS turns that must be ANSWERED, never turned into a code build, even in
@@ -52,12 +95,17 @@ export function looksLikeFactualQuestion(content: string): boolean {
   if (!text) return false;
   // An explicit build request is never "just a question".
   if (isExplicitBuildExecutionRequest(text)) return false;
-  // Any build/make/create verb anywhere disqualifies it (so "how do I build a price
-  // widget" is a build question, not a fresh-data lookup, despite containing "price").
-  if (EXPLICIT_BUILD_REQUEST.test(text) || BUILD_VERB_ANYWHERE.test(text)) return false;
   // Interrogative lead OR a fresh-data ask, AND reasonably short (real questions are).
   const wordCount = text.split(/\s+/).length;
   const interrogative = FACTUAL_QUESTION_LEAD.test(text) || text.endsWith('?');
+  // A build/make/create verb anywhere disqualifies it (so "how do I build a price widget"
+  // is a build question, not a fresh-data lookup) — EXCEPT when the text is a clean
+  // interrogative that merely *mentions* a build gerund ("what's a great idea when CREATING
+  // a company in Norway?"). Imperative build asks ("how do I build X") are caught by
+  // EXPLICIT_BUILD_REQUEST / FACTUAL exclusion below, so the question form stays factual.
+  // This is the fix for the Norway opportunity question that "creating" wrongly disqualified.
+  if (EXPLICIT_BUILD_REQUEST.test(text)) return false;
+  if (BUILD_VERB_ANYWHERE.test(text) && !interrogative) return false;
   const freshData = FRESH_DATA_LEAD.test(text);
   return (interrogative || freshData) && wordCount <= 40;
 }

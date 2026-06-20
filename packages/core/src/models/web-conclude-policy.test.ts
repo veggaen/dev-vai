@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   hasSubstantiveQuestionAfterOpener,
   isExplicitResearchRequest,
+  isBusinessOpportunityRequest,
   isFreshLocalBusinessContactRequest,
   isFreshLocalRecommendationRequest,
   isLiveFactualLookupQuery,
@@ -126,5 +127,19 @@ describe('web-conclude-policy', () => {
   it('limits counter-strike overview to definitional prompts', () => {
     expect(isGameFranchiseOverviewQuestion('what is counter-strike')).toBe(true);
     expect(isGameFranchiseOverviewQuestion('how much does ak cost in cs2')).toBe(false);
+  });
+
+  it('detects business-opportunity questions and routes them to research+synthesis', () => {
+    // The Norway bug class: these want concrete IDEAS, not legal forms or definitions.
+    expect(isBusinessOpportunityRequest('What is a great idea when creating a company in norway?')).toBe(true);
+    expect(isBusinessOpportunityRequest('give me a promising business idea for the nordics')).toBe(true);
+    expect(isBusinessOpportunityRequest('what kind of startup makes sense in a small country?')).toBe(true);
+    expect(isBusinessOpportunityRequest('what is an underrated business opportunity right now?')).toBe(true);
+    // Must NOT fire for procedural/forms/factual asks.
+    expect(isBusinessOpportunityRequest('how do I register a company in norway?')).toBe(false);
+    expect(isBusinessOpportunityRequest('what company forms exist in norway?')).toBe(false);
+    expect(isBusinessOpportunityRequest('what is the capital of norway?')).toBe(false);
+    // And such questions must NOT skip the web conclusion (they need fresh synthesis).
+    expect(shouldSkipWebConclusion('What is a great idea when creating a company in norway?')).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import type { ModelCapabilities, ModelCost, ModelProfile, ProviderId } from '../config/types.js';
+import type { ModelCapabilities, ModelCost, ProviderId } from '../config/types.js';
 import type { ChatTurnKind } from '../chat/turn-kind.js';
 import type { CouncilThinking } from '../consensus/types.js';
 
@@ -129,11 +129,14 @@ export interface ChatChunk {
     readonly detail?: string;
     readonly status: 'running' | 'done';
     readonly councilMembers?: readonly {
+      readonly memberId?: string;
       readonly name: string;
       readonly topic?: string;
       readonly verdict: 'good' | 'needs-work' | 'bad';
       readonly confidence: number;
+      readonly durationMs?: number;
       readonly note?: string;
+      readonly pending?: boolean;
       readonly failed?: boolean;
       readonly realIntent?: string;
       readonly hiddenMeaning?: string;
@@ -143,7 +146,7 @@ export interface ChatChunk {
       readonly concerns?: readonly string[];
     }[];
     readonly processLog?: readonly {
-      readonly kind: 'thought' | 'action' | 'artifact' | 'feedback' | 'verdict';
+      readonly kind: 'thought' | 'read' | 'action' | 'event' | 'show' | 'artifact' | 'tool' | 'tool-response' | 'feedback' | 'verdict';
       readonly label: string;
       readonly body?: string;
     }[];

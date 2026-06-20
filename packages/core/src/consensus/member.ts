@@ -11,6 +11,10 @@
 import { z } from 'zod';
 import type { ModelAdapter } from '../models/adapter.js';
 import type { CouncilAction, CouncilInput, CouncilMember, CouncilMemberNote, CouncilTopic } from './types.js';
+import type { CouncilContextTools } from './context-tools.js';
+import { gatherMemberEvidence, type MemberEvidence } from './member-evidence.js';
+import { buildMemberContextLedger } from './context-states.js';
+import { gatherMemberProof, type ProofRunner } from './member-experiment.js';
 
 const ACTION_VALUES = ['answer-directly', 'web-search', 'local-business-search', 'reread-intent', 'ask-one-question'] as const;
 
@@ -156,6 +160,25 @@ export function parseCouncilNote(
   };
 }
 
+/**
+ * A review "lens" — an extra framing layered on the base/niche system prompt so the SAME local
+ * model produces an independent angle on the draft. Running one local model through several
+ * lenses gives the council genuine diversity with no extra models and no paid voices. Each lens
+ * becomes its own council member (distinct id/displayName), so its note is mixed and re-judged
+ * alongside the others. Temperature is nudged off 0 per-lens so the angles don't collapse onto
+ * the same deterministic completion.
+ */
+export interface CouncilLens {
+  /** Stable id suffix, e.g. 'skeptic'. */
+  readonly id: string;
+  /** Human label shown in the council/timeline UI, e.g. 'Skeptic'. */
+  readonly label: string;
+  /** Extra system-prompt framing appended after the niche addendum. */
+  readonly framing: string;
+  /** Sampling temperature for this angle (default 0 for the base lens, higher for variety). */
+  readonly temperature?: number;
+}
+
 export interface CouncilMemberOptions {
   readonly adapter: ModelAdapter;
   /** The niche this member is trusted for. */
@@ -165,16 +188,36 @@ export interface CouncilMemberOptions {
   readonly timeoutMs?: number;
   readonly maxTokens?: number;
   readonly now?: () => number;
+  /** Optional review lens (multi-angle local council). */
+  readonly lens?: CouncilLens;
+  /**
+   * Optional read-only context tools (the "pull model"). When provided, the member runs one
+   * evidence round before voting — fetching the files/greps its lens judges relevant and
+   * grounding its note in what it verified. When absent, the member votes from the prompt
+   * context alone (current behavior), so this is fully backward-compatible.
+   */
+  readonly contextTools?: CouncilContextTools;
+  /**
+   * Optional proof runner (the experiment loop). When provided, after drafting its note the
+   * member may propose ONE allowlisted command to PROVE its claim; the verified result is
+   * attached to the note and boosts/discounts the member's trust. Absent = no proof round
+   * (current behavior). The runner is injected (matches runCommandEvidence) so it stays safe
+   * and testable. Typically only seated for self-improvement / code turns.
+   */
+  readonly proofRunner?: ProofRunner;
+  /** Working directory for proof commands (defaults to cwd in the runner). */
+  readonly proofCwd?: string;
 }
 
 /** Turn a chat model into a topic-scoped council member. */
 export function createCouncilMember(options: CouncilMemberOptions): CouncilMember {
-  const { adapter, topic } = options;
+  const { adapter, topic, lens, contextTools, proofRunner, proofCwd } = options;
   const id = options.id ?? adapter.id;
   const displayName = options.displayName ?? adapter.displayName;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
   const now = options.now ?? Date.now;
+  const temperature = lens?.temperature ?? 0;
 
   return {
     id,
@@ -185,20 +228,74 @@ export function createCouncilMember(options: CouncilMemberOptions): CouncilMembe
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       const hasSelf = !!(input as any).vaiProjectSelfContext;
-      const system = buildSystemPrompt(topic, hasSelf);
+      const baseSystem = buildSystemPrompt(topic, hasSelf);
+      const system = lens
+        ? `${baseSystem}\n\nREVIEW LENS — ${lens.label}: ${lens.framing}\nStay in this lens: it is WHY you are a distinct voice on this panel. Still return the same strict JSON note.`
+        : baseSystem;
       try {
+        let userPrompt = buildUserPrompt(input);
+        let fetched: MemberEvidence['fetched'] = [];
+
+        // Pull-model evidence round: when context tools are seated, the member fetches the
+        // files/greps its lens needs and grounds its note in what it verified. Best-effort —
+        // gatherMemberEvidence never throws, so a failed fetch just means voting without it.
+        if (contextTools) {
+          const evidence = await gatherMemberEvidence(adapter, input, contextTools, {
+            system,
+            question: input.prompt,
+            signal: controller.signal,
+          });
+          fetched = evidence.fetched;
+          if (evidence.block) userPrompt = `${userPrompt}\n\n${evidence.block}`;
+        }
+
         const response = await adapter.chat({
           messages: [
             { role: 'system', content: system },
-            { role: 'user', content: buildUserPrompt(input) },
+            { role: 'user', content: userPrompt },
           ],
-          temperature: 0,
+          temperature,
           maxTokens,
           signal: controller.signal,
         });
-        return parseCouncilNote(response.message.content, {
+        const parsedNote = parseCouncilNote(response.message.content, {
           memberId: id, memberName: displayName, topic, durationMs: Math.max(0, now() - startedAt),
         });
+        if (!parsedNote) return null;
+
+        let note: CouncilMemberNote = parsedNote;
+
+        // Attach the context-state ledger (the pull-model audit trail) when the member fetched
+        // anything: classify each fetched item as used / unused / unavailable against the note.
+        if (fetched.length > 0) {
+          const ledger = buildMemberContextLedger(id, fetched, note.methodLesson + ' ' + note.concerns.join(' ') + ' ' + note.realIntent);
+          note = {
+            ...note,
+            contextLedger: {
+              used: ledger.summary.used,
+              unused: ledger.summary.unused,
+              unavailable: ledger.summary.unavailable,
+              items: ledger.items.map((i) => ({ label: i.label, state: i.state, reason: i.reason })),
+            },
+          };
+        }
+
+        // Experiment loop: let the member PROVE its claim with one allowlisted command before
+        // presenting. The verified result is attached and feeds the council's trust weighting.
+        // Best-effort — gatherMemberProof never throws; no proposal = no proof round.
+        if (proofRunner) {
+          const proof = await gatherMemberProof(adapter, {
+            system,
+            note: note.methodLesson || note.concerns.join('; ') || note.realIntent,
+            signal: controller.signal,
+            runProofOptions: { runner: proofRunner, cwd: proofCwd },
+          });
+          if (proof) {
+            note = { ...note, proof: { hypothesis: proof.hypothesis, command: proof.command, status: proof.status, detail: proof.detail } };
+          }
+        }
+
+        return note;
       } finally {
         clearTimeout(timer);
       }

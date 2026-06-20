@@ -155,4 +155,48 @@ describe('IngestPipeline', () => {
     expect(result.sourceId).toBeTruthy();
     expect(result.chunkCounts.l0).toBeGreaterThanOrEqual(1);
   });
+
+  // The startup perf win: hydrate moved off the blocking path to hydrateAsync (batched,
+  // event-loop-yielding) so the server answers turns immediately and warms up in the
+  // background. This MUST produce identical engine state — otherwise we'd be trading
+  // correctness for speed. Pin parity so a future refactor can't silently diverge them.
+  describe('hydrate ↔ hydrateAsync parity (background-load perf win)', () => {
+    function seed(p: IngestPipeline) {
+      for (let i = 0; i < 12; i++) {
+        p.ingest({
+          sourceType: 'web',
+          url: `https://example.com/doc-${i}`,
+          title: `Doc ${i}`,
+          content: Array.from({ length: 40 }, (_, j) =>
+            `Document ${i} sentence ${j} about machine learning and retrieval systems.`,
+          ).join(' '),
+        });
+      }
+    }
+
+    it('async hydrate yields the same sources/chunks and identical engine stats as sync', async () => {
+      // Two independent engines fed from two independent (identically seeded) stores.
+      const syncEngine = new VaiEngine();
+      const syncDb = createDb(':memory:');
+      const syncPipe = new IngestPipeline(syncDb, syncEngine);
+      seed(syncPipe);
+
+      const asyncEngine = new VaiEngine();
+      const asyncDb = createDb(':memory:');
+      const asyncPipe = new IngestPipeline(asyncDb, asyncEngine);
+      seed(asyncPipe);
+
+      const syncRes = syncPipe.hydrate();
+      const asyncRes = await asyncPipe.hydrateAsync(3);
+
+      expect(asyncRes).toEqual(syncRes);
+      // Engine state must match exactly — n-grams, knowledge, docs.
+      const s = syncEngine.getStats();
+      const a = asyncEngine.getStats();
+      expect(a.ngramContexts).toBe(s.ngramContexts);
+      expect(a.knowledgeEntries).toBe(s.knowledgeEntries);
+      expect(a.documentsIndexed).toBe(s.documentsIndexed);
+      expect(s.ngramContexts).toBeGreaterThan(0); // sanity: it actually loaded something
+    });
+  });
 });

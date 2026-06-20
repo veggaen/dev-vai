@@ -1,5 +1,6 @@
 import type { ChatProgressStep } from '../../stores/chatStore.js';
 import { stripAnsi } from '../../lib/strip-ansi.js';
+import { panelLabelForLogKind } from './ProcessTree.logic.js';
 
 /** Flat row for live streaming — no nested tree until a step is active. */
 export interface LiveFlatRow {
@@ -23,7 +24,7 @@ export function flattenStepsForLive(steps: readonly ChatProgressStep[]): LiveFla
     for (const [logIndex, entry] of (step.processLog ?? []).entries()) {
       subLines.push({
         id: `${step.stage}-log-${logIndex}`,
-        label: entry.label,
+        label: `${panelLabelForLogKind(entry.kind)} · ${entry.label}`,
         detail: entry.body?.trim() ? stripAnsi(entry.body.trim()).slice(0, 280) : undefined,
       });
     }
@@ -40,7 +41,9 @@ export function flattenStepsForLive(steps: readonly ChatProgressStep[]): LiveFla
       subLines.push({
         id: `${step.stage}-tool-${toolIndex}`,
         label: tool.name,
-        detail: tool.status === 'running' ? 'running…' : `${tool.success === false ? 'failed' : 'ok'}`,
+        detail: tool.status === 'running'
+          ? 'running…'
+          : `${tool.success === false ? 'failed' : 'ok'}${tool.output?.trim() ? ' · response ready' : ''}`,
       });
     }
 

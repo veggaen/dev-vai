@@ -1,4 +1,5 @@
 import type { Message } from '../models/adapter.js';
+import { isBusinessOpportunityRequest } from '../models/web-conclude-policy.js';
 
 /**
  * Dynamic top-level classification of a user turn.
@@ -95,6 +96,23 @@ export function classifyTurn(
   const trimmed = input.trim().replace(/[?.!]+$/g, '').trim();
   const lower = trimmed.toLowerCase();
   const wordCount = countWords(trimmed);
+
+  // A user's business-opportunity / ideas question ("what is a great idea when
+  // creating a company in Norway?") is a STANDALONE question for business ideas —
+  // never a Vai self-improvement / product-quality-direction turn. Classifying it
+  // as the latter is what routed it to the "Best next task" engineering meta-answer.
+  // Guard first so no downstream best-next/self-improvement rule can capture it.
+  if (isBusinessOpportunityRequest(input)) {
+    signals.push('business-opportunity-SENTINEL-X9Q');
+    return {
+      kind: 'standalone-question',
+      confidence: 0.9,
+      signals,
+      referencesPriorTurn: false,
+      isShortAnaphoric: false,
+      wordCount,
+    };
+  }
 
   const referencesPriorTurn = PRIOR_REF_RE.test(lower);
   if (referencesPriorTurn) signals.push('references-prior-turn');

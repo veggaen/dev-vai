@@ -85,6 +85,41 @@ describe('chatProgressStepSchema', () => {
     });
     expect(leakedPrompt.success).toBe(false);
   });
+
+  it('accepts rich process log kinds for inspectable process UI', () => {
+    const result = chatProgressStepSchema.safeParse({
+      stage: 'inspect',
+      label: 'Inspected the workspace',
+      status: 'done',
+      processLog: [
+        { kind: 'read', label: 'Read file', body: 'src/App.tsx' },
+        { kind: 'show', label: 'Show UI state', body: 'preview open' },
+        { kind: 'event', label: 'User expanded process tree' },
+        { kind: 'tool-response', label: 'Tool response', body: 'ok' },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts council member identity and timing for submodel timelines', () => {
+    const result = chatProgressStepSchema.safeParse({
+      stage: 'council-vai-round-1',
+      label: 'Council reviewed Vai\'s proposal',
+      status: 'done',
+      councilMembers: [{
+        memberId: 'local:qwen3:8b',
+        name: 'Local qwen3:8b',
+        topic: 'code',
+        verdict: 'needs-work',
+        confidence: 0.82,
+        durationMs: 1234,
+        suggestedAction: 'reread-intent',
+      }],
+    });
+
+    expect(result.success).toBe(true);
+  });
 });
 
 describe('conversations HTTP body schemas', () => {

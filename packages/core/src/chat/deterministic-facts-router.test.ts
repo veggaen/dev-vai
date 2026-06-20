@@ -106,3 +106,51 @@ describe('conceptual primers', () => {
     expect(result?.reply).toMatch(/chat app/i);
   });
 });
+
+describe('grounded Vai self-knowledge (meta-vai) — regression for n-gram-soup bug', () => {
+  it('answers "tell me about your engine" with a grounded architecture answer, not corpus soup', () => {
+    const r = tryEmitFactShim({ content: 'tell me about your engine' });
+    expect(r?.kind).toBe('meta-vai');
+    expect(r?.reply).toMatch(/local-first|council|deterministic/i);
+    // The exact live failure: it must NOT return V8/Spark/dockerfile fragments.
+    expect(r?.reply).not.toMatch(/v8 javascript|apache spark|dockerfile/i);
+  });
+
+  it('answers "what is Vai" / "what can you do" with identity + capabilities', () => {
+    expect(tryEmitFactShim({ content: 'what is vai?' })?.kind).toBe('meta-vai');
+    expect(tryEmitFactShim({ content: 'what can you do?' })?.kind).toBe('meta-vai');
+    expect(tryEmitFactShim({ content: 'who are you?' })?.kind).toBe('meta-vai');
+  });
+
+  it('handles "how does Vai work" and "how are you built"', () => {
+    expect(tryEmitFactShim({ content: 'how does vai work internally?' })?.kind).toBe('meta-vai');
+    expect(tryEmitFactShim({ content: 'how are you built?' })?.kind).toBe('meta-vai');
+  });
+
+  it('still keeps the chat-vs-IDE-mode explainer working', () => {
+    const r = tryEmitFactShim({ content: 'what is the difference between chat and IDE mode?' });
+    expect(r?.kind).toBe('meta-vai');
+    expect(r?.reply).toMatch(/chat mode/i);
+  });
+
+  it('does NOT hijack a real build/task that merely mentions "engine"', () => {
+    // "build me a physics engine" is a task, not a question about Vai.
+    const r = tryEmitFactShim({ content: 'build me a physics engine for my game' });
+    expect(r?.kind).not.toBe('meta-vai');
+  });
+});
+
+describe('grounded self-knowledge must NOT trip the decline-escalation guard', () => {
+  it('no meta-vai answer contains a decline phrase that would escalate it to the engine', async () => {
+    // Subtle live bug: the answers mentioned "I don't know", which looksLikeDecline matched,
+    // so shouldEscalateDeterministicDecline discarded the grounded answer and the engine
+    // produced "Best next task"/"engine, simpler" instead. Lock the wording.
+    const { shouldEscalateDeterministicDecline } = await import('./vai-fallback.js');
+    for (const q of ['tell me about your engine', 'what can you do?', 'who are you?', 'what is vai?']) {
+      const r = tryEmitFactShim({ content: q });
+      if (r?.kind === 'meta-vai') {
+        expect(shouldEscalateDeterministicDecline(r.reply, true)).toBe(false);
+      }
+    }
+  });
+});

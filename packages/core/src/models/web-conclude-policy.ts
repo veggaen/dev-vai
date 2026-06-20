@@ -238,6 +238,29 @@ export function isFreshLocalRecommendationRequest(input: string): boolean {
     && LOCALITY_CUE_PATTERN.test(normalized);
 }
 
+/**
+ * "What's a great business idea / opportunity in <place>?" — an OPPORTUNITY ask.
+ * These want concrete, current ideas synthesized from fresh evidence (like Grok's
+ * blue-economy answer for Norway), NOT a definition dump or a legal-forms list.
+ * Detecting them lets the pipeline route to web-research + synthesis instead of a
+ * canned/deterministic fallback. Excludes pure "how to register" procedural asks.
+ */
+const OPPORTUNITY_CUE_PATTERN =
+  /\b(?:business\s+idea|great\s+idea|good\s+idea|startup\s+idea|company\s+to\s+start|business\s+to\s+start|opportunit\w*|promising\s+(?:sector|industry|market|niche)|what\s+(?:should|could)\s+i\s+(?:build|start|make)|what\s+kind\s+of\s+(?:company|business|startup))\b/i;
+const OPPORTUNITY_FRAME_PATTERN =
+  /\b(?:company|companies|business|startup|venture|enterprise)\b/i;
+const PURE_PROCEDURE_PATTERN =
+  /\b(?:how\s+(?:do\s+i|to)\s+(?:register|incorporate|set\s+up|file)|registration\s+steps|paperwork|tax\s+id|brønnøysund|altinn)\b/i;
+
+export function isBusinessOpportunityRequest(input: string): boolean {
+  const normalized = normalizeWebConclusionInput(input);
+  if (!normalized) return false;
+  if (PURE_PROCEDURE_PATTERN.test(normalized)) return false; // "how to register" is procedural, not ideas
+  // Either an explicit opportunity cue, OR (idea-ish phrasing + a business frame).
+  if (OPPORTUNITY_CUE_PATTERN.test(normalized)) return true;
+  return /\bidea\b/i.test(normalized) && OPPORTUNITY_FRAME_PATTERN.test(normalized);
+}
+
 /** Public business contact details are mutable and should be verified online. */
 export function isFreshLocalBusinessContactRequest(input: string): boolean {
   const normalized = normalizeWebConclusionInput(input);
@@ -260,6 +283,12 @@ export function shouldSkipWebConclusion(
 
   const lower = trimmed.toLowerCase();
   const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+
+  // Opportunity/ideas questions ("a great idea when creating a company in Norway")
+  // are exactly the case that benefits from fresh research + synthesis. Never skip
+  // the web conclusion for them — this is the fix that replaced the canned legal-
+  // forms dump with a real, synthesized ideas answer.
+  if (isBusinessOpportunityRequest(input)) return false;
 
   if (GREETING_PATTERN.test(trimmed) || isConversationalWebFollowUpCue(trimmed)) {
     return true;

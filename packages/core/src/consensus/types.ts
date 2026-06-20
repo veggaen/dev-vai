@@ -111,6 +111,28 @@ export interface CouncilMemberNote {
   readonly durationMs: number;
   /** Set when the member could not produce a usable note (timeout / parse fail). Never blocks. */
   readonly error?: string;
+  /**
+   * Per-member context-state ledger (the pull-model audit trail): which fetched context the
+   * member actually grounded on (used) vs looked at and discarded (unused) vs found nothing
+   * for (unavailable). Present only when the member ran an evidence round. Advisory/UI only.
+   */
+  readonly contextLedger?: {
+    readonly used: number;
+    readonly unused: number;
+    readonly unavailable: number;
+    readonly items: readonly { readonly label: string; readonly state: string; readonly reason: string }[];
+  };
+  /**
+   * Verified proof the member ran on its own claim before presenting (the experiment loop):
+   * an allowlisted command + its outcome. `proved` boosts the member's vote weight; `disproved`
+   * discounts it. Present only when the member proposed and ran a proof. Advisory/UI.
+   */
+  readonly proof?: {
+    readonly hypothesis: string;
+    readonly command: string;
+    readonly status: string;
+    readonly detail: string;
+  };
 }
 
 /**

@@ -166,7 +166,6 @@ export class ToolExecutor {
     for (let iteration = 0; iteration < this.config.maxIterations; iteration++) {
       // Stream from the model
       let fullText = '';
-      const finishReason = 'stop';
       const toolCalls: ToolCall[] = [];
       const toolCallBuffers = new Map<string, { name: string; args: string }>();
 
