@@ -1,4 +1,4 @@
-import { eq, desc, or } from 'drizzle-orm';
+import { eq, desc, or, and } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import type { VaiDatabase } from '../db/client.js';
 import type {
@@ -72,6 +72,8 @@ import {
   buildVaiRedraftProcessLog,
   councilMembersFromNotes,
 } from './council-process-log.js';
+import { accumulateProgressStep, serializeProgressTrace, deserializeProgressTrace } from './progress-trace.js';
+import type { ChatProgressStep as ApiChatProgressStep } from '@vai/api-types/chat-ws';
 import { buildSearchProcessLog } from './search-process-log.js';
 import { extractCheckableClaim, assessClaimAgreement, applyCrossCheck } from '../consensus/cross-check.js';
 import { resolveIntent } from '../consensus/intent-resolver.js';
@@ -1845,12 +1847,19 @@ export class ChatService {
   }
 
   getMessages(conversationId: string) {
-    return this.db
+    const rows = this.db
       .select()
       .from(messages)
       .where(eq(messages.conversationId, conversationId))
       .orderBy(messages.createdAt)
       .all();
+    // Rehydrate the persisted process trace into `progressSteps` so a reopened
+    // conversation's in-message ProcessTree expands exactly as it did live. Rows
+    // written before this column existed (or with no trace) simply omit it.
+    return rows.map((row) => {
+      const steps = deserializeProgressTrace(row.progressTrace);
+      return steps ? { ...row, progressSteps: steps } : row;
+    });
   }
 
   appendAssistantMessage(conversationId: string, content: string) {
@@ -1948,7 +1957,78 @@ export class ChatService {
     }).from(images).all();
   }
 
+  /**
+   * Public turn entry. Thin wrapper over {@link sendMessageInner} that taps the
+   * stream in ONE place to accumulate the progress trace (mirroring the client's
+   * merge) and, on the terminal `done`, persists a pruned snapshot onto the just-
+   * written assistant row. This is what lets the in-message ProcessTree re-expand
+   * after the app is closed and reopened — without it the trace is client-only and
+   * lost on reload. Pure pass-through of every chunk; no behavioural change to the
+   * turn itself.
+   */
   async *sendMessage(
+    conversationIdParam: string,
+    content: string,
+    image?: ImageInput,
+    systemPrompt?: string,
+    noLearn?: boolean,
+    promptRewriteOverrides?: ChatPromptRewriteOverrides,
+    autoCreateOptions?: {
+      fallbackModelId?: string;
+      fallbackMode?: ConversationMode;
+      imageMode?: boolean;
+      signal?: AbortSignal;
+      processDepth?: 'quick' | 'balanced' | 'deep';
+    },
+  ): AsyncGenerator<ChatChunk> {
+    // Accumulated server-side using the api-types wire shape (what the persisted
+    // blob and the client tree both speak); the adapter's readonly progress shape
+    // is structurally identical, so the cast at the boundary is sound.
+    let trace: ApiChatProgressStep[] = [];
+    let resolvedConversationId = conversationIdParam;
+    for await (const chunk of this.sendMessageInner(
+      conversationIdParam, content, image, systemPrompt, noLearn, promptRewriteOverrides, autoCreateOptions,
+    )) {
+      // Track the real conversation id (auto-create can swap it mid-turn).
+      if (chunk.type === 'conversation_resolved' && chunk.conversationId) {
+        resolvedConversationId = chunk.conversationId;
+      }
+      if (chunk.type === 'progress' && chunk.progress) {
+        trace = accumulateProgressStep(trace, chunk.progress as ApiChatProgressStep);
+      }
+      if (chunk.type === 'done') {
+        // Persist BEFORE yielding `done` so a client that closes immediately after
+        // still has the trace on disk. Best-effort: a persistence failure must never
+        // break the turn the user just received.
+        try {
+          const blob = serializeProgressTrace(trace);
+          if (blob) this.persistProgressTrace(resolvedConversationId, blob);
+        } catch (err) {
+          console.warn('[chat-service] progress trace persist failed:', err);
+        }
+      }
+      yield chunk;
+    }
+  }
+
+  /**
+   * Attach the pruned process trace to the most recent assistant row in the
+   * conversation (the row this turn just inserted). Scoped to assistant rows and
+   * ordered by creation so it cannot clobber an earlier turn.
+   */
+  private persistProgressTrace(conversationId: string, blob: string): void {
+    const latest = this.db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(and(eq(messages.conversationId, conversationId), eq(messages.role, 'assistant')))
+      .orderBy(desc(messages.createdAt))
+      .limit(1)
+      .get();
+    if (!latest) return;
+    this.db.update(messages).set({ progressTrace: blob }).where(eq(messages.id, latest.id)).run();
+  }
+
+  private async *sendMessageInner(
     conversationIdParam: string,
     content: string,
     image?: ImageInput,

@@ -59,6 +59,46 @@ export function shouldAutoExpand(params: {
   return null; // no change
 }
 
+/**
+ * Minimum time (ms) an auto-opened step stays visible before it is allowed to
+ * collapse — even if the underlying work finished in a few ms.
+ *
+ * The complaint this encodes: on fast/cached/deterministic turns the backend
+ * bursts every step in one tick, each step flips running→done instantly, and the
+ * old `shouldAutoExpand` collapsed each one the same frame it opened — so the user
+ * saw ~16 rows flash open and vanish, learning nothing. A human needs the detail to
+ * dwell. This floor is decoupled from how fast the AI actually was; it does NOT
+ * delay the answer, only how long each finished step lingers before folding.
+ */
+export const MIN_STEP_DWELL_MS = 700;
+
+/**
+ * Decide a freshly-completed step's open state under the human-paced dwell rule.
+ *
+ * Returns:
+ *  - `true`  → keep it open (still inside its dwell window) and re-check after `recheckInMs`
+ *  - `false` → dwell satisfied; collapse now
+ *  - `null`  → not applicable (user toggled, not live, never opened, or still running)
+ *
+ * Pure and clock-injected so it unit-tests without timers or a DOM.
+ */
+export function resolveDwellCollapse(params: {
+  live: boolean;
+  status: ProcessNode['status'];
+  openedAt: number | null;
+  now: number;
+  userToggled?: boolean;
+  minDwellMs?: number;
+}): { open: boolean; recheckInMs: number } | null {
+  const { live, status, openedAt, now, userToggled = false, minDwellMs = MIN_STEP_DWELL_MS } = params;
+  if (!live || userToggled) return null;       // settled view / user decided
+  if (status !== 'done') return null;          // only completed steps collapse
+  if (openedAt === null) return null;          // never auto-opened — nothing to hold
+  const elapsed = now - openedAt;
+  if (elapsed >= minDwellMs) return { open: false, recheckInMs: 0 }; // dwell met → fold
+  return { open: true, recheckInMs: minDwellMs - elapsed };          // hold a bit longer
+}
+
 function toneForStage(stage: string): ProcessTone {
   if (stage.startsWith('tool-batch')) return 'tool';
   if (stage.startsWith('council')) return 'council';

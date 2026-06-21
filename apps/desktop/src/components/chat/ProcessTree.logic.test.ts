@@ -1,6 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { buildProcessTree, shouldAutoExpand } from './ProcessTree.logic.js';
+import { buildProcessTree, shouldAutoExpand, resolveDwellCollapse, MIN_STEP_DWELL_MS } from './ProcessTree.logic.js';
 import type { ChatProgressStep } from '../../stores/chatStore.js';
+
+describe('resolveDwellCollapse — a completed step lingers long enough to read', () => {
+  it('holds a just-completed step open until the dwell window passes', () => {
+    const opened = 1000;
+    // 200ms after opening, with a 700ms floor → keep open, recheck after the remainder.
+    const r = resolveDwellCollapse({ live: true, status: 'done', openedAt: opened, now: opened + 200 });
+    expect(r).toEqual({ open: true, recheckInMs: MIN_STEP_DWELL_MS - 200 });
+  });
+
+  it('allows collapse once the dwell window is satisfied', () => {
+    const opened = 1000;
+    const r = resolveDwellCollapse({ live: true, status: 'done', openedAt: opened, now: opened + MIN_STEP_DWELL_MS + 1 });
+    expect(r).toEqual({ open: false, recheckInMs: 0 });
+  });
+
+  it('does not apply when the step never auto-opened', () => {
+    expect(resolveDwellCollapse({ live: true, status: 'done', openedAt: null, now: 5000 })).toBeNull();
+  });
+
+  it('does not apply to a still-running step or a user-toggled / settled view', () => {
+    expect(resolveDwellCollapse({ live: true, status: 'running', openedAt: 0, now: 9999 })).toBeNull();
+    expect(resolveDwellCollapse({ live: true, status: 'done', openedAt: 0, now: 9999, userToggled: true })).toBeNull();
+    expect(resolveDwellCollapse({ live: false, status: 'done', openedAt: 0, now: 9999 })).toBeNull();
+  });
+});
 
 describe('shouldAutoExpand — stream the active step open (any tone, not just council)', () => {
   it('auto-expands ANY running expandable step while live', () => {

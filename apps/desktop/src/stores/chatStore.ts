@@ -640,6 +640,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       imageId?: string | null;
       plan?: string | null;
       modelId?: string | null;
+      /** Pruned process trace rehydrated server-side, so the ProcessTree re-expands. */
+      progressSteps?: ChatProgressStep[] | null;
     }>;
     const conversation = get().conversations.find((item) => item.id === id);
     // Restore per-chat broadcast state
@@ -654,6 +656,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         imageId: m.imageId,
         ...(m.role === 'assistant' ? parseEvidenceFromMessagePlan(m.plan) : {}),
         ...(m.role === 'assistant' && m.modelId ? { respondingModelId: m.modelId } : {}),
+        ...(m.role === 'assistant' && m.progressSteps?.length ? { progressSteps: m.progressSteps } : {}),
       }))),
       broadcastMode: isBroadcastChat,
       broadcastTargetClientIds: isBroadcastChat ? broadcastChats[id] : [],

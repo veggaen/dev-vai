@@ -5,7 +5,7 @@ import type { ChatProgressStep, CouncilThinkingUI } from '../../stores/chatStore
 import { useProcessChildReveal } from '../../hooks/useProcessChildReveal.js';
 import { useAnimatedEllipsis } from '../../hooks/useAnimatedEllipsis.js';
 import { VaiNode, type VaiNodeProps } from '../brand/VaiNode.js';
-import { buildProcessTree, isExpandable, shouldAutoExpand, type ProcessNode, type ProcessTone } from './ProcessTree.logic.js';
+import { buildProcessTree, isExpandable, shouldAutoExpand, resolveDwellCollapse, type ProcessNode, type ProcessTone } from './ProcessTree.logic.js';
 import { ProcessTreeCopyActions } from './ProcessTreeCopyActions.js';
 import { copyProcessText } from './ProcessTree.copy.js';
 import { humanizeLiveTail } from './process-humanize.js';
@@ -243,10 +243,37 @@ function StepRow({
   const streamChildren = autoExpandRunning && open;
   const visibleChildCount = useProcessChildReveal(childCount, streamChildren);
   const visibleChildren = node.children.slice(0, visibleChildCount);
+  // When this row auto-opened, so we can hold it open for a human-readable dwell
+  // before it folds — instead of flashing open and collapsing in the same frame on
+  // a fast/bursted turn. Cleared once collapsed so a later re-open re-arms the dwell.
+  const openedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const next = shouldAutoExpand({ live, expandable, status: node.status, expandAll, userToggled: userToggledRef.current });
-    if (next !== null) setOpen(next);
+    if (userToggledRef.current) return; // user owns the state once they click
+    const next = shouldAutoExpand({ live, expandable, status: node.status, expandAll, userToggled: false });
+
+    // Opening (or staying open while running): record when it opened, arm dwell.
+    if (next === true) {
+      if (openedAtRef.current === null) openedAtRef.current = Date.now();
+      setOpen(true);
+      return;
+    }
+    // A completed step wants to fold — but only after it has dwelled long enough
+    // for the user to actually read it. Re-check on a timer if we're still early.
+    if (next === false) {
+      const dwell = resolveDwellCollapse({
+        live, status: node.status, openedAt: openedAtRef.current, now: Date.now(),
+        userToggled: false,
+      });
+      if (dwell === null) { setOpen(false); openedAtRef.current = null; return; }
+      if (!dwell.open) { setOpen(false); openedAtRef.current = null; return; }
+      setOpen(true); // hold through the remaining dwell window
+      const id = window.setTimeout(() => {
+        if (!userToggledRef.current) { setOpen(false); openedAtRef.current = null; }
+      }, dwell.recheckInMs);
+      return () => window.clearTimeout(id);
+    }
+    // next === null → leave as-is.
   }, [expandAll, expandable, live, node.status, childCount]);
 
   const toggle = () => {
