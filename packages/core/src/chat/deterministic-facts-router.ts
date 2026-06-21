@@ -12,6 +12,7 @@
  */
 
 import { resolveProgrammingIdiom, isMultiConceptOrComparison, isMultiWayComparison, composeIdiomComparison, type IdiomContext, type ConceptExplainer } from './programming-idioms.js';
+import { buildEntityMatcher, type EntityMatcher } from './entity-matcher.js';
 
 export type FactShimResult = {
   reply: string;
@@ -511,19 +512,19 @@ function normalize(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ').replace(/[?.!,;:]+$/g, '');
 }
 
+// Per-table matchers compiled ONCE (lazily, since the tables are declared below).
+// Replaces the old findEntity loop that built ~570 regexes PER TURN across the
+// country/company/brand tables. WeakMap-keyed by the table object so each static
+// table compiles its alternation regex exactly once, then matches in one pass.
+const entityMatcherCache = new WeakMap<object, EntityMatcher>();
 function findEntity(content: string, table: Record<string, unknown>): string | null {
-  const lower = ' ' + content.toLowerCase() + ' ';
-  let best: string | null = null;
-  for (const key of Object.keys(table)) {
-    const needle = ' ' + key + ' ';
-    // Match against word-boundary neighbors so "india" doesn't match "indiana".
-    const re = new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-    if (re.test(content)) {
-      if (!best || key.length > best.length) best = key;
-    }
-    void needle;
+  let matcher = entityMatcherCache.get(table);
+  if (!matcher) {
+    matcher = buildEntityMatcher(Object.keys(table));
+    entityMatcherCache.set(table, matcher);
   }
-  return best;
+  // Longest curated key wins (preserves the old `key.length > best.length` tie-break).
+  return matcher.match(content);
 }
 
 // ── country handler ───────────────────────────────────────────────────────
@@ -1155,16 +1156,21 @@ const COMPARE_PAIRS: ComparePair[] = [
 **Pick Remix / React Router** for a "web standards first" mental model, Cloudflare/edge runtimes, or simpler data flow.` },
 ];
 
+let comparePairTermMatcher: EntityMatcher | null = null;
 function tryCompare(content: string): FactShimResult | null {
   const lower = content.toLowerCase();
   if (!/\bvs\.?\b|\bversus\b|\bcompare\b|\bcompared to\b|\bshould i use\b|\bdifference[s]? between\b/i.test(lower)) return null;
   // A two-way curated pair must not answer a 3+ way comparison ("compare A, B,
   // and C") — that question deserves a full multi-way answer, not "A vs B".
   if (isMultiWayComparison(content)) return null;
+  // Match all curated comparison TERMS in one pass (compiled once over both sides
+  // of every pair), then test each pair against that set — O(1) per pair instead
+  // of two fresh regex compiles per pair.
+  comparePairTermMatcher ??= buildEntityMatcher(COMPARE_PAIRS.flatMap(({ a, b }) => [a, b]));
+  const present = new Set(comparePairTermMatcher.matchAll(content).map((t) => t.toLowerCase()));
+  if (present.size === 0) return null;
   for (const { a, b, reply } of COMPARE_PAIRS) {
-    const ra = new RegExp(`\\b${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-    const rb = new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-    if (ra.test(content) && rb.test(content)) {
+    if (present.has(a.toLowerCase()) && present.has(b.toLowerCase())) {
       return { reply, kind: 'compare-pair' };
     }
   }
@@ -1339,13 +1345,13 @@ const PERSON_FACTS: Record<string, PersonFact> = {
 `**Marie Curie** was a Polish-French physicist and chemist who conducted pioneering research on radioactivity. She was the first woman to win a Nobel Prize, the only person to win Nobels in two different sciences (Physics 1903, Chemistry 1911), and the first woman professor at the University of Paris.` },
 };
 
+let personMatcher: EntityMatcher | null = null;
 function tryPerson(content: string): FactShimResult | null {
   const lower = content.toLowerCase();
-  let matched: string | null = null;
-  for (const name of Object.keys(PERSON_FACTS)) {
-    const re = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-    if (re.test(content)) { matched = name; break; }
-  }
+  // Compile-once over PERSON_FACTS (was: a fresh regex per name, every turn).
+  // Longest-first now, so "carl sagan" wins over a bare "carl" if both existed.
+  personMatcher ??= buildEntityMatcher(Object.keys(PERSON_FACTS));
+  const matched = personMatcher.match(content);
   if (!matched) return null;
   const f = PERSON_FACTS[matched];
   const display = matched.split(' ').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
@@ -1668,20 +1674,16 @@ const ACRONYM_FACTS: Record<string, AcronymFact> = {
 
 const ACRONYM_QUESTION_RE = /\b(what\s*(?:is|'s|does|do)|what\s+(?:the\s+)?(?:heck|hell)|define|meaning\s+of|stand(?:s)?\s+for|mean(?:s)?(?:\s+by)?|abbreviation\s+for|short\s+for|expand|expansion\s+of)\b/i;
 
+let acronymMatcher: EntityMatcher | null = null;
 function tryAcronym(content: string): FactShimResult | null {
   if (!ACRONYM_QUESTION_RE.test(content)) return null;
   if (content.length > 120) return null;
-  // Require uppercase form in the prompt so "api" in random prose doesn't
-  // collide. Sort longest-first so e.g. HTTPS wins over HTTP.
-  const keys = Object.keys(ACRONYM_FACTS).sort((a, b) => b.length - a.length);
-  for (const key of keys) {
-    // Match the acronym as a standalone uppercase token (allowing surrounding
-    // punctuation and ? at end).
-    const re = new RegExp(`(?:^|[^A-Za-z0-9])${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9])`);
-    if (re.test(content)) {
-      return { reply: ACRONYM_FACTS[key].oneLiner, kind: 'fact-acronym' };
-    }
-  }
+  // Require the uppercase standalone token ("api" in prose must not collide), with
+  // HTTPS winning over HTTP. Token mode = case-sensitive, longest-first. Compiled
+  // once (was: one regex per acronym key, every acronym question).
+  acronymMatcher ??= buildEntityMatcher(Object.keys(ACRONYM_FACTS), { boundary: 'token' });
+  const key = acronymMatcher.match(content);
+  if (key) return { reply: ACRONYM_FACTS[key].oneLiner, kind: 'fact-acronym' };
   return null;
 }
 
@@ -1733,16 +1735,14 @@ function tryDefinition(content: string): FactShimResult | null {
   if (!DEFINE_RE.test(trimmed)) return null;
   // Strip leading phrasing to isolate the term being asked about.
   const stripped = trimmed.replace(DEFINE_RE, '').replace(/^(?:an?|the)\s+/i, '').toLowerCase();
-  // Try each definition key, longest-first, against the (stripped) prompt.
-  const keys = Object.keys(DEFINITION_FACTS).sort((a, b) => b.length - a.length);
-  for (const key of keys) {
-    const re = new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-    if (re.test(stripped)) {
-      return { reply: DEFINITION_FACTS[key], kind: 'fact-definition' };
-    }
-  }
+  // Longest curated definition key wins. Compiled once (was: one regex per key,
+  // every definition-shaped question).
+  definitionMatcher ??= buildEntityMatcher(Object.keys(DEFINITION_FACTS));
+  const key = definitionMatcher.match(stripped);
+  if (key) return { reply: DEFINITION_FACTS[key], kind: 'fact-definition' };
   return null;
 }
+let definitionMatcher: EntityMatcher | null = null;
 
 function tryConceptualPrimer(content: string): FactShimResult | null {
   if (
