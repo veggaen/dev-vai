@@ -1067,7 +1067,12 @@ export class ChatService {
     let webEvidence: CouncilInput['webEvidence'];
     const webEvidenceEnabled = process.env.VAI_COUNCIL_WEB_EVIDENCE !== '0';
     const alreadyGrounded = (draft.sources?.length ?? 0) > 0;
-    if (webEvidenceEnabled && !isSelfImprovement && !alreadyGrounded) {
+    // V3gga's directive: EVERY council turn gets web evidence, including self-improvement
+    // ones (previously skipped). A codebase question now reaches members with BOTH the file
+    // pull-model AND web sources — they corroborate across both. The fact-quarantine guardrail
+    // is unchanged: web text informs reasoning only; Vai's grounded tools own surfaced facts,
+    // so an off-topic web hit can't become an asserted fact. Opt out with VAI_COUNCIL_WEB_EVIDENCE=0.
+    if (webEvidenceEnabled && !alreadyGrounded) {
       const evidence = await gatherWebEvidence(draft.prompt);
       if (evidence.sources.length > 0 || evidence.aiOverview) {
         webSources = [...webSources, ...evidence.sources];

@@ -494,10 +494,12 @@ export class LocalOpenAICompatibleAdapter extends BaseHttpAdapter {
     };
     // Chat latency contract: thinking-capable local models default to thinking
     // OFF (a chat turn should answer in seconds, not minutes); opt back in via
-    // VAI_LOCAL_THINK=1. The flag is only sent to models discovered as
-    // thinking-capable — daemons reject it for non-thinking models.
+    // VAI_LOCAL_THINK=1. A per-request `think` ALWAYS wins (the council sets it true
+    // for reasoning models so their CoT goes to a separate field and `content` stays
+    // clean JSON — see ChatRequest.think). The flag is only sent to models discovered
+    // as thinking-capable — daemons reject it for non-thinking models.
     if (this.profile.capabilities.extendedThinking) {
-      body.think = process.env.VAI_LOCAL_THINK === '1';
+      body.think = request.think ?? (process.env.VAI_LOCAL_THINK === '1');
     }
     const res = await fetch(`${this.providerConfig.baseUrl ?? 'http://localhost:11434'}/api/chat`, {
       method: 'POST',

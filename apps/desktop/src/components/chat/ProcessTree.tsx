@@ -8,6 +8,7 @@ import { VaiNode, type VaiNodeProps } from '../brand/VaiNode.js';
 import { buildProcessTree, isExpandable, shouldAutoExpand, type ProcessNode, type ProcessTone } from './ProcessTree.logic.js';
 import { ProcessTreeCopyActions } from './ProcessTreeCopyActions.js';
 import { copyProcessText } from './ProcessTree.copy.js';
+import { humanizeLiveTail } from './process-humanize.js';
 
 /**
  * ProcessTree — top-down live trace that collapses in place when the turn settles.
@@ -50,7 +51,9 @@ export function ProcessTree({ steps, council, live = false, imageSteps, vaiPropo
   const nodes = buildProcessTree(steps, council ?? undefined, imageSteps, vaiProposedDraft, live, !live);
   const hasNodes = nodes.length > 0;
   const showLiveTail = live;
-  const tailLabel = live ? 'Working' : 'Working';
+  // Name what Vai is doing right now instead of a bare "Working…". Derived from the
+  // last running step (and the council member in flight, when there is one).
+  const tailLabel = live ? deriveLiveTailLabel(steps) : 'Working';
   const summaryDuration = durationMs !== undefined && durationMs >= 500 ? durationMs : undefined;
   const [phase, setPhase] = useState<TreePhase>(live ? 'live' : 'settled');
   const [open, setOpen] = useState(false);
@@ -137,6 +140,23 @@ export function ProcessTree({ steps, council, live = false, imageSteps, vaiPropo
       </AnimatePresence>
     </div>
   );
+}
+
+/**
+ * Build the live-tail label ("Consulting DeepSeek on first-principles reasoning…")
+ * from the last running step. Falls back to a stage-derived phrase, then a generic
+ * "Thinking it through…". Pure read of the steps the component already has.
+ */
+function deriveLiveTailLabel(steps: readonly ChatProgressStep[]): string {
+  const active = [...steps].reverse().find((s) => s.status === 'running') ?? steps[steps.length - 1];
+  if (!active) return 'Thinking it through…';
+  const inFlight = active.councilMembers?.find((m) => m.pending)
+    ?? (active.councilMembers?.length ? active.councilMembers[active.councilMembers.length - 1] : undefined);
+  return humanizeLiveTail({
+    stage: active.stage,
+    memberInFlight: inFlight?.pending ? inFlight.name : undefined,
+    memberTopic: inFlight?.topic,
+  });
 }
 
 function ProcessLiveTail({ label }: { label: string }) {
@@ -411,7 +431,7 @@ function ProcessNotePanel({ label, body }: { label: string; body: string }) {
   return (
     <div className="process-tree__panel group/panel relative py-1">
       <div className="mb-0.5 flex items-center justify-between gap-2">
-        <div className="process-tree__panel-label text-[10px] font-medium uppercase tracking-wide text-[color:var(--chat-muted)]">
+        <div className="process-tree__panel-label text-[10px] font-semibold tracking-wide text-[color:var(--chat-muted)]">
           {ioLabel}
         </div>
         <button

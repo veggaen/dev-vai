@@ -2,6 +2,13 @@ import type { ChatProgressStep, CouncilThinkingUI } from '../../stores/chatStore
 import type { AdvisorTrace } from '@vai/api-types/chat-ws';
 import { enrichProgressStepsWithCouncil } from './process-step-enrich.js';
 import { stripAnsi } from '../../lib/strip-ansi.js';
+import {
+  humanizeMemberWaiting,
+  humanizeMemberReturned,
+  humanizeMemberBody,
+  humanizeAdvisorState,
+  cleanModelName,
+} from './process-humanize.js';
 
 /**
  * Tree model for ProcessTree. The backend streams a FLAT list of progress steps
@@ -129,15 +136,17 @@ function verdictTone(verdict: string, failed?: boolean): ProcessNode['status'] {
 function formatMemberProcessBody(
   member: NonNullable<ChatProgressStep['councilMembers']>[number],
 ): string {
-  if (member.failed) return stripAnsi(member.note?.trim() || 'Member did not respond.');
-  const lines: string[] = [];
-  if (member.realIntent?.trim()) lines.push(`Real intent: ${stripAnsi(member.realIntent.trim())}`);
-  if (member.hiddenMeaning?.trim()) lines.push(`Hidden meaning: ${stripAnsi(member.hiddenMeaning.trim())}`);
-  if (member.missingCapability?.trim()) lines.push(`Missing capability: ${stripAnsi(member.missingCapability.trim())}`);
-  if (member.suggestedAction?.trim()) lines.push(`Suggested action: ${stripAnsi(member.suggestedAction.trim())}`);
-  if (member.methodLesson?.trim()) lines.push(`Method lesson: ${stripAnsi(member.methodLesson.trim())}`);
-  if (member.concerns?.length) lines.push(`Concerns:\n- ${member.concerns.map(stripAnsi).join('\n- ')}`);
-  return stripAnsi(lines.join('\n\n') || member.note?.trim() || '—');
+  if (member.failed) return stripAnsi(member.note?.trim() || `${cleanModelName(member.name)} didn't respond in time.`);
+  const body = humanizeMemberBody({
+    name: member.name,
+    realIntent: member.realIntent?.trim() ? stripAnsi(member.realIntent.trim()) : undefined,
+    hiddenMeaning: member.hiddenMeaning?.trim() ? stripAnsi(member.hiddenMeaning.trim()) : undefined,
+    missingCapability: member.missingCapability?.trim() ? stripAnsi(member.missingCapability.trim()) : undefined,
+    suggestedAction: member.suggestedAction?.trim() ? stripAnsi(member.suggestedAction.trim()) : undefined,
+    methodLesson: member.methodLesson?.trim() ? stripAnsi(member.methodLesson.trim()) : undefined,
+    concerns: member.concerns?.length ? member.concerns.map(stripAnsi) : undefined,
+  });
+  return stripAnsi(body || member.note?.trim() || '—');
 }
 
 export function panelLabelForLogKind(kind: string): string {
@@ -189,16 +198,13 @@ function mapAdvisorTrace(advisor: AdvisorTrace, prefix: string): ProcessNode[] {
   const nodes: ProcessNode[] = [];
   nodes.push({
     id: `${prefix}-model`,
-    label: advisor.actorId,
+    label: cleanModelName(advisor.modelId),
     kind: 'submodel',
-    detail: `${advisor.modelId} · ${advisor.state}${advisor.durationMs !== undefined ? ` · ${formatCompactMs(advisor.durationMs)}` : ''}`,
-    note: [
-      `Actor: ${advisor.actorId}`,
-      `Model: ${advisor.modelId}`,
-      `State: ${advisor.state}`,
-      advisor.durationMs !== undefined ? `Duration: ${advisor.durationMs}ms` : undefined,
-      advisor.confidence !== undefined ? `Confidence: ${Math.round(advisor.confidence * 100)}%` : undefined,
-    ].filter(Boolean).join('\n'),
+    detail: `${advisor.state}${advisor.durationMs !== undefined ? ` · ${formatCompactMs(advisor.durationMs)}` : ''}`,
+    note: humanizeAdvisorState(advisor.modelId, advisor.state, {
+      durationMs: advisor.durationMs,
+      confidencePct: advisor.confidence !== undefined ? Math.round(advisor.confidence * 100) : undefined,
+    }),
     status: advisor.state === 'invalid' || advisor.state === 'unavailable'
       ? 'bad'
       : advisor.state === 'running' || advisor.state === 'background'
@@ -298,21 +304,16 @@ function mapCouncilMembers(
     if (member.pending) {
       return {
         id: `${prefix}-council-pending-${memberKey}`,
-        label: member.name,
+        label: cleanModelName(member.name),
         kind: 'submodel',
-        detail: `${member.topic ?? 'review'} · waiting`,
+        detail: 'thinking…',
         status: 'running' as const,
         tone: 'council',
         children: [{
           id: `${prefix}-council-pending-${memberKey}-event`,
-          label: 'Submodel event',
+          label: 'Status',
           kind: 'event',
-          note: [
-            `Member: ${member.name}`,
-            member.memberId ? `ID: ${member.memberId}` : undefined,
-            `Topic: ${member.topic ?? 'review'}`,
-            'Status: waiting for response',
-          ].filter(Boolean).join('\n'),
+          note: humanizeMemberWaiting(member.name, member.topic),
           status: 'running' as const,
           tone: 'council',
           children: [],
@@ -323,11 +324,11 @@ function mapCouncilMembers(
     const children = buildCouncilMemberTimeline(member);
     return {
       id: `${prefix}-council-${memberKey}`,
-      label: member.name,
+      label: cleanModelName(member.name),
       kind: 'submodel',
       detail: member.failed
         ? 'no response'
-        : `${member.verdict} @ ${Math.round(member.confidence * 100)}%${member.durationMs !== undefined ? ` · ${formatCompactMs(member.durationMs)}` : ''}`,
+        : `${member.verdict} · ${Math.round(member.confidence * 100)}%${member.durationMs !== undefined ? ` · ${formatCompactMs(member.durationMs)}` : ''}`,
       note: body,
       status: verdictTone(member.verdict, member.failed),
       tone: 'council',
@@ -340,17 +341,13 @@ function buildCouncilMemberTimeline(
   member: NonNullable<ChatProgressStep['councilMembers']>[number],
 ): ProcessNode[] {
   const memberKey = member.memberId || member.name;
+  const confidencePct = Math.round(member.confidence * 100);
   const nodes: ProcessNode[] = [{
     id: `${memberKey}-submodel-call`,
-    label: 'Submodel call',
+    label: 'What happened',
     kind: 'event',
-    note: [
-      `Member: ${member.name}`,
-      member.memberId ? `ID: ${member.memberId}` : undefined,
-      `Topic: ${member.topic ?? 'review'}`,
-      member.durationMs !== undefined ? `Duration: ${member.durationMs}ms` : undefined,
-      member.failed ? 'Status: failed/no usable note' : 'Status: returned structured review',
-    ].filter(Boolean).join('\n'),
+    note: humanizeMemberReturned(member.name, member.topic, member.verdict, confidencePct, member.failed)
+      + (member.durationMs !== undefined ? ` (took ${formatCompactMs(member.durationMs)})` : ''),
     status: member.failed ? 'bad' : 'done',
     tone: 'council',
     children: [],
@@ -358,11 +355,7 @@ function buildCouncilMemberTimeline(
     id: `${memberKey}-verdict`,
     label: 'Verdict',
     kind: 'verdict',
-    note: [
-      `Verdict: ${member.verdict}`,
-      `Confidence: ${Math.round(member.confidence * 100)}%`,
-      member.suggestedAction ? `Suggested action: ${member.suggestedAction}` : undefined,
-    ].filter(Boolean).join('\n'),
+    note: humanizeMemberReturned(member.name, member.topic, member.verdict, confidencePct, member.failed),
     status: verdictTone(member.verdict, member.failed),
     tone: 'council',
     children: [],

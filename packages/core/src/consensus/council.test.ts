@@ -165,6 +165,41 @@ describe('runCouncil / convene', () => {
     expect(c.outcome).toBe('ship'); // a member that didn't answer can't block
   });
 
+  it('extends the outer per-member timeout for a slowThinking member (deepseek fix)', async () => {
+    vi.useFakeTimers();
+    try {
+      // A reasoning member that resolves at 50s — past the 30s base cap, but within the 60s
+      // slow-thinking floor. A non-thinking member with the same base cap would be aborted.
+      const deep: CouncilMember = {
+        id: 'deepseek-r1:8b', displayName: 'DeepSeek-R1', topic: 'reasoning', slowThinking: true,
+        review: () => new Promise((resolve) => setTimeout(() => resolve(note({ verdict: 'needs-work', memberId: 'deepseek-r1:8b', topic: 'reasoning' })), 50_000)),
+      };
+      const p = runCouncil([deep], INPUT, { timeoutMs: 30_000 });
+      await vi.advanceTimersByTimeAsync(55_000);
+      const c = await p;
+      expect(c.notes[0].error).toBeUndefined();
+      expect(c.memberIds).toContain('deepseek-r1:8b');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does NOT extend the outer timeout for a non-thinking member (stays bounded)', async () => {
+    vi.useFakeTimers();
+    try {
+      const slow: CouncilMember = {
+        id: 'qwen', displayName: 'Qwen', topic: 'local', // no slowThinking
+        review: () => new Promise((resolve) => setTimeout(() => resolve(note({ verdict: 'good', memberId: 'qwen' })), 50_000)),
+      };
+      const p = runCouncil([slow], INPUT, { timeoutMs: 30_000 });
+      await vi.advanceTimersByTimeAsync(35_000);
+      const c = await p;
+      expect(c.notes[0].error).toMatch(/timed out after 30000ms/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('convene routes the topic and runs the roster', async () => {
     const member: CouncilMember = { id: 'q', displayName: 'Q', topic: 'local', review: async () => note({ verdict: 'needs-work', memberId: 'q', suggestedAction: 'local-business-search', searchQuery: 'x' }) };
     const { topic, consensus } = await convene(INPUT, { default: [member] });

@@ -44,6 +44,18 @@ export interface ChatRequest {
    * adapters. Accepts any Ollama keep_alive form ('20s', '5m', '0' = unload now, '-1' = never).
    */
   readonly keepAlive?: string;
+  /**
+   * Per-call override for a thinking-capable LOCAL model's reasoning channel (Ollama `think`).
+   * Unset = the adapter default (thinking OFF for chat latency unless VAI_LOCAL_THINK=1).
+   *
+   * The council passes `think: true` for reasoning models (DeepSeek-R1): with thinking ON,
+   * Ollama routes the long chain-of-thought to a SEPARATE field and returns clean JSON in
+   * `content`. With thinking OFF a distilled-R1 instead crams its reasoning INTO content,
+   * exhausting the token budget so the stripped content is empty and the member is silently
+   * dropped — the "deepseek seated but never responds" bug. Ignored by hosted/non-thinking
+   * adapters (the daemon rejects `think` for models without the capability).
+   */
+  readonly think?: boolean;
 }
 
 export interface TokenUsage {

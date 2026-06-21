@@ -127,6 +127,14 @@ export function resetCouncilAvailability(): void {
   liveAvailability.clear();
 }
 
+/**
+ * Outer per-member timeout floor for a slow-thinking model (DeepSeek-R1 et al.). Its
+ * chain-of-thought + cold load runs ~45-50s on council prompts, so the normal cap
+ * (often 30s from the runtime) abandons it mid-think → it never responds and gets rested.
+ * Mirrors the member-internal THINKING_MODEL_TIMEOUT_MS so both bounds agree.
+ */
+const SLOW_THINKING_TIMEOUT_FLOOR_MS = 60_000;
+
 async function runOneMember(
   member: CouncilMember,
   input: CouncilInput,
@@ -134,9 +142,14 @@ async function runOneMember(
   now: () => number,
 ): Promise<CouncilMemberNote | null> {
   const startedAt = now();
+  // A reasoning model needs more wall-clock than a terse generalist; extend the outer cap
+  // for it (the inner review budget alone can't help — this Promise.race would still fire).
+  const effectiveTimeoutMs = member.slowThinking
+    ? Math.max(timeoutMs, SLOW_THINKING_TIMEOUT_FLOOR_MS)
+    : timeoutMs;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`council member timed out after ${timeoutMs}ms`)), timeoutMs);
+    timer = setTimeout(() => reject(new Error(`council member timed out after ${effectiveTimeoutMs}ms`)), effectiveTimeoutMs);
   });
   try {
     const note = await Promise.race([member.review(input), timeout]);
