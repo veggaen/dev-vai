@@ -16,6 +16,7 @@
  *   auto-applied (loop is read-only on source).
  */
 import { ollamaGenerate } from './driver.mjs';
+import { scoreVagueOverconfident } from './vague-answer.mjs';
 
 const GEN_MODEL = process.env.IMPROVE_GEN_MODEL ?? process.env.LOCAL_MODEL ?? 'qwen3:8b';
 
@@ -27,6 +28,8 @@ const CLASS_LOCATION = {
     'packages/core/src/chat/build-execution-intent.ts:88 (FRESH_DATA_LEAD too narrow) + search/pipeline.ts:247',
   'answer/opportunity-framing':
     'packages/core/src/chat/deterministic-facts-router.ts (no idea/opportunity answer contract)',
+  'answer/vague-overconfident':
+    'packages/core/src/chat/service.ts (draft quality contract) + council redraft gate (grounding not enforced before ship)',
 };
 
 /** Ask qwen for N fresh prompts in a class. Returns string[] (best-effort parse). */
@@ -73,6 +76,16 @@ export async function gradeInterpretation(klass, expectedIntent, prompt, vai) {
       return { passed: false, reason: 'enumerated legal company forms instead of business ideas (Norway signature)' };
     }
     if (gaveIdeas) return { passed: true, reason: 'proposed concrete ideas/opportunities' };
+  }
+
+  if (klass === 'answer/vague-overconfident') {
+    // The class the user flagged: confident-sounding but generic, ungrounded prose
+    // ("AI slop"). Deterministic surface scoring — ungameable, no model needed.
+    const verdict = scoreVagueOverconfident(vai.text ?? '');
+    if (verdict.vague) {
+      return { passed: false, reason: `vague/overconfident (score ${verdict.score}): ${verdict.signals.slice(0, 2).join('; ')}` };
+    }
+    return { passed: true, reason: `grounded enough (score ${verdict.score})` };
   }
 
   if (klass === 'routing/build-verb-poison') {
