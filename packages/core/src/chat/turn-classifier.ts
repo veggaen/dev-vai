@@ -61,7 +61,12 @@ const PRODUCT_RECOMMENDATION_HINT_RE =
   /\b(?:product|feature|ux|ui|design|architecture|system|pipeline|workflow|onboarding|prompt|chat|app|build|ship|launch|release)\b/i;
 
 const VAI_SELF_IMPROVEMENT_RE =
-  /\b(?:improve|better|stronger|enhance|augment|fix|upgrade|evolve)\b[\s\S]{0,30}\b(?:Vai|you|yourself|chat|intelligence|quality|responses|engine|routing|brief|classifier|grounding)\b|\b(?:Vai|chat)\s+(?:quality|intelligence|self-improvement|better|stronger)\b/i;
+  // An improvement verb within reach of a Vai-internals noun. The noun list covers the
+  // SUBSYSTEMS users name when steering Vai's own quality (council/members/answers/...), and
+  // the window is wide enough to span a possessive ("make Vai's council ANSWERS more
+  // trustworthy") — under-matching here dropped such turns to `unknown`, so they got no
+  // context-grounding and drifted (the council's "routing drift on meta turns" finding).
+  /\b(?:improve|better|stronger|enhance|augment|fix|upgrade|evolve|make|reduce|less|more)\b[\s\S]{0,48}\b(?:Vai|you|yourself|chat|council|member|members|intelligence|quality|answers?|responses?|engine|routing|brief|classifier|grounding|hallucinat\w*|trustworth\w*)\b|\b(?:Vai|chat|council)\s+(?:quality|intelligence|self-improvement|answers?|responses?|better|stronger|trustworth\w*)\b|\b(?:less|reduce|fewer)\s+hallucinat\w*/i;
 
 const VAI_CHAT_QUALITY_DIRECTION_RE =
   /\b(?:grok.*vai|vai.*grok|vai-collab|vai-chat-quality-direction|collaboration.*prompts|self-referential improvement)\b/i;

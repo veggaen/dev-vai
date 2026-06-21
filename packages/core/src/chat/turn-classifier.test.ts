@@ -36,6 +36,33 @@ describe('classifyTurn', () => {
     });
   });
 
+  // The council's own "routing drift on meta turns" finding: prompts that steer Vai's
+  // INTERNAL quality (council/answers/hallucination) were dropping to `unknown` — so they
+  // got no context-grounding and drifted into loose retrieval. They must classify as a
+  // product-quality / self-improvement direction even on a FRESH conversation (no history).
+  describe('Vai self-improvement / meta-quality steering (no history)', () => {
+    it.each([
+      "Smallest concrete change to make Vai's council answers more trustworthy and less hallucinated?",
+      'make the council more reliable',
+      'reduce hallucinations in the council',
+      'make Vai chat answers less hallucinated',
+    ])('classifies %j as a self-improvement direction', (input) => {
+      const r = classifyTurn(input, []);
+      expect(['product-quality-recommendation', 'vai-chat-quality-direction']).toContain(r.kind);
+    });
+
+    // Guard: the broadened self-improvement matcher must NOT swallow ordinary asks that
+    // merely contain improvement verbs ("make", "better", "stronger").
+    it.each([
+      ['make me a haiku about better days', 'unknown'],
+      ['write a function to add two numbers', 'unknown'],
+      ['tell me a story about a stronger hero', 'unknown'],
+    ] as const)('does NOT misclassify %j as self-improvement', (input, expected) => {
+      const r = classifyTurn(input, []);
+      expect(r.kind).toBe(expected);
+    });
+  });
+
   describe('standalone questions', () => {
     it.each([
       'what is the capital of Norway',
