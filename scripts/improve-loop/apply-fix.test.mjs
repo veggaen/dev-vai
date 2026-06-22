@@ -126,3 +126,14 @@ test('missing file is refused safely', async () => {
   assert.equal(r.applied, false);
   assert.match(r.reasons[0], /not found/);
 });
+
+// ── rejected-rationale guard (correctness, not just safety) ──
+// verified=1 means the LINE exists, not that the patch is right. A proposal whose own `why`
+// flags it rejected/wrong/already-fixed must never apply. (Guard lives in apply-consensus.mjs;
+// this pins the detector pattern so a future edit can't silently weaken it.)
+test('rejected-rationale regex matches the language consensus-fix uses for bad patches', () => {
+  const REJECTED_WHY = /\b(rejected|wrong patch|incorrect|do not apply|already fixed|re-?introduces?|reintroduce|regression)\b/i;
+  const real = 'REJECTED by gate: 4/4 consensus on the right LINE but a WRONG patch (re-introduces the over-broad bug). Already fixed correctly by hand.';
+  assert.equal(REJECTED_WHY.test(real), true);
+  assert.equal(REJECTED_WHY.test('tighten the interrogative guard so advice questions are not builds'), false);
+});

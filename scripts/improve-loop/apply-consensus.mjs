@@ -53,8 +53,20 @@ const deps = realApplyDeps({ pkgTsconfig: TSCONFIG, branch: AUTO_IMPROVE_BRANCH 
 const summary = { applied: 0, reverted: 0, flagged: 0, skipped: 0 };
 const flaggedForVegga = [];
 
+// CORRECTNESS GUARD: verified=1 means the LINE exists, NOT that the patch is correct. The
+// consensus stage can converge on the right line but a wrong replacement (4/4 agreement is no
+// proof of correctness), and such rows are saved with a `why` that explains the rejection.
+// Never apply a proposal whose own rationale flags it as rejected/wrong/already-fixed.
+const REJECTED_WHY = /\b(rejected|wrong patch|incorrect|do not apply|already fixed|re-?introduces?|reintroduce|regression)\b/i;
+
 for (const p of pending) {
   const proposal = { file: p.file, find: p.find, replace: p.replace ?? '', why: p.why };
+  if (REJECTED_WHY.test(p.why ?? '')) {
+    summary.skipped++;
+    if (!DRY) db.prepare("UPDATE consensus SET applied='skipped-rejected' WHERE id=?").run(p.id);
+    console.log(`\n▸ [${p.class}] ${p.file}  (rejected)\n   – skipped: proposal's own rationale flags it as not-to-apply`);
+    continue;
+  }
   const risk = classifyRisk(proposal);
   process.stdout.write(`\n▸ [${p.class}] ${p.file}  (${risk.tier})\n`);
 
