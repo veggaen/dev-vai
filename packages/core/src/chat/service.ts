@@ -455,6 +455,35 @@ export function redraftResolvedConcern(
 }
 
 /**
+ * Routing-drift guard for pasted-URL turns: returns true when the prompt linked a page, the
+ * ORIGINAL draft engaged with that page (named its URL/owner/repo/domain), and the REDRAFT
+ * dropped every trace of it. That's the measured honojs/hono failure — a grounded repo
+ * assessment replaced by an off-topic "Refactoring approach" memo. When true, the loop keeps
+ * the grounded draft. Pure + token-based so it unit-tests without a model.
+ */
+export function redraftDroppedUrlSubject(prompt: string, originalDraft: string, redraft: string): boolean {
+  const urls = extractUrls(prompt);
+  if (urls.length === 0) return false;
+  // Build subject tokens from each URL: owner, repo, and bare host (sans TLD), lowercased.
+  const subjects = new Set<string>();
+  for (const url of urls) {
+    for (const seg of url.toLowerCase().replace(/^https?:\/\//, '').split(/[/.@?#=&]+/)) {
+      const tok = seg.trim();
+      if (tok.length >= 3 && !['com', 'org', 'net', 'www', 'github', 'io', 'dev', 'vercel', 'app', 'https', 'http'].includes(tok)) {
+        subjects.add(tok);
+      }
+    }
+  }
+  if (subjects.size === 0) return false;
+  const mentions = (text: string) => {
+    const lower = text.toLowerCase();
+    return [...subjects].some((s) => lower.includes(s));
+  };
+  // Only fire when the original was on-subject AND the redraft abandoned it entirely.
+  return mentions(originalDraft) && !mentions(redraft);
+}
+
+/**
  * Turn council feedback into a compact redraft instruction. Intent and method only —
  * the friends point, Vai writes. Returns a single appended system/user nudge string.
  */
@@ -1733,6 +1762,21 @@ export class ChatService {
       yield {
         stage: stages.redraft,
         label: 'Vai kept the original draft',
+        detail: buildCouncilFeedbackDetail(feedback) || undefined,
+        status: 'done',
+        processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, draft.draftText),
+      };
+      return { council: first.thinking, finalText: draft.draftText, revised: false };
+    }
+    // URL on-topic retention guard: when the user pasted a link and the ORIGINAL draft
+    // engaged with it (a grounded repo/page answer), a redraft that drops the subject
+    // entirely is a routing-drift hijack — the measured honojs/hono failure where a grounded
+    // assessment got replaced by an off-topic "Refactoring approach" memo. Keep the grounded
+    // draft instead of shipping the drifted redraft. (The council stays advisory.)
+    if (redraftDroppedUrlSubject(draft.prompt, draft.draftText, cleaned)) {
+      yield {
+        stage: stages.redraft,
+        label: 'Vai kept the original draft (redraft drifted off the linked page)',
         detail: buildCouncilFeedbackDetail(feedback) || undefined,
         status: 'done',
         processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, draft.draftText),
@@ -3116,6 +3160,7 @@ export class ChatService {
       let bufferedUsage: TokenUsage = { promptTokens: 0, completionTokens: 0 };
       let bufferedDurationMs: number | undefined;
       let bufferedModelId = primaryModelId;
+      let bufferedStrategy: string | undefined;
       let latestConfidence: number | undefined;
       let bufferedSawDone = false;
 
@@ -3151,6 +3196,9 @@ export class ChatService {
           bufferedSawDone = true;
           if (typeof chunk.thinking?.confidence === 'number') {
             latestConfidence = chunk.thinking.confidence;
+          }
+          if (typeof chunk.thinking?.strategy === 'string') {
+            bufferedStrategy = chunk.thinking.strategy;
           }
           if (chunk.usage) bufferedUsage = chunk.usage;
           if (chunk.durationMs !== undefined) bufferedDurationMs = chunk.durationMs;
@@ -3302,7 +3350,17 @@ export class ChatService {
         }
         loop = councilStep.value ?? loop;
         councilThinking = loop.council;
-        if (loop.revised) {
+        // A `url-request` draft already READ the real repo/page (GitHub API + README) and
+        // grounded its answer in it. The council's redraft re-runs the engine on the nudge
+        // text, which the keyword router then hijacks into a generic memo/decline — so the
+        // redraft REPLACES a grounded repo answer with worse, ungrounded prose (the measured
+        // zod/hono interview regressions: "what stack does zod use?" → a refactoring memo).
+        // Keep the council ADVISORY here: show its notes, but don't let it overwrite an
+        // answer that was already grounded in the fetched repo. Opt out with
+        // VAI_COUNCIL_REPLACE_URL_REQUEST=1.
+        const draftIsGroundedRepoRead = bufferedStrategy === 'url-request'
+          && process.env.VAI_COUNCIL_REPLACE_URL_REQUEST !== '1';
+        if (loop.revised && !draftIsGroundedRepoRead) {
           bufferedText = loop.finalText;
           reviewReplacedPrimary = true;
         }

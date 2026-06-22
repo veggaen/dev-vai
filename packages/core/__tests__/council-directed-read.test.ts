@@ -39,7 +39,7 @@ vi.mock('../src/search/browser-search.js', () => ({
 }));
 
 import { createDb } from '../src/db/client.js';
-import { ChatService } from '../src/chat/service.js';
+import { ChatService, redraftDroppedUrlSubject } from '../src/chat/service.js';
 import type { CouncilRedraftFeedback } from '../src/chat/service.js';
 import { ModelRegistry } from '../src/models/adapter.js';
 import type { CouncilMember, CouncilMemberNote } from '../src/consensus/types.js';
@@ -133,5 +133,29 @@ describe('council-directed pasted-URL read', () => {
       if (prev === undefined) delete process.env.VAI_COUNCIL_READ_PASTED_URLS;
       else process.env.VAI_COUNCIL_READ_PASTED_URLS = prev;
     }
+  });
+});
+
+describe('redraftDroppedUrlSubject — keep grounded repo answer over a drifted redraft', () => {
+  const PROMPT = 'Look at https://github.com/honojs/hono and tell me what is this app and is it good?';
+  const GROUNDED = '**honojs/hono** — Web framework built on Web Standards. TypeScript, 31k stars.';
+  const DRIFTED = '**Refactoring approach:**\nMake sure tests exist, commit, change one thing at a time.';
+
+  it('flags a redraft that abandons the linked repo entirely', () => {
+    expect(redraftDroppedUrlSubject(PROMPT, GROUNDED, DRIFTED)).toBe(true);
+  });
+
+  it('allows a redraft that still engages the repo', () => {
+    const better = 'honojs/hono is a tiny web-standards framework; good adoption (31k stars), MIT licensed.';
+    expect(redraftDroppedUrlSubject(PROMPT, GROUNDED, better)).toBe(false);
+  });
+
+  it('is a no-op when there is no URL in the prompt', () => {
+    expect(redraftDroppedUrlSubject('how do hash maps work?', 'a', 'b')).toBe(false);
+  });
+
+  it('does not fire when the original draft never engaged the repo either', () => {
+    // Original already off-subject → nothing grounded to protect.
+    expect(redraftDroppedUrlSubject(PROMPT, 'I cannot access external sites.', DRIFTED)).toBe(false);
   });
 });
