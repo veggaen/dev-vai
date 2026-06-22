@@ -9776,6 +9776,19 @@ export class VaiEngine implements ModelAdapter {
     // Rogaland" category-error guard). Same motivation as the inventor
     // lookup — keeps high-frequency political/leader questions from
     // drifting into unrelated retrieval.
+    // Strategy 0.0095: a pasted GitHub URL with an inquiry ("what is this app and is
+    // it good?", "what stack does X use?") MUST read the repo here — BEFORE the curated
+    // framework/devops/factual keyword strategies below. Otherwise a word like "stack"
+    // or "json" in the question grabs a canned knowledge snippet and the real repo URL is
+    // ignored (the measured DEV-VEGGASTARE/zod/hono interview failures: a "what stack does
+    // zod use?" turn answered with a generic JSON tutorial). tryUrlBasedRequest fetches the
+    // real repo (description + README + topics) and assesses it. Build/"make one like this"
+    // intents are handled inside it too. Only intercept when a URL is actually present.
+    if (/https?:\/\/\S*github\.com\//i.test(input)) {
+      const earlyUrlResult = await this.tryUrlBasedRequest(lower, input);
+      if (earlyUrlResult !== null) return this.tracked('url-request', earlyUrlResult, input);
+    }
+
     if (
       /\b(?:make|write|create|generate|implement|build)\b/i.test(input)
       && /\b(?:http\s*server|web\s*server)\b/i.test(input)
