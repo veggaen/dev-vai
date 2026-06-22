@@ -91,10 +91,21 @@ export async function gradeInterpretation(klass, expectedIntent, prompt, vai) {
   if (klass === 'routing/build-verb-poison') {
     // The prompt is a QUESTION that merely mentions a build gerund. It must be
     // answered as a question, not turned into a build / treated as build-intent.
+    // The AUTHORITATIVE signal is the ANSWER shape: did Vai actually scaffold, or ask the
+    // user for a stack/scaffold target? The council's `readAs` intent string alone is NOT
+    // reliable — it routinely contains the word "building"/"build" for a pure advice ask
+    // ("seeking guidance on team BUILDING fundamentals"), which produced false-negative
+    // grades that dragged the pass rate down even when the answer was a correct advice reply.
     const builtSomething = /```|title=|installed dependencies|scaffold|here('?s| is) (your|the) (app|project)/i.test(answer);
     if (builtSomething) return { passed: false, reason: 'turned an innocent question into a build' };
-    if (readAs && /build|scaffold|create an app|make an app/.test(readAs)) {
-      return { passed: false, reason: `council read it as a build: "${readAs}"` };
+    // A build-shaped DEFLECTION counts as a build-misread too ("give me a target stack and
+    // I'll scaffold"), but ONLY when the answer itself solicits build inputs — not from the
+    // intent string. This keeps "team building fundamentals" advice (a correct answer) passing.
+    const answerSolicitsBuild =
+      /\b(?:target stack|tech stack|what (?:stack|framework|language)|one-line goal|i'?ll scaffold|scaffold (?:a|the|something)|what (?:do you )?want (?:me )?to build)\b/i.test(answer);
+    const readAsBuild = readAs && /\b(?:build (?:an? )?(?:app|project|tool|site|dashboard)|scaffold|create an app|make an app|treat (?:this|it) as a build)\b/.test(readAs);
+    if (answerSolicitsBuild && readAsBuild) {
+      return { passed: false, reason: `read+answered as a build: "${readAs}"` };
     }
     return { passed: true, reason: 'answered as a question, not a build' };
   }
