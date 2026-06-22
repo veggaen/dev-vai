@@ -14,7 +14,7 @@ import { routeTopic, selectMembers, type CouncilRoster } from './topic-router.js
 import { MemberAvailabilityStore, type MemberAvailability } from './member-availability.js';
 import { proofTrustWeight, type ProofStatus } from './member-experiment.js';
 import { deliberate, isDeliberationEnabled, buildPeerNotes } from './deliberate.js';
-import { spineFromNotes, disputedLabelsFromCrossCheck } from './context-states.js';
+import { spineFromNotes } from './context-states.js';
 import type {
   CouncilAction,
   CouncilConsensus,
@@ -197,7 +197,7 @@ async function runOneMember(
  */
 export function reachConsensus(
   notes: readonly CouncilMemberNote[],
-  options: { readonly escalateBelow?: number; readonly maxItems?: number; readonly weightFor?: (note: CouncilMemberNote) => number; readonly spineGating?: boolean } = {},
+  options: { readonly escalateBelow?: number; readonly maxItems?: number; readonly weightFor?: (note: CouncilMemberNote) => number } = {},
 ): CouncilConsensus {
   const escalateBelow = options.escalateBelow ?? DEFAULT_ESCALATE_BELOW;
   const maxItems = options.maxItems ?? DEFAULT_MAX_ITEMS;
@@ -247,15 +247,6 @@ export function reachConsensus(
   else if (modalVerdict === 'good' && recommendedAction === 'answer-directly') outcome = 'ship';
   else if (recommendedAction === 'answer-directly') outcome = 'escalate';
   else outcome = 'act';
-
-  // NOTE: spine gating (web-disputed grounding → don't ship) lives in toCouncilThinking, not
-  // here — the `disputed` state is only known AFTER the cross-check, downstream of this pure
-  // fold. `options.spineGating` is reserved for a future peer-marked dispute set on note ledgers
-  // before consensus; today no path sets it, so it is intentionally inert here (kept for the
-  // signature so callers can opt in once peer-dispute marking exists).
-  if (options.spineGating && usable.some((n) => (n.contextLedger?.items ?? []).some((i) => i.state === 'disputed')) && outcome === 'ship') {
-    outcome = 'escalate';
-  }
 
   // Weighted confidence over the modal-side members.
   const modalMembers = usable.filter((n) => n.verdict === modalVerdict);
@@ -601,27 +592,16 @@ export function toCouncilThinking(
     : cc?.contradicted
       ? `${consensus.summary} · web search disagreed — redrafting`
       : consensus.summary;
-  // Verification spine (advisory): provenance of what the panel grounded on, with a free-web
-  // contradiction (cross-check) promoting matching used context to `disputed`. Built from the
-  // notes' attached ledgers; absent (verdict 'none') when no member fetched context. Surfaced
-  // for the UI only — does NOT gate the outcome.
-  const itemLabels = consensus.notes.flatMap((n) => (n.contextLedger?.items ?? []).map((i) => i.label));
-  const disputedLabels = disputedLabelsFromCrossCheck(
-    cc ? { contradicted: cc.contradicted, value: cc.confirmsValue ?? undefined } : null,
-    itemLabels,
-  );
-  const provenance = spineFromNotes(consensus.notes, disputedLabels);
-  // SPINE GATING (flag-gated VAI_COUNCIL_SPINE_GATING=1, default OFF → advisory only). When a
-  // grounding the panel used is web-disputed (verdict 'contested'), don't project a `ship` —
-  // downgrade to `escalate` so the turn re-grounds instead of asserting a disputed claim.
-  // Only ever TIGHTENS a ship; leaves act/escalate untouched. Default behavior unchanged.
-  const spineGating = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.VAI_COUNCIL_SPINE_GATING === '1';
-  const gatedOutcome: CouncilOutcome =
-    spineGating && provenance.verdict === 'contested' && consensus.outcome === 'ship'
-      ? 'escalate'
-      : consensus.outcome;
+  // Verification spine (advisory, transparency-only): provenance of what the panel grounded on
+  // (used/unused/considered/unavailable), built from the notes' attached ledgers; absent
+  // (verdict 'none') when no member fetched context. The ship/refuse decision on a web
+  // contradiction is already owned upstream by applyCrossCheck (ship→act) — the spine does NOT
+  // add a second gate. The `disputed` state is reserved for a future change that threads the
+  // cross-check subject through CouncilCrossCheck so used groundings can be matched; until then
+  // no production path marks an item disputed, so the spine reports plain provenance.
+  const provenance = spineFromNotes(consensus.notes);
   return {
-    outcome: gatedOutcome,
+    outcome: consensus.outcome,
     agreement: consensus.agreement,
     confidence: consensus.confidence,
     topic,

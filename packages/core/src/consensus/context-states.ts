@@ -190,6 +190,12 @@ export function buildProvenanceSpine(
  * value are the tokens to mark any matching USED grounding as `disputed` — turning a web
  * contradiction into the spine's `contested` verdict. Pure; returns [] when nothing contradicted.
  *
+ * NOT YET WIRED into the live council path (intentionally). The projected `CouncilCrossCheck`
+ * currently carries only `confirmsValue` (null on contradiction) and no `subjectAliases`, so
+ * feeding it produces no needles. Threading the cross-check subject through CouncilCrossCheck is
+ * the prerequisite to enabling real contested-grounding; this helper + its tests are kept ready
+ * for that. (We removed a gating path that relied on synthetic data — see git history.)
+ *
  * @param assessment { contradicted, subjectAliases?, value? } — the cross-check ClaimAssessment
  *   (loosely typed to avoid a hard import cycle; we only read these fields).
  * @param itemLabels  the context-item labels in play (from member ledgers) to match against.
