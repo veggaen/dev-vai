@@ -25,6 +25,9 @@ if (!OUT || wantNames.length === 0) {
 if (existsSync(OUT)) { console.error(`REFUSING: ${OUT} exists.`); process.exit(1); }
 
 const moduleBase = OUT.split('/').pop().replace(/\.ts$/, '');
+// Unique namespace alias per module (e.g. code-emitters -> codeEmittersMod) so multiple
+// extracted modules don't collide on a shared `mod` import in vai-engine.ts.
+const alias = moduleBase.replace(/[^a-zA-Z0-9]+(.)?/g, (_, c) => (c ? c.toUpperCase() : '')) + 'Mod';
 
 const src = readFileSync(ENGINE, 'utf8');
 const sf = ts.createSourceFile(ENGINE, src, ts.ScriptTarget.Latest, true);
@@ -68,7 +71,7 @@ for (const m of targets) {
   const bodyStart = m.body.getStart(sf);
   const sigText = src.slice(m.getStart(sf), bodyStart + 1);
   const asyncKw = asyncMod ? 'await ' : '';
-  const wrapper = `${sigText}\n    return ${asyncKw}mod.${name}(${params});\n  }`;
+  const wrapper = `${sigText}\n    return ${asyncKw}${alias}.${name}(${params});\n  }`;
   edits.push({ start: m.getStart(sf), end: m.end, text: wrapper });
 }
 
@@ -83,7 +86,7 @@ const importEnd = (() => {
 })();
 const importPath = './' + moduleBase + '.js';
 engineOut = engineOut.slice(0, importEnd)
-  + `\nimport * as mod from '${importPath}';`
+  + `\nimport * as ${alias} from '${importPath}';`
   + engineOut.slice(importEnd);
 
 // Carry over any imports the extracted code depends on. Collect identifiers used in the
