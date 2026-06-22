@@ -351,15 +351,18 @@ describe('buildProcessTree — surfaced council dissent (transparency)', () => {
     },
   };
 
-  it('adds a visible Minority dissent node with the dissenter and their concern', () => {
+  it('adds a visible Minority view node with the dissenter and their concern', () => {
     const nodes = buildProcessTree([{ stage: 'council-vai-round-1', label: 'Council', status: 'done' }], council);
     const d = nodes.find((n) => n.id === 'council-dissent');
     expect(d).toBeTruthy();
-    expect(d?.label).toMatch(/Minority dissent/i);
+    expect(d?.label).toMatch(/Minority view/i);
     expect(d?.label).toMatch(/25% of the panel/);
-    expect(d?.status).toBe('bad');
+    // Dissent is the panel working as intended — a completed council note, NOT an error glyph.
+    expect(d?.status).toBe('done');
+    expect(d?.tone).toBe('council');
     const member = d?.children[0];
     expect(member?.label).toBe('qwen2.5:7b'); // cleaned name
+    expect(member?.status).toBe('done');
     expect(member?.note).toContain('unsupported latency claim');
   });
 
@@ -387,12 +390,18 @@ describe('buildProcessTree — verification spine (grounding) node', () => {
     expect(g?.note).toMatch(/used 2 · unused 1/);
   });
 
-  it('flags a contested spine as bad with a web-disputed note', () => {
-    const contested = { ...council, provenance: { ...council.provenance, verdict: 'contested' as const, hasDisputed: true, counts: { ...council.provenance.counts, disputed: 1 } } };
-    const g = buildProcessTree([{ stage: 'council-vai-round-1', label: 'C', status: 'done' }], contested).find((n) => n.id === 'council-provenance');
-    expect(g?.status).toBe('bad');
-    expect(g?.label).toMatch(/contested/);
-    expect(g?.note).toMatch(/disputed 1/);
+  it('renders the grounding row as a calm completed note (advisory, never an error glyph)', () => {
+    const g = buildProcessTree([{ stage: 'council-vai-round-1', label: 'C', status: 'done' }], council).find((n) => n.id === 'council-provenance');
+    expect(g?.status).toBe('done'); // advisory-only — the spine never flags an error
+    expect(g?.tone).toBe('verify');
+    expect(g?.label).not.toMatch(/⚠|contested|disputed/); // no dead vocabulary, no status emoji
+  });
+
+  it('renders a thinly-grounded verdict without alarm', () => {
+    const thin = { ...council, provenance: { ...council.provenance, verdict: 'thin' as const, groundedness: 0.2 } };
+    const g = buildProcessTree([{ stage: 'council-vai-round-1', label: 'C', status: 'done' }], thin).find((n) => n.id === 'council-provenance');
+    expect(g?.label).toMatch(/thinly grounded/);
+    expect(g?.status).toBe('done');
   });
 
   it('omits the row when no context was used (verdict none / total 0)', () => {
