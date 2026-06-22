@@ -86,10 +86,24 @@ export async function ensureRuntimeReady(baseUrl, {
   return { ready: true, runtimeUp: true, warmed, detail: warmed ? `runtime up · ${model} warmed` : `runtime up · ${model} warm timed out (proceeding)` };
 }
 
-/** True when an error is an INFRA/connection failure (skip, don't grade), not a Vai answer. */
+/**
+ * True when an error is an INFRA/connection failure (skip, don't grade), not a Vai answer.
+ * Inspects the error's NAME, code, message AND aggregated sub-errors — not just .message:
+ * a Node AggregateError ("all connect attempts failed", the cold-model case) carries the
+ * signal in its `.name`/`.errors[]`, not its message, so a message-only check let it slip
+ * through and get mis-graded as a Vai failure (the very corpus pollution this prevents).
+ */
 export function isInfraError(err) {
-  const s = String(err?.message ?? err ?? '');
-  return /AggregateError|ECONNREFUSED|ECONNRESET|fetch failed|socket hang up|WebSocket|timeout/i.test(s);
+  const parts = [
+    err?.name,
+    err?.code,
+    err?.message ?? (typeof err === 'string' ? err : ''),
+    err?.cause?.code,
+    err?.cause?.message,
+    ...(Array.isArray(err?.errors) ? err.errors.map((e) => `${e?.code ?? ''} ${e?.message ?? ''}`) : []),
+  ];
+  const s = parts.filter(Boolean).join(' ');
+  return /AggregateError|ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|EPIPE|fetch failed|socket hang up|WebSocket|timeout/i.test(s);
 }
 
 /** Direct, low-cost Ollama generate — used for prompt generation + cheap grading. */
