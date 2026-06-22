@@ -20,7 +20,7 @@ import {
   openDb, startRun, endRun, upsertPrompt, alreadyScored,
   recordResult, queueFix, classStats, liveHeartbeat,
 } from './db.mjs';
-import { waitForVramHeadroom, loadedVram, runThroughVai, sleep } from './driver.mjs';
+import { waitForVramHeadroom, loadedVram, runThroughVai, sleep, ensureRuntimeReady, isInfraError } from './driver.mjs';
 import { generatePrompts, gradeInterpretation, mineFailures } from './brain.mjs';
 import { SEED_CLASSES } from './seeds.mjs';
 import { claudeWorkItems } from './claude-prompts.mjs';
@@ -81,6 +81,18 @@ async function main() {
   ui.db = db;
   const runId = startRun(db, `per-class=${PER_CLASS} seeds-only=${SEEDS_ONLY}`);
   ui.runId = runId;
+
+  // Readiness gate (Verification-First): confirm the runtime is serving and pre-warm the
+  // model BEFORE any turn, so the first prompts don't AggregateError on a cold model and
+  // get mis-scored as Vai failures. Bakes in the manual curl-warm we used to do by hand.
+  ui.now = 'readying runtime (health + model warm)…';
+  const ready = await ensureRuntimeReady(BASE_URL).catch((e) => ({ ready: false, detail: String(e) }));
+  ui.now = ready.detail ?? (ready.ready ? 'runtime ready' : 'runtime not ready');
+  if (!ready.ready) {
+    process.stderr.write(`\n[improve-loop] ${ready.detail}\n`);
+    endRun(db, runId, 'aborted-runtime-down');
+    return; // don't run a whole cycle of false failures against a dead runtime
+  }
 
   let interrupted = false;
   const onSig = () => { interrupted = true; };
@@ -148,7 +160,20 @@ async function main() {
         },
       });
     } catch (err) {
-      ui.crashes++; // a timeout/error is recorded as a non-pass, loop continues
+      // Verification-First (constitution #3): an INFRA failure (cold model AggregateError,
+      // runtime down, socket reset) is NOT a Vai logic failure. Grading it pollutes the
+      // corpus with false negatives. So we SKIP it — not scored, not counted as a failure —
+      // and re-ready the runtime before the next turn. Only genuine answer-level errors
+      // (a real timeout while connected) fall through to be recorded.
+      if (isInfraError(err)) {
+        ui.crashes++; // tracked for the operator, but NOT written as a graded result
+        ui.now = `infra skip (${String(err).slice(0, 40)}) — re-readying…`;
+        await ensureRuntimeReady(BASE_URL).catch(() => {});
+        ui.done++;
+        await sleep(COOLDOWN_MS);
+        continue;
+      }
+      ui.crashes++;
       recordResult(db, {
         runId, promptId, klass: item.klass, passed: false,
         gradeReason: `run error: ${String(err).slice(0, 80)}`,

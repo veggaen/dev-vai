@@ -42,6 +42,56 @@ export async function waitForVramHeadroom(budgetBytes, { pollMs = 3000, maxWaitM
   return vram;
 }
 
+/**
+ * Readiness gate — called ONCE per cycle before any turn. Two infra failures cost whole
+ * loop runs this session: (1) a cold model → the first WS turns `AggregateError` (every
+ * connect attempt fails) until it warms; (2) the runtime HTTP not yet serving after a
+ * restart. Both produced FALSE failure grades that polluted the corpus — a Verification-First
+ * violation (a turn's INFRA failure must never be scored as a Vai LOGIC failure).
+ *
+ * So we proactively: confirm the runtime answers HTTP, then pre-warm the council/generation
+ * model with one tiny generate (keep_alive long) so the first real turn hits a warm model.
+ * Crash-safe: a single serial generate, no parallelism, honours the same OLLAMA endpoint.
+ * Returns { ready, runtimeUp, warmed, detail } — the loop gates on `ready` and, when false,
+ * SKIPS (not grades) the cycle. Never throws.
+ */
+export async function ensureRuntimeReady(baseUrl, {
+  model = process.env.IMPROVE_GEN_MODEL ?? process.env.LOCAL_MODEL ?? 'qwen3:8b',
+  keepAlive = '30m',
+  warmTimeoutMs = 60_000,
+} = {}) {
+  const httpBase = baseUrl.replace(/\/$/, '');
+  let runtimeUp = false;
+  try {
+    const res = await fetch(`${httpBase}/`, { signal: AbortSignal.timeout(5000) });
+    runtimeUp = res.status > 0; // any HTTP response = process is serving
+  } catch {
+    runtimeUp = false;
+  }
+  if (!runtimeUp) {
+    return { ready: false, runtimeUp: false, warmed: false, detail: `runtime not serving at ${httpBase} — start it (pnpm --filter @vai/runtime dev)` };
+  }
+  let warmed = false;
+  try {
+    await fetch(`${OLLAMA}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, prompt: 'ready?', stream: false, think: false, keep_alive: keepAlive, options: { num_predict: 1 } }),
+      signal: AbortSignal.timeout(warmTimeoutMs),
+    });
+    warmed = true; // the model is now resident; cold-start AggregateError avoided
+  } catch {
+    warmed = false; // warm failed — caller still proceeds (runtime is up), just less hot
+  }
+  return { ready: true, runtimeUp: true, warmed, detail: warmed ? `runtime up · ${model} warmed` : `runtime up · ${model} warm timed out (proceeding)` };
+}
+
+/** True when an error is an INFRA/connection failure (skip, don't grade), not a Vai answer. */
+export function isInfraError(err) {
+  const s = String(err?.message ?? err ?? '');
+  return /AggregateError|ECONNREFUSED|ECONNRESET|fetch failed|socket hang up|WebSocket|timeout/i.test(s);
+}
+
 /** Direct, low-cost Ollama generate — used for prompt generation + cheap grading. */
 export async function ollamaGenerate(model, prompt, { timeoutMs = 90_000, numPredict = 512 } = {}) {
   const res = await fetch(`${OLLAMA}/api/generate`, {
