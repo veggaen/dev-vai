@@ -854,6 +854,33 @@ export class ChatService {
     }
   }
 
+  /**
+   * The council roster to use for THIS turn's depth.
+   *
+   * VRAM-aware residency: on a single small GPU (e.g. 12GB, ~4.5GB free) each ~8GB
+   * local model cold-loads after evicting the previous one, so a full 3-model
+   * sequential council costs 60-90s of pure model-swapping and made balanced turns
+   * TIME OUT with empty answers. So:
+   *   - 'deep'      → full panel (the user opted into thoroughness; worth the swaps).
+   *   - 'balanced'  → a SINGLE member (prefer one already warm), so no eviction cycle:
+   *                   the model stays resident and the turn answers in seconds.
+   *   - 'quick'     → council is already skipped upstream (loop budget 0).
+   * Override the balanced cap with VAI_COUNCIL_BALANCED_MEMBERS (default 1).
+   */
+  private councilRosterForDepth(): CouncilRoster {
+    const roster = this.councilRoster!;
+    if (this.turnProcessDepth === 'deep') return roster;
+    const envCap = Number(process.env.VAI_COUNCIL_BALANCED_MEMBERS);
+    const cap = Number.isFinite(envCap) && envCap > 0 ? Math.floor(envCap) : 1;
+    if (roster.default.length <= cap) return roster;
+    // Prefer a member that is NOT a slow-thinking model (those are the heaviest to load)
+    // so the single balanced reviewer is the fastest resident option.
+    const ranked = [...roster.default].sort(
+      (a, b) => Number(a.slowThinking ?? false) - Number(b.slowThinking ?? false),
+    );
+    return { default: ranked.slice(0, cap) };
+  }
+
   /** Live-swap the council roster (driven by the council-config settings route). */
   setCouncilRoster(roster: CouncilRoster | undefined): void {
     this.councilRoster = roster;
@@ -1182,7 +1209,7 @@ export class ChatService {
       // Bound the WHOLE round by the loop's remaining wall-clock budget so slow cold
       // models can't hold the buffered answer hostage — the council yields the floor when
       // its time is up and consensus is built from whoever answered in time.
-      const stream = conveneStreaming(input, this.councilRoster!, { timeoutMs: councilTimeout, overallDeadlineMs });
+      const stream = conveneStreaming(input, this.councilRosterForDepth(), { timeoutMs: councilTimeout, overallDeadlineMs });
       let iter = await stream.next();
       while (!iter.done) {
         const progress = iter.value;
@@ -1248,7 +1275,7 @@ export class ChatService {
       // a box with the VRAM headroom via VAI_COUNCIL_CONCURRENCY=N.
       const envConcurrency = Number(process.env.VAI_COUNCIL_CONCURRENCY);
       const concurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? envConcurrency : 1;
-      const result = await convene(input, this.councilRoster!, { timeoutMs: councilTimeout, concurrency });
+      const result = await convene(input, this.councilRosterForDepth(), { timeoutMs: councilTimeout, concurrency });
       if (!result.convened) return undefined;
       return await this.finalizeCouncilConvene(draft, result, isSelfImprovement);
     } catch (err) {
