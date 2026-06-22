@@ -200,7 +200,17 @@ export interface CouncilMember {
   readonly displayName: string;
   /** The niche this member is trusted for. */
   readonly topic: CouncilTopic;
-  readonly review: (input: CouncilInput) => Promise<CouncilMemberNote | null>;
+  /**
+   * Review a draft. The optional `opts.onReasoningDelta(textSoFar)` fires as the model
+   * streams its own reasoning ("thinking out loud") so the UI can show live presence per
+   * member instead of a bare "working…". It's advisory/observability only — the structured
+   * note is still the source of truth and the fact-quarantine holds. A member that doesn't
+   * stream simply never calls it. Pure stubs in tests can ignore the arg entirely.
+   */
+  readonly review: (
+    input: CouncilInput,
+    opts?: { readonly onReasoningDelta?: (textSoFar: string) => void },
+  ) => Promise<CouncilMemberNote | null>;
   /**
    * True for a reasoning model (DeepSeek-R1 et al.) that emits a long chain-of-thought
    * before answering. The council's OUTER per-member timeout (`runOneMember`) extends

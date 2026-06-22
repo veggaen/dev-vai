@@ -41,7 +41,7 @@ export const councilAvailability = new MemberAvailabilityStore();
 function wrapWithAvailability(member: CouncilMember): CouncilMember {
   return {
     ...member,
-    async review(input) {
+    async review(input, opts) {
       if (!councilAvailability.shouldTry(member.id)) {
         const state = councilAvailability.get(member.id);
         return {
@@ -63,7 +63,9 @@ function wrapWithAvailability(member: CouncilMember): CouncilMember {
         } satisfies CouncilMemberNote;
       }
       try {
-        const note = await member.review(input);
+        // Thread `opts` (incl. onReasoningDelta) through so the live reasoning stream reaches
+        // the model — the availability wrapper must be transparent to the streaming callback.
+        const note = await member.review(input, opts);
         if (!note || note.error) {
           councilAvailability.recordFailure(member.id, member.displayName, note?.error ?? 'no usable response');
           return note;

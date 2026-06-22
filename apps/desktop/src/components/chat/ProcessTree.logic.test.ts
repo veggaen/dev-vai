@@ -1,6 +1,53 @@
 import { describe, expect, it } from 'vitest';
-import { buildProcessTree, shouldAutoExpand, resolveDwellCollapse, MIN_STEP_DWELL_MS } from './ProcessTree.logic.js';
+import {
+  buildProcessTree, shouldAutoExpand, resolveDwellCollapse, MIN_STEP_DWELL_MS,
+  planStaggeredReveal, activeRevealIndex, STAGGER_STEP_MS, STAGGER_MAX_TOTAL_MS,
+} from './ProcessTree.logic.js';
 import type { ChatProgressStep } from '../../stores/chatStore.js';
+
+describe('planStaggeredReveal — a fast burst plays the timeline forward, not all at once', () => {
+  it('gives each step a sequential, non-overlapping read window', () => {
+    const plan = planStaggeredReveal(3);
+    expect(plan).toHaveLength(3);
+    expect(plan[0]).toEqual({ index: 0, openAt: 0, closeAt: STAGGER_STEP_MS });
+    expect(plan[1].openAt).toBe(STAGGER_STEP_MS); // step 2 opens exactly when step 1 closes
+    expect(plan[2].openAt).toBe(2 * STAGGER_STEP_MS);
+    // no overlap: each opens at the previous close
+    for (let i = 1; i < plan.length; i++) expect(plan[i].openAt).toBe(plan[i - 1].closeAt);
+  });
+
+  it('compresses the per-step window so a long burst still settles within the cap', () => {
+    const plan = planStaggeredReveal(40);
+    const total = plan[plan.length - 1].closeAt;
+    expect(total).toBeLessThanOrEqual(STAGGER_MAX_TOTAL_MS);
+    expect(plan[1].openAt - plan[0].openAt).toBeLessThan(STAGGER_STEP_MS); // window shrank
+  });
+
+  it('never produces a window shorter than a readable floor', () => {
+    const plan = planStaggeredReveal(1000);
+    const window = plan[0].closeAt - plan[0].openAt;
+    expect(window).toBeGreaterThanOrEqual(120);
+  });
+
+  it('empty/zero burst yields no windows', () => {
+    expect(planStaggeredReveal(0)).toEqual([]);
+  });
+});
+
+describe('activeRevealIndex — which step the timeline is currently showing', () => {
+  const plan = planStaggeredReveal(3); // windows at 0,700,1400
+  it('opens the step whose window contains elapsed', () => {
+    expect(activeRevealIndex(plan, 0)).toBe(0);
+    expect(activeRevealIndex(plan, 700)).toBe(1);
+    expect(activeRevealIndex(plan, 1500)).toBe(2);
+  });
+  it('holds the last step once the plan has played out', () => {
+    expect(activeRevealIndex(plan, 99999)).toBe(2);
+  });
+  it('returns -1 for an empty plan', () => {
+    expect(activeRevealIndex([], 100)).toBe(-1);
+  });
+});
 
 describe('resolveDwellCollapse — a completed step lingers long enough to read', () => {
   it('holds a just-completed step open until the dwell window passes', () => {
@@ -130,6 +177,50 @@ describe('buildProcessTree council rounds', () => {
     expect(nodes[0]?.children.some((child) => child.label === 'Submodels (2)')).toBe(true);
     expect(nodes[1]?.children[0]?.label).toBe('qwen3:8b');
     expect(nodes[1]?.children[0]?.note).toMatch(/qwen3:8b/);
+  });
+
+  it('shows a live reasoning child while a member is pending with a reasoningPreview', () => {
+    const steps: ChatProgressStep[] = [{
+      stage: 'council-vai-round-1',
+      label: 'Council member 1/3: deepseek-r1:8b thinking…',
+      status: 'running',
+      councilMembers: [{
+        memberId: 'local:deepseek-r1:8b',
+        name: 'deepseek-r1:8b',
+        topic: 'reasoning',
+        verdict: 'needs-work',
+        confidence: 0,
+        pending: true,
+        reasoningPreview: 'The user pasted a repo URL.\nFirst I should check the README before claiming a stack.',
+      }],
+    }];
+    const member = buildProcessTree(steps)[0]?.children.find((c) => c.label === 'deepseek-r1:8b');
+    expect(member).toBeTruthy();
+    // Role chip surfaces instead of a bare "thinking…".
+    expect(member?.detail).toMatch(/reasoning · reasoning…/);
+    const reasoning = member?.children.find((c) => c.kind === 'reasoning');
+    expect(reasoning).toBeTruthy();
+    expect(reasoning?.note).toContain('check the README');
+    expect(reasoning?.status).toBe('running');
+  });
+
+  it('falls back to the spoken waiting line when a pending member has no preview yet', () => {
+    const steps: ChatProgressStep[] = [{
+      stage: 'council-vai-round-1', label: 'Asking qwen3:8b', status: 'running',
+      councilMembers: [{ name: 'qwen3:8b', topic: 'review', verdict: 'needs-work', confidence: 0, pending: true }],
+    }];
+    const member = buildProcessTree(steps)[0]?.children.find((c) => c.label === 'qwen3:8b');
+    expect(member?.children.some((c) => c.kind === 'reasoning')).toBe(false);
+    expect(member?.children[0]?.note).toMatch(/qwen3:8b/i); // humanized waiting line
+  });
+
+  it('includes the role chip in a resolved member detail', () => {
+    const steps: ChatProgressStep[] = [{
+      stage: 'council-vai-round-1', label: 'done', status: 'done',
+      councilMembers: [{ memberId: 'q', name: 'qwen3:8b', topic: 'code', verdict: 'good', confidence: 0.9, durationMs: 100 }],
+    }];
+    const member = buildProcessTree(steps)[0]?.children.find((c) => c.label === 'qwen3:8b');
+    expect(member?.detail).toMatch(/^code · good · 90%/);
   });
 
   it('nests tool runs with input and output grandchildren', () => {

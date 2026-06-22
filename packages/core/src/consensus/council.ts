@@ -140,6 +140,7 @@ async function runOneMember(
   input: CouncilInput,
   timeoutMs: number,
   now: () => number,
+  onReasoningDelta?: (textSoFar: string) => void,
 ): Promise<CouncilMemberNote | null> {
   const startedAt = now();
   // A reasoning model needs more wall-clock than a terse generalist; extend the outer cap
@@ -152,7 +153,7 @@ async function runOneMember(
     timer = setTimeout(() => reject(new Error(`council member timed out after ${effectiveTimeoutMs}ms`)), effectiveTimeoutMs);
   });
   try {
-    const note = await Promise.race([member.review(input), timeout]);
+    const note = await Promise.race([member.review(input, { onReasoningDelta }), timeout]);
     // A returned note clears any prior down-state — the member is healthy again (green).
     liveAvailability.recordSuccess(member.id);
     return note;
@@ -321,6 +322,12 @@ export interface CouncilMemberProgress {
   readonly note?: CouncilMemberNote;
   /** Emitted immediately before a member starts reviewing — UI shows who's being asked. */
   readonly pendingMember?: { readonly name: string; readonly id: string };
+  /**
+   * Emitted while a member is mid-review and its model is streaming reasoning — carries the
+   * rolling preview so the UI can show what that member is thinking through, live. Same
+   * member identity as the preceding `pendingMember`. Advisory only; the note is still truth.
+   */
+  readonly reasoningMember?: { readonly name: string; readonly id: string; readonly preview: string };
   readonly partialNotes: readonly CouncilMemberNote[];
   readonly index: number;
   readonly total: number;
@@ -343,9 +350,21 @@ export async function* runCouncilStreaming(
   // the deadline only gates whether to start the NEXT one.
   const deadline = options.overallDeadlineMs !== undefined ? now() + options.overallDeadlineMs : undefined;
 
-  for (let index = 0; index < members.length; index++) {
+  // Fast-first ordering: when a wall-clock budget bounds the run, a slow-thinking member
+  // (DeepSeek-R1, ~60s) placed early STARVES the budget so the faster generalists never get
+  // asked — the measured "configured 3, only 2 ever speak" gap. Run fast members first and slow
+  // ones last (stable within each group) so the panel hears the MOST voices within the budget;
+  // the slow member still runs if time remains. No VRAM change — execution stays sequential.
+  const ordered = deadline === undefined
+    ? members
+    : [...members]
+        .map((m, i) => ({ m, i }))
+        .sort((a, b) => Number(a.m.slowThinking ?? false) - Number(b.m.slowThinking ?? false) || a.i - b.i)
+        .map((e) => e.m);
+
+  for (let index = 0; index < ordered.length; index++) {
     if (deadline !== undefined && index > 0 && now() >= deadline) break;
-    const member = members[index];
+    const member = ordered[index];
     yield {
       pendingMember: { name: member.displayName, id: member.id },
       partialNotes: [...partialNotes],
@@ -353,7 +372,39 @@ export async function* runCouncilStreaming(
       total: members.length,
     };
 
-    const note = await runOneMember(member, input, timeoutMs, now);
+    // Live reasoning pump: the member's model streams reasoning via a callback that runs
+    // DURING the await below. A callback can't `yield`, so we buffer the latest preview and
+    // a waiter that resolves on each new delta, then race the member promise against that
+    // waiter — draining previews as `reasoningMember` progress without blocking the review.
+    let latestPreview: string | null = null;
+    let signal: (() => void) | null = null;
+    const onReasoningDelta = (textSoFar: string) => {
+      latestPreview = textSoFar;
+      const fire = signal;
+      signal = null;
+      fire?.();
+    };
+    const memberPromise = runOneMember(member, input, timeoutMs, now, onReasoningDelta)
+      .then((value) => ({ done: true as const, value }));
+
+    let settled: { done: true; value: CouncilMemberNote | null } | undefined;
+    while (!settled) {
+      const deltaReady = latestPreview !== null
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => { signal = resolve; });
+      const winner = await Promise.race([memberPromise, deltaReady.then(() => ({ done: false as const }))]);
+      if (winner.done) { settled = winner; break; }
+      if (latestPreview !== null) {
+        yield {
+          reasoningMember: { name: member.displayName, id: member.id, preview: latestPreview },
+          partialNotes: [...partialNotes],
+          index,
+          total: members.length,
+        };
+        latestPreview = null;
+      }
+    }
+    const note = settled.value;
     if (note) {
       partialNotes.push(note);
       yield {

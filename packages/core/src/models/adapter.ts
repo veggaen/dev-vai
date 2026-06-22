@@ -159,6 +159,10 @@ export interface ChatChunk {
       readonly note?: string;
       readonly pending?: boolean;
       readonly failed?: boolean;
+      /** Live rolling preview of the member's reasoning while pending (thinking out loud). */
+      readonly reasoningPreview?: string;
+      /** Member lens/role label for the UI (e.g. "reasoning", "code"). */
+      readonly role?: string;
       readonly realIntent?: string;
       readonly hiddenMeaning?: string;
       readonly missingCapability?: string;

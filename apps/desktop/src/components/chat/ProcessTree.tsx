@@ -5,7 +5,7 @@ import type { ChatProgressStep, CouncilThinkingUI } from '../../stores/chatStore
 import { useProcessChildReveal } from '../../hooks/useProcessChildReveal.js';
 import { useAnimatedEllipsis } from '../../hooks/useAnimatedEllipsis.js';
 import { VaiNode, type VaiNodeProps } from '../brand/VaiNode.js';
-import { buildProcessTree, isExpandable, shouldAutoExpand, resolveDwellCollapse, type ProcessNode, type ProcessTone } from './ProcessTree.logic.js';
+import { buildProcessTree, isExpandable, shouldAutoExpand, resolveDwellCollapse, planStaggeredReveal, activeRevealIndex, type ProcessNode, type ProcessTone } from './ProcessTree.logic.js';
 import { ProcessTreeCopyActions } from './ProcessTreeCopyActions.js';
 import { copyProcessText } from './ProcessTree.copy.js';
 import { humanizeLiveTail } from './process-humanize.js';
@@ -189,25 +189,58 @@ function TimelineList({
   showLiveTail?: boolean;
   tailLabel?: string;
 }) {
+  // Staggered reveal: when a turn bursts many steps in one tick, play the timeline FORWARD —
+  // append rows one read-window at a time instead of dumping all at once — so a fast turn is
+  // still legible. Once revealed a row stays (we only gate the FRONTIER, never hide history).
+  const revealedThrough = useStaggeredReveal(nodes.length, live);
+  const visibleNodes = live ? nodes.slice(0, revealedThrough + 1) : nodes;
+  const lastIndex = visibleNodes.length - 1;
+  // The live tail keeps pulsing until the whole burst has been revealed.
+  const tailVisible = showLiveTail || (live && revealedThrough < nodes.length - 1);
   return (
     <ol className="process-tree__timeline space-y-0">
       <AnimatePresence initial={false}>
-        {nodes.map((node, index) => (
+        {visibleNodes.map((node, index) => (
           <StepRow
             key={node.id}
             node={node}
             allNodes={allNodes}
             live={live}
             expandAll={expandAll}
-            isLast={index === nodes.length - 1 && !showLiveTail}
-            enterAnimate={live && index === nodes.length - 1}
+            isLast={index === lastIndex && !tailVisible}
+            enterAnimate={live && index === lastIndex}
             showTreeCopy={index === 0}
           />
         ))}
-        {showLiveTail && <ProcessLiveTail key="live-tail" label={tailLabel} />}
+        {tailVisible && <ProcessLiveTail key="live-tail" label={tailLabel} />}
       </AnimatePresence>
     </ol>
   );
+}
+
+/**
+ * Drive the staggered reveal frontier: returns the highest node index revealed so far. New
+ * nodes that arrive in a burst are revealed one read-window apart (planStaggeredReveal); when
+ * not live, everything is revealed immediately. Self-contained — a single interval, no
+ * per-row timers. Pure scheduling math lives in ProcessTree.logic.ts (unit-tested).
+ */
+function useStaggeredReveal(count: number, live: boolean): number {
+  const [revealed, setRevealed] = useState(count - 1);
+  const startRef = useRef(Date.now());
+  const planRef = useRef(planStaggeredReveal(count));
+  useEffect(() => {
+    if (!live) { setRevealed(count - 1); return; }
+    planRef.current = planStaggeredReveal(count);
+    startRef.current = Date.now();
+    const tick = () => {
+      const idx = activeRevealIndex(planRef.current, Date.now() - startRef.current);
+      setRevealed((prev) => (idx > prev ? idx : prev)); // monotonic — never un-reveal
+    };
+    tick();
+    const id = window.setInterval(tick, 120);
+    return () => window.clearInterval(id);
+  }, [count, live]);
+  return Math.min(revealed, count - 1);
 }
 
 function StepRow({
@@ -232,7 +265,6 @@ function StepRow({
   const userToggledRef = useRef(false);
   const [open, setOpen] = useState(false);
   const childCount = node.children.length;
-  const rowElapsed = useRowElapsed(running && live);
   // Stream the ACTIVE step open, whatever it is — not just council. The latest running
   // step auto-expands so the user watches its detail arrive live instead of clicking
   // each node to see its final element. A user toggle always wins, and a step
@@ -322,9 +354,7 @@ function StepRow({
           )}
         </span>
         {running && live && node.tone !== 'council' && (
-          <span className="shrink-0 tabular-nums text-[10px] text-[color:var(--chat-muted)] opacity-70">
-            {formatMs(rowElapsed)}
-          </span>
+          <LiveElapsed className="shrink-0 tabular-nums text-[10px] text-[color:var(--chat-muted)] opacity-70" />
         )}
       </button>
       <ProcessTreeCopyActions
@@ -344,7 +374,9 @@ function StepRow({
           style={{ overflow: 'hidden' }}
         >
           {node.note && node.children.length === 0 && (
-            <ProcessNotePanel label={node.label} body={node.note} />
+            node.kind === 'reasoning'
+              ? <ReasoningStreamPanel body={node.note} />
+              : <ProcessNotePanel label={node.label} body={node.note} />
           )}
           {node.children.length > 0 && (
             <ol className="space-y-0">
@@ -424,7 +456,9 @@ function ChildRow({
           style={{ overflow: 'hidden' }}
         >
           {node.note && node.children.length === 0 && (
-            <ProcessNotePanel label={node.label} body={node.note} />
+            node.kind === 'reasoning'
+              ? <ReasoningStreamPanel body={node.note} />
+              : <ProcessNotePanel label={node.label} body={node.note} />
           )}
           {node.note && node.children.length > 0 && (
             <ProcessNotePanel label="Summary" body={node.note} />
@@ -441,6 +475,35 @@ function ChildRow({
         </motion.div>
       )}
     </li>
+  );
+}
+
+/**
+ * Live reasoning stream — a council member "thinking out loud". Shows only the last few
+ * lines of the rolling preview, monospace and quiet, auto-scrolled to the newest text. The
+ * point is presence: the user sees the model actually working, not a static "qwen is working".
+ * Animates opacity only (UI rubric); the content updates in place as deltas arrive.
+ */
+function ReasoningStreamPanel({ body }: { body: string }) {
+  const scrollRef = useRef<HTMLPreElement>(null);
+  const lines = body.split('\n').filter((l) => l.trim().length > 0);
+  const tail = lines.slice(-6).join('\n');
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [tail]);
+  return (
+    <div className="process-tree__panel py-1">
+      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] font-semibold tracking-wide text-[color:var(--chat-muted)]">
+        <span className="vai-process-shimmer">Thinking out loud</span>
+      </div>
+      <pre
+        ref={scrollRef}
+        className="process-tree__panel-body process-tree__reasoning m-0 max-h-24 overflow-hidden whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-[color:var(--chat-muted)]"
+      >
+        {tail}
+      </pre>
+    </div>
   );
 }
 
@@ -520,19 +583,25 @@ function formatMs(ms: number): string {
   return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
 }
 
-function useRowElapsed(running: boolean) {
+/**
+ * Self-ticking elapsed timer (pattern borrowed from t3code's WorkingTimer): updates the
+ * span's textContent via a ref on a 1s interval, so a running row's clock advances WITHOUT
+ * re-rendering the row (and its children) every tick. Mounts when the row goes running and
+ * resets its start each mount.
+ */
+function LiveElapsed({ className }: { className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
   const startRef = useRef(Date.now());
-  const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    if (!running) {
-      setElapsed(0);
-      return;
-    }
     startRef.current = Date.now();
-    const id = window.setInterval(() => setElapsed(Date.now() - startRef.current), 250);
+    const tick = () => {
+      if (ref.current) ref.current.textContent = formatMs(Date.now() - startRef.current);
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [running]);
-  return elapsed;
+  }, []);
+  return <span ref={ref} className={className}>0ms</span>;
 }
 
 export default ProcessTree;

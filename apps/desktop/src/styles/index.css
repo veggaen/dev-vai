@@ -496,6 +496,14 @@ html, body, #root {
   animation: vai-process-shimmer 1.4s ease-in-out infinite;
 }
 
+/* Live council reasoning stream: a quiet teleprompter feel — older lines fade out at the
+   top so the newest reasoning reads as "scrolling up". Mask is opacity-only (GPU-cheap,
+   rubric-safe); the element itself scrolls to its bottom in JS as deltas arrive. */
+.process-tree__reasoning {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.4em);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 1.4em);
+}
+
 html {
   background-color: var(--app-chrome-background);
 }

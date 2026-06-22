@@ -9,6 +9,7 @@ import {
   humanizeAdvisorState,
   cleanModelName,
 } from './process-humanize.js';
+import { memberIdentity } from './member-identity.js';
 
 /**
  * Tree model for ProcessTree. The backend streams a FLAT list of progress steps
@@ -97,6 +98,66 @@ export function resolveDwellCollapse(params: {
   const elapsed = now - openedAt;
   if (elapsed >= minDwellMs) return { open: false, recheckInMs: 0 }; // dwell met → fold
   return { open: true, recheckInMs: minDwellMs - elapsed };          // hold a bit longer
+}
+
+/**
+ * Per-step read window (ms) in a staggered reveal — how long each step holds open before the
+ * next one's window starts. Kept >= MIN_STEP_DWELL_MS so a human can actually read the row.
+ */
+export const STAGGER_STEP_MS = 700;
+/** Cap total stagger so a long burst doesn't make the user wait forever to see it settle. */
+export const STAGGER_MAX_TOTAL_MS = 6_000;
+
+export interface RevealWindow {
+  /** Index of the step in render order. */
+  readonly index: number;
+  /** When (ms from reveal start) this step opens. */
+  readonly openAt: number;
+  /** When (ms from reveal start) this step folds; the next step opens at/after this. */
+  readonly closeAt: number;
+}
+
+/**
+ * Plan a STAGGERED reveal for a burst of steps that all completed in roughly the same tick.
+ *
+ * The complaint this encodes (V3gga): on a fast/cached/deterministic turn the backend bursts
+ * every step at once; each step's independent dwell window overlaps the others, so the user
+ * sees ~16 rows flash open and vanish together. Instead we play the timeline FORWARD — each
+ * step opens, holds its read window, folds, and only THEN does the next step open. The answer
+ * text is never delayed; this governs only the visual fold pacing of the process trace.
+ *
+ * Pure: given step count + a per-step window it returns the open/close offsets. The total is
+ * clamped (STAGGER_MAX_TOTAL_MS) by compressing the per-step window for very long bursts so a
+ * 30-step turn still settles in a few seconds rather than 21s. Clock-injected by the caller.
+ */
+export function planStaggeredReveal(
+  stepCount: number,
+  opts: { stepMs?: number; maxTotalMs?: number } = {},
+): RevealWindow[] {
+  if (stepCount <= 0) return [];
+  const maxTotal = opts.maxTotalMs ?? STAGGER_MAX_TOTAL_MS;
+  const desired = opts.stepMs ?? STAGGER_STEP_MS;
+  // Compress per-step window if the burst is long enough to blow the total budget.
+  const stepMs = Math.max(120, Math.min(desired, Math.floor(maxTotal / stepCount)));
+  const windows: RevealWindow[] = [];
+  for (let index = 0; index < stepCount; index++) {
+    const openAt = index * stepMs;
+    windows.push({ index, openAt, closeAt: openAt + stepMs });
+  }
+  return windows;
+}
+
+/**
+ * Given a staggered plan and elapsed time since reveal start, which step index is currently
+ * "showing" (open). Returns the last step once the whole plan has played. Pure — drives the
+ * component's "open exactly the step the timeline is currently on" without per-step timers.
+ */
+export function activeRevealIndex(windows: readonly RevealWindow[], elapsedMs: number): number {
+  if (windows.length === 0) return -1;
+  for (const w of windows) {
+    if (elapsedMs >= w.openAt && elapsedMs < w.closeAt) return w.index;
+  }
+  return elapsedMs < windows[0].openAt ? windows[0].index : windows[windows.length - 1].index;
 }
 
 function toneForStage(stage: string): ProcessTone {
@@ -341,23 +402,40 @@ function mapCouncilMembers(
 ): ProcessNode[] {
   return members.map((member) => {
     const memberKey = member.memberId || member.name;
+    const identity = memberIdentity(member.name, member.role ?? member.topic);
     if (member.pending) {
+      // Live presence: if the model is streaming its reasoning, show that rolling text as a
+      // first child ("thinking out loud") instead of a bare "Status: waiting". This is the
+      // fix for the "qwen is working" complaint — the user watches what each model works
+      // through. Falls back to the spoken waiting line when no preview has arrived yet.
+      const preview = member.reasoningPreview?.trim();
+      const children: ProcessNode[] = preview
+        ? [{
+            id: `${prefix}-council-pending-${memberKey}-reasoning`,
+            label: 'Thinking out loud',
+            kind: 'reasoning',
+            note: preview,
+            status: 'running' as const,
+            tone: 'council',
+            children: [],
+          }]
+        : [{
+            id: `${prefix}-council-pending-${memberKey}-event`,
+            label: 'Status',
+            kind: 'event',
+            note: humanizeMemberWaiting(member.name, member.topic),
+            status: 'running' as const,
+            tone: 'council',
+            children: [],
+          }];
       return {
         id: `${prefix}-council-pending-${memberKey}`,
         label: cleanModelName(member.name),
         kind: 'submodel',
-        detail: 'thinking…',
+        detail: preview ? `${identity.roleChip} · reasoning…` : `${identity.roleChip} · thinking…`,
         status: 'running' as const,
         tone: 'council',
-        children: [{
-          id: `${prefix}-council-pending-${memberKey}-event`,
-          label: 'Status',
-          kind: 'event',
-          note: humanizeMemberWaiting(member.name, member.topic),
-          status: 'running' as const,
-          tone: 'council',
-          children: [],
-        }],
+        children,
       };
     }
     const body = formatMemberProcessBody(member);
@@ -367,8 +445,8 @@ function mapCouncilMembers(
       label: cleanModelName(member.name),
       kind: 'submodel',
       detail: member.failed
-        ? 'no response'
-        : `${member.verdict} · ${Math.round(member.confidence * 100)}%${member.durationMs !== undefined ? ` · ${formatCompactMs(member.durationMs)}` : ''}`,
+        ? `${identity.roleChip} · no response`
+        : `${identity.roleChip} · ${member.verdict} · ${Math.round(member.confidence * 100)}%${member.durationMs !== undefined ? ` · ${formatCompactMs(member.durationMs)}` : ''}`,
       note: body,
       status: verdictTone(member.verdict, member.failed),
       tone: 'council',

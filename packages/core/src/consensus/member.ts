@@ -9,7 +9,8 @@
  */
 
 import { z } from 'zod';
-import type { ModelAdapter } from '../models/adapter.js';
+import type { ChatRequest, ModelAdapter } from '../models/adapter.js';
+import { stripThinkingBlocks } from '../models/provider-adapters.js';
 import type { CouncilAction, CouncilInput, CouncilMember, CouncilMemberNote, CouncilTopic } from './types.js';
 import type { CouncilContextTools } from './context-tools.js';
 import { gatherMemberEvidence, type MemberEvidence } from './member-evidence.js';
@@ -44,12 +45,70 @@ const THINKING_MODEL_MAX_TOKENS = 5_000;
 const THINKING_MODEL_TIMEOUT_MS = 60_000;
 const MAX_DRAFT_CHARS = 6_000;
 
+/** Cap the live reasoning preview so a runaway <think> can't flood the WS / UI. */
+const MAX_REASONING_PREVIEW_CHARS = 2_400;
+/** Throttle delta emission so we update the UI a few times/sec, not per token. */
+const REASONING_DELTA_THROTTLE_MS = 150;
+
+/**
+ * Stream a member's review and accumulate the model's CONTENT (the JSON note) exactly as the
+ * buffered `chat()` path would, while surfacing its REASONING channel (and, for models that
+ * cram thinking into content, a tail of content) to `onDelta` as a rolling, capped preview.
+ * Throttled so the UI updates a few times a second. Returns the full content string for the
+ * existing parser. Any stream error propagates to the caller, which already falls back / fails
+ * the member safely.
+ */
+async function streamMemberContent(
+  adapter: ModelAdapter,
+  request: ChatRequest,
+  onDelta: (textSoFar: string) => void,
+): Promise<string> {
+  let content = '';
+  let reasoning = '';
+  let lastEmit = 0;
+  const emit = (force: boolean) => {
+    const now = Date.now();
+    if (!force && now - lastEmit < REASONING_DELTA_THROTTLE_MS) return;
+    // Only the dedicated REASONING channel is human-readable "thinking out loud". A model
+    // with no reasoning channel (a terse generalist) streams only its JSON note into
+    // `content` — previewing that would show raw JSON noise, so we suppress it and let the
+    // row keep its plain "reviewing…" status instead. If content looks like prose (a
+    // distilled-R1 that put its think into content), allow it; if it's clearly JSON, skip.
+    let source = reasoning.trim();
+    if (!source) {
+      const c = content.trim();
+      if (c && !c.startsWith('{') && !c.startsWith('[')) source = c;
+    }
+    if (!source) return;
+    lastEmit = now;
+    const preview = source.length > MAX_REASONING_PREVIEW_CHARS
+      ? source.slice(source.length - MAX_REASONING_PREVIEW_CHARS)
+      : source;
+    try { onDelta(preview); } catch { /* observability must never break the review */ }
+  };
+  for await (const chunk of adapter.chatStream!(request)) {
+    if (chunk.type === 'reasoning_delta' && chunk.reasoningDelta) {
+      reasoning += chunk.reasoningDelta;
+      emit(false);
+    } else if (chunk.type === 'text_delta' && chunk.textDelta) {
+      content += chunk.textDelta;
+      emit(false);
+    }
+  }
+  emit(true);
+  // Match the buffered path: a non-thinking model may have crammed <think> into content;
+  // strip it so the council-note parser sees clean JSON (thinking-channel deltas already
+  // went to the live preview, not here).
+  return stripThinkingBlocks(content);
+}
+
 const BASE_SYSTEM = [
   "You are a 0.1%-level world-class engineer on Vai's SCIS consensus council (Vai is the deterministic engine/institution; models including you are staff).",
   'Vai prepared a draft answer but has NOT shown it to the user. You review only — do NOT answer the user and do NOT assert facts of your own (fact-quarantine is absolute).',
   'Read PAST the literal words: find the real intent, sarcasm, hidden or multiple meanings, and local abbreviations.',
   'Name precisely what CAPABILITY or METHOD Vai was missing for THIS CLASS of turn, and teach a concrete, minimal, testable way to handle it next time (teach-to-fish, never hand the answer).',
   'Ground every observation in the provided context only. Explicitly name file:line or architecture when relevant. Flag uncertainty. Never overclaim.',
+  'If the turn involves UI/UX, judge it against EXTERNAL references (proven Fable-5 design patterns + Vai\'s own design tokens/components) and the design rubric (states, a11y, mobile, animate transform+opacity only) — not unanchored taste — and require rendered-visual proof, not "looks good".',
   'When the turn feels stuck or the model is weak, rotate (Thorsen): suggest fast-ack paths, direct high-intel voice (pipe), human steer via visible panels, or reliable synthetic notes instead of forcing weak output.',
   'Every methodLesson must include: (a) the exact handle-next-time rule, (b) one concrete proof method (tsc, rendered visual, unit, introspect, live panel), (c) at least one named edge case.',
   'Return STRICT JSON ONLY (no markdown, no code fences, no prose) with keys:',
@@ -66,12 +125,12 @@ const BASE_SYSTEM = [
 
 function buildSystemPrompt(topic: CouncilTopic, hasSelfContext: boolean): string {
   const niche: Partial<Record<CouncilTopic, string>> & { other: string } = {
-    code: ' You are the code specialist: principal deterministic systems + TS/React engineer. You prize inspectable gates (tsc, CSS coverage, rendered-page proof), small high-leverage patches, no external URLs, Windows-first Node, anti-slop (measure before claiming PASS). Visual richness and human-visible process (panels) matter because humans steer with their eyes.',
+    code: ' You are the code specialist: principal deterministic systems + TS/React engineer. You prize inspectable gates (tsc, CSS coverage, rendered-page proof), small high-leverage patches, no external URLs, Windows-first Node, anti-slop (measure before claiming PASS). Visual richness and human-visible process (panels) matter because humans steer with their eyes. For any UI judgment, anchor on REFERENCES not taste: Vai\'s existing design tokens/components and proven Fable-5 design patterns (study how Fable-5 apps handle layout, timing, micro-interactions) — animate transform+opacity only, demand states/a11y/mobile, and require rendered-visual proof, never "looks good" by assertion.',
     reasoning: ' You are the reasoning specialist: first-principles + edge-case hunter. You rotate around blocks by trying alternative framings (Thorsen perspective). Demand explicit proof or "unproven"; call out when small models cannot be true 0.1% experts and what deterministic compensations (structure, quarantine, human steer, direct high-intel) are needed.',
     factual: ' You are the factual specialist: precision analyst and vision verifier. Never assert un-sourced numbers/names. Always specify the exact verification method (search query, file:line to inspect, image gate). You are the council\'s vision member when screenshots or UI proof are present.',
     local: ' You are the local/on-device specialist: latency, VRAM, offline robustness, and practical small-model constraints expert. You surface what actually works on free local stacks vs what requires the direct high-intel channel or synthetic reliable notes.',
     other: ' You are the generalist collaborator: elite across the board but defer to topic specialists. Focus on cross-cutting concerns (visibility for humans, preservation of prior good work, loop closure via visible panels + backlog).',
-    creative: ' You are the creative/generative specialist: high-craft output with strong taste, but still bound by Vai\'s gates (no slop, visual proof, deterministic where it counts). Help the council judge "humans like it visually" without sacrificing correctness.',
+    creative: ' You are the creative/generative specialist: high-craft output with strong taste, but still bound by Vai\'s gates (no slop, visual proof, deterministic where it counts). Help the council judge "humans like it visually" without sacrificing correctness. Ground visual taste in EXTERNAL references — proven Fable-5 design patterns and Vai\'s own design system — rather than unanchored opinion; think in second-order UX (the banner/highlight/animation that fires on an action, perfect easings, micro-interactions), but verify by rendered proof.',
     chitchat: ' You are the conversational / presence specialist: warm, low-friction, honest about limits. You flag when a turn should stay pure conversational and bypass heavy council so the experience feels alive rather than over-engineered.',
   };
   const selfAddendum = hasSelfContext
@@ -247,7 +306,10 @@ export function createCouncilMember(options: CouncilMemberOptions): CouncilMembe
     // internal review budget below is not enough on its own (a separate Promise.race in
     // runOneMember also bounds the call, and at 30s it aborted DeepSeek mid-think).
     slowThinking: isThinkingModel,
-    async review(input: CouncilInput): Promise<CouncilMemberNote | null> {
+    async review(
+      input: CouncilInput,
+      opts?: { readonly onReasoningDelta?: (textSoFar: string) => void },
+    ): Promise<CouncilMemberNote | null> {
       const startedAt = now();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -273,10 +335,10 @@ export function createCouncilMember(options: CouncilMemberOptions): CouncilMembe
           if (evidence.block) userPrompt = `${userPrompt}\n\n${evidence.block}`;
         }
 
-        const response = await adapter.chat({
+        const request = {
           messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: userPrompt },
+            { role: 'system' as const, content: system },
+            { role: 'user' as const, content: userPrompt },
           ],
           temperature,
           maxTokens,
@@ -293,8 +355,19 @@ export function createCouncilMember(options: CouncilMemberOptions): CouncilMembe
           // Override window via VAI_COUNCIL_KEEP_ALIVE (default 20s — long enough that a
           // member retried within the same turn reuses the resident model).
           keepAlive: process.env.VAI_COUNCIL_KEEP_ALIVE?.trim() || '20s',
-        });
-        const parsedNote = parseCouncilNote(response.message.content, {
+        };
+
+        // Live reasoning presence: when a delta sink is provided AND the adapter can stream,
+        // surface the model's reasoning ("thinking out loud") as it generates so the UI shows
+        // what each member is actually working through. The model's REASONING channel feeds
+        // the preview; its CONTENT (the JSON note) is what we parse — identical to the
+        // non-streaming path, so the fact-quarantine and parsing are unchanged. The stream
+        // failing/being unavailable falls straight back to the buffered chat() call.
+        const content = (opts?.onReasoningDelta && typeof adapter.chatStream === 'function')
+          ? await streamMemberContent(adapter, request, opts.onReasoningDelta)
+          : (await adapter.chat(request)).message.content;
+
+        const parsedNote = parseCouncilNote(content, {
           memberId: id, memberName: displayName, topic, durationMs: Math.max(0, now() - startedAt),
         });
         if (!parsedNote) return null;
