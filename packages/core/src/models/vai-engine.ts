@@ -7933,7 +7933,17 @@ export class VaiEngine implements ModelAdapter {
     this.tracePerf('chat:preflight-complete', userContent, start);
     let response: string;
     let structuredFormatFired = false;
-    if (webConcluded) {
+    // STRUCTURAL GATE (mirror of chatStream): a pasted GitHub URL inquiry reads the repo
+    // and answers from it, before any preflight handler can route it to a hallucinating
+    // fallback. See chatStream for the full rationale (DEV-VEGGASTARE/zod/hono failures).
+    const urlInquiryGate = process.env.VAI_URL_INQUIRY_GATE !== '0'
+      && /https?:\/\/\S*github\.com\/[\w.-]+\/[\w.-]+/i.test(userContent)
+      ? await this.tryUrlBasedRequest(userContent.toLowerCase(), userContent)
+      : null;
+    if (urlInquiryGate !== null) {
+      response = this.tracked('url-request', urlInquiryGate, userContent);
+      structuredFormatFired = true;
+    } else if (webConcluded) {
       this._lastSearchResponse = webConcluded.searchResult;
       response = this.tracked('web-search', webConcluded.text, userContent, { confidenceOverride: 0.78 });
       structuredFormatFired = true;
@@ -8213,7 +8223,22 @@ export class VaiEngine implements ModelAdapter {
     // that otherwise hijacks it with legal-forms, "Best next task", or refactoring
     // answers. This is the one-place fix for the whole class of curated-trap
     // hijacks on opportunity questions, instead of guarding each template.
-    if (isBusinessOpportunityRequest(userContent) && request.messages.length <= 2) {
+    // STRUCTURAL GATE (first, before the whole preflight gauntlet): when the user pasted
+    // a GitHub URL and is asking about it ("what is this app and is it good?", "what stack
+    // does X use?"), READ the repo and answer from it. Without this, an early preflight
+    // handler (recall/follow-up/fallback) grabs the turn and routes it to escalate→qwen3,
+    // which hallucinates from training data (told us "hono is Rust"). tryUrlBasedRequest
+    // fetches the real repo (GitHub API + README + topics) and assesses it; build intents
+    // are handled inside it too. This is the one-place fix for the DEV-VEGGASTARE/zod/hono
+    // "look at this repo" failures. Opt out with VAI_URL_INQUIRY_GATE=0.
+    const urlInquiryGate = process.env.VAI_URL_INQUIRY_GATE !== '0'
+      && /https?:\/\/\S*github\.com\/[\w.-]+\/[\w.-]+/i.test(userContent)
+      ? await this.tryUrlBasedRequest(userContent.toLowerCase(), userContent)
+      : null;
+    if (urlInquiryGate !== null) {
+      response = this.tracked('url-request', urlInquiryGate, userContent);
+      structuredFormatFired = true;
+    } else if (isBusinessOpportunityRequest(userContent) && request.messages.length <= 2) {
       response = await this.generateResponse(userContent, request.messages);
     } else if (formatOnlyPreflight !== null) {
       response = this.tracked('format-only-followup', formatOnlyPreflight, originalUserContent, { confidenceOverride: 0.85 });
