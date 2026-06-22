@@ -18,6 +18,7 @@
 import { readFileSync } from 'node:fs';
 import { openDb } from './db.mjs';
 import { ollamaGenerate, waitForVramHeadroom } from './driver.mjs';
+import { fetchFixWebEvidence, fixSearchQuery } from './web-evidence.mjs';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
@@ -51,6 +52,15 @@ try { source = readFileSync(filePath, 'utf8'); } catch { source = '(could not re
 // Keep it within context: head of file (where the regexes/guards live).
 const sourceExcerpt = source.split('\n').slice(0, 130).map((l, i) => `${i + 1}: ${l}`).join('\n');
 
+// Free web evidence (Vegga: council/Vai run local but HAVE web — use it). Opt-in via
+// VAI_FIX_WEB_EVIDENCE=1; best-effort, never blocks. Grounds the patch in current docs/discussion.
+let webBlock = '';
+if (/^(1|true|on|yes)$/i.test((process.env.VAI_FIX_WEB_EVIDENCE ?? '').trim())) {
+  const baseUrl = process.env.VAI_API ?? 'http://localhost:3006';
+  webBlock = await fetchFixWebEvidence({ baseUrl, query: fixSearchQuery(fix.class, fix.summary) });
+  if (webBlock) console.log('🌐 pulled free web evidence for the fix');
+}
+
 const prompt =
 `You are fixing a bug in a TypeScript codebase. Be precise and minimal.
 
@@ -59,7 +69,7 @@ SYMPTOM: ${fix.summary}
 
 FAILING CASES (prompt → how the AI wrongly read/answered it):
 ${fails.map((f) => `- "${f.prompt}" → read:"${f.read_as ?? '?'}" → ${f.grade_reason}`).join('\n')}
-
+${webBlock ? '\n' + webBlock + '\n' : ''}
 ACTUAL SOURCE (${filePath}, first 130 lines):
 \`\`\`typescript
 ${sourceExcerpt}
