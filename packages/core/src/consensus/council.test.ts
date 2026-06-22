@@ -144,6 +144,40 @@ describe('reachConsensus', () => {
     ]);
     expect(c.searchQuery).toBe('btc price now');
   });
+
+  it('surfaces a serious minority dissent even when the modal verdict ships', () => {
+    // Split panel: 3 'good' (answer-directly) ship the draft, but 1 strong member returns
+    // 'bad' with a real concern. The outcome still ships (modal logic unchanged), yet the
+    // objection must be AUDITABLE on consensus.dissent — never silently buried in notes[].
+    const c = reachConsensus([
+      note({ verdict: 'good', memberId: 'a', suggestedAction: 'answer-directly' }),
+      note({ verdict: 'good', memberId: 'b', suggestedAction: 'answer-directly' }),
+      note({ verdict: 'good', memberId: 'c', suggestedAction: 'answer-directly' }),
+      note({ verdict: 'bad', memberId: 'd', memberName: 'Skeptic', confidence: 0.9, concerns: ['unsupported claim about latency'] }),
+    ]);
+    expect(c.outcome).toBe('ship'); // modal logic intentionally unchanged
+    expect(c.dissent?.hasDissent).toBe(true);
+    expect(c.dissent?.dissentingMembers).toHaveLength(1);
+    expect(c.dissent?.dissentingMembers[0].memberId).toBe('d');
+    expect(c.dissent?.dissentingMembers[0].concerns).toContain('unsupported claim about latency');
+    expect(c.dissent?.dissentStrength).toBeCloseTo(0.25, 2); // 1 of 4 equal-weight members
+  });
+
+  it('does NOT surface dissent below the weight threshold (noise floor)', () => {
+    // A lone low-share dissenter among many shippers stays below DISSENT_MIN_WEIGHT (0.2).
+    const c = reachConsensus([
+      note({ verdict: 'good', memberId: 'a' }), note({ verdict: 'good', memberId: 'b' }),
+      note({ verdict: 'good', memberId: 'c' }), note({ verdict: 'good', memberId: 'e' }),
+      note({ verdict: 'good', memberId: 'f' }),
+      note({ verdict: 'bad', memberId: 'd' }), // 1 of 6 = 0.167 < 0.2
+    ]);
+    expect(c.dissent).toBeUndefined();
+  });
+
+  it('omits dissent entirely when the panel is unanimous good', () => {
+    const c = reachConsensus([note({ verdict: 'good', memberId: 'a' }), note({ verdict: 'good', memberId: 'b' })]);
+    expect(c.dissent).toBeUndefined();
+  });
 });
 
 describe('runCouncil / convene', () => {
@@ -223,6 +257,29 @@ describe('runCouncil / convene', () => {
     const consensus = iter.value;
     // First member always heard; the deadline (50ms, already blown after m1's +100) cuts the rest.
     expect(consensus.memberIds).toEqual(['m1']);
+  });
+
+  it('fast-first ordering: a slow-thinking member placed first does not starve faster ones', async () => {
+    // Under a budget, a slowThinking member listed first must be deferred so the fast members are
+    // heard within the deadline (the measured "configured 3, only 2 ever speak" gap). The slow one
+    // runs last if time remains. We model cost via the clock: slow advances past the deadline.
+    let clock = 1000;
+    const fastReview = (id: string) => async () => { clock += 10; return note({ verdict: 'good', memberId: id }); };
+    const slowReview = (id: string) => async () => { clock += 1000; return note({ verdict: 'good', memberId: id }); };
+    const members: CouncilMember[] = [
+      { id: 'slow', displayName: 'Slow', topic: 'reasoning', slowThinking: true, review: slowReview('slow') },
+      { id: 'fast1', displayName: 'Fast1', topic: 'code', review: fastReview('fast1') },
+      { id: 'fast2', displayName: 'Fast2', topic: 'local', review: fastReview('fast2') },
+    ];
+    const stream = runCouncilStreaming(members, INPUT, { now: () => clock, overallDeadlineMs: 100 });
+    let iter = await stream.next();
+    while (!iter.done) iter = await stream.next();
+    // Both fast members are heard first; the slow one runs last (and here still fits before the
+    // deadline check for the NEXT member, which there is none of). Crucially fast1+fast2 are in.
+    expect(iter.value.memberIds).toContain('fast1');
+    expect(iter.value.memberIds).toContain('fast2');
+    // The slow member no longer monopolizes the budget and exclude the others.
+    expect(iter.value.memberIds.length).toBeGreaterThanOrEqual(2);
   });
 
   it('with no overall deadline, every member is heard', async () => {

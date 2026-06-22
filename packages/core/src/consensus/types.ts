@@ -192,6 +192,32 @@ export interface CouncilConsensus {
   readonly factsQuarantined: true;
   /** Set when a fact cross-check ran for this turn (confirmation / contradiction). */
   readonly crossCheck?: CouncilCrossCheck;
+  /**
+   * Surfaced minority objection (Council Excellence + transparency): present when one or
+   * more members returned `verdict: 'bad'` with non-trivial weight, EVEN IF the modal
+   * verdict shipped. The outcome logic is intentionally unchanged — this only makes a
+   * serious dissent auditable so it's never silently buried in `notes[]`. Absent when no
+   * meaningful dissent exists.
+   */
+  readonly dissent?: CouncilDissent;
+}
+
+/** A surfaced minority objection within the council — auditable, does not (yet) alter outcome. */
+export interface CouncilDissent {
+  /** True when a non-trivial-weight minority returned `verdict: 'bad'`. */
+  readonly hasDissent: true;
+  /** Fraction of total panel weight that dissented (0..1). */
+  readonly dissentStrength: number;
+  /** The dissenting members and what they objected with. */
+  readonly dissentingMembers: readonly {
+    readonly memberId: string;
+    readonly memberName: string;
+    /** This member's share of total panel weight (0..1). */
+    readonly weight: number;
+    readonly confidence: number;
+    /** The member's flagged concerns (may be empty if it gave none). */
+    readonly concerns: readonly string[];
+  }[];
 }
 
 /** A council member. Implementations live in `member.ts` or are injected in tests. */

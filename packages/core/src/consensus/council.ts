@@ -64,6 +64,12 @@ export interface RunCouncilOptions {
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_ESCALATE_BELOW = 0.5;
 const DEFAULT_MAX_ITEMS = 5;
+/**
+ * Minimum share of total panel weight a 'bad'-verdict minority must hold for its objection
+ * to be SURFACED as `consensus.dissent`. Below this it's noise (a single low-weight off-topic
+ * member); at/above it the dissent is auditable. Audit-only — does not change the outcome.
+ */
+const DISSENT_MIN_WEIGHT = 0.2;
 /** Off-specialty members still count, but less — the council's trust-weighting rule. */
 const OFF_TOPIC_WEIGHT = 0.6;
 
@@ -252,6 +258,29 @@ export function reachConsensus(
     .filter((n) => (n.suggestedAction === 'web-search' || n.suggestedAction === 'local-business-search') && n.searchQuery.trim())
     .sort((a, b) => weightOf.get(b)! * b.confidence - weightOf.get(a)! * a.confidence)[0];
 
+  // Surface a serious minority objection so it is never silently buried in notes[] (Council
+  // Excellence + transparency). A dissent is members that returned verdict 'bad'; we only
+  // surface it when its combined weight is non-trivial (>= DISSENT_MIN_WEIGHT of the panel).
+  // The outcome/modal logic above is intentionally NOT changed by this — it's audit-only.
+  const dissenters = usable.filter((n) => n.verdict === 'bad');
+  const dissentWeightRaw = dissenters.reduce((s, n) => s + weightOf.get(n)!, 0);
+  const dissentStrength = totalWeight > 0 ? dissentWeightRaw / totalWeight : 0;
+  const dissent: CouncilConsensus['dissent'] = (dissenters.length > 0 && dissentStrength >= DISSENT_MIN_WEIGHT)
+    ? {
+        hasDissent: true,
+        dissentStrength,
+        dissentingMembers: dissenters
+          .sort((a, b) => weightOf.get(b)! - weightOf.get(a)!)
+          .map((n) => ({
+            memberId: n.memberId,
+            memberName: n.memberName,
+            weight: totalWeight > 0 ? weightOf.get(n)! / totalWeight : 0,
+            confidence: n.confidence,
+            concerns: n.concerns,
+          })),
+      }
+    : undefined;
+
   return {
     outcome,
     agreement,
@@ -265,6 +294,7 @@ export function reachConsensus(
     notes,
     memberIds: usable.map((n) => n.memberId),
     factsQuarantined: true,
+    ...(dissent ? { dissent } : {}),
   };
 }
 
