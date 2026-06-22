@@ -252,6 +252,21 @@ export function buildConversationGrounding(
   };
 }
 
+/**
+ * True when `input` is a COUNCIL REDRAFT instruction rather than a real user turn.
+ *
+ * The council loop appends a redraft nudge ("Your draft was reviewed by your friend
+ * council… improve THIS answer… they point at intent and method…") as the latest
+ * message. Its vocabulary (answer/context/intent/improve/better) otherwise trips the
+ * chat-quality branch of {@link classifyContextGroundedFollowUpIntent}, hijacking the
+ * redraft with the "Best next task" engineering memo instead of the real answer — the
+ * measured routing-drift bug. Callers in the answer path use this to bail and answer
+ * the original question. Kept as a stable substring match on the instruction's lead.
+ */
+export function isCouncilRedraftInstruction(input: string): boolean {
+  return /your draft was reviewed by your friend council/i.test(input);
+}
+
 export function classifyContextGroundedFollowUpIntent(
   input: string,
   contextText: string,

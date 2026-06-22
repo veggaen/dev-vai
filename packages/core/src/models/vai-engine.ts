@@ -116,6 +116,7 @@ import {
   buildConversationGrounding,
   classifyContextGroundedFollowUpIntent,
   shouldDeferContextGroundedFollowUp,
+  isCouncilRedraftInstruction,
   type ConversationGrounding,
   type ConversationGroundingDependencies,
 } from '../chat/conversation-grounding.js';
@@ -14820,6 +14821,15 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
   private tryContextGroundedFollowUpSynthesis(input: string, history: readonly Message[]): string | null {
     const trimmed = input.trim();
     if (!trimmed || history.length < 2) return null;
+    // A COUNCIL REDRAFT nudge is not a user follow-up. The redraft appends an
+    // instruction ("Your draft was reviewed by your friend council… improve THIS
+    // answer… intent and method…") as the latest user turn; its words (answer,
+    // context, intent, improve, better) trip the chat-quality classifier below and
+    // hijack the redraft with the "Best next task" engineering memo instead of the
+    // real answer — the measured routing-drift bug where "who wrote Romeo and Juliet"
+    // came back as a self-improvement plan. Detect the redraft signature and bail so
+    // the engine re-answers the ORIGINAL question.
+    if (isCouncilRedraftInstruction(trimmed)) return null;
     if (shouldDeferContextGroundedFollowUp(trimmed, history)) return null;
     // An opportunity/ideas question ("a great idea when creating a company in
     // Norway") is a fresh standalone ask for business ideas — never a context-
