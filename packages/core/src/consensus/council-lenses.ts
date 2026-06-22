@@ -81,6 +81,47 @@ export function isRole(lens: CouncilLens): boolean {
   return typeof lens.tier === 'string';
 }
 
+/** One role seated on a specific adapter (the capability-probe's decision made concrete). */
+export interface RoleSeat {
+  readonly role: CouncilLens;
+  readonly adapter: CouncilMemberOptions['adapter'];
+}
+
+export interface RoleMembersOptions {
+  readonly seats: readonly RoleSeat[];
+  readonly topic: CouncilTopic;
+  readonly timeoutMs?: number;
+  readonly idPrefix?: string;
+  readonly contextTools?: CouncilMemberOptions['contextTools'];
+  readonly proofRunner?: CouncilMemberOptions['proofRunner'];
+}
+
+/**
+ * Build council members from explicit (role → adapter) seats. Unlike `buildLocalLensMembers`
+ * (one adapter, N lenses), this seats EACH role on its OWN assigned model — the runtime form
+ * of the capability probe (`assignModelsToRoles`): the distinguished/principal roles can run a
+ * stronger model than the senior role. Each member is labelled with its role + tier so the
+ * panel reads as a seniority ladder of distinct voices. Falls back gracefully — a seat whose
+ * adapter is the same as another's is fine (multiple roles can share one model on a small box).
+ */
+export function buildRoleMembers(options: RoleMembersOptions): CouncilMember[] {
+  const { seats, topic, timeoutMs, contextTools, proofRunner } = options;
+  return seats.map(({ role, adapter }) =>
+    createCouncilMember({
+      adapter,
+      topic,
+      id: `${options.idPrefix ?? 'role'}-${role.id}-${adapter.id}`,
+      displayName: role.tier
+        ? `${adapter.displayName} · ${role.label} · ${role.tier}`
+        : `${adapter.displayName} · ${role.label}`,
+      timeoutMs,
+      lens: role,
+      contextTools,
+      proofRunner,
+    }),
+  );
+}
+
 export interface LocalLensMembersOptions {
   /** The local model every lens runs on. */
   readonly adapter: CouncilMemberOptions['adapter'];

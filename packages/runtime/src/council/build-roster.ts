@@ -14,7 +14,8 @@
  * stays on `default` for breadth. De-dupe in `selectMembers` keeps that honest.
  */
 
-import { buildLocalLensMembers, createCouncilMember, createGrokCliAdapter, createCouncilContextTools, runCommandEvidence, MemberAvailabilityStore } from '@vai/core';
+import { buildLocalLensMembers, buildRoleMembers, assignModelsToRoles, LOCAL_COUNCIL_ROLES, createCouncilMember, createGrokCliAdapter, createCouncilContextTools, runCommandEvidence, MemberAvailabilityStore } from '@vai/core';
+import type { DiscoveredOllamaModel } from '@vai/core';
 import type { CouncilContextTools, CouncilMember, CouncilMemberNote, CouncilRoster, CouncilTopic, ModelAdapter, ModelRegistry, ProofRunner } from '@vai/core';
 import { GrokFriendClient } from '../grok-friend/client.js';
 import { nicheTopicForModel } from './model-niche-catalog.js';
@@ -118,6 +119,40 @@ export interface BuildRosterOptions {
 export function grokEnabledFromEnv(): boolean {
   const raw = (process.env.VAI_COUNCIL_GROK ?? '').trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+}
+
+/** True when capability-probe role assignment is enabled (default OFF — unchanged behavior). */
+export function roleAssignEnabledFromEnv(): boolean {
+  return /^(1|true|on|yes)$/i.test((process.env.VAI_COUNCIL_ROLE_ASSIGN ?? '').trim());
+}
+
+/** Parse a billions-of-params estimate from an Ollama model id/name, e.g. "qwen3:8b" → 8. */
+function paramBFromName(name: string): number | null {
+  const m = /(\d+(?:\.\d+)?)\s*b\b/i.exec(name);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * Project the runtime's local ADAPTERS into the minimal `DiscoveredOllamaModel` shape the
+ * capability probe (`assignModelsToRoles`) consumes. We don't re-query Ollama here — the
+ * adapters are already the discovered models; we just estimate size from the name (good enough
+ * to rank strongest→weakest, which is all the probe needs). thinking is inferred from the id.
+ */
+function adaptersToDiscovered(adapters: readonly ModelAdapter[]): DiscoveredOllamaModel[] {
+  return adapters.map((a) => {
+    const name = a.id.replace(/^local:/, '');
+    const parameterB = paramBFromName(name);
+    return {
+      name,
+      sizeBytes: (parameterB ?? 0) * 1e9,
+      parameterB,
+      contextWindow: null,
+      thinking: /deepseek|r1|think|reason/i.test(name),
+      toolUse: false,
+      vision: false,
+      embedding: /embed/i.test(name),
+    };
+  });
 }
 
 /**
@@ -224,7 +259,28 @@ export function buildLocalCouncilRoster(
   const byTopic: Partial<Record<CouncilTopic, CouncilMember[]>> = {};
   const defaultMembers: CouncilMember[] = [];
 
-  chosen.forEach((adapter, index) => {
+  // CAPABILITY-PROBE ROLE ASSIGNMENT (flag-gated VAI_COUNCIL_ROLE_ASSIGN=1, default OFF).
+  // Instead of one generalist adapter run through N lenses, seat EACH Thorsen role on the
+  // model the probe judged best for its tier (strongest model → highest tier). Needs ≥2 chosen
+  // models to be worth it. When it seats a role panel, we SKIP the per-adapter loop below but
+  // still flow through the shared availability-wrapping + roster assembly at the end (pattern
+  // fidelity — role members must be wrapped + returned exactly like every other member).
+  let rolePanelSeated = false;
+  if (roleAssignEnabledFromEnv() && chosen.length >= 2) {
+    const discovered = adaptersToDiscovered(chosen as ModelAdapter[]);
+    const byName = new Map((chosen as ModelAdapter[]).map((a) => [a.id.replace(/^local:/, ''), a]));
+    const assignments = assignModelsToRoles(discovered, LOCAL_COUNCIL_ROLES);
+    const seats = assignments
+      .filter((a) => a.modelName && byName.has(a.modelName))
+      .map((a) => ({ role: a.role, adapter: byName.get(a.modelName!)! }));
+    if (seats.length > 0) {
+      defaultMembers.push(...buildRoleMembers({ seats, topic: 'other', timeoutMs, contextTools, proofRunner }));
+      rolePanelSeated = true;
+    }
+    // No usable seats (shouldn't happen with chosen.length>=2) → fall through to default path.
+  }
+
+  if (!rolePanelSeated) chosen.forEach((adapter, index) => {
     // Topic seating: a recognized NICHE specialist (DeepSeek-R1 → reasoning, a coder model →
     // code, etc.) seats on its strength via the catalog; everything else uses the positional
     // spread. The first member still anchors `default` (generalist) unless it's a clear niche.

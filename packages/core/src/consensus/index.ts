@@ -36,8 +36,10 @@ export {
 export {
   createCouncilMember,
   parseCouncilNote,
+  THORSEN_TIER_RANK,
   type CouncilMemberOptions,
   type CouncilLens,
+  type ThorsenTier,
 } from './member.js';
 
 export {
@@ -85,9 +87,26 @@ export {
 
 export {
   LOCAL_COUNCIL_LENSES,
+  LOCAL_COUNCIL_ROLES,
+  isRole,
   buildLocalLensMembers,
+  buildRoleMembers,
   type LocalLensMembersOptions,
+  type RoleSeat,
+  type RoleMembersOptions,
 } from './council-lenses.js';
+
+export {
+  assignModelsToRoles,
+  type RoleAssignment,
+} from './role-assignment.js';
+
+export {
+  deliberate,
+  isDeliberationEnabled,
+  buildPeerNotes,
+  type DeliberationResult,
+} from './deliberate.js';
 
 export {
   MemberAvailabilityStore,
