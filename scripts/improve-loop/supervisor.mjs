@@ -36,6 +36,11 @@ const MAX_CYCLES = Number(opt('--max-cycles', '0')) || Infinity; // 0 = forever
 const PER_CLASS = opt('--per-class', '4');
 const REST_S = Number(opt('--rest', '45'));        // breather between cycles (GPU rest)
 const DB_PATH = opt('--db', 'scripts/improve-loop/.corpus.sqlite');
+// AUTO-APPLY toggle: when --apply is passed, each cycle also CONVERGES proposals (consensus-fix)
+// and SAFELY applies the verified-safe ones to council/auto-improve (apply-consensus: risk-gate
+// + rejected-guard + tsc/vitest verify + commit-or-revert + branch-guard). Off by default →
+// the loop stays OBSERVE+PROPOSE-only (read-only on source), exactly as before.
+const AUTO_APPLY = args.includes('--apply');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (m) => process.stdout.write(`[supervisor ${new Date().toLocaleTimeString()}] ${m}\n`);
@@ -56,7 +61,21 @@ process.on('SIGINT', () => { stop = true; log('SIGINT — finishing current cycl
 
 async function main() {
   log(`living loop starting · per-class=${PER_CLASS} · rest=${REST_S}s · ${MAX_CYCLES === Infinity ? 'FOREVER' : MAX_CYCLES + ' cycles'}`);
-  log('watch live → http://localhost:4123   (read-only on Vai source; fixes are QUEUED, never auto-applied)');
+  if (AUTO_APPLY) {
+    // Safety: auto-apply ONLY ever commits to council/auto-improve. Guard at startup so the
+    // user gets a clear message instead of per-cycle refusals (apply-consensus also refuses).
+    const { currentBranch, AUTO_IMPROVE_BRANCH } = await import('./apply-runners.mjs');
+    const head = currentBranch();
+    if (head !== AUTO_IMPROVE_BRANCH) {
+      log(`✋ --apply requires HEAD on '${AUTO_IMPROVE_BRANCH}', but you're on '${head}'.`);
+      log(`   Run:  git checkout -B ${AUTO_IMPROVE_BRANCH}   then start again. (Verified fixes land there; you review + Claude merges later.)`);
+      process.exit(1);
+    }
+    log(`🤖 AUTO-APPLY ON → verified-safe fixes commit to ${AUTO_IMPROVE_BRANCH} (risk-tier'd; review-tier flagged, never auto-applied). Reversible; merge later with Claude.`);
+  } else {
+    log('OBSERVE+PROPOSE only (read-only on Vai source; fixes QUEUED, never applied). Add --apply to auto-apply to council/auto-improve.');
+  }
+  log('watch live → http://localhost:4123');
 
   for (let cycle = 1; cycle <= MAX_CYCLES && !stop; cycle++) {
     log(`━━━ cycle ${cycle} : OBSERVE ━━━`);
@@ -72,6 +91,17 @@ async function main() {
       if (stop) break;
       log(`━━━ cycle ${cycle} : PROPOSE [${klass}] ━━━`);
       await runChild('scripts/improve-loop/propose-fix.mjs', ['--class', klass]);
+      if (AUTO_APPLY && !stop) {
+        // CONVERGE: many expert personas propose; keep only grep-verified consensus.
+        log(`━━━ cycle ${cycle} : CONVERGE [${klass}] ━━━`);
+        await runChild('scripts/improve-loop/consensus-fix.mjs', ['--class', klass]);
+      }
+    }
+    if (AUTO_APPLY && !stop) {
+      // APPLY: the SAFE gated path — risk-gate + rejected-guard + tsc/vitest verify + commit
+      // to council/auto-improve if green / revert if red. Refuses off-branch internally.
+      log(`━━━ cycle ${cycle} : APPLY (verified-safe → council/auto-improve) ━━━`);
+      await runChild('scripts/improve-loop/apply-consensus.mjs', []);
     }
 
     // Campaign snapshot.
