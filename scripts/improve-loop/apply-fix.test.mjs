@@ -156,3 +156,8 @@ test('REVIEW: widening a regex (losing an anchor) — the over-broad-keyword bug
 test('still SAFE: a clean small logic tweak that introduces none of the above', () => {
   assert.equal(classifyRisk({ file: 'src/x.ts', find: 'if (a) return 1;', replace: 'if (a) return 2;' }).tier, RISK_TIER.SAFE);
 });
+
+test('REVIEW: obfuscated dynamic code access (globalThis[...] / concatenated Function)', () => {
+  assert.equal(classifyRisk({ file: 'src/x.ts', find: 'run()', replace: 'globalThis["Func"+"tion"]()' }).tier, RISK_TIER.REVIEW);
+  assert.equal(classifyRisk({ file: 'src/x.ts', find: 'go()', replace: 'window["eval"]("x")' }).tier, RISK_TIER.REVIEW);
+});

@@ -15,7 +15,7 @@
  *   pnpm review:branch --model qwen2.5:7b       # pick the reviewer model
  */
 
-import { execSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
@@ -25,26 +25,33 @@ const MODEL = opt('--model', process.env.VAI_REVIEW_MODEL || 'qwen2.5:7b');
 const OLLAMA = process.env.OLLAMA_HOST || 'http://localhost:11434';
 const MAX_DIFF = Number(opt('--max-diff-chars', '60000')); // keep the prompt within a sane window
 
-function sh(cmd) { return execSync(cmd, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
+// Run git with an ARG ARRAY (no shell) — refuse-by-construction against arg injection, since
+// BASE/HEAD come from the CLI. Throws on non-zero so the caller can message + exit.
+function git(...a) {
+  const r = spawnSync('git', a, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error(`git ${a.join(' ')} failed: ${(r.stderr || '').trim()}`);
+  return r.stdout;
+}
 
 async function main() {
   // Resolve the merge-base so we only review what HEAD adds on top of BASE.
   let range;
   try {
-    const mb = sh(`git merge-base ${BASE} ${HEAD}`).trim();
+    const mb = git('merge-base', BASE, HEAD).trim();
     range = `${mb}..${HEAD}`;
   } catch {
     console.error(`Could not find a merge-base between '${BASE}' and '${HEAD}'. Are both branches present?`);
     process.exit(1);
   }
 
-  const stat = sh(`git diff --stat ${range}`).trim();
-  let diff = sh(`git diff ${range}`);
+  const stat = git('diff', '--stat', range).trim();
+  let diff = git('diff', range);
   if (!diff.trim()) { console.log(`No changes in ${range}. Nothing to review.`); return; }
   const truncated = diff.length > MAX_DIFF;
   if (truncated) diff = diff.slice(0, MAX_DIFF) + '\n…[diff truncated for prompt size]…';
 
-  const commits = sh(`git log --oneline ${range}`).trim();
+  const commits = git('log', '--oneline', range).trim();
 
   const prompt = [
     'You are a senior staff engineer doing a focused, honest code review. Be specific and terse.',

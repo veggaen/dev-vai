@@ -42,6 +42,7 @@ const RISKY_ADDED = [
   /\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}/,                                         // silent error swallow (empty catch)
   /\bawait\s+fetch\(|\b(?:https?\.request|axios|got)\(/i,                       // NEW network call / side effect
   /\beval\(|new\s+Function\(/,                                                  // dynamic code execution
+  /\bglobalThis\s*\[|\bwindow\s*\[|\bFunction\b[^(]*\+/,                        // dynamic/obfuscated code access
 ];
 
 // Behavior-change heuristic: WIDENING a regex (removing an anchor ^ or $, or trading a
