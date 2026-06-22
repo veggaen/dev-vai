@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { reachConsensus, runCouncil, convene, toCouncilThinking, runCouncilStreaming } from './council.js';
+import { reachConsensus, runCouncil, convene, toCouncilThinking, runCouncilStreaming, conveneStreaming } from './council.js';
 import { routeTopic, selectMembers } from './topic-router.js';
 import { createCouncilMember, parseCouncilNote } from './member.js';
 import type { CouncilInput, CouncilMember, CouncilMemberNote } from './types.js';
@@ -293,6 +293,58 @@ describe('runCouncil / convene', () => {
     let iter = await stream.next();
     while (!iter.done) iter = await stream.next();
     expect([...iter.value.memberIds].sort()).toEqual(['m1', 'm2']);
+  });
+
+  describe('conveneStreaming deliberation (live path, flag-gated)', () => {
+    // A split 2-member roster: m1 'good', m2 'bad' on round 1 → triggers a peer-aware round 2.
+    const splitRoster = () => {
+      const peerSeen: Record<string, boolean> = {};
+      const member = (id: string, verdict: 'good' | 'bad'): CouncilMember => ({
+        id, displayName: id, topic: 'local',
+        async review(input) { peerSeen[id] = Boolean(input.peerNotes?.length); return note({ memberId: id, verdict }); },
+      });
+      return { roster: { default: [member('m1', 'good'), member('m2', 'bad')] }, peerSeen };
+    };
+    const drain = async (gen: ReturnType<typeof conveneStreaming>) => {
+      let pendingEvents = 0; let it = await gen.next();
+      while (!it.done) { if (it.value.pendingMember) pendingEvents++; it = await gen.next(); }
+      return { pendingEvents, result: it.value };
+    };
+
+    it('OFF by default: a split panel runs ONE round only (no peer round)', async () => {
+      delete process.env.VAI_COUNCIL_DELIBERATE;
+      const { roster, peerSeen } = splitRoster();
+      const { pendingEvents } = await drain(conveneStreaming(INPUT, roster));
+      expect(pendingEvents).toBe(2);             // 2 members, one round
+      expect(peerSeen.m1).toBe(false);           // nobody saw peers
+      expect(peerSeen.m2).toBe(false);
+    });
+
+    it('ON: a split panel runs a SECOND peer-aware round (members see peerNotes), streamed', async () => {
+      const prev = process.env.VAI_COUNCIL_DELIBERATE;
+      process.env.VAI_COUNCIL_DELIBERATE = '1';
+      try {
+        const { roster, peerSeen } = splitRoster();
+        const { pendingEvents } = await drain(conveneStreaming(INPUT, roster));
+        expect(pendingEvents).toBe(4);           // 2 members × 2 rounds, all streamed
+        expect(peerSeen.m1).toBe(true);          // round 2 injected peer notes
+        expect(peerSeen.m2).toBe(true);
+      } finally {
+        if (prev === undefined) delete process.env.VAI_COUNCIL_DELIBERATE; else process.env.VAI_COUNCIL_DELIBERATE = prev;
+      }
+    });
+
+    it('ON but unanimous: no second round (nothing to deliberate)', async () => {
+      const prev = process.env.VAI_COUNCIL_DELIBERATE;
+      process.env.VAI_COUNCIL_DELIBERATE = '1';
+      try {
+        const m = (id: string): CouncilMember => ({ id, displayName: id, topic: 'local', review: async () => note({ memberId: id, verdict: 'good' }) });
+        const { pendingEvents } = await drain(conveneStreaming(INPUT, { default: [m('m1'), m('m2')] }));
+        expect(pendingEvents).toBe(2);           // unanimous → single round
+      } finally {
+        if (prev === undefined) delete process.env.VAI_COUNCIL_DELIBERATE; else process.env.VAI_COUNCIL_DELIBERATE = prev;
+      }
+    });
   });
 });
 
