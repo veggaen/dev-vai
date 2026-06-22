@@ -13,6 +13,7 @@ import { councilPlan, governConsensus } from './seriousness.js';
 import { routeTopic, selectMembers, type CouncilRoster } from './topic-router.js';
 import { MemberAvailabilityStore, type MemberAvailability } from './member-availability.js';
 import { proofTrustWeight, type ProofStatus } from './member-experiment.js';
+import { deliberate, isDeliberationEnabled, buildPeerNotes } from './deliberate.js';
 import type {
   CouncilAction,
   CouncilConsensus,
@@ -497,7 +498,16 @@ export async function convene(
   // whose proof FAILED counts less. So the council leans toward verified voices over speculation.
   const weightFor = (note: CouncilMemberNote) =>
     (note.topic === topic ? 1 : OFF_TOPIC_WEIGHT) * proofTrustWeight(note.proof?.status as ProofStatus | undefined);
-  const raw = await runCouncil(members, input, { ...options, weightFor });
+  // Multi-turn deliberation (flag-gated, Milestone 1 slice 3): when enabled, the panel runs a
+  // second peer-aware round on a split decision before consensus. Default OFF — the single-round
+  // runCouncil path below is unchanged. Same trust-weighting, same governConsensus.
+  let raw: CouncilConsensus;
+  if (isDeliberationEnabled()) {
+    const result = await deliberate(members, input, { ...options, weightFor });
+    raw = result.consensus;
+  } else {
+    raw = await runCouncil(members, input, { ...options, weightFor });
+  }
   const consensus = governConsensus(raw, plan.assessment);
   return { topic, assessment: plan.assessment, convened: true, consensus };
 }
@@ -536,13 +546,35 @@ export async function* conveneStreaming(
 
   const members = selectMembers(topic, roster);
   const weightFor = (note: CouncilMemberNote) => (note.topic === topic ? 1 : OFF_TOPIC_WEIGHT);
-  const stream = runCouncilStreaming(members, input, { ...options, weightFor });
-  let iter = await stream.next();
-  while (!iter.done) {
-    yield { ...iter.value, topic, assessment: plan.assessment };
-    iter = await stream.next();
+
+  // ── Round 1: independent reviews, streamed to the UI (unchanged default path). ──
+  const drain = async function* (gen: AsyncGenerator<CouncilMemberProgress, CouncilConsensus>): AsyncGenerator<ConveneStreamingProgress, CouncilConsensus> {
+    let it = await gen.next();
+    while (!it.done) {
+      yield { ...it.value, topic, assessment: plan.assessment };
+      it = await gen.next();
+    }
+    return it.value;
+  };
+  const round1Gen = drain(runCouncilStreaming(members, input, { ...options, weightFor }));
+  let r1 = await round1Gen.next();
+  while (!r1.done) { yield r1.value; r1 = await round1Gen.next(); }
+  let raw = r1.value;
+
+  // ── Round 2 (flag-gated, default OFF): peer-aware deliberation on a SPLIT panel, also
+  //    streamed so transparency holds. Same crash-safe sequential execution. Default behavior
+  //    is unchanged — without VAI_COUNCIL_DELIBERATE=1 we never enter this branch. ──
+  const usable = raw.notes.filter((n) => !n.error);
+  const split = usable.length >= 2 && new Set(usable.map((n) => n.verdict)).size > 1;
+  if (isDeliberationEnabled() && split) {
+    const peerNotes = buildPeerNotes(usable);
+    const round2Gen = drain(runCouncilStreaming(members, { ...input, peerNotes }, { ...options, weightFor }));
+    let r2 = await round2Gen.next();
+    while (!r2.done) { yield r2.value; r2 = await round2Gen.next(); }
+    // Keep round 2 only if it produced usable notes; otherwise round 1 stands (never regress).
+    if (r2.value.notes.some((n) => !n.error)) raw = r2.value;
   }
-  const raw = iter.value;
+
   const consensus = governConsensus(raw, plan.assessment);
   return { topic, assessment: plan.assessment, convened: true, consensus };
 }

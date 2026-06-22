@@ -63,3 +63,37 @@ describe('buildLocalCouncilRoster — seat all installed models, niche-prioritiz
     expect(roster).toBeUndefined();
   });
 });
+
+describe('buildLocalCouncilRoster — capability-probe role assignment (flag-gated)', () => {
+  const env = process.env;
+  beforeEach(() => { process.env = { ...env, VAI_COUNCIL_PREWARM: '0', VAI_COUNCIL_CONTEXT_ROOT: '' }; });
+  afterEach(() => { process.env = env; });
+
+  it('default OFF: no role-tiered panel; seating is the unchanged lens/positional path', () => {
+    delete process.env.VAI_COUNCIL_ROLE_ASSIGN;
+    const roster = buildLocalCouncilRoster(registryOf(['qwen3:8b', 'qwen2.5:7b']), { localLensCount: 1 });
+    expect((roster?.default ?? []).some((m) => /· (senior|staff|principal|distinguished)$/.test(m.displayName))).toBe(false);
+  });
+
+  it('ON with ≥2 models: seats the Thorsen role ladder, strongest model on the top tier', () => {
+    process.env.VAI_COUNCIL_ROLE_ASSIGN = '1';
+    const roster = buildLocalCouncilRoster(
+      registryOf(['qwen2.5:3b', 'qwen3:8b', 'qwen2.5:7b']),
+      { localLensCount: 1, maxMembers: Number.POSITIVE_INFINITY },
+    );
+    const members = roster?.default ?? [];
+    expect(members.length).toBeGreaterThanOrEqual(4); // 4 roles
+    expect(members.every((m) => /· (senior|staff|principal|distinguished)$/.test(m.displayName))).toBe(true);
+    // The probe's strongest→highest-tier policy, live: distinguished runs 8b, senior a lighter model.
+    const distinguished = members.find((m) => / · distinguished$/.test(m.displayName));
+    const senior = members.find((m) => / · senior$/.test(m.displayName));
+    expect(distinguished?.displayName).toMatch(/8b/i);
+    expect(senior?.displayName).not.toMatch(/^qwen3:8b/i);
+  });
+
+  it('ON but only ONE model: falls back to the unchanged path (role-assign needs ≥2)', () => {
+    process.env.VAI_COUNCIL_ROLE_ASSIGN = '1';
+    const roster = buildLocalCouncilRoster(registryOf(['qwen3:8b']), { localLensCount: 1 });
+    expect((roster?.default ?? []).some((m) => /· (senior|staff|principal|distinguished)$/.test(m.displayName))).toBe(false);
+  });
+});
