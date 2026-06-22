@@ -25,7 +25,7 @@ import { classifyRisk, RISK_TIER } from './risk-tier.mjs';
  *   readFile(file): string|null,         // current file contents (null if missing)
  *   writeFile(file, contents): void,     // overwrite
  *   verify(): Promise<{ok:boolean, detail:string}>,  // tsc + tests; ok=green
- *   commit(message): Promise<void>,      // commit the working tree to council/auto-improve
+ *   commit(message, file): Promise<void>, // stage `file` + commit to council/auto-improve
  *   branch?: string,                     // for the audit message (default council/auto-improve)
  * }
  * @returns { applied, tier, reasons, verifyDetail?, committed }
@@ -82,7 +82,7 @@ export async function applyVerifiedFix(proposal, deps) {
     `auto-applied to ${branch} (risk tier: safe). Reversible; visible in git history.`,
   ].filter(Boolean).join('\n');
   try {
-    await deps.commit(message);
+    await deps.commit(message, proposal.file);
   } catch (err) {
     return { applied: true, committed: false, tier, reasons: [`applied + verified, but commit failed: ${String(err).slice(0, 80)}`], verifyDetail: verifyResult.detail };
   }
