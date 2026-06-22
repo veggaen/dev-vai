@@ -237,6 +237,22 @@ export function parseCouncilNote(
  * alongside the others. Temperature is nudged off 0 per-lens so the angles don't collapse onto
  * the same deterministic completion.
  */
+/**
+ * Thorsen-inspired seniority ladder (from MDS/Thorsen.md, the sacred doctrine). A council
+ * ROLE is a lens promoted to a seat on this ladder — it tells us the ALTITUDE the voice
+ * reviews from, which (later) drives vote weight and which deliberation rounds it joins.
+ * Ordered low→high; `THORSEN_TIER_RANK` gives the numeric altitude.
+ */
+export type ThorsenTier = 'senior' | 'staff' | 'principal' | 'distinguished';
+
+/** Numeric altitude per tier (higher = more architectural authority). Low→high, stable. */
+export const THORSEN_TIER_RANK: Record<ThorsenTier, number> = {
+  senior: 1,
+  staff: 2,
+  principal: 3,
+  distinguished: 4,
+};
+
 export interface CouncilLens {
   /** Stable id suffix, e.g. 'skeptic'. */
   readonly id: string;
@@ -246,6 +262,20 @@ export interface CouncilLens {
   readonly framing: string;
   /** Sampling temperature for this angle (default 0 for the base lens, higher for variety). */
   readonly temperature?: number;
+  /**
+   * ROLE fields (Thorsen-inspired role-based deliberation, Milestone 1). All OPTIONAL so the
+   * pre-existing plain lenses keep working unchanged. When present, this lens is a ROLE:
+   * a seat on the Thorsen seniority ladder with an explicit mandate and a base vote weight.
+   */
+  /** Seniority altitude this voice reviews from. */
+  readonly tier?: ThorsenTier;
+  /** One-line charter: what this role is accountable for on the panel. */
+  readonly mandate?: string;
+  /**
+   * Base vote weight multiplier for this role (default 1). Surfaced/recorded now; it does NOT
+   * change consensus math yet — outcome logic stays as-is until we deliberately evolve it.
+   */
+  readonly weight?: number;
 }
 
 export interface CouncilMemberOptions {
