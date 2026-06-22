@@ -5,6 +5,7 @@ import {
   labelForRequest,
   distinctiveTokens,
   buildProvenanceSpine,
+  disputedLabelsFromCrossCheck,
   type FetchedEvidence,
   type MemberContextLedger,
 } from './context-states.js';
@@ -129,5 +130,32 @@ describe('buildProvenanceSpine — consensus-level verification spine (advisory)
     expect(spine.total).toBe(0);
     expect(spine.groundedness).toBe(0);
     expect(spine.verdict).toBe('none');
+  });
+});
+
+describe('disputedLabelsFromCrossCheck — free web contradiction → spine disputed', () => {
+  const labels = ['readFile src/price.ts', 'grep /ETH/', 'listFiles src/'];
+
+  it('returns [] when the cross-check did not contradict (verified/inconclusive)', () => {
+    expect(disputedLabelsFromCrossCheck({ contradicted: false, subjectAliases: ['eth'] }, labels)).toEqual([]);
+    expect(disputedLabelsFromCrossCheck(null, labels)).toEqual([]);
+  });
+
+  it('marks context items whose label references a contradicted subject/value', () => {
+    const disputed = disputedLabelsFromCrossCheck({ contradicted: true, subjectAliases: ['eth'], value: '$3,200' }, labels);
+    expect(disputed).toContain('grep /ETH/');     // matches 'eth'
+    expect(disputed).not.toContain('listFiles src/');
+  });
+
+  it('chains into buildProvenanceSpine → contested verdict', () => {
+    const ledger: MemberContextLedger = {
+      memberId: 'a',
+      items: [{ label: 'grep /ETH/', tool: 'grep', state: 'used', reason: '' }],
+      summary: { used: 1, unused: 0, unavailable: 0 },
+    };
+    const disputed = disputedLabelsFromCrossCheck({ contradicted: true, subjectAliases: ['eth'] }, ['grep /ETH/']);
+    const spine = buildProvenanceSpine([ledger], disputed);
+    expect(spine.verdict).toBe('contested');
+    expect(spine.counts.disputed).toBe(1);
   });
 });

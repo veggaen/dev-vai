@@ -182,3 +182,31 @@ export function buildProvenanceSpine(
     : 'thin';
   return { total, counts, groundedness, hasDisputed, verdict };
 }
+
+/**
+ * Bridge: derive disputed-context labels from a cross-check contradiction. cross-check.ts works
+ * at the CLAIM level (e.g. a draft's "$3,200 ETH" the free web search contradicted); the spine
+ * works at the CONTEXT-ITEM level. When a claim is contradicted, the claim's subject aliases +
+ * value are the tokens to mark any matching USED grounding as `disputed` — turning a web
+ * contradiction into the spine's `contested` verdict. Pure; returns [] when nothing contradicted.
+ *
+ * @param assessment { contradicted, subjectAliases?, value? } — the cross-check ClaimAssessment
+ *   (loosely typed to avoid a hard import cycle; we only read these fields).
+ * @param itemLabels  the context-item labels in play (from member ledgers) to match against.
+ * @returns the subset of itemLabels whose text references a contradicted subject/value.
+ */
+export function disputedLabelsFromCrossCheck(
+  assessment: { contradicted?: boolean; subjectAliases?: readonly string[]; value?: string } | null | undefined,
+  itemLabels: readonly string[],
+): string[] {
+  if (!assessment?.contradicted) return [];
+  const needles = [
+    ...(assessment.subjectAliases ?? []),
+    ...(assessment.value ? [assessment.value] : []),
+  ].map((s) => String(s).toLowerCase()).filter((s) => s.length >= 2);
+  if (needles.length === 0) return [];
+  return itemLabels.filter((label) => {
+    const l = label.toLowerCase();
+    return needles.some((n) => l.includes(n));
+  });
+}
