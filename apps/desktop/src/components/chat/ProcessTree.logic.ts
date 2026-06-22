@@ -725,6 +725,30 @@ export function buildProcessTree(
     });
   }
 
+  // Surfaced council DISSENT (transparency): when a non-trivial minority pushed back even
+  // though the modal verdict carried, show it as its own visible row instead of letting it
+  // stay buried in the member list — "the panel was split, here's who objected and why".
+  if (council?.dissent && council.dissent.dissentingMembers.length > 0) {
+    const d = council.dissent;
+    nodes.push({
+      id: 'council-dissent',
+      label: `Minority dissent — ${d.dissentingMembers.length} pushed back (${Math.round(d.dissentStrength * 100)}% of the panel)`,
+      shortLabel: 'Dissent',
+      status: 'bad',
+      tone: 'council',
+      children: d.dissentingMembers.map((m, i) => ({
+        id: `council-dissent-${i}`,
+        label: cleanModelName(m.memberName),
+        kind: 'verdict',
+        detail: `${Math.round(m.weight * 100)}% weight · ${Math.round(m.confidence * 100)}% sure`,
+        note: m.concerns.length ? m.concerns.map((c) => `- ${c}`).join('\n') : 'objected (no specific concern given)',
+        status: 'bad',
+        tone: 'council',
+        children: [],
+      })),
+    });
+  }
+
   if (includeActivityMap) {
     const map = buildActivityMap(enrichedSteps);
     if (map) nodes.unshift(map);

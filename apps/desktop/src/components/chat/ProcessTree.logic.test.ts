@@ -337,3 +337,34 @@ describe('buildProcessTree council rounds', () => {
     expect(councilStep?.children.some((c) => c.label === 'qwen3:8b' && c.status === 'done')).toBe(true);
   });
 });
+
+describe('buildProcessTree — surfaced council dissent (transparency)', () => {
+  const council = {
+    outcome: 'ship' as const, agreement: 0.75, confidence: 0.8, topic: 'other',
+    summary: 'shipped', realIntent: '', recommendedAction: 'answer-directly',
+    missingCapabilities: [], methodLessons: [], members: [],
+    dissent: {
+      dissentStrength: 0.25,
+      dissentingMembers: [
+        { memberName: 'local:qwen2.5:7b', weight: 0.25, confidence: 0.9, concerns: ['unsupported latency claim'] },
+      ],
+    },
+  };
+
+  it('adds a visible Minority dissent node with the dissenter and their concern', () => {
+    const nodes = buildProcessTree([{ stage: 'council-vai-round-1', label: 'Council', status: 'done' }], council);
+    const d = nodes.find((n) => n.id === 'council-dissent');
+    expect(d).toBeTruthy();
+    expect(d?.label).toMatch(/Minority dissent/i);
+    expect(d?.label).toMatch(/25% of the panel/);
+    expect(d?.status).toBe('bad');
+    const member = d?.children[0];
+    expect(member?.label).toBe('qwen2.5:7b'); // cleaned name
+    expect(member?.note).toContain('unsupported latency claim');
+  });
+
+  it('adds no dissent node when the council had none (unanimous / no objection)', () => {
+    const nodes = buildProcessTree([{ stage: 'council-vai-round-1', label: 'Council', status: 'done' }], { ...council, dissent: undefined });
+    expect(nodes.some((n) => n.id === 'council-dissent')).toBe(false);
+  });
+});

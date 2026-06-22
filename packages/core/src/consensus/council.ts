@@ -614,6 +614,7 @@ export function toCouncilThinking(
       failed: Boolean(n.error),
     })),
     crossCheck: cc,
+    ...(consensus.dissent ? { dissent: consensus.dissent } : {}),
   };
 }
 

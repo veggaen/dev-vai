@@ -137,6 +137,15 @@ export interface CouncilThinkingUI {
     note: string;
     failed?: boolean;
   }>;
+  /**
+   * Surfaced minority objection (transparency): present when a non-trivial-weight minority
+   * pushed back even though the modal verdict carried. Audit-only — the outcome already
+   * accounted for the vote; this makes the dissent visible instead of buried.
+   */
+  dissent?: {
+    dissentStrength: number;
+    dissentingMembers: Array<{ memberName: string; weight: number; confidence: number; concerns: string[] }>;
+  };
 }
 
 export interface ResearchTraceStageUI {

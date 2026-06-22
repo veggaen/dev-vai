@@ -291,4 +291,10 @@ export interface CouncilThinking {
   }[];
   /** Fact cross-check outcome, when one ran — drives the "web-confirmed" badge + human review. */
   readonly crossCheck?: CouncilCrossCheck;
+  /**
+   * Surfaced minority objection for the UI (transparency): present when a non-trivial-weight
+   * minority pushed back even though the modal verdict carried. Projected from
+   * {@link CouncilConsensus.dissent}; audit-only, does not change the outcome.
+   */
+  readonly dissent?: CouncilDissent;
 }
