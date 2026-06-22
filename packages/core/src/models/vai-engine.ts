@@ -7332,7 +7332,25 @@ export class VaiEngine implements ModelAdapter {
       /\b(?:can you (?:build|make|create|write|implement|draft))\b/i,
       /\b(?:turn this into|convert this to|refactor (?:this|it) (?:to|into))\b/i,
     ];
-    if (buildSignals.some((re) => re.test(lower))) return 'build';
+    // …but an ADVICE/OPPORTUNITY question that merely mentions a build gerund is NOT a build:
+    // "what is a great idea when creating a company in Norway?" wants business ideas, not a
+    // scaffold. Without this carve-out classifyIntent returns 'build', and the no-grounding
+    // fallback then emits the builder decline ("give me a target stack and I'll scaffold") —
+    // the measured Norway opportunity-framing failure. A genuine imperative build ("build me
+    // a dashboard") is unaffected: it isn't an interrogative/opportunity ask.
+    if (buildSignals.some((re) => re.test(lower))) {
+      // A business-opportunity ask, or a clean interrogative that merely MENTIONS a build
+      // gerund (no imperative "build me X"), is advice/info — not a build. Otherwise fall
+      // through to explore/fact below. A real imperative build ("build me a dashboard",
+      // "create a react todo app") has no leading question word, so it still returns 'build'.
+      const interrogativeLead = /^\s*(?:what|which|how|why|when|where|who|is|are|should|could|would|do|does|can)\b/i.test(s);
+      const imperativeBuild = /^\s*(?:build|create|make|generate|scaffold|set\s*up|spin\s*up|bootstrap|write|implement|draft|design)\b/i.test(s);
+      if ((isBusinessOpportunityRequest(s) || interrogativeLead) && !imperativeBuild) {
+        // advice/info question → fall through to explore/fact classification below
+      } else {
+        return 'build';
+      }
+    }
 
     // Meta — questions about Vai itself, capabilities, the conversation.
     const metaSignals = [
@@ -34900,8 +34918,8 @@ Want me to customize it with your actual links, change the color scheme, add ani
           // guess, hand me one detail" voice instead.
           if (intent === 'explore' || intent === 'pushback') {
             return [
-              `Honest answer: I don't have a baked-in take on that, and I'd rather say so than guess.${prev ? ` We were on **${prev}** — want to stay there, or give me one concrete detail and I'll reason from it?` : ` Give me one concrete detail — the stack, the constraint, what you've tried — and I'll reason from there.`}`,
-              `I won't fake a confident answer on that one.${prev ? ` On **${prev}** I'm still on solid ground if you want to stay.` : ` Drop me a single concrete anchor — the language, the scale, the failure you're seeing — and I can actually engage with it.`}`,
+              `Honest answer: I don't have a baked-in take on that, and I'd rather say so than guess.${prev ? ` We were on **${prev}** — want to stay there, or give me one concrete detail and I'll reason from it?` : ` Give me one concrete angle — a place, a goal, a constraint, or what you're weighing — and I'll reason from there.`}`,
+              `I won't fake a confident answer on that one.${prev ? ` On **${prev}** I'm still on solid ground if you want to stay.` : ` Point me at one concrete anchor — the topic, the scale, the decision you're facing — and I can actually engage with it.`}`,
             ];
           }
           if (intent === 'build') {
