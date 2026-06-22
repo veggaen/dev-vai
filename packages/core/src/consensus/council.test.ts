@@ -356,6 +356,26 @@ describe('toCouncilThinking', () => {
     expect(ui.members[0]).toMatchObject({ name: 'Qwen 2.5 7B', action: 'local-business-search', verdict: 'needs-work' });
     expect(ui.recommendedAction).toBe('local-business-search');
   });
+
+  it('attaches the verification spine (provenance) when members fetched context', () => {
+    const grounded = { ...note({ verdict: 'good', memberId: 'a' }), contextLedger: {
+      used: 1, unused: 1, unavailable: 0,
+      items: [
+        { label: 'readFile src/x.ts', state: 'used', reason: '' },
+        { label: 'grep /Y/', state: 'unused', reason: '' },
+      ],
+    } } as any;
+    const ui = toCouncilThinking('other', reachConsensus([grounded]));
+    expect(ui.provenance).toBeTruthy();
+    expect(ui.provenance!.total).toBe(2);
+    expect(ui.provenance!.counts.used).toBe(1);
+    expect(ui.provenance!.verdict).toBe('grounded'); // 1/2 used >= 0.34
+  });
+
+  it('omits provenance when no member fetched context (prompt-only review)', () => {
+    const ui = toCouncilThinking('other', reachConsensus([note({ verdict: 'good' })]));
+    expect(ui.provenance).toBeUndefined();
+  });
 });
 
 describe('createCouncilMember', () => {

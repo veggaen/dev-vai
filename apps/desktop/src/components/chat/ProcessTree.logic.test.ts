@@ -368,3 +368,35 @@ describe('buildProcessTree — surfaced council dissent (transparency)', () => {
     expect(nodes.some((n) => n.id === 'council-dissent')).toBe(false);
   });
 });
+
+describe('buildProcessTree — verification spine (grounding) node', () => {
+  const council = {
+    outcome: 'ship' as const, agreement: 1, confidence: 0.9, topic: 'other',
+    summary: 's', realIntent: '', recommendedAction: 'answer-directly',
+    missingCapabilities: [], methodLessons: [], members: [],
+    provenance: { total: 4, groundedness: 0.5, hasDisputed: false, verdict: 'grounded' as const,
+      counts: { used: 2, unused: 1, considered: 1, unavailable: 0, disputed: 0 } },
+  };
+
+  it('renders a Grounding row from council.provenance', () => {
+    const nodes = buildProcessTree([{ stage: 'council-vai-round-1', label: 'C', status: 'done' }], council);
+    const g = nodes.find((n) => n.id === 'council-provenance');
+    expect(g).toBeTruthy();
+    expect(g?.label).toMatch(/grounded/);
+    expect(g?.label).toMatch(/50% of fetched context used/);
+    expect(g?.note).toMatch(/used 2 · unused 1/);
+  });
+
+  it('flags a contested spine as bad with a web-disputed note', () => {
+    const contested = { ...council, provenance: { ...council.provenance, verdict: 'contested' as const, hasDisputed: true, counts: { ...council.provenance.counts, disputed: 1 } } };
+    const g = buildProcessTree([{ stage: 'council-vai-round-1', label: 'C', status: 'done' }], contested).find((n) => n.id === 'council-provenance');
+    expect(g?.status).toBe('bad');
+    expect(g?.label).toMatch(/contested/);
+    expect(g?.note).toMatch(/disputed 1/);
+  });
+
+  it('omits the row when no context was used (verdict none / total 0)', () => {
+    const none = { ...council, provenance: { ...council.provenance, total: 0 } };
+    expect(buildProcessTree([{ stage: 'council-vai-round-1', label: 'C', status: 'done' }], none).some((n) => n.id === 'council-provenance')).toBe(false);
+  });
+});

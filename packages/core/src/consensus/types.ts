@@ -297,4 +297,17 @@ export interface CouncilThinking {
    * {@link CouncilConsensus.dissent}; audit-only, does not change the outcome.
    */
   readonly dissent?: CouncilDissent;
+  /**
+   * Verification spine (Pillar B): consensus-level provenance of the context the panel grounded
+   * on (used/considered/unused/unavailable/disputed) + an advisory groundedness verdict. Audit
+   * surface for the UI; does NOT gate ship/refuse yet. Structural type (mirrors
+   * context-states.ProvenanceSpine) to avoid an import cycle through this types module.
+   */
+  readonly provenance?: {
+    readonly total: number;
+    readonly groundedness: number;
+    readonly hasDisputed: boolean;
+    readonly verdict: 'grounded' | 'thin' | 'contested' | 'none';
+    readonly counts: { readonly used: number; readonly unused: number; readonly considered: number; readonly unavailable: number; readonly disputed: number };
+  };
 }

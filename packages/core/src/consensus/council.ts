@@ -14,6 +14,7 @@ import { routeTopic, selectMembers, type CouncilRoster } from './topic-router.js
 import { MemberAvailabilityStore, type MemberAvailability } from './member-availability.js';
 import { proofTrustWeight, type ProofStatus } from './member-experiment.js';
 import { deliberate, isDeliberationEnabled, buildPeerNotes } from './deliberate.js';
+import { spineFromNotes, disputedLabelsFromCrossCheck } from './context-states.js';
 import type {
   CouncilAction,
   CouncilConsensus,
@@ -591,6 +592,16 @@ export function toCouncilThinking(
     : cc?.contradicted
       ? `${consensus.summary} · web search disagreed — redrafting`
       : consensus.summary;
+  // Verification spine (advisory): provenance of what the panel grounded on, with a free-web
+  // contradiction (cross-check) promoting matching used context to `disputed`. Built from the
+  // notes' attached ledgers; absent (verdict 'none') when no member fetched context. Surfaced
+  // for the UI only — does NOT gate the outcome.
+  const itemLabels = consensus.notes.flatMap((n) => (n.contextLedger?.items ?? []).map((i) => i.label));
+  const disputedLabels = disputedLabelsFromCrossCheck(
+    cc ? { contradicted: cc.contradicted, value: cc.confirmsValue ?? undefined } : null,
+    itemLabels,
+  );
+  const provenance = spineFromNotes(consensus.notes, disputedLabels);
   return {
     outcome: consensus.outcome,
     agreement: consensus.agreement,
@@ -615,6 +626,7 @@ export function toCouncilThinking(
     })),
     crossCheck: cc,
     ...(consensus.dissent ? { dissent: consensus.dissent } : {}),
+    ...(provenance.total > 0 ? { provenance } : {}),
   };
 }
 

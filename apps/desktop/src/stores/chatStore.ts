@@ -146,6 +146,17 @@ export interface CouncilThinkingUI {
     dissentStrength: number;
     dissentingMembers: Array<{ memberName: string; weight: number; confidence: number; concerns: string[] }>;
   };
+  /**
+   * Verification spine (transparency): how much of the context the panel fetched actually
+   * grounded the answer, and whether any grounding is web-disputed. Advisory — does not gate.
+   */
+  provenance?: {
+    total: number;
+    groundedness: number;
+    hasDisputed: boolean;
+    verdict: 'grounded' | 'thin' | 'contested' | 'none';
+    counts: { used: number; unused: number; considered: number; unavailable: number; disputed: number };
+  };
 }
 
 export interface ResearchTraceStageUI {
