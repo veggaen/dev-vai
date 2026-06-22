@@ -13,6 +13,7 @@ import { councilPlan, governConsensus } from './seriousness.js';
 import { routeTopic, selectMembers, type CouncilRoster } from './topic-router.js';
 import { MemberAvailabilityStore, type MemberAvailability } from './member-availability.js';
 import { proofTrustWeight, type ProofStatus } from './member-experiment.js';
+import { deliberate, isDeliberationEnabled } from './deliberate.js';
 import type {
   CouncilAction,
   CouncilConsensus,
@@ -497,7 +498,16 @@ export async function convene(
   // whose proof FAILED counts less. So the council leans toward verified voices over speculation.
   const weightFor = (note: CouncilMemberNote) =>
     (note.topic === topic ? 1 : OFF_TOPIC_WEIGHT) * proofTrustWeight(note.proof?.status as ProofStatus | undefined);
-  const raw = await runCouncil(members, input, { ...options, weightFor });
+  // Multi-turn deliberation (flag-gated, Milestone 1 slice 3): when enabled, the panel runs a
+  // second peer-aware round on a split decision before consensus. Default OFF — the single-round
+  // runCouncil path below is unchanged. Same trust-weighting, same governConsensus.
+  let raw: CouncilConsensus;
+  if (isDeliberationEnabled()) {
+    const result = await deliberate(members, input, { ...options, weightFor });
+    raw = result.consensus;
+  } else {
+    raw = await runCouncil(members, input, { ...options, weightFor });
+  }
   const consensus = governConsensus(raw, plan.assessment);
   return { topic, assessment: plan.assessment, convened: true, consensus };
 }

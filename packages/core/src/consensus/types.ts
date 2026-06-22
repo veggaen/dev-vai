@@ -85,6 +85,19 @@ export interface CouncilInput {
   readonly retrievedSnippets?: readonly { readonly title?: string; readonly url?: string; readonly snippet?: string }[];
   /** Trimmed chat history relevant to this turn. */
   readonly relevantHistory?: readonly { readonly role: 'user' | 'assistant' | 'system' | 'tool'; readonly content: string }[];
+  /**
+   * Peer reviews from a PRIOR deliberation round (multi-turn deliberation, Milestone 1
+   * slice 3). Present ONLY on round 2+: each member sees how the other roles read the draft
+   * and may revise its own note. Absent on round 1 and on the default single-round path, so
+   * this is additive and changes nothing unless deliberation is explicitly run. Fact-
+   * quarantine still holds — peers share intent/method/verdict, never user-facing facts.
+   */
+  readonly peerNotes?: readonly {
+    readonly role: string;
+    readonly verdict: CouncilVerdict;
+    readonly intent: string;
+    readonly concern: string;
+  }[];
 }
 
 /** One council member's structured note. Advisory only — facts are quarantined. */

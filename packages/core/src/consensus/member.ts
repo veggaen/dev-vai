@@ -164,6 +164,19 @@ function buildUserPrompt(input: CouncilInput): string {
     base.push('', 'retrievedSnippets (only what Vai retrieved and used):');
     base.push(JSON.stringify(input.retrievedSnippets));
   }
+  // Multi-turn deliberation (round 2+): the other roles' round-1 reviews. THINK FIRST about
+  // where you agree/disagree with them, THEN return your (possibly revised) note. You may hold
+  // your ground or change your mind — but engage with the strongest opposing concern. This is
+  // how a panel becomes a deliberation. Fact-quarantine unchanged: peers share intent/method/
+  // verdict only, never user-facing facts.
+  if (input.peerNotes?.length) {
+    base.push(
+      '',
+      'PEER REVIEWS from round 1 (the other roles on this panel) — reconsider in light of these:',
+      JSON.stringify(input.peerNotes),
+      'First think briefly about the strongest disagreement, then return your final note (revised if they changed your mind, or held with a reason if not).',
+    );
+  }
   if (input.webEvidence?.aiOverview) {
     base.push(
       '',
