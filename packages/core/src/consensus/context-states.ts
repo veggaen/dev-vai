@@ -210,3 +210,30 @@ export function disputedLabelsFromCrossCheck(
     return needles.some((n) => l.includes(n));
   });
 }
+
+/**
+ * Build the provenance spine straight from council NOTES' attached contextLedger data — the
+ * shape actually available at consensus time (note.contextLedger.items: {label,state,reason}).
+ * A thin adapter over buildProvenanceSpine so the spine can be computed in reachConsensus
+ * without re-running the per-item classifier. `disputedLabels` (e.g. from
+ * disputedLabelsFromCrossCheck) promote matching used items to `disputed`. Pure; ignores notes
+ * without a ledger. The note's `state` is a string → coerced to ContextStateKind defensively.
+ */
+export function spineFromNotes(
+  notes: ReadonlyArray<{ memberId?: string; contextLedger?: { items?: ReadonlyArray<{ label: string; state: string; reason?: string }> } }>,
+  disputedLabels: readonly string[] = [],
+): ProvenanceSpine {
+  const ledgers: MemberContextLedger[] = notes
+    .filter((n) => n.contextLedger?.items?.length)
+    .map((n) => ({
+      memberId: n.memberId ?? 'member',
+      items: (n.contextLedger!.items ?? []).map((it) => ({
+        label: it.label,
+        tool: 'readFile' as const, // tool isn't carried on the note ledger; spine ignores it
+        state: (['used', 'unused', 'considered', 'unavailable', 'disputed'].includes(it.state) ? it.state : 'considered') as ContextStateKind,
+        reason: it.reason ?? '',
+      })),
+      summary: { used: 0, unused: 0, unavailable: 0 },
+    }));
+  return buildProvenanceSpine(ledgers, disputedLabels);
+}

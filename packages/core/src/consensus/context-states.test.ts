@@ -6,6 +6,7 @@ import {
   distinctiveTokens,
   buildProvenanceSpine,
   disputedLabelsFromCrossCheck,
+  spineFromNotes,
   type FetchedEvidence,
   type MemberContextLedger,
 } from './context-states.js';
@@ -157,5 +158,29 @@ describe('disputedLabelsFromCrossCheck — free web contradiction → spine disp
     const spine = buildProvenanceSpine([ledger], disputed);
     expect(spine.verdict).toBe('contested');
     expect(spine.counts.disputed).toBe(1);
+  });
+});
+
+describe('spineFromNotes — build spine from council notes\' attached ledgers', () => {
+  it('aggregates note contextLedgers + applies disputed labels', () => {
+    const notes = [
+      { memberId: 'a', contextLedger: { items: [{ label: 'readFile x.ts', state: 'used', reason: '' }, { label: 'grep /Y/', state: 'unused', reason: '' }] } },
+      { memberId: 'b', contextLedger: { items: [{ label: 'grep /ETH/', state: 'used', reason: '' }] } },
+      { memberId: 'c' }, // no ledger → ignored
+    ];
+    const spine = spineFromNotes(notes, ['grep /ETH/']);
+    expect(spine.total).toBe(3);
+    expect(spine.counts.disputed).toBe(1);
+    expect(spine.verdict).toBe('contested');
+  });
+
+  it('empty/ledgerless notes → verdict none, no throw', () => {
+    expect(spineFromNotes([{ memberId: 'a' }]).verdict).toBe('none');
+    expect(spineFromNotes([]).verdict).toBe('none');
+  });
+
+  it('coerces an unknown state string to a safe kind (defensive)', () => {
+    const spine = spineFromNotes([{ memberId: 'a', contextLedger: { items: [{ label: 'l', state: 'weird', reason: '' }] } }]);
+    expect(spine.total).toBe(1); // counted, not crashed
   });
 });
