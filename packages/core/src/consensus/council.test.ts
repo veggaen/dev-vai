@@ -376,6 +376,48 @@ describe('toCouncilThinking', () => {
     const ui = toCouncilThinking('other', reachConsensus([note({ verdict: 'good' })]));
     expect(ui.provenance).toBeUndefined();
   });
+
+  describe('spine gating (VAI_COUNCIL_SPINE_GATING)', () => {
+    const shipWithDisputedGrounding = () => {
+      const n = { ...note({ verdict: 'good', memberId: 'a' }), contextLedger: {
+        used: 1, unused: 0, unavailable: 0,
+        items: [{ label: 'readFile price.ts', state: 'used', reason: '' }],
+      } } as any;
+      const c = reachConsensus([n]);
+      return { ...c, crossCheck: { verified: false, contradicted: true, confirmsValue: 'price.ts' } } as any;
+    };
+
+    it('OFF (default): contested grounding still ships (advisory only)', () => {
+      delete process.env.VAI_COUNCIL_SPINE_GATING;
+      const ui = toCouncilThinking('other', shipWithDisputedGrounding());
+      expect(ui.provenance?.verdict).toBe('contested');
+      expect(ui.outcome).toBe('ship');
+    });
+
+    it('ON: contested grounding downgrades ship → escalate', () => {
+      process.env.VAI_COUNCIL_SPINE_GATING = '1';
+      try {
+        const ui = toCouncilThinking('other', shipWithDisputedGrounding());
+        expect(ui.provenance?.verdict).toBe('contested');
+        expect(ui.outcome).toBe('escalate');
+      } finally {
+        delete process.env.VAI_COUNCIL_SPINE_GATING;
+      }
+    });
+
+    it('ON but grounded (not contested): still ships (only tightens contested)', () => {
+      process.env.VAI_COUNCIL_SPINE_GATING = '1';
+      try {
+        const n = { ...note({ verdict: 'good', memberId: 'a' }), contextLedger: {
+          used: 1, unused: 0, unavailable: 0, items: [{ label: 'readFile x.ts', state: 'used', reason: '' }],
+        } } as any;
+        const ui = toCouncilThinking('other', reachConsensus([n]));
+        expect(ui.outcome).toBe('ship');
+      } finally {
+        delete process.env.VAI_COUNCIL_SPINE_GATING;
+      }
+    });
+  });
 });
 
 describe('createCouncilMember', () => {

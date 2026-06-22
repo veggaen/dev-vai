@@ -197,7 +197,7 @@ async function runOneMember(
  */
 export function reachConsensus(
   notes: readonly CouncilMemberNote[],
-  options: { readonly escalateBelow?: number; readonly maxItems?: number; readonly weightFor?: (note: CouncilMemberNote) => number } = {},
+  options: { readonly escalateBelow?: number; readonly maxItems?: number; readonly weightFor?: (note: CouncilMemberNote) => number; readonly spineGating?: boolean } = {},
 ): CouncilConsensus {
   const escalateBelow = options.escalateBelow ?? DEFAULT_ESCALATE_BELOW;
   const maxItems = options.maxItems ?? DEFAULT_MAX_ITEMS;
@@ -247,6 +247,15 @@ export function reachConsensus(
   else if (modalVerdict === 'good' && recommendedAction === 'answer-directly') outcome = 'ship';
   else if (recommendedAction === 'answer-directly') outcome = 'escalate';
   else outcome = 'act';
+
+  // NOTE: spine gating (web-disputed grounding → don't ship) lives in toCouncilThinking, not
+  // here — the `disputed` state is only known AFTER the cross-check, downstream of this pure
+  // fold. `options.spineGating` is reserved for a future peer-marked dispute set on note ledgers
+  // before consensus; today no path sets it, so it is intentionally inert here (kept for the
+  // signature so callers can opt in once peer-dispute marking exists).
+  if (options.spineGating && usable.some((n) => (n.contextLedger?.items ?? []).some((i) => i.state === 'disputed')) && outcome === 'ship') {
+    outcome = 'escalate';
+  }
 
   // Weighted confidence over the modal-side members.
   const modalMembers = usable.filter((n) => n.verdict === modalVerdict);
@@ -602,8 +611,17 @@ export function toCouncilThinking(
     itemLabels,
   );
   const provenance = spineFromNotes(consensus.notes, disputedLabels);
+  // SPINE GATING (flag-gated VAI_COUNCIL_SPINE_GATING=1, default OFF → advisory only). When a
+  // grounding the panel used is web-disputed (verdict 'contested'), don't project a `ship` —
+  // downgrade to `escalate` so the turn re-grounds instead of asserting a disputed claim.
+  // Only ever TIGHTENS a ship; leaves act/escalate untouched. Default behavior unchanged.
+  const spineGating = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.VAI_COUNCIL_SPINE_GATING === '1';
+  const gatedOutcome: CouncilOutcome =
+    spineGating && provenance.verdict === 'contested' && consensus.outcome === 'ship'
+      ? 'escalate'
+      : consensus.outcome;
   return {
-    outcome: consensus.outcome,
+    outcome: gatedOutcome,
     agreement: consensus.agreement,
     confidence: consensus.confidence,
     topic,
