@@ -59,11 +59,14 @@ export async function ensureRuntimeReady(baseUrl, {
   model = process.env.IMPROVE_GEN_MODEL ?? process.env.LOCAL_MODEL ?? 'qwen3:8b',
   keepAlive = '30m',
   warmTimeoutMs = 60_000,
+  // Injectable for tests (mirrors the runtime adapters' fetchImpl pattern). Defaults to the
+  // global fetch in production so real callers are unaffected.
+  fetchImpl = fetch,
 } = {}) {
   const httpBase = baseUrl.replace(/\/$/, '');
   let runtimeUp = false;
   try {
-    const res = await fetch(`${httpBase}/`, { signal: AbortSignal.timeout(5000) });
+    const res = await fetchImpl(`${httpBase}/`, { signal: AbortSignal.timeout(5000) });
     runtimeUp = res.status > 0; // any HTTP response = process is serving
   } catch {
     runtimeUp = false;
@@ -73,7 +76,7 @@ export async function ensureRuntimeReady(baseUrl, {
   }
   let warmed = false;
   try {
-    await fetch(`${OLLAMA}/api/generate`, {
+    await fetchImpl(`${OLLAMA}/api/generate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model, prompt: 'ready?', stream: false, think: false, keep_alive: keepAlive, options: { num_predict: 1 } }),
