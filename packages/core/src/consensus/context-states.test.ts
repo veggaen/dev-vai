@@ -4,7 +4,9 @@ import {
   buildMemberContextLedger,
   labelForRequest,
   distinctiveTokens,
+  buildProvenanceSpine,
   type FetchedEvidence,
+  type MemberContextLedger,
 } from './context-states.js';
 
 /**
@@ -82,5 +84,50 @@ describe('buildMemberContextLedger', () => {
     const ledger = buildMemberContextLedger('m', [], 'note');
     expect(ledger.items).toEqual([]);
     expect(ledger.summary).toEqual({ used: 0, unused: 0, unavailable: 0 });
+  });
+});
+
+describe('buildProvenanceSpine — consensus-level verification spine (advisory)', () => {
+  const ledger = (memberId: string, states: Array<{ label: string; state: any }>): MemberContextLedger => ({
+    memberId,
+    items: states.map((s) => ({ label: s.label, tool: 'readFile' as const, state: s.state, reason: '' })),
+    summary: { used: 0, unused: 0, unavailable: 0 },
+  });
+
+  it('rolls up counts + groundedness across members', () => {
+    const spine = buildProvenanceSpine([
+      ledger('a', [{ label: 'f1', state: 'used' }, { label: 'f2', state: 'unused' }]),
+      ledger('b', [{ label: 'f3', state: 'used' }, { label: 'f4', state: 'unavailable' }]),
+    ]);
+    expect(spine.total).toBe(4);
+    expect(spine.counts.used).toBe(2);
+    expect(spine.groundedness).toBeCloseTo(0.5, 2);
+    expect(spine.verdict).toBe('grounded'); // >= 0.34 used, nothing disputed
+  });
+
+  it('marks a USED item disputed when a contradicting label is supplied → contested', () => {
+    const spine = buildProvenanceSpine(
+      [ledger('a', [{ label: 'price.ts', state: 'used' }, { label: 'g', state: 'used' }])],
+      ['price.ts'],
+    );
+    expect(spine.counts.disputed).toBe(1);
+    expect(spine.counts.used).toBe(1);
+    expect(spine.hasDisputed).toBe(true);
+    expect(spine.verdict).toBe('contested');
+  });
+
+  it('verdict "thin" when little fetched context actually grounded the answer', () => {
+    const spine = buildProvenanceSpine([ledger('a', [
+      { label: '1', state: 'unused' }, { label: '2', state: 'unused' }, { label: '3', state: 'used' },
+      { label: '4', state: 'considered' }, { label: '5', state: 'unused' },
+    ])]); // 1/5 used = 0.2 < 0.34
+    expect(spine.verdict).toBe('thin');
+  });
+
+  it('verdict "none" + no NaN when the panel touched no context (prompt-only)', () => {
+    const spine = buildProvenanceSpine([ledger('a', [])]);
+    expect(spine.total).toBe(0);
+    expect(spine.groundedness).toBe(0);
+    expect(spine.verdict).toBe('none');
   });
 });

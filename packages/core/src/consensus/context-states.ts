@@ -16,7 +16,18 @@
 
 import type { ToolRequest } from './member-evidence.js';
 
-export type ContextStateKind = 'used' | 'unused' | 'considered' | 'unavailable';
+/**
+ * Provenance lifecycle of a piece of context a member touched (V3gga's blockchain-validation
+ * framing). The verification spine (Pillar B) adds `disputed` to the original four:
+ *   considered  → fetched (a tool request returned content) but no distinctive signal to match
+ *   used        → the fetched content grounded the member's note
+ *   unused      → fetched but absent from the note (looked, then discarded)
+ *   unavailable → the fetch returned nothing / errored
+ *   disputed    → a USED claim that another source (cross-check / a peer) contradicted — the
+ *                 spine's "this grounding is contested" state. Set by the aggregator, never by
+ *                 the per-item classifier (which only sees one member's fetch+note).
+ */
+export type ContextStateKind = 'used' | 'unused' | 'considered' | 'unavailable' | 'disputed';
 
 export interface ContextItemState {
   /** Stable label for the fetched item, e.g. "grep /SECRET/" or "readFile src/a.ts". */
@@ -111,4 +122,63 @@ export function buildMemberContextLedger(
     unavailable: items.filter((i) => i.state === 'unavailable').length,
   };
   return { memberId, items, summary };
+}
+
+// ── Verification spine (Pillar B) ──────────────────────────────────────────
+//
+// Aggregates per-member ledgers into ONE consensus-level provenance view: how much of the
+// panel's grounding was actually USED vs merely considered/unused/unavailable, and whether any
+// used grounding is DISPUTED. This is ADVISORY/audit-only for now — it surfaces a groundedness
+// signal for the UI and a future ship/refuse gate, but does NOT itself block anything yet
+// (gating ship/refuse is a verification-path change, done deliberately as a later, risk-gated
+// step). Pure → unit-tested without models.
+
+export interface ProvenanceSpine {
+  /** Total context items the panel touched across all members. */
+  readonly total: number;
+  /** Rollup by state across the whole panel. */
+  readonly counts: Record<ContextStateKind, number>;
+  /** Fraction of touched items that actually grounded a note (used / total), 0..1. */
+  readonly groundedness: number;
+  /** True when at least one USED grounding is contradicted (disputed). */
+  readonly hasDisputed: boolean;
+  /**
+   * Advisory groundedness verdict (NOT a gate yet):
+   *   'grounded'   → solid: used grounding dominates, nothing disputed
+   *   'thin'       → little of the fetched context actually grounded the answer
+   *   'contested'  → a used grounding is disputed (a peer/cross-check contradicted it)
+   *   'none'       → no context was touched (prompt-only review)
+   */
+  readonly verdict: 'grounded' | 'thin' | 'contested' | 'none';
+}
+
+const EMPTY_COUNTS: Record<ContextStateKind, number> = { used: 0, unused: 0, considered: 0, unavailable: 0, disputed: 0 };
+
+/**
+ * Build the consensus provenance spine from every member's ledger. `disputedLabels` (optional)
+ * marks item labels that another source contradicted — those USED items become `disputed` in
+ * the rollup. Pure; never throws.
+ */
+export function buildProvenanceSpine(
+  ledgers: readonly MemberContextLedger[],
+  disputedLabels: readonly string[] = [],
+): ProvenanceSpine {
+  const disputed = new Set(disputedLabels);
+  const counts: Record<ContextStateKind, number> = { ...EMPTY_COUNTS };
+  let total = 0;
+  for (const ledger of ledgers) {
+    for (const item of ledger.items) {
+      total++;
+      const state: ContextStateKind = item.state === 'used' && disputed.has(item.label) ? 'disputed' : item.state;
+      counts[state]++;
+    }
+  }
+  const groundedness = total > 0 ? counts.used / total : 0;
+  const hasDisputed = counts.disputed > 0;
+  const verdict: ProvenanceSpine['verdict'] =
+    total === 0 ? 'none'
+    : hasDisputed ? 'contested'
+    : groundedness >= 0.34 ? 'grounded'
+    : 'thin';
+  return { total, counts, groundedness, hasDisputed, verdict };
 }
