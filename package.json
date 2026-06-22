@@ -60,6 +60,7 @@
     "self-improve": "node --experimental-sqlite scripts/improve-loop/supervisor.mjs",
     "self-improve:apply": "node --experimental-sqlite scripts/improve-loop/supervisor.mjs --apply",
     "self-improve:watch": "node scripts/improve-loop/watch.mjs",
+    "review:branch": "node scripts/review-branch.mjs",
     "verify:pro-app-chat": "node scripts/verify-pro-app-chat.mjs",
     "verify:chat:five-apps:visual": "node scripts/verify-five-chat-builder-apps-visual.mjs",
     "verify:chat:quality": "node scripts/verify-chat-build-quality.mjs",
