@@ -31245,6 +31245,11 @@ A simple 2-player tic-tac-toe with board display, move validation, and win/draw 
     // Detect intent
     const hasBuildIntent = /\b(?:build|create|make|design|clone|rebuild|replicate|recreate|copy|develop|implement|code)\b/i.test(lower);
     const hasSimilarIntent = /\b(?:similar|like\s+(?:this|that)|inspired\s+by|something\s+like|based\s+on)\b/i.test(lower);
+    // Inquiry intent: the user is ASKING ABOUT the repo (what is it, is it good, what
+    // stack, explain, review, summarize) — not asking to build. This is the fix for the
+    // DEV-VEGGASTARE/hono/zod traces where "what is this app and is it good?" got a
+    // metadata card + a "rebuild / paste code" menu instead of an actual grounded answer.
+    const hasInquiryIntent = /\b(?:what\s+(?:is|are|does)|is\s+(?:it|this|that)\s+good|how\s+good|any\s+good|tell\s+me\s+about|explain|describe|summari[sz]e|what\s+stack|which\s+stack|tech\s+stack|what\s+(?:tech|technolog|framework|language)|review|assess|evaluate|overview|good\s+or\s+bad|worth\s+(?:it|using))\b/i.test(lower);
 
     // ── GitHub URL handling ──────────────────────────────────────────────
     const githubMatch = url.match(/github\.com\/([\w.-]+)\/([\w.-]+)/i);
@@ -31252,11 +31257,18 @@ A simple 2-player tic-tac-toe with board display, move validation, and win/draw 
       const [, owner, repo] = githubMatch;
       const repoInfo = await this.fetchGitHubRepoInfo(owner, repo);
 
+      // Build/"make me one like this" wins — it's an explicit action request.
       if (hasBuildIntent || hasSimilarIntent) {
         return this.generateProjectFromGitHub(owner, repo, repoInfo);
       }
 
-      // Look / inspect / bare URL — present repo info and offer to build
+      // Asking about the repo → answer from what we actually read (description + topics +
+      // README), and assess it. Only fall back to the build-offer menu for a bare paste
+      // with no question (where "what would you like to do?" is the right prompt).
+      if (hasInquiryIntent) {
+        return this.formatGitHubRepoAssessment(owner, repo, repoInfo);
+      }
+
       return this.formatGitHubRepoSummary(owner, repo, repoInfo);
     }
 
@@ -31419,6 +31431,78 @@ A simple 2-player tic-tac-toe with board display, move validation, and win/draw 
     lines.push(`- \`rebuild ${repoName}\` — I'll generate a version of it`);
     lines.push('- Describe specific features you want from it');
     lines.push('- Paste code from it for review or explanation');
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Answer an "what is this / is it good / what stack" question about a GitHub repo from the
+   * data we actually fetched (description + topics + README), and give an honest assessment
+   * grounded ONLY in observable signals. This replaces the old behaviour where an inquiry got
+   * a metadata card + "rebuild / paste code" menu — Vai now reads the repo and engages with
+   * the real question. When the fetch failed, it says so plainly instead of guessing.
+   */
+  private formatGitHubRepoAssessment(
+    owner: string, repo: string,
+    info: { description: string; language: string; topics: string[]; stars: number; homepage: string; readmeText: string } | null,
+  ): string {
+    const repoName = `${owner}/${repo}`;
+
+    if (!info) {
+      return [
+        `I tried to read **${repoName}** but GitHub didn't return its details just now (rate limit, private repo, or a transient error).`,
+        'I won\'t guess at what it is. Try again in a moment, or paste the README / a file and I\'ll assess it directly.',
+      ].join('\n');
+    }
+
+    // First non-empty README paragraph: the project's own summary of itself.
+    const readmeSummary = (info.readmeText || '')
+      .replace(/^#.*$/gm, '')           // drop heading lines
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // drop image badges
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .find((p) => p.length > 40) ?? '';
+
+    const lines: string[] = [`**${repoName}**`];
+    if (info.description) lines.push(`> ${info.description}`);
+    lines.push('');
+
+    // What it is — grounded in the README the user asked us to read.
+    lines.push('**What it is**');
+    if (readmeSummary) {
+      lines.push(readmeSummary.slice(0, 600));
+    } else if (info.description) {
+      lines.push(`From its own description: ${info.description}`);
+    } else {
+      lines.push(`The repo has no description or README text I could read, so I can only see its metadata.`);
+    }
+    lines.push('');
+
+    // Stack — answer "what stack" directly from language + topics.
+    const stackBits: string[] = [];
+    if (info.language) stackBits.push(`**Primary language:** ${info.language}`);
+    if (info.topics.length > 0) stackBits.push(`**Topics:** ${info.topics.join(', ')}`);
+    if (info.homepage) stackBits.push(`**Homepage:** ${info.homepage}`);
+    if (stackBits.length > 0) {
+      lines.push('**Stack & signals**');
+      lines.push(stackBits.join(' · '));
+      lines.push('');
+    }
+
+    // Is it good — honest, signal-bound. No invented features, no overclaiming.
+    lines.push('**Is it good?**');
+    const verdict: string[] = [];
+    if (info.stars >= 5000) verdict.push(`Strong adoption — ${info.stars.toLocaleString()} stars, so it's battle-tested and well-supported.`);
+    else if (info.stars >= 500) verdict.push(`Moderate traction — ${info.stars.toLocaleString()} stars; a real project with some community.`);
+    else if (info.stars > 0) verdict.push(`Small/early — ${info.stars.toLocaleString()} stars, so judge it on the code rather than popularity.`);
+    else verdict.push(`No star signal, so this looks personal/early — assess it on the code itself, not adoption.`);
+    if (/work in progress|wip|todo|not (?:ready|done)|early/i.test(info.readmeText)) {
+      verdict.push(`The README flags it as a work in progress, so expect rough edges.`);
+    }
+    verdict.push(`I'm assessing from the description, topics, and README only — I haven't run its tests, so this is a surface read, not a code audit.`);
+    lines.push(verdict.join(' '));
+    lines.push('');
+    lines.push(`Want me to go deeper on a specific file, or \`rebuild ${repoName}\` as a clean v1?`);
 
     return lines.join('\n');
   }

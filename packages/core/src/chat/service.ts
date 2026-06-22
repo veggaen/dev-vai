@@ -62,7 +62,7 @@ import type {
 } from '../consensus/types.js';
 import type { CouncilRoster } from '../consensus/topic-router.js';
 import { convene, conveneStreaming, toCouncilThinking, type ConveneResult } from '../consensus/council.js';
-import { gatherWebEvidence } from '../consensus/web-evidence.js';
+import { gatherWebEvidence, extractUrls } from '../consensus/web-evidence.js';
 import { buildCouncilReviewPacket } from '../consensus/review-packet.js';
 import {
   buildCouncilFeedbackBody,
@@ -1213,7 +1213,31 @@ export class ChatService {
       let iter = await stream.next();
       while (!iter.done) {
         const progress = iter.value;
-        if (progress.pendingMember) {
+        if (progress.reasoningMember) {
+          // Live reasoning preview: the member is mid-review and its model is thinking out
+          // loud. Show it on the pending member row so the UI renders what THAT model is
+          // working through, instead of a bare "qwen is working".
+          const { reasoningMember, partialNotes, index, total } = progress;
+          yield {
+            stage,
+            label: total > 1
+              ? `Council member ${index + 1}/${total}: ${reasoningMember.name} thinking…`
+              : `${reasoningMember.name} thinking…`,
+            status: 'running',
+            councilMembers: [
+              ...councilMembersFromNotes(partialNotes),
+              {
+                name: reasoningMember.name,
+                memberId: reasoningMember.id,
+                verdict: 'needs-work' as const,
+                confidence: 0,
+                pending: true,
+                reasoningPreview: reasoningMember.preview,
+              },
+            ],
+            processLog: partialLogs.length ? [...partialLogs] : undefined,
+          };
+        } else if (progress.pendingMember) {
           const { pendingMember, partialNotes, index, total } = progress;
           yield {
             stage,
@@ -1225,6 +1249,7 @@ export class ChatService {
               ...councilMembersFromNotes(partialNotes),
               {
                 name: pendingMember.name,
+                memberId: pendingMember.id,
                 verdict: 'needs-work' as const,
                 confidence: 0,
                 pending: true,
@@ -1454,7 +1479,6 @@ export class ChatService {
       }
     | undefined
   > {
-    if (!this.searchForEvidence) return undefined;
     // ACT on the council's recommendation, don't just log it. The council asks to search
     // either via its consensus recommendedAction OR when any member explicitly supplied a
     // searchQuery (which `reachConsensus` surfaces even when a polluting member — e.g. a
@@ -1468,6 +1492,21 @@ export class ChatService {
       return undefined;
     }
     if ((draft.sources?.length ?? 0) > 0 || draft.hasEvidence) return undefined;
+
+    // Pasted-URL path FIRST: when the user dropped an explicit link (a GitHub/Codeberg repo,
+    // a blog post, "look at https://…"), the council's "web-search" recommendation should make
+    // Vai READ that exact page, not search its URL string. `gatherWebEvidence` drives the
+    // proven Readability reader (`readUrl`) and degrades gracefully. This is the fix for the
+    // DEV-VEGGASTARE trace: every member correctly said "go read the repo", but the redraft
+    // only ever searched the bare URL (thin/empty) and produced "I can't access external
+    // sites". Critically this runs even when `searchForEvidence` is unset — reading a named
+    // page needs no search backend. Opt out with VAI_COUNCIL_READ_PASTED_URLS=0.
+    if (process.env.VAI_COUNCIL_READ_PASTED_URLS !== '0' && extractUrls(draft.prompt).length > 0) {
+      const directed = await this.readPastedUrlsForCouncil(draft);
+      if (directed) return directed;
+    }
+
+    if (!this.searchForEvidence) return undefined;
 
     const query = consensus.searchQuery.trim() || draft.prompt;
     try {
@@ -1507,6 +1546,63 @@ export class ChatService {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Read the explicit URLs the user pasted and hand the actual page text to the redraft as
+   * grounded evidence. This is the "council recommendation → real action" bridge for named
+   * pages: `gatherWebEvidence` drives the Readability reader (proven to fetch GitHub READMEs),
+   * so a "look at <repo>" turn answers from the repo's real description instead of refusing or
+   * hallucinating framework features. Best-effort and never throws — an unreadable SPA/404
+   * yields undefined and the caller falls through to the search-string path.
+   */
+  private async readPastedUrlsForCouncil(
+    draft: CouncilDraftInput,
+  ): Promise<
+    | { draft: CouncilDraftInput; systemHint: string; progress: CouncilLoopProgressStep }
+    | undefined
+  > {
+    const urls = extractUrls(draft.prompt);
+    if (urls.length === 0) return undefined;
+    let evidence;
+    try {
+      // skipAiOverview: we only need the read pages here; the search/Chrome bonus is the
+      // search-string path's job. This keeps the read fast and backend-independent.
+      evidence = await gatherWebEvidence(draft.prompt, { skipAiOverview: true });
+    } catch {
+      return undefined;
+    }
+    const read = evidence.sources.filter((source) => source.url && urls.includes(source.url));
+    const sources = read.length > 0 ? read : evidence.sources;
+    if (sources.length === 0) return undefined;
+
+    const systemHint = [
+      'The page(s) the user linked were fetched and read for this turn.',
+      'Answer from this real page content — describe what the project/page actually is and assess it on this evidence.',
+      'Do NOT say you cannot access external sites: the content below WAS retrieved for you.',
+      'If the content is thin or ambiguous, say what is and is not visible rather than inventing details.',
+      `User question: ${draft.prompt.trim()}`,
+      'Fetched page content:',
+      sources
+        .slice(0, 3)
+        .map((source, index) => {
+          const body = String(source.snippet ?? '').trim().slice(0, 2_000);
+          return `[${index + 1}] ${source.title ?? source.url}\nURL: ${source.url}\n${body}`;
+        })
+        .join('\n\n'),
+    ].join('\n\n');
+
+    return {
+      draft: { ...draft, sources: [...(draft.sources ?? []), ...sources], hasEvidence: true },
+      systemHint,
+      progress: {
+        stage: 'search',
+        label: `Council directed read: ${urls[0].slice(0, 64)}${urls[0].length > 64 ? '…' : ''}`,
+        detail: `${sources.length} page${sources.length === 1 ? '' : 's'} read`,
+        status: 'done',
+        processLog: buildSearchProcessLog({ prompt: draft.prompt, sources }),
+      },
+    };
   }
 
   /**

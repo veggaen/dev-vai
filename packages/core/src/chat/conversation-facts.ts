@@ -501,6 +501,12 @@ export function tryHandleFactRecall(
   const text = content.trim();
   if (!text) return null;
 
+  // A message with an explicit URL is asking about THAT link (e.g. "what stack does
+  // https://github.com/honojs/hono use?"), not the user's own remembered project. Defer to
+  // the URL/repo handler so we don't hijack it with "you said you're using <project>". This
+  // is the fix for the hono trace where a repo question got answered from conversation facts.
+  if (/https?:\/\/\S+/i.test(text)) return null;
+
   const facts = extractConversationFacts(history);
 
   // Project list ("what projects am I working on", "list my projects").
