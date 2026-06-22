@@ -35,6 +35,25 @@ const RISKY_CONTENT = [
   /process\.exit|dangerouslySetInnerHTML|eval\(|child_process|execSync/i,      // dangerous APIs
 ];
 
+// Signals checked on the ADDED (replace) side only — a change that INTRODUCES these is risky
+// even if the removed line was innocent (the auditor-found bypasses 2026-06-22).
+const RISKY_ADDED = [
+  /process\.env\.[A-Z_]+|\b(?:secret|token|apikey|api_key|password|credential)\b/i, // secret/env access
+  /\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}/,                                         // silent error swallow (empty catch)
+  /\bawait\s+fetch\(|\b(?:https?\.request|axios|got)\(/i,                       // NEW network call / side effect
+  /\beval\(|new\s+Function\(/,                                                  // dynamic code execution
+];
+
+// Behavior-change heuristic: WIDENING a regex (removing an anchor ^ or $, or trading a
+// specific literal for a broad one) is the exact class that caused this session's Norway/hono
+// over-broad-keyword bugs. If the find had an anchor and the replace dropped it, flag it.
+function widensRegex(find, replace) {
+  const isRegexLine = /\/[^/\n]+\/[gimsuy]*/.test(find) || /\/[^/\n]+\/[gimsuy]*/.test(replace);
+  if (!isRegexLine) return false;
+  const anchors = (s) => (s.match(/[\^$]/g) || []).length;
+  return anchors(find) > anchors(replace); // lost an anchor → broader match
+}
+
 // A removal of these tokens (present in `find`, gone from `replace`) = weakening a guardrail.
 const GUARDRAIL_TOKENS = [/factsQuarantined/, /verify\(/, /assert/, /redactSteeringText/, /isInfraError/];
 
@@ -64,6 +83,12 @@ export function classifyRisk(proposal) {
   for (const re of RISKY_CONTENT) {
     if (re.test(both)) reasons.push(`risky content matched ${re}`);
   }
+  // Added-side-only signals (introducing a risky construct even if the removed line was clean).
+  for (const re of RISKY_ADDED) {
+    if (re.test(replace) && !re.test(find)) reasons.push(`introduces risky construct ${re}`);
+  }
+  // Behavior-change: a regex widening (lost an anchor) — the over-broad-keyword bug class.
+  if (widensRegex(find, replace)) reasons.push('widens a regex (lost an anchor) — behavior-broadening, needs review');
   // Guardrail removal: token present in find but absent in replace.
   for (const re of GUARDRAIL_TOKENS) {
     if (re.test(find) && !re.test(replace)) reasons.push(`removes a guardrail token (${re})`);

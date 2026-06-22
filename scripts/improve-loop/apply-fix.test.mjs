@@ -137,3 +137,22 @@ test('rejected-rationale regex matches the language consensus-fix uses for bad p
   assert.equal(REJECTED_WHY.test(real), true);
   assert.equal(REJECTED_WHY.test('tighten the interrogative guard so advice questions are not builds'), false);
 });
+
+// ── auditor-found bypasses (2026-06-22): added-side risky constructs + regex widening ──
+test('REVIEW: introducing a secret/env read, silent catch, new fetch, or eval', () => {
+  const cases = [
+    { find: 'const k = cfg.key', replace: 'const k = process.env.SECRET_KEY' },
+    { find: 'doThing()', replace: 'try { doThing() } catch {}' },
+    { find: 'return cached', replace: 'return await fetch(url)' },
+    { find: 'compute(x)', replace: 'new Function("return " + x)()' },
+  ];
+  for (const c of cases) assert.equal(classifyRisk({ file: 'src/x.ts', ...c }).tier, RISK_TIER.REVIEW, JSON.stringify(c));
+});
+
+test('REVIEW: widening a regex (losing an anchor) — the over-broad-keyword bug class', () => {
+  assert.equal(classifyRisk({ file: 'src/x.ts', find: 'const R = /^admin$/', replace: 'const R = /admin/' }).tier, RISK_TIER.REVIEW);
+});
+
+test('still SAFE: a clean small logic tweak that introduces none of the above', () => {
+  assert.equal(classifyRisk({ file: 'src/x.ts', find: 'if (a) return 1;', replace: 'if (a) return 2;' }).tier, RISK_TIER.SAFE);
+});
