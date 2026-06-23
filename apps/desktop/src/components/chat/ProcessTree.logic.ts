@@ -71,7 +71,7 @@ export function shouldAutoExpand(params: {
  * dwell. This floor is decoupled from how fast the AI actually was; it does NOT
  * delay the answer, only how long each finished step lingers before folding.
  */
-export const MIN_STEP_DWELL_MS = 700;
+export const MIN_STEP_DWELL_MS = 1800;
 
 /**
  * Decide a freshly-completed step's open state under the human-paced dwell rule.

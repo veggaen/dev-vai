@@ -11,7 +11,7 @@ export function computeProcessRevealFloor(steps: readonly ChatProgressStep[]): n
 }
 
 /** Ms between each top-level row appearing — must feel sequential, not a batch. */
-const STEP_DRIP_MS = 480;
+const STEP_DRIP_MS = 850;
 
 /**
  * Whether the reveal should keep dripping after the stream ends.
@@ -104,7 +104,7 @@ export function useProcessStepReveal(
 export function useProcessChildReveal(
   childCount: number,
   active: boolean,
-  paceMs = 320,
+  paceMs = 700,
 ): number {
   const [revealed, setRevealed] = useState(0);
   const activeSinceRef = useRef(0);
