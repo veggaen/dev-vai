@@ -9,6 +9,8 @@ interface MicButtonProps {
   readonly onHoldStart: () => void;
   readonly onHoldEnd: () => void;
   readonly disabled?: boolean;
+  /** Right-click → open the mic device-picker menu at the pointer. */
+  readonly onContextMenu?: (at: { x: number; y: number }) => void;
 }
 
 /**
@@ -19,7 +21,7 @@ interface MicButtonProps {
  * opacity — the "listening" ring uses scale/opacity, never box-shadow — and every
  * state has an accessible label + title.
  */
-export function MicButton({ status, supported, onHoldStart, onHoldEnd, disabled }: MicButtonProps) {
+export function MicButton({ status, supported, onHoldStart, onHoldEnd, disabled, onContextMenu }: MicButtonProps) {
   const listening = status === 'listening';
   const transcribing = status === 'transcribing';
   const isDisabled = disabled || !supported || status === 'unsupported';
@@ -30,7 +32,7 @@ export function MicButton({ status, supported, onHoldStart, onHoldEnd, disabled 
       ? 'Listening… release to insert'
       : transcribing
         ? 'Transcribing…'
-        : 'Hold to dictate (or hold Alt+Win)';
+        : 'Hold to dictate (or hold Alt+Win) · right-click to pick a microphone';
 
   return (
     <motion.button
@@ -44,6 +46,9 @@ export function MicButton({ status, supported, onHoldStart, onHoldEnd, disabled 
       onPointerDown={(e) => { if (!isDisabled) { e.preventDefault(); onHoldStart(); } }}
       onPointerUp={() => { if (!isDisabled) onHoldEnd(); }}
       onPointerLeave={() => { if (listening) onHoldEnd(); }}
+      // Right-click opens the device picker. Available even when capture is "unsupported" so the
+      // user can still inspect devices / understand why; only the hold-to-talk press is gated.
+      onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu({ x: e.clientX, y: e.clientY }); } : undefined}
       whileTap={isDisabled ? {} : { scale: 0.92 }}
       className={`relative flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-200 ${
         isDisabled

@@ -42,6 +42,10 @@ export async function waitForVramHeadroom(budgetBytes, { pollMs = 3000, maxWaitM
   return vram;
 }
 
+export function isOverVramBudget(vramBytes, budgetBytes) {
+  return Number.isFinite(vramBytes) && Number.isFinite(budgetBytes) && vramBytes > budgetBytes;
+}
+
 /**
  * Readiness gate — called ONCE per cycle before any turn. Two infra failures cost whole
  * loop runs this session: (1) a cold model → the first WS turns `AggregateError` (every

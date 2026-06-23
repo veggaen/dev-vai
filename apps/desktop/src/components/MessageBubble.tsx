@@ -12,6 +12,7 @@ import { motion } from 'framer-motion';
 import { MarkdownRenderer } from '@vai/ui';
 import { API_BASE } from '../lib/api.js';
 import { VaiMark } from './brand/VaiMark.js';
+import { VaiNode } from './brand/VaiNode.js';
 import {
   Copy, Check, FileText, Rocket, HelpCircle, X as XIcon,
   ChevronRight, CornerDownRight, User, ThumbsUp, ThumbsDown,
@@ -97,6 +98,8 @@ interface MessageBubbleProps {
   verification?: ResponseVerificationUI;
   /** Engine-narrated progress steps, surfaced in the settled panel's evidence log */
   progressSteps?: ChatProgressStep[];
+  /** Live in-review draft (work product, not final answer) shown while streaming. */
+  liveDraft?: { text: string; phase: 'start' | 'delta' | 'reset' | 'committed' | 'discarded'; seq: number } | null;
   /** Live image-generation steps (produce→verify→regenerate) shown as visible process. */
   imageGenSteps?: { phase: string; label: string; attempt?: number; matchScore?: number; flaws?: string[] }[];
   /** Feedback state: true=helpful, false=not helpful, undefined=no feedback */
@@ -582,12 +585,38 @@ function GroundedBuildBriefCard({
   );
 }
 
+/**
+ * LiveDraftBlock — Vai's draft answer rendered LIVE as it streams, clearly labeled as
+ * in-review work product that may change or be withdrawn by the council. This is the "show me
+ * the answer being written" surface; it is NOT hidden reasoning and never the committed answer.
+ */
+function LiveDraftBlock({ text, phase }: { text: string; phase: 'start' | 'delta' | 'reset' | 'committed' | 'discarded' }) {
+  const revised = phase === 'reset';
+  return (
+    <div className="my-3 overflow-hidden rounded-xl border border-[color:var(--border)] bg-[color:var(--panel-bg-muted)]">
+      <div className="flex items-center gap-2 border-b border-[color:var(--border)] px-3 py-1.5 text-[11px]">
+        <VaiNode state="thinking" size={11} />
+        <span className="font-medium text-[color:var(--chat-body)]">Draft answer</span>
+        <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-amber-300">
+          {revised ? 'revised by council' : 'in review · may change'}
+        </span>
+        <span className="ml-auto flex items-center gap-1 text-[10px] text-[color:var(--chat-muted)]">
+          <Sparkles className="h-3 w-3" /> writing…
+        </span>
+      </div>
+      <div className="px-3 py-2 text-[13px] leading-relaxed text-[color:var(--chat-body)] opacity-90">
+        <MarkdownRenderer content={text} />
+      </div>
+    </div>
+  );
+}
+
 export function MessageBubble({
   role, content, imageId, imagePreview, files,
   fallbackDeploy, recoveryPattern = 'silent', allIntents, onIntentAction,
   isLatest = false, isStreaming = false,
   respondingModelId, fallback,
-  sources, sourcePresentation, turnKind, followUps, confidence, groundedBuildBrief, thinking, researchTrace, verification, progressSteps, imageGenSteps, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
+  sources, sourcePresentation, turnKind, followUps, confidence, groundedBuildBrief, thinking, researchTrace, verification, progressSteps, liveDraft, imageGenSteps, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
   isAutoRepair = false, repairAttempt,
   compactResearchChrome = false,
   isLatestResearchMessage = false,
@@ -950,6 +979,12 @@ export function MessageBubble({
                 imageSteps={imageGenSteps}
                 durationMs={thinking?.durationMs}
               />
+            )}
+
+            {/* Live work product: Vai's draft answer as it streams, BEFORE the council accepts it.
+                Shown only while streaming and before the final answer has committed into content. */}
+            {!isUser && isStreaming && liveDraft?.text?.trim() && !content.trim() && (
+              <LiveDraftBlock text={liveDraft.text} phase={liveDraft.phase} />
             )}
 
             {/* Legacy turns without engine progress — fallback narrative panel only. */}

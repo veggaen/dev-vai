@@ -271,7 +271,6 @@ function StepRow({
   // collapses itself once it completes (keeping the finished trace quiet). Council
   // still gets the slower drip-reveal of its member notes for readability.
   const autoExpandRunning = live && running && expandable;
-  const autoExpandCouncil = autoExpandRunning && node.tone === 'council';
   const streamChildren = autoExpandRunning && open;
   const visibleChildCount = useProcessChildReveal(childCount, streamChildren);
   const visibleChildren = node.children.slice(0, visibleChildCount);
@@ -332,7 +331,7 @@ function StepRow({
         disabled={!expandable}
         onClick={toggle}
         aria-expanded={expandable ? open : undefined}
-        className={`process-tree__row ${running ? 'process-tree__row--running' : ''} min-w-0 flex-1 flex items-start gap-2 px-1.5 py-1 text-left ${expandable ? '' : 'cursor-default'}`}
+        className={`process-tree__row ${running ? 'process-tree__row--running' : ''} ${running && live ? 'process-tree__row--focused' : ''} min-w-0 flex-1 flex items-start gap-2 px-1.5 py-1 text-left ${expandable ? '' : 'cursor-default'}`}
       >
         <span className="process-tree__chevron mt-px flex h-3.5 w-3 shrink-0 items-center justify-center">
           {expandable && (
@@ -353,8 +352,9 @@ function StepRow({
             <span className="ml-1.5 text-[11px] text-[color:var(--chat-muted)] opacity-80">{node.detail}</span>
           )}
         </span>
-        {running && live && node.tone !== 'council' && (
-          <LiveElapsed className="shrink-0 tabular-nums text-[10px] text-[color:var(--chat-muted)] opacity-70" />
+        {running && live && (
+          // ml-2 guarantees a gap so the timer never glues to the label (the "answer11s" bug).
+          <LiveElapsed className="ml-2 shrink-0 tabular-nums text-[10px] text-[color:var(--chat-muted)] opacity-70" />
         )}
       </button>
       <ProcessTreeCopyActions

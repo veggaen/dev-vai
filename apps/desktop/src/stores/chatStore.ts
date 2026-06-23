@@ -232,6 +232,16 @@ export interface ChatMessage {
   repairAttempt?: number;
   /** Real server-side activity/progress stages for long turns */
   progressSteps?: ChatProgressStep[];
+  /** EPHEMERAL live work-product: Vai's draft answer as it streams, BEFORE the council
+   *  accepts/redrafts it. Shown in a discardable "Draft (in review)" block and never persisted
+   *  (it may be withdrawn). Cleared/replaced via the draft lifecycle (start/delta/reset/
+   *  committed). Not hidden reasoning — observable work product only. */
+  liveDraft?: {
+    text: string;
+    phase: 'start' | 'delta' | 'reset' | 'committed' | 'discarded';
+    seq: number;
+    turnId?: string;
+  } | null;
 }
 
 /** Preserve nested payloads when the backend re-emits the same stage (e.g. council members arriving late). */
@@ -936,6 +946,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         type: string;
         textDelta?: string;
         reasoningDelta?: string;
+        draftText?: string;
+        draft?: { phase: 'start' | 'delta' | 'reset' | 'committed' | 'discarded'; turnId?: string; seq: number; source?: string; isDiscardable?: boolean };
         sources?: SearchSourceUI[];
         sourcePresentation?: SourcePresentationUI;
         turnKind?: TurnKindUI;
@@ -1079,6 +1091,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
           return { messages: msgs };
         });
+      } else if (chunk.type === 'draft_delta') {
+        // Live WORK PRODUCT (not the final answer): stash the in-review draft on the target
+        // assistant message as EPHEMERAL state. Never routed through appendToLastMessage, so the
+        // council can still discard/redraft it without corrupting the committed answer. Server
+        // sends cumulative draftText (replace, not append); we drop out-of-order seqs.
+        const d = chunk.draft;
+        set((state) => {
+          const msgs = [...state.messages];
+          const idx = activeStreamingAssistantId
+            ? msgs.findIndex((m) => m.id === activeStreamingAssistantId)
+            : msgs.length - 1;
+          if (idx < 0) return {};
+          const target = msgs[idx];
+          const prev = target.liveDraft ?? null;
+          if (prev && d && d.seq < prev.seq) return {}; // stale frame
+          const phase = d?.phase ?? 'delta';
+          msgs[idx] = {
+            ...target,
+            liveDraft: {
+              text: chunk.draftText ?? prev?.text ?? '',
+              phase,
+              seq: d?.seq ?? (prev?.seq ?? 0) + 1,
+              turnId: d?.turnId ?? prev?.turnId,
+            },
+          };
+          return { messages: msgs };
+        });
       } else if (chunk.type === 'text_delta' && chunk.textDelta) {
         get().appendToLastMessage(chunk.textDelta);
       } else if (chunk.type === 'reasoning_delta' && chunk.reasoningDelta) {
@@ -1086,7 +1125,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         reasoningText += chunk.reasoningDelta;
       } else if (chunk.type === 'done') {
         flushPendingStreamDelta();
-        set({ isStreaming: false, streamingConversationId: null });
+        // The final answer has committed into message.content — retire the in-review draft block
+        // so the UI shows the answer, not the stale draft.
+        set((state) => {
+          const msgs = state.messages.map((m) => (m.liveDraft ? { ...m, liveDraft: null } : m));
+          return { messages: msgs, isStreaming: false, streamingConversationId: null };
+        });
         // Capture assistant response + reasoning in dev logs
         const capture = getActiveCapture();
         if (capture) {

@@ -45,6 +45,7 @@ import { deriveLiveCouncilFromProgressSteps } from './chat/process-step-enrich.j
 import { ComposerProcessStrip } from './chat/ComposerProcessStrip.js';
 import { ProcessDepthControl } from './chat/ProcessDepthControl.js';
 import { MicButton } from './chat/MicButton.js';
+import { MicDeviceMenu } from './chat/MicDeviceMenu.js';
 import { useVoiceDictation } from '../hooks/useVoiceDictation.js';
 import { detectCorrections, mishearingPrompt } from '../lib/voice/correction-detection.js';
 import { useComposerActivity } from '../hooks/useComposerActivity.js';
@@ -288,8 +289,20 @@ export function ChatWindow() {
   const dictatedBaselineRef = useRef<string>('');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [mishearAsk, setMishearAsk] = useState<{ prompt: string; term: string } | null>(null);
+  // Chosen mic for dictation (the right-click device menu). Persisted so it survives reloads;
+  // empty string = system default.
+  const [micDeviceId, setMicDeviceId] = useState<string>(() => {
+    try { return localStorage.getItem('vai-voice-device') ?? ''; } catch { return ''; }
+  });
+  const selectMicDevice = useCallback((id: string) => {
+    setMicDeviceId(id);
+    try { localStorage.setItem('vai-voice-device', id); } catch { /* non-fatal */ }
+  }, []);
+  // Where (if anywhere) the right-click mic device menu is open.
+  const [micMenuAt, setMicMenuAt] = useState<{ x: number; y: number } | null>(null);
   const dictation = useVoiceDictation({
     disabled: isStreaming,
+    deviceId: micDeviceId || undefined,
     onInterim: (text) => setInterimTranscript(text),
     onFinal: (text) => {
       setInterimTranscript('');
@@ -1458,6 +1471,7 @@ export function ChatWindow() {
                         verification={msg.verification}
                         imageGenSteps={msg.imageGenSteps}
                         progressSteps={msg.progressSteps}
+                        liveDraft={msg.liveDraft}
                         feedback={msg.feedback}
                         onFeedback={(helpful) => useChatStore.getState().setFeedback(msg.id, helpful)}
                         onFollowUp={(question) => { void handleSend(question); }}
@@ -2086,6 +2100,15 @@ export function ChatWindow() {
                     onHoldStart={() => void dictation.start()}
                     onHoldEnd={() => void dictation.stop()}
                     disabled={isStreaming}
+                    onContextMenu={(at) => setMicMenuAt(at)}
+                  />
+                )}
+                {micMenuAt && (
+                  <MicDeviceMenu
+                    at={micMenuAt}
+                    selectedId={micDeviceId}
+                    onSelect={selectMicDevice}
+                    onClose={() => setMicMenuAt(null)}
                   />
                 )}
                 <AnimatePresence mode="wait">

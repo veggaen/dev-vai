@@ -3163,6 +3163,26 @@ export class ChatService {
       let bufferedStrategy: string | undefined;
       let latestConfidence: number | undefined;
       let bufferedSawDone = false;
+      // Live WORK-PRODUCT stream (not hidden thought): surface Vai's draft answer AS IT BUFFERS
+      // so the user watches the answer being written (the "Drafting an answer…" caption was
+      // content-blind). This NEVER commits to the final message body — the UI shows it in a
+      // discardable, clearly-labeled "Draft (in review)" block, and the council can still
+      // redraft (emits a 'reset' phase). Carries a lifecycle envelope (start/delta/reset/
+      // committed) + monotonic seq so a future PresenceBlock timeline needs no migration.
+      // Coalesced deterministically (time AND size) so it neither lags nor jitters.
+      const STREAM_DRAFTS = (process.env.VAI_STREAM_DRAFTS ?? '1') !== '0'; // kill switch, default on
+      const draftTurnId = ulid();
+      let lastDraftEmit = 0;
+      let lastDraftLen = 0;
+      let draftSeq = 0;
+      let draftStarted = false;
+      const DRAFT_THROTTLE_MS = 120;
+      const DRAFT_MIN_CHARS = 32;
+      const draftChunk = (phase: 'start' | 'delta' | 'reset' | 'committed', text: string): ChatChunk => ({
+        type: 'draft_delta',
+        draftText: text,
+        draft: { phase, turnId: draftTurnId, seq: draftSeq++, source: 'vai-draft', isDiscardable: true },
+      } as ChatChunk);
 
       if (!primaryFlip) {
       yield {
@@ -3191,6 +3211,18 @@ export class ChatService {
         bufferedChunks.push(chunk);
         if (chunk.type === 'text_delta' && chunk.textDelta) {
           bufferedText += chunk.textDelta;
+          if (STREAM_DRAFTS) {
+            const now = Date.now();
+            const grew = bufferedText.length - lastDraftLen;
+            // Coalesce by time AND size so it neither lags nor jitters: flush after the throttle
+            // window once meaningful new text exists, or immediately once a big burst arrives.
+            if ((now - lastDraftEmit >= DRAFT_THROTTLE_MS && grew > 0) || grew >= DRAFT_MIN_CHARS) {
+              lastDraftEmit = now;
+              lastDraftLen = bufferedText.length;
+              if (!draftStarted) { draftStarted = true; yield draftChunk('start', bufferedText); }
+              else yield draftChunk('delta', bufferedText);
+            }
+          }
         }
         if (chunk.type === 'done') {
           bufferedSawDone = true;
@@ -3203,6 +3235,12 @@ export class ChatService {
           if (chunk.usage) bufferedUsage = chunk.usage;
           if (chunk.durationMs !== undefined) bufferedDurationMs = chunk.durationMs;
         }
+      }
+      // Final flush: the draft block shows the COMPLETE buffered draft (the throttle may have
+      // skipped the last tokens). 'committed' = this is the whole draft that now goes to the
+      // council; if the council later redrafts, the UI gets a 'reset' from that path.
+      if (STREAM_DRAFTS && draftStarted && bufferedText.trim()) {
+        yield draftChunk('committed', bufferedText);
       }
       if (!bufferedSawDone) {
         bufferedDurationMs = bufferedDurationMs ?? (Date.now() - streamStartedAt);
@@ -3363,6 +3401,9 @@ export class ChatService {
         if (loop.revised && !draftIsGroundedRepoRead) {
           bufferedText = loop.finalText;
           reviewReplacedPrimary = true;
+          // The council rewrote the draft — clear the stale "Draft (in review)" block and show
+          // the revised text so the UI can explain "draft revised by council".
+          if (STREAM_DRAFTS && draftStarted) yield draftChunk('reset', bufferedText);
         }
         councilEscalateToGenerative = councilThinking?.outcome === 'escalate';
       }

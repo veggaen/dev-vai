@@ -23,24 +23,42 @@
  *   - watch live at http://localhost:4123 (node scripts/improve-loop/watch.mjs)
  *
  * Usage:
- *   node scripts/improve-loop/supervisor.mjs                 # forever
- *   node scripts/improve-loop/supervisor.mjs --max-cycles 3  # bounded
+ *   node scripts/improve-loop/supervisor.mjs                           # forever, observe+propose
+ *   node scripts/improve-loop/supervisor.mjs --max-cycles 3            # bounded
+ *   node scripts/improve-loop/supervisor.mjs --mode apply              # verified auto-apply switch
  *   node scripts/improve-loop/supervisor.mjs --per-class 4 --rest 60
+ *   node scripts/improve-loop/supervisor.mjs --base-url http://host:3006 --db C:/tmp/vai-loop.sqlite
  */
 import { spawn } from 'node:child_process';
 import { openDb } from './db.mjs';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
+const has = (f) => args.includes(f);
 const MAX_CYCLES = Number(opt('--max-cycles', '0')) || Infinity; // 0 = forever
 const PER_CLASS = opt('--per-class', '4');
 const REST_S = Number(opt('--rest', '45'));        // breather between cycles (GPU rest)
 const DB_PATH = opt('--db', 'scripts/improve-loop/.corpus.sqlite');
+const BASE_URL = opt('--base-url', process.env.VAI_API ?? 'http://localhost:3006');
+const SEEDS_ONLY = has('--seeds-only');
+const VRAM_GB = opt('--vram-gb', '');
+const COOLDOWN_MS = opt('--cooldown', '');
+const QWEN_FRAC = opt('--qwen-frac', '');
+const LIMIT = opt('--limit', '');
+// Visual cadence: run a no-video eyes/hands probe every N cycles (0 = never). Off by
+// default. Stays strictly serial (after PROPOSE/APPLY, before the GPU rest) so the
+// one-heavy-task-at-a-time rule holds. Uses --no-video to avoid disk/ffmpeg load.
+const VISUAL_EVERY = Number(opt('--visual-every', '0')) || 0;
 // AUTO-APPLY toggle: when --apply is passed, each cycle also CONVERGES proposals (consensus-fix)
 // and SAFELY applies the verified-safe ones to council/auto-improve (apply-consensus: risk-gate
 // + rejected-guard + tsc/vitest verify + commit-or-revert + branch-guard). Off by default →
 // the loop stays OBSERVE+PROPOSE-only (read-only on source), exactly as before.
-const AUTO_APPLY = args.includes('--apply');
+const MODE = opt('--mode', has('--apply') ? 'apply' : 'observe');
+if (!['observe', 'apply'].includes(MODE)) {
+  process.stderr.write(`[supervisor] invalid --mode '${MODE}'. Use observe or apply.\n`);
+  process.exit(1);
+}
+const AUTO_APPLY = MODE === 'apply' || has('--apply');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (m) => process.stdout.write(`[supervisor ${new Date().toLocaleTimeString()}] ${m}\n`);
@@ -56,10 +74,34 @@ function runChild(script, extra = []) {
   });
 }
 
+/** Run one no-video visual eyes/hands probe through the operator, recorded to the corpus DB.
+ *  Serial like every other step (one heavy task at a time). Failure is operator evidence,
+ *  never a Vai-logic failure — so it never aborts the loop. */
+function runVisualProbe() {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [
+      '--experimental-sqlite', 'scripts/improve-loop/operator.mjs', 'visual',
+      '--no-video', '--db', DB_PATH, '--base-url', BASE_URL,
+    ], { stdio: ['ignore', 'inherit', 'inherit'] });
+    child.on('exit', (code) => resolve(code ?? 0));
+    child.on('error', () => resolve(1));
+  });
+}
+
 let stop = false;
 process.on('SIGINT', () => { stop = true; log('SIGINT — finishing current cycle then stopping (resumable).'); });
 
 async function main() {
+  const forwarded = [
+    `base-url=${BASE_URL}`,
+    `db=${DB_PATH}`,
+    SEEDS_ONLY ? 'seeds-only' : null,
+    VRAM_GB ? `vram-gb=${VRAM_GB}` : null,
+    COOLDOWN_MS ? `cooldown=${COOLDOWN_MS}` : null,
+    QWEN_FRAC ? `qwen-frac=${QWEN_FRAC}` : null,
+    LIMIT ? `limit=${LIMIT}` : null,
+  ].filter(Boolean).join(' · ');
+  log(`living loop switch · mode=${AUTO_APPLY ? 'apply' : 'observe'} · ${forwarded}`);
   log(`living loop starting · per-class=${PER_CLASS} · rest=${REST_S}s · ${MAX_CYCLES === Infinity ? 'FOREVER' : MAX_CYCLES + ' cycles'}`);
   if (AUTO_APPLY) {
     // Safety: auto-apply ONLY ever commits to council/auto-improve. Guard at startup so the
@@ -75,11 +117,20 @@ async function main() {
   } else {
     log('OBSERVE+PROPOSE only (read-only on Vai source; fixes QUEUED, never applied). Add --apply to auto-apply to council/auto-improve.');
   }
+  if (VISUAL_EVERY > 0) {
+    log(`👁  visual cadence ON → a no-video eyes/hands probe every ${VISUAL_EVERY} cycle(s), serial, recorded to the corpus.`);
+  }
   log('watch live → http://localhost:4123');
 
   for (let cycle = 1; cycle <= MAX_CYCLES && !stop; cycle++) {
     log(`━━━ cycle ${cycle} : OBSERVE ━━━`);
-    await runChild('scripts/improve-loop/run.mjs', ['--per-class', PER_CLASS]);
+    const runArgs = ['--per-class', PER_CLASS, '--base-url', BASE_URL];
+    if (SEEDS_ONLY) runArgs.push('--seeds-only');
+    if (VRAM_GB) runArgs.push('--vram-gb', VRAM_GB);
+    if (COOLDOWN_MS) runArgs.push('--cooldown', COOLDOWN_MS);
+    if (QWEN_FRAC) runArgs.push('--qwen-frac', QWEN_FRAC);
+    if (LIMIT) runArgs.push('--limit', LIMIT);
+    await runChild('scripts/improve-loop/run.mjs', runArgs);
     if (stop) break;
 
     // PROPOSE for each class that has queued failures this run.
@@ -104,13 +155,23 @@ async function main() {
       await runChild('scripts/improve-loop/apply-consensus.mjs', []);
     }
 
+    // VISUAL CADENCE: between text cycles, let Vai LOOK at itself. Serial (one heavy task
+    // at a time), no-video, recorded to the corpus for the watch page + council packet.
+    if (VISUAL_EVERY > 0 && !stop && cycle % VISUAL_EVERY === 0) {
+      log(`━━━ cycle ${cycle} : VISUAL (no-video eyes/hands probe) ━━━`);
+      await runVisualProbe();
+    }
+
     // Campaign snapshot.
     const db2 = openDb(DB_PATH);
     const trend = db2.prepare(
       `SELECT r.id, COUNT(res.id) t, COALESCE(SUM(res.passed),0) p FROM runs r
        LEFT JOIN results res ON res.run_id=r.id GROUP BY r.id ORDER BY r.id DESC LIMIT 5`,
     ).all().reverse();
-    const proposals = db2.prepare('SELECT COUNT(*) c FROM proposals').get().c;
+    // proposals table is created lazily by propose-fix.mjs; on a fresh corpus where no
+    // class failed (so PROPOSE never ran) it may not exist yet — don't crash the loop.
+    let proposals = 0;
+    try { proposals = db2.prepare('SELECT COUNT(*) c FROM proposals').get().c; } catch { proposals = 0; }
     db2.close();
     log('campaign: ' + trend.map((x) => `#${x.id}:${x.t ? Math.round((x.p / x.t) * 100) : 0}%`).join(' ') + ` · ${proposals} proposals queued for review`);
 

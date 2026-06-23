@@ -4,7 +4,7 @@
 // (mirrors vague-answer.test.mjs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isInfraError, ensureRuntimeReady } from './driver.mjs';
+import { isInfraError, ensureRuntimeReady, isOverVramBudget } from './driver.mjs';
 
 // Verification-First: isInfraError is the gate that decides whether a failed turn is an
 // INFRASTRUCTURE failure (skip — never grade, the constitution's "don't score infra as Vai
@@ -40,6 +40,13 @@ test('null / undefined / empty are safely non-infra', () => {
   assert.equal(isInfraError(null), false);
   assert.equal(isInfraError(undefined), false);
   assert.equal(isInfraError(''), false);
+});
+
+test('detects when VRAM is still over budget after waiting', () => {
+  assert.equal(isOverVramBudget(8, 7), true);
+  assert.equal(isOverVramBudget(7, 7), false);
+  assert.equal(isOverVramBudget(6, 7), false);
+  assert.equal(isOverVramBudget(Number.NaN, 7), false);
 });
 
 // ── ensureRuntimeReady — readiness gate (fetch injected so tests never hit the network) ──

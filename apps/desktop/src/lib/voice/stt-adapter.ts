@@ -42,6 +42,18 @@ export interface SttStartOptions {
   /** Called as interim/final transcripts arrive, so the UI can show live text. */
   readonly onPartial?: (partial: SttPartial) => void;
   readonly onError?: (error: SttError) => void;
+  /**
+   * Preferred input device (from {@link enumerateMicrophones}). When set, the OS-permission
+   * pre-flight pins capture to this mic. Omit to use the system default.
+   */
+  readonly deviceId?: string;
+}
+
+/** A selectable audio input, surfaced by {@link enumerateMicrophones} for the device picker. */
+export interface MicDevice {
+  readonly deviceId: string;
+  /** Human label (empty until mic permission is granted — the OS hides labels otherwise). */
+  readonly label: string;
 }
 
 export interface SttAdapter {

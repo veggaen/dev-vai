@@ -130,6 +130,7 @@ export interface ChatChunk {
   readonly type:
     | 'text_delta'
     | 'reasoning_delta'
+    | 'draft_delta'
     | 'tool_call_delta'
     | 'progress'
     | 'turn_kind'
@@ -142,6 +143,25 @@ export interface ChatChunk {
     | 'image_result';
   readonly textDelta?: string;
   readonly reasoningDelta?: string;
+  /** Live WORK PRODUCT (not hidden thought): Vai's in-review DRAFT answer as it is written,
+   *  before the council accepts/redrafts it. Distinct from text_delta — this NEVER commits to
+   *  the final message body; the UI shows it in a discardable, clearly-labeled "Draft (in
+   *  review)" block. `draft` carries a small lifecycle envelope so the UI can explain what
+   *  happened (started / updated / cleared on redraft / committed / discarded) and so a future
+   *  PresenceBlock timeline needs no migration. `draftText` is the FULL draft-so-far
+   *  (cumulative, replace-not-append). */
+  readonly draftText?: string;
+  readonly draft?: {
+    /** Lifecycle of the draft block. */
+    readonly phase: 'start' | 'delta' | 'reset' | 'committed' | 'discarded';
+    readonly turnId?: string;
+    /** Monotonic per-turn sequence so the UI can drop out-of-order frames. */
+    readonly seq: number;
+    /** What produced this block — keeps the presence model honest about provenance. */
+    readonly source: 'vai-draft';
+    /** This content may change or be withdrawn — the UI labels it accordingly. */
+    readonly isDiscardable: true;
+  };
   readonly toolCallDelta?: { readonly id: string; readonly name: string; readonly argumentsDelta: string };
   /** User-visible activity/progress for long-running research, analysis, and builder turns. */
   readonly progress?: {

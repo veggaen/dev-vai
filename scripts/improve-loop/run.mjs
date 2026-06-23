@@ -10,6 +10,7 @@
  * Usage:
  *   node scripts/improve-loop/run.mjs                 # default: ~6 generated / class
  *   node scripts/improve-loop/run.mjs --per-class 12 --vram-gb 7 --cooldown 2500
+ *   node scripts/improve-loop/run.mjs --seeds-only --limit 1  # one controlled probe
  *   node scripts/improve-loop/run.mjs --base-url http://localhost:3006
  *   node scripts/improve-loop/run.mjs --seeds-only    # no generation, just the known rows
  *
@@ -20,7 +21,7 @@ import {
   openDb, startRun, endRun, upsertPrompt, alreadyScored,
   recordResult, queueFix, classStats, liveHeartbeat,
 } from './db.mjs';
-import { waitForVramHeadroom, loadedVram, runThroughVai, sleep, ensureRuntimeReady, isInfraError } from './driver.mjs';
+import { waitForVramHeadroom, loadedVram, runThroughVai, sleep, ensureRuntimeReady, isInfraError, isOverVramBudget } from './driver.mjs';
 import { generatePrompts, gradeInterpretation, mineFailures } from './brain.mjs';
 import { SEED_CLASSES } from './seeds.mjs';
 import { claudeWorkItems } from './claude-prompts.mjs';
@@ -35,6 +36,7 @@ const VRAM_BUDGET = Number(opt('--vram-gb', '7')) * 1024 ** 3;
 const COOLDOWN_MS = Number(opt('--cooldown', '2000'));
 const SEEDS_ONLY = has('--seeds-only');
 const DB_PATH = opt('--db', 'scripts/improve-loop/.corpus.sqlite');
+const LIMIT = Math.max(0, Number(opt('--limit', '0')) || 0);
 // Claude authors the bulk of prompts; qwen contributes only this fraction as a
 // minority top-up per class (0 = none, 1 = full PER_CLASS). Default small.
 const QWEN_FRAC = Math.max(0, Math.min(1, Number(opt('--qwen-frac', '0.3'))));
@@ -124,6 +126,12 @@ async function main() {
       ui.now = `qwen tops up ${qwenN} prompts for ${c.klass}…`;
       render();
       ui.vram = await waitForVramHeadroom(VRAM_BUDGET);
+      if (isOverVramBudget(ui.vram, VRAM_BUDGET)) {
+        ui.crashes++;
+        ui.now = `infra skip qwen top-up (VRAM ${(ui.vram / GB).toFixed(1)}GB > budget ${(VRAM_BUDGET / GB).toFixed(1)}GB)`;
+        render();
+        continue;
+      }
       const gen = await generatePrompts(c.klass, c.expectedIntent, c.seeds, qwenN);
       for (const g of gen) {
         if (seen.has(g)) continue;
@@ -133,10 +141,11 @@ async function main() {
       await sleep(COOLDOWN_MS);
     }
   }
-  ui.total = work.length;
+  const selectedWork = LIMIT > 0 ? work.slice(0, LIMIT) : work;
+  ui.total = selectedWork.length;
 
   const failures = [];
-  for (const item of work) {
+  for (const item of selectedWork) {
     if (interrupted) break;
     const promptId = upsertPrompt(db, {
       prompt: item.prompt, klass: item.klass, expectedIntent: item.expectedIntent, origin: item.origin,
@@ -149,6 +158,14 @@ async function main() {
     // CRASH GUARD: wait for VRAM headroom, then ONE serial turn.
     ui.vram = await waitForVramHeadroom(VRAM_BUDGET);
     render();
+    if (isOverVramBudget(ui.vram, VRAM_BUDGET)) {
+      ui.crashes++;
+      ui.now = `infra skip (VRAM ${(ui.vram / GB).toFixed(1)}GB > budget ${(VRAM_BUDGET / GB).toFixed(1)}GB)`;
+      ui.done++;
+      render();
+      await sleep(COOLDOWN_MS);
+      continue;
+    }
 
     let vai;
     try {

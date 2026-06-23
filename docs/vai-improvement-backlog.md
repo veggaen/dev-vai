@@ -6,6 +6,208 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **Progress 2026-06-22 - Visual eyes/hands telemetry lane for the improvement loop**
+  - Read V3gga's pasted Google/blueprint notes about giving Vai persistent
+    "eyes and hands" and turning visual observation into live loop data.
+  - Implemented the safe first slice in `scripts/improve-loop/visual-probe.mjs`:
+    Playwright opens the real desktop app, checks top-layer hit testing with
+    `elementFromPoint`, moves a curved pointer path, clicks/types/clears the
+    composer without submitting, captures screenshots, attempts video, and
+    writes `report.json` plus `events.ndjson`.
+  - Promoted the event stream into the operator/corpus path: `operator visual`
+    streams probe events live, stores a sampled copy in `visual_runs`,
+    `visual_events`, and `visual_live`, and `status`/`watch` expose the latest
+    visual run.
+  - Evidence: `corepack pnpm self-improve:visual` passed on the live desktop app
+    at `http://localhost:5173/?devAuthBypass=1`; report
+    `Temporary_files/improve-loop-visual/2026-06-22T21-35-26-015Z/report.json`
+    shows 5/5 checks passed, 3 screenshots, 38 events, no console/page errors,
+    and one expected Google Fonts network warning under restricted network.
+    `corepack pnpm self-improve:status` reported 2 visual runs and the latest
+    live visual event `probe.done`. Focused Node tests passed for operator and
+    driver helpers.
+  - Next: let the long-running supervisor optionally schedule visual probes
+    between text turns, and add a lightweight browser view that tails
+    `visual_live` without requiring a full page refresh.
+
+- **DONE 2026-06-22 - Visual cadence + council packet + lightweight live JSON**
+  (follow-up to the entry above; the three "Next" items are now shipped)
+  - **Visual cadence**: `supervisor.mjs` takes `--visual-every <n>` (off by
+    default; threaded through `operator start` and `buildSupervisorNodeArgs`).
+    Every `n` text cycles it runs ONE `--no-video` eyes/hands probe, strictly
+    serial (after PROPOSE/APPLY, before the GPU rest, recorded to the corpus),
+    so the one-heavy-task-at-a-time rule holds. A probe failure is logged as
+    operator evidence and never aborts the loop.
+  - **Council packet**: `buildVisualCouncilPacket(db)` in `db.mjs` summarizes the
+    latest visual run from the sampled SQLite trail (checks, composer
+    reachability, top-layer target, screenshot count, real warnings vs expected
+    optional-resource blocks, report path, pass/fail, one-line headline). It
+    deliberately omits screenshots and the pointer trace so a model is never fed
+    images or thousands of points. Surfaced via `operator visual --packet`.
+  - **Lightweight live JSON**: the watch server now serves
+    `GET /visual.json` → `{ packet, live }` with `cache-control: no-store`, so a
+    council member or helper can poll the latest verdict without parsing HTML or
+    reloading the dashboard.
+  - **Probe robustness fix** (surfaced live): with the network open, Google Fonts
+    now fail a CORS preflight because the probe injects `x-vai-dev-auth-bypass`
+    (a header the fonts CDN does not allow), appearing as `ERR_FAILED` console
+    errors. These are the probe's own artifact on an optional external resource,
+    not a Vai defect, so `visual-probe.mjs` now classifies fonts.gstatic/
+    googleapis `ERR_FAILED` and that specific CORS console message as expected
+    optional-resource warnings. Before the fix a live probe FAILed on 4 console
+    errors / 2 failed requests; after, it PASSes (warnings counted, not flagged).
+  - Also hardened: the supervisor campaign snapshot no longer crashes with
+    `no such table: proposals` on a fresh corpus where PROPOSE never ran.
+  - Evidence (2026-06-22):
+    - Live `corepack pnpm self-improve:visual -- --no-video` → PASS, 5/5 checks,
+      `Temporary_files/improve-loop-visual/2026-06-22T21-47-14-480Z/report.json`.
+    - `operator visual --packet` and `GET http://localhost:4124/visual.json`
+      both returned `headline: "visual #4 done/pass · 5/5 checks · composer
+      reachable"`.
+    - One bounded cadence cycle
+      (`supervisor.mjs --max-cycles 1 --seeds-only --limit 1 --visual-every 1
+      --db C:/tmp/vai-cadence-test.sqlite`) ran the text cycle then the VISUAL
+      step serially; the probe was recorded (`visual #1 done/pass`).
+    - Focused tests green: `node --experimental-sqlite --test
+      scripts/improve-loop/operator.test.mjs scripts/improve-loop/driver.test.mjs
+      scripts/improve-loop/visual-packet.test.mjs` → 27/27 pass (new tests for
+      `--visual-every` threading, `--packet` parsing, and
+      `buildVisualCouncilPacket`).
+  - How V3gga runs it:
+    - Perpetual self-watching loop:
+      `corepack pnpm self-improve:start -- --mode observe --visual-every 1`
+    - Compact verdict for the council / another agent:
+      `corepack pnpm self-improve:operator -- visual --packet`
+    - Poll the live verdict while `self-improve:watch` runs:
+      `GET http://localhost:4123/visual.json`
+
+- **DONE 2026-06-23 - Visual TASTE engine: evidence-bound UX/human-appeal/flaw rubric**
+  - Mission: make Vai's visual inspection more than pass/fail — build visual taste,
+    human-appeal prediction, and picky-senior-designer flaw sensitivity, all as
+    INSPECTABLE evidence, not vibes.
+  - Architecture (matches AGENTS.md "deterministic policy is code"): the probe stays
+    the deterministic "eyes/hands" that MEASURES the live DOM; a new pure scorer
+    `scripts/improve-loop/visual-rubric.mjs` turns those measurements into scores +
+    flaws + human-appeal + a taste lesson. Pure → unit-testable without a browser.
+  - Measured signals (all from getComputedStyle / boundingBox / elementFromPoint /
+    WCAG contrast, during real interaction): distinct font sizes, grid-sampled content
+    density, card nesting depth, transition duration+easing, input latency, focus-ring
+    presence, hover-state delta, text contrast vs resolved opaque background, clipped
+    popovers, offscreen controls, unexpected scrollbars, generic-AI signals
+    (purple-gradient slop / glassmorphism overuse / nested cards / empty hero / weak
+    type scale).
+  - Rubric output: 6-dimension scores; human-appeal (first impression / modern /
+    interaction / trust / wow / keep-using, with wow gated to the floor on any P0);
+    flaws with severity P0..P3 + measured evidence + cause + fix direction (repeats
+    deduped with an occurrences count); one reusable taste lesson accumulated across
+    runs in a new `taste_lessons` table.
+  - Surfaces: probe emits `vision.signals` / `vision.rubric` / `vision.flaw` and carries
+    the verdict on `probe.done`; `operator visual --packet` + `GET /visual.json` include
+    a compact `taste` block; `self-improve:status` prints the verdict + top flaw +
+    lesson + accumulated lessons; the watch page renders a taste card.
+  - HONESTY CATCH (the important part): the rubric's FIRST live run reported 9 false
+    P0 "invisible text" flaws — a measurement bug (it couldn't parse modern
+    `color(srgb …)` and invented a white bg to compare against), and a second bug where
+    `measureInteractionSignals` blurred the composer and broke typing. Both fixed: parse
+    `color(srgb …)`, REFUSE to emit a contrast verdict when the background is
+    indeterminate (a false flaw is worse than none — it trains Vai on noise), keep the
+    composer focused. Also fixed content-density saturating to 1.0 (now grid-sampled
+    coverage, not summed overlapping backgrounds) and over-eager empty-hero detection
+    (skips app-shell roots).
+  - Evidence (2026-06-23):
+    - Live `corepack pnpm self-improve:visual -- --no-video` → PASS;
+      `report Temporary_files/improve-loop-visual/2026-06-22T22-20-01-185Z/report.json`.
+    - Honest verdict on Vai's own dev-bypass landing: **visual 7.3/10** (comp 6, motion 9,
+      feel 8, identity 6), wow 5.5/10, **0×P0** (false positives gone), 4×P1 REAL
+      `text-zinc-500` (`rgb(113,113,122)`) on near-black `rgb(11,13,16)` ≈ 4.0 contrast
+      (just under WCAG 4.5), 1×P3 missing hover affordance, generic flag "oversized empty
+      hero" (the landing genuinely has a big empty message area).
+    - `self-improve:status` shows Visual taste + top flaw + taste lesson + accumulated
+      lessons (×1). `GET /visual.json` carries `taste.overall=7.3`. Watch page renders
+      the taste card.
+    - Tests: `node --test scripts/improve-loop/visual-rubric.test.mjs` 10/10; full
+      improve-loop suite 45/45 green (new coverage: contrast math, motion timing,
+      generic-aesthetic detection, flaw severity/dedup, good-vs-slop fixtures, missing-
+      signal conservatism).
+  - REAL FINDINGS for V3gga to fix in the actual UI (the rubric earning its keep):
+    - P1: secondary `text-zinc-500` text on the dark shell is ~4.0:1 — bump to
+      zinc-400/zinc-300 for body-sized secondary text to clear WCAG 4.5.
+    - P3: primary button has no measurable hover delta — add a subtle hover state.
+    - Note: judging the empty landing state isn't a full test; next slice should drive a
+      real turn first, then run the taste pass on the populated UI.
+  - How V3gga runs it:
+    - `corepack pnpm self-improve:visual -- --no-video` then read the TASTE line.
+    - `corepack pnpm self-improve:operator -- visual --packet` for the council packet.
+    - `corepack pnpm self-improve:status` for the persisted verdict + learned lessons.
+
+- **DONE 2026-06-23 - Live smart video: watch-together stream + drive-a-real-turn + process-UI inspection**
+  - V3gga ask: "I also want to SEE it going on; validate WITH me." Built a near-real-time
+    shared view + a probe that drives a real turn so the POPULATED UI (Timeline/ProcessTree)
+    is judged, not the empty landing.
+  - Live-frame channel: the probe overwrites a single `live.jpg` (atomic temp→rename) on a
+    ~450ms cadence while it drives; the watch page (http://localhost:4123) shows it at the top
+    with a live/idle badge (`/live-frame.jpg` + `/live-frame.meta`). V3gga + the council watch
+    the SAME frame in near-real-time (a video file only appears after the run; this is the
+    LIVE surface). Plus a `cache.log` event stream = step-by-step "what I'm doing now".
+  - Drive-a-turn: `--send` types a prompt + Enter, waits for the process UI, lets it run,
+    inspects the focused/current block, waits for settle (bounded), inspects again.
+  - Process-UI inspection (`inspectProcessUi`, grounded in Timeline.tsx / ProcessTree.tsx):
+    answers V3gga's exact question — does the ONE in-focus block, on its own, tell the story?
+    Measures cues (title/summary/gate/duration/glyph = 0..5), whether the focused block is
+    visually DISTINCT from the rest, clipping, row count.
+  - Flags: `self-improve:visual -- --headed --send --live [--prompt "…"]`.
+  - VALIDATED LIVE (2026-06-23, headed, real turn driven, you watched):
+    report `Temporary_files/improve-loop-visual/2026-06-22T22-45-47-606Z/report.json`,
+    video saved (.webm). Honest findings on the live populated UI:
+    - Surface was **ProcessTree, not Timeline** (Timeline flag off — reported honestly).
+    - **Focused block WEAK: 2/5 cues (title+glyph only), focusDistinct=false** — the
+      current block does NOT stand out from the other 47 rows, and carries no summary/gate/
+      duration of its own. Fails V3gga's "1 block in focus alone is great info" bar.
+    - **Real P2 bug**: label reads `"qwen3:8b is writing the answer11s"` — the duration is
+      glued to the label with no space. Cause: `LiveElapsed` span right after the label text
+      in `apps/desktop/src/components/chat/ProcessTree.tsx` (~L357) with no separating gap.
+    - 48 steps = dense without the focused-block clarity to guide the eye.
+  - NEXT (queued, not done): (a) give the focused/current ProcessTree row a distinct focus
+    treatment + fix the duration spacing; (b) consider promoting the Timeline as the default
+    process surface; (c) re-run the live drive-a-turn probe to confirm the focused block
+    reaches ≥3/5 cues + focusDistinct=true.
+  - Tests: operator/rubric/packet suites green (live-stream arg threading covered).
+
+- **DONE 2026-06-23 - Phase 1: Live Work Product (draft streaming + real council reasoning + focus clarity)**
+  - V3gga: the process UI showed CAPTIONS ("Drafting an answer…", "Waiting for qwen to weigh in"),
+    not the actual content. Ideology adopted (V3gga's framing): stream observable WORK PRODUCT
+    (draft, council summaries, process state) — never hidden chain-of-thought.
+  - **1A — live draft stream**: new `draft_delta` ChatChunk ([adapter.ts:129](packages/core/src/models/adapter.ts#L129))
+    carrying a lifecycle envelope `{ phase: start|delta|reset|committed, turnId, seq, source, isDiscardable }`
+    so a future PresenceBlock timeline needs no migration. Emitted from the draft-buffering loop in
+    [service.ts](packages/core/src/chat/service.ts) (cumulative draftText, deterministic
+    time-AND-size coalescing 120ms/32ch, final committed flush, `reset` on council redraft, kill
+    switch `VAI_STREAM_DRAFTS` default on). Frontend: ephemeral per-message `liveDraft` in chatStore
+    (NEVER via appendToLastMessage so a redraft can't corrupt the answer; cleared on `done`), rendered
+    as a labeled "Draft answer · in review · may change / revised by council" block (LiveDraftBlock in
+    MessageBubble).
+  - **1B — real council reasoning**: root cause was `member.ts` SUPPRESSING JSON-shaped content from
+    non-thinking models (qwen) → empty preview → "Waiting…". Fixed with `previewFromPartialJson` — a
+    tolerant partial-JSON extractor (regex, never JSON.parse; works mid-stream) that surfaces
+    verdict/realIntent/suggestedAction/gap as they form, else "drafting its review…", never raw JSON.
+  - **1C — focus clarity + P2 glue**: `process-tree__row--focused` treatment (deeper wash + thicker
+    rail + strong label) so the in-flight block is unmistakable; LiveElapsed now renders for council
+    rows too with an `ml-2` gap that fixes the "answer11s" duration-glue.
+  - **Proof (2026-06-23)**:
+    - Live WS probe to the runtime: `draft_delta: 5` chunks, `firstPhase=start`, draftLen=68 — the
+      draft streams with the lifecycle envelope end-to-end.
+    - Visual drive-a-turn probe: focused block **2/5 → 3/5 cues** (title+summary+glyph),
+      **one-block-tells-the-story: WEAK → YES**, no "answer11s" flagged. Probe PASS.
+    - `previewFromPartialJson` unit test 6/6; core typecheck + desktop typecheck clean; consensus +
+      chat-quality suites **177/177**.
+    - Note: the visual probe's 3.5s inspect window misses the draft block (it streams + retires in
+      the first ~1-2s before council) — a probe-tuning detail, not a feature bug; the WS probe is the
+      authoritative proof.
+  - NEXT (roadmap, plan file mellow-pondering-salamander.md): Phase 2 live HTML info blocks (strict
+    srcdoc iframe + sanitizer); Phase 3 unified PresenceBlock timeline + TTS out (speechSynthesis) +
+    in-app Owner Dashboard + app-video blocks in chat; Phase 4 multi-party rooms. Desktop binary needs
+    build + `pnpm app:update` to show 1A/1C in veggaai.exe (dev 5173 + runtime tsx already have it).
+
 - **PRIORITY 0 - Capability kernel, not phrase-gated side routes** (2026-06-13)
   - unify deterministic handlers, repo tools, web research, council/model calls,
   and sandbox actions behind one inspectable capability contract:
@@ -150,6 +352,51 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
   code until a verified build passes and the update is run.
 
 ## Done
+
+- 2026-06-22 - Perpetual improvement-loop operator switchboard. Added
+  `scripts/improve-loop/operator.mjs` plus pure command utilities and node:test
+  coverage so the loop now has a Windows-first `doctor/status/start/watch/report/
+  handoff` surface. `supervisor.mjs` now accepts `--mode observe|apply` and
+  forwards `--base-url`, `--db`, `--seeds-only`, `--vram-gb`, `--cooldown`, and
+  `--qwen-frac` into each run cycle, which makes delegated runtimes, isolated
+  corpora, and remote model hosts practical. Package scripts added:
+  `self-improve:operator`, `self-improve:doctor`, `self-improve:status`,
+  `self-improve:start`, and `self-improve:handoff`; `self-improve:watch` now
+  runs with `--experimental-sqlite`. Operator docs live at
+  `docs/perpetual-improvement-loop.md`. Evidence: deep `council-ask` on this
+  exact operator slice timed out at 360s, showing the need for a lightweight
+  switchboard; `node --test scripts/improve-loop/driver.test.mjs
+  scripts/improve-loop/operator.test.mjs` passed 15 tests; syntax checks passed
+  for operator, utils, and supervisor; `operator doctor` passed against local
+  runtime `:3006` and Ollama `:11434`; pnpm dry-runs verified argument
+  forwarding and generated handoff output.
+  Follow-up 2026-06-22: `self-improve:doctor` revealed run #7 was still marked
+  `running` with a heartbeat more than 10 hours stale. Added a tested liveness
+  classifier so `status`/`doctor` now prints `Doctor: WARN
+  (stale-running-run)` instead of a misleading clean PASS while keeping service
+  health separate from corpus hygiene. Evidence: `corepack pnpm
+  self-improve:doctor` now reports the stale run warning; operator tests cover
+  fresh heartbeat, stale running heartbeat, completed stale run, and old running
+  run without a heartbeat.
+  Follow-up 2026-06-22 "go" pass: added `--limit` to `run.mjs` and forwarded it
+  through supervisor/operator so V3gga/agents can run a single measured probe
+  before a full campaign. Ran `node --experimental-sqlite
+  scripts/improve-loop/run.mjs --seeds-only --limit 1 --cooldown 1000`; run #8
+  completed in about 58s, passed `routing/build-verb-poison` 1/1, and queued no
+  new fixes. `self-improve:status` now labels completed-run heartbeat as `Last
+  heartbeat ... (run complete)` instead of implying live streaming. Evidence:
+  focused syntax checks passed, and `node --test scripts/improve-loop/driver.test.mjs
+  scripts/improve-loop/operator.test.mjs` passed 19 tests.
+  Follow-up 2026-06-22 bounded observe pass: ran
+  `node --experimental-sqlite scripts/improve-loop/run.mjs --seeds-only --limit
+  3 --cooldown 1500`; run #9 completed 3/3 in about 5m14s with no answer
+  failures or new fix candidates. It exposed an operator-safety issue: after
+  waiting, one turn still showed VRAM at `7.2/7.0 GB` and proceeded. Hardened
+  the runner so qwen top-up and live Vai turns skip without grading whenever
+  VRAM remains above budget after the wait window. Evidence: syntax checks
+  passed for `run.mjs` and `driver.mjs`; `node --test
+  scripts/improve-loop/driver.test.mjs scripts/improve-loop/operator.test.mjs`
+  passed 20 tests, including the new over-budget invariant.
 
 - 2026-06-15 - Runtime startup and adaptive-domain isolation. Chat/model latency
   and tool-batch latency now use separate `ThorsenAdaptiveController` instances,

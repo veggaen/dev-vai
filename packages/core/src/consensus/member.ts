@@ -58,6 +58,40 @@ const REASONING_DELTA_THROTTLE_MS = 150;
  * existing parser. Any stream error propagates to the caller, which already falls back / fails
  * the member safely.
  */
+/**
+ * Build a readable preview from a member's PARTIAL JSON note (mid-stream, possibly truncated).
+ * Tolerant by design — it scans for known keys with a regex rather than JSON.parse, so it works
+ * on incomplete output and never throws. Surfaces the member's emerging conclusion (verdict /
+ * what they think the user wants / what they'd do) as it forms. Returns '' if nothing useful yet.
+ */
+export function previewFromPartialJson(partial: string): string {
+  if (!partial) return '';
+  // Match `"key": "value..."` where value may be unterminated (stream cut mid-string).
+  const grab = (key: string): string | null => {
+    const m = partial.match(new RegExp(`"${key}"\\s*:\\s*"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)`, 'i'));
+    const v = m?.[1]?.trim();
+    return v ? v.replace(/\\"/g, '"') : null;
+  };
+  const grabBare = (key: string): string | null => {
+    const m = partial.match(new RegExp(`"${key}"\\s*:\\s*([0-9.]+|true|false)`, 'i'));
+    return m?.[1] ?? null;
+  };
+  const parts: string[] = [];
+  const verdict = grab('verdict');
+  if (verdict) parts.push(`leaning "${verdict}"`);
+  const intent = grab('realIntent');
+  if (intent) parts.push(`reads the ask as: ${intent}`);
+  const action = grab('suggestedAction');
+  if (action) parts.push(`would ${action}`);
+  const missing = grab('missingCapability');
+  if (missing) parts.push(`gap: ${missing}`);
+  const confidence = grabBare('confidence');
+  if (confidence && parts.length) parts.push(`(~${Math.round(Number(confidence) * 100)}% sure)`);
+  if (parts.length) return parts.join(' · ');
+  // Nothing structured yet but bytes ARE arriving — say so honestly instead of "Waiting…".
+  return partial.length > 8 ? 'drafting its review…' : '';
+}
+
 async function streamMemberContent(
   adapter: ModelAdapter,
   request: ChatRequest,
@@ -69,15 +103,17 @@ async function streamMemberContent(
   const emit = (force: boolean) => {
     const now = Date.now();
     if (!force && now - lastEmit < REASONING_DELTA_THROTTLE_MS) return;
-    // Only the dedicated REASONING channel is human-readable "thinking out loud". A model
-    // with no reasoning channel (a terse generalist) streams only its JSON note into
-    // `content` — previewing that would show raw JSON noise, so we suppress it and let the
-    // row keep its plain "reviewing…" status instead. If content looks like prose (a
-    // distilled-R1 that put its think into content), allow it; if it's clearly JSON, skip.
+    // The dedicated REASONING channel is human-readable "thinking out loud" (a distilled-R1
+    // that put its think into content also reads as prose). For a terse generalist that streams
+    // ONLY its JSON note into `content`, we used to suppress it entirely — which left qwen-class
+    // members showing a bare "Waiting…" the whole time (the exact complaint). Instead, derive a
+    // readable WORK-PRODUCT preview from the partial JSON as keys appear. Never raw JSON noise,
+    // never hidden reasoning — just "what the member is concluding so far".
     let source = reasoning.trim();
     if (!source) {
       const c = content.trim();
       if (c && !c.startsWith('{') && !c.startsWith('[')) source = c;
+      else if (c) source = previewFromPartialJson(c);
     }
     if (!source) return;
     lastEmit = now;

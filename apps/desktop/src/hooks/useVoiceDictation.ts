@@ -13,6 +13,8 @@ export interface UseVoiceDictationOptions {
   /** Engine override (defaults to the zero-dep Web Speech adapter). */
   readonly adapter?: SttAdapter;
   readonly lang?: string;
+  /** Preferred mic (from the device picker). Omit to use the system default. */
+  readonly deviceId?: string;
   /**
    * Hold-to-talk hotkey. Default: Alt+Meta (Win) held together — Wispr-Flow style.
    * The Win key alone is unreliable in a webview, so we gate on BOTH modifiers.
@@ -34,7 +36,7 @@ const defaultHoldChord = (e: KeyboardEvent): boolean => e.altKey && e.metaKey;
  * with no change here or in the UI.
  */
 export function useVoiceDictation(options: UseVoiceDictationOptions) {
-  const { onInterim, onFinal, onError, adapter = defaultSttAdapter, lang, holdChord = defaultHoldChord, disabled = false } = options;
+  const { onInterim, onFinal, onError, adapter = defaultSttAdapter, lang, deviceId, holdChord = defaultHoldChord, disabled = false } = options;
   const [status, setStatus] = useState<DictationStatus>(() => (adapter.isAvailable() ? 'idle' : 'unsupported'));
   const sessionRef = useRef<SttSession | null>(null);
   const startingRef = useRef(false);
@@ -52,6 +54,7 @@ export function useVoiceDictation(options: UseVoiceDictationOptions) {
     try {
       const session = await adapter.start({
         lang,
+        deviceId,
         onPartial: (p) => cbRef.current.onInterim?.(p.transcript),
         onError: (err) => {
           cbRef.current.onError?.(err);
@@ -65,7 +68,7 @@ export function useVoiceDictation(options: UseVoiceDictationOptions) {
     } finally {
       startingRef.current = false;
     }
-  }, [adapter, disabled, lang, supported]);
+  }, [adapter, disabled, lang, deviceId, supported]);
 
   const stop = useCallback(async () => {
     const session = sessionRef.current;
