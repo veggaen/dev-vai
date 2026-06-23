@@ -1472,6 +1472,7 @@ export function ChatWindow() {
                         imageGenSteps={msg.imageGenSteps}
                         progressSteps={msg.progressSteps}
                         liveDraft={msg.liveDraft}
+                        infoBlocks={msg.infoBlocks}
                         feedback={msg.feedback}
                         onFeedback={(helpful) => useChatStore.getState().setFeedback(msg.id, helpful)}
                         onFollowUp={(question) => { void handleSend(question); }}

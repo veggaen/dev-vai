@@ -242,6 +242,8 @@ export interface ChatMessage {
     seq: number;
     turnId?: string;
   } | null;
+  /** Deterministic HTML info blocks (sandboxed-iframe rendered) emitted by Vai/council. */
+  infoBlocks?: { id: string; html: string; title?: string }[];
 }
 
 /** Preserve nested payloads when the backend re-emits the same stage (e.g. council members arriving late). */
@@ -948,6 +950,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         reasoningDelta?: string;
         draftText?: string;
         draft?: { phase: 'start' | 'delta' | 'reset' | 'committed' | 'discarded'; turnId?: string; seq: number; source?: string; isDiscardable?: boolean };
+        infoBlock?: { id: string; html: string; title?: string };
         sources?: SearchSourceUI[];
         sourcePresentation?: SourcePresentationUI;
         turnKind?: TurnKindUI;
@@ -1116,6 +1119,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
               turnId: d?.turnId ?? prev?.turnId,
             },
           };
+          return { messages: msgs };
+        });
+      } else if (chunk.type === 'info_block' && chunk.infoBlock) {
+        // Append-only, addressable by id (replace on repeat id).
+        const block = chunk.infoBlock;
+        set((state) => {
+          const msgs = [...state.messages];
+          const idx = activeStreamingAssistantId
+            ? msgs.findIndex((m) => m.id === activeStreamingAssistantId)
+            : msgs.length - 1;
+          if (idx < 0) return {};
+          const existing = msgs[idx].infoBlocks ?? [];
+          const at = existing.findIndex((b) => b.id === block.id);
+          const next = at >= 0
+            ? existing.map((b, i) => (i === at ? block : b))
+            : [...existing, block];
+          msgs[idx] = { ...msgs[idx], infoBlocks: next };
           return { messages: msgs };
         });
       } else if (chunk.type === 'text_delta' && chunk.textDelta) {

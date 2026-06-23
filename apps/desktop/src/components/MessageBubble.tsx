@@ -13,6 +13,7 @@ import { MarkdownRenderer } from '@vai/ui';
 import { API_BASE } from '../lib/api.js';
 import { VaiMark } from './brand/VaiMark.js';
 import { VaiNode } from './brand/VaiNode.js';
+import { InfoBlock } from './chat/InfoBlock.js';
 import {
   Copy, Check, FileText, Rocket, HelpCircle, X as XIcon,
   ChevronRight, CornerDownRight, User, ThumbsUp, ThumbsDown,
@@ -100,6 +101,8 @@ interface MessageBubbleProps {
   progressSteps?: ChatProgressStep[];
   /** Live in-review draft (work product, not final answer) shown while streaming. */
   liveDraft?: { text: string; phase: 'start' | 'delta' | 'reset' | 'committed' | 'discarded'; seq: number } | null;
+  /** Deterministic HTML info blocks (sandboxed iframe). */
+  infoBlocks?: { id: string; html: string; title?: string }[];
   /** Live image-generation steps (produce→verify→regenerate) shown as visible process. */
   imageGenSteps?: { phase: string; label: string; attempt?: number; matchScore?: number; flaws?: string[] }[];
   /** Feedback state: true=helpful, false=not helpful, undefined=no feedback */
@@ -616,7 +619,7 @@ export function MessageBubble({
   fallbackDeploy, recoveryPattern = 'silent', allIntents, onIntentAction,
   isLatest = false, isStreaming = false,
   respondingModelId, fallback,
-  sources, sourcePresentation, turnKind, followUps, confidence, groundedBuildBrief, thinking, researchTrace, verification, progressSteps, liveDraft, imageGenSteps, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
+  sources, sourcePresentation, turnKind, followUps, confidence, groundedBuildBrief, thinking, researchTrace, verification, progressSteps, liveDraft, infoBlocks, imageGenSteps, feedback, onFeedback, onFollowUp, onGroundedExecute, sender,
   isAutoRepair = false, repairAttempt,
   compactResearchChrome = false,
   isLatestResearchMessage = false,
@@ -985,6 +988,13 @@ export function MessageBubble({
                 Shown only while streaming and before the final answer has committed into content. */}
             {!isUser && isStreaming && liveDraft?.text?.trim() && !content.trim() && (
               <LiveDraftBlock text={liveDraft.text} phase={liveDraft.phase} />
+            )}
+
+            {/* Deterministic HTML info blocks emitted by Vai/council (sandboxed iframe). */}
+            {!isUser && (infoBlocks?.length ?? 0) > 0 && (
+              <div className="my-1">
+                {infoBlocks!.map((b) => <InfoBlock key={b.id} html={b.html} title={b.title} />)}
+              </div>
             )}
 
             {/* Legacy turns without engine progress — fallback narrative panel only. */}

@@ -208,6 +208,19 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
     in-app Owner Dashboard + app-video blocks in chat; Phase 4 multi-party rooms. Desktop binary needs
     build + `pnpm app:update` to show 1A/1C in veggaai.exe (dev 5173 + runtime tsx already have it).
 
+- **DONE 2026-06-23 - Phase 2: live HTML info blocks (deterministic + sandboxed)**
+  - Vai/council now emit styled HTML "info blocks" into chat. Security decision: HTML is built
+    SERVER-SIDE from STRUCTURED DATA only ([info-block.ts](packages/core/src/chat/info-block.ts):
+    `renderInfoBlockHtml`, escaped text, fixed tag allowlist) and rendered in an iframe with
+    `sandbox=""` (no allow-scripts/same-origin — [InfoBlock.tsx](apps/desktop/src/components/chat/InfoBlock.tsx)).
+    We never sanitize model-authored HTML (sanitizer-as-security-boundary avoided).
+  - New `info_block` ChatChunk ({id,html,title}); store appends/replaces by id; MessageBubble
+    renders. First real emitter: a deterministic **Council verdict** block (outcome/agreement/
+    read-as) after the council loop in service.ts.
+  - Proof: `info-block` unit 3/3; WS verify on a balanced turn → `info_block=1 title="Council
+    verdict"` after council (35 stages) completed; deep turns emit too but run past an 85s probe
+    window (slow-council, not a bug). core+desktop typecheck clean; 41/41 council suites.
+
 - **PRIORITY 0 - Capability kernel, not phrase-gated side routes** (2026-06-13)
   - unify deterministic handlers, repo tools, web research, council/model calls,
   and sandbox actions behind one inspectable capability contract:

@@ -131,6 +131,7 @@ export interface ChatChunk {
     | 'text_delta'
     | 'reasoning_delta'
     | 'draft_delta'
+    | 'info_block'
     | 'tool_call_delta'
     | 'progress'
     | 'turn_kind'
@@ -151,6 +152,9 @@ export interface ChatChunk {
    *  PresenceBlock timeline needs no migration. `draftText` is the FULL draft-so-far
    *  (cumulative, replace-not-append). */
   readonly draftText?: string;
+  /** A deterministic, pre-rendered HTML "info block" (built server-side from structured data;
+   *  rendered in a sandboxed iframe). Append-only, addressable by id. */
+  readonly infoBlock?: { readonly id: string; readonly html: string; readonly title?: string };
   readonly draft?: {
     /** Lifecycle of the draft block. */
     readonly phase: 'start' | 'delta' | 'reset' | 'committed' | 'discarded';
