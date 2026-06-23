@@ -494,3 +494,11 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
     Knowledge panel simplified; ingest/retrieval metrics in Settings → Engine → Memory health;
     handoff poll exponential backoff + abort; council panel opens during live council-* stages;
     audit `waitForSettle` uses `[data-streaming]` + `[title="Copy response"]`.
+
+- **DONE 2026-06-23 - Phase 3 (start): TTS voice-out primitive (free/local)**
+  - Voice OUTPUT mirror of the STT pair: `tts-adapter.ts` contract + `WebSpeechTtsAdapter`
+    (browser speechSynthesis, zero-dep, serial queue) + `useVoiceOutput(enabled)` hook (off by
+    default, cancel on unmount). Reads TEXT aloud — honestly the presence voice layer, NOT a
+    synthetic Claude voice. Proof: 4/4 adapter tests, desktop typecheck clean.
+  - NEXT: a "read aloud" toggle + Owner Dashboard will wire it; then unified presence-block
+    timeline + rooms.
