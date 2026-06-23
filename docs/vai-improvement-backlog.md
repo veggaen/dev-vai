@@ -502,3 +502,13 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
     synthetic Claude voice. Proof: 4/4 adapter tests, desktop typecheck clean.
   - NEXT: a "read aloud" toggle + Owner Dashboard will wire it; then unified presence-block
     timeline + rooms.
+
+- **DONE 2026-06-23 - Phase 3: in-app Owner Dashboard (live view + voice toggle + loop commands)**
+  - Added an OwnerDashboardSection to the Control panel (owner-only) so V3gga works from the app:
+    a LIVE VIEW (polls the watch server `/live-frame.jpg` + `/live-frame.meta`, live/idle badge),
+    a voice toggle wired to `useVoiceOutput` (TTS read-aloud + Test voice button), and the safe
+    observe+visual loop commands. No heavy work runs from the panel (apply stays a deliberate
+    switch). Chose to extend the existing Control panel (not a new nav entry) — lower risk, fewer
+    files. Proof: desktop typecheck clean, lint 0 errors, TTS adapter 4/4.
+  - NEXT small wire: auto-speak the final answer when the toggle is on (a store flag + speak on
+    `done`); then unified presence-block timeline + multi-party rooms.
