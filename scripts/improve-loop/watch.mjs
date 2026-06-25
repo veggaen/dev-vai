@@ -269,6 +269,9 @@ function loopStatus() {
   // Latest health verdict (working / not / inconclusive), in plain words.
   const healthRow = q("SELECT detail FROM loop_events WHERE kind='health' ORDER BY id DESC LIMIT 1")[0];
   let health = null; try { health = healthRow ? JSON.parse(healthRow.detail) : null; } catch {}
+  // What the loop has decided is the MOST MEANINGFUL lane to work on (vs just routing micro-bugs).
+  const meaningRow = q("SELECT detail FROM loop_events WHERE kind='meaning' ORDER BY id DESC LIMIT 1")[0];
+  let meaning = null; try { meaning = meaningRow ? JSON.parse(meaningRow.detail) : null; } catch {}
 
   // Pass-rate of the most recent meaningful run (≥8 prompts), and the weakest class right now.
   const trend = q(`SELECT r.id, COUNT(res.id) t, COALESCE(SUM(res.passed),0) p FROM runs r
@@ -284,6 +287,7 @@ function loopStatus() {
     lastCycleSeconds: lastDurS,
     lastCycleBounded: lastFinished?.status === 'budget-stopped',
     innovations, escalations,
+    meaning: meaning ? { lane: meaning.lane, reason: meaning.reason, ranking: meaning.ranking ?? [] } : null,
     health: health ? { working: health.working, reason: health.reason } : null,
     passPct,
     weakest: weakest ? { class: weakest.class, pct: Math.round((weakest.p / weakest.t) * 100), passed: weakest.p, total: weakest.t } : null,
@@ -313,7 +317,12 @@ function loopHeroPanel() {
         if(s.health){
           var w=s.health.working; var tone=w===true?'#8d9':w===false?'#f99':'#dc9';
           var label=w===true?'It is improving the codebase':w===false?'It is running but not yet improving anything':'Too early to tell if it is improving';
-          html += '<div style="font-size:13px;color:'+tone+';margin-bottom:10px">'+esc(label)+(s.passPct!=null?' · pass-rate '+s.passPct+'%':'')+'</div>';
+          html += '<div style="font-size:13px;color:'+tone+';margin-bottom:6px">'+esc(label)+(s.passPct!=null?' · pass-rate '+s.passPct+'%':'')+'</div>';
+        }
+        // WHAT it has decided is most meaningful to work on (not just routing micro-bugs)
+        if(s.meaning && s.meaning.lane){
+          var laneName={quality:'answer quality',capability:'new capabilities',routing:'routing correctness',reliability:'recurring weaknesses'}[s.meaning.lane]||s.meaning.lane;
+          html += '<div style="font-size:13px;color:#bcd;margin-bottom:10px">🎯 Most meaningful right now: <b style="color:#9cf">'+esc(laneName)+'</b> <span style="color:#789">— '+esc(s.meaning.reason)+'</span></div>';
         }
         // INNOVATIONS it built itself
         var innerI = (s.innovations&&s.innovations.length)

@@ -344,6 +344,20 @@ async function engineMain() {
       log(`━━━ cycle ${cycle} · ${motion.headline} ━━━`);
       logLoopEvent(db, { cycle, kind: 'cycle', detail: { motion: motion.state, passRate: ctx.passRate, worstClass: ctx.worstClass, failing: ctx.failingClassCount } });
 
+      // MEANING: before spending the cycle, weigh ALL work sources (routing / answer-quality /
+      // capability backlog / stuck weaknesses) and name the highest-LEVERAGE lane — so the loop is
+      // working on what's MEANINGFUL, not just defaulting to routing micro-bugs. Logged + recorded
+      // for the dashboard; pure read, never throws into the loop.
+      try {
+        const { gatherMeaningSignals, chooseMeaningfulWork } = await import('./meaning-selector.mjs');
+        const meaning = chooseMeaningfulWork(gatherMeaningSignals(db));
+        if (meaning.lane) {
+          log(`  🎯 ${meaning.headline}`);
+          logLoopEvent(db, { cycle, kind: 'meaning', detail: { lane: meaning.lane, leverage: meaning.leverage, reason: meaning.reason, ranking: meaning.ranking.map((l) => ({ lane: l.lane, leverage: Math.round(l.leverage * 100) / 100 })) } });
+          recordKnowledge(db, { scope: 'loop:meaning', claim: `highest-leverage lane is ${meaning.lane}`, kind: 'observation', confirm: true, evidence: meaning.reason });
+        }
+      } catch (e) { log('  meaning skipped: ' + String(e).slice(0, 70)); }
+
       const result = await runCycle(registry, ctx, {
         budget: COMPUTE_BUDGET,
         onEvent: (e) => {
