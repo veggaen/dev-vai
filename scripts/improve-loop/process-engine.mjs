@@ -53,10 +53,15 @@ export function createRegistry(processes = []) {
   return map;
 }
 
+/** Minimum effective cost for density. Every process consumes at least a cycle slot, so no process
+ *  is truly "free" — flooring here stops a ~0-cost bookkeeping step from scoring near-infinite density
+ *  and winning every cycle (the meta-slop starvation bug). 0.25 ≈ a quarter of a cheap model call. */
+export const MIN_COST = 0.25;
+
 /**
  * Score every process against the context. Returns ALL of them (eligible or not) with their
  * decision math, ordered best-density-first among the eligible, so a caller/dashboard can SEE
- * why each ran or was skipped. density = value / max(cost, ε). Pure — calls when/cost/value,
+ * why each ran or was skipped. density = value / max(cost, MIN_COST). Pure — calls when/cost/value,
  * never run(). when()/cost()/value() are expected to be cheap and side-effect-free.
  */
 export function scoreProcesses(registry, ctx = {}) {
@@ -69,7 +74,11 @@ export function scoreProcesses(registry, ctx = {}) {
     if (eligible) {
       try { cost = Math.max(Number(p.cost(ctx)) || 0, 0); } catch { cost = 1; }
       try { value = Math.max(Number(p.value(ctx)) || 0, 0); } catch { value = 0; }
-      density = value / Math.max(cost, 1e-6);
+      // MIN_COST floor: a near-zero cost must NOT mean near-infinite density. With a 1e-6 floor a
+      // "free" bookkeeping process scored ~600000 density and won EVERY cycle, starving observe/
+      // prototype — the loop ran forever doing nothing (meta-slop). A real minimum (every process
+      // still consumes a turn/slot) keeps density a fair value-per-real-effort comparison.
+      density = value / Math.max(cost, MIN_COST);
       reason = `density ${density.toFixed(3)} (value ${value.toFixed(2)} / cost ${cost})`;
     } else if (!reason) {
       reason = 'not eligible (when=false)';

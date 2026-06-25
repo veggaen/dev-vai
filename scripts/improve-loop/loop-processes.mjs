@@ -84,8 +84,14 @@ export function defineLoopProcesses(deps = {}) {
       // Always eligible — observation is how the loop SEES; on cold-start it's the only way to
       // get data. Value is high when stale (no recent run) or when we have no data at all.
       when: () => true,
-      cost: () => 8, // a batch of WS turns; the heaviest regular phase
-      value: (ctx) => (!ctx.hasData ? 0.95 : ctx.cyclesSinceObserve > 1 ? 0.7 : 0.3),
+      // Cost reflects a WALL-CLOCK-BOUNDED batch now (--max-run-ms caps it ~8min), not the old
+      // unbounded 90-min grind — so observe is no longer "too expensive to ever run". It is the
+      // ENGINE of the loop: without fresh observations, no failing class exists, so propose/
+      // prototype are never eligible and NOTHING lands (the meta-slop starvation you watched live).
+      cost: () => 2,
+      // High when stale or cold — observing must out-compete cheap bookkeeping so the loop actually
+      // generates the work everything else depends on. Drops once fresh (just observed this cycle).
+      value: (ctx) => (!ctx.hasData ? 0.98 : ctx.cyclesSinceObserve >= 2 ? 0.85 : ctx.cyclesSinceObserve === 1 ? 0.55 : 0.2),
       run: async (ctx) => {
         const code = await runChild('scripts/improve-loop/run.mjs', runArgs(ctx));
         setLoopState(ctx.db, 'cyclesSinceObserve', 0);
