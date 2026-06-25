@@ -19,8 +19,20 @@ import { gatherMemberProof, type ProofRunner } from './member-experiment.js';
 
 const ACTION_VALUES = ['answer-directly', 'web-search', 'local-business-search', 'reread-intent', 'ask-one-question'] as const;
 
+/** Normalise a model's free-form verdict to the enum. Different models phrase it differently
+ *  ("ok"/"pass"/"approve" → good; "reject"/"poor"/"fail" → bad; anything else → needs-work). The
+ *  verdict was the ONLY non-tolerant field — a variant phrasing made safeParse discard the WHOLE
+ *  note, so members that DID answer counted as "no usable view" and the council rubber-stamped the
+ *  draft. Tolerating it is the difference between a working council and a silent one. */
+function normalizeVerdict(v: unknown): 'good' | 'needs-work' | 'bad' {
+  const s = String(v ?? '').toLowerCase().trim();
+  if (/\b(good|ok|okay|pass|approve|approved|accept|ship|fine|solid|correct)\b/.test(s)) return 'good';
+  if (/\b(bad|reject|rejected|poor|fail|wrong|incorrect|unusable)\b/.test(s)) return 'bad';
+  return 'needs-work';
+}
+
 const councilNoteSchema = z.object({
-  verdict: z.enum(['good', 'needs-work', 'bad']),
+  verdict: z.preprocess(normalizeVerdict, z.enum(['good', 'needs-work', 'bad'])).catch('needs-work'),
   confidence: z.coerce.number().catch(0.5),
   realIntent: z.string().catch(''),
   hiddenMeaning: z.string().catch(''),
@@ -240,8 +252,11 @@ function buildUserPrompt(input: CouncilInput): string {
 }
 
 function extractJsonObject(raw: string): string | null {
-  const trimmed = raw.trim();
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  // Strip reasoning blocks first (deepseek-r1 et al. wrap output in <think>…</think> with their own
+  // braces) so we don't grab JSON-looking content out of the reasoning instead of the answer.
+  let trimmed = String(raw ?? '').replace(/<think>[\s\S]*?<\/think>/gi, ' ').replace(/<\/?think>/gi, ' ').trim();
+  // A fenced ```json … ``` block ANYWHERE (not only when it's the whole message).
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
   const body = fenced ? fenced[1].trim() : trimmed;
   if (body.startsWith('{') && body.endsWith('}')) return body;
   const first = body.indexOf('{');

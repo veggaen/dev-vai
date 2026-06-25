@@ -416,4 +416,26 @@ describe('createCouncilMember', () => {
     const n = parseCouncilNote('{"verdict":"good","confidence":9,"suggestedAction":"answer-directly"}', { memberId: 'x', memberName: 'X', topic: 'factual', durationMs: 1 });
     expect(n?.confidence).toBe(1);
   });
+
+  // The "council not working" bug: members ANSWERED but a variant verdict word or wrapping made the
+  // strict parse discard the whole note → 0 usable → council rubber-stamped the draft.
+  const meta = { memberId: 'x', memberName: 'X', topic: 'factual' as const, durationMs: 1 };
+  it('SALVAGE: a variant verdict word is normalised, not discarded', () => {
+    expect(parseCouncilNote('{"verdict":"ok","confidence":0.8}', meta)?.verdict).toBe('good');
+    expect(parseCouncilNote('{"verdict":"approve"}', meta)?.verdict).toBe('good');
+    expect(parseCouncilNote('{"verdict":"reject"}', meta)?.verdict).toBe('bad');
+    expect(parseCouncilNote('{"verdict":"meh"}', meta)?.verdict).toBe('needs-work');
+  });
+  it('SALVAGE: a note with a MISSING verdict still counts (defaults needs-work, not null)', () => {
+    const n = parseCouncilNote('{"confidence":0.7,"realIntent":"compare frameworks"}', meta);
+    expect(n).not.toBeNull();
+    expect(n?.verdict).toBe('needs-work');
+    expect(n?.realIntent).toBe('compare frameworks');
+  });
+  it('SALVAGE: JSON wrapped in <think> blocks and prose is still extracted', () => {
+    const raw = '<think>I should rate this good because the draft is solid {not this brace}</think>\nHere is my note:\n```json\n{"verdict":"good","confidence":0.9}\n```';
+    const n = parseCouncilNote(raw, meta);
+    expect(n?.verdict).toBe('good');
+    expect(n?.confidence).toBe(0.9);
+  });
 });
