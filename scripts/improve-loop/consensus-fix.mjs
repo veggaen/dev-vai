@@ -147,15 +147,29 @@ if (ranked.length === 0) {
   }
   console.log('→ This is a SIGNAL: the bug needs human analysis, not more qwen rounds.');
 } else {
-  const [find, group] = ranked[0];
+  const [, group] = ranked[0];
   const top = group[0];
+  // CRITICAL: store the WINNER's ACTUAL full find (top.find), NOT the cluster KEY (which was
+  // find.slice(0,80) for grouping only). Storing the 80-char-truncated key was the apply-time
+  // revert bug: a truncated find ends mid-regex → unbalanced parens/slashes → tsc fails → revert
+  // every cycle, even though the model's real proposal was clean and verified. (Found by grading
+  // the live loop: routing/comparison reverted-red twice on a find cut at "…|\\bdiffer".)
+  const find = top.find;
+  // RE-VERIFY the exact (find, replace) we are about to store — it must pass the full mechanical
+  // gate (exists, executable, unique, balanced). Only mark verified=1 when it genuinely is, so a
+  // truncated/unbalanced patch can never reach apply-consensus as "verified".
+  const finalVerdict = verifyProposal({ file: top.file, find, replace: top.replace ?? '' }, { readFile: (p) => readFileSync(p, 'utf8') });
   const distinctModels = [...new Set(group.map((g) => g.model ?? 'default'))];
   console.log(`WINNER · ${group.length}/${proposals.length} agreement · ${distinctModels.length} distinct model(s): ${distinctModels.join(', ')} · personas: ${[...new Set(group.map((g) => g.persona))].join(', ')}`);
   console.log('file:', top.file);
   console.log('find:', JSON.stringify(find));
   console.log('replace:', JSON.stringify(top.replace));
   console.log('why:', top.why);
-  db.prepare('INSERT INTO consensus (class,file,find,replace,agree_count,personas,verified,why,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run(TARGET, top.file, find, top.replace ?? '', group.length, [...new Set(group.map((g) => g.persona))].join(','), 1, top.why ?? '', new Date().toISOString());
-  console.log('\n→ saved to consensus table. Human/architect grades + applies the winner.');
+  if (!finalVerdict.ok) {
+    console.log(`\n⛔ winner FAILED final verification (${finalVerdict.code}: ${finalVerdict.detail}) — NOT saved (would revert at apply). The bug needs human analysis.`);
+  } else {
+    db.prepare('INSERT INTO consensus (class,file,find,replace,agree_count,personas,verified,why,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(TARGET, top.file, find, top.replace ?? '', group.length, [...new Set(group.map((g) => g.persona))].join(','), 1, top.why ?? '', new Date().toISOString());
+    console.log('\n→ saved to consensus table (re-verified). apply-consensus applies the winner.');
+  }
 }
