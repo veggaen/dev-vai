@@ -30,6 +30,27 @@ export function currentBranch() {
   return r.code === 0 ? r.out.trim() : '';
 }
 
+/** The current HEAD commit sha (short), or '' if undetectable. Captured before a loop commit so a
+ *  failed behavioural-acceptance check can revert exactly that commit. */
+export function headSha() {
+  const r = sh('git', ['rev-parse', '--short', 'HEAD']);
+  return r.code === 0 ? r.out.trim() : '';
+}
+
+/**
+ * Revert a specific commit by sha with `git revert --no-edit` (a NEW commit that undoes it — honest
+ * history, never a force-reset that rewrites it). Branch-guarded like commit(). Returns {ok,detail}.
+ * Used by the acceptance gate: a fix that passed tsc + committed but did NOT make the class's broken
+ * prompts recover is behaviourally wrong and must be backed out, not left to rot in the branch.
+ */
+export function revertCommit(sha, { branch = AUTO_IMPROVE_BRANCH } = {}) {
+  if (!sha) return { ok: false, detail: 'no sha to revert' };
+  const head = currentBranch();
+  if (head !== branch) return { ok: false, detail: `refusing to revert: HEAD is '${head}', not '${branch}'` };
+  const r = sh('git', ['revert', '--no-edit', sha]);
+  return r.code === 0 ? { ok: true, detail: `reverted ${sha}` } : { ok: false, detail: `git revert failed: ${r.out.slice(0, 160)}` };
+}
+
 /**
  * Build the real deps for applyVerifiedFix.
  * @param opts {

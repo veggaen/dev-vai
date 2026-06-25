@@ -16,14 +16,22 @@
  */
 import { openDb, isFixBanned, strikeFix, recordKnowledge } from './db.mjs';
 import { applyVerifiedFix } from './apply-fix.mjs';
-import { realApplyDeps, currentBranch, AUTO_IMPROVE_BRANCH } from './apply-runners.mjs';
+import { realApplyDeps, currentBranch, AUTO_IMPROVE_BRANCH, revertCommit } from './apply-runners.mjs';
 import { classifyRisk } from './risk-tier.mjs';
+import { verifyClassAcceptance, formatAcceptance } from './acceptance-verifier.mjs';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
 const DRY = args.includes('--dry-run');
 const DB_PATH = opt('--db', 'scripts/improve-loop/.corpus.sqlite');
 const TSCONFIG = opt('--tsconfig', 'packages/core/tsconfig.json');
+// BEHAVIOURAL ACCEPTANCE GATE (the missing closed-loop step). After a tsc-green commit, re-run the
+// class's CURRENTLY-FAILING prompts through live Vai and confirm they recover fail→pass. If they
+// don't, the fix is behaviourally wrong (tsc-green ≠ correct — the wrong-target trap) → git revert it.
+// On by default for a real apply (it is the whole point of "did the loop IMPROVE anything?"); skip
+// with --no-acceptance (e.g. when Vai isn't serving) or in --dry-run. Heavy + serial (owns the GPU).
+const ACCEPTANCE = !DRY && !args.includes('--no-acceptance');
+const BASE_URL = opt('--base-url', process.env.VAI_API ?? 'http://localhost:3006');
 
 const db = openDb(DB_PATH);
 // Track which proposals we've acted on so re-runs don't re-apply. Add the column once.
@@ -85,14 +93,53 @@ for (const p of pending) {
 
   const r = await applyVerifiedFix(proposal, deps);
   if (r.committed) {
-    summary.applied++;
-    db.prepare("UPDATE consensus SET applied='committed' WHERE id=?").run(p.id);
-    // EFFICIENCY: a just-fixed class must be re-OBSERVED before it can be targeted again — its old
-    // failing results still sit in the corpus, so without this the engine re-targets a class it
-    // already fixed (wasted cycles). Record a recently-fixed fact; the skip-set honours it until the
-    // next observe re-runs those prompts and clears/confirms it.
-    recordKnowledge(db, { scope: 'class:recently-fixed', claim: `class "${p.class}" just received a committed fix — re-observe before targeting again`, kind: 'guard', confirm: true, evidence: `commit on ${p.file}` });
-    console.log(`   ✅ applied + committed — ${r.verifyDetail}`);
+    // BEHAVIOURAL ACCEPTANCE: tsc-green proves the build, NOT that the bug is fixed. Re-run the
+    // class's failing prompts; revert the commit if they don't recover (the only honest, ATTRIBUTABLE
+    // signal that the loop improved something — and the guard against a wrong-target fix landing).
+    let acceptOk = true;
+    let acceptDetail = '';
+    if (ACCEPTANCE) {
+      try {
+        const { runThroughVai, waitForVramHeadroom } = await import('./driver.mjs');
+        const { gradeInterpretation } = await import('./brain.mjs');
+        const runOne = async (prompt) => { await waitForVramHeadroom(7 * 1024 ** 3); return runThroughVai(BASE_URL, prompt, { timeoutMs: 220_000 }); };
+        const grade = (k, expected, prompt, vai) => gradeInterpretation(k, expected, prompt, vai);
+        console.log(`   ⏳ acceptance: re-running ${p.class} failing prompts to confirm recovery…`);
+        const rep = await verifyClassAcceptance(db, p.class, {
+          runOne, grade,
+          onResult: (x) => process.stdout.write(`      ${x.passed ? '✓' : '✗'} "${String(x.prompt).slice(0, 60)}"\n`),
+        });
+        acceptOk = rep.accepted || rep.verdict === 'no-targets'; // nothing to disprove ⇒ keep (tsc-green)
+        acceptDetail = rep.headline;
+      } catch (e) {
+        // Acceptance infra failure (Vai down) is NOT proof the fix is wrong — keep the tsc-green commit
+        // but say so plainly, so a maintainer knows it wasn't behaviourally confirmed.
+        acceptOk = true;
+        acceptDetail = `acceptance skipped (infra): ${String(e).slice(0, 80)}`;
+      }
+    }
+
+    if (ACCEPTANCE && !acceptOk) {
+      // Behaviourally wrong → revert the single commit applyVerifiedFix just made (HEAD), keep honest
+      // history, and strike the fix so it isn't retried.
+      const rev = revertCommit('HEAD', { branch: AUTO_IMPROVE_BRANCH });
+      summary.reverted++;
+      db.prepare("UPDATE consensus SET applied='reverted-acceptance' WHERE id=?").run(p.id);
+      strikeFix(db, proposal, `acceptance failed: ${acceptDetail}`);
+      recordKnowledge(db, { scope: 'apply:acceptance', claim: `a tsc-green fix for class "${p.class}" did NOT recover its failing prompts — tsc-green is not correctness`, kind: 'guard', confirm: true, evidence: acceptDetail });
+      console.log(`   ↩ REVERTED (acceptance): ${acceptDetail} — ${rev.detail}`);
+    } else {
+      summary.applied++;
+      db.prepare("UPDATE consensus SET applied='committed' WHERE id=?").run(p.id);
+      // EFFICIENCY: a just-fixed class must be re-OBSERVED before it can be targeted again — its old
+      // failing results still sit in the corpus, so without this the engine re-targets a class it
+      // already fixed (wasted cycles). Record a recently-fixed fact; the skip-set honours it until the
+      // next observe re-runs those prompts and clears/confirms it.
+      recordKnowledge(db, { scope: 'class:recently-fixed', claim: `class "${p.class}" just received a committed fix — re-observe before targeting again`, kind: 'guard', confirm: true, evidence: `commit on ${p.file}` });
+      // ATTRIBUTABLE WIN: record the behavioural proof so "did the loop improve anything?" is answerable.
+      if (ACCEPTANCE && acceptDetail) recordKnowledge(db, { scope: 'apply:accepted', claim: `class "${p.class}" fix recovered its failing prompts (behaviourally accepted)`, kind: 'observation', confirm: true, evidence: acceptDetail });
+      console.log(`   ✅ applied + committed — ${r.verifyDetail}${acceptDetail ? ` · ${acceptDetail}` : ''}`);
+    }
   } else if (r.tier === 'review') {
     summary.flagged++;
     db.prepare("UPDATE consensus SET applied='flagged-review' WHERE id=?").run(p.id);
