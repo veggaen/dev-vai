@@ -17,6 +17,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 
 export function openDb(path) {
   mkdirSync(dirname(path), { recursive: true });
@@ -152,6 +153,18 @@ export function openDb(path) {
     CREATE TABLE IF NOT EXISTS loop_state (
       key TEXT PRIMARY KEY,
       value REAL NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    -- fix_quarantine — a dead-fix ban list. A proposed fix (file+find+replace) that fails verify
+    -- repeatedly must NOT be re-attempted forever (the BSOD-empty-file doom-loop: ~900 cycles
+    -- re-trying the same un-appliable patch). After STRIKE_LIMIT failures the signature is banned,
+    -- and apply-consensus skips it. Bounded: one row per distinct dead fix, not a growing corpus.
+    CREATE TABLE IF NOT EXISTS fix_quarantine (
+      sig TEXT PRIMARY KEY,          -- hash of file|find|replace
+      file TEXT, find TEXT, "replace" TEXT,
+      strikes INTEGER NOT NULL DEFAULT 0,
+      banned INTEGER NOT NULL DEFAULT 0,
+      last_detail TEXT,
       updated_at TEXT NOT NULL
     );
   `);
@@ -317,6 +330,39 @@ export function recordKnowledge(db, { scope, claim, kind = 'observation', eviden
        confirmations  = project_knowledge.confirmations  + ?,
        contradictions = project_knowledge.contradictions + ?`,
   ).run(scope, claim, kind, evidence, confirm ? 1 : 0, confirm ? 0 : 1, now, now, confirm ? 1 : 0, confirm ? 0 : 1);
+}
+
+// ── Dead-fix quarantine (loop-detection / anti-doom-loop) ────────────────────────────────────
+// A fix that fails verify STRIKE_LIMIT times is banned so the loop stops re-attempting it and
+// spends the compute on real work instead. Pure signature so it's stable across cycles.
+export const STRIKE_LIMIT = 2;
+
+/** Stable signature for a fix attempt. Same file+find+replace ⇒ same sig ⇒ strikes accumulate. */
+export function fixSignature({ file = '', find = '', replace = '' } = {}) {
+  return createHash('sha1').update(`${file} ${find} ${replace}`).digest('hex').slice(0, 16);
+}
+
+/** Record one verify FAILURE for a fix; bans it once it reaches STRIKE_LIMIT. Returns {strikes,banned}. */
+export function strikeFix(db, fix, detail = '') {
+  const sig = fixSignature(fix);
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO fix_quarantine (sig, file, find, "replace", strikes, banned, last_detail, updated_at)
+     VALUES (?, ?, ?, ?, 1, 0, ?, ?)
+     ON CONFLICT(sig) DO UPDATE SET
+       strikes = fix_quarantine.strikes + 1,
+       banned  = CASE WHEN fix_quarantine.strikes + 1 >= ${STRIKE_LIMIT} THEN 1 ELSE 0 END,
+       last_detail = excluded.last_detail,
+       updated_at  = excluded.updated_at`,
+  ).run(sig, fix.file ?? '', fix.find ?? '', fix.replace ?? '', String(detail).slice(0, 300), now);
+  const row = db.prepare('SELECT strikes, banned FROM fix_quarantine WHERE sig=?').get(sig);
+  return { strikes: Number(row.strikes), banned: !!row.banned };
+}
+
+/** True if this exact fix has been banned (failed verify ≥ STRIKE_LIMIT times). */
+export function isFixBanned(db, fix) {
+  const row = db.prepare('SELECT banned FROM fix_quarantine WHERE sig=?').get(fixSignature(fix));
+  return !!(row && row.banned);
 }
 
 /**

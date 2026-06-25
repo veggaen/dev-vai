@@ -14,7 +14,7 @@
  *   node scripts/improve-loop/apply-consensus.mjs --dry-run       # classify + report, never write/commit
  *   node scripts/improve-loop/apply-consensus.mjs --db <path> --tsconfig packages/core/tsconfig.json
  */
-import { openDb } from './db.mjs';
+import { openDb, isFixBanned, strikeFix } from './db.mjs';
 import { applyVerifiedFix } from './apply-fix.mjs';
 import { realApplyDeps, currentBranch, AUTO_IMPROVE_BRANCH } from './apply-runners.mjs';
 import { classifyRisk } from './risk-tier.mjs';
@@ -67,6 +67,14 @@ for (const p of pending) {
     console.log(`\n▸ [${p.class}] ${p.file}  (rejected)\n   – skipped: proposal's own rationale flags it as not-to-apply`);
     continue;
   }
+  // ANTI-DOOM-LOOP: a fix that already failed verify STRIKE_LIMIT times is banned. Skip it so the
+  // loop never re-attempts a dead patch forever (the BSOD-empty-file ~900-cycle stall). #40/#78.
+  if (!DRY && isFixBanned(db, proposal)) {
+    summary.skipped++;
+    db.prepare("UPDATE consensus SET applied='skipped-quarantined' WHERE id=?").run(p.id);
+    console.log(`\n▸ [${p.class}] ${p.file}  (quarantined)\n   – skipped: this exact fix failed verify ≥2× — banned to break the doom-loop`);
+    continue;
+  }
   const risk = classifyRisk(proposal);
   process.stdout.write(`\n▸ [${p.class}] ${p.file}  (${risk.tier})\n`);
 
@@ -88,7 +96,9 @@ for (const p of pending) {
   } else if (r.verifyDetail && /reverted/i.test(r.verifyDetail)) {
     summary.reverted++;
     db.prepare("UPDATE consensus SET applied='reverted-red' WHERE id=?").run(p.id);
-    console.log(`   ↩ reverted — ${r.verifyDetail}`);
+    // Strike the dead fix; after STRIKE_LIMIT failures it's banned and skipped next time.
+    const { strikes, banned } = strikeFix(db, proposal, r.verifyDetail);
+    console.log(`   ↩ reverted — ${r.verifyDetail}  [strike ${strikes}${banned ? ' → BANNED (won\'t retry)' : ''}]`);
   } else {
     summary.skipped++;
     db.prepare("UPDATE consensus SET applied='skipped' WHERE id=?").run(p.id);
