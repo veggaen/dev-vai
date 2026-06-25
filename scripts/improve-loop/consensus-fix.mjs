@@ -120,17 +120,40 @@ try {
   }
   if (proposals.length) console.log(`   seeded ${proposals.length} prior-verified proposal(s) from the proposals table (re-verified)`);
 } catch { /* no proposals table yet — proceed with fresh rounds only */ }
-for (let r = 0; r < REPEATS; r++) {
-  for (let i = 0; i < panel.length; i++) {
+
+const seededCount = proposals.length;
+// WALL-CLOCK BOUND for the council (the stall fix, applied to consensus like observe): a single
+// hung 8B tool-loop call froze the whole loop for minutes (measured live: stuck on persona round 1
+// with no timeout firing). Cap total council wall-time; stop STARTING new persona rounds past it.
+const COUNCIL_MS = Math.max(0, Number(opt('--council-ms', String(4 * 60_000))) || 0);
+// SEED SHORT-CIRCUIT: if seeds already gave us verified proposals, we don't NEED a full 6-persona
+// council — run a small diversity sample, not the whole panel. This is the difference between a
+// 6-10 min consensus (often hanging) and a fast one that converges on what the loop already verified.
+const personaCap = seededCount >= 1 ? Math.min(2, panel.length) : panel.length;
+const councilStart = Date.now();
+let councilStopped = false;
+for (let r = 0; r < REPEATS && !councilStopped; r++) {
+  for (let i = 0; i < personaCap; i++) {
+    if (COUNCIL_MS > 0 && Date.now() - councilStart >= COUNCIL_MS) {
+      console.log(`   ⏱ council wall-clock budget reached (${Math.round(COUNCIL_MS / 60000)}m) — proceeding with ${proposals.filter((p) => p.verified).length} verified proposal(s)`);
+      councilStopped = true; break;
+    }
     const persona = panel[i];
     const model = models[i % models.length]; // rotate models across personas → cross-model diversity
     process.stdout.write(`  ▸ ${persona.id} @ ${model ?? 'default'} (round ${r + 1})… `);
     let res;
     try {
-      res = await proposeGrounded({
-        klass: TARGET, summary, fails, hintFile, maxSteps: STEPS, model,
-        preamble: personaPreamble(persona, { klass: TARGET, summary }),
-      });
+      // PER-PERSONA TIMEOUT: a tool-loop call can hang indefinitely (measured: stuck on round 1 with
+      // no internal timeout). Race it against a hard deadline so ONE slow model can't freeze the loop;
+      // a timed-out persona just contributes nothing (we still have seeds + the others).
+      const PERSONA_MS = Math.max(30_000, Number(opt('--persona-ms', '90000')) || 90_000);
+      res = await Promise.race([
+        proposeGrounded({
+          klass: TARGET, summary, fails, hintFile, maxSteps: STEPS, model,
+          preamble: personaPreamble(persona, { klass: TARGET, summary }),
+        }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error(`persona timeout ${PERSONA_MS}ms`)), PERSONA_MS)),
+      ]);
     } catch (e) { console.log('error', String(e).slice(0, 50)); continue; }
     const p = res.proposal;
     if (!p || !p.find) { console.log('no proposal'); continue; }
