@@ -72,8 +72,38 @@ if (!readOk) {
   console.log(`⛔ no-file: class ${fix.class} → "${filePath}" is not a readable source. Skipping (recorded so the loop deprioritises it).`);
   process.exit(0);
 }
-// Keep it within context: head of file (where the regexes/guards live).
-const sourceExcerpt = source.split('\n').slice(0, 130).map((l, i) => `${i + 1}: ${l}`).join('\n');
+// LOCATION-AWARE EXCERPT: show qwen the RELEVANT slice, not just the head. A 1840-line file shown
+// head-only made qwen hallucinate `find` lines it never saw (the opportunity-framing stall: the
+// real logic is at line 526+). Center the window on the location's :line hint if present, else on
+// the best keyword match for the class; fall back to the head only when nothing matches.
+const lines = source.split('\n');
+const WINDOW = 150;
+function excerptAround(centerIdx) {
+  const start = Math.max(0, centerIdx - Math.floor(WINDOW / 2));
+  const end = Math.min(lines.length, start + WINDOW);
+  return lines.slice(start, end).map((l, i) => `${start + i + 1}: ${l}`).join('\n');
+}
+let centerIdx = -1;
+// (1) explicit :line in the location, e.g. "build-execution-intent.ts:88"
+const lineHint = /:(\d+)/.exec(fix.location);
+if (lineHint) centerIdx = Math.max(0, Number(lineHint[1]) - 1);
+// (2) else grep for the most distinctive term from the class name / failing prompts.
+if (centerIdx < 0) {
+  const terms = [...new Set(
+    (`${fix.class} ${fix.summary} ${fails.map((f) => f.prompt).join(' ')}`)
+      .toLowerCase().match(/[a-z]{5,}/g) || [],
+  )].filter((t) => !['answer', 'routing', 'where', 'which', 'should', 'about', 'these', 'their'].includes(t));
+  let best = -1; let bestIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const low = lines[i].toLowerCase();
+    const score = terms.reduce((s, t) => s + (low.includes(t) ? 1 : 0), 0);
+    if (score > best) { best = score; bestIdx = i; }
+  }
+  if (best > 0) centerIdx = bestIdx;
+}
+const sourceExcerpt = centerIdx >= 0 && lines.length > WINDOW
+  ? excerptAround(centerIdx)
+  : lines.slice(0, WINDOW).map((l, i) => `${i + 1}: ${l}`).join('\n');
 
 // Free web evidence (Vegga: council/Vai run local but HAVE web — use it). Opt-in via
 // VAI_FIX_WEB_EVIDENCE=1; best-effort, never blocks. Grounds the patch in current docs/discussion.
@@ -102,7 +132,7 @@ ${learnedBlock}
 FAILING CASES (prompt → how the AI wrongly read/answered it):
 ${fails.map((f) => `- "${f.prompt}" → read:"${f.read_as ?? '?'}" → ${f.grade_reason}`).join('\n')}
 ${webBlock ? '\n' + webBlock + '\n' : ''}
-ACTUAL SOURCE (${filePath}, first 130 lines):
+ACTUAL SOURCE (${filePath} — the relevant excerpt; line numbers are REAL, quote a "find" only from these lines):
 \`\`\`typescript
 ${sourceExcerpt}
 \`\`\`
@@ -160,6 +190,25 @@ if (!verdict.ok && verdict.code !== 'no-find') {
     'ambiguous-find': 'pick a "find" that occurs exactly once so the patch has a unique anchor',
   }[verdict.code];
   if (guardClaim) recordKnowledge(db, { scope: KNOW_SCOPE, claim: guardClaim, kind: 'guard', confirm: true, evidence: `observed on ${fix.class}` });
+
+  // MODEL-GROUNDING DEAD-END: if THIS class keeps getting hallucinated/unparseable finds, the
+  // model cannot ground a fix here (file too big, logic too diffuse for an 8B). After 3 strikes,
+  // flag it ungroundable so the engine targets a class the model CAN actually fix — instead of
+  // spinning on opportunity-framing forever. The propose:no-file scope drives ungroundableClasses().
+  const HALLUC_CODES = new Set(['hallucinated-find', 'no-find', 'ambiguous-find']);
+  if (HALLUC_CODES.has(verdict.code)) {
+    const recent = db.prepare(
+      "SELECT COUNT(*) c FROM proposals WHERE class=? AND status LIKE 'auto-rejected:%' AND (status LIKE '%hallucinated-find%' OR status LIKE '%no-find%' OR status LIKE '%ambiguous-find%')",
+    ).get(fix.class);
+    if (Number(recent.c) >= 3) {
+      recordKnowledge(db, {
+        scope: 'propose:no-file',
+        claim: `class "${fix.class}" has no resolvable source file (location="${fix.location}") — the model cannot ground a fix (≥3 hallucinated/empty proposals)`,
+        kind: 'guard', confirm: true, evidence: `${recent.c} ungroundable proposals on a real but un-localisable file`,
+      });
+      console.log(`⛔ model-grounding dead-end on ${fix.class} (${recent.c} hallucinated) → flagged ungroundable; engine will move on.`);
+    }
+  }
 }
 
 console.log('\n━━━ qwen proposal ['+fix.class+'] ━━━');
