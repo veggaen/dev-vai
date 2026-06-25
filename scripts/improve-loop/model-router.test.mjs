@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickRoster, routeThroughModels, withModelMounted, tallyConsensus, buildBestAnswerVote, parseBestVote } from './model-router.mjs';
+import { pickRoster, routeThroughModels, withModelMounted, tallyConsensus, buildBestAnswerVote, parseBestVote, isCoderModel } from './model-router.mjs';
 
 const GB = 1024 ** 3;
 const INSTALLED = [
@@ -18,6 +18,21 @@ test('pickRoster: biggest-first, excludes over-budget + excluded models, capped'
 
 test('pickRoster: every model over budget ⇒ empty (never mounts something that wont fit)', () => {
   assert.deepEqual(pickRoster(INSTALLED, { budgetBytes: 1 * GB }), []);
+});
+
+test('isCoderModel: recognises code-specialized models', () => {
+  assert.equal(isCoderModel('qwen2.5-coder:7b'), true);
+  assert.equal(isCoderModel('deepseek-coder:6.7b'), true);
+  assert.equal(isCoderModel('qwen3:8b'), false);
+});
+
+test('pickRoster: a CODER model is ranked first even if a general model is bigger', () => {
+  const withCoder = [
+    { name: 'qwen2.5-coder:7b', sizeBytes: 4.7 * GB },
+    ...INSTALLED,
+  ];
+  const r = pickRoster(withCoder, { budgetBytes: 8.5 * GB, max: 3 });
+  assert.equal(r[0], 'qwen2.5-coder:7b', 'the coder model leads the roundtable');
 });
 
 test('routeThroughModels: SERIAL — waits for headroom before EACH model, one at a time', async () => {

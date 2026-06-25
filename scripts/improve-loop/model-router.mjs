@@ -12,15 +12,24 @@
  * injected deps (generate / vram / installed / wait), so it unit-tests without a GPU.
  */
 
-/** Choose the roster: installed models that individually fit the VRAM budget, biggest-first
- *  (a bigger model is usually a better localiser), capped at `max`. Excludes the embedded Vai
- *  runtime model so we never evict the live app's model out from under it. */
+/** A code-specialized model is a far better fix-localiser than a general model of the same size —
+ *  it emits correct syntax and is much less likely to truncate an edit. Rank these FIRST. */
+export function isCoderModel(name = '') {
+  return /coder|code-?llama|starcoder|deepseek-?coder|codestral|codeqwen/i.test(name);
+}
+
+/** Choose the roster: installed models that individually fit the VRAM budget, capped at `max`.
+ *  Ordering: CODER models first (best at code edits), then biggest-first (a bigger general model
+ *  is usually a better localiser). Excludes the embedded Vai runtime model so we never evict the
+ *  live app's model out from under it. */
 export function pickRoster(installed, { budgetBytes, max = 3, exclude = [] } = {}) {
   const ex = new Set(exclude);
   return (installed || [])
     .filter((m) => m && m.name && !ex.has(m.name))
     .filter((m) => !budgetBytes || !m.sizeBytes || m.sizeBytes <= budgetBytes)
-    .sort((a, b) => (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0))
+    .sort((a, b) =>
+      (Number(isCoderModel(b.name)) - Number(isCoderModel(a.name))) || // coder models first
+      ((b.sizeBytes ?? 0) - (a.sizeBytes ?? 0)))                       // then biggest-first
     .slice(0, max)
     .map((m) => m.name);
 }
