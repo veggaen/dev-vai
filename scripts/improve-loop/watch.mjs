@@ -242,13 +242,107 @@ function visualPanel(visualRun, visualLive, visualEvents) {
     </div>${rows}`;
 }
 
+/**
+ * loopStatus — the PLAIN-LANGUAGE summary of what the loop is actually doing, for the hero panel.
+ * Reads the real human-meaningful signals (not machine cycle-speak): is it running or idle, what
+ * has it INNOVATED (autonomous guards it built+proved), what did it ESCALATE to V3gga (fundamental
+ * gaps it won't build alone), what's the latest health verdict, and where the pass-rate sits.
+ * This is the answer to "what is the loop doing?" a human can read at a glance. Never throws.
+ */
+function loopStatus() {
+  const db = openDb(DB_PATH);
+  const q = (s, ...a) => { try { return db.prepare(s).all(...a); } catch { return []; } };
+  const one = (s, ...a) => { try { return db.prepare(s).get(...a); } catch { return null; } };
+
+  const run = one('SELECT id,status,started_at,ended_at FROM runs ORDER BY id DESC LIMIT 1');
+  const running = run?.status === 'running';
+  // Bounded-cycle health: how long the last finished run took + whether it stopped on the budget.
+  const lastFinished = one("SELECT status,started_at,ended_at FROM runs WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT 1");
+  const lastDurS = lastFinished?.ended_at ? Math.round((new Date(lastFinished.ended_at) - new Date(lastFinished.started_at)) / 1000) : null;
+
+  // INNOVATIONS the loop built autonomously (from the knowledge spine this session wires).
+  const innovations = q("SELECT claim, evidence, last_seen FROM project_knowledge WHERE scope IN ('innovation:autonomous','feature:built') ORDER BY last_seen DESC LIMIT 6")
+    .map((r) => ({ what: r.claim, proof: r.evidence, at: r.last_seen }));
+  // ESCALATIONS — fundamental gaps the loop found but won't build alone (it taps V3gga).
+  const escalations = q("SELECT claim, evidence, last_seen FROM project_knowledge WHERE scope='innovation:escalate' ORDER BY last_seen DESC LIMIT 6")
+    .map((r) => ({ what: r.claim, why: r.evidence, at: r.last_seen }));
+  // Latest health verdict (working / not / inconclusive), in plain words.
+  const healthRow = q("SELECT detail FROM loop_events WHERE kind='health' ORDER BY id DESC LIMIT 1")[0];
+  let health = null; try { health = healthRow ? JSON.parse(healthRow.detail) : null; } catch {}
+
+  // Pass-rate of the most recent meaningful run (≥8 prompts), and the weakest class right now.
+  const trend = q(`SELECT r.id, COUNT(res.id) t, COALESCE(SUM(res.passed),0) p FROM runs r
+    LEFT JOIN results res ON res.run_id=r.id GROUP BY r.id HAVING t>=8 ORDER BY r.id DESC LIMIT 1`)[0];
+  const passPct = trend && trend.t ? Math.round((trend.p / trend.t) * 100) : null;
+  const weakest = q(`SELECT class, COUNT(*) t, COALESCE(SUM(passed),0) p FROM results
+    GROUP BY class HAVING t>=4 ORDER BY (1.0*p/t) ASC LIMIT 1`)[0];
+
+  db.close();
+  return {
+    running,
+    state: running ? 'running' : 'idle',
+    lastCycleSeconds: lastDurS,
+    lastCycleBounded: lastFinished?.status === 'budget-stopped',
+    innovations, escalations,
+    health: health ? { working: health.working, reason: health.reason } : null,
+    passPct,
+    weakest: weakest ? { class: weakest.class, pct: Math.round((weakest.p / weakest.t) * 100), passed: weakest.p, total: weakest.t } : null,
+  };
+}
+
+/** The plain-language HERO panel — answers "what is the loop doing?" with no machine-speak. */
+function loopHeroPanel() {
+  return `<div id="loop-hero" style="margin:6px 0 22px"><div style="color:#667;font-size:12px">loading…</div></div>
+  <script>(function(){
+    function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+    function timeAgo(iso){ if(!iso) return ''; var s=Math.round((Date.now()-new Date(iso))/1000); if(s<60)return s+'s ago'; if(s<3600)return Math.round(s/60)+'m ago'; if(s<86400)return Math.round(s/3600)+'h ago'; return Math.round(s/86400)+'d ago'; }
+    function card(bg,bd,inner){ return '<div style="background:'+bg+';border:1px solid '+bd+';border-radius:10px;padding:14px 16px;margin:10px 0">'+inner+'</div>'; }
+    async function tick(){
+      try{
+        var s=await (await fetch('/loop.json',{cache:'no-store'})).json();
+        var el=document.getElementById('loop-hero'); if(!el) return;
+        var html='';
+        // STATUS line
+        var dot = s.running ? '#3c9' : '#667';
+        var cyc = s.lastCycleSeconds!=null ? (' · last cycle '+s.lastCycleSeconds+'s'+(s.lastCycleBounded?' (bounded ✓)':'')) : '';
+        html += '<div style="display:flex;align-items:center;gap:9px;font-size:14px;color:#cde;margin-bottom:4px">'
+          +'<span style="width:9px;height:9px;border-radius:50%;background:'+dot+';'+(s.running?'animation:p 1.2s infinite':'')+'"></span>'
+          +'<b>'+(s.running?'The loop is running':'The loop is idle')+'</b>'
+          +'<span style="color:#667;font-size:12px">'+esc(cyc)+'</span></div>';
+        // HEALTH in plain words
+        if(s.health){
+          var w=s.health.working; var tone=w===true?'#8d9':w===false?'#f99':'#dc9';
+          var label=w===true?'It is improving the codebase':w===false?'It is running but not yet improving anything':'Too early to tell if it is improving';
+          html += '<div style="font-size:13px;color:'+tone+';margin-bottom:10px">'+esc(label)+(s.passPct!=null?' · pass-rate '+s.passPct+'%':'')+'</div>';
+        }
+        // INNOVATIONS it built itself
+        var innerI = (s.innovations&&s.innovations.length)
+          ? s.innovations.map(function(x){ return '<div style="margin:7px 0"><div style="color:#9e9;font-size:13px">✅ '+esc(x.what)+'</div>'+(x.proof?'<div style="color:#789;font-size:11px;margin-top:2px">'+esc(x.proof).slice(0,160)+'</div>':'')+'<div style="color:#566;font-size:11px">'+esc(timeAgo(x.at))+'</div></div>'; }).join('')
+          : '<div style="color:#667;font-size:12px">Nothing built yet — it builds a fix only when it can prove the fix works on its own data.</div>';
+        html += card('#0d1510','#1f3a26','<div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6a8;margin-bottom:4px">What it built itself (proven)</div>'+innerI);
+        // ESCALATIONS for V3gga
+        if(s.escalations&&s.escalations.length){
+          var innerE = s.escalations.map(function(x){ return '<div style="margin:7px 0"><div style="color:#fb8;font-size:13px">🚩 '+esc(x.what)+'</div>'+(x.why?'<div style="color:#987;font-size:11px;margin-top:2px">'+esc(x.why).slice(0,160)+'</div>':'')+'<div style="color:#766;font-size:11px">'+esc(timeAgo(x.at))+'</div></div>'; }).join('');
+          html += card('#15110b','#3a2a14','<div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#b95;margin-bottom:4px">🚩 Needs you — fundamental, the loop won\\'t build it alone</div>'+innerE);
+        }
+        // WEAKEST class it's working on
+        if(s.weakest){
+          html += '<div style="font-size:12px;color:#9ab;margin-top:8px">Currently weakest: <code style="color:#9ad">'+esc(s.weakest.class)+'</code> at '+s.weakest.pct+'% ('+s.weakest.passed+'/'+s.weakest.total+')</div>';
+        }
+        el.innerHTML=html;
+      }catch(e){}
+      setTimeout(tick,4000);
+    } tick();
+  })();</script>`;
+}
+
 function page() {
   const { run, stats, results, fixes, live, visualRun, visualLive, visualEvents, taste, tasteLessons, loopEvents, banned } = snapshot();
   if (!run) {
     const lf = liveFramePanel();
     const tp = tastePanel(taste, tasteLessons);
     const vp = visualPanel(visualRun, visualLive, visualEvents);
-    return `<html><body style="background:#0b0b10;color:#ddd;font-family:system-ui;padding:40px;max-width:1000px">${enginePanel(loopEvents, banned)}${councilPanel()}${lf}${tp}${vp}</body></html>`;
+    return `<html><head><style>@keyframes p{50%{opacity:.3}}</style></head><body style="background:#0b0b10;color:#ddd;font-family:system-ui;padding:40px;max-width:1000px"><h1 style="font-size:18px;margin:0 0 4px">Vai Improvement Loop</h1><div style="color:#667;font-size:12px;margin-bottom:8px">a self-improving loop that finds its own gaps, builds + proves fixes, and escalates the big calls to you</div>${loopHeroPanel()}<details style="margin-top:14px"><summary style="cursor:pointer;color:#566;font-size:12px">⤵ engine internals</summary>${enginePanel(loopEvents, banned)}</details>${councilPanel()}${lf}${tp}${vp}</body></html>`;
   }
 
   const bar = (frac) => {
@@ -300,10 +394,13 @@ function page() {
   .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:${running ? '#3c3' : '#666'};margin-right:7px;${running ? 'animation:p 1.2s infinite' : ''}}
   @keyframes p{50%{opacity:.3}}</style></head><body>
   <h1><span class="dot"></span>Vai Improvement Loop</h1>
-  <div style="color:#667;font-size:12px">${running ? `live · auto-refreshing` : 'idle'} · council audits the UI against the world-class standard each cycle</div>
-  <div id="app-engine">${enginePanel(loopEvents, banned)}</div>
+  <div style="color:#667;font-size:12px">${running ? `live · auto-refreshing` : 'idle'} · a self-improving loop that finds its own gaps, builds + proves fixes, and escalates the big calls to you</div>
+  ${loopHeroPanel()}
+  <details style="margin-top:14px"><summary style="cursor:pointer;color:#566;font-size:12px">⤵ engine internals (cycle-by-cycle machine trace)</summary>
+  <div id="app-engine">${enginePanel(loopEvents, banned)}</div></details>
+  <details style="margin-top:8px"><summary style="cursor:pointer;color:#566;font-size:12px">⤵ council UI audit (overnight visual work)</summary>
   ${councilPanel()}
-  ${liveFramePanel()}
+  ${liveFramePanel()}</details>
   <details style="margin-top:18px"><summary style="cursor:pointer;color:#566;font-size:12px">⤵ old text-seed lane (run #${run.id}, not the UI work)</summary>
   <div id="app">
   ${livePanel}
@@ -365,6 +462,14 @@ createServer((req, res) => {
       res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'no-store' });
       res.end(buf);
     }).catch(() => { res.writeHead(404); res.end(); });
+    return;
+  }
+  // The plain-language loop summary the hero panel polls — "what is the loop doing?" as data.
+  if (req.url === '/loop.json') {
+    let body = '{}';
+    try { body = JSON.stringify(loopStatus()); } catch (e) { body = JSON.stringify({ error: String(e).slice(0, 120) }); }
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(body);
     return;
   }
   if (req.url === '/council.json') {
