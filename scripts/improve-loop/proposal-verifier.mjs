@@ -60,6 +60,30 @@ export function verifyProposal(proposal, { readFile } = {}) {
   if (count > 1) {
     return { ok: false, code: 'ambiguous-find', detail: `find occurs ${count}× — not a unique anchor` };
   }
+  // BALANCED-EDIT guard: a TRUNCATED find (a fragment that opens a (), [], {} or / regex it never
+  // closes) corrupts the file when replaced — the old tail dangles after the new text. This is the
+  // fresh-data-trigger break: find ended "…|fore", replace was the WHOLE regex, leaving "cast|…)/i;"
+  // orphaned → tsc failure every time. The verifier passed it (it WAS a unique substring) but the
+  // EDIT is structurally unsound. Require: applying find→replace keeps bracket/regex balance.
+  if (proposal.replace != null) {
+    const bal = (s) => {
+      const c = { '(': 0, '[': 0, '{': 0, slash: 0 };
+      for (const ch of String(s)) {
+        if (ch === '(') c['(']++; else if (ch === ')') c['(']--;
+        else if (ch === '[') c['[']++; else if (ch === ']') c['[']--;
+        else if (ch === '{') c['{']++; else if (ch === '}') c['{']--;
+        else if (ch === '/') c.slash++;
+      }
+      return c;
+    };
+    // The replaced span must have the SAME open/close delta as the find it replaces — otherwise the
+    // surrounding line's brackets/regex no longer balance after the swap.
+    const f = bal(proposal.find); const r = bal(proposal.replace);
+    const drift = ['(', '[', '{'].some((k) => f[k] !== r[k]) || (f.slash % 2) !== (r.slash % 2);
+    if (drift) {
+      return { ok: false, code: 'unbalanced-edit', detail: 'find/replace change bracket or regex-delimiter balance — the edit would corrupt the surrounding code (truncated find?)' };
+    }
+  }
   return { ok: true, code: 'ok', detail: 'find exists, is executable, unique, and changes the line' };
 }
 

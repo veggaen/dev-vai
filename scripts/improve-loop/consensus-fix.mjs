@@ -38,10 +38,14 @@ db.exec(`CREATE TABLE IF NOT EXISTS consensus (
   agree_count INTEGER, personas TEXT, verified INTEGER, why TEXT, created_at TEXT);`);
 
 const run = db.prepare('SELECT id FROM runs ORDER BY id DESC LIMIT 1').get();
-const fix = db.prepare('SELECT class,location,summary FROM fixes WHERE run_id=? AND class=? LIMIT 1').get(run.id, TARGET);
+// CROSS-RUN lookup (same fix propose-fix.mjs already has): observe rarely wins the compute budget,
+// so the latest run usually has no fixes/results for the class. Run-scoping here starved the whole
+// consensus→apply stage — verified proposals piled up but never converged ("no queued failure").
+// Use the latest fix + failing cases for THIS class across ALL runs so the pipeline can flow.
+const fix = db.prepare('SELECT class,location,summary FROM fixes WHERE class=? ORDER BY id DESC LIMIT 1').get(TARGET);
 const fails = db.prepare(
-  'SELECT p.prompt, r.read_as, r.grade_reason FROM results r JOIN prompts p ON p.id=r.prompt_id WHERE r.run_id=? AND r.class=? AND r.passed=0 LIMIT 4',
-).all(run.id, TARGET);
+  'SELECT p.prompt, r.read_as, r.grade_reason FROM results r JOIN prompts p ON p.id=r.prompt_id WHERE r.class=? AND r.passed=0 ORDER BY r.run_id DESC LIMIT 4',
+).all(TARGET);
 if (!fix || fails.length === 0) { console.log('no queued failure for', TARGET); process.exit(0); }
 const hintFile = (fix.location.split(/[:\s(]/)[0] || '').trim();
 const summary = fix.summary;

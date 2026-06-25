@@ -43,6 +43,24 @@ test('verifyProposal: editing a comment or string is rejected as non-executable'
   assert.equal(vs.ok, true); // a const assignment IS executable (only a BARE string find is rejected)
 });
 
+test('verifyProposal: UNBALANCED edit (truncated find) is caught before it corrupts the file', () => {
+  // The real fresh-data-trigger break: find ended mid-regex ("…temperature|fore"), replace was the
+  // WHOLE regex — applying it left the old tail "cast|…)/i;" dangling → tsc failure every cycle.
+  const SRC2 = 'const FRESH = /\\b(?:price|weather|temperature|forecast|latest)\\b/i;\nreturn FRESH.test(x);';
+  const v = verifyProposal({
+    file: 'f.ts',
+    find: '/\\b(?:price|weather|temperature|fore',                       // truncated: opens ( and /, closes neither
+    replace: '/\\b(?:price|weather|temperature|forecast|latest|urgent)\\b/i;', // full, balanced regex
+  }, { readFile: () => SRC2 });
+  assert.equal(v.ok, false);
+  assert.equal(v.code, 'unbalanced-edit');
+});
+
+test('verifyProposal: a balanced edit that adds an alternative is still allowed', () => {
+  const v = verifyProposal({ file: 'f.ts', find: 'if (BUILD_VERB_ANYWHERE.test(text)) return false;', replace: 'if (BUILD_VERB_ANYWHERE.test(text) && ok(y)) return false;' }, { readFile: reader });
+  assert.equal(v.ok, true, 'balanced () additions must pass');
+});
+
 test('verifyProposal: noop replace and missing fields', () => {
   assert.equal(verifyProposal({ file: 'f.ts', find: 'return true;', replace: 'return true;' }, { readFile: reader }).code, 'noop-replace');
   assert.equal(verifyProposal({ file: 'f.ts' }, { readFile: reader }).code, 'no-find');
