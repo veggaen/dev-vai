@@ -508,6 +508,21 @@ async function main() {
     const db = openDb(DB_PATH);
     const run = db.prepare('SELECT id FROM runs ORDER BY id DESC LIMIT 1').get();
     let classes = db.prepare('SELECT DISTINCT class FROM fixes WHERE run_id=?').all(run.id).map((r) => r.class);
+    // BUDGET GUARD: drop classes the loop can NEVER ground a fix for (orphan classes with no real
+    // source file — e.g. the routing/comparison phantom that burned 50 no-file rejections, or a
+    // class flagged ungroundable after ≥3 hallucinated proposals). The engine path already filters
+    // these via buildLoopContext; the fixed path did not, so a permanently-0% phantom sorted to the
+    // TOP of weakest-first and ate the one-at-a-time GPU budget every cycle. This is the #1 reason
+    // proposal yield was <1%. Read-only; never throws into the loop.
+    try {
+      const { ungroundableClasses } = await import('./db.mjs');
+      const skip = ungroundableClasses(db);
+      if (skip.size) {
+        const dropped = classes.filter((c) => skip.has(c));
+        classes = classes.filter((c) => !skip.has(c));
+        if (dropped.length) log(`GRADE: skipping ${dropped.length} ungroundable class(es) → ${dropped.join(', ')} (no real source file / model can't land a fix)`);
+      }
+    } catch (e) { log('ungroundable filter skipped: ' + String(e).slice(0, 80)); }
     // GRADE: order the failing classes WEAKEST-FIRST by campaign-wide pass-rate, so the
     // scarce one-at-a-time GPU budget goes to the LOWEST pass-rate class — not whichever
     // familiar near-passing class happened to fail this tiny run. Deterministic, read-only;

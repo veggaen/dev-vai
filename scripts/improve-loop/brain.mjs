@@ -32,6 +32,18 @@ export const CLASS_LOCATION = {
     'packages/core/src/chat/deterministic-facts-router.ts (no idea/opportunity answer contract)',
   'answer/vague-overconfident':
     'packages/core/src/chat/service.ts (draft quality contract) + council redraft gate (grounding not enforced before ship)',
+  // Real source locations for the four classes that were stuck at "(unknown — investigate)" —
+  // they were REAL weak classes (35–73% pass-rate, 78 failing rows) the loop could never fix
+  // because no file was mapped, so every proposal died at the no-file guard. Grounded against
+  // the actual router thicket (deterministic-facts-router.ts) + the follow-up resolver.
+  'routing/comparison':
+    'packages/core/src/chat/deterministic-facts-router.ts:1162 (comparePair matcher answers/defines one entity instead of comparing the two)',
+  'answer/curated-trap':
+    'packages/core/src/chat/deterministic-facts-router.ts:526 (longest-curated-key-wins fires a hardcoded answer too broadly)',
+  'answer/freshness-staleness':
+    'packages/core/src/chat/build-execution-intent.ts:88 (FRESH_DATA_LEAD misses time-sensitive facts → answered from frozen memory)',
+  'followup/context-carry':
+    'packages/core/src/chat/contextual-resolver.ts:27 (THING_REF pronoun/ordinal resolution against the prior turn)',
 };
 
 /** Ask qwen for N fresh prompts in a class. Returns string[] (best-effort parse). */

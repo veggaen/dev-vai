@@ -388,6 +388,33 @@ export function isTargetExhausted(db, file) {
   return targetFailures(db, file) >= TARGET_FAIL_LIMIT;
 }
 
+/**
+ * OUTCOME MEMORY — was this EXACT patch already tried and rejected/reverted? The loop's keystone
+ * leak: the model re-proposed one already-rejected find→replace 66× (a senior superseded it in a
+ * commit, but nothing told the model). A proposal is "dead on arrival" if the same (file, find,
+ * replace) previously landed status='rejected'/'auto-rejected' in `proposals`, applied='reverted-red'
+ * /'skipped-rejected' in `consensus`, or sits banned in `fix_quarantine`. Returns the reason string
+ * (for the prompt feedback) or null. Read-only; never throws. This is what turns one wasted apply
+ * into a permanent "don't propose this again" — the difference between a loop and a doom-loop.
+ */
+export function priorRejection(db, { file, find, replace } = {}) {
+  if (!file || !find) return null;
+  const rep = String(replace ?? '');
+  try {
+    const p = db.prepare(
+      "SELECT status FROM proposals WHERE file=? AND find=? AND IFNULL(\"replace\",'')=? AND (status LIKE 'rejected:%' OR status LIKE 'auto-rejected:%') ORDER BY id DESC LIMIT 1",
+    ).get(file, find, rep);
+    if (p) return `this exact patch was already rejected: ${String(p.status).slice(0, 90)}`;
+  } catch { /* no proposals table */ }
+  try {
+    const c = db.prepare(
+      "SELECT applied FROM consensus WHERE file=? AND find=? AND IFNULL(\"replace\",'')=? AND applied IN ('reverted-red','skipped-rejected') ORDER BY id DESC LIMIT 1",
+    ).get(file, find, rep);
+    if (c) return `this exact patch was already applied and ${c.applied === 'reverted-red' ? 'failed verification (reverted)' : 'rejected'} — don't re-propose it`;
+  } catch { /* no consensus table */ }
+  return null;
+}
+
 /** The current ban list (for the watch UI): which dead fixes are quarantined, newest first. */
 export function bannedFixes(db, limit = 20) {
   try {

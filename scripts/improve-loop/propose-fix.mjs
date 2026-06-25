@@ -16,10 +16,12 @@
  * Usage: node scripts/improve-loop/propose-fix.mjs --class routing/fresh-data-trigger
  */
 import { readFileSync } from 'node:fs';
-import { openDb, recordKnowledge, topKnowledge } from './db.mjs';
+import { openDb, recordKnowledge, topKnowledge, priorRejection } from './db.mjs';
 import { ollamaGenerate, waitForVramHeadroom } from './driver.mjs';
 import { fetchFixWebEvidence, fixSearchQuery } from './web-evidence.mjs';
 import { verifyProposal, summarizeVerdicts } from './proposal-verifier.mjs';
+import { CLASS_LOCATION } from './brain.mjs';
+import { parseProposal } from './parse-proposal.mjs';
 
 /** KNOWLEDGE-SPINE scope for this stage: facts about how the LOCAL model proposes fixes. */
 const KNOW_SCOPE = `propose-fix:${process.env.IMPROVE_GEN_MODEL ?? process.env.LOCAL_MODEL ?? 'qwen3:8b'}`;
@@ -42,9 +44,25 @@ const run = db.prepare('SELECT id FROM runs ORDER BY id DESC LIMIT 1').get();
 // the latest fix for THAT class across ALL runs — not just the current run. The prototype runs
 // every cycle but observe (which mines fixes) rarely wins the budget, so the latest run usually
 // has no fixes; run-scoping starved propose-fix → no proposal → no knowledge (the bottleneck).
-const fix = TARGET_CLASS
-  ? db.prepare('SELECT id,class,location,summary FROM fixes WHERE class=? ORDER BY id DESC LIMIT 1').get(TARGET_CLASS)
-  : db.prepare('SELECT id,class,location,summary FROM fixes WHERE run_id=? ORDER BY failure_count DESC LIMIT 1').get(run.id);
+// LOCATION-RESILIENT SELECTION: a concurrent observe mints a NEW fix row every run, and a class
+// not (yet) in CLASS_LOCATION gets location "(unknown — investigate)". Blindly taking ORDER BY id
+// DESC then lets one junk row shadow a good, resolvable location forever (the routing/comparison
+// race: a stale-code observe wrote an unknown-location row newer than the migrated real one). So for
+// a targeted class, prefer the most-recent fix row whose location RESOLVES to a real path; only fall
+// back to the newest row (and, last resort, the static CLASS_LOCATION map) if none resolve.
+const RESOLVABLE = /[\\/].+\.(ts|tsx|js|jsx|mjs|cjs|json|md)/i;
+let fix;
+if (TARGET_CLASS) {
+  const recent = db.prepare('SELECT id,class,location,summary FROM fixes WHERE class=? ORDER BY id DESC LIMIT 8').all(TARGET_CLASS);
+  fix = recent.find((r) => RESOLVABLE.test(String(r.location ?? ''))) ?? recent[0];
+  // Static fallback: if EVERY recent row is junk but the class has a known location, synthesize one
+  // from CLASS_LOCATION so a poisoned corpus can't permanently block a class we DO know how to ground.
+  if (fix && !RESOLVABLE.test(String(fix.location ?? '')) && CLASS_LOCATION[TARGET_CLASS]) {
+    fix = { ...fix, location: CLASS_LOCATION[TARGET_CLASS] };
+  }
+} else {
+  fix = db.prepare('SELECT id,class,location,summary FROM fixes WHERE run_id=? ORDER BY failure_count DESC LIMIT 1').get(run.id);
+}
 if (!fix) { console.log('no queued fix for that class'); process.exit(0); }
 
 // Pull the failing prompts + how Vai read them — qwen needs the evidence. Across ALL runs for
@@ -157,18 +175,25 @@ let raw = '';
 try { raw = await ollamaGenerate(MODEL, prompt, { numPredict: 400, timeoutMs: 120000 }); }
 catch (e) { console.log('qwen unavailable:', String(e)); process.exit(1); }
 
-// Extract the JSON object.
-let parsed = null;
-const jmatch = raw.match(/\{[\s\S]*\}/);
-if (jmatch) { try { parsed = JSON.parse(jmatch[0]); } catch {} }
+// Extract the JSON object — strict parse first, then a regex-escape repair so a sound regex fix
+// (\b \s \w …) isn't discarded as "unparseable" (the measured comparison-class false-reject).
+const parsed = parseProposal(raw);
 
 // VERIFY mechanically (knowledge-as-guard): does the cited line actually exist + is it
 // executable + unique? This is the loop's most-repeated failure encoded as a deterministic
 // check — caught at the SOURCE, no model, ungameable. The verdict drives BOTH the proposal
 // status and the captured knowledge, so the same mistake teaches the next cycle.
-const verdict = parsed
-  ? verifyProposal(parsed, { readFile: (p) => readFileSync(p, 'utf8') })
-  : { ok: false, code: 'no-find', detail: 'qwen produced no parseable JSON proposal' };
+// OUTCOME-MEMORY GUARD (runs BEFORE the mechanical verify): if this EXACT patch was already
+// rejected or reverted in a past cycle, it is dead on arrival — re-verifying + re-queuing it just
+// re-spends the budget on a known-dead patch (the 66× re-proposal of a senior-superseded fix). Catch
+// it here, record it as a counted lesson, and skip. This is the difference between a loop that learns
+// and one that re-tries the same dead end forever.
+const rejected = parsed ? priorRejection(db, parsed) : null;
+const verdict = rejected
+  ? { ok: false, code: 'already-rejected', detail: rejected }
+  : parsed
+    ? verifyProposal(parsed, { readFile: (p) => readFileSync(p, 'utf8') })
+    : { ok: false, code: 'no-find', detail: 'qwen produced no parseable JSON proposal' };
 
 const status = verdict.ok ? 'proposed' : `auto-rejected: ${verdict.code} — ${verdict.detail}`;
 db.prepare(`INSERT INTO proposals (fix_id,class,file,find,replace,why,raw,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)`)
@@ -191,6 +216,7 @@ if (!verdict.ok && verdict.code !== 'no-find') {
     'non-executable-find': 'the "find" must be executable decision logic (a regex/if/return), never a comment or string',
     'noop-replace': 'the "replace" must differ from "find" — a no-op change fixes nothing',
     'ambiguous-find': 'pick a "find" that occurs exactly once so the patch has a unique anchor',
+    'already-rejected': 'this exact find→replace was tried in a past cycle and rejected/reverted — propose a DIFFERENT line or a different replacement; do not re-submit a known-dead patch',
   }[verdict.code];
   if (guardClaim) recordKnowledge(db, { scope: KNOW_SCOPE, claim: guardClaim, kind: 'guard', confirm: true, evidence: `observed on ${fix.class}` });
 
