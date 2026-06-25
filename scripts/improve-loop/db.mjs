@@ -708,18 +708,34 @@ export function campaignClassStats(db) {
  *  NOT keep picking these as "weakest" — they can never be fixed, only burn cycles. Confirmed
  *  ≥ contradicted ⇒ still considered ungroundable. Returns a Set of class names. */
 export function ungroundableClasses(db) {
+  const set = new Set();
+  // (a) Reactive: classes propose-fix already flagged no-file (confirmed ≥ contradicted).
   try {
     const rows = db.prepare(
       "SELECT claim, confirmations, contradictions FROM project_knowledge WHERE scope='propose:no-file'",
     ).all();
-    const set = new Set();
     for (const r of rows) {
       if (Number(r.confirmations) < Number(r.contradictions)) continue; // recovered → groundable again
       const m = /class "([^"]+)"/.exec(r.claim);
       if (m) set.add(m[1]);
     }
-    return set;
-  } catch { return new Set(); }
+  } catch { /* no knowledge table yet */ }
+  // (b) Proactive: a class whose latest fix LOCATION is a placeholder (not a real file path) can
+  // never be grounded — skip it from cycle 1 instead of waiting for N wasted no-file proposals.
+  try {
+    const fixes = db.prepare(
+      'SELECT class, location FROM fixes WHERE id IN (SELECT MAX(id) FROM fixes GROUP BY class)',
+    ).all();
+    for (const f of fixes) {
+      const loc = String(f.location ?? '').trim();
+      // A real location starts with a path segment containing a "/" and a file-ish token; the
+      // placeholders look like "(unknown — investigate)" or are empty.
+      const filePart = (loc.split(/[:\s(]/)[0] || '').trim();
+      const looksLikePath = /[\\/].+\.(ts|tsx|js|jsx|mjs|cjs|json|md)$/i.test(filePart);
+      if (!loc || loc.startsWith('(') || !looksLikePath) set.add(f.class);
+    }
+  } catch { /* no fixes table yet */ }
+  return set;
 }
 
 /** Answer-excellence trend: average craft score + sample count per run, oldest

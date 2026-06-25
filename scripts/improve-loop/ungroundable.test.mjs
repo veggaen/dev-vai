@@ -25,6 +25,19 @@ test('ungroundableClasses reads propose:no-file facts into a Set', () => {
   assert.ok(set.has('routing/comparison'), 'flagged class is in the set');
 });
 
+test('PROACTIVE: a class whose fix location is a placeholder is ungroundable from the start', () => {
+  const db = db0();
+  const now = new Date().toISOString();
+  // placeholder location → ungroundable; real path → groundable. No no-file fact needed.
+  db.prepare("INSERT INTO fixes (run_id,class,failure_count,location,summary,created_at) VALUES (?,?,?,?,?,?)")
+    .run(1, 'answer/curated-trap', 9, '(unknown — investigate)', 's', now);
+  db.prepare("INSERT INTO fixes (run_id,class,failure_count,location,summary,created_at) VALUES (?,?,?,?,?,?)")
+    .run(1, 'routing/fresh-data-trigger', 9, 'packages/core/src/chat/build-execution-intent.ts:88', 's', now);
+  const set = ungroundableClasses(db);
+  assert.ok(set.has('answer/curated-trap'), 'placeholder location ⇒ ungroundable');
+  assert.equal(set.has('routing/fresh-data-trigger'), false, 'real .ts path ⇒ groundable');
+});
+
 test('a class that recovered (contradicted > confirmed) is NOT ungroundable', () => {
   const db = db0();
   const claim = 'class "x/y" has no resolvable source file';
