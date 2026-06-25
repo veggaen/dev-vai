@@ -18,6 +18,38 @@ export function isCoderModel(name = '') {
   return /coder|code-?llama|starcoder|deepseek-?coder|codestral|codeqwen/i.test(name);
 }
 
+/** A reasoning model (deepseek-r1, qwq) is strong at open-ended JUDGEMENT but bad/slow at the
+ *  grep→read→emit-exact-JSON tool-loop (it reasons in prose and times out). Use it where it shines. */
+export function isReasoner(name = '') {
+  return /r1\b|deepseek-?r1|qwq|thinking|reason/i.test(name);
+}
+
+/**
+ * Assign each model a ROLE by its strength — "use everyone where they're good", configurable.
+ *   propose: runs the fix tool-loop (coders + general models; fast, code-fluent)
+ *   judge:   votes on candidates / critiques (reasoning models; their strength)
+ *   both:    capable of either (general models default here)
+ * Defaults to ALL installed models seated (per V3gga: "default to all"), each in its best role.
+ * `override` lets the UI force a role per model, e.g. { 'deepseek-r1:8b': 'propose' }.
+ */
+export function assignRoles(models, { override = {} } = {}) {
+  return (models || []).map((name) => {
+    if (override[name]) return { name, role: override[name], reason: 'ui-override' };
+    if (isReasoner(name)) return { name, role: 'judge', reason: 'reasoning model — strong at judging, slow at the tool-loop' };
+    if (isCoderModel(name)) return { name, role: 'propose', reason: 'code-specialized — best fix localiser' };
+    return { name, role: 'both', reason: 'general model — can propose or judge' };
+  });
+}
+
+/** The models that should run the fix tool-loop (role propose|both). */
+export function proposers(roleAssignments) {
+  return roleAssignments.filter((r) => r.role === 'propose' || r.role === 'both').map((r) => r.name);
+}
+/** The models that should judge/vote on candidates (role judge|both). */
+export function judges(roleAssignments) {
+  return roleAssignments.filter((r) => r.role === 'judge' || r.role === 'both').map((r) => r.name);
+}
+
 /** Choose the roster: installed models that individually fit the VRAM budget, capped at `max`.
  *  Ordering: CODER models first (best at code edits), then biggest-first (a bigger general model
  *  is usually a better localiser). Excludes the embedded Vai runtime model so we never evict the

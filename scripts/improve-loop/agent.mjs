@@ -52,7 +52,7 @@ export function parseToolCall(raw) {
  * Run the grounded proposal loop for one failure.
  * @returns {Promise<{proposal: object|null, transcript: string[]}>}
  */
-export async function proposeGrounded({ klass, summary, fails, hintFile, maxSteps = 6, preamble = '', model = MODEL }) {
+export async function proposeGrounded({ klass, summary, fails, hintFile, maxSteps = 9, preamble = '', model = MODEL }) {
   const transcript = [];
   const sys =
 `${preamble ? preamble + '\n\n' : ''}You are a senior engineer fixing a bug in the dev-vai TypeScript codebase.
@@ -78,7 +78,11 @@ Begin by locating the code. Your first reply must be a grep_repo or read_file ca
   for (let step = 0; step < maxSteps; step++) {
     await waitForVramHeadroom(7 * 1024 ** 3);
     let raw;
-    try { raw = await ollamaGenerate(model, convo + '\n\nYour JSON tool call:', { numPredict: 300, timeoutMs: 120000 }); }
+    // think:false even for reasoning models HERE: the multi-step tool-loop IS the reasoning scaffold,
+    // and an 8B r1 with think:true burns its whole token budget on CoT and never emits the answer
+    // ("" every step → "no proposal"). Direct JSON is what the loop needs. (Proven: r1 returns clean
+    // tool-call JSON in ~7s with think off, vs 4617 truncated thinking-tokens with it on.)
+    try { raw = await ollamaGenerate(model, convo + '\n\nYour JSON tool call:', { numPredict: 400, timeoutMs: 120000, think: false }); }
     catch (e) { transcript.push(`step ${step}: model error ${String(e)}`); break; }
 
     const call = parseToolCall(raw);
@@ -100,7 +104,7 @@ Begin by locating the code. Your first reply must be a grep_repo or read_file ca
       let critRaw = '';
       try {
         await waitForVramHeadroom(7 * 1024 ** 3);
-        critRaw = await ollamaGenerate(model, critiquePrompt, { numPredict: 320, timeoutMs: 120000 });
+        critRaw = await ollamaGenerate(model, critiquePrompt, { numPredict: 400, timeoutMs: 120000, think: false });
       } catch { /* keep original on critique failure */ }
       const revised = parseToolCall(critRaw);
       if (revised && revised.tool === 'propose' && revised.find) {

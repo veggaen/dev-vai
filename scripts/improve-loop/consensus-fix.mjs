@@ -25,7 +25,7 @@ import { proposeGrounded } from './agent.mjs';
 import { selectPersonas, personaPreamble } from './personas.mjs';
 import { grep_repo } from './tools.mjs';
 import { installedModels } from './driver.mjs';
-import { pickRoster } from './model-router.mjs';
+import { pickRoster, assignRoles, proposers } from './model-router.mjs';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
@@ -75,10 +75,17 @@ const panel = selectPersonas(TARGET);
 // the panel is a DIVERSE set of models, not one model wearing hats.
 const installed = await installedModels().catch(() => []);
 const roster = pickRoster(installed, { budgetBytes: VRAM_GB * 1024 ** 3, max: MAX_MODELS });
-const models = roster.length ? roster : [undefined]; // undefined → proposeGrounded uses its default
+// Role-by-strength (default ALL seated, configurable): coders/general PROPOSE via the tool-loop;
+// reasoning models (deepseek-r1) are bad/slow at the loop, so they JUDGE instead. We run the
+// proposers here; the judges' role (best-answer vote) kicks in below when there's no clean winner.
+const roles = assignRoles(roster);
+const proposeModels = proposers(roles);
+const models = proposeModels.length ? proposeModels : (roster.length ? roster : [undefined]);
 const rosterRank = (m) => { const i = models.indexOf(m); return i < 0 ? 99 : i; }; // bigger/earlier = lower
+const judgeModels = roles.filter((r) => r.role === 'judge').map((r) => r.name);
 
-console.log(`\n━━━ consensus-fix [${TARGET}] · ${panel.length} engineers × ${models.length} model(s) [${models.map((m) => m ?? 'default').join(', ')}] · ${STEPS} steps ━━━`);
+console.log(`\n━━━ consensus-fix [${TARGET}] · roles: ${roles.map((r) => `${r.name}→${r.role}`).join(', ') || 'default'} ━━━`);
+console.log(`   proposers (tool-loop): [${models.map((m) => m ?? 'default').join(', ')}]${judgeModels.length ? ` · judges: [${judgeModels.join(', ')}]` : ''}`);
 const proposals = [];
 for (let r = 0; r < REPEATS; r++) {
   for (let i = 0; i < panel.length; i++) {
@@ -112,6 +119,21 @@ const ranked = [...clusters.entries()].sort((a, b) => b[1].length - a[1].length)
 console.log('\n━━━ RESULT ━━━');
 if (ranked.length === 0) {
   console.log('No verified consensus. ' + (proposals.length ? proposals.length + ' proposals, none survived grep-verify (likely hallucinated lines).' : 'No proposals at all (hard bug — honest punt).'));
+  // JUDGE ROLE: give the reasoning model(s) a real voice — let them weigh the unverified candidates
+  // and name the most promising one for a human. Advisory ONLY: a candidate still has to pass
+  // grep-verify + tsc before anything applies. This is how every model contributes by its strength.
+  if (judgeModels.length && proposals.length) {
+    try {
+      const { buildBestAnswerVote, parseBestVote } = await import('./model-router.mjs');
+      const { ollamaGenerate } = await import('./driver.mjs');
+      const cands = proposals.map((p) => ({ model: p.model, summary: `${p.find.slice(0, 60)} → ${String(p.replace).slice(0, 60)}` }));
+      const votePrompt = buildBestAnswerVote(`${TARGET}: ${summary}`, cands);
+      const judge = judgeModels[0];
+      const raw = await ollamaGenerate(judge, votePrompt, { numPredict: 200, timeoutMs: 120000, think: false });
+      const vote = parseBestVote(raw, cands.length);
+      if (vote) console.log(`⚖️  judge [${judge}] favours candidate #${vote.best} (${cands[vote.best - 1]?.model}): ${vote.why}`);
+    } catch { /* judging is best-effort; never blocks */ }
+  }
   console.log('→ This is a SIGNAL: the bug needs human analysis, not more qwen rounds.');
 } else {
   const [find, group] = ranked[0];

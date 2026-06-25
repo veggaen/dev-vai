@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickRoster, routeThroughModels, withModelMounted, tallyConsensus, buildBestAnswerVote, parseBestVote, isCoderModel } from './model-router.mjs';
+import { pickRoster, routeThroughModels, withModelMounted, tallyConsensus, buildBestAnswerVote, parseBestVote, isCoderModel, isReasoner, assignRoles, proposers, judges } from './model-router.mjs';
 
 const GB = 1024 ** 3;
 const INSTALLED = [
@@ -87,6 +87,32 @@ test('tallyConsensus: a tie is broken toward the bigger/earlier model (rosterRan
   const rank = (m) => (m === 'big' ? 0 : 9); // big is earlier/bigger
   const t = tallyConsensus(results, (a) => a.fix, { rosterRank: rank });
   assert.equal(t.winner.key, 'A', 'tie broken to the bigger model');
+});
+
+test('assignRoles: coders→propose, reasoners→judge, general→both (all seated by default)', () => {
+  const roles = assignRoles(['qwen2.5-coder:7b', 'deepseek-r1:8b', 'qwen3:8b']);
+  assert.equal(roles.find((r) => r.name === 'qwen2.5-coder:7b').role, 'propose');
+  assert.equal(roles.find((r) => r.name === 'deepseek-r1:8b').role, 'judge');
+  assert.equal(roles.find((r) => r.name === 'qwen3:8b').role, 'both');
+  assert.equal(roles.length, 3, 'every model stays seated — default to all');
+});
+
+test('assignRoles: a UI override wins over the default', () => {
+  const roles = assignRoles(['deepseek-r1:8b'], { override: { 'deepseek-r1:8b': 'propose' } });
+  assert.equal(roles[0].role, 'propose');
+  assert.equal(roles[0].reason, 'ui-override');
+});
+
+test('proposers / judges split by role (both counts for either)', () => {
+  const roles = assignRoles(['qwen2.5-coder:7b', 'deepseek-r1:8b', 'qwen3:8b']);
+  assert.deepEqual(proposers(roles).sort(), ['qwen2.5-coder:7b', 'qwen3:8b']); // coder + both
+  assert.deepEqual(judges(roles).sort(), ['deepseek-r1:8b', 'qwen3:8b']);       // reasoner + both
+});
+
+test('isReasoner recognises r1/qwq', () => {
+  assert.equal(isReasoner('deepseek-r1:8b'), true);
+  assert.equal(isReasoner('qwq:32b'), true);
+  assert.equal(isReasoner('qwen2.5-coder:7b'), false);
 });
 
 test('best-answer meta-vote prompt + parse round-trips', () => {
