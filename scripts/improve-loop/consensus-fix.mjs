@@ -98,6 +98,28 @@ const judgeModels = roles.filter((r) => r.role === 'judge').map((r) => r.name);
 console.log(`\n━━━ consensus-fix [${TARGET}] · roles: ${roles.map((r) => `${r.name}→${r.role}`).join(', ') || 'default'} ━━━`);
 console.log(`   proposers (tool-loop): [${models.map((m) => m ?? 'default').join(', ')}]${judgeModels.length ? ` · judges: [${judgeModels.join(', ')}]` : ''}`);
 const proposals = [];
+// SEED from EXISTING verified proposals (the propose-fix step already produced + verified these and
+// they sit in the `proposals` table). Re-rolling the council from scratch every cycle threw that
+// work away — and a single noisy 8B round often yields 0 verified proposals → "No verified
+// consensus" → nothing ever applies (the loop never lands a fix). Seeding gives consensus a real
+// starting set; each is RE-verified against current source (a proposal can go stale if the file
+// changed). Found by grading the live loop: 2 applyable proposals sat unused while consensus re-rolled.
+try {
+  const prior = db.prepare(
+    "SELECT file, find, \"replace\", why FROM proposals WHERE class=? AND status='proposed' ORDER BY id DESC LIMIT 12",
+  ).all(TARGET);
+  const seen = new Set();
+  for (const p of prior) {
+    const key = `${norm(p.find)}|${p.replace}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const verified = verifyEdit(p.file, norm(p.find), p.replace);
+    if (verified) {
+      proposals.push({ persona: 'prior-verified', model: 'propose-fix', file: p.file, find: norm(p.find), replace: p.replace, why: p.why, verified: true });
+    }
+  }
+  if (proposals.length) console.log(`   seeded ${proposals.length} prior-verified proposal(s) from the proposals table (re-verified)`);
+} catch { /* no proposals table yet — proceed with fresh rounds only */ }
 for (let r = 0; r < REPEATS; r++) {
   for (let i = 0; i < panel.length; i++) {
     const persona = panel[i];
