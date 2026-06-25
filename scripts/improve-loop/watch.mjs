@@ -15,7 +15,7 @@
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { openDb, classStats, latestVisualEvents, latestVisualRun, readHeartbeat, readVisualLive, buildVisualCouncilPacket, topTasteLessons } from './db.mjs';
+import { openDb, classStats, latestVisualEvents, latestVisualRun, readHeartbeat, readVisualLive, buildVisualCouncilPacket, topTasteLessons, recentLoopEvents, bannedFixes } from './db.mjs';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
@@ -34,10 +34,12 @@ function snapshot() {
   const visualEvents = latestVisualEvents(db, 40);
   const taste = buildVisualCouncilPacket(db)?.taste ?? null;
   const tasteLessons = topTasteLessons(db, 5);
+  const loopEvents = recentLoopEvents(db, 80);   // the --engine heartbeat
+  const banned = bannedFixes(db, 12);            // quarantine ban list
   const run = db.prepare('SELECT id,status,started_at FROM runs ORDER BY id DESC LIMIT 1').get();
   if (!run) {
     db.close();
-    return { run: null, visualRun, visualLive, visualEvents, taste, tasteLessons };
+    return { run: null, visualRun, visualLive, visualEvents, taste, tasteLessons, loopEvents, banned };
   }
   const stats = classStats(db, run.id);
   const results = db.prepare(
@@ -47,7 +49,7 @@ function snapshot() {
   const fixes = db.prepare('SELECT class, failure_count, location, summary, status FROM fixes WHERE run_id=? ORDER BY failure_count DESC').all(run.id);
   const live = readHeartbeat(db);
   db.close();
-  return { run, stats, results, fixes, live, visualRun, visualLive, visualEvents, taste, tasteLessons };
+  return { run, stats, results, fixes, live, visualRun, visualLive, visualEvents, taste, tasteLessons, loopEvents, banned };
 }
 
 function parseData(data) {
@@ -63,6 +65,57 @@ function compactData(type, data) {
   if (type === 'request.blocked_external') return data.text || '';
   if (type === 'probe.done') return `${data.passed ? 'PASS' : 'FAIL'} ${data.reportPath || ''}`;
   return JSON.stringify(data).slice(0, 220);
+}
+
+function enginePanel(events, banned) {
+  // The --engine heartbeat the UI used to miss: live cycles with their value-per-compute PLAN,
+  // each process run/result, and the perpetual-health verdict — grouped newest cycle first. This
+  // is what makes "what I see" == "what V3gga sees".
+  if (!(events || []).length && !(banned || []).length) {
+    return `<h2>Engine — live cycles</h2><div style="color:#667;font-size:12px;margin-bottom:14px">No engine cycles yet. Start with <code>supervisor.mjs --engine</code>.</div>`;
+  }
+  // Group events by cycle (events arrive newest-first; keep that order).
+  const byCycle = new Map();
+  for (const e of events) {
+    if (!byCycle.has(e.cycle)) byCycle.set(e.cycle, []);
+    byCycle.get(e.cycle).push(e);
+  }
+  const cycleBlocks = [...byCycle.entries()].slice(0, 8).map(([cycle, evs]) => {
+    const health = evs.find((e) => e.kind === 'health');
+    const plan = evs.find((e) => e.kind === 'plan');
+    const runs = evs.filter((e) => e.kind === 'run:done' || e.kind === 'run:error');
+    let hv = null;
+    try { hv = health ? JSON.parse(health.detail) : null; } catch {}
+    const working = hv?.working;
+    const tone = working === true ? '#8d9' : working === false ? '#f99' : '#dc9';
+    let chosen = [];
+    try { const p = plan ? JSON.parse(plan.detail) : null; chosen = p?.chosen || []; } catch {}
+    const runChips = runs.map((r) => {
+      const ok = r.kind === 'run:done' && r.ok;
+      let produced = 0; try { produced = JSON.parse(r.detail)?.produced ?? 0; } catch {}
+      const c = r.kind === 'run:error' ? '#f99' : ok ? '#8d9' : '#bbb';
+      return `<span style="display:inline-flex;gap:5px;align-items:center;background:#10141c;border:1px solid #233;border-radius:6px;padding:3px 8px;font-size:12px;color:${c}">${r.kind === 'run:error' ? '✗' : '✓'} ${esc(r.process)}${produced ? ` ·${produced}` : ''}${r.ms ? ` ${Math.round(r.ms)}ms` : ''}</span>`;
+    }).join(' ');
+    const at = (evs[0]?.at || '').slice(11, 19);
+    return `<div style="background:#0e1018;border:1px solid #243045;border-left:3px solid ${tone};border-radius:8px;padding:11px 13px;margin:9px 0">
+      <div style="display:flex;gap:10px;align-items:center;font-size:12px;color:#9ab">
+        <b style="color:#cde">cycle ${esc(cycle)}</b>
+        ${chosen.length ? `<span style="color:#8ad">plan: ${chosen.map(esc).join(', ')}</span>` : '<span style="color:#778">no move cleared the floor</span>'}
+        <span style="margin-left:auto;color:#566">${esc(at)}</span>
+      </div>
+      ${runChips ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">${runChips}</div>` : ''}
+      ${hv ? `<div style="margin-top:7px;font-size:12px;color:${tone}"><b>${working === true ? '✓ working' : working === false ? '✗ not working' : '… inconclusive'}</b> · quality ${esc(hv.composite ?? '?')} · ${esc(hv.reason || '')}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  const banBlock = (banned || []).length ? `
+    <div style="background:#1a1410;border:1px solid #3a2a18;border-radius:8px;padding:11px 13px;margin:10px 0 16px">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#b95;margin-bottom:6px">🚫 quarantined dead fixes (won't retry — breaks the doom-loop)</div>
+      ${banned.map((b) => `<div style="font-size:12px;color:#caa;margin:3px 0"><code style="color:#e98">${esc((b.file || '').split('/').pop())}</code> · ${esc(b.find).slice(0, 38)} → ${esc(b.replace).slice(0, 38)} <span style="color:#866">(${b.strikes} strikes)</span></div>`).join('')}
+    </div>` : '';
+
+  return `<h2>Engine — live cycles (value-per-compute)</h2>
+    <div id="engine">${cycleBlocks}${banBlock}</div>`;
 }
 
 function councilPanel() {
@@ -190,12 +243,12 @@ function visualPanel(visualRun, visualLive, visualEvents) {
 }
 
 function page() {
-  const { run, stats, results, fixes, live, visualRun, visualLive, visualEvents, taste, tasteLessons } = snapshot();
+  const { run, stats, results, fixes, live, visualRun, visualLive, visualEvents, taste, tasteLessons, loopEvents, banned } = snapshot();
   if (!run) {
     const lf = liveFramePanel();
     const tp = tastePanel(taste, tasteLessons);
     const vp = visualPanel(visualRun, visualLive, visualEvents);
-    return `<html><body style="background:#0b0b10;color:#ddd;font-family:system-ui;padding:40px;max-width:1000px">${councilPanel()}${lf}${tp}${vp}</body></html>`;
+    return `<html><body style="background:#0b0b10;color:#ddd;font-family:system-ui;padding:40px;max-width:1000px">${enginePanel(loopEvents, banned)}${councilPanel()}${lf}${tp}${vp}</body></html>`;
   }
 
   const bar = (frac) => {
@@ -248,6 +301,7 @@ function page() {
   @keyframes p{50%{opacity:.3}}</style></head><body>
   <h1><span class="dot"></span>Vai Improvement Loop</h1>
   <div style="color:#667;font-size:12px">${running ? `live · auto-refreshing` : 'idle'} · council audits the UI against the world-class standard each cycle</div>
+  <div id="app-engine">${enginePanel(loopEvents, banned)}</div>
   ${councilPanel()}
   ${liveFramePanel()}
   <details style="margin-top:18px"><summary style="cursor:pointer;color:#566;font-size:12px">⤵ old text-seed lane (run #${run.id}, not the UI work)</summary>
@@ -274,6 +328,9 @@ function page() {
         if(fresh){ document.getElementById('app').replaceWith(fresh);
           document.querySelectorAll('details').forEach(function(d){ if(open[d.getAttribute('data-k')]) d.open=true; });
         }
+        // Also refresh the live ENGINE panel (it lives outside #app, at the top).
+        var freshEng=doc.getElementById('app-engine');
+        if(freshEng){ var cur=document.getElementById('app-engine'); if(cur) cur.replaceWith(freshEng); }
       }catch(e){}
       setTimeout(tick,ms);
     }

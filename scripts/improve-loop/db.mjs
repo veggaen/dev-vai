@@ -339,7 +339,7 @@ export const STRIKE_LIMIT = 2;
 
 /** Stable signature for a fix attempt. Same file+find+replace ⇒ same sig ⇒ strikes accumulate. */
 export function fixSignature({ file = '', find = '', replace = '' } = {}) {
-  return createHash('sha1').update(`${file} ${find} ${replace}`).digest('hex').slice(0, 16);
+  return createHash('sha1').update(`${file}|${find}|${replace}`).digest('hex').slice(0, 16);
 }
 
 /** Record one verify FAILURE for a fix; bans it once it reaches STRIKE_LIMIT. Returns {strikes,banned}. */
@@ -364,6 +364,16 @@ export function isFixBanned(db, fix) {
   const row = db.prepare('SELECT banned FROM fix_quarantine WHERE sig=?').get(fixSignature(fix));
   return !!(row && row.banned);
 }
+
+/** The current ban list (for the watch UI): which dead fixes are quarantined, newest first. */
+export function bannedFixes(db, limit = 20) {
+  try {
+    return db.prepare(
+      'SELECT file, find, "replace", strikes, last_detail, updated_at FROM fix_quarantine WHERE banned=1 ORDER BY updated_at DESC LIMIT ?',
+    ).all(limit);
+  } catch { return []; }
+}
+
 
 /**
  * Confidence of a knowledge row in [0,1], Laplace-smoothed: (confirm+1)/(confirm+contra+2).
