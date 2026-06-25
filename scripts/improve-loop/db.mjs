@@ -407,10 +407,19 @@ export function priorRejection(db, { file, find, replace } = {}) {
     if (p) return `this exact patch was already rejected: ${String(p.status).slice(0, 90)}`;
   } catch { /* no proposals table */ }
   try {
+    // Include 'reverted-acceptance' — a patch that passed tsc but did NOT recover the class's failing
+    // prompts (behaviourally wrong). Without this the loop re-proposes the same semantically-wrong
+    // patch every cycle: propose → apply → acceptance reverts → propose the SAME thing → forever.
+    // (Found by grading the live loop: the comparison-class \bbuild\b patch is tsc-green but wrong.)
     const c = db.prepare(
-      "SELECT applied FROM consensus WHERE file=? AND find=? AND IFNULL(\"replace\",'')=? AND applied IN ('reverted-red','skipped-rejected') ORDER BY id DESC LIMIT 1",
+      "SELECT applied FROM consensus WHERE file=? AND find=? AND IFNULL(\"replace\",'')=? AND applied IN ('reverted-red','reverted-acceptance','skipped-rejected') ORDER BY id DESC LIMIT 1",
     ).get(file, find, rep);
-    if (c) return `this exact patch was already applied and ${c.applied === 'reverted-red' ? 'failed verification (reverted)' : 'rejected'} — don't re-propose it`;
+    if (c) {
+      const why = c.applied === 'reverted-red' ? 'failed verification (reverted)'
+        : c.applied === 'reverted-acceptance' ? 'applied but did NOT fix the failing prompts (behaviourally reverted)'
+        : 'rejected';
+      return `this exact patch was already applied and ${why} — don't re-propose it`;
+    }
   } catch { /* no consensus table */ }
   return null;
 }

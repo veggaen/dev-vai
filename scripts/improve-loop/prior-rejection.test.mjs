@@ -43,6 +43,14 @@ test('priorRejection: matches a reverted-red consensus row', () => {
   assert.ok(r && /revert/i.test(r), `expected revert reason, got ${r}`);
 });
 
+test('priorRejection: matches a reverted-ACCEPTANCE row (tsc-green but behaviourally wrong)', () => {
+  const db = mkDb();
+  db.prepare("INSERT INTO consensus (class,file,find,\"replace\",verified,applied,created_at) VALUES ('c',?,?,?,1,'reverted-acceptance',?)")
+    .run('a.ts', 'L', 'R', new Date().toISOString());
+  const r = priorRejection(db, { file: 'a.ts', find: 'L', replace: 'R' });
+  assert.ok(r && /behaviourally reverted|did NOT fix/i.test(r), `expected acceptance-revert reason, got ${r}`);
+});
+
 test('priorRejection: a DIFFERENT replace is not considered rejected', () => {
   const db = mkDb();
   ins(db, 'a.ts', 'L', 'R1', 'rejected: bad');
