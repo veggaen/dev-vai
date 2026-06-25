@@ -145,6 +145,13 @@ for (const p of pending) {
     db.prepare("UPDATE consensus SET applied='flagged-review' WHERE id=?").run(p.id);
     flaggedForVegga.push({ file: p.file, class: p.class, reasons: r.reasons });
     console.log(`   ⚠ propose-only (risk tier) — left for Vegga: ${r.reasons.join('; ')}`);
+  } else if (r.infra) {
+    // INFRA blip (tsc couldn't finish) — NOT a broken patch. Leave the proposal UNAPPLIED + unstruck
+    // so it's retried when the machine is free. Striking it here would quarantine a possibly-good fix
+    // for a timeout — the exact bug that meant the loop could never land anything under GPU load.
+    summary.skipped++;
+    db.prepare("UPDATE consensus SET applied='skipped-infra' WHERE id=?").run(p.id);
+    console.log(`   ⏭ skipped (infra, NOT a bad patch) — ${r.verifyDetail} · will retry`);
   } else if (r.verifyDetail && /reverted/i.test(r.verifyDetail)) {
     summary.reverted++;
     db.prepare("UPDATE consensus SET applied='reverted-red' WHERE id=?").run(p.id);

@@ -68,7 +68,13 @@ export async function applyVerifiedFix(proposal, deps) {
   }
 
   if (!verifyResult.ok) {
-    deps.writeFile(proposal.file, before); // revert — NEVER commit red
+    deps.writeFile(proposal.file, before); // revert — NEVER commit red OR on an infra blip
+    // INFRA failure (tsc timed out / couldn't run) is NOT a broken patch. Signal it distinctly so the
+    // caller SKIPS (retries later) instead of striking a possibly-good fix as dead — the difference
+    // between "your patch is wrong" and "the typechecker didn't finish under load".
+    if (verifyResult.infra) {
+      return { applied: false, committed: false, infra: true, tier, reasons, verifyDetail: `skipped (infra) — ${verifyResult.detail}` };
+    }
     return { applied: false, committed: false, tier, reasons, verifyDetail: `reverted — verify failed: ${verifyResult.detail}` };
   }
 
@@ -84,7 +90,11 @@ export async function applyVerifiedFix(proposal, deps) {
   try {
     await deps.commit(message, proposal.file);
   } catch (err) {
-    return { applied: true, committed: false, tier, reasons: [`applied + verified, but commit failed: ${String(err).slice(0, 80)}`], verifyDetail: verifyResult.detail };
+    // SAFETY: a failed commit must NOT leave the patch in the working tree (applied + maybe staged).
+    // Restore the original so the tree is never left dirty for the next run (which then saw the find
+    // "missing" and a stale modification). Revert to `before`; the caller treats this as infra-ish.
+    try { deps.writeFile(proposal.file, before); } catch { /* best-effort restore */ }
+    return { applied: false, committed: false, infra: true, tier, reasons: [`verified, but commit failed (tree restored): ${String(err).slice(0, 80)}`], verifyDetail: verifyResult.detail };
   }
   return { applied: true, committed: true, tier, reasons, verifyDetail: verifyResult.detail };
 }

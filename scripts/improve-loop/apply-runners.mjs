@@ -20,8 +20,20 @@ const ROOT = resolve(import.meta.dirname, '../..');
 export const AUTO_IMPROVE_BRANCH = 'council/auto-improve';
 
 function sh(cmd, args, opts = {}) {
-  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8', timeout: opts.timeoutMs ?? 300_000, ...opts });
-  return { code: r.status ?? 1, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim(), error: r.error };
+  // shell:true ONLY for npx — on Windows spawnSync('npx', …) without it returns ENOENT (npx is
+  // npx.cmd). This is why tsc verify NEVER ran here: every apply hit ENOENT and the loop could never
+  // land a fix. But shell:true makes spawnSync re-parse args through the shell, so a commit -m message
+  // with spaces would split (git saw "Exclude" as a pathspec). git/node resolve WITHOUT a shell, so
+  // we keep them shell:false (args passed literally, spaces safe). Only npx needs the shell.
+  const useShell = /^npx(\.cmd)?$/i.test(cmd);
+  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8', timeout: opts.timeoutMs ?? 300_000, shell: useShell, ...opts });
+  // CRITICAL distinction: r.status===null means the process did NOT exit normally — it timed out
+  // (r.error.code==='ETIMEDOUT') or failed to spawn. That is an INFRA failure, NOT a non-zero exit.
+  // Conflating them ("code: r.status ?? 1") made a timed-out tsc look like a type error → every patch
+  // falsely reverted under GPU load (tsc is slow while the loop runs models). `infra` lets verify
+  // tell "your patch is broken" from "tsc couldn't run", so an infra blip never strikes a good fix.
+  const infra = r.status === null || !!r.error;
+  return { code: r.status ?? 1, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim(), error: r.error, infra };
 }
 
 /** The git branch HEAD is currently on (or '' if undetectable). */
@@ -70,15 +82,22 @@ export function realApplyDeps(opts = {}) {
     writeFile: (file, contents) => writeFileSync(resolve(ROOT, file), contents),
 
     verify: async () => {
-      // 1) Typecheck — the cheapest strong signal that the edit didn't break the build.
-      const tsc = sh('npx', ['tsc', '-p', pkgTsconfig, '--noEmit'], { timeoutMs: opts.verifyTimeoutMs ?? 240_000 });
+      // 1) Typecheck — the cheapest strong signal that the edit didn't break the build. Timeout
+      //    raised to 6min: tsc runs SLOW while the loop holds the GPU, and a slow tsc must not be
+      //    mistaken for a broken patch.
+      const tsc = sh('npx', ['tsc', '-p', pkgTsconfig, '--noEmit'], { timeoutMs: opts.verifyTimeoutMs ?? 360_000 });
+      // INFRA failure (timeout / couldn't spawn) is NOT a type error — return ok:false WITH infra:true
+      // so the caller skips (doesn't strike/quarantine a good patch). Conflating these falsely reverted
+      // every patch under GPU load — the real wall to ever landing a fix.
+      if (tsc.infra) return { ok: false, infra: true, detail: `tsc could not complete (infra: ${tsc.error?.code ?? 'timeout/spawn'}) — not a type error` };
       if (tsc.code !== 0) {
-        const firstErr = tsc.out.split('\n').find((l) => /error TS\d+/.test(l)) ?? tsc.out.slice(0, 200);
+        const firstErr = tsc.out.split('\n').find((l) => /error TS\d+/.test(l)) ?? (tsc.out.slice(0, 200) || '(no diagnostic — likely infra)');
         return { ok: false, detail: `tsc failed: ${firstErr}` };
       }
       // 2) Optional scoped tests — only when the caller names a test path (keeps verify fast).
       if (opts.testPath) {
-        const vt = sh('npx', ['vitest', 'run', opts.testPath], { timeoutMs: opts.verifyTimeoutMs ?? 240_000 });
+        const vt = sh('npx', ['vitest', 'run', opts.testPath], { timeoutMs: opts.verifyTimeoutMs ?? 360_000 });
+        if (vt.infra) return { ok: false, infra: true, detail: `tests could not complete (infra) — not a test failure` };
         if (vt.code !== 0) {
           const fail = vt.out.split('\n').find((l) => /FAIL|✗|failed/i.test(l)) ?? vt.out.slice(-200);
           return { ok: false, detail: `tests failed: ${fail}` };
