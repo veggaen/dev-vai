@@ -51,6 +51,8 @@ export function openDb(path) {
       passed INTEGER NOT NULL,         -- 1 = interpretation matched expectation
       grade_reason TEXT,
       duration_ms INTEGER,
+      answer_excellence REAL,          -- 0..10 craft score of the produced answer
+      answer_excellence_json TEXT,     -- full rubric verdict (scores/flaws/lesson)
       created_at TEXT NOT NULL,
       UNIQUE (run_id, prompt_id)       -- idempotent: re-run a prompt = replace
     );
@@ -103,7 +105,61 @@ export function openDb(path) {
       last_visual_run_id INTEGER,
       last_overall REAL
     );
+    CREATE TABLE IF NOT EXISTS answer_lessons (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lesson TEXT NOT NULL UNIQUE,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      times_seen INTEGER NOT NULL DEFAULT 1,
+      last_run_id INTEGER,
+      last_overall REAL
+    );
+    -- project_knowledge — the KNOWLEDGE SPINE. Unlike *_lessons (vague prose the model
+    -- averages into slop), a knowledge row is an EVIDENCE-BOUND, COUNTED fact about THIS
+    -- project, with a confidence that RISES on confirmation and FALLS on contradiction so
+    -- stale knowledge decays instead of misleading forever. scope groups facts by where
+    -- they apply (e.g. 'propose-fix', 'model:qwen3:8b', 'file:...'). claim is the actionable
+    -- fact. evidence is the machine-checkable backing (counts, file refs). kind distinguishes
+    -- a 'guard' (encodes a deterministic check) from an 'observation'.
+    CREATE TABLE IF NOT EXISTS project_knowledge (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope TEXT NOT NULL,
+      claim TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'observation',  -- 'guard' | 'observation'
+      evidence TEXT,
+      confirmations INTEGER NOT NULL DEFAULT 0,
+      contradictions INTEGER NOT NULL DEFAULT 0,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      UNIQUE(scope, claim)
+    );
+    -- loop_events — the STRUCTURED TRACE of the process engine. Every decision (what was
+    -- eligible, what ran, what it cost, what it produced) is one row, so "is perpetual motion
+    -- TRUE?" is answerable from data, not vibes. cycle groups a cycle; phase = plan|run|health.
+    CREATE TABLE IF NOT EXISTS loop_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cycle INTEGER NOT NULL,
+      at TEXT NOT NULL,
+      kind TEXT NOT NULL,           -- 'plan' | 'run:start' | 'run:done' | 'run:error' | 'health' | 'cycle'
+      process TEXT,                 -- which process (null for cycle/health rows)
+      ok INTEGER,                   -- 1/0 for run outcomes
+      compute REAL,                 -- cost units spent
+      ms INTEGER,                   -- wall time
+      detail TEXT                   -- JSON blob (scorecard, result summary, verdict…)
+    );
+    -- loop_state — durable per-key counters the cheap when()/value() guards read (e.g.
+    -- cyclesSinceVisual). A tiny KV, NOT a growing corpus — bounded by the number of keys.
+    CREATE TABLE IF NOT EXISTS loop_state (
+      key TEXT PRIMARY KEY,
+      value REAL NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
+  // Lazy migration: upgrade corpus DBs created before the answer-excellence
+  // rubric landed, without dropping their accumulated rows.
+  for (const col of ['answer_excellence REAL', 'answer_excellence_json TEXT']) {
+    try { db.exec(`ALTER TABLE results ADD COLUMN ${col};`); } catch { /* column already present */ }
+  }
   return db;
 }
 
@@ -215,6 +271,160 @@ export function topTasteLessons(db, limit = 8) {
     return db.prepare('SELECT lesson, times_seen, last_overall FROM taste_lessons ORDER BY times_seen DESC, id DESC LIMIT ?').all(limit);
   } catch {
     return [];
+  }
+}
+
+/** Accumulate an answer-craft lesson across runs (deduped); the text-lane twin of
+ *  recordTasteLesson — how Vai builds answer taste through repetition. */
+export function recordAnswerLesson(db, { lesson, runId, overall }) {
+  if (!lesson) return;
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO answer_lessons (lesson, first_seen, last_seen, times_seen, last_run_id, last_overall)
+     VALUES (?, ?, ?, 1, ?, ?)
+     ON CONFLICT(lesson) DO UPDATE SET
+       last_seen=excluded.last_seen, times_seen=answer_lessons.times_seen+1,
+       last_run_id=excluded.last_run_id, last_overall=excluded.last_overall`,
+  ).run(lesson, now, now, runId ?? null, overall ?? null);
+}
+
+export function topAnswerLessons(db, limit = 8) {
+  try {
+    return db.prepare('SELECT lesson, times_seen, last_overall FROM answer_lessons ORDER BY times_seen DESC, id DESC LIMIT ?').all(limit);
+  } catch {
+    return [];
+  }
+}
+
+// ── KNOWLEDGE SPINE ──────────────────────────────────────────────────────────
+// capture → (confidence) → apply. The store the loop reads to stop repeating mistakes.
+
+/**
+ * Record (or reinforce) a piece of project knowledge. confirm=true bumps confirmations
+ * (the fact held again), confirm=false bumps contradictions (the fact was wrong this time).
+ * Idempotent per (scope, claim); evidence is overwritten with the latest backing. This is
+ * the CAPTURE half of the spine — call it wherever the loop produces a verifiable outcome.
+ */
+export function recordKnowledge(db, { scope, claim, kind = 'observation', evidence = null, confirm = true } = {}) {
+  if (!scope || !claim) return;
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO project_knowledge (scope, claim, kind, evidence, confirmations, contradictions, first_seen, last_seen)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(scope, claim) DO UPDATE SET
+       last_seen = excluded.last_seen,
+       evidence  = COALESCE(excluded.evidence, project_knowledge.evidence),
+       confirmations  = project_knowledge.confirmations  + ?,
+       contradictions = project_knowledge.contradictions + ?`,
+  ).run(scope, claim, kind, evidence, confirm ? 1 : 0, confirm ? 0 : 1, now, now, confirm ? 1 : 0, confirm ? 0 : 1);
+}
+
+/**
+ * Confidence of a knowledge row in [0,1], Laplace-smoothed: (confirm+1)/(confirm+contra+2).
+ * A fact confirmed 9× / contradicted 0× ≈ 0.91; confirmed 1 / contradicted 4 ≈ 0.29 (decays).
+ * Pure so callers/tests can score rows without a query.
+ */
+export function knowledgeConfidence(row) {
+  const c = Number(row?.confirmations ?? 0);
+  const x = Number(row?.contradictions ?? 0);
+  return (c + 1) / (c + x + 2);
+}
+
+/**
+ * Top knowledge for a scope, most-confident first, above a confidence floor so low/contradicted
+ * facts don't get re-injected (they're decaying out). This is the APPLY half — callers inject
+ * these into the relevant prompt. scope can be exact ('propose-fix') — prefix matching is the
+ * caller's job if it wants 'model:*'.
+ */
+export function topKnowledge(db, scope, { limit = 5, minConfidence = 0.5 } = {}) {
+  try {
+    const rows = db.prepare('SELECT * FROM project_knowledge WHERE scope = ?').all(scope);
+    return rows
+      .map((r) => ({ ...r, confidence: knowledgeConfidence(r) }))
+      .filter((r) => r.confidence >= minConfidence)
+      .sort((a, b) => b.confidence - a.confidence || b.confirmations - a.confirmations)
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+// ── ENGINE TRACE + DURABLE STATE ─────────────────────────────────────────────
+// The structured log that makes "is perpetual motion TRUE?" answerable from data.
+
+/** Append one engine event. Never throws into the loop (a logging failure must not stop work). */
+export function logLoopEvent(db, { cycle, kind, process = null, ok = null, compute = null, ms = null, detail = null } = {}) {
+  try {
+    db.prepare(
+      `INSERT INTO loop_events (cycle, at, kind, process, ok, compute, ms, detail)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      cycle ?? 0, new Date().toISOString(), kind, process,
+      ok == null ? null : (ok ? 1 : 0), compute, ms,
+      detail == null ? null : (typeof detail === 'string' ? detail : JSON.stringify(detail)),
+    );
+  } catch { /* logging is best-effort */ }
+}
+
+/** Recent engine events (newest first) — for the operator/dashboard + verification. */
+export function recentLoopEvents(db, limit = 50) {
+  try { return db.prepare('SELECT * FROM loop_events ORDER BY id DESC LIMIT ?').all(limit); }
+  catch { return []; }
+}
+
+/** Aggregate the trace into proof-of-motion stats: per-process run/ok counts, compute spent,
+ *  outcomes produced. This is the data behind "the loop is legitimately working." */
+export function loopEventStats(db, { sinceCycle = 0 } = {}) {
+  try {
+    const rows = db.prepare(
+      `SELECT process,
+              SUM(CASE WHEN kind='run:done' THEN 1 ELSE 0 END) AS done,
+              SUM(CASE WHEN kind='run:error' THEN 1 ELSE 0 END) AS errors,
+              COALESCE(SUM(compute),0) AS compute
+       FROM loop_events WHERE cycle > ? AND process IS NOT NULL
+       GROUP BY process ORDER BY done DESC`,
+    ).all(sinceCycle);
+    const cycles = db.prepare('SELECT COUNT(DISTINCT cycle) c FROM loop_events WHERE cycle > ?').get(sinceCycle).c;
+    return { cycles, perProcess: rows };
+  } catch { return { cycles: 0, perProcess: [] }; }
+}
+
+/** Durable KV the cheap guards read (e.g. cyclesSinceVisual). getLoopState returns def if unset. */
+export function getLoopState(db, key, def = 0) {
+  try { const r = db.prepare('SELECT value FROM loop_state WHERE key = ?').get(key); return r ? Number(r.value) : def; }
+  catch { return def; }
+}
+export function setLoopState(db, key, value) {
+  try {
+    db.prepare(
+      `INSERT INTO loop_state (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).run(key, Number(value), new Date().toISOString());
+  } catch { /* best-effort */ }
+}
+/** Atomic-ish increment for cycle counters (read+write in one call). */
+export function bumpLoopState(db, key, by = 1) {
+  const next = getLoopState(db, key, 0) + by;
+  setLoopState(db, key, next);
+  return next;
+}
+
+/** Answer-excellence distribution for a run (or campaign-wide when runId is null):
+ *  count graded, average craft score, and the worst score seen — the gradient the
+ *  loop climbs on text output. */
+export function answerExcellenceStats(db, runId = null) {
+  try {
+    const filter = runId == null
+      ? 'WHERE answer_excellence IS NOT NULL'
+      : 'WHERE run_id = ? AND answer_excellence IS NOT NULL';
+    const args = runId == null ? [] : [runId];
+    const row = db.prepare(
+      `SELECT COUNT(answer_excellence) AS n, AVG(answer_excellence) AS avg, MIN(answer_excellence) AS worst
+       FROM results ${filter}`,
+    ).get(...args);
+    return { n: Number(row?.n ?? 0), avg: row?.avg == null ? null : Number(row.avg), worst: row?.worst == null ? null : Number(row.worst) };
+  } catch {
+    return { n: 0, avg: null, worst: null };
   }
 }
 
@@ -339,16 +549,20 @@ export function alreadyScored(db, runId, promptId) {
 export function recordResult(db, r) {
   db.prepare(
     `INSERT INTO results
-       (run_id, prompt_id, class, read_as, outcome, agreement, answer_excerpt, passed, grade_reason, duration_ms, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (run_id, prompt_id, class, read_as, outcome, agreement, answer_excerpt, passed, grade_reason, duration_ms, answer_excellence, answer_excellence_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(run_id, prompt_id) DO UPDATE SET
        read_as=excluded.read_as, outcome=excluded.outcome, agreement=excluded.agreement,
        answer_excerpt=excluded.answer_excerpt, passed=excluded.passed,
-       grade_reason=excluded.grade_reason, duration_ms=excluded.duration_ms`,
+       grade_reason=excluded.grade_reason, duration_ms=excluded.duration_ms,
+       answer_excellence=excluded.answer_excellence, answer_excellence_json=excluded.answer_excellence_json`,
   ).run(
     r.runId, r.promptId, r.klass, r.readAs ?? null, r.outcome ?? null, r.agreement ?? null,
     (r.answerExcerpt ?? '').slice(0, 600), r.passed ? 1 : 0, r.gradeReason ?? null,
-    r.durationMs ?? null, new Date().toISOString(),
+    r.durationMs ?? null,
+    r.answerExcellence ?? null,
+    r.answerExcellenceJson ?? null,
+    new Date().toISOString(),
   );
 }
 
@@ -370,13 +584,145 @@ export function classStats(db, runId) {
   ).all(runId);
 }
 
+/**
+ * Infra-pollution guard (Verification-First). An older brain.mjs recorded grader/runtime
+ * OUTAGES as Vai FAILURES ("grader unavailable — counted as fail"). Those rows describe an
+ * infra hiccup, not a Vai answer, so counting them craters the measured pass-rate and lies
+ * to the motion meter. Current code SKIPS such turns instead of recording them, but the
+ * historical rows remain — and any stray legacy/manual write could reintroduce them. This
+ * predicate excludes them from every aggregate so the trend reflects Vai behavior only.
+ * SQL fragment (no leading AND) so callers compose it into their WHERE clause.
+ */
+export const NOT_INFRA_RESULT_SQL =
+  `(res.grade_reason IS NULL OR (res.grade_reason NOT LIKE '%grader unavailable%' AND res.grade_reason NOT LIKE '%counted as fail%'))`;
+/** Same predicate for queries that alias the results table as `results`/no-alias. */
+const NOT_INFRA_RESULT_BARE =
+  `(grade_reason IS NULL OR (grade_reason NOT LIKE '%grader unavailable%' AND grade_reason NOT LIKE '%counted as fail%'))`;
+
 /** Campaign trend: pass-rate per finished run, for the eventual Campaign zoom. */
 export function campaignTrend(db) {
   return db.prepare(
     `SELECT r.id AS run_id, r.started_at,
-            COUNT(res.id) AS total,
-            COALESCE(SUM(res.passed),0) AS passed
+            COUNT(CASE WHEN ${NOT_INFRA_RESULT_SQL} THEN res.id END) AS total,
+            COALESCE(SUM(CASE WHEN ${NOT_INFRA_RESULT_SQL} THEN res.passed ELSE 0 END),0) AS passed
      FROM runs r LEFT JOIN results res ON res.run_id = r.id
      GROUP BY r.id ORDER BY r.id`,
   ).all();
+}
+
+/**
+ * The EXACT prompts currently failing for a class — each prompt's MOST RECENT result
+ * (max run_id) is a failure. This is the honest acceptance-verifier target: re-run THESE
+ * specific rows after a fix and confirm THEY moved, instead of trusting corpus-wide drift.
+ * try/catch-guarded so a fresh corpus returns [] instead of crashing.
+ * @returns {{prompt_id:number, prompt:string, expected_intent:string, run_id:number, grade_reason:string}[]}
+ */
+export function failingRowsForClass(db, klass) {
+  try {
+    return db.prepare(
+      `SELECT r.prompt_id, p.prompt, p.expected_intent, r.run_id, r.grade_reason
+       FROM results r
+       JOIN prompts p ON p.id = r.prompt_id
+       JOIN (SELECT prompt_id, MAX(run_id) AS mrun FROM results WHERE class = ? GROUP BY prompt_id) m
+         ON m.prompt_id = r.prompt_id AND m.mrun = r.run_id
+       WHERE r.class = ? AND r.passed = 0
+       ORDER BY r.prompt_id`,
+    ).all(klass, klass);
+  } catch {
+    return [];
+  }
+}
+
+/** Campaign-wide per-class pass-rate across ALL runs — the grader reads this to
+ *  spend the scarce one-at-a-time GPU budget on the LOWEST pass-rate class, not on
+ *  whichever class happened to fail in the latest tiny run. try/catch-guarded so a
+ *  fresh corpus (no results table populated yet) reports [] instead of crashing. */
+export function campaignClassStats(db) {
+  try {
+    return db.prepare(
+      `SELECT class, COUNT(*) AS total, COALESCE(SUM(passed),0) AS passed
+       FROM results WHERE ${NOT_INFRA_RESULT_BARE} GROUP BY class ORDER BY class`,
+    ).all();
+  } catch {
+    return [];
+  }
+}
+
+/** Answer-excellence trend: average craft score + sample count per run, oldest
+ *  first. The cross-run quality gradient the motion meter reads to tell whether
+ *  the council's OUTPUT is getting better over the perpetual run, not just its
+ *  read-the-prompt pass-rate. Runs with no scored answers report n=0, avg=null. */
+export function answerExcellenceTrend(db) {
+  try {
+    return db.prepare(
+      `SELECT r.id AS run_id, r.started_at,
+              COUNT(res.answer_excellence) AS n,
+              AVG(res.answer_excellence) AS avg
+       FROM runs r LEFT JOIN results res ON res.run_id = r.id
+       GROUP BY r.id ORDER BY r.id`,
+    ).all();
+  } catch {
+    return [];
+  }
+}
+
+/** Proposal quality: of the failure CLASSES we proposed fixes for, how many
+ *  converged into a grep-verified consensus winner. Convergence is a per-class
+ *  question — propose-fix emits many persona proposals per class and consensus-fix
+ *  converges them into a verified winner for that class — so the metric is measured
+ *  at the class grain and SCOPED to the proposed classes. That keeps it bounded
+ *  [0,1] and stops unrelated lanes (e.g. the visual ui/* consensus the supervisor
+ *  also writes into this table) from inflating it past 100%. Low hit-rate with
+ *  enough proposed classes = the propose prompt is weak (the signal the innovation
+ *  engine reads to suggest a prompt experiment). Both tables are lazy, so a fresh
+ *  corpus reports zeros instead of crashing. */
+export function proposalQualityStats(db) {
+  const count = (sql) => { try { return Number(db.prepare(sql).get().c) || 0; } catch { return 0; } };
+  const total = count('SELECT COUNT(DISTINCT class) c FROM proposals');
+  const converged = count(
+    'SELECT COUNT(DISTINCT p.class) c FROM proposals p '
+    + 'WHERE EXISTS (SELECT 1 FROM consensus c WHERE c.verified=1 AND c.class=p.class)',
+  );
+  return { total, converged, hitRate: total > 0 ? converged / total : 0 };
+}
+
+/** Council health: fraction of results where the council actually convened (read_as
+ *  non-empty). A low response-rate means members aren't answering parseably — the
+ *  signal for a model experiment. runId null = campaign-wide. */
+export function councilResponseRate(db, runId = null) {
+  try {
+    const where = runId == null ? '' : 'WHERE run_id = ?';
+    const args = runId == null ? [] : [runId];
+    const row = db.prepare(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN read_as IS NOT NULL AND TRIM(read_as) <> '' THEN 1 ELSE 0 END) AS responded
+       FROM results ${where}`,
+    ).get(...args);
+    const total = Number(row?.total) || 0;
+    const responded = Number(row?.responded) || 0;
+    return { total, responded, responseRate: total > 0 ? responded / total : 1 };
+  } catch {
+    return { total: 0, responded: 0, responseRate: 1 };
+  }
+}
+
+/** Low-excellence count: graded answers scoring below `threshold` (out of 10) — the
+ *  raw count of weak-craft answers the grading experiments aim to shrink. The
+ *  threshold `?` sits in the SELECT (before the WHERE), so it is always the first
+ *  bound param; runId, when present, follows. */
+export function lowExcellenceCount(db, runId = null, threshold = 6) {
+  try {
+    const where = runId == null
+      ? 'WHERE answer_excellence IS NOT NULL'
+      : 'WHERE run_id = ? AND answer_excellence IS NOT NULL';
+    const args = runId == null ? [threshold] : [threshold, runId];
+    const row = db.prepare(
+      `SELECT COUNT(*) AS graded,
+              SUM(CASE WHEN answer_excellence < ? THEN 1 ELSE 0 END) AS low
+       FROM results ${where}`,
+    ).get(...args);
+    return { graded: Number(row?.graded) || 0, low: Number(row?.low) || 0, threshold };
+  } catch {
+    return { graded: 0, low: 0, threshold };
+  }
 }

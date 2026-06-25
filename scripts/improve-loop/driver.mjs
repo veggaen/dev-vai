@@ -29,6 +29,41 @@ export async function loadedVram() {
 }
 
 /**
+ * Name of the model currently RESIDENT in Ollama VRAM (the largest, if several), or
+ * null if nothing is loaded / the host is unreachable. The grader uses this to judge on
+ * the model that is ALREADY warm instead of forcing a different model in — an evict +
+ * cold-load swap is both the #1 grader-timeout source and the sustained disk/GPU load the
+ * BSOD rule forbids. fetchImpl is injectable for tests (mirrors ensureRuntimeReady).
+ */
+export async function residentModel({ fetchImpl = fetch } = {}) {
+  try {
+    const res = await fetchImpl(`${OLLAMA}/api/ps`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return null;
+    const j = await res.json();
+    const models = j.models ?? [];
+    if (!models.length) return null;
+    return models.slice().sort((a, b) => (b.size_vram ?? 0) - (a.size_vram ?? 0))[0]?.name ?? null;
+  } catch {
+    return null; // never let a probe failure crash the loop
+  }
+}
+
+/**
+ * Installed Ollama models with sizes — for the review gate's dynamic "best model that fits"
+ * picker. Returns [{name, sizeBytes}] (empty on any failure; never throws into the loop).
+ */
+export async function installedModels({ fetchImpl = fetch } = {}) {
+  try {
+    const res = await fetchImpl(`${OLLAMA}/api/tags`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return [];
+    const j = await res.json();
+    return (j.models ?? []).map((m) => ({ name: m.name, sizeBytes: m.size ?? 0 }));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Block until loaded VRAM is under `budgetBytes`, or `maxWaitMs` elapses.
  * Returns the VRAM reading at the moment we proceed (for the UI gauge).
  */
@@ -60,7 +95,7 @@ export function isOverVramBudget(vramBytes, budgetBytes) {
  * SKIPS (not grades) the cycle. Never throws.
  */
 export async function ensureRuntimeReady(baseUrl, {
-  model = process.env.IMPROVE_GEN_MODEL ?? process.env.LOCAL_MODEL ?? 'qwen3:8b',
+  model = null,
   keepAlive = '30m',
   warmTimeoutMs = 60_000,
   // Injectable for tests (mirrors the runtime adapters' fetchImpl pattern). Defaults to the
@@ -78,19 +113,26 @@ export async function ensureRuntimeReady(baseUrl, {
   if (!runtimeUp) {
     return { ready: false, runtimeUp: false, warmed: false, detail: `runtime not serving at ${httpBase} — start it (pnpm --filter @vai/runtime dev)` };
   }
+  // Warm the model that is ALREADY resident (the one Vai is actually answering with), not a
+  // hard-coded qwen3 — warming a different model evicts Vai's model, so the NEXT WS turn must
+  // cold-load it UNDER the 220s timeout and hangs. That swap-thrash was the dominant crash
+  // source. Honour an explicit model when given; else resident; else the env/qwen3 default.
+  const warmModel = model
+    ?? (await residentModel({ fetchImpl }))
+    ?? process.env.IMPROVE_GEN_MODEL ?? process.env.LOCAL_MODEL ?? 'qwen3:8b';
   let warmed = false;
   try {
     await fetchImpl(`${OLLAMA}/api/generate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, prompt: 'ready?', stream: false, think: false, keep_alive: keepAlive, options: { num_predict: 1 } }),
+      body: JSON.stringify({ model: warmModel, prompt: 'ready?', stream: false, think: false, keep_alive: keepAlive, options: { num_predict: 1 } }),
       signal: AbortSignal.timeout(warmTimeoutMs),
     });
     warmed = true; // the model is now resident; cold-start AggregateError avoided
   } catch {
     warmed = false; // warm failed — caller still proceeds (runtime is up), just less hot
   }
-  return { ready: true, runtimeUp: true, warmed, detail: warmed ? `runtime up · ${model} warmed` : `runtime up · ${model} warm timed out (proceeding)` };
+  return { ready: true, runtimeUp: true, warmed, detail: warmed ? `runtime up · ${warmModel} warmed` : `runtime up · ${warmModel} warm timed out (proceeding)` };
 }
 
 /**

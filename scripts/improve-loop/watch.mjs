@@ -65,6 +65,32 @@ function compactData(type, data) {
   return JSON.stringify(data).slice(0, 220);
 }
 
+function councilPanel() {
+  // Self-refreshing panel that shows the COUNCIL's overnight work on Vai's UI (read from
+  // /council.json). This is the real self-improvement — not the old text-seed table below.
+  return `<h2 style="color:#dce">Council working on your UI (overnight)</h2>
+    <div id="council-panel" style="margin:8px 0 18px"><div style="color:#667;font-size:12px">loading council findings…</div></div>
+    <script>(function(){
+      function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+      async function tick(){
+        try{
+          var arr=await (await fetch('/council.json',{cache:'no-store'})).json();
+          var el=document.getElementById('council-panel'); if(!el) return;
+          if(!arr.length){ el.innerHTML='<div style="color:#667;font-size:12px">No council findings yet — first cycle runs ~1–2 min.</div>'; }
+          else el.innerHTML=arr.slice(0,12).map(function(f){
+            var tone=f.taste>=8?'#8d9':f.taste>=6?'#dc9':'#f99';
+            return '<div style="background:#10141c;border:1px solid #243045;border-left:3px solid '+tone+';border-radius:8px;padding:11px 13px;margin:9px 0">'
+              +'<div style="display:flex;gap:10px;align-items:center;font-size:12px;color:#9ab"><b style="color:'+tone+'">taste '+esc(f.taste)+'/10</b>'
+              +'<span>wow '+esc(f.wow)+'/10</span>'+(f.flaw?'<span style="color:#fb8">'+esc(f.flaw)+'</span>':'')
+              +'<span style="margin-left:auto;color:#566">cycle '+esc(f.cycle)+' · '+esc((f.at||"").slice(11,16))+'</span></div>'
+              +'<pre style="white-space:pre-wrap;font-size:12px;color:#bcd;margin:7px 0 0;max-height:240px;overflow:auto">'+esc(f.council)+'</pre></div>';
+          }).join('');
+        }catch(e){}
+        setTimeout(tick,5000);
+      } tick();
+    })();</script>`;
+}
+
 function liveFramePanel() {
   // A near-real-time mirror of what the probe sees. The <img> reloads itself with a
   // cache-busting query; a freshness poll flips the badge to "live" vs "idle".
@@ -169,7 +195,7 @@ function page() {
     const lf = liveFramePanel();
     const tp = tastePanel(taste, tasteLessons);
     const vp = visualPanel(visualRun, visualLive, visualEvents);
-    return `<html><body style="background:#0b0b10;color:#ddd;font-family:system-ui;padding:40px;max-width:1000px">${lf}<div style="color:#778;font-size:12px;margin:6px 0">No text run yet. Start: <code>node scripts/improve-loop/run.mjs</code></div>${tp}${vp}</body></html>`;
+    return `<html><body style="background:#0b0b10;color:#ddd;font-family:system-ui;padding:40px;max-width:1000px">${councilPanel()}${lf}${tp}${vp}</body></html>`;
   }
 
   const bar = (frac) => {
@@ -220,9 +246,11 @@ function page() {
   h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#778;margin:26px 0 8px}
   .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:${running ? '#3c3' : '#666'};margin-right:7px;${running ? 'animation:p 1.2s infinite' : ''}}
   @keyframes p{50%{opacity:.3}}</style></head><body>
-  <h1><span class="dot"></span>Vai Improvement Loop — run #${run.id} <span style="color:#778;font-weight:400">(${esc(run.status)})</span></h1>
-  <div style="color:#667;font-size:12px">${running ? `live · auto-refreshing every ${refreshSec}s` : 'finished'} · ${(results || []).length} scored</div>
+  <h1><span class="dot"></span>Vai Improvement Loop</h1>
+  <div style="color:#667;font-size:12px">${running ? `live · auto-refreshing` : 'idle'} · council audits the UI against the world-class standard each cycle</div>
+  ${councilPanel()}
   ${liveFramePanel()}
+  <details style="margin-top:18px"><summary style="cursor:pointer;color:#566;font-size:12px">⤵ old text-seed lane (run #${run.id}, not the UI work)</summary>
   <div id="app">
   ${livePanel}
   ${tastePanel(taste, tasteLessons)}
@@ -230,7 +258,7 @@ function page() {
   <h2>Pass-rate by class</h2>${statRows || '<div style="color:#666">warming up…</div>'}
   <h2>Queued fix candidates (you approve — never auto-applied)</h2>${fixRows}
   <h2>Results (newest first)</h2>${resultRows || '<div style="color:#666">no results yet…</div>'}
-  </div>
+  </div></details>
   <script>
   // Soft refresh: re-fetch only #app and swap it, PRESERVING which <details> the user
   // opened (the old meta-refresh reloaded the whole page and slammed them shut every ${refreshSec}s).
@@ -280,6 +308,12 @@ createServer((req, res) => {
       res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'no-store' });
       res.end(buf);
     }).catch(() => { res.writeHead(404); res.end(); });
+    return;
+  }
+  if (req.url === '/council.json') {
+    readFile(resolve('Temporary_files/council-findings.json'))
+      .then((b) => { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(b); })
+      .catch(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('[]'); });
     return;
   }
   if (req.url === '/live-frame.meta') {

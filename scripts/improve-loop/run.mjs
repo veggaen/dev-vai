@@ -19,8 +19,9 @@
  */
 import {
   openDb, startRun, endRun, upsertPrompt, alreadyScored,
-  recordResult, queueFix, classStats, liveHeartbeat,
+  recordResult, queueFix, classStats, liveHeartbeat, recordAnswerLesson,
 } from './db.mjs';
+import { judgeAnswerExcellence } from './answer-rubric.mjs';
 import { waitForVramHeadroom, loadedVram, runThroughVai, sleep, ensureRuntimeReady, isInfraError, isOverVramBudget } from './driver.mjs';
 import { generatePrompts, gradeInterpretation, mineFailures } from './brain.mjs';
 import { SEED_CLASSES } from './seeds.mjs';
@@ -203,14 +204,31 @@ async function main() {
 
     ui.readAs = vai.council?.realIntent ?? '(no council)';
     const grade = await gradeInterpretation(item.klass, item.expectedIntent, item.prompt, vai);
+    // Verification-First: a grader-MODEL failure (not Vai's fault) must be SKIPPED, never
+    // recorded as a logic failure — the same rule the runThroughVai catch enforces above.
+    if (grade.infra) {
+      ui.crashes++;
+      ui.now = 'grader infra skip (model judge unavailable) — not scored';
+      ui.done++;
+      render();
+      await sleep(COOLDOWN_MS);
+      continue;
+    }
     ui.lastPass = grade.passed;
+
+    // Text-lane twin of the visual taste pass: grade HOW excellent the answer is
+    // (craft gradient), not just whether the read was right. Pure compute, no GPU.
+    const excellence = judgeAnswerExcellence(vai.text);
 
     recordResult(db, {
       runId, promptId, klass: item.klass,
       readAs: vai.council?.realIntent, outcome: vai.council?.outcome,
       agreement: vai.council?.agreement, answerExcerpt: vai.text,
       passed: grade.passed, gradeReason: grade.reason, durationMs: vai.durationMs,
+      answerExcellence: excellence.overall,
+      answerExcellenceJson: JSON.stringify(excellence),
     });
+    recordAnswerLesson(db, { lesson: excellence.lesson, runId, overall: excellence.overall });
     if (!grade.passed) {
       failures.push({ klass: item.klass, reason: grade.reason });
       ui.failures++;

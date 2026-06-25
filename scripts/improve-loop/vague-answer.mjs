@@ -37,20 +37,34 @@ const FILLER_MARKERS = [
 ];
 
 /**
+ * Detect the raw surface signals of an answer — the shared primitive both the
+ * vague/overconfident grader and the answer-excellence rubric build on, so the
+ * regex contracts live in exactly one place.
+ * @returns {{ text: string, words: number, confident: boolean, hedged: boolean,
+ *   grounded: boolean, filler: number }}
+ */
+export function detectAnswerSignals(answer) {
+  const text = String(answer ?? '').trim();
+  const words = text.length === 0 ? 0 : text.split(/\s+/).length;
+  return {
+    text,
+    words,
+    confident: CONFIDENT_MARKERS.some((re) => re.test(text)),
+    hedged: HEDGE_MARKERS.some((re) => re.test(text)),
+    grounded: GROUNDING_MARKERS.some((re) => re.test(text)),
+    filler: FILLER_MARKERS.filter((re) => re.test(text)).length,
+  };
+}
+
+/**
  * Score an answer for vagueness/overconfidence.
  * @returns {{ vague: boolean, score: number, signals: string[] }}
  *   `vague` is true when the answer trips the threshold; `signals` explains why.
  */
 export function scoreVagueOverconfident(answer, opts = {}) {
-  const text = String(answer ?? '').trim();
+  const { text, words, confident, hedged, grounded, filler } = detectAnswerSignals(answer);
   const signals = [];
   if (text.length === 0) return { vague: false, score: 0, signals: ['empty'] };
-
-  const words = text.split(/\s+/).length;
-  const confident = CONFIDENT_MARKERS.some((re) => re.test(text));
-  const hedged = HEDGE_MARKERS.some((re) => re.test(text));
-  const grounded = GROUNDING_MARKERS.some((re) => re.test(text));
-  const filler = FILLER_MARKERS.filter((re) => re.test(text)).length;
 
   let score = 0;
   if (!grounded && words > 25) { score += 2; signals.push('no concrete grounding (no numbers/names/links/examples)'); }

@@ -60,6 +60,29 @@ test('buildFlaws gives a clipped popover P0 with cause and fix direction', () =>
   assert.match(flaws[0].fixDirection, /portal|top-layer/);
 });
 
+test('buildFlaws catches offscreen and covered controls as P0', () => {
+  const flaws = buildFlaws({
+    viewport: { width: 390, height: 700 },
+    offscreenInteractive: [{ selector: 'button.menu', box: { x: 360, y: 40, w: 90, h: 36 } }],
+    coveredInteractive: [{ selector: 'button.submit', topLabel: 'div.overlay', point: { x: 120, y: 500 } }],
+  });
+  assert.equal(flaws.length, 2);
+  assert.deepEqual(flaws.map((f) => f.severity), ['P0', 'P0']);
+  assert.match(flaws[0].symptom, /offscreen/);
+  assert.match(flaws[1].symptom, /covered/);
+  assert.match(flaws[1].fixDirection, /stacking|top layer/);
+});
+
+test('buildFlaws treats small hit areas as polish flaws, not blockers', () => {
+  const flaws = buildFlaws({
+    viewport: { width: 1440, height: 900 },
+    tinyClickTargets: [{ selector: 'button.icon', box: { x: 24, y: 24, w: 24, h: 24 } }],
+  });
+  assert.equal(flaws.length, 1);
+  assert.equal(flaws[0].severity, 'P2');
+  assert.match(flaws[0].symptom, /too small/);
+});
+
 test('buildFlaws escalates very-low-contrast text to P0, mild to P1', () => {
   const flaws = buildFlaws({
     invisibleText: [

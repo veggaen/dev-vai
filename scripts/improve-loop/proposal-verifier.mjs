@@ -1,0 +1,95 @@
+/**
+ * proposal-verifier — knowledge as EXECUTABLE GUARDS, not model prose.
+ *
+ * The Zig-grade objection to "AI knowledge stores": they fill with model opinions that the
+ * next model averages into slop. The answer is to encode what the loop LEARNS as MECHANICAL,
+ * verifiable checks. The loop's most-repeated, provable failure (recorded but never acted on)
+ * is: qwen proposes a `find` line that DOES NOT EXIST in the file it claims to edit
+ * ("hallucinated code that does not exist"), or edits a comment/string instead of logic.
+ *
+ * Those are not opinions — they are decidable. This module decides them, deterministically,
+ * with no model call. A proposal that fails here is rejected at the SOURCE (cheap, ungameable),
+ * the failure becomes a counted fact (knowledge), and that fact is fed back into the next
+ * prompt so the mistake stops repeating. Knowledge → guard → measured behaviour change.
+ *
+ * Pure + I/O-light (only reads the target file), so it unit-tests with an injected reader.
+ */
+
+/** A `find` is non-executable if it is a comment, a bare string, or empty/prose. These are
+ *  the lines that "look like a fix" but change no behaviour — qwen's #2 recurring failure. */
+export function isNonExecutableFind(find) {
+  if (!find || typeof find !== 'string') return true;
+  const t = find.trim();
+  if (t.length < 3) return true;
+  if (t.startsWith('//') || t.startsWith('/*') || t.startsWith('*')) return true; // comment
+  // A bare quoted string with no code around it (e.g. a log/grade message).
+  if (/^["'`].*["'`],?$/.test(t)) return true;
+  return false;
+}
+
+/**
+ * Verify a proposal against the REAL file. Returns a structured verdict — never throws.
+ * @param proposal {{ file, find, replace, why }}
+ * @param {{ readFile?: (path)=>string }} opts  injectable reader for tests
+ * @returns {{ ok:boolean, code:string, detail:string }}
+ *   code ∈ no-find | no-file | hallucinated-find | non-executable-find | noop-replace | ok
+ */
+export function verifyProposal(proposal, { readFile } = {}) {
+  const reader = readFile ?? ((p) => { const { readFileSync } = require('node:fs'); return readFileSync(p, 'utf8'); });
+  if (!proposal || !proposal.find) return { ok: false, code: 'no-find', detail: 'proposal has no find line' };
+  if (!proposal.file) return { ok: false, code: 'no-file', detail: 'proposal has no file' };
+
+  let source = '';
+  try { source = reader(proposal.file); }
+  catch { return { ok: false, code: 'no-file', detail: `cannot read ${proposal.file}` }; }
+
+  // THE core learned guard: does the cited line actually exist in the file? (hallucination)
+  if (!source.includes(proposal.find)) {
+    return { ok: false, code: 'hallucinated-find', detail: `find not present in ${proposal.file} (model hallucinated the line)` };
+  }
+  // Editing a comment/string changes no behaviour.
+  if (isNonExecutableFind(proposal.find)) {
+    return { ok: false, code: 'non-executable-find', detail: 'find is a comment/string/prose, not decision logic' };
+  }
+  // A find==replace (or whitespace-only diff) is a no-op.
+  if (proposal.replace != null && proposal.find.trim() === String(proposal.replace).trim()) {
+    return { ok: false, code: 'noop-replace', detail: 'replace equals find (no change)' };
+  }
+  // Multiple matches make a literal find/replace ambiguous (apply-fix refuses these too).
+  const count = source.split(proposal.find).length - 1;
+  if (count > 1) {
+    return { ok: false, code: 'ambiguous-find', detail: `find occurs ${count}× — not a unique anchor` };
+  }
+  return { ok: true, code: 'ok', detail: 'find exists, is executable, unique, and changes the line' };
+}
+
+/**
+ * Roll up a window of recent proposal verdicts into the FEEDBACK the next prompt needs.
+ * This is the "apply" half of the knowledge spine: the system tells the model about its OWN
+ * recent, COUNTED failure modes so it stops repeating them. Returns null when there's no
+ * signal yet (don't inject noise). `verdicts` are { code } objects (newest first or any order).
+ * @returns {{ total, byCode, hallucinationRate, promptHint }|null}
+ */
+export function summarizeVerdicts(verdicts = []) {
+  if (!verdicts.length) return null;
+  const byCode = {};
+  for (const v of verdicts) byCode[v.code] = (byCode[v.code] ?? 0) + 1;
+  const total = verdicts.length;
+  const hallucinated = byCode['hallucinated-find'] ?? 0;
+  const nonExec = byCode['non-executable-find'] ?? 0;
+  const hallucinationRate = hallucinated / total;
+
+  // Build a SPECIFIC, evidence-bound hint — counts, not vibes (the anti-slop contract).
+  const hints = [];
+  if (hallucinated > 0) {
+    hints.push(`${hallucinated}/${total} of your recent proposals cited a "find" line that DOES NOT EXIST in the file. Copy the find as an EXACT, verbatim substring from the SOURCE shown — do not paraphrase or reconstruct it from memory.`);
+  }
+  if (nonExec > 0) {
+    hints.push(`${nonExec}/${total} edited a comment/string instead of logic. The find MUST be executable code (a regex const, an if(...), or a return ...).`);
+  }
+  if (!hints.length) return { total, byCode, hallucinationRate, promptHint: null };
+  return {
+    total, byCode, hallucinationRate,
+    promptHint: `LEARNED FROM YOUR OWN RECENT MISTAKES (verified, counted):\n- ${hints.join('\n- ')}`,
+  };
+}

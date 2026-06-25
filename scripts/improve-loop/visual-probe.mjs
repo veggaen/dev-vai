@@ -273,6 +273,15 @@ async function gatherVisualSignals(page) {
       const cls = typeof el.className === 'string' ? el.className.trim().split(/\s+/).filter(Boolean).slice(0, 3).map((c) => `.${c}`).join('') : '';
       return `${el.tagName.toLowerCase()}${id}${cls}`;
     };
+    const box = (r) => ({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) });
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 &&
+        cs.display !== 'none' &&
+        cs.visibility !== 'hidden' &&
+        parseFloat(cs.opacity || '1') > 0.05;
+    };
 
     const all = Array.from(document.querySelectorAll('body *')).filter((el) => {
       const r = el.getBoundingClientRect();
@@ -380,6 +389,63 @@ async function gatherVisualSignals(page) {
     // Unexpected scrollbar (horizontal is the real smell; vertical is often legit).
     const unexpectedScrollbar = document.documentElement.scrollWidth > vw + 1 ? 'x' : null;
 
+    // Hands-sensitive flaws: controls that exist in the DOM but a human cannot comfortably see/click.
+    const interactiveSelector = [
+      'button', 'a[href]', 'input', 'textarea', 'select', 'summary',
+      '[role="button"]', '[role="menuitem"]', '[role="option"]', '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    const interactive = Array.from(document.querySelectorAll(interactiveSelector)).filter(isVisible);
+    const offscreenInteractive = [];
+    const coveredInteractive = [];
+    const tinyClickTargets = [];
+    for (const el of interactive.slice(0, 250)) {
+      const r = el.getBoundingClientRect();
+      const center = { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+      if (r.left < -1 || r.top < -1 || r.right > vw + 1 || r.bottom > vh + 1) {
+        offscreenInteractive.push({ selector: sel(el), box: box(r) });
+      }
+      if (r.width < 32 || r.height < 32) {
+        tinyClickTargets.push({ selector: sel(el), box: box(r) });
+      }
+      if (center.x >= 0 && center.x <= vw && center.y >= 0 && center.y <= vh) {
+        const top = document.elementFromPoint(center.x, center.y);
+        if (top && top !== el && !el.contains(top)) {
+          coveredInteractive.push({ selector: sel(el), topLabel: sel(top), point: center });
+        }
+      }
+    }
+
+    const overlaySelector = [
+      '[role="menu"]', '[role="listbox"]', '[role="dialog"]', '[role="tooltip"]', '[popover]',
+      '[data-state="open"]', '[data-radix-popper-content-wrapper]',
+      '.popover', '.dropdown', '.menu', '.tooltip', '.modal',
+    ].join(',');
+    const clippedPopovers = [];
+    const overlays = Array.from(document.querySelectorAll(overlaySelector)).filter(isVisible);
+    for (const el of overlays.slice(0, 120)) {
+      const r = el.getBoundingClientRect();
+      let p = el.parentElement;
+      while (p && p !== document.body && p !== document.documentElement) {
+        const cs = getComputedStyle(p);
+        const overflow = `${cs.overflow} ${cs.overflowX} ${cs.overflowY}`;
+        if (/(hidden|clip|auto|scroll)/.test(overflow)) {
+          const pr = p.getBoundingClientRect();
+          const clipped = r.left < pr.left - 1 || r.top < pr.top - 1 || r.right > pr.right + 1 || r.bottom > pr.bottom + 1;
+          if (clipped) {
+            clippedPopovers.push({
+              selector: sel(el),
+              box: box(r),
+              clipperSelector: sel(p),
+              clipperBox: box(pr),
+              clipperOverflow: overflow.trim(),
+            });
+            break;
+          }
+        }
+        p = p.parentElement;
+      }
+    }
+
     return {
       viewport: { width: vw, height: vh },
       distinctFontSizes: fontSizes.size,
@@ -392,6 +458,10 @@ async function gatherVisualSignals(page) {
       oversizedEmptyHero,
       invisibleText: invisibleText.slice(0, 12),
       unexpectedScrollbar,
+      clippedPopovers: clippedPopovers.slice(0, 12),
+      offscreenInteractive: offscreenInteractive.slice(0, 12),
+      coveredInteractive: coveredInteractive.slice(0, 12),
+      tinyClickTargets: tinyClickTargets.slice(0, 12),
     };
   });
 }

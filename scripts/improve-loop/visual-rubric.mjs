@@ -227,6 +227,20 @@ export function buildFlaws(signals) {
       'a human cannot reach the control',
       'clamp/flip the position so it stays within the viewport');
   }
+  for (const c of s.coveredInteractive || []) {
+    add('P0', 'interactive element is covered by another element',
+      { selector: c.selector, topLabel: c.topLabel, point: c.point, viewport: s.viewport },
+      'stacking context or z-index places another element over the control',
+      'a human sees the control but the click lands somewhere else',
+      'fix stacking order, remove the covering layer, or move the control into the top layer');
+  }
+  for (const t of s.tinyClickTargets || []) {
+    add('P2', 'click target is too small for comfortable use',
+      { selector: t.selector, box: t.box, viewport: s.viewport },
+      'control hit area is below the comfortable 32px minimum',
+      'the UI feels fiddly, especially on touch or high-DPI screens',
+      'increase padding/hit area while keeping visual alignment intact');
+  }
   for (const t of s.invisibleText || []) {
     add(t.contrast < 1.6 ? 'P0' : 'P1', 'low-contrast / near-invisible text',
       { selector: t.selector, contrast: round1(t.contrast), fg: t.fg, bg: t.bg },

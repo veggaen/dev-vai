@@ -193,7 +193,7 @@ async function printStatus(opts) {
     return { ok: true };
   }
 
-  const { openDb, classStats, readHeartbeat, latestVisualRun, readVisualLive, buildVisualCouncilPacket, topTasteLessons } = await import('./db.mjs');
+  const { openDb, classStats, readHeartbeat, latestVisualRun, readVisualLive, buildVisualCouncilPacket, topTasteLessons, answerExcellenceStats, topAnswerLessons } = await import('./db.mjs');
   const db = openDb(dbPath);
   const lastRun = db.prepare('SELECT id,status,started_at,ended_at,note FROM runs ORDER BY id DESC LIMIT 1').get();
   const fixes = tableCount(db, 'fixes');
@@ -241,6 +241,77 @@ async function printStatus(opts) {
     console.log(`Taste lessons learned (${lessons.length} shown):`);
     for (const l of lessons) console.log(`  ×${l.times_seen} ${l.lesson}`);
   }
+  const answerStats = answerExcellenceStats(db, lastRun?.id ?? null);
+  if (answerStats.n) {
+    console.log(`Answer excellence: avg ${answerStats.avg.toFixed(1)}/10 · worst ${answerStats.worst.toFixed(1)}/10 (n=${answerStats.n}, last run)`);
+  }
+  const answerLessons = topAnswerLessons(db, 3);
+  if (answerLessons.length) {
+    console.log(`Answer lessons learned (${answerLessons.length} shown):`);
+    for (const l of answerLessons) console.log(`  ×${l.times_seen} ${l.lesson}`);
+  }
+  // Perpetual motion: does the loop ITSELF move across runs, or just spin? When it
+  // stalls, planNextExperiment (read-only here) previews the experiment the living
+  // loop would queue — bringing the innovation engine's decision into view.
+  const { planNextExperiment, experimentHistory, formatExperiment } = await import('./innovation-engine.mjs');
+  const plan = planNextExperiment(db, { record: false });
+  const motion = plan.motion;
+  if (motion.state !== 'cold-start') {
+    console.log(motion.headline);
+    if (motion.recommendation) console.log(`  → ${motion.recommendation}`);
+    const sc = plan.scorecard;
+    const ipct = (n) => (n == null ? 'n/a' : `${Math.round(n * 100)}%`);
+    console.log(`  scorecard: hit-rate ${ipct(sc.proposalQuality.hitRate)} (${sc.proposalQuality.total} classes) · council ${ipct(sc.councilHealth.responseRate)} · low-craft ${sc.slopScore.score}/${sc.slopScore.graded}`);
+    if (motion.state === 'stalling') {
+      const ev = plan.suggestion.evRationale ? ` (${plan.suggestion.evRationale})` : '';
+      console.log(`  next experiment: [${plan.suggestion.type}] ${plan.suggestion.hypothesis}${ev}`);
+      if (plan.skipReason) console.log(`    (would not queue: ${plan.skipReason})`);
+    }
+  }
+  // Experiment ledger: the closed-loop outcome feedback (open = awaiting post-queue
+  // runs; closed = adopted/discarded with measured delta).
+  const experiments = experimentHistory(db, 3);
+  if (experiments.length) {
+    console.log(`Experiments (${experiments.length} shown):`);
+    for (const exp of experiments) console.log(`  ${formatExperiment(exp)}`);
+  }
+  // GRADE: the deterministic self-grader — which weakest classes to target next, any
+  // stuck lessons (re-learned but never acted on), and a per-agent adopt/reject/keep
+  // verdict bound to a measured signal. Read-only; reuses the scorecard already built.
+  const { campaignClassStats } = await import('./db.mjs');
+  const { gradeLedger } = await import('./grader.mjs');
+  const { buildActionQueue, formatTopAction } = await import('./action-queue.mjs');
+  const grade = gradeLedger({
+    classStats: campaignClassStats(db),
+    tasteLessons: topTasteLessons(db, 8),
+    answerLessons: topAnswerLessons(db, 8),
+    proposalQuality: plan.scorecard.proposalQuality,
+    councilHealth: plan.scorecard.councilHealth,
+  });
+  console.log(grade.headline);
+  if (grade.targets.length) {
+    console.log(`  targets (weakest first): ${grade.targets.slice(0, 3).map((c) => `${c.class} ${Math.round(c.passRate * 100)}%`).join(' · ')}`);
+  }
+  const queue = buildActionQueue(grade);
+  console.log(`  ${formatTopAction(queue)}`);
+  for (const v of grade.verdicts) console.log(`  [${v.verdict.toUpperCase()}] ${v.agent}: ${v.why}`);
+  // CAPABILITY preview: the most recent FEATURE-level proposals from the generative
+  // council (read-only). Shows what the capability arc is steering toward next.
+  try {
+    const { capabilityHistory, computeRoiSeries } = await import('./capability-engine.mjs');
+    const caps = capabilityHistory(db, 3);
+    if (caps.length) {
+      console.log(`Capability council: ${caps.length} recent proposal(s) (propose-only → backlog)`);
+      for (const c of caps) console.log(`  [${c.area}] ${c.title} (impact ${c.impact ?? '?'}/10) — ${String(c.capability).slice(0, 80)}`);
+    }
+    // COMPUTE-ROI verdict: is the loop converting GPU compute into shipped value, or
+    // spinning (the Zig "wasteful review burden" failure)? Deterministic, read-only.
+    const series = computeRoiSeries(db, 30);
+    if (series.length) {
+      const { analyzeRoiTrend, formatRoi } = await import('./compute-roi.mjs');
+      console.log(formatRoi(analyzeRoiTrend(series)));
+    }
+  } catch (e) { /* ledger not created yet — capability arc hasn't run; silent */ }
   if (live) {
     const label = lastRun?.status === 'running' ? 'Live heartbeat' : 'Last heartbeat';
     const suffix = lastRun?.status === 'running' ? (live.phase ?? '') : '(run complete)';

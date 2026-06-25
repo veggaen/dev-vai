@@ -4,7 +4,7 @@
 // (mirrors vague-answer.test.mjs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isInfraError, ensureRuntimeReady, isOverVramBudget } from './driver.mjs';
+import { isInfraError, ensureRuntimeReady, isOverVramBudget, residentModel } from './driver.mjs';
 
 // Verification-First: isInfraError is the gate that decides whether a failed turn is an
 // INFRASTRUCTURE failure (skip — never grade, the constitution's "don't score infra as Vai
@@ -82,4 +82,34 @@ test('runtime up but warm fails → ready:true, warmed:false (proceeds anyway)',
   assert.equal(r.ready, true);   // still ready — runtime is up, just not pre-warmed
   assert.equal(r.warmed, false);
   assert.match(r.detail, /proceeding/i);
+});
+
+// ── residentModel — lets the grader judge on the ALREADY-warm model (no evict+reload swap) ──
+
+test('residentModel returns the largest loaded model (no VRAM swap forced)', async () => {
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ models: [
+    { name: 'qwen2.5:3b', size_vram: 2_000_000_000 },
+    { name: 'deepseek-r1:8b', size_vram: 7_520_177_356 },
+  ] }) });
+  assert.equal(await residentModel({ fetchImpl }), 'deepseek-r1:8b');
+});
+
+test('residentModel returns null when nothing is loaded or host is unreachable', async () => {
+  assert.equal(await residentModel({ fetchImpl: async () => ({ ok: true, json: async () => ({ models: [] }) }) }), null);
+  assert.equal(await residentModel({ fetchImpl: async () => ({ ok: false }) }), null);
+  assert.equal(await residentModel({ fetchImpl: async () => { throw new Error('ECONNREFUSED'); } }), null);
+});
+
+test('ensureRuntimeReady warms the RESIDENT model (no swap) when no model is given', async () => {
+  // The crash cause this fixes: re-ready was warming a hard-coded qwen3, evicting Vai's
+  // deepseek so the next WS turn cold-loaded it under timeout and hung. Now it warms whatever
+  // is resident.
+  const fetchImpl = async (url) => {
+    if (url.endsWith('/api/ps')) return { ok: true, json: async () => ({ models: [{ name: 'deepseek-r1:8b', size_vram: 7e9 }] }) };
+    return { status: 200 }; // health probe + warm generate
+  };
+  const r = await ensureRuntimeReady('http://localhost:3006', { fetchImpl });
+  assert.equal(r.ready, true);
+  assert.equal(r.warmed, true);
+  assert.match(r.detail, /deepseek-r1:8b warmed/);
 });
