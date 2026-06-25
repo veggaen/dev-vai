@@ -156,19 +156,33 @@ export function isInfraError(err) {
 }
 
 /** Direct, low-cost Ollama generate — used for prompt generation + cheap grading. */
-export async function ollamaGenerate(model, prompt, { timeoutMs = 90_000, numPredict = 512 } = {}) {
+/** A reasoning model (deepseek-r1, qwq, *-thinking) is DESIGNED to think before answering — forcing
+ *  think:false cripples it (it produced "no proposal" because it couldn't reason first). Detect it
+ *  so we enable thinking AND give it enough tokens to finish the reasoning + the answer. */
+export function isReasoningModel(name = '') {
+  return /r1\b|deepseek-?r1|qwq|thinking|reason/i.test(name);
+}
+
+export async function ollamaGenerate(model, prompt, { timeoutMs = 90_000, numPredict = 512, think } = {}) {
+  const reasoning = isReasoningModel(model);
+  // Reasoning models: enable think (unless caller overrode) and ensure a generous token budget so
+  // the JSON answer isn't truncated by the reasoning preamble eating the cap.
+  const useThink = think != null ? think : reasoning;
+  const tokens = reasoning ? Math.max(numPredict, 1024) : numPredict;
   const res = await fetch(`${OLLAMA}/api/generate`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model, prompt, stream: false, think: false,
-      options: { num_predict: numPredict, temperature: 0.7 },
+      model, prompt, stream: false, think: useThink,
+      options: { num_predict: tokens, temperature: 0.7 },
     }),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: AbortSignal.timeout(reasoning ? Math.max(timeoutMs, 180_000) : timeoutMs),
   });
   if (!res.ok) throw new Error(`ollama ${res.status}`);
   const j = await res.json();
-  return (j.response ?? '').trim();
+  // With think:true, ollama returns reasoning in j.thinking and the answer in j.response — use the
+  // answer, but fall back to thinking if the model put everything there.
+  return (j.response ?? j.thinking ?? '').trim();
 }
 
 /**

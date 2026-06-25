@@ -17,11 +17,35 @@ import { TOOL_SPEC, runTool } from './tools.mjs';
 
 const MODEL = process.env.IMPROVE_GEN_MODEL ?? process.env.LOCAL_MODEL ?? 'qwen3:8b';
 
-/** Pull the first JSON object out of a model reply. */
-function parseToolCall(raw) {
-  const m = raw.match(/\{[\s\S]*?\}(?=\s*$|\s*[^}])/) ?? raw.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try { return JSON.parse(m[0]); } catch { return null; }
+/**
+ * Pull a tool-call JSON out of a model reply — ROBUSTLY, so every model gets a fair voice, not
+ * just ones that emit bare strict JSON. Reasoning models (deepseek-r1) wrap output in <think>…</think>
+ * and prose; others fence it in ```json. A too-strict parser silenced them ("no proposal") even when
+ * they HAD a valid answer. We: (1) strip <think> blocks, (2) prefer fenced ```json, (3) try EVERY
+ * balanced {...} candidate and return the first that parses into a tool-call object.
+ */
+export function parseToolCall(raw) {
+  if (!raw) return null;
+  // 1. Drop reasoning blocks so their stray braces don't get mistaken for the tool call.
+  let text = String(raw).replace(/<think>[\s\S]*?<\/think>/gi, ' ').replace(/<\/?think>/gi, ' ');
+  const tryParse = (s) => { try { const o = JSON.parse(s); return (o && typeof o === 'object' && (o.tool || o.file || o.find)) ? o : null; } catch { return null; } };
+  // 2. Prefer a fenced ```json … ``` block (most models' "final answer" format).
+  const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((m) => m[1]);
+  for (const f of fenced) { const o = tryParse(f.trim()); if (o) return o; }
+  // 3. Scan ALL balanced {...} candidates, longest-last (the real tool call usually comes after any
+  //    reasoning object). Balance-scan so nested braces are handled, not a greedy single regex.
+  const cands = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '{') continue;
+    let depth = 0;
+    for (let j = i; j < text.length; j++) {
+      if (text[j] === '{') depth++;
+      else if (text[j] === '}') { depth--; if (depth === 0) { cands.push(text.slice(i, j + 1)); break; } }
+    }
+  }
+  // Prefer a candidate that actually has a "tool"/"file"/"find" key; try last-first (post-reasoning).
+  for (const c of cands.reverse()) { const o = tryParse(c); if (o) return o; }
+  return null;
 }
 
 /**
