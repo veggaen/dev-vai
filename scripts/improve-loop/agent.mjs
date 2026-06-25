@@ -28,7 +28,7 @@ function parseToolCall(raw) {
  * Run the grounded proposal loop for one failure.
  * @returns {Promise<{proposal: object|null, transcript: string[]}>}
  */
-export async function proposeGrounded({ klass, summary, fails, hintFile, maxSteps = 6, preamble = '' }) {
+export async function proposeGrounded({ klass, summary, fails, hintFile, maxSteps = 6, preamble = '', model = MODEL }) {
   const transcript = [];
   const sys =
 `${preamble ? preamble + '\n\n' : ''}You are a senior engineer fixing a bug in the dev-vai TypeScript codebase.
@@ -54,7 +54,7 @@ Begin by locating the code. Your first reply must be a grep_repo or read_file ca
   for (let step = 0; step < maxSteps; step++) {
     await waitForVramHeadroom(7 * 1024 ** 3);
     let raw;
-    try { raw = await ollamaGenerate(MODEL, convo + '\n\nYour JSON tool call:', { numPredict: 300, timeoutMs: 120000 }); }
+    try { raw = await ollamaGenerate(model, convo + '\n\nYour JSON tool call:', { numPredict: 300, timeoutMs: 120000 }); }
     catch (e) { transcript.push(`step ${step}: model error ${String(e)}`); break; }
 
     const call = parseToolCall(raw);
@@ -76,7 +76,7 @@ Begin by locating the code. Your first reply must be a grep_repo or read_file ca
       let critRaw = '';
       try {
         await waitForVramHeadroom(7 * 1024 ** 3);
-        critRaw = await ollamaGenerate(MODEL, critiquePrompt, { numPredict: 320, timeoutMs: 120000 });
+        critRaw = await ollamaGenerate(model, critiquePrompt, { numPredict: 320, timeoutMs: 120000 });
       } catch { /* keep original on critique failure */ }
       const revised = parseToolCall(critRaw);
       if (revised && revised.tool === 'propose' && revised.find) {

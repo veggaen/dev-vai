@@ -24,6 +24,8 @@ import { openDb } from './db.mjs';
 import { proposeGrounded } from './agent.mjs';
 import { selectPersonas, personaPreamble } from './personas.mjs';
 import { grep_repo } from './tools.mjs';
+import { installedModels } from './driver.mjs';
+import { pickRoster } from './model-router.mjs';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
@@ -31,6 +33,11 @@ const DB_PATH = opt('--db', 'scripts/improve-loop/.corpus.sqlite');
 const TARGET = opt('--class', 'answer/opportunity-framing');
 const REPEATS = Number(opt('--repeats', '1'));
 const STEPS = Number(opt('--steps', '7'));
+// Multi-model roundtable: route personas across DIFFERENT installed models (biggest-first, each
+// within the VRAM budget). Cross-MODEL agreement is far stronger than one model repeating itself —
+// one model's truncated regex is another's clean line. --vram-gb caps which models are eligible.
+const VRAM_GB = Number(opt('--vram-gb', '8.5'));
+const MAX_MODELS = Number(opt('--models', '3'));
 
 const db = openDb(DB_PATH);
 db.exec(`CREATE TABLE IF NOT EXISTS consensus (
@@ -63,22 +70,32 @@ function verifyFind(find) {
 }
 
 const panel = selectPersonas(TARGET);
-console.log(`\n━━━ consensus-fix [${TARGET}] · ${panel.length} engineers (${panel.map((p) => p.discipline ?? 'debug').join(',')}) × ${REPEATS} · ${STEPS} steps ━━━`);
+// Build the model roster (VRAM-eligible, biggest-first). Fall back to a single default if Ollama
+// is unreachable, so the loop still works offline-ish. Each persona gets a model by rotation, so
+// the panel is a DIVERSE set of models, not one model wearing hats.
+const installed = await installedModels().catch(() => []);
+const roster = pickRoster(installed, { budgetBytes: VRAM_GB * 1024 ** 3, max: MAX_MODELS });
+const models = roster.length ? roster : [undefined]; // undefined → proposeGrounded uses its default
+const rosterRank = (m) => { const i = models.indexOf(m); return i < 0 ? 99 : i; }; // bigger/earlier = lower
+
+console.log(`\n━━━ consensus-fix [${TARGET}] · ${panel.length} engineers × ${models.length} model(s) [${models.map((m) => m ?? 'default').join(', ')}] · ${STEPS} steps ━━━`);
 const proposals = [];
 for (let r = 0; r < REPEATS; r++) {
-  for (const persona of panel) {
-    process.stdout.write(`  ▸ ${persona.id} (round ${r + 1})… `);
+  for (let i = 0; i < panel.length; i++) {
+    const persona = panel[i];
+    const model = models[i % models.length]; // rotate models across personas → cross-model diversity
+    process.stdout.write(`  ▸ ${persona.id} @ ${model ?? 'default'} (round ${r + 1})… `);
     let res;
     try {
       res = await proposeGrounded({
-        klass: TARGET, summary, fails, hintFile, maxSteps: STEPS,
+        klass: TARGET, summary, fails, hintFile, maxSteps: STEPS, model,
         preamble: personaPreamble(persona, { klass: TARGET, summary }),
       });
     } catch (e) { console.log('error', String(e).slice(0, 50)); continue; }
     const p = res.proposal;
     if (!p || !p.find) { console.log('no proposal'); continue; }
     const verified = verifyFind(p.find);
-    proposals.push({ persona: persona.id, file: p.file, find: norm(p.find), replace: p.replace, why: p.why, verified });
+    proposals.push({ persona: persona.id, model: model ?? 'default', file: p.file, find: norm(p.find), replace: p.replace, why: p.why, verified });
     console.log(`proposed ${verified ? '✓verified' : '✗unverified'}: ${norm(p.find).slice(0, 50)}`);
   }
 }
@@ -99,7 +116,8 @@ if (ranked.length === 0) {
 } else {
   const [find, group] = ranked[0];
   const top = group[0];
-  console.log(`WINNER · ${group.length}/${proposals.length} agreement · personas: ${[...new Set(group.map((g) => g.persona))].join(', ')}`);
+  const distinctModels = [...new Set(group.map((g) => g.model ?? 'default'))];
+  console.log(`WINNER · ${group.length}/${proposals.length} agreement · ${distinctModels.length} distinct model(s): ${distinctModels.join(', ')} · personas: ${[...new Set(group.map((g) => g.persona))].join(', ')}`);
   console.log('file:', top.file);
   console.log('find:', JSON.stringify(find));
   console.log('replace:', JSON.stringify(top.replace));
