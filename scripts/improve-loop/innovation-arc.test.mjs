@@ -51,19 +51,61 @@ test('classifyInnovation: unknown/empty candidate escalates by default', () => {
   assert.equal(classifyInnovation().mode, 'escalate');
 });
 
-test('planInnovation routes the grounding gap to autonomous', async () => {
+test('planInnovation classifies the grounding gap autonomous (build injected to isolate routing)', async () => {
+  // Inject a passing build so this test isolates the DISCOVER→CLASSIFY routing from the data-dependent
+  // prove step (which has its own tests above). A guardable grounding gap must route autonomous.
   const plan = await planInnovation(null, {
     lessons: [L('no concrete grounding: cite a number, name, file ref', 52, 5.3)],
+    build: () => ({ built: true, guard: () => ({ verdict: 'ship' }), scorecard: { detail: 'injected pass' }, reason: 'injected pass' }),
   });
   assert.equal(plan.found, true);
   assert.equal(plan.mode, 'autonomous');
-  assert.match(plan.headline, /innovation \[autonomous\]/);
+  assert.equal(plan.built, true);
+  assert.match(plan.headline, /innovation \[autonomous · BUILT\+PROVEN\]/);
+});
+
+test('planInnovation with a guardable gap but NO examples demotes to escalate (cannot prove)', async () => {
+  const plan = await planInnovation(null, {
+    lessons: [L('no concrete grounding: cite a number, name, file ref', 52, 5.3)],
+    examples: [], // no labelled data → cannot prove a guard → must not keep it
+  });
+  assert.equal(plan.built, false);
+  assert.equal(plan.mode, 'escalate');
 });
 
 test('planInnovation reports nothing-to-do when the loop is healthy', async () => {
   const plan = await planInnovation(null, { lessons: [L('keep this craft', 94, 7.9)] });
   assert.equal(plan.found, false);
   assert.match(formatInnovation(plan), /no unacted gap/);
+});
+
+test('planInnovation BUILDS+PROVES an autonomous guard when the data separates', async () => {
+  const SLOP = 'A good company culture is defined by its focus on amazing people, with leaders who invest in hiring, onboarding, and retaining top talent. It fosters a supportive and productive environment where everyone simply thrives and the best teams always win because the right mindset is the only way.';
+  const GROUNDED = 'For React, open the React DevTools Profiler, record the slow interaction. Fixes: 1. useMemo, 2. split context, 3. virtualize lists.';
+  const plan = await planInnovation(null, {
+    lessons: [L('no concrete grounding: cite a number, name, file ref', 52, 5.3)],
+    examples: [
+      { answer: SLOP, bad: true }, { answer: SLOP.replace('culture', 'team'), bad: true },
+      { answer: GROUNDED, bad: false }, { answer: GROUNDED.replace('React', 'Vue'), bad: false },
+    ],
+    buildOpts: { minCatch: 0.6, maxFalsePos: 0.1 },
+  });
+  assert.equal(plan.mode, 'autonomous');
+  assert.equal(plan.built, true, JSON.stringify(plan.scorecard));
+  assert.equal(typeof plan.guard, 'function');
+  assert.match(formatInnovation(plan), /AUTONOMOUSLY BUILT/);
+});
+
+test('planInnovation DEMOTES to escalate when the guard cannot prove out', async () => {
+  const GROUNDED = 'Use Vitest 3.2, e.g. `vitest run`, and check the 12 failing specs in service.ts.';
+  const plan = await planInnovation(null, {
+    lessons: [L('no concrete grounding: cite a number', 52, 5.3)],
+    // all "bad" examples are actually grounded → the guard catches nothing → must not be kept
+    examples: [{ answer: GROUNDED, bad: true }, { answer: GROUNDED, bad: false }],
+  });
+  assert.equal(plan.built, false);
+  assert.equal(plan.mode, 'escalate');
+  assert.match(formatInnovation(plan), /flagged for V3gga/);
 });
 
 test('formatInnovation flags an escalate plan for V3gga', async () => {

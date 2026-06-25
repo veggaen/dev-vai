@@ -86,10 +86,28 @@ export function classifyInnovation(candidate = {}) {
 }
 
 /**
- * One step of the innovation arc: discover a gap, classify it, and produce a ROUTED plan.
+ * Pull the loop's OWN labelled answers for the build/prove step: each answer with a bad/good label
+ * from its excellence score (< badBelow = bad, >= goodAbove = good). Substantive answers only, so a
+ * one-line reply doesn't skew the proof. Returns [] on any error (the builder then can't prove → escalates).
+ */
+export function labelledAnswers(db, { badBelow = 6, goodAbove = 8, minLen = 80 } = {}) {
+  try {
+    return db.prepare(
+      `SELECT DISTINCT answer_excerpt AS answer, answer_excellence AS sc FROM results
+       WHERE answer_excellence IS NOT NULL AND answer_excerpt IS NOT NULL AND length(answer_excerpt) > ?`,
+    ).all(minLen)
+      .filter((r) => r.sc < badBelow || r.sc >= goodAbove)
+      .map((r) => ({ answer: r.answer, bad: r.sc < badBelow }));
+  } catch { return []; }
+}
+
+/**
+ * One step of the innovation arc: discover a gap, classify it, and — for an AUTONOMOUS candidate —
+ * actually BUILD + PROVE a guard against the loop's own labelled data (escalating if it can't prove
+ * out). This is the conceive→build→prove the grounding-gate did by hand, now autonomous.
  * @param db open corpus DB
- * @param deps { lessons?: rows }  inject lessons for tests; defaults to topAnswerLessons(db)
- * @returns { found:boolean, candidate?, mode?, reasons?, headline }
+ * @param deps { lessons?, examples?, build? }  injectable for tests
+ * @returns { found, candidate?, mode?, reasons?, built?, guard?, scorecard?, headline }
  */
 export async function planInnovation(db, deps = {}) {
   let lessons = deps.lessons;
@@ -103,13 +121,29 @@ export async function planInnovation(db, deps = {}) {
   if (!candidate) {
     return { found: false, headline: 'innovation: no unacted gap above the discovery threshold (loop healthy or already acting)' };
   }
-  const { mode, reasons } = classifyInnovation(candidate);
+  let { mode, reasons } = classifyInnovation(candidate);
+
+  // AUTONOMOUS BUILD: a guardable discovery gets a real guard built + proven on the loop's own data.
+  // If it proves out, the loop has autonomously CREATED working enforcement. If it can't, demote to
+  // escalate — never keep an unproven guard (the anti-slop contract applied to the loop's own work).
+  let built = false; let guard; let scorecard; let params;
+  if (mode === 'autonomous') {
+    try {
+      const { buildGuardFromDiscovery } = await import('./guard-builder.mjs');
+      const examples = deps.examples ?? labelledAnswers(db, deps.labelOpts ?? {});
+      const r = (deps.build ?? buildGuardFromDiscovery)(candidate, examples, deps.buildOpts ?? {});
+      built = r.built; guard = r.guard; scorecard = r.scorecard; params = r.params;
+      if (!built) { mode = 'escalate'; reasons = [...reasons, r.reason]; }
+      else reasons = [...reasons, r.reason];
+    } catch (e) {
+      mode = 'escalate';
+      reasons = [...reasons, `build step failed (${String(e).slice(0, 60)}) — escalate`];
+    }
+  }
+
   return {
-    found: true,
-    candidate,
-    mode,
-    reasons,
-    headline: `innovation [${mode}]: ${candidate.kind} — "${String(candidate.lesson).slice(0, 60)}" (${candidate.summary})`,
+    found: true, candidate, mode, reasons, built, guard, scorecard, params,
+    headline: `innovation [${mode}${built ? ' · BUILT+PROVEN' : ''}]: ${candidate.kind} — "${String(candidate.lesson).slice(0, 56)}" (${candidate.summary})`,
   };
 }
 
@@ -118,7 +152,8 @@ export function formatInnovation(plan) {
   if (!plan?.found) return plan?.headline ?? 'innovation: nothing to do';
   const lines = [plan.headline];
   for (const r of plan.reasons ?? []) lines.push(`  · ${r}`);
-  if (plan.mode === 'escalate') lines.push('  → flagged for V3gga (fundamental — not built autonomously)');
+  if (plan.built) lines.push(`  → ✅ AUTONOMOUSLY BUILT + PROVEN: ${plan.scorecard?.detail ?? 'guard proves out on the loop\'s own data'}`);
+  else if (plan.mode === 'escalate') lines.push('  → 🚩 flagged for V3gga (fundamental or unprovable — not built autonomously)');
   else lines.push('  → the loop may pursue this autonomously (build a guard → prove → land)');
   return lines.join('\n');
 }
