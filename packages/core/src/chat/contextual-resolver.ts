@@ -19,7 +19,7 @@ import { isPureConversationalTurn } from '../models/web-conclude-policy.js';
 const QUESTION_START = /^(?:how|what|which|when|where|why|who|whom|whose|is|are|was|were|does|do|did|can|could|will|would|should|has|have|had|tell|give|explain|and)\b/i;
 
 // Imperative / fragment follow-ups that still refer back ("got a link to his profiles").
-const FOLLOW_UP_FRAGMENT = /^(?:got|any|share|show|give|find|look|link)\b/i;
+const FOLLOW_UP_FRAGMENT = /^(?:got|any|share|show|give|look|link)\b/i;
 const PROFILE_LINK_CUE = /\b(?:profile|profiles|link|links|url|website|social|linkedin|twitter|instagram|facebook)\b/i;
 
 // Place referents → "in <topic>"; thing referents → "<topic>"; "one" → "a <topic>".
