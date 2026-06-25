@@ -85,7 +85,7 @@ const FACTUAL_QUESTION_LEAD =
   /^\s*(?:what(?:'s| is| are| was| were)?|who(?:'s| is| are| was| were)?|when(?:'s| is| was| did)?|where(?:'s| is| are)?|which|how (?:much|many|old|far|long|tall|big)|how (?:do(?:es)?|did|to)\b(?!\s+(?:i|we|you)?\s*(?:make|build|create|generate))|why|whose|is|are|was|were|does|do|did|can|could|will|would)\b/i;
 /** Short, fresh/real-time data asks — price, score, weather, latest, current value. */
 const FRESH_DATA_LEAD =
-  /\b(?:price|cost|worth|value|rate|exchange\s+rate|score|weather|temperature|forecast|latest|current(?:ly)?|right\s+now|today|this\s+(?:week|month|year)|how\s+much\s+(?:is|does|are)|stock\s+price|market\s+cap)\b/i;
+  /\b(?:price|cost|worth|value|rate|exchange\s+rate|score|weather|temperature|forecast|latest|current(?:ly)?|right\s+now|now|tonight|today|this\s+(?:week|month|year)|this\s+(?:morning|afternoon|evening)|how\s+much\s+(?:is|does|are)|stock\s+price|market\s+cap|up[\s-]to[\s-]date)\b/i;
 
 /** Any build/make/create verb anywhere — catches "how do I build X", "help me make Y". */
 const BUILD_VERB_ANYWHERE = /\b(?:build|make|create|generate|scaffold|develop|implement|code|design|spin\s*up|set\s*up|add|write)\b/i;
