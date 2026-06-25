@@ -652,6 +652,26 @@ export function alreadyScored(db, runId, promptId) {
   return !!db.prepare('SELECT 1 FROM results WHERE run_id = ? AND prompt_id = ?').get(runId, promptId);
 }
 
+/**
+ * Map prompt → the ISO time it was MOST RECENTLY scored in ANY run (null = never). Lets a
+ * wall-clock-bounded cycle order its work LEAST-RECENTLY-SCORED FIRST, so each short cycle ADVANCES
+ * through the corpus instead of re-grinding the front of a fixed list every time (the stall fix:
+ * a 50-prompt run that times out at a budget would otherwise re-do prompts 1..N forever). Keyed by
+ * prompt TEXT so it works against the run.mjs work list before promptIds are assigned.
+ * @returns {Map<string, string>} prompt text → last_scored ISO
+ */
+export function lastScoredByPrompt(db) {
+  const m = new Map();
+  try {
+    const rows = db.prepare(
+      `SELECT p.prompt AS prompt, MAX(r.created_at) AS last_scored
+       FROM results r JOIN prompts p ON p.id = r.prompt_id GROUP BY p.prompt`,
+    ).all();
+    for (const r of rows) m.set(r.prompt, r.last_scored);
+  } catch { /* fresh corpus */ }
+  return m;
+}
+
 export function recordResult(db, r) {
   db.prepare(
     `INSERT INTO results

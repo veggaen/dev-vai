@@ -19,7 +19,7 @@
  */
 import {
   openDb, startRun, endRun, upsertPrompt, alreadyScored,
-  recordResult, queueFix, classStats, liveHeartbeat, recordAnswerLesson,
+  recordResult, queueFix, classStats, liveHeartbeat, recordAnswerLesson, lastScoredByPrompt,
 } from './db.mjs';
 import { judgeAnswerExcellence } from './answer-rubric.mjs';
 import { waitForVramHeadroom, loadedVram, runThroughVai, sleep, ensureRuntimeReady, isInfraError, isOverVramBudget } from './driver.mjs';
@@ -38,6 +38,12 @@ const COOLDOWN_MS = Number(opt('--cooldown', '2000'));
 const SEEDS_ONLY = has('--seeds-only');
 const DB_PATH = opt('--db', 'scripts/improve-loop/.corpus.sqlite');
 const LIMIT = Math.max(0, Number(opt('--limit', '0')) || 0);
+// WALL-CLOCK BUDGET (the stall fix): cap how long ONE observe run spends starting new turns. Without
+// this, a ~50-prompt list × up-to-220s/turn could block the whole loop for 28–91 min (measured),
+// freezing every other cycle phase. Default 8 min ≈ a handful of turns; resumable + least-recently-
+// scored-first ordering means each bounded cycle ADVANCES through the corpus instead of re-grinding.
+// 0 disables (legacy unbounded behaviour). An in-flight turn always finishes — we just stop STARTING new ones.
+const MAX_RUN_MS = Math.max(0, Number(opt('--max-run-ms', String(8 * 60_000))) || 0);
 // Claude authors the bulk of prompts; qwen contributes only this fraction as a
 // minority top-up per class (0 = none, 1 = full PER_CLASS). Default small.
 const QWEN_FRAC = Math.max(0, Math.min(1, Number(opt('--qwen-frac', '0.3'))));
@@ -142,12 +148,32 @@ async function main() {
       await sleep(COOLDOWN_MS);
     }
   }
-  const selectedWork = LIMIT > 0 ? work.slice(0, LIMIT) : work;
+  // LEAST-RECENTLY-SCORED FIRST: order the work so each wall-clock-bounded cycle ADVANCES through
+  // the corpus instead of re-grinding the front of a fixed list. A prompt never scored sorts first
+  // (epoch 0), then oldest-scored; ties keep the original authored order (stable). This is what makes
+  // the budget cut a stall WITHOUT starving prompts at the back of the list.
+  const lastScored = lastScoredByPrompt(db);
+  const ordered = work
+    .map((item, i) => ({ item, i, last: lastScored.get(item.prompt) ?? '' }))
+    .sort((a, b) => (a.last < b.last ? -1 : a.last > b.last ? 1 : a.i - b.i))
+    .map((x) => x.item);
+  const selectedWork = LIMIT > 0 ? ordered.slice(0, LIMIT) : ordered;
   ui.total = selectedWork.length;
 
+  const runStartedAt = Date.now();
+  let budgetStopped = false;
   const failures = [];
   for (const item of selectedWork) {
     if (interrupted) break;
+    // WALL-CLOCK BUDGET: stop STARTING new turns once the cycle's time is spent (an in-flight turn
+    // already finished by here). Resumable: next cycle re-orders least-recently-scored-first and
+    // picks up where this one left off. This is the stall fix — a cycle can no longer run 90 min.
+    if (MAX_RUN_MS > 0 && Date.now() - runStartedAt >= MAX_RUN_MS) {
+      budgetStopped = true;
+      ui.now = `wall-clock budget reached (${Math.round(MAX_RUN_MS / 60000)}m) — stopping this cycle (resumable)`;
+      render();
+      break;
+    }
     const promptId = upsertPrompt(db, {
       prompt: item.prompt, klass: item.klass, expectedIntent: item.expectedIntent, origin: item.origin,
     });
@@ -243,10 +269,12 @@ async function main() {
     queueFix(db, { runId, klass: cand.klass, failureCount: cand.failureCount, location: cand.location, summary: cand.summary });
     ui.fixes++;
   }
-  endRun(db, runId, interrupted ? 'interrupted' : 'done');
+  const status = interrupted ? 'interrupted' : budgetStopped ? 'budget-stopped' : 'done';
+  endRun(db, runId, status);
   ui.vram = await loadedVram();
   render();
-  process.stdout.write(`\n${interrupted ? '■ interrupted (resumable)' : '✓ run complete'} — ${ui.fixes} fix candidates in ${DB_PATH}\n`);
+  const tag = interrupted ? '■ interrupted (resumable)' : budgetStopped ? '⏱ wall-clock budget reached (resumable — advances next cycle)' : '✓ run complete';
+  process.stdout.write(`\n${tag} — ${ui.fixes} fix candidates in ${DB_PATH}\n`);
   process.stdout.write(`  inspect: node scripts/improve-loop/report.mjs\n`);
 }
 

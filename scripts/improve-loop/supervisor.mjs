@@ -45,6 +45,10 @@ const VRAM_GB = opt('--vram-gb', '');
 const COOLDOWN_MS = opt('--cooldown', '');
 const QWEN_FRAC = opt('--qwen-frac', '');
 const LIMIT = opt('--limit', '');
+// Per-cycle wall-clock budget for the observe step (forwarded to run.mjs). Bounds a cycle so the
+// loop stays genuinely PERPETUAL instead of freezing 28–91 min on a slow observe (measured stall).
+// Empty → run.mjs's own 8-min default applies. Set '0' to disable (legacy unbounded).
+const MAX_RUN_MS = opt('--max-run-ms', '');
 // Visual cadence: run a no-video eyes/hands probe every N cycles (0 = never). Off by
 // default. Stays strictly serial (after PROPOSE/APPLY, before the GPU rest) so the
 // one-heavy-task-at-a-time rule holds. Uses --no-video to avoid disk/ffmpeg load.
@@ -314,6 +318,7 @@ async function engineMain() {
       if (COOLDOWN_MS) a.push('--cooldown', COOLDOWN_MS);
       if (QWEN_FRAC) a.push('--qwen-frac', QWEN_FRAC);
       if (LIMIT) a.push('--limit', LIMIT);
+      if (MAX_RUN_MS) a.push('--max-run-ms', MAX_RUN_MS);
       return a;
     },
   }));
@@ -501,6 +506,7 @@ async function main() {
     if (COOLDOWN_MS) runArgs.push('--cooldown', COOLDOWN_MS);
     if (QWEN_FRAC) runArgs.push('--qwen-frac', QWEN_FRAC);
     if (LIMIT) runArgs.push('--limit', LIMIT);
+    if (MAX_RUN_MS) runArgs.push('--max-run-ms', MAX_RUN_MS);
     await runChild('scripts/improve-loop/run.mjs', runArgs);
     if (stop) break;
 
