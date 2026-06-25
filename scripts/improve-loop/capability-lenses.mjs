@@ -78,6 +78,70 @@ export const LENSES = [
       'against what Vai can do today. Name the ONE missing capability whose absence blocks the most tasks, ' +
       'and the smallest first slice that would unblock it.',
   },
+  // ── Non-engineering CREWS. The mission is not "more code" — it is "a project so good the outside
+  // world pulls on it without marketing" (stars / forks / unsolicited PRs). These lenses give the
+  // council the framings that produce research/design/brand/growth proposals, each anchored to that
+  // single falsifiable definition of useful, each still grounded in a file/line actually read.
+  {
+    id: 'research-crew',
+    area: 'research',
+    title: 'a research lead who finds the proven technique we are NOT yet using',
+    lens:
+      'Survey the field for a known, published technique (a paper, a real OSS project, a benchmark method) ' +
+      'that would measurably improve Vai AND that we have not adopted. Compare it honestly against what the ' +
+      'codebase does today. Propose the smallest experiment that would TEST the technique here, with a metric ' +
+      'that says whether it beat the baseline — never adopt on faith.',
+  },
+  {
+    id: 'brainstorm-crew',
+    area: 'brainstorm',
+    title: 'a divergent thinker generating non-obvious high-ceiling ideas',
+    lens:
+      'Deliberately leave the local maximum. Generate a non-obvious idea that, if it worked, would make Vai ' +
+      'meaningfully more useful or more loved — the kind that earns an unsolicited star. Then immediately ' +
+      'stress-test your own idea: name its single biggest risk and the cheapest prototype that would prove or ' +
+      'kill it this week. One bold idea, one honest kill-test.',
+  },
+  {
+    id: 'design-styling-crew',
+    area: 'design',
+    title: 'a product designer raising the interface to award-winning taste',
+    lens:
+      'Treat the interface as the first thing a stranger judges. Find ONE concrete UI/UX flaw — a missing ' +
+      'state, a motion that distracts instead of guides, an unclear affordance — using the real components ' +
+      '(apps/desktop). Map the fix to the Vai design tokens (never hardcode colors). Propose the smallest ' +
+      'change that visibly raises taste, and how you would VERIFY it by running, not by eyeballing.',
+  },
+  {
+    id: 'branding-crew',
+    area: 'brand',
+    title: 'a brand strategist making Vai instantly understandable and memorable',
+    lens:
+      'A stranger lands on the repo or app for 10 seconds. Find where the STORY is unclear: the one-line ' +
+      'promise, the name/voice, the first-run moment, the README hook. Propose the smallest change to identity ' +
+      'or first-impression that makes someone think "I get it, and I want this" — honest to what Vai actually ' +
+      'does today, never overclaiming.',
+  },
+  {
+    id: 'growth-marketing-crew',
+    area: 'growth',
+    title: 'a growth engineer designing the loop that earns attention without ads',
+    lens:
+      'The mission forbids paid marketing — usefulness must do the pulling. Find the smallest built-in ' +
+      'mechanism that turns a real use of Vai into reach: a shareable artifact, a why-not-PR-this moment, a ' +
+      'visible proof-of-work others want to show off. Propose ONE such loop and the metric (shares, return ' +
+      'visits, inbound PRs) that says whether it actually pulls.',
+  },
+  {
+    id: 'external-pull-strategist',
+    area: 'external-pull',
+    title: 'a strategist who measures the ONE thing that means "useful": does the world pull on it',
+    lens:
+      'Hold the council to the real definition of done: the project becomes useful exactly when outsiders ' +
+      'arrive on their own — stars, forks, unsolicited pull requests — solely because it is excellent. Of all ' +
+      'work in flight, name the single change most likely to produce the FIRST unsolicited external pull, and ' +
+      'the smallest honest step toward it. Refuse vanity metrics; only external, unpaid pull counts.',
+  },
 ];
 
 /** Map a free-text focus/area hint to the most relevant lens ids, so a round can be
@@ -89,11 +153,19 @@ const FOCUS_MAP = [
   [/council|roundtable|debate|converge|synthes/i, ['council-process-improver']],
   [/reliab|detail|lost|memory|trust|verify/i, ['reliability-no-lost-details']],
   [/delegat|orchestrat|route|worker|agent/i, ['delegation-orchestrator']],
+  [/research|paper|technique|benchmark|sota|prior.?art/i, ['research-crew']],
+  [/brainstorm|idea|divergent|speculat|what.?if/i, ['brainstorm-crew']],
+  [/design|styling|ui|ux|interface|taste|layout|motion/i, ['design-styling-crew']],
+  [/brand|identity|story|name|first.?impression|readme/i, ['branding-crew']],
+  [/growth|market|share|viral|reach|attention|adoption/i, ['growth-marketing-crew']],
+  [/pull|star|fork|traction|useful|attract|external/i, ['external-pull-strategist']],
 ];
 
 /** Always-on lenses: the gap hunter keeps the round honest about the WHOLE mission,
  *  and the council-process improver keeps "improve the roundtable" on every agenda. */
-const CORE_LENS_IDS = ['capability-gap-hunter', 'council-process-improver'];
+// external-pull-strategist is always-on too: every round must answer to the real definition of
+// useful (does the world pull on it), so a code-only round can't drift away from the mission.
+const CORE_LENS_IDS = ['capability-gap-hunter', 'council-process-improver', 'external-pull-strategist'];
 
 /**
  * Pick the lenses for a round. With no focus, returns ALL lenses (a full roundtable).
