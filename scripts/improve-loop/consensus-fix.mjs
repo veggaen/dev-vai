@@ -26,6 +26,8 @@ import { selectPersonas, personaPreamble } from './personas.mjs';
 import { grep_repo } from './tools.mjs';
 import { installedModels } from './driver.mjs';
 import { pickRoster, assignRoles, proposers } from './model-router.mjs';
+import { verifyProposal } from './proposal-verifier.mjs';
+import { readFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
@@ -60,10 +62,19 @@ const summary = fix.summary;
 /** Normalise a code line for clustering (collapse whitespace). */
 const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
 
-/** Does this exact code line really exist in the repo? (grounding gate) */
-function verifyFind(find) {
+/** FULL verification gate (not just "does the line exist"): the find must exist, be executable,
+ *  unique, AND the find→replace edit must keep bracket/regex balance — so a TRUNCATED find (the
+ *  recurring fresh-data-trigger break: find ended "…|fore", replace was the whole regex) is rejected
+ *  HERE, at consensus, instead of slipping through as verified=1 and failing tsc at apply. Falls back
+ *  to a grep-only check when there's no replace yet (proposal stage). */
+function verifyEdit(file, find, replace) {
   if (!find || find.length < 6) return false;
-  // escape regex specials so we match the literal line
+  if (file && replace != null) {
+    try {
+      const v = verifyProposal({ file, find, replace }, { readFile: (p) => readFileSync(p, 'utf8') });
+      return v.ok;
+    } catch { /* fall through to grep check */ }
+  }
   const esc = norm(find).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 80);
   const hits = grep_repo(esc, { glob: '**/*.ts' });
   return hits !== '(no matches)' && !hits.startsWith('(error');
@@ -101,7 +112,7 @@ for (let r = 0; r < REPEATS; r++) {
     } catch (e) { console.log('error', String(e).slice(0, 50)); continue; }
     const p = res.proposal;
     if (!p || !p.find) { console.log('no proposal'); continue; }
-    const verified = verifyFind(p.find);
+    const verified = verifyEdit(p.file, norm(p.find), p.replace);
     proposals.push({ persona: persona.id, model: model ?? 'default', file: p.file, find: norm(p.find), replace: p.replace, why: p.why, verified });
     console.log(`proposed ${verified ? '✓verified' : '✗unverified'}: ${norm(p.find).slice(0, 50)}`);
   }

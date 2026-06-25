@@ -146,7 +146,10 @@ Worked reasoning for this class: the failing inputs are QUESTIONS that merely co
 
 Respond with ONLY a JSON object, no prose:
 {"file":"${filePath}","find":"<exact executable line copied from source>","replace":"<new line>","why":"<one sentence>"}
-The "find" must be an EXACT substring copied from the source above so it can be matched literally, and must be CODE, not a comment or string.`;
+CRITICAL — the "find" and "replace" rules (most fixes fail by breaking these):
+- "find" must be a COMPLETE line/statement copied verbatim from the source — NEVER a partial line. If the line is a regex like \`const X = /.../i;\`, copy the WHOLE regex through the closing \`/i;\`. A truncated find (e.g. ending mid-pattern at "|fore") corrupts the file and is REJECTED.
+- "replace" must have the SAME balanced brackets () [] {} and the SAME number of \`/\` as "find". If "find" has one \`(\` and one \`/\`, so must "replace" — otherwise the edit breaks the syntax.
+- Both must be CODE (a regex / if / return), not a comment or string.`;
 
 console.log('⏳ grounding qwen in', filePath, '— asking for minimal patch…');
 await waitForVramHeadroom(7 * 1024 ** 3);
