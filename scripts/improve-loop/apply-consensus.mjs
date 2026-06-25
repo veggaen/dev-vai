@@ -14,7 +14,7 @@
  *   node scripts/improve-loop/apply-consensus.mjs --dry-run       # classify + report, never write/commit
  *   node scripts/improve-loop/apply-consensus.mjs --db <path> --tsconfig packages/core/tsconfig.json
  */
-import { openDb, isFixBanned, strikeFix } from './db.mjs';
+import { openDb, isFixBanned, strikeFix, recordKnowledge } from './db.mjs';
 import { applyVerifiedFix } from './apply-fix.mjs';
 import { realApplyDeps, currentBranch, AUTO_IMPROVE_BRANCH } from './apply-runners.mjs';
 import { classifyRisk } from './risk-tier.mjs';
@@ -87,6 +87,11 @@ for (const p of pending) {
   if (r.committed) {
     summary.applied++;
     db.prepare("UPDATE consensus SET applied='committed' WHERE id=?").run(p.id);
+    // EFFICIENCY: a just-fixed class must be re-OBSERVED before it can be targeted again — its old
+    // failing results still sit in the corpus, so without this the engine re-targets a class it
+    // already fixed (wasted cycles). Record a recently-fixed fact; the skip-set honours it until the
+    // next observe re-runs those prompts and clears/confirms it.
+    recordKnowledge(db, { scope: 'class:recently-fixed', claim: `class "${p.class}" just received a committed fix — re-observe before targeting again`, kind: 'guard', confirm: true, evidence: `commit on ${p.file}` });
     console.log(`   ✅ applied + committed — ${r.verifyDetail}`);
   } else if (r.tier === 'review') {
     summary.flagged++;

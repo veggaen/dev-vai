@@ -365,6 +365,29 @@ export function isFixBanned(db, fix) {
   return !!(row && row.banned);
 }
 
+// TARGET-LEVEL cooldown — the per-signature ban misses "distinct-find near-misses": the model
+// truncates the SAME long line slightly differently each cycle → a fresh signature every time →
+// never bans → reverts forever on one file. So also count DISTINCT failed finds per file, and treat
+// a file as a dead target once too many distinct edits there have failed. file → count of banned
+// (or distinct-find) failures.
+export const TARGET_FAIL_LIMIT = 3;
+
+/** How many DISTINCT failed finds have hit this file (any class)? The near-miss signal the
+ *  per-signature ban can't see. */
+export function targetFailures(db, file) {
+  if (!file) return 0;
+  try {
+    const row = db.prepare('SELECT COUNT(DISTINCT find) n FROM fix_quarantine WHERE file=?').get(file);
+    return Number(row?.n ?? 0);
+  } catch { return 0; }
+}
+
+/** True if a FILE is a dead target (≥ TARGET_FAIL_LIMIT distinct edits failed there) — the engine
+ *  should stop targeting classes that localise to it until something changes. */
+export function isTargetExhausted(db, file) {
+  return targetFailures(db, file) >= TARGET_FAIL_LIMIT;
+}
+
 /** The current ban list (for the watch UI): which dead fixes are quarantined, newest first. */
 export function bannedFixes(db, limit = 20) {
   try {
@@ -720,6 +743,18 @@ export function ungroundableClasses(db) {
       if (m) set.add(m[1]);
     }
   } catch { /* no knowledge table yet */ }
+  // (a2) Recently-fixed: a class that just got a committed fix is skipped until re-observed, so the
+  // engine doesn't re-target it while its stale failing results still sit in the corpus.
+  try {
+    const fixed = db.prepare(
+      "SELECT claim, confirmations, contradictions FROM project_knowledge WHERE scope='class:recently-fixed'",
+    ).all();
+    for (const r of fixed) {
+      if (Number(r.confirmations) < Number(r.contradictions)) continue; // re-observed as still failing → target again
+      const m = /class "([^"]+)"/.exec(r.claim);
+      if (m) set.add(m[1]);
+    }
+  } catch { /* no knowledge table yet */ }
   // (b) Proactive: a class whose latest fix LOCATION is a placeholder (not a real file path) can
   // never be grounded — skip it from cycle 1 instead of waiting for N wasted no-file proposals.
   try {
@@ -732,7 +767,10 @@ export function ungroundableClasses(db) {
       // placeholders look like "(unknown — investigate)" or are empty.
       const filePart = (loc.split(/[:\s(]/)[0] || '').trim();
       const looksLikePath = /[\\/].+\.(ts|tsx|js|jsx|mjs|cjs|json|md)$/i.test(filePart);
-      if (!loc || loc.startsWith('(') || !looksLikePath) set.add(f.class);
+      if (!loc || loc.startsWith('(') || !looksLikePath) { set.add(f.class); continue; }
+      // (c) EXHAUSTED TARGET: too many DISTINCT edits already failed on this file (the truncation
+      // near-miss loop). Stop targeting it — the models can't land a fix here; a human/senior must.
+      if (isTargetExhausted(db, filePart)) set.add(f.class);
     }
   } catch { /* no fixes table yet */ }
   return set;
