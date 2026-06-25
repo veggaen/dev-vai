@@ -16,7 +16,7 @@
  * the health metric can attribute motion.
  */
 import {
-  campaignClassStats, getLoopState, setLoopState, bumpLoopState, recordKnowledge,
+  campaignClassStats, getLoopState, setLoopState, bumpLoopState, recordKnowledge, ungroundableClasses,
 } from './db.mjs';
 
 /**
@@ -26,7 +26,11 @@ import {
  */
 export function buildLoopContext(db, { motion, cycle } = {}) {
   const classStats = safe(() => campaignClassStats(db), []);
-  const failingClasses = classStats.filter((c) => Number(c.total) >= 4 && Number(c.passed) / Number(c.total) < 0.85);
+  // Exclude classes propose-fix flagged as ungroundable (no resolvable source file). Picking one
+  // as "weakest" burns every cycle on a fix that can never land (the routing/comparison stall).
+  const ungroundable = safe(() => ungroundableClasses(db), new Set());
+  const failingClasses = classStats.filter((c) =>
+    Number(c.total) >= 4 && Number(c.passed) / Number(c.total) < 0.85 && !ungroundable.has(c.class));
   const worst = failingClasses.slice().sort((a, b) => (a.passed / a.total) - (b.passed / b.total))[0] ?? null;
   return {
     db,

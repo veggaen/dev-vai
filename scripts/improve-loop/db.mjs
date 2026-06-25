@@ -704,6 +704,24 @@ export function campaignClassStats(db) {
   }
 }
 
+/** Classes propose-fix has flagged as ungroundable (no resolvable source file). The engine must
+ *  NOT keep picking these as "weakest" — they can never be fixed, only burn cycles. Confirmed
+ *  ≥ contradicted ⇒ still considered ungroundable. Returns a Set of class names. */
+export function ungroundableClasses(db) {
+  try {
+    const rows = db.prepare(
+      "SELECT claim, confirmations, contradictions FROM project_knowledge WHERE scope='propose:no-file'",
+    ).all();
+    const set = new Set();
+    for (const r of rows) {
+      if (Number(r.confirmations) < Number(r.contradictions)) continue; // recovered → groundable again
+      const m = /class "([^"]+)"/.exec(r.claim);
+      if (m) set.add(m[1]);
+    }
+    return set;
+  } catch { return new Set(); }
+}
+
 /** Answer-excellence trend: average craft score + sample count per run, oldest
  *  first. The cross-run quality gradient the motion meter reads to tell whether
  *  the council's OUTPUT is getting better over the perpetual run, not just its

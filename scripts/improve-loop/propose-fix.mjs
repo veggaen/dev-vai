@@ -58,7 +58,20 @@ const fails = db.prepare(
 // Ground qwen in the REAL file at the candidate location.
 const filePath = (fix.location.split(/[:\s(]/)[0] || '').trim();
 let source = '';
-try { source = readFileSync(filePath, 'utf8'); } catch { source = '(could not read ' + filePath + ')'; }
+let readOk = false;
+try { source = readFileSync(filePath, 'utf8'); readOk = source.trim().length > 0; }
+catch { source = '(could not read ' + filePath + ')'; }
+
+// NO-FILE GUARD (anti-waste): if the class's location does NOT resolve to a real, readable source
+// file, qwen has nothing to ground on and WILL hallucinate a `no-file` patch — every cycle, forever
+// (the routing/comparison stall: 49 wasted cycles). Don't spend a model call on an ungroundable
+// class. Record a counted fact so the engine's class-selection can deprioritise it, then exit.
+if (!readOk) {
+  const claim = `class "${fix.class}" has no resolvable source file (location="${fix.location}") — propose cannot ground a fix`;
+  recordKnowledge(db, { scope: 'propose:no-file', claim, kind: 'guard', confirm: true, evidence: `filePath="${filePath}"` });
+  console.log(`⛔ no-file: class ${fix.class} → "${filePath}" is not a readable source. Skipping (recorded so the loop deprioritises it).`);
+  process.exit(0);
+}
 // Keep it within context: head of file (where the regexes/guards live).
 const sourceExcerpt = source.split('\n').slice(0, 130).map((l, i) => `${i + 1}: ${l}`).join('\n');
 
