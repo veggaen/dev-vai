@@ -45,6 +45,7 @@ export function buildLoopContext(db, { motion, cycle } = {}) {
     cyclesSinceObserve: getLoopState(db, 'cyclesSinceObserve', 99),
     cyclesSinceVisual: getLoopState(db, 'cyclesSinceVisual', 99),
     cyclesSinceCapability: getLoopState(db, 'cyclesSinceCapability', 99),
+    cyclesSinceInnovationArc: getLoopState(db, 'cyclesSinceInnovationArc', 99),
     // openExperiment is read by the innovate/experiment processes' guards.
     hasData: classStats.some((c) => Number(c.total) >= 4),
   };
@@ -194,6 +195,29 @@ export function defineLoopProcesses(deps = {}) {
         return { produced: code === 0 ? 1 : 0 };
       },
     },
+    {
+      id: 'innovate-arc',
+      description: 'self-innovator: mine an unacted gap, classify by impact, route (autonomous guard | escalate to V3gga)',
+      // CHEAP (pure DB read of answer lessons; no model call), so it can run most cycles. Eligible
+      // once there's data to mine. Value rises when the loop is flat/regressing (a stuck low-score
+      // lesson the loop keeps re-learning but never acting on is exactly the gap to surface) — this
+      // is what makes the perpetual loop a self-INNOVATOR, not just a self-tuner. Route-only here:
+      // a fundamental find is escalated to V3gga, an autonomous one is surfaced for the build step.
+      when: (ctx) => ctx.hasData && ctx.cyclesSinceInnovationArc >= 2,
+      cost: () => 0.1,
+      value: (ctx) => (ctx.motionState === 'regressing' ? 0.7 : ctx.motionState === 'stalling' ? 0.5 : 0.25),
+      run: async (ctx) => {
+        const { planInnovation } = await import('./innovation-arc.mjs');
+        const plan = await planInnovation(ctx.db);
+        setLoopState(ctx.db, 'cyclesSinceInnovationArc', 0);
+        if (!plan.found) return { produced: 0, skip: 'no unacted gap' };
+        if (plan.mode === 'escalate') {
+          // Persist the escalation as a counted fact so a fundamental idea reaches a human, not /dev/null.
+          recordKnowledge(ctx.db, { scope: 'innovation:escalate', claim: `the loop found a FUNDAMENTAL gap it won't build unattended: ${String(plan.candidate.lesson).slice(0, 80)}`, kind: 'observation', confirm: true, evidence: plan.candidate.summary });
+        }
+        return { produced: 1, mode: plan.mode, lesson: String(plan.candidate.lesson).slice(0, 60) };
+      },
+    },
   ];
 }
 
@@ -203,4 +227,5 @@ export function advanceCycleCounters(db, ran = []) {
   if (!ran.includes('observe')) bumpLoopState(db, 'cyclesSinceObserve', 1);
   if (!ran.includes('visual')) bumpLoopState(db, 'cyclesSinceVisual', 1);
   if (!ran.includes('capability')) bumpLoopState(db, 'cyclesSinceCapability', 1);
+  if (!ran.includes('innovate-arc')) bumpLoopState(db, 'cyclesSinceInnovationArc', 1);
 }

@@ -631,6 +631,32 @@ async function main() {
       } else { idb.close(); }
     } catch (e) { log('innovate skipped: ' + String(e).slice(0, 80)); }
 
+    // INNOVATION-ARC: the SELF-INNOVATOR (above the self-tuner). Each cycle it mines the loop's
+    // own unacted gaps (a stuck low-score lesson re-learned many times — the 52× grounding gap
+    // shape), classifies each by IMPACT, and ROUTES it: a guardable discovery → autonomous (the
+    // loop may build+prove a pure pre-ship guard, like grounding-gate); anything fundamental (a
+    // feature, an answer-path change) → ESCALATED to V3gga (the "flag the fundamental" contract).
+    // Pure DB read (cheap), propose/route-only — it never edits Vai source here. Records an escalation
+    // to the findings file V3gga watches so a fundamental idea reaches a human, not /dev/null.
+    try {
+      const { planInnovation, formatInnovation } = await import('./innovation-arc.mjs');
+      const adb = openDb(DB_PATH);
+      const plan = await planInnovation(adb);
+      adb.close();
+      if (plan.found) {
+        log(`━━━ cycle ${cycle} : INNOVATION-ARC ━━━`);
+        for (const line of formatInnovation(plan).split('\n')) log(line);
+        if (plan.mode === 'escalate') {
+          const fs = await import('node:fs');
+          recordCouncilFinding(fs, {
+            at: new Date().toISOString(), cycle, taste: null, wow: null,
+            flaw: `🚩 INNOVATION (escalate): ${String(plan.candidate.lesson).slice(0, 70)}`,
+            council: `${plan.headline}\n\n${(plan.reasons || []).map((r) => `· ${r}`).join('\n')}\n\nFUNDAMENTAL — needs V3gga: the loop found this gap but won't build it unattended.`,
+          });
+        }
+      }
+    } catch (e) { log('innovation-arc skipped: ' + String(e).slice(0, 80)); }
+
     // CAPABILITY: the GENERATIVE arc. Every N cycles, convene the capability council —
     // it reads the north-star + backlog + V3gga's recurring asks + live introspect,
     // investigates the real code through each lens, and appends ranked FEATURE-level
