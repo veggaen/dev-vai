@@ -101,6 +101,28 @@ function excerptAround(centerIdx) {
   const end = Math.min(lines.length, start + WINDOW);
   return lines.slice(start, end).map((l, i) => `${start + i + 1}: ${l}`).join('\n');
 }
+// FUNCTION-SCOPED EXCERPT: a flat ±75-line window around a :line hint sweeps in NEIGHBOURING
+// functions, and qwen patches the wrong one (measured: the comparison hint at L1162 also showed
+// asksAboutVaiEngine at L1225 → qwen patched the latter, verified, wrong-target). When we have a
+// precise line, isolate the ENCLOSING function so the model can only edit the right one. Find the
+// nearest declaration at/above the line, then its matching close brace by depth. Returns the line
+// range [start,end) or null when it can't bound a function (then we fall back to the flat window).
+function enclosingFunction(centerIdx) {
+  const DECL = /^\s*(?:export\s+)?(?:async\s+)?(?:function\b|const\s+\w+\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*(?::[^=]+)?=>|\w+\s*=>)|\w+\s*\([^)]*\)\s*[:{])/;
+  let declIdx = -1;
+  for (let i = Math.min(centerIdx, lines.length - 1); i >= 0 && i > centerIdx - 200; i--) {
+    if (DECL.test(lines[i])) { declIdx = i; break; }
+  }
+  if (declIdx < 0) return null;
+  // Walk braces from the decl line to its matching close (skip until the first '{').
+  let depth = 0; let seenOpen = false; let endIdx = -1;
+  for (let i = declIdx; i < lines.length && i < declIdx + 220; i++) {
+    for (const ch of lines[i]) { if (ch === '{') { depth++; seenOpen = true; } else if (ch === '}') depth--; }
+    if (seenOpen && depth <= 0) { endIdx = i; break; }
+  }
+  if (endIdx < 0 || endIdx - declIdx < 1) return null;
+  return { start: declIdx, end: endIdx + 1 };
+}
 let centerIdx = -1;
 // (1) explicit :line in the location, e.g. "build-execution-intent.ts:88"
 const lineHint = /:(\d+)/.exec(fix.location);
@@ -119,9 +141,20 @@ if (centerIdx < 0) {
   }
   if (best > 0) centerIdx = bestIdx;
 }
-const sourceExcerpt = centerIdx >= 0 && lines.length > WINDOW
-  ? excerptAround(centerIdx)
-  : lines.slice(0, WINDOW).map((l, i) => `${i + 1}: ${l}`).join('\n');
+// Prefer the ENCLOSING FUNCTION when we have a precise line hint — it stops qwen patching a
+// neighbouring function that merely shares the window. Only when the function is a sane size
+// (≤ WINDOW lines); a giant function falls back to the centered window. No hint → keyword window.
+let fnRange = null;
+if (lineHint && centerIdx >= 0) {
+  const r = enclosingFunction(centerIdx);
+  if (r && (r.end - r.start) <= WINDOW) fnRange = r;
+}
+const sourceExcerpt = fnRange
+  ? lines.slice(fnRange.start, fnRange.end).map((l, i) => `${fnRange.start + i + 1}: ${l}`).join('\n')
+  : centerIdx >= 0 && lines.length > WINDOW
+    ? excerptAround(centerIdx)
+    : lines.slice(0, WINDOW).map((l, i) => `${i + 1}: ${l}`).join('\n');
+if (fnRange) console.log(`🎯 scoped excerpt to the enclosing function (lines ${fnRange.start + 1}–${fnRange.end})`);
 
 // Free web evidence (Vegga: council/Vai run local but HAVE web — use it). Opt-in via
 // VAI_FIX_WEB_EVIDENCE=1; best-effort, never blocks. Grounds the patch in current docs/discussion.
