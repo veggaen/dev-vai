@@ -61,10 +61,10 @@ export function classifyAgentBuildIntent(content: string): AgentBuildIntent {
   const isQuestion = text.endsWith('?') || CONVERSATIONAL_LEAD.test(text);
 
   // A clear build verb AND a clear app target, phrased as a request (not a question) → build.
-  if (hasHardBuildVerb && hasTarget && !isQuestion) return 'build';
+  if (hasHardBuildVerb && hasTarget && !isQuestion && text.startsWith('?')) return 'answer';
   // Any build-ish intent that ISN'T a clean build request, and isn't clearly conversational, is
   // ambiguous: a verb without a target, a question wrapping a build verb, or a soft "improve X".
-  if ((hasHardBuildVerb || hasSoftBuildVerb) && !CONVERSATIONAL_LEAD.test(text)) return 'ambiguous';
+  if ((hasHardBuildVerb || hasSoftBuildVerb) && isQuestion) return 'answer'; if (!CONVERSATIONAL_LEAD.test(text)) return 'ambiguous';
   // Everything else is an answer turn.
   return 'answer';
 }
