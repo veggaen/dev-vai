@@ -30,26 +30,12 @@ test('isTargetExhausted trips at TARGET_FAIL_LIMIT distinct failures (catches si
   assert.equal(isTargetExhausted(db, f), true, 'distinct near-misses now ban the TARGET even though no single signature did');
 });
 
-test('a class whose file is exhausted is excluded from targeting (while other work remains)', () => {
+test('a class whose file is exhausted is excluded from targeting', () => {
   const db = db0();
   const file = 'packages/core/src/chat/build-execution-intent.ts';
   seedClass(db, 'routing/fresh-data-trigger', 22, 12, `${file}:88`);
-  // A SECOND fixable class on a different, healthy file — so the loop isn't fully starved and the
-  // anti-starvation escape valve does NOT fire (it only relaxes exhaustion when EVERY class is blocked).
-  seedClass(db, 'routing/other', 20, 8, 'packages/core/src/chat/contextual-resolver.ts:27');
   for (let i = 0; i < TARGET_FAIL_LIMIT; i++) strikeFix(db, { file, find: `near${i}`, replace: `x${i}` }, 'tsc');
-  const skip = ungroundableClasses(db);
-  assert.ok(skip.has('routing/fresh-data-trigger'), 'exhausted-target class is skipped while other work remains');
-  assert.equal(skip.has('routing/other'), false, 'the healthy class stays fixable');
-});
-
-test('ESCAPE VALVE: if EVERY class is exhausted, exhaustion is relaxed so the loop is never starved', () => {
-  const db = db0();
-  const file = 'packages/core/src/chat/build-execution-intent.ts';
-  seedClass(db, 'routing/only', 22, 12, `${file}:88`);
-  for (let i = 0; i < TARGET_FAIL_LIMIT; i++) strikeFix(db, { file, find: `near${i}`, replace: `x${i}` }, 'tsc');
-  // The single class would be exhausted → loop fully starved → escape valve relaxes it.
-  assert.equal(ungroundableClasses(db).has('routing/only'), false, 'sole exhausted class is relaxed (anti-starvation)');
+  assert.ok(ungroundableClasses(db).has('routing/fresh-data-trigger'), 'exhausted-target class is skipped');
 });
 
 test('EFFICIENCY: a recently-fixed class is skipped until re-observed (no re-target of a fixed class)', () => {

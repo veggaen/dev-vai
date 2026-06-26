@@ -808,7 +808,6 @@ export function campaignClassStats(db) {
  *  ≥ contradicted ⇒ still considered ungroundable. Returns a Set of class names. */
 export function ungroundableClasses(db) {
   const set = new Set();
-  const softExhausted = new Set(); // classes flagged ONLY by target-exhaustion (relaxable by the escape valve)
   // (a) Reactive: classes propose-fix already flagged no-file (confirmed ≥ contradicted).
   try {
     const rows = db.prepare(
@@ -847,23 +846,9 @@ export function ungroundableClasses(db) {
       if (!loc || loc.startsWith('(') || !looksLikePath) { set.add(f.class); continue; }
       // (c) EXHAUSTED TARGET: too many DISTINCT edits already failed on this file (the truncation
       // near-miss loop). Stop targeting it — the models can't land a fix here; a human/senior must.
-      // Tracked separately so the escape valve below can relax it without un-flagging hard reasons.
-      if (isTargetExhausted(db, filePart)) { set.add(f.class); softExhausted.add(f.class); }
+      if (isTargetExhausted(db, filePart)) set.add(f.class);
     }
   } catch { /* no fixes table yet */ }
-
-  // ESCAPE VALVE (anti-starvation): if EVERY class with data ends up ungroundable, the loop has zero
-  // fixable work and spins on observe forever (measured: 134 runs / 0 proposals). The soft target-
-  // exhaustion flag is the over-firing cause — a shared file's failures cascade across all its
-  // classes. When the loop would otherwise be fully starved, RELAX the soft-exhausted classes so it
-  // keeps trying real work; the hard reasons (no-file, recently-committed, banned) still hold.
-  try {
-    const withData = campaignClassStats(db).filter((c) => Number(c.total) >= 4).map((c) => c.class);
-    const allBlocked = withData.length > 0 && withData.every((c) => set.has(c));
-    if (allBlocked && softExhausted.size) {
-      for (const c of softExhausted) set.delete(c);
-    }
-  } catch { /* stats unavailable — leave the set as-is */ }
   return set;
 }
 
