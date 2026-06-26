@@ -126,6 +126,11 @@ for (const p of pending) {
       summary.reverted++;
       db.prepare("UPDATE consensus SET applied='reverted-acceptance' WHERE id=?").run(p.id);
       strikeFix(db, proposal, `acceptance failed: ${acceptDetail}`);
+      // The class is NOT actually fixed — clear any 'recently-fixed' flag so it isn't permanently
+      // skipped as ungroundable. (The bug that starved the loop: a reverted fix left recently-fixed
+      // set, the class never re-observed clear of it, and EVERY class ended up ungroundable → the
+      // loop spun on observe forever, 134 runs / 0 proposals.) The class must stay a fixable target.
+      try { db.prepare("DELETE FROM project_knowledge WHERE scope='class:recently-fixed' AND claim LIKE ?").run(`%class "${p.class}"%`); } catch {}
       recordKnowledge(db, { scope: 'apply:acceptance', claim: `a tsc-green fix for class "${p.class}" did NOT recover its failing prompts — tsc-green is not correctness`, kind: 'guard', confirm: true, evidence: acceptDetail });
       console.log(`   ↩ REVERTED (acceptance): ${acceptDetail} — ${rev.detail}`);
     } else {
