@@ -202,11 +202,30 @@ CRITICAL — the "find" and "replace" rules (most fixes fail by breaking these):
 - "replace" must have the SAME balanced brackets () [] {} and the SAME number of \`/\` as "find". If "find" has one \`(\` and one \`/\`, so must "replace" — otherwise the edit breaks the syntax.
 - Both must be CODE (a regex / if / return), not a comment or string.`;
 
-console.log('⏳ grounding qwen in', filePath, '— asking for minimal patch…');
+// PREFER A CODE MODEL for code localization. Localizing a TS bug + writing a precise find/replace is
+// a CODE task — a dedicated coder model (qwen2.5-coder) does it better than a general chat model
+// (qwen3:8b). Measured the gap: qwen3 proposed shallow, low-diversity patches (re-proposing "exclude
+// build" 6×). Pick an installed coder model when available; honour an explicit override; else fall
+// back. Cheap (one installed-list read), and the resident-first order avoids a VRAM evict/cold-load.
+let genModel = MODEL;
+if (!process.env.IMPROVE_GEN_MODEL && !process.env.LOCAL_MODEL) {
+  try {
+    const { installedModels, residentModel } = await import('./driver.mjs');
+    const installed = await installedModels().catch(() => []);
+    const resident = await residentModel().catch(() => null);
+    // installedModels() returns {name,sizeBytes} objects — read .name (the earlier string assumption
+    // was the bug: regex over an object never matched, so the coder model was never picked).
+    const names = installed.map((m) => (typeof m === 'string' ? m : m?.name)).filter(Boolean);
+    const coder = names.find((m) => /coder/i.test(m));
+    // Prefer the coder model; if it's not already resident but another coder is, still use a coder.
+    if (coder) genModel = (resident && /coder/i.test(resident)) ? resident : coder;
+  } catch { /* keep MODEL default */ }
+}
+console.log(`⏳ grounding ${genModel} in ${filePath} — asking for minimal patch…`);
 await waitForVramHeadroom(7 * 1024 ** 3);
 let raw = '';
-try { raw = await ollamaGenerate(MODEL, prompt, { numPredict: 400, timeoutMs: 120000 }); }
-catch (e) { console.log('qwen unavailable:', String(e)); process.exit(1); }
+try { raw = await ollamaGenerate(genModel, prompt, { numPredict: 400, timeoutMs: 120000 }); }
+catch (e) { console.log('model unavailable:', String(e)); process.exit(1); }
 
 // Extract the JSON object — strict parse first, then a regex-escape repair so a sound regex fix
 // (\b \s \w …) isn't discarded as "unparseable" (the measured comparison-class false-reject).
