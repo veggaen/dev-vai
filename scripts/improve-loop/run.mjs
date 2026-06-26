@@ -22,6 +22,7 @@ import {
   recordResult, queueFix, classStats, liveHeartbeat, recordAnswerLesson, lastScoredByPrompt,
 } from './db.mjs';
 import { judgeAnswerExcellence } from './answer-rubric.mjs';
+import { gradeWithAppGate, appVerdictToScore } from './app-quality.mjs';
 import { waitForVramHeadroom, loadedVram, runThroughVai, sleep, ensureRuntimeReady, isInfraError, isOverVramBudget } from './driver.mjs';
 import { generatePrompts, gradeInterpretation, mineFailures } from './brain.mjs';
 import { SEED_CLASSES } from './seeds.mjs';
@@ -242,19 +243,36 @@ async function main() {
     }
     ui.lastPass = grade.passed;
 
-    // Text-lane twin of the visual taste pass: grade HOW excellent the answer is
-    // (craft gradient), not just whether the read was right. Pure compute, no GPU.
+    // Text-lane twin of the visual taste pass: grade HOW excellent the answer is.
+    // ALIGN WITH THE APP: grade with the SAME gate the live app ships through
+    // (evaluateChatAnswerQuality) when it's built — so the loop optimizes what actually decides
+    // shipping, not its own crude rubric (the misalignment that made results hollow + re-discovered a
+    // phantom grounding gap 79×). Falls back to the rubric when the dist isn't available. The crude
+    // rubric still runs too (kept for its craft sub-scores), but the APP gate drives the score+lesson.
     const excellence = judgeAnswerExcellence(vai.text);
+    let overallScore = excellence.overall;
+    let lesson = excellence.lesson;
+    let appQualityJson = null;
+    const app = await gradeWithAppGate(item.prompt, vai.text, { strategy: vai.council?.outcome });
+    if (app) {
+      overallScore = appVerdictToScore(app.verdict, app.score);
+      // App-aligned lesson: name what the answer actually FAILED (actionability/comparison/honesty),
+      // the thing the app would reject it for — far more actionable than "cite a number".
+      lesson = app.verdict === 'pass'
+        ? 'app quality gate: PASS — keep this answer shape'
+        : `app quality gate: ${app.verdict.toUpperCase()} — missing: ${app.missing.slice(0, 3).join(', ') || 'quality'}`;
+      appQualityJson = JSON.stringify(app);
+    }
 
     recordResult(db, {
       runId, promptId, klass: item.klass,
       readAs: vai.council?.realIntent, outcome: vai.council?.outcome,
       agreement: vai.council?.agreement, answerExcerpt: vai.text,
       passed: grade.passed, gradeReason: grade.reason, durationMs: vai.durationMs,
-      answerExcellence: excellence.overall,
-      answerExcellenceJson: JSON.stringify(excellence),
+      answerExcellence: overallScore,
+      answerExcellenceJson: appQualityJson ?? JSON.stringify(excellence),
     });
-    recordAnswerLesson(db, { lesson: excellence.lesson, runId, overall: excellence.overall });
+    recordAnswerLesson(db, { lesson, runId, overall: overallScore });
     if (!grade.passed) {
       failures.push({ klass: item.klass, reason: grade.reason });
       ui.failures++;
