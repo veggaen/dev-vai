@@ -280,170 +280,313 @@ function loopStatus() {
   const weakest = q(`SELECT class, COUNT(*) t, COALESCE(SUM(passed),0) p FROM results
     GROUP BY class HAVING t>=4 ORDER BY (1.0*p/t) ASC LIMIT 1`)[0];
 
+  // QUALITY TREND — per-run average answer-quality, oldest→newest (the sparkline: is Vai's answering
+  // getting better?). Only runs with real graded answers; a flat line is honest, not hidden.
+  const qtrend = q(`SELECT r.id, AVG(res.answer_excellence) avg, COUNT(res.answer_excellence) n
+    FROM runs r JOIN results res ON res.run_id=r.id
+    WHERE res.answer_excellence IS NOT NULL GROUP BY r.id HAVING n>=1 ORDER BY r.id ASC`)
+    .map((x) => ({ run: x.id, avg: Math.round(Number(x.avg) * 10) / 10 }));
+
+  // MEANINGFUL EVENTS — the human story, newest first. Real outcomes only (fixes landed/reverted,
+  // innovations built, blocked), NOT every cycle's plumbing. This replaces the meta-slop card-dump.
+  const events = [];
+  for (const r of q("SELECT class, applied, datetime(created_at) at FROM consensus WHERE applied IN ('committed','reverted-acceptance') ORDER BY id DESC LIMIT 10")) {
+    events.push({
+      at: r.at, kind: r.applied === 'committed' ? 'landed' : 'reverted',
+      title: r.applied === 'committed' ? `Landed a fix for ${r.class}` : `Reverted a fix for ${r.class}`,
+      detail: r.applied === 'committed' ? 'verified + behaviourally accepted' : (r.applied === 'reverted-acceptance' ? 'applied but did not actually fix the prompts — backed out' : 'failed typecheck — backed out'),
+    });
+  }
+  for (const r of q("SELECT claim, last_seen FROM project_knowledge WHERE scope IN ('innovation:autonomous','feature:built') ORDER BY last_seen DESC LIMIT 5")) {
+    events.push({ at: r.last_seen, kind: 'innovation', title: 'Built + proved a guard', detail: r.claim });
+  }
+  for (const r of q("SELECT claim, last_seen FROM project_knowledge WHERE scope='innovation:escalate' ORDER BY last_seen DESC LIMIT 5")) {
+    events.push({ at: r.last_seen, kind: 'escalate', title: 'Escalated to you', detail: r.claim });
+  }
+  events.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+
+  // Counts for the at-a-glance summary strip. "Caught wrong" = behavioural reverts (the safety net
+  // working), NOT the 895 historical reverted-red from the now-fixed npx-verify bug — counting those
+  // would misrepresent the loop as failing constantly when it was one infra bug, since fixed.
+  const landed = q("SELECT COUNT(*) n FROM consensus WHERE applied='committed'")[0]?.n ?? 0;
+  const reverted = q("SELECT COUNT(*) n FROM consensus WHERE applied='reverted-acceptance'")[0]?.n ?? 0;
+
   db.close();
   return {
     running,
     state: running ? 'running' : 'idle',
     lastCycleSeconds: lastDurS,
     lastCycleBounded: lastFinished?.status === 'budget-stopped',
+    blocked: health?.state === 'blocked' || /runtime down/i.test(health?.reason ?? ''),
     innovations, escalations,
     meaning: meaning ? { lane: meaning.lane, reason: meaning.reason, ranking: meaning.ranking ?? [] } : null,
     health: health ? { working: health.working, reason: health.reason } : null,
     passPct,
     weakest: weakest ? { class: weakest.class, pct: Math.round((weakest.p / weakest.t) * 100), passed: weakest.p, total: weakest.t } : null,
+    qualityTrend: qtrend.slice(-40),
+    events: events.slice(0, 14),
+    counts: { landed, reverted, innovations: innovations.length },
   };
 }
 
 /** The plain-language HERO panel — answers "what is the loop doing?" with no machine-speak. */
-function loopHeroPanel() {
-  return `<div id="loop-hero" style="margin:6px 0 22px"><div style="color:#667;font-size:12px">loading…</div></div>
-  <script>(function(){
-    function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
-    function timeAgo(iso){ if(!iso) return ''; var s=Math.round((Date.now()-new Date(iso))/1000); if(s<60)return s+'s ago'; if(s<3600)return Math.round(s/60)+'m ago'; if(s<86400)return Math.round(s/3600)+'h ago'; return Math.round(s/86400)+'d ago'; }
-    function card(bg,bd,inner){ return '<div style="background:'+bg+';border:1px solid '+bd+';border-radius:10px;padding:14px 16px;margin:10px 0">'+inner+'</div>'; }
-    async function tick(){
-      try{
-        var s=await (await fetch('/loop.json',{cache:'no-store'})).json();
-        var el=document.getElementById('loop-hero'); if(!el) return;
-        var html='';
-        // STATUS line
-        var dot = s.running ? '#3c9' : '#667';
-        var cyc = s.lastCycleSeconds!=null ? (' · last cycle '+s.lastCycleSeconds+'s'+(s.lastCycleBounded?' (bounded ✓)':'')) : '';
-        html += '<div style="display:flex;align-items:center;gap:9px;font-size:14px;color:#cde;margin-bottom:4px">'
-          +'<span style="width:9px;height:9px;border-radius:50%;background:'+dot+';'+(s.running?'animation:p 1.2s infinite':'')+'"></span>'
-          +'<b>'+(s.running?'The loop is running':'The loop is idle')+'</b>'
-          +'<span style="color:#667;font-size:12px">'+esc(cyc)+'</span></div>';
-        // HEALTH in plain words
-        if(s.health){
-          var w=s.health.working; var tone=w===true?'#8d9':w===false?'#f99':'#dc9';
-          var label=w===true?'It is improving the codebase':w===false?'It is running but not yet improving anything':'Too early to tell if it is improving';
-          html += '<div style="font-size:13px;color:'+tone+';margin-bottom:6px">'+esc(label)+(s.passPct!=null?' · pass-rate '+s.passPct+'%':'')+'</div>';
-        }
-        // WHAT it has decided is most meaningful to work on (not just routing micro-bugs)
-        if(s.meaning && s.meaning.lane){
-          var laneName={quality:'answer quality',capability:'new capabilities',routing:'routing correctness',reliability:'recurring weaknesses'}[s.meaning.lane]||s.meaning.lane;
-          html += '<div style="font-size:13px;color:#bcd;margin-bottom:10px">🎯 Most meaningful right now: <b style="color:#9cf">'+esc(laneName)+'</b> <span style="color:#789">— '+esc(s.meaning.reason)+'</span></div>';
-        }
-        // INNOVATIONS it built itself
-        var innerI = (s.innovations&&s.innovations.length)
-          ? s.innovations.map(function(x){ return '<div style="margin:7px 0"><div style="color:#9e9;font-size:13px">✅ '+esc(x.what)+'</div>'+(x.proof?'<div style="color:#789;font-size:11px;margin-top:2px">'+esc(x.proof).slice(0,160)+'</div>':'')+'<div style="color:#566;font-size:11px">'+esc(timeAgo(x.at))+'</div></div>'; }).join('')
-          : '<div style="color:#667;font-size:12px">Nothing built yet — it builds a fix only when it can prove the fix works on its own data.</div>';
-        html += card('#0d1510','#1f3a26','<div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6a8;margin-bottom:4px">What it built itself (proven)</div>'+innerI);
-        // ESCALATIONS for V3gga
-        if(s.escalations&&s.escalations.length){
-          var innerE = s.escalations.map(function(x){ return '<div style="margin:7px 0"><div style="color:#fb8;font-size:13px">🚩 '+esc(x.what)+'</div>'+(x.why?'<div style="color:#987;font-size:11px;margin-top:2px">'+esc(x.why).slice(0,160)+'</div>':'')+'<div style="color:#766;font-size:11px">'+esc(timeAgo(x.at))+'</div></div>'; }).join('');
-          html += card('#15110b','#3a2a14','<div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#b95;margin-bottom:4px">🚩 Needs you — fundamental, the loop won\\'t build it alone</div>'+innerE);
-        }
-        // WEAKEST class it's working on
-        if(s.weakest){
-          html += '<div style="font-size:12px;color:#9ab;margin-top:8px">Currently weakest: <code style="color:#9ad">'+esc(s.weakest.class)+'</code> at '+s.weakest.pct+'% ('+s.weakest.passed+'/'+s.weakest.total+')</div>';
-        }
-        el.innerHTML=html;
-      }catch(e){}
-      setTimeout(tick,4000);
-    } tick();
-  })();</script>`;
+/**
+ * page — the human-facing dashboard. A calm, futuristic, THEMED, collapsible-timeline view that
+ * replaces the old meta-slop card-dump. Design goals (V3gga): award-worthy, themeable, no pill/box
+ * overuse, open clean timeline, smooth collapse transitions. All data comes from /loop.json; this
+ * function returns a static shell that hydrates + auto-refreshes client-side.
+ */
+function page() {
+  return `<!doctype html><html lang="en"><head><meta charset="utf8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Vai · Improvement Loop</title>
+<style>
+:root{
+  --bg:#07080c; --bg-2:#0c0e15; --panel:#0e1119; --line:rgba(255,255,255,.06);
+  --ink:#e8ecf4; --ink-dim:#8b93a7; --ink-faint:#5a6072;
+  --accent:#5b8cff; --good:#46d6a3; --warn:#f2c46b; --bad:#ff6b8a; --idle:#5a6072;
+  --r:14px; --ease:cubic-bezier(.4,0,.2,1);
+  --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+}
+/* THEMES — switchable; custom accent via the picker writes --accent inline on <html>. */
+html[data-theme="aurora"]{--bg:#060810;--bg-2:#0a0e1a;--panel:#0d1322;--accent:#6ee7ff;--good:#5af2c0;--line:rgba(120,180,255,.08)}
+html[data-theme="ember"]{--bg:#0c0807;--bg-2:#140d0a;--panel:#1a0f0b;--accent:#ff9d5c;--good:#ffd27a;--bad:#ff6b6b;--line:rgba(255,160,100,.08)}
+html[data-theme="mono"]{--bg:#0a0a0b;--bg-2:#101012;--panel:#141417;--accent:#c9cdd6;--good:#c9cdd6;--warn:#c9cdd6;--bad:#ff6b8a;--ink-dim:#7c7f88;--line:rgba(255,255,255,.07)}
+html[data-theme="paper"]{--bg:#f6f6f3;--bg-2:#efefea;--panel:#fff;--ink:#16181d;--ink-dim:#5d6470;--ink-faint:#9aa0ac;--accent:#3b6fff;--good:#0f9d6b;--warn:#b8820a;--bad:#d6395c;--line:rgba(0,0,0,.08)}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:radial-gradient(1200px 700px at 70% -10%,var(--bg-2),var(--bg) 60%);
+  color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;
+  line-height:1.5;letter-spacing:-.01em;min-height:100vh}
+.wrap{max-width:880px;margin:0 auto;padding:48px 28px 120px}
+/* header */
+.top{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+.glyph{width:30px;height:30px;position:relative;flex:none}
+.glyph::before,.glyph::after{content:"";position:absolute;inset:0;border-radius:50%;
+  border:1.5px solid var(--accent);opacity:.9}
+.glyph::after{animation:breathe 3.4s var(--ease) infinite}
+.glyph i{position:absolute;inset:10px;border-radius:50%;background:var(--accent);
+  box-shadow:0 0 16px var(--accent);animation:pulse 3.4s var(--ease) infinite}
+@keyframes breathe{0%,100%{transform:scale(1);opacity:.5}50%{transform:scale(1.5);opacity:0}}
+@keyframes pulse{0%,100%{opacity:.7}50%{opacity:1}}
+h1{font-size:19px;font-weight:600;margin:0;letter-spacing:-.02em}
+.sub{color:var(--ink-dim);font-size:13px;margin:2px 0 0}
+.spacer{flex:1}
+.themes{display:flex;gap:7px;align-items:center}
+.swatch{width:18px;height:18px;border-radius:50%;cursor:pointer;border:1.5px solid var(--line);
+  transition:transform .2s var(--ease),border-color .2s}
+.swatch:hover{transform:scale(1.15)}
+.swatch.on{border-color:var(--ink)}
+input[type=color]{width:22px;height:22px;padding:0;border:none;background:none;cursor:pointer;border-radius:50%;overflow:hidden}
+/* status line */
+.status{display:flex;align-items:baseline;gap:12px;margin:30px 0 8px;flex-wrap:wrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--idle);align-self:center}
+.dot.live{background:var(--good);box-shadow:0 0 10px var(--good);animation:pulse 1.6s infinite}
+.dot.blocked{background:var(--warn)}
+.state{font-size:22px;font-weight:600;letter-spacing:-.02em}
+.state-meta{color:var(--ink-dim);font-size:13px}
+.verdict{font-size:14px;margin:4px 0 0}
+.verdict.good{color:var(--good)} .verdict.bad{color:var(--bad)} .verdict.warn{color:var(--warn)} .verdict.dim{color:var(--ink-dim)}
+/* trend */
+.trend{margin:26px 0 8px}
+.trend svg{display:block;width:100%;height:84px;overflow:visible}
+.trend .lbl{display:flex;justify-content:space-between;color:var(--ink-faint);font-size:11px;
+  text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px}
+/* summary chips (numbers, no pills) */
+.nums{display:flex;gap:36px;margin:24px 0 10px}
+.num b{display:block;font-size:26px;font-weight:600;letter-spacing:-.03em}
+.num span{color:var(--ink-dim);font-size:12px}
+.num.good b{color:var(--good)} .num.bad b{color:var(--bad)} .num.acc b{color:var(--accent)}
+/* collapsible section */
+.sec{border-top:1px solid var(--line);margin-top:4px}
+.sec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;
+  padding:18px 2px;font-size:13px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--ink-dim);transition:color .2s}
+.sec>summary:hover{color:var(--ink)}
+.sec>summary::-webkit-details-marker{display:none}
+.sec .chev{width:14px;height:14px;transition:transform .35s var(--ease);color:var(--ink-faint)}
+.sec[open] .chev{transform:rotate(90deg)}
+.sec .count{margin-left:auto;color:var(--ink-faint);font-variant-numeric:tabular-nums}
+/* smooth collapse: grid-rows trick (animatable height) */
+.body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s var(--ease),opacity .3s var(--ease);opacity:0}
+.sec[open] .body{grid-template-rows:1fr;opacity:1}
+.body>div{overflow:hidden;min-height:0}
+.inner{padding:0 2px 22px}
+/* timeline */
+.tl{position:relative;padding-left:26px}
+.tl::before{content:"";position:absolute;left:6px;top:6px;bottom:6px;width:1px;background:var(--line)}
+.ev{position:relative;padding:0 0 22px}
+.ev::before{content:"";position:absolute;left:-23px;top:5px;width:9px;height:9px;border-radius:50%;
+  background:var(--bg);border:2px solid var(--idle)}
+.ev.landed::before{border-color:var(--good);box-shadow:0 0 8px var(--good)}
+.ev.reverted::before{border-color:var(--bad)}
+.ev.innovation::before{border-color:var(--accent);box-shadow:0 0 8px var(--accent)}
+.ev.escalate::before{border-color:var(--warn)}
+.ev .t{font-size:14px;font-weight:500}
+.ev .d{color:var(--ink-dim);font-size:13px;margin-top:2px}
+.ev .when{color:var(--ink-faint);font-size:11px;margin-top:3px;font-variant-numeric:tabular-nums}
+.row{display:flex;gap:10px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:none}
+.row .k{color:var(--ink);font-size:14px}
+.row .v{color:var(--ink-dim);font-size:13px;margin-left:auto;font-variant-numeric:tabular-nums}
+.bar{height:3px;border-radius:2px;background:var(--line);position:relative;flex:1;max-width:160px;align-self:center;margin:0 12px}
+.bar i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--accent);transition:width .5s var(--ease)}
+.empty{color:var(--ink-faint);font-size:13px;padding:6px 0}
+.meaning{font-size:14px;color:var(--ink);margin:18px 0 4px}
+.meaning b{color:var(--accent);font-weight:600}
+.fade{opacity:0;transform:translateY(6px);transition:opacity .5s var(--ease),transform .5s var(--ease)}
+.fade.in{opacity:1;transform:none}
+code{font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
+</style></head>
+<body><div class="wrap">
+  <div class="top">
+    <div class="glyph"><i></i></div>
+    <div><h1>Vai · Improvement Loop</h1><div class="sub" id="sub">connecting…</div></div>
+    <div class="spacer"></div>
+    <div class="themes" id="themes">
+      <span class="swatch" data-th="default" style="background:#5b8cff" title="Default"></span>
+      <span class="swatch" data-th="aurora" style="background:#6ee7ff" title="Aurora"></span>
+      <span class="swatch" data-th="ember" style="background:#ff9d5c" title="Ember"></span>
+      <span class="swatch" data-th="mono" style="background:#c9cdd6" title="Mono"></span>
+      <span class="swatch" data-th="paper" style="background:#f0f0ec;border-color:#ccc" title="Paper"></span>
+      <input type="color" id="custom" value="#5b8cff" title="Custom accent"/>
+    </div>
+  </div>
+
+  <div class="status">
+    <span class="dot" id="dot"></span>
+    <span class="state" id="state">—</span>
+    <span class="state-meta" id="meta"></span>
+  </div>
+  <div class="verdict dim" id="verdict"></div>
+  <div class="meaning" id="meaning"></div>
+
+  <div class="trend" id="trendwrap" style="display:none">
+    <div class="lbl"><span>answer quality over time</span><span id="trendnow"></span></div>
+    <svg id="spark" viewBox="0 0 600 84" preserveAspectRatio="none"></svg>
+  </div>
+
+  <div class="nums" id="nums"></div>
+
+  <details class="sec" id="sec-tl" open>
+    <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Timeline · what actually happened<span class="count" id="tl-count"></span></summary>
+    <div class="body"><div><div class="inner"><div class="tl" id="tl"></div></div></div></div>
+  </details>
+
+  <details class="sec" id="sec-built" open>
+    <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Built itself · proven<span class="count" id="built-count"></span></summary>
+    <div class="body"><div><div class="inner" id="built"></div></div></div>
+  </details>
+
+  <details class="sec" id="sec-classes">
+    <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Where it's working<span class="count" id="cl-count"></span></summary>
+    <div class="body"><div><div class="inner" id="classes"><div class="empty">loading…</div></div></div></div>
+  </details>
+
+  <details class="sec" id="sec-need">
+    <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Needs you<span class="count" id="need-count"></span></summary>
+    <div class="body"><div><div class="inner" id="need"></div></div></div>
+  </details>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function ago(iso){if(!iso)return '';let s=Math.round((Date.now()-new Date(iso))/1000);
+  if(s<0)s=0; if(s<60)return s+'s ago'; if(s<3600)return Math.round(s/60)+'m ago';
+  if(s<86400)return Math.round(s/3600)+'h ago'; return Math.round(s/86400)+'d ago';}
+
+// THEME persistence
+function applyTheme(t,custom){
+  if(t==='default') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme',t);
+  if(custom) document.documentElement.style.setProperty('--accent',custom);
+  document.querySelectorAll('.swatch').forEach(s=>s.classList.toggle('on',s.dataset.th===t));
+  localStorage.setItem('vai-theme',t); if(custom) localStorage.setItem('vai-accent',custom);
+}
+document.querySelectorAll('.swatch').forEach(s=>s.onclick=()=>applyTheme(s.dataset.th,null));
+$('custom').oninput=e=>{document.documentElement.style.setProperty('--accent',e.target.value);localStorage.setItem('vai-accent',e.target.value);};
+applyTheme(localStorage.getItem('vai-theme')||'default',localStorage.getItem('vai-accent'));
+
+// SPARKLINE
+function spark(points){
+  const wrap=$('trendwrap'); if(!points||points.length<2){wrap.style.display='none';return;}
+  wrap.style.display='block';
+  const W=600,H=84,pad=6,vals=points.map(p=>p.avg);
+  const min=Math.min(...vals,0),max=Math.max(...vals,10);
+  const x=i=>pad+(W-2*pad)*i/(points.length-1);
+  const y=v=>H-pad-(H-2*pad)*(v-min)/((max-min)||1);
+  let d='',area='';
+  points.forEach((p,i)=>{const px=x(i),py=y(p.avg);d+=(i?'L':'M')+px+' '+py+' ';});
+  area=d+'L'+x(points.length-1)+' '+H+' L'+x(0)+' '+H+' Z';
+  const last=points[points.length-1];
+  $('trendnow').textContent=last.avg.toFixed(1)+' / 10';
+  $('spark').innerHTML=
+    '<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">'
+    +'<stop offset="0" stop-color="var(--accent)" stop-opacity=".18"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>'
+    +'<path d="'+area+'" fill="url(#g)"/>'
+    +'<path d="'+d+'" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+    +'<circle cx="'+x(points.length-1)+'" cy="'+y(last.avg)+'" r="3.5" fill="var(--accent)"/>';
 }
 
-function page() {
-  const { run, stats, results, fixes, live, visualRun, visualLive, visualEvents, taste, tasteLessons, loopEvents, banned } = snapshot();
-  if (!run) {
-    const lf = liveFramePanel();
-    const tp = tastePanel(taste, tasteLessons);
-    const vp = visualPanel(visualRun, visualLive, visualEvents);
-    return `<html><head><style>@keyframes p{50%{opacity:.3}}</style></head><body style="background:#0b0b10;color:#ddd;font-family:system-ui;padding:40px;max-width:1000px"><h1 style="font-size:18px;margin:0 0 4px">Vai Improvement Loop</h1><div style="color:#667;font-size:12px;margin-bottom:8px">a self-improving loop that finds its own gaps, builds + proves fixes, and escalates the big calls to you</div>${loopHeroPanel()}<details style="margin-top:14px"><summary style="cursor:pointer;color:#566;font-size:12px">⤵ engine internals</summary>${enginePanel(loopEvents, banned)}</details>${councilPanel()}${lf}${tp}${vp}</body></html>`;
+function render(s){
+  // status
+  const blocked=s.blocked, running=s.running&&!blocked;
+  $('dot').className='dot'+(running?' live':blocked?' blocked':'');
+  $('state').textContent=blocked?'Waiting on Vai runtime':running?'Running':'Idle';
+  $('sub').textContent='live · auto-refreshing · a loop that finds its own gaps, proves fixes, and escalates the big calls';
+  const cyc=s.lastCycleSeconds!=null?('last cycle '+s.lastCycleSeconds+'s'+(s.lastCycleBounded?' · bounded':'')):'';
+  $('meta').textContent=cyc;
+  // verdict
+  const v=$('verdict');
+  if(blocked){v.className='verdict warn';v.textContent='Vai runtime is down — start it and the loop resumes automatically.';}
+  else if(s.health){const w=s.health.working;
+    v.className='verdict '+(w===true?'good':w===false?'bad':'dim');
+    v.textContent=(w===true?'Improving the codebase':w===false?'Running, not yet moving the needle':'Too early to tell')+(s.passPct!=null?' · routing '+s.passPct+'%':'');
+  } else v.textContent='';
+  // meaning
+  if(s.meaning&&s.meaning.lane){
+    const names={quality:'answer quality',capability:'new capabilities',routing:'routing correctness',reliability:'recurring weaknesses'};
+    $('meaning').innerHTML='Most meaningful right now → <b>'+esc(names[s.meaning.lane]||s.meaning.lane)+'</b> <span style="color:var(--ink-dim)">'+esc(s.meaning.reason||'')+'</span>';
+  } else $('meaning').textContent='';
+  // trend
+  spark(s.qualityTrend);
+  // numbers
+  const c=s.counts||{};
+  $('nums').innerHTML=
+    '<div class="num good"><b>'+(c.landed||0)+'</b><span>fixes landed</span></div>'
+    +'<div class="num bad"><b>'+(c.reverted||0)+'</b><span>reverted (caught wrong)</span></div>'
+    +'<div class="num acc"><b>'+(c.innovations||0)+'</b><span>built itself</span></div>';
+  // timeline
+  const evs=s.events||[]; $('tl-count').textContent=evs.length||'';
+  $('tl').innerHTML=evs.length?evs.map(e=>
+    '<div class="ev '+esc(e.kind)+' fade"><div class="t">'+esc(e.title)+'</div><div class="d">'+esc(e.detail||'').slice(0,140)+'</div><div class="when">'+esc(ago(e.at))+'</div></div>'
+  ).join(''):'<div class="empty">No landed changes yet — it proves a fix against real prompts before keeping it.</div>';
+  // built
+  const inn=s.innovations||[]; $('built-count').textContent=inn.length||'';
+  $('built').innerHTML=inn.length?inn.map(x=>
+    '<div class="ev innovation fade" style="padding-bottom:16px"><div class="t">'+esc(x.what).slice(0,90)+'</div>'+(x.proof?'<div class="d">'+esc(x.proof).slice(0,150)+'</div>':'')+'<div class="when">'+esc(ago(x.at))+'</div></div>'
+  ).join(''):'<div class="empty">Nothing yet.</div>';
+  // needs you
+  const es=s.escalations||[]; $('need-count').textContent=es.length||'';
+  $('need').innerHTML=es.length?es.map(x=>
+    '<div class="ev escalate fade"><div class="t">'+esc(x.what).slice(0,90)+'</div>'+(x.why?'<div class="d">'+esc(x.why).slice(0,150)+'</div>':'')+'<div class="when">'+esc(ago(x.at))+'</div></div>'
+  ).join(''):'<div class="empty">Nothing needs you right now.</div>';
+  // weakest class (single, in "where it's working")
+  if(s.weakest){$('cl-count').textContent=s.weakest.pct+'%';
+    $('classes').innerHTML='<div class="row"><span class="k"><code>'+esc(s.weakest.class)+'</code></span><span class="bar"><i style="width:'+s.weakest.pct+'%"></i></span><span class="v">'+s.weakest.pct+'% · '+s.weakest.passed+'/'+s.weakest.total+'</span></div><div class="empty" style="margin-top:8px">Weakest class the loop is currently working on.</div>';
   }
+  // reveal fades
+  requestAnimationFrame(()=>document.querySelectorAll('.fade:not(.in)').forEach((el,i)=>setTimeout(()=>el.classList.add('in'),i*45)));
+}
 
-  const bar = (frac) => {
-    const pct = Math.round(frac * 100);
-    const hue = Math.round(frac * 120); // red→green
-    return `<div style="background:#1c1c26;border-radius:6px;overflow:hidden;height:22px;position:relative">
-      <div style="width:${pct}%;height:100%;background:hsl(${hue} 70% 45%);transition:width .4s"></div>
-      <span style="position:absolute;inset:0;display:flex;align-items:center;padding:0 8px;font-size:12px;color:#fff;mix-blend-mode:difference">${pct}%</span></div>`;
-  };
-
-  const statRows = (stats || []).map((s) => `
-    <div style="display:grid;grid-template-columns:260px 1fr 70px;gap:12px;align-items:center;margin:6px 0">
-      <code style="color:#9ad">${esc(s.class)}</code>${bar(s.total ? s.passed / s.total : 0)}
-      <span style="color:#888;font-size:12px">${s.passed}/${s.total}</span></div>`).join('');
-
-  const resultRows = (results || []).map((r) => {
-    const ok = r.passed;
-    return `<div style="border-left:3px solid ${ok ? '#3a3' : '#c44'};background:#13131a;border-radius:6px;padding:10px 14px;margin:8px 0">
-      <div style="font-weight:600;color:${ok ? '#9e9' : '#f99'}">${ok ? '✓' : '✗'} ${esc(r.prompt)}</div>
-      <div style="font-size:12px;color:#aaa;margin-top:4px"><b>read as:</b> ${esc(r.read_as) || '<i>no council</i>'} · outcome=${esc(r.outcome)} · ${r.duration_ms || 0}ms</div>
-      <div style="font-size:12px;color:#c9a;margin-top:2px">grade: ${esc(r.grade_reason)}</div>
-      <details data-k="ex-${r.id ?? esc(r.prompt).slice(0,40)}" style="margin-top:6px"><summary style="cursor:pointer;color:#789;font-size:12px">answer excerpt</summary>
-        <pre style="white-space:pre-wrap;font-size:12px;color:#bbb;margin:6px 0 0">${esc((r.answer_excerpt || '').slice(0, 500))}</pre></details></div>`;
-  }).join('');
-
-  const fixRows = (fixes || []).map((f) => `
-    <div style="background:#1a1410;border:1px solid #3a2a18;border-radius:6px;padding:10px 14px;margin:8px 0">
-      <div style="color:#fb8;font-weight:600">[${esc(f.class)}] ${f.failure_count} failures · ${esc(f.status)}</div>
-      <div style="font-size:12px;color:#caa;margin-top:4px"><b>where:</b> ${esc(f.location)}</div>
-      <div style="font-size:12px;color:#999;margin-top:2px">${esc(f.summary)}</div></div>`).join('') || '<div style="color:#666">none yet</div>';
-
-  const running = run.status === 'running';
-  // Live in-flight panel: show the current prompt, phase, elapsed, and qwen's
-  // streaming partial output so there is no ~70s dead gap between results.
-  const heartbeatFresh = live && (Date.now() - new Date(live.updated_at).getTime() < 15000);
-  const livePanel = running && heartbeatFresh ? `
-    <div style="background:#0e1622;border:1px solid #1f3550;border-radius:8px;padding:14px 16px;margin:14px 0">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#5b8;display:flex;align-items:center;gap:7px">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#5b8;animation:p 1s infinite"></span>
-        IN FLIGHT · ${esc(live.phase) || 'thinking'} · ${Math.round((live.elapsed_ms || 0) / 1000)}s</div>
-      <div style="font-weight:600;color:#cfe;margin-top:6px">${esc(live.prompt)}</div>
-      <pre style="white-space:pre-wrap;font-size:12px;color:#9bd;margin:8px 0 0;max-height:160px;overflow:auto">${esc((live.partial || '').slice(-700)) || '…streaming…'}</pre>
-    </div>` : '';
-  // Refresh faster while a turn streams so the partial visibly grows.
-  const refreshSec = running ? (heartbeatFresh ? 2 : 4) : 9999;
-  return `<!doctype html><html><head><meta charset="utf8"><title>Vai Improve Loop</title>
-  <style>body{background:#0b0b10;color:#e6e6ee;font-family:system-ui,-apple-system;margin:0;padding:28px 36px;max-width:1000px}
-  h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#778;margin:26px 0 8px}
-  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:${running ? '#3c3' : '#666'};margin-right:7px;${running ? 'animation:p 1.2s infinite' : ''}}
-  @keyframes p{50%{opacity:.3}}</style></head><body>
-  <h1><span class="dot"></span>Vai Improvement Loop</h1>
-  <div style="color:#667;font-size:12px">${running ? `live · auto-refreshing` : 'idle'} · a self-improving loop that finds its own gaps, builds + proves fixes, and escalates the big calls to you</div>
-  ${loopHeroPanel()}
-  <details style="margin-top:14px"><summary style="cursor:pointer;color:#566;font-size:12px">⤵ engine internals (cycle-by-cycle machine trace)</summary>
-  <div id="app-engine">${enginePanel(loopEvents, banned)}</div></details>
-  <details style="margin-top:8px"><summary style="cursor:pointer;color:#566;font-size:12px">⤵ council UI audit (overnight visual work)</summary>
-  ${councilPanel()}
-  ${liveFramePanel()}</details>
-  <details style="margin-top:18px"><summary style="cursor:pointer;color:#566;font-size:12px">⤵ old text-seed lane (run #${run.id}, not the UI work)</summary>
-  <div id="app">
-  ${livePanel}
-  ${tastePanel(taste, tasteLessons)}
-  ${visualPanel(visualRun, visualLive, visualEvents)}
-  <h2>Pass-rate by class</h2>${statRows || '<div style="color:#666">warming up…</div>'}
-  <h2>Queued fix candidates (you approve — never auto-applied)</h2>${fixRows}
-  <h2>Results (newest first)</h2>${resultRows || '<div style="color:#666">no results yet…</div>'}
-  </div></details>
-  <script>
-  // Soft refresh: re-fetch only #app and swap it, PRESERVING which <details> the user
-  // opened (the old meta-refresh reloaded the whole page and slammed them shut every ${refreshSec}s).
-  (function(){
-    var ms=${running ? refreshSec * 1000 : 0};
-    if(!ms) return;
-    async function tick(){
-      try{
-        var open={}; document.querySelectorAll('details[open]').forEach(function(d){open[d.getAttribute('data-k')]=1;});
-        var html=await (await fetch('/',{cache:'no-store'})).text();
-        var doc=new DOMParser().parseFromString(html,'text/html');
-        var fresh=doc.getElementById('app');
-        if(fresh){ document.getElementById('app').replaceWith(fresh);
-          document.querySelectorAll('details').forEach(function(d){ if(open[d.getAttribute('data-k')]) d.open=true; });
-        }
-        // Also refresh the live ENGINE panel (it lives outside #app, at the top).
-        var freshEng=doc.getElementById('app-engine');
-        if(freshEng){ var cur=document.getElementById('app-engine'); if(cur) cur.replaceWith(freshEng); }
-      }catch(e){}
-      setTimeout(tick,ms);
-    }
-    setTimeout(tick,ms);
-  })();
-  </script>
-  </body></html>`;
+async function tick(){
+  try{const s=await(await fetch('/loop.json',{cache:'no-store'})).json();render(s);}catch(e){}
+  setTimeout(tick,4000);
+}
+tick();
+</script>
+</div></body></html>`;
 }
 
 /** Compact JSON for council/helper polling — no page reload, no screenshots. */
