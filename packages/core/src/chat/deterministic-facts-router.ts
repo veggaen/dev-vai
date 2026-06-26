@@ -1159,7 +1159,7 @@ const COMPARE_PAIRS: ComparePair[] = [
 let comparePairTermMatcher: EntityMatcher | null = null;
 function tryCompare(content: string): FactShimResult | null {
   const lower = content.toLowerCase();
-  if (!/\bvs\.?\b|\bversus\b|\bcompare\b|\bcompared to\b|\bshould i use\b|\bdifference[s]? between\b/i.test(lower)) return null;
+  if (!/\bvs\.?\b|\bversus\b|\bcompare\b|\bcompared to\b|\bshould i use\b|\bdifference[s]? between\b|\bbuild\b/i.test(lower)) return null;
   // A two-way curated pair must not answer a 3+ way comparison ("compare A, B,
   // and C") — that question deserves a full multi-way answer, not "A vs B".
   if (isMultiWayComparison(content)) return null;
