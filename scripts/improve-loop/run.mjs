@@ -101,7 +101,12 @@ async function main() {
   if (!ready.ready) {
     process.stderr.write(`\n[improve-loop] ${ready.detail}\n`);
     endRun(db, runId, 'aborted-runtime-down');
-    return; // don't run a whole cycle of false failures against a dead runtime
+    // Exit NON-ZERO so the engine knows observe could NOT run (vs ran-and-found-nothing). Exit code
+    // 0 made the engine count a runtime-down abort as a "successful" observe → the health check then
+    // cried "ran but landed NOTHING → meta-slop" every cycle, when the truth is just "Vai is down".
+    // 75 = EX_TEMPFAIL (a transient/retryable failure), distinguishing it from a real error (1).
+    process.exitCode = 75;
+    return;
   }
 
   let interrupted = false;

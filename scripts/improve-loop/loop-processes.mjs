@@ -94,6 +94,10 @@ export function defineLoopProcesses(deps = {}) {
       value: (ctx) => (!ctx.hasData ? 0.98 : ctx.cyclesSinceObserve >= 2 ? 0.85 : ctx.cyclesSinceObserve === 1 ? 0.55 : 0.2),
       run: async (ctx) => {
         const code = await runChild('scripts/improve-loop/run.mjs', runArgs(ctx));
+        // Exit 75 (EX_TEMPFAIL) = the runtime was DOWN, so observe could not run. Do NOT reset the
+        // since-counter (it didn't really observe) and surface runtimeDown so the cycle reports
+        // "WAITING: Vai runtime down" instead of pretending it ran and crying meta-slop.
+        if (code === 75) return { produced: 0, runtimeDown: true };
         setLoopState(ctx.db, 'cyclesSinceObserve', 0);
         return { produced: code === 0 ? 1 : 0, exitCode: code };
       },

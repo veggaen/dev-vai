@@ -381,10 +381,18 @@ async function engineMain() {
       ran = result.ran;
       advanceCycleCounters(db, ran);
 
+      // RUNTIME-DOWN GUARD: if observe couldn't run because Vai is down, the loop is BLOCKED, not
+      // failing. Say so honestly instead of crying "meta-slop" every cycle against a dead runtime
+      // (the misleading output: fast empty cycles + flat 0.5135 quality). Skip the health verdict.
+      const runtimeDown = (result.outcomes ?? []).some((o) => o.result?.runtimeDown);
       // PERPETUAL-HEALTH: is the loop actually improving the codebase, attributably? Sample cheap
       // signals; tsc only every 5th cycle (heavy). Attribution = experiments adopted + observe ran.
       const withTsc = cycle % 5 === 0;
       try {
+        if (runtimeDown) {
+          log(`  ⏸ WAITING: Vai runtime is DOWN at ${BASE_URL} — observe cannot run. Start it (pnpm --filter @vai/runtime dev). Not a loop failure; resumes automatically when it's back.`);
+          logLoopEvent(db, { cycle, kind: 'health', detail: { working: null, state: 'blocked', reason: 'runtime down — observe cannot run' } });
+        } else {
         qualitySamples.push(makeSample(await collectSignals({ withTsc })));
         if (qualitySamples.length > 20) qualitySamples = qualitySamples.slice(-20); // bounded series, not a corpus
         const quality = analyzeQuality(qualitySamples);
@@ -395,6 +403,7 @@ async function engineMain() {
         logLoopEvent(db, { cycle, kind: 'health', detail: { working: verify.working, state: quality.state, composite: quality.composite.current, reason: verify.reason } });
         // Capture the verdict as a counted fact (cheap, bounded) so the operator can trend it.
         if (verify.working === false) recordKnowledge(db, { scope: 'loop:health', claim: 'cycle did not improve codebase quality', evidence: verify.reason, confirm: true });
+        }
       } catch (e) { log('  health check skipped: ' + String(e).slice(0, 70)); }
 
       // PROOF-OF-MOTION rollup every 10 cycles.
