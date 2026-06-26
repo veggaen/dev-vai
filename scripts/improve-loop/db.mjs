@@ -768,6 +768,26 @@ export function failingRowsForClass(db, klass) {
   }
 }
 
+/** Most-recently-PASSING prompts for a class — the REGRESSION sample. Acceptance re-runs a few of
+ *  these after a fix; if any now FAILS, the fix broke working behaviour and is rejected. This is
+ *  what makes "keep net improvements" safe: we keep fixes that recover failures WITHOUT breaking
+ *  passes. limit keeps it cheap (a handful of live turns, not the whole passing set). */
+export function passingRowsForClass(db, klass, limit = 4) {
+  try {
+    return db.prepare(
+      `SELECT r.prompt_id, p.prompt, p.expected_intent
+       FROM results r
+       JOIN prompts p ON p.id = r.prompt_id
+       JOIN (SELECT prompt_id, MAX(run_id) AS mrun FROM results WHERE class = ? GROUP BY prompt_id) m
+         ON m.prompt_id = r.prompt_id AND m.mrun = r.run_id
+       WHERE r.class = ? AND r.passed = 1
+       ORDER BY r.run_id DESC LIMIT ?`,
+    ).all(klass, klass, limit);
+  } catch {
+    return [];
+  }
+}
+
 /** Campaign-wide per-class pass-rate across ALL runs — the grader reads this to
  *  spend the scarce one-at-a-time GPU budget on the LOWEST pass-rate class, not on
  *  whichever class happened to fail in the latest tiny run. try/catch-guarded so a

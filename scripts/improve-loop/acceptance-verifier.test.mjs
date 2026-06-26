@@ -18,14 +18,42 @@ test('summarizeAcceptance: all recovered = accepted, recoveryRate exact', () => 
   assert.equal(r.recoveryRate, 1);
 });
 
-test('summarizeAcceptance: at/above the bar = accepted, below but >0 = partial, none = rejected', () => {
+test('summarizeAcceptance: accepted ≥0.8, improved ≥improveRate, partial below, rejected at 0', () => {
   const atBar = summarizeAcceptance([{ passed: true }, { passed: true }, { passed: true }, { passed: true }, { passed: false }], { acceptRate: 0.8 });
   assert.equal(atBar.recoveryRate, 0.8);
   assert.equal(atBar.verdict, 'accepted');
-  const partial = summarizeAcceptance([{ passed: true }, { passed: false }, { passed: false }], { acceptRate: 0.8 });
+  // 1/3 (33%) ≥ improveRate 0.25 + breaks nothing → IMPROVED (kept, net progress) — the key change.
+  const improved = summarizeAcceptance([{ passed: true }, { passed: false }, { passed: false }], { acceptRate: 0.8, improveRate: 0.25 });
+  assert.equal(improved.verdict, 'improved');
+  assert.equal(improved.accepted, true, 'an improvement is KEPT');
+  // 1/10 (10%) < improveRate → too marginal → partial (not kept).
+  const partial = summarizeAcceptance(Array.from({ length: 10 }, (_, i) => ({ passed: i === 0 })), { acceptRate: 0.8, improveRate: 0.25 });
   assert.equal(partial.verdict, 'partial');
   const rejected = summarizeAcceptance([{ passed: false }, { passed: false }], { acceptRate: 0.8 });
   assert.equal(rejected.verdict, 'rejected');
+});
+
+test('summarizeAcceptance: ANY regression rejects, however much it recovers (safety)', () => {
+  // recovers 2/2 failures (100%) BUT breaks a previously-passing prompt → REJECTED.
+  const r = summarizeAcceptance([
+    { passed: true }, { passed: true },                 // both failures recovered
+    { passed: false, regression: true },                // a known-pass now FAILS → regression
+  ], { acceptRate: 0.8 });
+  assert.equal(r.regressed, 1);
+  assert.equal(r.verdict, 'rejected');
+  assert.equal(r.accepted, false);
+  assert.match(r.headline, /REGRESSED/);
+});
+
+test('summarizeAcceptance: passing regression rows do not count as targets', () => {
+  // 1 failure recovered + 2 passing rows that stay passing → 1/1 targets = accepted, no regression.
+  const r = summarizeAcceptance([
+    { passed: true },                                   // the one failure, recovered
+    { passed: true, regression: true }, { passed: true, regression: true },
+  ], { acceptRate: 0.8 });
+  assert.equal(r.total, 1, 'regression rows excluded from targets');
+  assert.equal(r.regressed, 0);
+  assert.equal(r.verdict, 'accepted');
 });
 
 test('summarizeAcceptance: NO targeted failures is no-targets, never a silent pass', () => {
@@ -50,7 +78,7 @@ test('verifyAcceptance: re-runs each row serially via injected runner+grader; er
   assert.deepEqual(seen, ['a', 'b', 'c']);           // onResult fired per row
   assert.equal(rep.total, 3);
   assert.equal(rep.recovered, 1);                    // only 'a'
-  assert.equal(rep.verdict, 'partial');              // 1/3 recovered: some moved, below the 0.8 bar
+  assert.equal(rep.verdict, 'improved');             // 1/3 (33%) ≥ improveRate, breaks nothing → kept
   const cRow = rep.perPrompt.find((p) => p.prompt === 'c');
   assert.equal(cRow.passed, false);
   assert.match(cRow.error, /infra blip/);
