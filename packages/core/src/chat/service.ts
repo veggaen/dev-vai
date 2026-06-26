@@ -47,11 +47,15 @@ import {
   type Resolution,
   type DispatchPlan,
 } from './turn-pipeline.js';
-import { shadowScore, type ShadowScore } from './capability-kernel.js';
+import { shadowScore, asTurnHandler, type ShadowScore } from './capability-kernel.js';
 import { liveContextCapability } from './capabilities/live-context-capability.js';
 import { gitCapability, classifyGitQuery } from './capabilities/git-capability.js';
-import { execCapability } from './capabilities/exec-capability.js';
+import { execCapability, isExecQuery } from './capabilities/exec-capability.js';
 import { pageCapability } from './capabilities/page-capability.js';
+import { inferRunCommand } from './capabilities/infer-run-command.js';
+import { runCommandEvidence, type RunEvidence } from '../tools/run-evidence.js';
+import { readFile as fsReadFile } from 'node:fs/promises';
+import { resolve as pathResolve } from 'node:path';
 import { scoreWithHistory } from './capability-kernel.js';
 import { CapabilityOutcomeLedger } from '../learning/capability-ledger.js';
 import { judgeAnswers, type JudgeCandidate } from '../eval/answer-judge.js';
@@ -2665,6 +2669,30 @@ export class ChatService {
         }).catch(() => undefined);
       }
 
+      // REAL-WORLD TOOL INVOCATION (the loop's chosen feature): when the turn asks to run/verify
+      // ("do the tests pass?", "does it typecheck?"), ACTUALLY run the project's allowlisted command
+      // and attach the result, so exec answers from a real exit code instead of "no command was run".
+      // Infer the command from the project's package.json; the runner is allowlist-gated + bounded, so
+      // this can never run arbitrary shell. Best-effort: any failure leaves run evidence undefined and
+      // exec falls back to its honest non-answer. Gated on exec phrasing so normal turns pay nothing.
+      let runEvidence: RunEvidence | undefined;
+      if (isExecQuery(understoodContent || content)) {
+        try {
+          const cwd = process.cwd();
+          let scripts: Record<string, string> | null = null;
+          try {
+            const pkgRaw = await fsReadFile(pathResolve(cwd, 'package.json'), 'utf8');
+            const pkg = JSON.parse(pkgRaw);
+            scripts = (pkg && typeof pkg.scripts === 'object') ? pkg.scripts : {};
+          } catch { scripts = null; }
+          const inferred = inferRunCommand(understoodContent || content, { scripts, hasPackageJson: scripts !== null });
+          if (inferred) {
+            runEvidence = await runCommandEvidence(inferred.command, inferred.args, { cwd, timeoutMs: 120_000 }).catch(() => undefined);
+            console.log(`[tool-invoke] ran ${inferred.command} ${inferred.args.join(' ')} → ${runEvidence ? `exit ${runEvidence.exitCode} (${runEvidence.passed ? 'passed' : 'failed'})` : 'no evidence'}`);
+          }
+        } catch { /* never block the turn on tool invocation */ }
+      }
+
       const turnContext: TurnContext = {
         content,
         understood: understoodContent,
@@ -2672,14 +2700,25 @@ export class ChatService {
         classification: turnClassification,
         intent: questionIntent,
         guidance: turnGuidance,
-        evidence: gitEvidence ? { git: gitEvidence } : undefined,
+        evidence: (gitEvidence || runEvidence)
+          ? { ...(gitEvidence ? { git: gitEvidence } : {}), ...(runEvidence ? { run: runEvidence } : {}) }
+          : undefined,
       };
       // Append the git capability (closes over the just-built context) only when the
       // turn is git-shaped — keeps the handler list unchanged for every other turn.
-      const gitHandlers = gitShape.any
+      let liveHandlers = gitShape.any
         ? [...handlers, makeGitHandler(turnContext)]
         : handlers;
-      const outcome = dispatchTurn(turnContext, gitHandlers, { confidenceFloor: 0.5 });
+      // Promote exec from shadow to a LIVE decider ONLY when we actually ran a command this turn
+      // (runEvidence present). This is the safe promotion: exec can now answer a "do the tests pass?"
+      // turn from the real exit code, but it never wins a turn where no command ran (its verify gate +
+      // this guard both require real evidence). Real-world tool invocation, grounded.
+      if (runEvidence) {
+        // exec produces a base Resolution; the dispatch reads only common fields, so it's safe to
+        // place in the ServiceResolution handler list (ServiceResolution extends Resolution).
+        liveHandlers = [...liveHandlers, asTurnHandler(execCapability) as unknown as TurnHandler<ServiceResolution>];
+      }
+      const outcome = dispatchTurn(turnContext, liveHandlers, { confidenceFloor: 0.5 });
 
       // Shadow baseline (unsteered) for reference when guidance was present.
       // Persisted alongside so we have direct pre/post for analysis.
