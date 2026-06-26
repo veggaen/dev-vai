@@ -202,6 +202,24 @@ export function defineLoopProcesses(deps = {}) {
       run: async (ctx) => {
         const code = await runChild('scripts/improve-loop/capability-engine.mjs', []);
         setLoopState(ctx.db, 'cyclesSinceCapability', 0);
+        // CHOOSE the one meaningful feature to build next — deduped, novel, ranked by real USER value
+        // (not the council's self-score, which navel-gazes on voice/vote variants). Building a feature
+        // is senior work (an 8B can't), so we ESCALATE the pick with its first slice instead of
+        // auto-writing it — surfaced on the dashboard's "Needs you" as the single meaningful next build.
+        try {
+          const { chooseCapability } = await import('./capability-select.mjs');
+          const props = ctx.db.prepare("SELECT title, capability, council_overall, first_slice, area FROM capabilities WHERE status='proposed'").all();
+          const choice = chooseCapability(props, { minScore: 7 });
+          if (choice.pick) {
+            recordKnowledge(ctx.db, {
+              scope: 'innovation:escalate',
+              claim: `build next: ${choice.pick.title} — ${String(choice.pick.capability).slice(0, 80)}`,
+              kind: 'observation', confirm: true,
+              evidence: `chosen from ${props.length} proposals (deduped to ${choice.ranked.length}); first slice: ${String(choice.pick.first_slice).slice(0, 90)}`,
+            });
+            return { produced: 1, chose: choice.pick.title };
+          }
+        } catch { /* chooser is best-effort; the proposals still landed in the backlog */ }
         return { produced: code === 0 ? 1 : 0 };
       },
     },
