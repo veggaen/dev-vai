@@ -55,6 +55,19 @@ describe('rewritePronounFollowUp', () => {
     expect(rewritePronounFollowUp('can you make it for me now?', 'commerce store')).toBeNull();
     expect(rewritePronounFollowUp('build it now', 'commerce store')).toBeNull();
     expect(rewritePronounFollowUp('do it', 'commerce store')).toBeNull();
+    // a build imperative with no refinement adjective stays a build, even with a referent
+    expect(rewritePronounFollowUp('make it production ready', 'the dashboard app')).toBeNull();
+    expect(rewritePronounFollowUp('can you make a darker theme?', 'the dashboard app')).toBeNull();
+  });
+
+  it('DOES resolve a refinement-of-prior-answer request ("make that simpler") to the topic', () => {
+    // followup/context-carry miss: these read like build imperatives but redo the LAST answer.
+    expect(rewritePronounFollowUp('can you make that simpler?', 'the binary search algorithm'))
+      .toBe('can you make the binary search algorithm simpler?');
+    expect(rewritePronounFollowUp('make that clearer', 'the binary search algorithm'))
+      .toBe('make the binary search algorithm clearer');
+    expect(rewritePronounFollowUp('explain it in plain english', 'recursion'))
+      .toBe('explain recursion in plain english');
   });
 
   it('does NOT attach a stale topic to complete short standalone questions', () => {

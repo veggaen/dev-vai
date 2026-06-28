@@ -27,6 +27,12 @@ const PLACE_REF = /\bthere\b/i;
 const THING_REF = /\b(?:it|its|it's|that|this|they|them|those|these)\b/i;
 const ONE_REF = /\bone\b/i;
 const POSSESSIVE_REF = /\b(?:his|her|their)\b/i;
+// A REFINEMENT of the prior answer ("make that simpler", "can you make it clearer", "explain that
+// more simply") — uses make/keep/rewrite + a refinement adjective. These read like build imperatives
+// but carry NO buildable target; they ask to redo the LAST answer differently, so the referent must
+// be resolved to the topic (not handed to the builder). This was the followup/context-carry miss.
+const REFINEMENT_REQUEST =
+  /\b(?:simpler|clearer|shorter|longer|briefer|more\s+(?:simply|clearly|concise(?:ly)?|detail(?:ed)?|thorough(?:ly)?)|less\s+technical|in\s+plain\s+(?:english|terms)|eli5|dumb(?:ed)?\s+down|tl;?dr)\b/i;
 
 const PRIOR_ENTITY_PATTERNS = [
   /\bwho\s+(?:is|are|was|were)\s+(.+?)\??\s*$/i,
@@ -228,15 +234,20 @@ export function rewritePronounFollowUp(input: string, topic: string): string | n
   const words = trimmed.split(/\s+/);
   if (words.length > 14) return null;                 // long turns are standalone
   const hasReferential = PLACE_REF.test(trimmed) || THING_REF.test(trimmed) || ONE_REF.test(trimmed) || POSSESSIVE_REF.test(trimmed);
+  // A refinement of the prior answer ("make that simpler") is a contextual follow-up even though it
+  // starts with an imperative verb — allow it through alongside questions/possessives/fragments.
+  const isRefinement = REFINEMENT_REQUEST.test(trimmed) && hasReferential;
   const allowsRewrite =
     QUESTION_START.test(trimmed)
     || POSSESSIVE_REF.test(trimmed)
+    || isRefinement
     || (FOLLOW_UP_FRAGMENT.test(trimmed) && PROFILE_LINK_CUE.test(trimmed));
   if (!allowsRewrite) return null;
   // Imperative build/action requests ("can you make it for me?", "build it now",
   // "do it") use "it" to mean "the thing we're building" — the builder handles
-  // those directly, so don't rewrite them into a factual question.
-  if (/^(?:can|could|would|will|please)\s+(?:you\s+)?(?:please\s+)?(?:make|build|create|do|show|give|write|generate|design|add|fix|help|set\s*up|scaffold|deploy|run|ship|render)\b|^(?:make|build|create|do|show|give|write|generate|design|add|fix|run|ship|render|please)\b/i.test(trimmed)) {
+  // those directly, so don't rewrite them into a factual question. EXCEPT a refinement
+  // ("make that simpler/clearer/shorter") which redoes the LAST answer, not a build.
+  if (!isRefinement && /^(?:can|could|would|will|please)\s+(?:you\s+)?(?:please\s+)?(?:make|build|create|do|show|give|write|generate|design|add|fix|help|set\s*up|scaffold|deploy|run|ship|render)\b|^(?:make|build|create|do|show|give|write|generate|design|add|fix|run|ship|render|please)\b/i.test(trimmed)) {
     return null;
   }
   if (new RegExp(`\\b${escapeRegex(cleanedTopic)}\\b`, 'i').test(trimmed)) return null; // already named
