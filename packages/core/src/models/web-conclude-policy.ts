@@ -246,7 +246,7 @@ export function isFreshLocalRecommendationRequest(input: string): boolean {
  * canned/deterministic fallback. Excludes pure "how to register" procedural asks.
  */
 const OPPORTUNITY_CUE_PATTERN =
-  /\b(?:business\s+idea|great\s+idea|good\s+idea|startup\s+idea|company\s+to\s+start|business\s+to\s+start|opportunit\w*|promising\s+(?:sector|industry|market|niche)|what\s+(?:should|could)\s+i\s+(?:build|start|make)|what\s+kind\s+of\s+(?:company|business|startup))\b/i;
+  /\b(?:business\s+idea|great\s+idea|good\s+idea|startup\s+idea|company\s+to\s+start|business\s+to\s+start|opportunit\w*|(?:promising|underrated|hot|smart|solid|profitable)\s+(?:sector|industry|market|niche|startup|venture|business|company)|(?:venture|company|startup|business)\s+to\s+(?:launch|start|build|begin|create)|(?:build|launch|start|create)\s+a\s+(?:startup|business|company|venture)|what\s+(?:should|could)\s+i\s+(?:build|start|make)|what\s+kind\s+of\s+(?:company|business|startup))\b/i;
 const OPPORTUNITY_FRAME_PATTERN =
   /\b(?:company|companies|business|startup|venture|enterprise)\b/i;
 const PURE_PROCEDURE_PATTERN =

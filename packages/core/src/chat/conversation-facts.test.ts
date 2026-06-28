@@ -20,4 +20,15 @@ describe('conversation facts', () => {
     expect(reply).toContain('Python');
     expect(reply).toContain('Redis');
   });
+
+  it('defers a stack question about an external URL to the repo handler (no project hijack)', () => {
+    // Regression for the hono trace: "what stack does <github url> use?" was answered from
+    // remembered project facts ("you said you're using Hono") instead of reading the repo.
+    const history = [
+      { role: 'user' as const, content: 'project Hono uses TypeScript. remember that.' },
+    ];
+    expect(tryHandleFactRecall('What stack does https://github.com/honojs/hono use?', history)).toBeNull();
+    // Plain (no URL) recall still works.
+    expect(tryHandleFactRecall('what stack does my project use?', history)?.reply).toContain('Hono');
+  });
 });

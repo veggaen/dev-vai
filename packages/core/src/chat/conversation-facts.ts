@@ -20,6 +20,7 @@
  * Caching can be layered later if profiling demands it. The extractor is
  * intentionally cheap (regex passes over user turns only).
  */
+import { buildEntityMatcher } from './entity-matcher.js';
 
 export interface FactsHistoryMessage {
   readonly role: 'user' | 'assistant' | 'system' | 'tool';
@@ -112,6 +113,14 @@ const STACK_KEYWORDS: readonly string[] = [
   'TypeScript', 'JavaScript', 'Python', 'Rust', 'Go', 'Bun', 'Deno', 'Node',
   'Vercel', 'Netlify', 'Cloudflare', 'AWS', 'Fly.io',
 ];
+
+// Compile-once matcher over the static stack list (was: a fresh `\b…\b` RegExp per
+// keyword, every turn — ~60 compiles/turn, found by scripts/hotpath-scan.mjs).
+// "Go" is excluded and handled case-sensitively below, because lowercase "go" is
+// ordinary prose far more often than the language.
+const STACK_KEYWORDS_CI = STACK_KEYWORDS.filter((kw) => kw !== 'Go');
+const stackMatcher = buildEntityMatcher(STACK_KEYWORDS_CI);
+const GO_LANG_RE = /\bGo\b/; // case-sensitive: only "Go" counts as the language
 
 const STACK_INTRO_PATTERNS: readonly RegExp[] = [
   /\bstack\s*[:=]?\s*([A-Za-z0-9 .+,/&-]+?)(?:[.\n]|$)/gi,
@@ -221,13 +230,10 @@ function extractProjectsFromTurn(content: string, turnIndex: number): ProjectFac
 }
 
 function extractStacksFromTurn(content: string): string[] {
-  const found: string[] = [];
-  for (const kw of STACK_KEYWORDS) {
-    // Lowercase "go" is ordinary prose far more often than a language name.
-    // Preserve the stack signal only when the user actually writes "Go".
-    const re = new RegExp(`\\b${kw.replace(/[.+]/g, '\\$&')}\\b`, kw === 'Go' ? '' : 'i');
-    if (re.test(content)) found.push(kw);
-  }
+  // One-pass match over the static keyword set (compile-once), preserving each
+  // keyword's canonical casing in the output, plus the case-sensitive "Go" check.
+  const found: string[] = stackMatcher.matchAll(content);
+  if (GO_LANG_RE.test(content)) found.push('Go');
   for (const pat of STACK_INTRO_PATTERNS) {
     pat.lastIndex = 0;
     let m: RegExpExecArray | null;
@@ -494,6 +500,12 @@ export function tryHandleFactRecall(
 ): FactRecallResult | null {
   const text = content.trim();
   if (!text) return null;
+
+  // A message with an explicit URL is asking about THAT link (e.g. "what stack does
+  // https://github.com/honojs/hono use?"), not the user's own remembered project. Defer to
+  // the URL/repo handler so we don't hijack it with "you said you're using <project>". This
+  // is the fix for the hono trace where a repo question got answered from conversation facts.
+  if (/https?:\/\/\S+/i.test(text)) return null;
 
   const facts = extractConversationFacts(history);
 

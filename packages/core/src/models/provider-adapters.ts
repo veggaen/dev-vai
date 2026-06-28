@@ -527,6 +527,84 @@ export class LocalOpenAICompatibleAdapter extends BaseHttpAdapter {
       finishReason: 'stop',
     };
   }
+
+  /**
+   * Real token streaming over Ollama's NDJSON `/api/chat` (stream:true). Unlike the base
+   * adapter's buffer-then-emit fallback, this surfaces deltas AS the model generates — the
+   * `message.thinking` channel becomes `reasoning_delta` (a thinking model "thinking out
+   * loud") and `message.content` becomes `text_delta`. The council uses this to show each
+   * member's live reasoning. `content` is accumulated raw and only the user-facing answer
+   * strips <think> blocks — here the caller (member.review) parses the accumulated content
+   * itself, so we pass content deltas through verbatim.
+   */
+  override async *chatStream(request: ChatRequest): AsyncIterable<ChatChunk> {
+    const runtime = resolveLocalRuntimeOptions(this.profile.contextWindow);
+    const body: Record<string, unknown> = {
+      model: this.profile.modelName,
+      messages: request.messages.map((message) => ({ role: message.role, content: messageText(message) })),
+      stream: true,
+      keep_alive: request.keepAlive ?? runtime.keepAlive,
+      options: {
+        temperature: this.temperature(request),
+        num_predict: this.maxTokens(request),
+        num_ctx: runtime.numCtx,
+      },
+    };
+    if (this.profile.capabilities.extendedThinking) {
+      body.think = request.think ?? (process.env.VAI_LOCAL_THINK === '1');
+    }
+    const res = await fetch(`${this.providerConfig.baseUrl ?? 'http://localhost:11434'}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: request.signal,
+    });
+    if (!res.ok) throw new Error(`Local model request failed: ${res.status} ${await res.text()}`);
+    if (!res.body) {
+      // No stream available — fall back to a single buffered emission.
+      const response = await this.performChat(request);
+      if (response.message.content) yield { type: 'text_delta', textDelta: response.message.content };
+      yield { type: 'done', usage: response.usage };
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let usage = { promptTokens: 0, completionTokens: 0 };
+    const emitLine = (line: string): ChatChunk[] => {
+      const trimmed = line.trim();
+      if (!trimmed) return [];
+      let payload: OllamaChatResponse & { done?: boolean };
+      try { payload = JSON.parse(trimmed); } catch { return []; }
+      const out: ChatChunk[] = [];
+      const thinking = payload.message?.thinking;
+      if (thinking) out.push({ type: 'reasoning_delta', reasoningDelta: thinking });
+      const content = payload.message?.content;
+      if (content) out.push({ type: 'text_delta', textDelta: content });
+      if (payload.prompt_eval_count !== undefined || payload.eval_count !== undefined) {
+        usage = {
+          promptTokens: payload.prompt_eval_count ?? usage.promptTokens,
+          completionTokens: payload.eval_count ?? usage.completionTokens,
+        };
+      }
+      return out;
+    };
+
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        for (const chunk of emitLine(line)) yield chunk;
+      }
+    }
+    for (const chunk of emitLine(buffer)) yield chunk; // trailing partial line
+    yield { type: 'done', usage };
+  }
 }
 
 export function createAdapterForProfile(profileId: string, provider: ProviderConfig): ModelAdapter | null {

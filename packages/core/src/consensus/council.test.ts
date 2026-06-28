@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { reachConsensus, runCouncil, convene, toCouncilThinking, runCouncilStreaming } from './council.js';
+import { reachConsensus, runCouncil, convene, toCouncilThinking, runCouncilStreaming, conveneStreaming } from './council.js';
 import { routeTopic, selectMembers } from './topic-router.js';
 import { createCouncilMember, parseCouncilNote } from './member.js';
 import type { CouncilInput, CouncilMember, CouncilMemberNote } from './types.js';
@@ -144,6 +144,40 @@ describe('reachConsensus', () => {
     ]);
     expect(c.searchQuery).toBe('btc price now');
   });
+
+  it('surfaces a serious minority dissent even when the modal verdict ships', () => {
+    // Split panel: 3 'good' (answer-directly) ship the draft, but 1 strong member returns
+    // 'bad' with a real concern. The outcome still ships (modal logic unchanged), yet the
+    // objection must be AUDITABLE on consensus.dissent — never silently buried in notes[].
+    const c = reachConsensus([
+      note({ verdict: 'good', memberId: 'a', suggestedAction: 'answer-directly' }),
+      note({ verdict: 'good', memberId: 'b', suggestedAction: 'answer-directly' }),
+      note({ verdict: 'good', memberId: 'c', suggestedAction: 'answer-directly' }),
+      note({ verdict: 'bad', memberId: 'd', memberName: 'Skeptic', confidence: 0.9, concerns: ['unsupported claim about latency'] }),
+    ]);
+    expect(c.outcome).toBe('ship'); // modal logic intentionally unchanged
+    expect(c.dissent?.hasDissent).toBe(true);
+    expect(c.dissent?.dissentingMembers).toHaveLength(1);
+    expect(c.dissent?.dissentingMembers[0].memberId).toBe('d');
+    expect(c.dissent?.dissentingMembers[0].concerns).toContain('unsupported claim about latency');
+    expect(c.dissent?.dissentStrength).toBeCloseTo(0.25, 2); // 1 of 4 equal-weight members
+  });
+
+  it('does NOT surface dissent below the weight threshold (noise floor)', () => {
+    // A lone low-share dissenter among many shippers stays below DISSENT_MIN_WEIGHT (0.2).
+    const c = reachConsensus([
+      note({ verdict: 'good', memberId: 'a' }), note({ verdict: 'good', memberId: 'b' }),
+      note({ verdict: 'good', memberId: 'c' }), note({ verdict: 'good', memberId: 'e' }),
+      note({ verdict: 'good', memberId: 'f' }),
+      note({ verdict: 'bad', memberId: 'd' }), // 1 of 6 = 0.167 < 0.2
+    ]);
+    expect(c.dissent).toBeUndefined();
+  });
+
+  it('omits dissent entirely when the panel is unanimous good', () => {
+    const c = reachConsensus([note({ verdict: 'good', memberId: 'a' }), note({ verdict: 'good', memberId: 'b' })]);
+    expect(c.dissent).toBeUndefined();
+  });
 });
 
 describe('runCouncil / convene', () => {
@@ -225,6 +259,29 @@ describe('runCouncil / convene', () => {
     expect(consensus.memberIds).toEqual(['m1']);
   });
 
+  it('fast-first ordering: a slow-thinking member placed first does not starve faster ones', async () => {
+    // Under a budget, a slowThinking member listed first must be deferred so the fast members are
+    // heard within the deadline (the measured "configured 3, only 2 ever speak" gap). The slow one
+    // runs last if time remains. We model cost via the clock: slow advances past the deadline.
+    let clock = 1000;
+    const fastReview = (id: string) => async () => { clock += 10; return note({ verdict: 'good', memberId: id }); };
+    const slowReview = (id: string) => async () => { clock += 1000; return note({ verdict: 'good', memberId: id }); };
+    const members: CouncilMember[] = [
+      { id: 'slow', displayName: 'Slow', topic: 'reasoning', slowThinking: true, review: slowReview('slow') },
+      { id: 'fast1', displayName: 'Fast1', topic: 'code', review: fastReview('fast1') },
+      { id: 'fast2', displayName: 'Fast2', topic: 'local', review: fastReview('fast2') },
+    ];
+    const stream = runCouncilStreaming(members, INPUT, { now: () => clock, overallDeadlineMs: 100 });
+    let iter = await stream.next();
+    while (!iter.done) iter = await stream.next();
+    // Both fast members are heard first; the slow one runs last (and here still fits before the
+    // deadline check for the NEXT member, which there is none of). Crucially fast1+fast2 are in.
+    expect(iter.value.memberIds).toContain('fast1');
+    expect(iter.value.memberIds).toContain('fast2');
+    // The slow member no longer monopolizes the budget and exclude the others.
+    expect(iter.value.memberIds.length).toBeGreaterThanOrEqual(2);
+  });
+
   it('with no overall deadline, every member is heard', async () => {
     let clock = 1000;
     const advancingReview = (id: string) => async () => { clock += 100; return note({ verdict: 'good', memberId: id }); };
@@ -237,6 +294,58 @@ describe('runCouncil / convene', () => {
     while (!iter.done) iter = await stream.next();
     expect([...iter.value.memberIds].sort()).toEqual(['m1', 'm2']);
   });
+
+  describe('conveneStreaming deliberation (live path, flag-gated)', () => {
+    // A split 2-member roster: m1 'good', m2 'bad' on round 1 → triggers a peer-aware round 2.
+    const splitRoster = () => {
+      const peerSeen: Record<string, boolean> = {};
+      const member = (id: string, verdict: 'good' | 'bad'): CouncilMember => ({
+        id, displayName: id, topic: 'local',
+        async review(input) { peerSeen[id] = Boolean(input.peerNotes?.length); return note({ memberId: id, verdict }); },
+      });
+      return { roster: { default: [member('m1', 'good'), member('m2', 'bad')] }, peerSeen };
+    };
+    const drain = async (gen: ReturnType<typeof conveneStreaming>) => {
+      let pendingEvents = 0; let it = await gen.next();
+      while (!it.done) { if (it.value.pendingMember) pendingEvents++; it = await gen.next(); }
+      return { pendingEvents, result: it.value };
+    };
+
+    it('OFF by default: a split panel runs ONE round only (no peer round)', async () => {
+      delete process.env.VAI_COUNCIL_DELIBERATE;
+      const { roster, peerSeen } = splitRoster();
+      const { pendingEvents } = await drain(conveneStreaming(INPUT, roster));
+      expect(pendingEvents).toBe(2);             // 2 members, one round
+      expect(peerSeen.m1).toBe(false);           // nobody saw peers
+      expect(peerSeen.m2).toBe(false);
+    });
+
+    it('ON: a split panel runs a SECOND peer-aware round (members see peerNotes), streamed', async () => {
+      const prev = process.env.VAI_COUNCIL_DELIBERATE;
+      process.env.VAI_COUNCIL_DELIBERATE = '1';
+      try {
+        const { roster, peerSeen } = splitRoster();
+        const { pendingEvents } = await drain(conveneStreaming(INPUT, roster));
+        expect(pendingEvents).toBe(4);           // 2 members × 2 rounds, all streamed
+        expect(peerSeen.m1).toBe(true);          // round 2 injected peer notes
+        expect(peerSeen.m2).toBe(true);
+      } finally {
+        if (prev === undefined) delete process.env.VAI_COUNCIL_DELIBERATE; else process.env.VAI_COUNCIL_DELIBERATE = prev;
+      }
+    });
+
+    it('ON but unanimous: no second round (nothing to deliberate)', async () => {
+      const prev = process.env.VAI_COUNCIL_DELIBERATE;
+      process.env.VAI_COUNCIL_DELIBERATE = '1';
+      try {
+        const m = (id: string): CouncilMember => ({ id, displayName: id, topic: 'local', review: async () => note({ memberId: id, verdict: 'good' }) });
+        const { pendingEvents } = await drain(conveneStreaming(INPUT, { default: [m('m1'), m('m2')] }));
+        expect(pendingEvents).toBe(2);           // unanimous → single round
+      } finally {
+        if (prev === undefined) delete process.env.VAI_COUNCIL_DELIBERATE; else process.env.VAI_COUNCIL_DELIBERATE = prev;
+      }
+    });
+  });
 });
 
 describe('toCouncilThinking', () => {
@@ -246,6 +355,38 @@ describe('toCouncilThinking', () => {
     expect(ui.topic).toBe('local');
     expect(ui.members[0]).toMatchObject({ name: 'Qwen 2.5 7B', action: 'local-business-search', verdict: 'needs-work' });
     expect(ui.recommendedAction).toBe('local-business-search');
+  });
+
+  it('attaches the verification spine (provenance) when members fetched context', () => {
+    const grounded = { ...note({ verdict: 'good', memberId: 'a' }), contextLedger: {
+      used: 1, unused: 1, unavailable: 0,
+      items: [
+        { label: 'readFile src/x.ts', state: 'used', reason: '' },
+        { label: 'grep /Y/', state: 'unused', reason: '' },
+      ],
+    } } as any;
+    const ui = toCouncilThinking('other', reachConsensus([grounded]));
+    expect(ui.provenance).toBeTruthy();
+    expect(ui.provenance!.total).toBe(2);
+    expect(ui.provenance!.counts.used).toBe(1);
+    expect(ui.provenance!.verdict).toBe('grounded'); // 1/2 used >= 0.34
+  });
+
+  it('omits provenance when no member fetched context (prompt-only review)', () => {
+    const ui = toCouncilThinking('other', reachConsensus([note({ verdict: 'good' })]));
+    expect(ui.provenance).toBeUndefined();
+  });
+
+  it('spine is advisory-only — never changes the outcome (no second gate)', () => {
+    // A grounded ledger; the spine reports provenance but must NOT touch outcome. The
+    // ship/refuse decision on a web contradiction is owned upstream by applyCrossCheck.
+    const n = { ...note({ verdict: 'good', memberId: 'a' }), contextLedger: {
+      used: 1, unused: 0, unavailable: 0, items: [{ label: 'readFile x.ts', state: 'used', reason: '' }],
+    } } as any;
+    const consensus = reachConsensus([n]);
+    const ui = toCouncilThinking('other', consensus);
+    expect(ui.provenance?.verdict).toBe('grounded');
+    expect(ui.outcome).toBe(consensus.outcome); // outcome is passed through unchanged
   });
 });
 
@@ -274,5 +415,27 @@ describe('createCouncilMember', () => {
   it('clamps an out-of-range confidence', () => {
     const n = parseCouncilNote('{"verdict":"good","confidence":9,"suggestedAction":"answer-directly"}', { memberId: 'x', memberName: 'X', topic: 'factual', durationMs: 1 });
     expect(n?.confidence).toBe(1);
+  });
+
+  // The "council not working" bug: members ANSWERED but a variant verdict word or wrapping made the
+  // strict parse discard the whole note → 0 usable → council rubber-stamped the draft.
+  const meta = { memberId: 'x', memberName: 'X', topic: 'factual' as const, durationMs: 1 };
+  it('SALVAGE: a variant verdict word is normalised, not discarded', () => {
+    expect(parseCouncilNote('{"verdict":"ok","confidence":0.8}', meta)?.verdict).toBe('good');
+    expect(parseCouncilNote('{"verdict":"approve"}', meta)?.verdict).toBe('good');
+    expect(parseCouncilNote('{"verdict":"reject"}', meta)?.verdict).toBe('bad');
+    expect(parseCouncilNote('{"verdict":"meh"}', meta)?.verdict).toBe('needs-work');
+  });
+  it('SALVAGE: a note with a MISSING verdict still counts (defaults needs-work, not null)', () => {
+    const n = parseCouncilNote('{"confidence":0.7,"realIntent":"compare frameworks"}', meta);
+    expect(n).not.toBeNull();
+    expect(n?.verdict).toBe('needs-work');
+    expect(n?.realIntent).toBe('compare frameworks');
+  });
+  it('SALVAGE: JSON wrapped in <think> blocks and prose is still extracted', () => {
+    const raw = '<think>I should rate this good because the draft is solid {not this brace}</think>\nHere is my note:\n```json\n{"verdict":"good","confidence":0.9}\n```';
+    const n = parseCouncilNote(raw, meta);
+    expect(n?.verdict).toBe('good');
+    expect(n?.confidence).toBe(0.9);
   });
 });

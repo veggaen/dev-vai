@@ -274,4 +274,64 @@ describe('evaluateChatAnswerQuality', () => {
     expect(report.verdict).toBe('fail');
     expect(report.missing.some((requirement) => requirement.label === 'core request focus')).toBe(true);
   });
+
+  describe('implicit "A or B" comparison detection (routing/comparison failures)', () => {
+    it('requires a real comparison for "X or Y" preference questions', () => {
+      for (const prompt of [
+        'sqlite or postgres for a local-first desktop app?',
+        'is it smarter to bootstrap or raise money for a small saas?',
+        'which is better for a solo founder, an ENK or an AS in norway?',
+      ]) {
+        const vague = evaluateChatAnswerQuality({ prompt, response: 'Both are good options with their own strengths; it depends on your needs.' });
+        expect(vague.missing.some((r) => r.label === 'real comparison'), `should demand comparison: ${prompt}`).toBe(true);
+        const good = evaluateChatAnswerQuality({ prompt, response: 'For this case, prefer the first: it is faster and simpler to operate, whereas the second is better for multi-user write load. Pick the first unless you need concurrency.' });
+        expect(good.missing.some((r) => r.label === 'real comparison'), `good answer satisfies: ${prompt}`).toBe(false);
+      }
+    });
+
+    it('does not demand a comparison for yes/no or single-subject questions', () => {
+      for (const prompt of ['should I use a VPN or not?', 'what is recursion?', 'tell me about norway or its capital']) {
+        const r = evaluateChatAnswerQuality({ prompt, response: 'A short relevant answer.' });
+        expect(r.requirements.some((x) => x.label === 'real comparison'), `no comparison req: ${prompt}`).toBe(false);
+      }
+    });
+  });
+
+  describe('concrete grounding (closes the ×247 escalated gap)', () => {
+    it('flags a vague answer when the prompt explicitly asks for an example', () => {
+      const report = evaluateChatAnswerQuality({
+        prompt: 'How would I debounce a function in JavaScript? Give me an example.',
+        response: 'You can debounce by delaying execution until activity stops. It is a common technique that improves performance and is widely used in modern apps.',
+      });
+
+      expect(report.missing.some((requirement) => requirement.label === 'concrete grounding')).toBe(true);
+    });
+
+    it('passes when the answer cites a concrete specific (code / number / worked example)', () => {
+      const report = evaluateChatAnswerQuality({
+        prompt: 'How would I debounce a function in JavaScript? Give me an example.',
+        response: 'Use a timer. For example: `function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }` — a 300 ms delay is typical for input handlers.',
+      });
+
+      expect(report.missing.some((requirement) => requirement.label === 'concrete grounding')).toBe(false);
+    });
+
+    it('passes a how-much prompt when the answer gives a number', () => {
+      const report = evaluateChatAnswerQuality({
+        prompt: 'How much memory does the model use?',
+        response: 'qwen2.5-coder:7b pins about 5.2 GB of VRAM while resident.',
+      });
+
+      expect(report.missing.some((requirement) => requirement.label === 'concrete grounding')).toBe(false);
+    });
+
+    it('does not invent the requirement when no concrete is requested (false-positive guard)', () => {
+      const report = evaluateChatAnswerQuality({
+        prompt: 'Why do you prefer local-first AI?',
+        response: 'Local-first keeps things private and free. It avoids per-call costs and works offline, which fits the project north-star.',
+      });
+
+      expect(report.requirements.some((requirement) => requirement.label === 'concrete grounding')).toBe(false);
+    });
+  });
 });

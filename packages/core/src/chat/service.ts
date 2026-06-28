@@ -1,4 +1,4 @@
-import { eq, desc, or } from 'drizzle-orm';
+import { eq, desc, or, and } from 'drizzle-orm';
 import { ulid } from 'ulid';
 import type { VaiDatabase } from '../db/client.js';
 import type {
@@ -26,6 +26,7 @@ import {
 import { isExplicitBuildExecutionRequest, looksLikeFactualQuestion, classifyAgentBuildIntent } from './build-execution-intent.js';
 import { CONVERSATION_MODE_SYSTEM_PROMPTS, DEFAULT_CONVERSATION_MODE, type ConversationMode, isConversationMode } from './modes.js';
 import { tryHandleChatMeta } from './meta-router.js';
+import { renderInfoBlockHtml } from './info-block.js';
 import {
   extractConversationFacts,
   tryHandleFactRecall,
@@ -46,11 +47,15 @@ import {
   type Resolution,
   type DispatchPlan,
 } from './turn-pipeline.js';
-import { shadowScore, type ShadowScore } from './capability-kernel.js';
+import { shadowScore, asTurnHandler, type ShadowScore } from './capability-kernel.js';
 import { liveContextCapability } from './capabilities/live-context-capability.js';
 import { gitCapability, classifyGitQuery } from './capabilities/git-capability.js';
-import { execCapability } from './capabilities/exec-capability.js';
+import { execCapability, isExecQuery } from './capabilities/exec-capability.js';
 import { pageCapability } from './capabilities/page-capability.js';
+import { inferRunCommand } from './capabilities/infer-run-command.js';
+import { runCommandEvidence, type RunEvidence } from '../tools/run-evidence.js';
+import { readFile as fsReadFile } from 'node:fs/promises';
+import { resolve as pathResolve } from 'node:path';
 import { scoreWithHistory } from './capability-kernel.js';
 import { CapabilityOutcomeLedger } from '../learning/capability-ledger.js';
 import { judgeAnswers, type JudgeCandidate } from '../eval/answer-judge.js';
@@ -62,7 +67,7 @@ import type {
 } from '../consensus/types.js';
 import type { CouncilRoster } from '../consensus/topic-router.js';
 import { convene, conveneStreaming, toCouncilThinking, type ConveneResult } from '../consensus/council.js';
-import { gatherWebEvidence } from '../consensus/web-evidence.js';
+import { gatherWebEvidence, extractUrls } from '../consensus/web-evidence.js';
 import { buildCouncilReviewPacket } from '../consensus/review-packet.js';
 import {
   buildCouncilFeedbackBody,
@@ -72,6 +77,8 @@ import {
   buildVaiRedraftProcessLog,
   councilMembersFromNotes,
 } from './council-process-log.js';
+import { accumulateProgressStep, serializeProgressTrace, deserializeProgressTrace } from './progress-trace.js';
+import type { ChatProgressStep as ApiChatProgressStep } from '@vai/api-types/chat-ws';
 import { buildSearchProcessLog } from './search-process-log.js';
 import { extractCheckableClaim, assessClaimAgreement, applyCrossCheck } from '../consensus/cross-check.js';
 import { resolveIntent } from '../consensus/intent-resolver.js';
@@ -450,6 +457,35 @@ export function redraftResolvedConcern(
   const stillUnresolved = firstGaps.some((gap) => secondGaps.has(gap));
   // Resolved the named gap(s) AND didn't regress on score.
   return !stillUnresolved && councilScore(second) >= councilScore(first);
+}
+
+/**
+ * Routing-drift guard for pasted-URL turns: returns true when the prompt linked a page, the
+ * ORIGINAL draft engaged with that page (named its URL/owner/repo/domain), and the REDRAFT
+ * dropped every trace of it. That's the measured honojs/hono failure — a grounded repo
+ * assessment replaced by an off-topic "Refactoring approach" memo. When true, the loop keeps
+ * the grounded draft. Pure + token-based so it unit-tests without a model.
+ */
+export function redraftDroppedUrlSubject(prompt: string, originalDraft: string, redraft: string): boolean {
+  const urls = extractUrls(prompt);
+  if (urls.length === 0) return false;
+  // Build subject tokens from each URL: owner, repo, and bare host (sans TLD), lowercased.
+  const subjects = new Set<string>();
+  for (const url of urls) {
+    for (const seg of url.toLowerCase().replace(/^https?:\/\//, '').split(/[/.@?#=&]+/)) {
+      const tok = seg.trim();
+      if (tok.length >= 3 && !['com', 'org', 'net', 'www', 'github', 'io', 'dev', 'vercel', 'app', 'https', 'http'].includes(tok)) {
+        subjects.add(tok);
+      }
+    }
+  }
+  if (subjects.size === 0) return false;
+  const mentions = (text: string) => {
+    const lower = text.toLowerCase();
+    return [...subjects].some((s) => lower.includes(s));
+  };
+  // Only fire when the original was on-subject AND the redraft abandoned it entirely.
+  return mentions(originalDraft) && !mentions(redraft);
 }
 
 /**
@@ -852,6 +888,33 @@ export class ChatService {
     }
   }
 
+  /**
+   * The council roster to use for THIS turn's depth.
+   *
+   * VRAM-aware residency: on a single small GPU (e.g. 12GB, ~4.5GB free) each ~8GB
+   * local model cold-loads after evicting the previous one, so a full 3-model
+   * sequential council costs 60-90s of pure model-swapping and made balanced turns
+   * TIME OUT with empty answers. So:
+   *   - 'deep'      → full panel (the user opted into thoroughness; worth the swaps).
+   *   - 'balanced'  → a SINGLE member (prefer one already warm), so no eviction cycle:
+   *                   the model stays resident and the turn answers in seconds.
+   *   - 'quick'     → council is already skipped upstream (loop budget 0).
+   * Override the balanced cap with VAI_COUNCIL_BALANCED_MEMBERS (default 1).
+   */
+  private councilRosterForDepth(): CouncilRoster {
+    const roster = this.councilRoster!;
+    if (this.turnProcessDepth === 'deep') return roster;
+    const envCap = Number(process.env.VAI_COUNCIL_BALANCED_MEMBERS);
+    const cap = Number.isFinite(envCap) && envCap > 0 ? Math.floor(envCap) : 1;
+    if (roster.default.length <= cap) return roster;
+    // Prefer a member that is NOT a slow-thinking model (those are the heaviest to load)
+    // so the single balanced reviewer is the fastest resident option.
+    const ranked = [...roster.default].sort(
+      (a, b) => Number(a.slowThinking ?? false) - Number(b.slowThinking ?? false),
+    );
+    return { default: ranked.slice(0, cap) };
+  }
+
   /** Live-swap the council roster (driven by the council-config settings route). */
   setCouncilRoster(roster: CouncilRoster | undefined): void {
     this.councilRoster = roster;
@@ -1180,11 +1243,35 @@ export class ChatService {
       // Bound the WHOLE round by the loop's remaining wall-clock budget so slow cold
       // models can't hold the buffered answer hostage — the council yields the floor when
       // its time is up and consensus is built from whoever answered in time.
-      const stream = conveneStreaming(input, this.councilRoster!, { timeoutMs: councilTimeout, overallDeadlineMs });
+      const stream = conveneStreaming(input, this.councilRosterForDepth(), { timeoutMs: councilTimeout, overallDeadlineMs });
       let iter = await stream.next();
       while (!iter.done) {
         const progress = iter.value;
-        if (progress.pendingMember) {
+        if (progress.reasoningMember) {
+          // Live reasoning preview: the member is mid-review and its model is thinking out
+          // loud. Show it on the pending member row so the UI renders what THAT model is
+          // working through, instead of a bare "qwen is working".
+          const { reasoningMember, partialNotes, index, total } = progress;
+          yield {
+            stage,
+            label: total > 1
+              ? `Council member ${index + 1}/${total}: ${reasoningMember.name} thinking…`
+              : `${reasoningMember.name} thinking…`,
+            status: 'running',
+            councilMembers: [
+              ...councilMembersFromNotes(partialNotes),
+              {
+                name: reasoningMember.name,
+                memberId: reasoningMember.id,
+                verdict: 'needs-work' as const,
+                confidence: 0,
+                pending: true,
+                reasoningPreview: reasoningMember.preview,
+              },
+            ],
+            processLog: partialLogs.length ? [...partialLogs] : undefined,
+          };
+        } else if (progress.pendingMember) {
           const { pendingMember, partialNotes, index, total } = progress;
           yield {
             stage,
@@ -1196,6 +1283,7 @@ export class ChatService {
               ...councilMembersFromNotes(partialNotes),
               {
                 name: pendingMember.name,
+                memberId: pendingMember.id,
                 verdict: 'needs-work' as const,
                 confidence: 0,
                 pending: true,
@@ -1246,7 +1334,7 @@ export class ChatService {
       // a box with the VRAM headroom via VAI_COUNCIL_CONCURRENCY=N.
       const envConcurrency = Number(process.env.VAI_COUNCIL_CONCURRENCY);
       const concurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? envConcurrency : 1;
-      const result = await convene(input, this.councilRoster!, { timeoutMs: councilTimeout, concurrency });
+      const result = await convene(input, this.councilRosterForDepth(), { timeoutMs: councilTimeout, concurrency });
       if (!result.convened) return undefined;
       return await this.finalizeCouncilConvene(draft, result, isSelfImprovement);
     } catch (err) {
@@ -1425,7 +1513,6 @@ export class ChatService {
       }
     | undefined
   > {
-    if (!this.searchForEvidence) return undefined;
     // ACT on the council's recommendation, don't just log it. The council asks to search
     // either via its consensus recommendedAction OR when any member explicitly supplied a
     // searchQuery (which `reachConsensus` surfaces even when a polluting member — e.g. a
@@ -1439,6 +1526,21 @@ export class ChatService {
       return undefined;
     }
     if ((draft.sources?.length ?? 0) > 0 || draft.hasEvidence) return undefined;
+
+    // Pasted-URL path FIRST: when the user dropped an explicit link (a GitHub/Codeberg repo,
+    // a blog post, "look at https://…"), the council's "web-search" recommendation should make
+    // Vai READ that exact page, not search its URL string. `gatherWebEvidence` drives the
+    // proven Readability reader (`readUrl`) and degrades gracefully. This is the fix for the
+    // DEV-VEGGASTARE trace: every member correctly said "go read the repo", but the redraft
+    // only ever searched the bare URL (thin/empty) and produced "I can't access external
+    // sites". Critically this runs even when `searchForEvidence` is unset — reading a named
+    // page needs no search backend. Opt out with VAI_COUNCIL_READ_PASTED_URLS=0.
+    if (process.env.VAI_COUNCIL_READ_PASTED_URLS !== '0' && extractUrls(draft.prompt).length > 0) {
+      const directed = await this.readPastedUrlsForCouncil(draft);
+      if (directed) return directed;
+    }
+
+    if (!this.searchForEvidence) return undefined;
 
     const query = consensus.searchQuery.trim() || draft.prompt;
     try {
@@ -1478,6 +1580,63 @@ export class ChatService {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Read the explicit URLs the user pasted and hand the actual page text to the redraft as
+   * grounded evidence. This is the "council recommendation → real action" bridge for named
+   * pages: `gatherWebEvidence` drives the Readability reader (proven to fetch GitHub READMEs),
+   * so a "look at <repo>" turn answers from the repo's real description instead of refusing or
+   * hallucinating framework features. Best-effort and never throws — an unreadable SPA/404
+   * yields undefined and the caller falls through to the search-string path.
+   */
+  private async readPastedUrlsForCouncil(
+    draft: CouncilDraftInput,
+  ): Promise<
+    | { draft: CouncilDraftInput; systemHint: string; progress: CouncilLoopProgressStep }
+    | undefined
+  > {
+    const urls = extractUrls(draft.prompt);
+    if (urls.length === 0) return undefined;
+    let evidence;
+    try {
+      // skipAiOverview: we only need the read pages here; the search/Chrome bonus is the
+      // search-string path's job. This keeps the read fast and backend-independent.
+      evidence = await gatherWebEvidence(draft.prompt, { skipAiOverview: true });
+    } catch {
+      return undefined;
+    }
+    const read = evidence.sources.filter((source) => source.url && urls.includes(source.url));
+    const sources = read.length > 0 ? read : evidence.sources;
+    if (sources.length === 0) return undefined;
+
+    const systemHint = [
+      'The page(s) the user linked were fetched and read for this turn.',
+      'Answer from this real page content — describe what the project/page actually is and assess it on this evidence.',
+      'Do NOT say you cannot access external sites: the content below WAS retrieved for you.',
+      'If the content is thin or ambiguous, say what is and is not visible rather than inventing details.',
+      `User question: ${draft.prompt.trim()}`,
+      'Fetched page content:',
+      sources
+        .slice(0, 3)
+        .map((source, index) => {
+          const body = String(source.snippet ?? '').trim().slice(0, 2_000);
+          return `[${index + 1}] ${source.title ?? source.url}\nURL: ${source.url}\n${body}`;
+        })
+        .join('\n\n'),
+    ].join('\n\n');
+
+    return {
+      draft: { ...draft, sources: [...(draft.sources ?? []), ...sources], hasEvidence: true },
+      systemHint,
+      progress: {
+        stage: 'search',
+        label: `Council directed read: ${urls[0].slice(0, 64)}${urls[0].length > 64 ? '…' : ''}`,
+        detail: `${sources.length} page${sources.length === 1 ? '' : 's'} read`,
+        status: 'done',
+        processLog: buildSearchProcessLog({ prompt: draft.prompt, sources }),
+      },
+    };
   }
 
   /**
@@ -1608,6 +1767,21 @@ export class ChatService {
       yield {
         stage: stages.redraft,
         label: 'Vai kept the original draft',
+        detail: buildCouncilFeedbackDetail(feedback) || undefined,
+        status: 'done',
+        processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, draft.draftText),
+      };
+      return { council: first.thinking, finalText: draft.draftText, revised: false };
+    }
+    // URL on-topic retention guard: when the user pasted a link and the ORIGINAL draft
+    // engaged with it (a grounded repo/page answer), a redraft that drops the subject
+    // entirely is a routing-drift hijack — the measured honojs/hono failure where a grounded
+    // assessment got replaced by an off-topic "Refactoring approach" memo. Keep the grounded
+    // draft instead of shipping the drifted redraft. (The council stays advisory.)
+    if (redraftDroppedUrlSubject(draft.prompt, draft.draftText, cleaned)) {
+      yield {
+        stage: stages.redraft,
+        label: 'Vai kept the original draft (redraft drifted off the linked page)',
         detail: buildCouncilFeedbackDetail(feedback) || undefined,
         status: 'done',
         processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, draft.draftText),
@@ -1845,12 +2019,19 @@ export class ChatService {
   }
 
   getMessages(conversationId: string) {
-    return this.db
+    const rows = this.db
       .select()
       .from(messages)
       .where(eq(messages.conversationId, conversationId))
       .orderBy(messages.createdAt)
       .all();
+    // Rehydrate the persisted process trace into `progressSteps` so a reopened
+    // conversation's in-message ProcessTree expands exactly as it did live. Rows
+    // written before this column existed (or with no trace) simply omit it.
+    return rows.map((row) => {
+      const steps = deserializeProgressTrace(row.progressTrace);
+      return steps ? { ...row, progressSteps: steps } : row;
+    });
   }
 
   appendAssistantMessage(conversationId: string, content: string) {
@@ -1948,7 +2129,78 @@ export class ChatService {
     }).from(images).all();
   }
 
+  /**
+   * Public turn entry. Thin wrapper over {@link sendMessageInner} that taps the
+   * stream in ONE place to accumulate the progress trace (mirroring the client's
+   * merge) and, on the terminal `done`, persists a pruned snapshot onto the just-
+   * written assistant row. This is what lets the in-message ProcessTree re-expand
+   * after the app is closed and reopened — without it the trace is client-only and
+   * lost on reload. Pure pass-through of every chunk; no behavioural change to the
+   * turn itself.
+   */
   async *sendMessage(
+    conversationIdParam: string,
+    content: string,
+    image?: ImageInput,
+    systemPrompt?: string,
+    noLearn?: boolean,
+    promptRewriteOverrides?: ChatPromptRewriteOverrides,
+    autoCreateOptions?: {
+      fallbackModelId?: string;
+      fallbackMode?: ConversationMode;
+      imageMode?: boolean;
+      signal?: AbortSignal;
+      processDepth?: 'quick' | 'balanced' | 'deep';
+    },
+  ): AsyncGenerator<ChatChunk> {
+    // Accumulated server-side using the api-types wire shape (what the persisted
+    // blob and the client tree both speak); the adapter's readonly progress shape
+    // is structurally identical, so the cast at the boundary is sound.
+    let trace: ApiChatProgressStep[] = [];
+    let resolvedConversationId = conversationIdParam;
+    for await (const chunk of this.sendMessageInner(
+      conversationIdParam, content, image, systemPrompt, noLearn, promptRewriteOverrides, autoCreateOptions,
+    )) {
+      // Track the real conversation id (auto-create can swap it mid-turn).
+      if (chunk.type === 'conversation_resolved' && chunk.conversationId) {
+        resolvedConversationId = chunk.conversationId;
+      }
+      if (chunk.type === 'progress' && chunk.progress) {
+        trace = accumulateProgressStep(trace, chunk.progress as ApiChatProgressStep);
+      }
+      if (chunk.type === 'done') {
+        // Persist BEFORE yielding `done` so a client that closes immediately after
+        // still has the trace on disk. Best-effort: a persistence failure must never
+        // break the turn the user just received.
+        try {
+          const blob = serializeProgressTrace(trace);
+          if (blob) this.persistProgressTrace(resolvedConversationId, blob);
+        } catch (err) {
+          console.warn('[chat-service] progress trace persist failed:', err);
+        }
+      }
+      yield chunk;
+    }
+  }
+
+  /**
+   * Attach the pruned process trace to the most recent assistant row in the
+   * conversation (the row this turn just inserted). Scoped to assistant rows and
+   * ordered by creation so it cannot clobber an earlier turn.
+   */
+  private persistProgressTrace(conversationId: string, blob: string): void {
+    const latest = this.db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(and(eq(messages.conversationId, conversationId), eq(messages.role, 'assistant')))
+      .orderBy(desc(messages.createdAt))
+      .limit(1)
+      .get();
+    if (!latest) return;
+    this.db.update(messages).set({ progressTrace: blob }).where(eq(messages.id, latest.id)).run();
+  }
+
+  private async *sendMessageInner(
     conversationIdParam: string,
     content: string,
     image?: ImageInput,
@@ -2417,6 +2669,30 @@ export class ChatService {
         }).catch(() => undefined);
       }
 
+      // REAL-WORLD TOOL INVOCATION (the loop's chosen feature): when the turn asks to run/verify
+      // ("do the tests pass?", "does it typecheck?"), ACTUALLY run the project's allowlisted command
+      // and attach the result, so exec answers from a real exit code instead of "no command was run".
+      // Infer the command from the project's package.json; the runner is allowlist-gated + bounded, so
+      // this can never run arbitrary shell. Best-effort: any failure leaves run evidence undefined and
+      // exec falls back to its honest non-answer. Gated on exec phrasing so normal turns pay nothing.
+      let runEvidence: RunEvidence | undefined;
+      if (isExecQuery(understoodContent || content)) {
+        try {
+          const cwd = process.cwd();
+          let scripts: Record<string, string> | null = null;
+          try {
+            const pkgRaw = await fsReadFile(pathResolve(cwd, 'package.json'), 'utf8');
+            const pkg = JSON.parse(pkgRaw);
+            scripts = (pkg && typeof pkg.scripts === 'object') ? pkg.scripts : {};
+          } catch { scripts = null; }
+          const inferred = inferRunCommand(understoodContent || content, { scripts, hasPackageJson: scripts !== null });
+          if (inferred) {
+            runEvidence = await runCommandEvidence(inferred.command, inferred.args, { cwd, timeoutMs: 120_000 }).catch(() => undefined);
+            console.log(`[tool-invoke] ran ${inferred.command} ${inferred.args.join(' ')} → ${runEvidence ? `exit ${runEvidence.exitCode} (${runEvidence.passed ? 'passed' : 'failed'})` : 'no evidence'}`);
+          }
+        } catch { /* never block the turn on tool invocation */ }
+      }
+
       const turnContext: TurnContext = {
         content,
         understood: understoodContent,
@@ -2424,14 +2700,25 @@ export class ChatService {
         classification: turnClassification,
         intent: questionIntent,
         guidance: turnGuidance,
-        evidence: gitEvidence ? { git: gitEvidence } : undefined,
+        evidence: (gitEvidence || runEvidence)
+          ? { ...(gitEvidence ? { git: gitEvidence } : {}), ...(runEvidence ? { run: runEvidence } : {}) }
+          : undefined,
       };
       // Append the git capability (closes over the just-built context) only when the
       // turn is git-shaped — keeps the handler list unchanged for every other turn.
-      const gitHandlers = gitShape.any
+      let liveHandlers = gitShape.any
         ? [...handlers, makeGitHandler(turnContext)]
         : handlers;
-      const outcome = dispatchTurn(turnContext, gitHandlers, { confidenceFloor: 0.5 });
+      // Promote exec from shadow to a LIVE decider ONLY when we actually ran a command this turn
+      // (runEvidence present). This is the safe promotion: exec can now answer a "do the tests pass?"
+      // turn from the real exit code, but it never wins a turn where no command ran (its verify gate +
+      // this guard both require real evidence). Real-world tool invocation, grounded.
+      if (runEvidence) {
+        // exec produces a base Resolution; the dispatch reads only common fields, so it's safe to
+        // place in the ServiceResolution handler list (ServiceResolution extends Resolution).
+        liveHandlers = [...liveHandlers, asTurnHandler(execCapability) as unknown as TurnHandler<ServiceResolution>];
+      }
+      const outcome = dispatchTurn(turnContext, liveHandlers, { confidenceFloor: 0.5 });
 
       // Shadow baseline (unsteered) for reference when guidance was present.
       // Persisted alongside so we have direct pre/post for analysis.
@@ -2913,8 +3200,29 @@ export class ChatService {
       let bufferedUsage: TokenUsage = { promptTokens: 0, completionTokens: 0 };
       let bufferedDurationMs: number | undefined;
       let bufferedModelId = primaryModelId;
+      let bufferedStrategy: string | undefined;
       let latestConfidence: number | undefined;
       let bufferedSawDone = false;
+      // Live WORK-PRODUCT stream (not hidden thought): surface Vai's draft answer AS IT BUFFERS
+      // so the user watches the answer being written (the "Drafting an answer…" caption was
+      // content-blind). This NEVER commits to the final message body — the UI shows it in a
+      // discardable, clearly-labeled "Draft (in review)" block, and the council can still
+      // redraft (emits a 'reset' phase). Carries a lifecycle envelope (start/delta/reset/
+      // committed) + monotonic seq so a future PresenceBlock timeline needs no migration.
+      // Coalesced deterministically (time AND size) so it neither lags nor jitters.
+      const STREAM_DRAFTS = (process.env.VAI_STREAM_DRAFTS ?? '1') !== '0'; // kill switch, default on
+      const draftTurnId = ulid();
+      let lastDraftEmit = 0;
+      let lastDraftLen = 0;
+      let draftSeq = 0;
+      let draftStarted = false;
+      const DRAFT_THROTTLE_MS = 120;
+      const DRAFT_MIN_CHARS = 32;
+      const draftChunk = (phase: 'start' | 'delta' | 'reset' | 'committed', text: string): ChatChunk => ({
+        type: 'draft_delta',
+        draftText: text,
+        draft: { phase, turnId: draftTurnId, seq: draftSeq++, source: 'vai-draft', isDiscardable: true },
+      } as ChatChunk);
 
       if (!primaryFlip) {
       yield {
@@ -2943,15 +3251,36 @@ export class ChatService {
         bufferedChunks.push(chunk);
         if (chunk.type === 'text_delta' && chunk.textDelta) {
           bufferedText += chunk.textDelta;
+          if (STREAM_DRAFTS) {
+            const now = Date.now();
+            const grew = bufferedText.length - lastDraftLen;
+            // Coalesce by time AND size so it neither lags nor jitters: flush after the throttle
+            // window once meaningful new text exists, or immediately once a big burst arrives.
+            if ((now - lastDraftEmit >= DRAFT_THROTTLE_MS && grew > 0) || grew >= DRAFT_MIN_CHARS) {
+              lastDraftEmit = now;
+              lastDraftLen = bufferedText.length;
+              if (!draftStarted) { draftStarted = true; yield draftChunk('start', bufferedText); }
+              else yield draftChunk('delta', bufferedText);
+            }
+          }
         }
         if (chunk.type === 'done') {
           bufferedSawDone = true;
           if (typeof chunk.thinking?.confidence === 'number') {
             latestConfidence = chunk.thinking.confidence;
           }
+          if (typeof chunk.thinking?.strategy === 'string') {
+            bufferedStrategy = chunk.thinking.strategy;
+          }
           if (chunk.usage) bufferedUsage = chunk.usage;
           if (chunk.durationMs !== undefined) bufferedDurationMs = chunk.durationMs;
         }
+      }
+      // Final flush: the draft block shows the COMPLETE buffered draft (the throttle may have
+      // skipped the last tokens). 'committed' = this is the whole draft that now goes to the
+      // council; if the council later redrafts, the UI gets a 'reset' from that path.
+      if (STREAM_DRAFTS && draftStarted && bufferedText.trim()) {
+        yield draftChunk('committed', bufferedText);
       }
       if (!bufferedSawDone) {
         bufferedDurationMs = bufferedDurationMs ?? (Date.now() - streamStartedAt);
@@ -3099,11 +3428,46 @@ export class ChatService {
         }
         loop = councilStep.value ?? loop;
         councilThinking = loop.council;
-        if (loop.revised) {
+        // A `url-request` draft already READ the real repo/page (GitHub API + README) and
+        // grounded its answer in it. The council's redraft re-runs the engine on the nudge
+        // text, which the keyword router then hijacks into a generic memo/decline — so the
+        // redraft REPLACES a grounded repo answer with worse, ungrounded prose (the measured
+        // zod/hono interview regressions: "what stack does zod use?" → a refactoring memo).
+        // Keep the council ADVISORY here: show its notes, but don't let it overwrite an
+        // answer that was already grounded in the fetched repo. Opt out with
+        // VAI_COUNCIL_REPLACE_URL_REQUEST=1.
+        const draftIsGroundedRepoRead = bufferedStrategy === 'url-request'
+          && process.env.VAI_COUNCIL_REPLACE_URL_REQUEST !== '1';
+        if (loop.revised && !draftIsGroundedRepoRead) {
           bufferedText = loop.finalText;
           reviewReplacedPrimary = true;
+          // The council rewrote the draft — clear the stale "Draft (in review)" block and show
+          // the revised text so the UI can explain "draft revised by council".
+          if (STREAM_DRAFTS && draftStarted) yield draftChunk('reset', bufferedText);
         }
         councilEscalateToGenerative = councilThinking?.outcome === 'escalate';
+        // Deterministic council-verdict info block: a clean, scannable HTML summary built from
+        // structured consensus data (rendered in a sandboxed iframe). Vai/council "showing the
+        // verdict" as a styled block, not a buried text line.
+        if (councilThinking) {
+          const tone = councilThinking.outcome === 'ship' ? 'good'
+            : councilThinking.outcome === 'escalate' ? 'bad' : 'warn';
+          yield {
+            type: 'info_block',
+            infoBlock: {
+              id: 'council-verdict',
+              title: 'Council verdict',
+              html: renderInfoBlockHtml({
+                kind: 'key-value',
+                rows: [
+                  { label: 'outcome', value: councilThinking.outcome, tone },
+                  { label: 'agreement', value: `${Math.round((councilThinking.agreement ?? 0) * 100)}%` },
+                  ...(councilThinking.realIntent ? [{ label: 'read as', value: councilThinking.realIntent }] : []),
+                ],
+              }),
+            },
+          } as ChatChunk;
+        }
       }
 
       const confidenceFallbackDecision = decideVaiFallback({

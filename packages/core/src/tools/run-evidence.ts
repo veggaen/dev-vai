@@ -105,12 +105,32 @@ const DEFAULT_MAX_OUTPUT = 256 * 1024;
 export const SAFE_COMMAND_BASENAMES = new Set([
   'vitest', 'jest', 'mocha', 'ava', 'node', 'tsc', 'tsd', 'eslint', 'biome', 'prettier',
   'tap', 'playwright', 'cargo', 'go', 'pytest',
+  // Stack-relevant read-only verification additions (council self-verification):
+  //   rustc --version / --explain  → confirm the Rust toolchain a claim assumes exists.
+  // A bare basename is allowed with any args ONLY because each of these is read-only by nature
+  // OR its mutating subcommands are caught by FORBIDDEN_TOKENS (e.g. `cargo install`). Commands
+  // whose DEFAULT behavior can mutate (git, tauri) are NOT bare basenames — they are
+  // subcommand-gated below so only their read-only verbs pass.
+  'rustc',
 ]);
 
 /** Package managers whose verification subcommands we permit. */
 const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'npx']);
 /** Subcommands of a package manager that are safe verification actions. */
 const PM_SAFE_SUBCOMMANDS = new Set(['test', 'run', 'exec', 'lint', 'typecheck', 'build', 'tsc', 'vitest', 'jest']);
+
+/**
+ * Subcommand-gated tools: the BASENAME is safe only with an explicitly read-only first verb.
+ * This lets a council member prove a claim about repo/build state (`git status`, `cargo check`,
+ * `tauri info`) WITHOUT opening the door to `git push`, `cargo publish`, or `tauri build`.
+ */
+const SUBCOMMAND_GATED: Record<string, ReadonlySet<string>> = {
+  // Read-only git verbs only — never push/commit/reset/checkout/clean/fetch/pull.
+  git: new Set(['status', 'diff', 'log', 'show', 'rev-parse', 'branch', 'remote', 'ls-files', 'blame']),
+  // `tauri info` reports the toolchain/config; everything else (build/dev/bundle) is excluded.
+  tauri: new Set(['info']),
+};
+
 /** Argument tokens that are never allowed (mutating / publishing / network installs). */
 const FORBIDDEN_TOKENS = [/^publish$/i, /^deploy$/i, /^--registry/i, /^login$/i, /^add$/i, /^install$/i, /^i$/i, /^rm$/i, /^remove$/i, /^uninstall$/i, /^link$/i, /^unlink$/i, /^dlx$/i];
 
@@ -130,6 +150,13 @@ export function isAllowlistedCommand(command: string, args: readonly string[]): 
 
   // Forbidden tokens anywhere → never allowed (e.g. `pnpm test && publish` style abuse).
   if (args.some((a) => FORBIDDEN_TOKENS.some((re) => re.test(a)))) return false;
+
+  // Subcommand-gated tools (git/tauri): the first non-flag verb must be on the read-only list.
+  const gated = SUBCOMMAND_GATED[name];
+  if (gated) {
+    const verb = args.find((a) => !a.startsWith('-'));
+    return verb ? gated.has(verb.toLowerCase()) : false;
+  }
 
   if (SAFE_COMMAND_BASENAMES.has(name)) return true;
 

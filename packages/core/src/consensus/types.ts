@@ -85,6 +85,19 @@ export interface CouncilInput {
   readonly retrievedSnippets?: readonly { readonly title?: string; readonly url?: string; readonly snippet?: string }[];
   /** Trimmed chat history relevant to this turn. */
   readonly relevantHistory?: readonly { readonly role: 'user' | 'assistant' | 'system' | 'tool'; readonly content: string }[];
+  /**
+   * Peer reviews from a PRIOR deliberation round (multi-turn deliberation, Milestone 1
+   * slice 3). Present ONLY on round 2+: each member sees how the other roles read the draft
+   * and may revise its own note. Absent on round 1 and on the default single-round path, so
+   * this is additive and changes nothing unless deliberation is explicitly run. Fact-
+   * quarantine still holds — peers share intent/method/verdict, never user-facing facts.
+   */
+  readonly peerNotes?: readonly {
+    readonly role: string;
+    readonly verdict: CouncilVerdict;
+    readonly intent: string;
+    readonly concern: string;
+  }[];
 }
 
 /** One council member's structured note. Advisory only — facts are quarantined. */
@@ -192,6 +205,32 @@ export interface CouncilConsensus {
   readonly factsQuarantined: true;
   /** Set when a fact cross-check ran for this turn (confirmation / contradiction). */
   readonly crossCheck?: CouncilCrossCheck;
+  /**
+   * Surfaced minority objection (Council Excellence + transparency): present when one or
+   * more members returned `verdict: 'bad'` with non-trivial weight, EVEN IF the modal
+   * verdict shipped. The outcome logic is intentionally unchanged — this only makes a
+   * serious dissent auditable so it's never silently buried in `notes[]`. Absent when no
+   * meaningful dissent exists.
+   */
+  readonly dissent?: CouncilDissent;
+}
+
+/** A surfaced minority objection within the council — auditable, does not (yet) alter outcome. */
+export interface CouncilDissent {
+  /** True when a non-trivial-weight minority returned `verdict: 'bad'`. */
+  readonly hasDissent: true;
+  /** Fraction of total panel weight that dissented (0..1). */
+  readonly dissentStrength: number;
+  /** The dissenting members and what they objected with. */
+  readonly dissentingMembers: readonly {
+    readonly memberId: string;
+    readonly memberName: string;
+    /** This member's share of total panel weight (0..1). */
+    readonly weight: number;
+    readonly confidence: number;
+    /** The member's flagged concerns (may be empty if it gave none). */
+    readonly concerns: readonly string[];
+  }[];
 }
 
 /** A council member. Implementations live in `member.ts` or are injected in tests. */
@@ -200,7 +239,17 @@ export interface CouncilMember {
   readonly displayName: string;
   /** The niche this member is trusted for. */
   readonly topic: CouncilTopic;
-  readonly review: (input: CouncilInput) => Promise<CouncilMemberNote | null>;
+  /**
+   * Review a draft. The optional `opts.onReasoningDelta(textSoFar)` fires as the model
+   * streams its own reasoning ("thinking out loud") so the UI can show live presence per
+   * member instead of a bare "working…". It's advisory/observability only — the structured
+   * note is still the source of truth and the fact-quarantine holds. A member that doesn't
+   * stream simply never calls it. Pure stubs in tests can ignore the arg entirely.
+   */
+  readonly review: (
+    input: CouncilInput,
+    opts?: { readonly onReasoningDelta?: (textSoFar: string) => void },
+  ) => Promise<CouncilMemberNote | null>;
   /**
    * True for a reasoning model (DeepSeek-R1 et al.) that emits a long chain-of-thought
    * before answering. The council's OUTER per-member timeout (`runOneMember`) extends
@@ -242,4 +291,23 @@ export interface CouncilThinking {
   }[];
   /** Fact cross-check outcome, when one ran — drives the "web-confirmed" badge + human review. */
   readonly crossCheck?: CouncilCrossCheck;
+  /**
+   * Surfaced minority objection for the UI (transparency): present when a non-trivial-weight
+   * minority pushed back even though the modal verdict carried. Projected from
+   * {@link CouncilConsensus.dissent}; audit-only, does not change the outcome.
+   */
+  readonly dissent?: CouncilDissent;
+  /**
+   * Verification spine (Pillar B): consensus-level provenance of the context the panel grounded
+   * on (used/considered/unused/unavailable/disputed) + an advisory groundedness verdict. Audit
+   * surface for the UI; does NOT gate ship/refuse yet. Structural type (mirrors
+   * context-states.ProvenanceSpine) to avoid an import cycle through this types module.
+   */
+  readonly provenance?: {
+    readonly total: number;
+    readonly groundedness: number;
+    readonly hasDisputed: boolean;
+    readonly verdict: 'grounded' | 'thin' | 'contested' | 'none';
+    readonly counts: { readonly used: number; readonly unused: number; readonly considered: number; readonly unavailable: number; readonly disputed: number };
+  };
 }
