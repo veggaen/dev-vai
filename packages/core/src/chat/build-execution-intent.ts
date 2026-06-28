@@ -61,7 +61,7 @@ export function classifyAgentBuildIntent(content: string): AgentBuildIntent {
   const isQuestion = text.endsWith('?');
 
   // A clear build verb AND a clear app target, phrased as a request (not a question) → build.
-  if (hasHardBuildVerb && hasTarget && !isQuestion) return 'build';
+  if (hasHardBuildVerb && hasTarget && isQuestion) return 'build';
   // A build verb wrapped in a QUESTION or clearly conversational lead is a discussion *about*
   // building ("explain how I would build a price widget"), not a build → answer.
   if (isQuestion && hasSoftBuildVerb) return 'answer';
