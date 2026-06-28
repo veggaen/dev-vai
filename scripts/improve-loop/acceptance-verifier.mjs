@@ -102,13 +102,27 @@ export async function verifyAcceptance({ rows = [], klass = '', runOne, grade, a
  * Convenience: pull the class's currently-failing rows from the corpus, then verify them.
  * Heavy (runs the model) → caller must own the serial-GPU slot. Injectable for tests.
  */
-export async function verifyClassAcceptance(db, klass, { runOne, grade, acceptRate = ACCEPT_RATE, improveRate = IMPROVE_RATE, onResult, selectRows = failingRowsForClass, selectPassing = passingRowsForClass, regressionSample = 4 } = {}) {
+export async function verifyClassAcceptance(db, klass, { runOne, grade, acceptRate = ACCEPT_RATE, improveRate = IMPROVE_RATE, onResult, selectRows = failingRowsForClass, selectPassing = passingRowsForClass, regressionSample = 4, siblingClasses = [] } = {}) {
   const failing = selectRows(db, klass) ?? [];
   // Add a small REGRESSION sample of known-passing prompts (marked regression:true) so a fix that
   // recovers failures but BREAKS a pass is caught and rejected — the safety that makes "keep net
   // improvements" sound. Re-running a few passes is cheap relative to the gain.
   const passing = (selectPassing(db, klass, regressionSample) ?? []).map((r) => ({ ...r, regression: true }));
-  const rows = [...failing, ...passing];
+  // CROSS-CLASS REGRESSION GUARD: a shared source file (e.g. build-execution-intent.ts is edited by
+  // 3 classes) means a fix for THIS class can break a SIBLING class's behaviour — which the single-
+  // class guard above never re-runs. Pull a passing sample from each sibling class and mark it
+  // regression:true, so breaking any of them rejects the fix. Deduped by prompt; bounded + cheap.
+  const seen = new Set([...failing, ...passing].map((r) => r.prompt));
+  const siblingPassing = [];
+  for (const sib of siblingClasses) {
+    if (!sib || sib === klass) continue;
+    for (const r of selectPassing(db, sib, regressionSample) ?? []) {
+      if (seen.has(r.prompt)) continue;
+      seen.add(r.prompt);
+      siblingPassing.push({ ...r, regression: true });
+    }
+  }
+  const rows = [...failing, ...passing, ...siblingPassing];
   return verifyAcceptance({ rows, klass, runOne, grade, acceptRate, improveRate, onResult });
 }
 

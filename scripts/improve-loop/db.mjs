@@ -768,6 +768,22 @@ export function failingRowsForClass(db, klass) {
   }
 }
 
+/** Other classes that have historically produced VERIFIED consensus edits to the same file as
+ *  `klass` — i.e. classes whose behaviour shares this source file. A fix for one of them can
+ *  regress the others (proven: 3 classes co-edit build-execution-intent.ts). The cross-class
+ *  acceptance guard re-runs a regression sample of each of these after a same-file fix. Excludes
+ *  `klass` itself. Cheap, read-only, never throws. */
+export function classesForFile(db, file, excludeClass = '') {
+  if (!file) return [];
+  try {
+    return db.prepare(
+      `SELECT DISTINCT class FROM consensus WHERE file = ? AND verified = 1 AND class IS NOT NULL AND class <> ?`,
+    ).all(file, excludeClass).map((r) => r.class).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /** Most-recently-PASSING prompts for a class — the REGRESSION sample. Acceptance re-runs a few of
  *  these after a fix; if any now FAILS, the fix broke working behaviour and is rejected. This is
  *  what makes "keep net improvements" safe: we keep fixes that recover failures WITHOUT breaking

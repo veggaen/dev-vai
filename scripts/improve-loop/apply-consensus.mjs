@@ -14,7 +14,7 @@
  *   node scripts/improve-loop/apply-consensus.mjs --dry-run       # classify + report, never write/commit
  *   node scripts/improve-loop/apply-consensus.mjs --db <path> --tsconfig packages/core/tsconfig.json
  */
-import { openDb, isFixBanned, strikeFix, recordKnowledge } from './db.mjs';
+import { openDb, isFixBanned, strikeFix, recordKnowledge, classesForFile } from './db.mjs';
 import { applyVerifiedFix } from './apply-fix.mjs';
 import { realApplyDeps, currentBranch, AUTO_IMPROVE_BRANCH, revertCommit } from './apply-runners.mjs';
 import { classifyRisk } from './risk-tier.mjs';
@@ -110,10 +110,13 @@ for (const p of pending) {
         const { gradeInterpretation } = await import('./brain.mjs');
         const runOne = async (prompt) => { await waitForVramHeadroom(7 * 1024 ** 3); return runThroughVai(BASE_URL, prompt, { timeoutMs: 220_000 }); };
         const grade = (k, expected, prompt, vai) => gradeInterpretation(k, expected, prompt, vai);
-        console.log(`   ⏳ acceptance: re-running ${p.class} failing prompts to confirm recovery…`);
+        // Sibling classes that share this file → their passing prompts are added as a cross-class
+        // regression guard, so a fix for p.class that breaks a sibling's behaviour is reverted.
+        const siblingClasses = classesForFile(db, p.file, p.class);
+        console.log(`   ⏳ acceptance: re-running ${p.class} failing prompts${siblingClasses.length ? ` + ${siblingClasses.length} sibling-class regression sample(s) [${siblingClasses.join(', ')}]` : ''} to confirm recovery…`);
         const rep = await verifyClassAcceptance(db, p.class, {
-          runOne, grade,
-          onResult: (x) => process.stdout.write(`      ${x.passed ? '✓' : '✗'} "${String(x.prompt).slice(0, 60)}"\n`),
+          runOne, grade, siblingClasses,
+          onResult: (x) => process.stdout.write(`      ${x.passed ? '✓' : '✗'}${x.regression ? ' (regression-check)' : ''} "${String(x.prompt).slice(0, 60)}"\n`),
         });
         acceptOk = rep.accepted || rep.verdict === 'no-targets'; // nothing to disprove ⇒ keep (tsc-green)
         acceptDetail = rep.headline;

@@ -97,6 +97,37 @@ test('verifyClassAcceptance: pulls rows via injected selectRows, then verifies',
   assert.equal(rep.total, 2);
 });
 
+test('verifyClassAcceptance: a SIBLING class regression rejects an otherwise-good fix', async () => {
+  // p.class recovers its own failures, but a sibling class (sharing the edited file) has a prompt
+  // that was passing and now fails → must be rejected (cross-class regression guard).
+  const selectRows = (_db, klass) => (klass === 'routing/fresh-data' ? [{ prompt: 'f1', expected_intent: 'E' }] : []);
+  const selectPassing = (_db, klass) =>
+    klass === 'routing/build-verb-poison' ? [{ prompt: 'sib-pass', expected_intent: 'E' }] : [];
+  const runOne = async (p) => ({ p });
+  // own failing prompt recovers (passed), but the sibling's known-passing prompt now FAILS.
+  const grade = async (_k, _e, prompt) => ({ passed: prompt !== 'sib-pass' });
+  const rep = await verifyClassAcceptance(null, 'routing/fresh-data', {
+    runOne, grade, selectRows, selectPassing,
+    siblingClasses: ['routing/build-verb-poison'],
+  });
+  assert.equal(rep.verdict, 'rejected', 'a broken sibling class must reject the fix');
+  assert.equal(rep.regressed, 1);
+});
+
+test('verifyClassAcceptance: siblings passing keeps an accepted verdict', async () => {
+  const selectRows = (_db, klass) => (klass === 'routing/fresh-data' ? [{ prompt: 'f1', expected_intent: 'E' }] : []);
+  const selectPassing = (_db, klass) =>
+    klass === 'routing/build-verb-poison' ? [{ prompt: 'sib-pass', expected_intent: 'E' }] : [];
+  const runOne = async (p) => ({ p });
+  const grade = async () => ({ passed: true }); // everything passes
+  const rep = await verifyClassAcceptance(null, 'routing/fresh-data', {
+    runOne, grade, selectRows, selectPassing,
+    siblingClasses: ['routing/build-verb-poison'],
+  });
+  assert.equal(rep.verdict, 'accepted');
+  assert.equal(rep.regressed, 0);
+});
+
 test('formatAcceptance: renders headline + still-failing prompts; null-safe', () => {
   const rep = summarizeAcceptance([{ passed: false, prompt: 'why is x broken' }, { passed: true }], { klass: 'c' });
   const out = formatAcceptance(rep);
