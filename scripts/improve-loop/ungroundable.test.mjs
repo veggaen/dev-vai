@@ -96,3 +96,18 @@ test('reopenClass: a live PASS re-opens a stale no-file class; a later re-confir
   recordKnowledge(db, { scope: 'propose:no-file', claim, kind: 'guard', confirm: true });
   assert.equal(ungroundableClasses(db).has('routing/comparison'), true, 're-confirm re-excludes');
 });
+
+test('BANNED-OUT class (≥4 skipped-quarantined, 0 committed) is excluded; reverted-red is NOT', () => {
+  const db = db0();
+  // consensus is created lazily by apply-consensus in prod; create it for the test.
+  db.exec("CREATE TABLE IF NOT EXISTS consensus (id INTEGER PRIMARY KEY AUTOINCREMENT, class TEXT, file TEXT, find TEXT, \"replace\" TEXT, verified INTEGER, applied TEXT, created_at TEXT)");
+  const ins = (cls, applied, n) => { for (let i=0;i<n;i++) db.prepare("INSERT INTO consensus (class,file,find,replace,verified,applied,created_at) VALUES (?,?,?,?,1,?,?)").run(cls,'f.ts','a','b',applied,new Date().toISOString()); };
+  ins('answer/curated-trap', 'skipped-quarantined', 5);   // banned-out, never landed → exclude
+  ins('routing/fresh-data', 'reverted-red', 5);           // red reverts only → still targetable
+  ins('answer/freshness', 'skipped-quarantined', 5);      // banned…
+  ins('answer/freshness', 'committed', 1);                // …but landed once → NOT excluded
+  const set = ungroundableClasses(db);
+  assert.equal(set.has('answer/curated-trap'), true, 'banned-out, never landed ⇒ excluded');
+  assert.equal(set.has('routing/fresh-data'), false, 'reverted-red is legit retry work ⇒ still targetable');
+  assert.equal(set.has('answer/freshness'), false, 'a class that ever landed a fix ⇒ not banned-out');
+});

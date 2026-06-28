@@ -960,6 +960,24 @@ export function ungroundableClasses(db) {
       if (isTargetExhausted(db, filePart)) set.add(f.class);
     }
   } catch { /* no fixes table yet */ }
+  // (d) BANNED-OUT CLASS: a class whose proposals keep getting BANNED (skipped-quarantined — the
+  // SAME fix failed verify ≥2× and was quarantined) is one the models can only generate dead patches
+  // for; re-targeting it burns the council every cycle for nothing (measured: answer/curated-trap had
+  // 28 skipped-quarantined, 0 committed). Narrow on purpose: ONLY 'skipped-quarantined' counts (not
+  // reverted-red — a red revert may just need a better proposal, which is legitimate work). Excludes
+  // only when banned attempts dominate AND nothing has ever landed for the class. Recoverable: a
+  // committed fix drops it back in, and reopenClass clears it on a live PASS.
+  try {
+    const rows = db.prepare(
+      `SELECT class,
+         SUM(CASE WHEN applied='skipped-quarantined' THEN 1 ELSE 0 END) banned,
+         SUM(CASE WHEN applied='committed' THEN 1 ELSE 0 END) committed
+       FROM consensus WHERE applied IS NOT NULL AND applied <> '' GROUP BY class`,
+    ).all();
+    for (const r of rows) {
+      if (Number(r.committed) === 0 && Number(r.banned) >= 4) set.add(r.class);
+    }
+  } catch { /* no consensus table yet */ }
   return set;
 }
 
