@@ -107,3 +107,11 @@ vai.db-wal
 # improve-loop generated corpus DB
 scripts/improve-loop/.corpus.sqlite
 scripts/improve-loop/*.sqlite
+scripts/improve-loop/*.sqlite-shm
+scripts/improve-loop/*.sqlite-wal
+
+# improve-loop runtime lock (single-instance supervisor — process-local, never committed)
+scripts/improve-loop/.supervisor.lock
+
+# runtime-learned knowledge — the live app rewrites this every session; generated data, not source
+packages/runtime/vai-knowledge.json

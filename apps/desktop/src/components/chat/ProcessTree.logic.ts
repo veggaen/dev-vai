@@ -9,6 +9,7 @@ import {
   humanizeAdvisorState,
   cleanModelName,
 } from './process-humanize.js';
+import { memberIdentity } from './member-identity.js';
 
 /**
  * Tree model for ProcessTree. The backend streams a FLAT list of progress steps
@@ -57,6 +58,106 @@ export function shouldAutoExpand(params: {
   if (live && status === 'running' && expandable) return true; // stream the active step open
   if (status === 'done') return false; // a finished step folds away
   return null; // no change
+}
+
+/**
+ * Minimum time (ms) an auto-opened step stays visible before it is allowed to
+ * collapse — even if the underlying work finished in a few ms.
+ *
+ * The complaint this encodes: on fast/cached/deterministic turns the backend
+ * bursts every step in one tick, each step flips running→done instantly, and the
+ * old `shouldAutoExpand` collapsed each one the same frame it opened — so the user
+ * saw ~16 rows flash open and vanish, learning nothing. A human needs the detail to
+ * dwell. This floor is decoupled from how fast the AI actually was; it does NOT
+ * delay the answer, only how long each finished step lingers before folding.
+ */
+export const MIN_STEP_DWELL_MS = 1800;
+
+/**
+ * Decide a freshly-completed step's open state under the human-paced dwell rule.
+ *
+ * Returns:
+ *  - `true`  → keep it open (still inside its dwell window) and re-check after `recheckInMs`
+ *  - `false` → dwell satisfied; collapse now
+ *  - `null`  → not applicable (user toggled, not live, never opened, or still running)
+ *
+ * Pure and clock-injected so it unit-tests without timers or a DOM.
+ */
+export function resolveDwellCollapse(params: {
+  live: boolean;
+  status: ProcessNode['status'];
+  openedAt: number | null;
+  now: number;
+  userToggled?: boolean;
+  minDwellMs?: number;
+}): { open: boolean; recheckInMs: number } | null {
+  const { live, status, openedAt, now, userToggled = false, minDwellMs = MIN_STEP_DWELL_MS } = params;
+  if (!live || userToggled) return null;       // settled view / user decided
+  if (status !== 'done') return null;          // only completed steps collapse
+  if (openedAt === null) return null;          // never auto-opened — nothing to hold
+  const elapsed = now - openedAt;
+  if (elapsed >= minDwellMs) return { open: false, recheckInMs: 0 }; // dwell met → fold
+  return { open: true, recheckInMs: minDwellMs - elapsed };          // hold a bit longer
+}
+
+/**
+ * Per-step read window (ms) in a staggered reveal — how long each step holds open before the
+ * next one's window starts. Kept >= MIN_STEP_DWELL_MS so a human can actually read the row.
+ */
+export const STAGGER_STEP_MS = 700;
+/** Cap total stagger so a long burst doesn't make the user wait forever to see it settle. */
+export const STAGGER_MAX_TOTAL_MS = 6_000;
+
+export interface RevealWindow {
+  /** Index of the step in render order. */
+  readonly index: number;
+  /** When (ms from reveal start) this step opens. */
+  readonly openAt: number;
+  /** When (ms from reveal start) this step folds; the next step opens at/after this. */
+  readonly closeAt: number;
+}
+
+/**
+ * Plan a STAGGERED reveal for a burst of steps that all completed in roughly the same tick.
+ *
+ * The complaint this encodes (V3gga): on a fast/cached/deterministic turn the backend bursts
+ * every step at once; each step's independent dwell window overlaps the others, so the user
+ * sees ~16 rows flash open and vanish together. Instead we play the timeline FORWARD — each
+ * step opens, holds its read window, folds, and only THEN does the next step open. The answer
+ * text is never delayed; this governs only the visual fold pacing of the process trace.
+ *
+ * Pure: given step count + a per-step window it returns the open/close offsets. The total is
+ * clamped (STAGGER_MAX_TOTAL_MS) by compressing the per-step window for very long bursts so a
+ * 30-step turn still settles in a few seconds rather than 21s. Clock-injected by the caller.
+ */
+export function planStaggeredReveal(
+  stepCount: number,
+  opts: { stepMs?: number; maxTotalMs?: number } = {},
+): RevealWindow[] {
+  if (stepCount <= 0) return [];
+  const maxTotal = opts.maxTotalMs ?? STAGGER_MAX_TOTAL_MS;
+  const desired = opts.stepMs ?? STAGGER_STEP_MS;
+  // Compress per-step window if the burst is long enough to blow the total budget.
+  const stepMs = Math.max(120, Math.min(desired, Math.floor(maxTotal / stepCount)));
+  const windows: RevealWindow[] = [];
+  for (let index = 0; index < stepCount; index++) {
+    const openAt = index * stepMs;
+    windows.push({ index, openAt, closeAt: openAt + stepMs });
+  }
+  return windows;
+}
+
+/**
+ * Given a staggered plan and elapsed time since reveal start, which step index is currently
+ * "showing" (open). Returns the last step once the whole plan has played. Pure — drives the
+ * component's "open exactly the step the timeline is currently on" without per-step timers.
+ */
+export function activeRevealIndex(windows: readonly RevealWindow[], elapsedMs: number): number {
+  if (windows.length === 0) return -1;
+  for (const w of windows) {
+    if (elapsedMs >= w.openAt && elapsedMs < w.closeAt) return w.index;
+  }
+  return elapsedMs < windows[0].openAt ? windows[0].index : windows[windows.length - 1].index;
 }
 
 function toneForStage(stage: string): ProcessTone {
@@ -301,23 +402,40 @@ function mapCouncilMembers(
 ): ProcessNode[] {
   return members.map((member) => {
     const memberKey = member.memberId || member.name;
+    const identity = memberIdentity(member.name, member.role ?? member.topic);
     if (member.pending) {
+      // Live presence: if the model is streaming its reasoning, show that rolling text as a
+      // first child ("thinking out loud") instead of a bare "Status: waiting". This is the
+      // fix for the "qwen is working" complaint — the user watches what each model works
+      // through. Falls back to the spoken waiting line when no preview has arrived yet.
+      const preview = member.reasoningPreview?.trim();
+      const children: ProcessNode[] = preview
+        ? [{
+            id: `${prefix}-council-pending-${memberKey}-reasoning`,
+            label: 'Thinking out loud',
+            kind: 'reasoning',
+            note: preview,
+            status: 'running' as const,
+            tone: 'council',
+            children: [],
+          }]
+        : [{
+            id: `${prefix}-council-pending-${memberKey}-event`,
+            label: 'Status',
+            kind: 'event',
+            note: humanizeMemberWaiting(member.name, member.topic),
+            status: 'running' as const,
+            tone: 'council',
+            children: [],
+          }];
       return {
         id: `${prefix}-council-pending-${memberKey}`,
         label: cleanModelName(member.name),
         kind: 'submodel',
-        detail: 'thinking…',
+        detail: preview ? `${identity.roleChip} · reasoning…` : `${identity.roleChip} · thinking…`,
         status: 'running' as const,
         tone: 'council',
-        children: [{
-          id: `${prefix}-council-pending-${memberKey}-event`,
-          label: 'Status',
-          kind: 'event',
-          note: humanizeMemberWaiting(member.name, member.topic),
-          status: 'running' as const,
-          tone: 'council',
-          children: [],
-        }],
+        children,
       };
     }
     const body = formatMemberProcessBody(member);
@@ -327,8 +445,8 @@ function mapCouncilMembers(
       label: cleanModelName(member.name),
       kind: 'submodel',
       detail: member.failed
-        ? 'no response'
-        : `${member.verdict} · ${Math.round(member.confidence * 100)}%${member.durationMs !== undefined ? ` · ${formatCompactMs(member.durationMs)}` : ''}`,
+        ? `${identity.roleChip} · no response`
+        : `${identity.roleChip} · ${member.verdict} · ${Math.round(member.confidence * 100)}%${member.durationMs !== undefined ? ` · ${formatCompactMs(member.durationMs)}` : ''}`,
       note: body,
       status: verdictTone(member.verdict, member.failed),
       tone: 'council',
@@ -604,6 +722,55 @@ export function buildProcessTree(
         tone: 'image',
         children: [],
       })),
+    });
+  }
+
+  // Surfaced council DISSENT (transparency): when a non-trivial minority pushed back even
+  // though the modal verdict carried, show it as its own visible row instead of letting it
+  // stay buried in the member list — "the panel was split, here's who objected and why".
+  if (council?.dissent && council.dissent.dissentingMembers.length > 0) {
+    const d = council.dissent;
+    // Dissent is the panel working as intended (a minority view surfaced, not buried) — render
+    // it as a completed council note, NOT an error. The red error glyph (status 'bad') would
+    // miscommunicate "something broke"; the meaning lives in the label, carried by the calm
+    // council tone like every other panel row.
+    nodes.push({
+      id: 'council-dissent',
+      label: `Minority view — ${d.dissentingMembers.length} pushed back (${Math.round(d.dissentStrength * 100)}% of the panel)`,
+      shortLabel: 'Minority view',
+      status: 'done',
+      tone: 'council',
+      children: d.dissentingMembers.map((m, i) => ({
+        id: `council-dissent-${i}`,
+        label: cleanModelName(m.memberName),
+        kind: 'verdict',
+        detail: `${Math.round(m.weight * 100)}% weight · ${Math.round(m.confidence * 100)}% sure`,
+        note: m.concerns.length ? m.concerns.map((c) => `- ${c}`).join('\n') : 'objected (no specific concern given)',
+        status: 'done',
+        tone: 'council',
+        children: [],
+      })),
+    });
+  }
+
+  // Verification spine (transparency): how grounded the panel's answer was — surfaced as a
+  // quiet row so the user sees whether the council leaned on real fetched context, not just a
+  // verdict. Advisory; does not gate anything. Status carried by the existing tone/glyph system
+  // (no inline status emoji — keeps the trace's visual language consistent).
+  if (council?.provenance && council.provenance.total > 0) {
+    const p = council.provenance;
+    const c = p.counts;
+    const verdictLabel = p.verdict === 'grounded' ? 'grounded'
+      : p.verdict === 'thin' ? 'thinly grounded'
+      : 'no context used';
+    nodes.push({
+      id: 'council-provenance',
+      label: `Grounding — ${verdictLabel} · ${Math.round(p.groundedness * 100)}% of fetched context used`,
+      shortLabel: 'Grounding',
+      status: 'done',
+      tone: 'verify',
+      note: `used ${c.used} · unused ${c.unused} · considered ${c.considered} · unavailable ${c.unavailable} (of ${p.total} context items the panel touched)`,
+      children: [],
     });
   }
 

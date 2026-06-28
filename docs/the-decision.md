@@ -14,9 +14,9 @@
 
 ## What Vai is
 
-> Vai is not a better answer-generator.
+> Currently and as of now Vai is most likely not a better answer-generator.
 >
-> Vai is the deterministic thinking interface that makes
+> Vai is deterministic in thinking and managing interfaces that makes
 > answer-generators usable, testable, and harder to misuse.
 >
 > It appears first as V3gga's personal pre-tool reasoning

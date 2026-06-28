@@ -137,6 +137,26 @@ export interface CouncilThinkingUI {
     note: string;
     failed?: boolean;
   }>;
+  /**
+   * Surfaced minority objection (transparency): present when a non-trivial-weight minority
+   * pushed back even though the modal verdict carried. Audit-only — the outcome already
+   * accounted for the vote; this makes the dissent visible instead of buried.
+   */
+  dissent?: {
+    dissentStrength: number;
+    dissentingMembers: Array<{ memberName: string; weight: number; confidence: number; concerns: string[] }>;
+  };
+  /**
+   * Verification spine (transparency): how much of the context the panel fetched actually
+   * grounded the answer, and whether any grounding is web-disputed. Advisory — does not gate.
+   */
+  provenance?: {
+    total: number;
+    groundedness: number;
+    hasDisputed: boolean;
+    verdict: 'grounded' | 'thin' | 'contested' | 'none';
+    counts: { used: number; unused: number; considered: number; unavailable: number; disputed: number };
+  };
 }
 
 export interface ResearchTraceStageUI {
@@ -212,6 +232,18 @@ export interface ChatMessage {
   repairAttempt?: number;
   /** Real server-side activity/progress stages for long turns */
   progressSteps?: ChatProgressStep[];
+  /** EPHEMERAL live work-product: Vai's draft answer as it streams, BEFORE the council
+   *  accepts/redrafts it. Shown in a discardable "Draft (in review)" block and never persisted
+   *  (it may be withdrawn). Cleared/replaced via the draft lifecycle (start/delta/reset/
+   *  committed). Not hidden reasoning — observable work product only. */
+  liveDraft?: {
+    text: string;
+    phase: 'start' | 'delta' | 'reset' | 'committed' | 'discarded';
+    seq: number;
+    turnId?: string;
+  } | null;
+  /** Deterministic HTML info blocks (sandboxed-iframe rendered) emitted by Vai/council. */
+  infoBlocks?: { id: string; html: string; title?: string }[];
 }
 
 /** Preserve nested payloads when the backend re-emits the same stage (e.g. council members arriving late). */
@@ -640,6 +672,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       imageId?: string | null;
       plan?: string | null;
       modelId?: string | null;
+      /** Pruned process trace rehydrated server-side, so the ProcessTree re-expands. */
+      progressSteps?: ChatProgressStep[] | null;
     }>;
     const conversation = get().conversations.find((item) => item.id === id);
     // Restore per-chat broadcast state
@@ -654,6 +688,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         imageId: m.imageId,
         ...(m.role === 'assistant' ? parseEvidenceFromMessagePlan(m.plan) : {}),
         ...(m.role === 'assistant' && m.modelId ? { respondingModelId: m.modelId } : {}),
+        ...(m.role === 'assistant' && m.progressSteps?.length ? { progressSteps: m.progressSteps } : {}),
       }))),
       broadcastMode: isBroadcastChat,
       broadcastTargetClientIds: isBroadcastChat ? broadcastChats[id] : [],
@@ -913,6 +948,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         type: string;
         textDelta?: string;
         reasoningDelta?: string;
+        draftText?: string;
+        draft?: { phase: 'start' | 'delta' | 'reset' | 'committed' | 'discarded'; turnId?: string; seq: number; source?: string; isDiscardable?: boolean };
+        infoBlock?: { id: string; html: string; title?: string };
         sources?: SearchSourceUI[];
         sourcePresentation?: SourcePresentationUI;
         turnKind?: TurnKindUI;
@@ -1056,6 +1094,50 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
           return { messages: msgs };
         });
+      } else if (chunk.type === 'draft_delta') {
+        // Live WORK PRODUCT (not the final answer): stash the in-review draft on the target
+        // assistant message as EPHEMERAL state. Never routed through appendToLastMessage, so the
+        // council can still discard/redraft it without corrupting the committed answer. Server
+        // sends cumulative draftText (replace, not append); we drop out-of-order seqs.
+        const d = chunk.draft;
+        set((state) => {
+          const msgs = [...state.messages];
+          const idx = activeStreamingAssistantId
+            ? msgs.findIndex((m) => m.id === activeStreamingAssistantId)
+            : msgs.length - 1;
+          if (idx < 0) return {};
+          const target = msgs[idx];
+          const prev = target.liveDraft ?? null;
+          if (prev && d && d.seq < prev.seq) return {}; // stale frame
+          const phase = d?.phase ?? 'delta';
+          msgs[idx] = {
+            ...target,
+            liveDraft: {
+              text: chunk.draftText ?? prev?.text ?? '',
+              phase,
+              seq: d?.seq ?? (prev?.seq ?? 0) + 1,
+              turnId: d?.turnId ?? prev?.turnId,
+            },
+          };
+          return { messages: msgs };
+        });
+      } else if (chunk.type === 'info_block' && chunk.infoBlock) {
+        // Append-only, addressable by id (replace on repeat id).
+        const block = chunk.infoBlock;
+        set((state) => {
+          const msgs = [...state.messages];
+          const idx = activeStreamingAssistantId
+            ? msgs.findIndex((m) => m.id === activeStreamingAssistantId)
+            : msgs.length - 1;
+          if (idx < 0) return {};
+          const existing = msgs[idx].infoBlocks ?? [];
+          const at = existing.findIndex((b) => b.id === block.id);
+          const next = at >= 0
+            ? existing.map((b, i) => (i === at ? block : b))
+            : [...existing, block];
+          msgs[idx] = { ...msgs[idx], infoBlocks: next };
+          return { messages: msgs };
+        });
       } else if (chunk.type === 'text_delta' && chunk.textDelta) {
         get().appendToLastMessage(chunk.textDelta);
       } else if (chunk.type === 'reasoning_delta' && chunk.reasoningDelta) {
@@ -1063,7 +1145,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         reasoningText += chunk.reasoningDelta;
       } else if (chunk.type === 'done') {
         flushPendingStreamDelta();
-        set({ isStreaming: false, streamingConversationId: null });
+        // The final answer has committed into message.content — retire the in-review draft block
+        // so the UI shows the answer, not the stale draft.
+        set((state) => {
+          const msgs = state.messages.map((m) => (m.liveDraft ? { ...m, liveDraft: null } : m));
+          return { messages: msgs, isStreaming: false, streamingConversationId: null };
+        });
         // Capture assistant response + reasoning in dev logs
         const capture = getActiveCapture();
         if (capture) {
