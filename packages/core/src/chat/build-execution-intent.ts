@@ -58,7 +58,7 @@ export function classifyAgentBuildIntent(content: string): AgentBuildIntent {
   const hasHardBuildVerb = EXPLICIT_BUILD_REQUEST.test(text);
   const hasSoftBuildVerb = SOFT_BUILD_VERB.test(text);
   const hasTarget = EXPLICIT_BUILD_TARGET.test(text) || NAMED_PRODUCT_CLONE.test(text);
-  const isQuestion = text.endsWith('?') || CONVERSATIONAL_LEAD.test(text);
+  const isQuestion = text.endsWith('?');
 
   // A clear build verb AND a clear app target, phrased as a request (not a question) → build.
   if (hasHardBuildVerb && hasTarget && !isQuestion) return 'build';
