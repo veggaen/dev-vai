@@ -196,8 +196,9 @@ RULES (critical — most proposals fail by ignoring these):
 Worked reasoning for this class: the failing inputs are QUESTIONS that merely contain a build-ish gerund (creating/building). A guard that treats "any build verb anywhere" as disqualifying is too broad — a clean interrogative should still qualify. The fix narrows that guard.
 
 Respond with ONLY a JSON object, no prose:
-{"file":"${filePath}","find":"<exact executable line copied from source>","replace":"<new line>","why":"<one sentence>"}
+{"file":"${filePath}","findLine":<the REAL line number from the source excerpt of the line to change>,"find":"<that exact line copied verbatim>","replace":"<new line>","why":"<one sentence>"}
 CRITICAL — the "find" and "replace" rules (most fixes fail by breaking these):
+- ALWAYS set "findLine" to the line number (shown as \`N:\` in the source excerpt) of the single line you are changing. We copy that exact line for you, so you CANNOT corrupt a regex by retyping it — this is the most reliable way to avoid a rejected fix. Still fill "find" too as a cross-check.
 - "find" must be a COMPLETE line/statement copied verbatim from the source — NEVER a partial line. If the line is a regex like \`const X = /.../i;\`, copy the WHOLE regex through the closing \`/i;\`. A truncated find (e.g. ending mid-pattern at "|fore") corrupts the file and is REJECTED.
 - "replace" must have the SAME balanced brackets () [] {} and the SAME number of \`/\` as "find". If "find" has one \`(\` and one \`/\`, so must "replace" — otherwise the edit breaks the syntax.
 - Both must be CODE (a regex / if / return), not a comment or string.`;
@@ -230,6 +231,25 @@ catch (e) { console.log('model unavailable:', String(e)); process.exit(1); }
 // Extract the JSON object — strict parse first, then a regex-escape repair so a sound regex fix
 // (\b \s \w …) isn't discarded as "unparseable" (the measured comparison-class false-reject).
 const parsed = parseProposal(raw);
+
+// LINE-NUMBER GROUNDING (the highest-leverage anti-corruption move): regex-heavy `find` lines are
+// the #1 source of hallucinated-find — the 7B model has to RE-TYPE + JSON-escape a line like
+// `const X = /\b(?:a|b)\s+c/i;` and reliably drops the \b or mangles \s+ (measured live on the
+// REFINEMENT_REQUEST case). The source excerpt already carries REAL line numbers, so if the model
+// cites `findLine` (a number), we COPY that exact source line ourselves instead of trusting its
+// retype. The model's job becomes "point at the line" (which it does well); the verbatim copy is
+// deterministic. Falls back to the model's `find` string when no usable line number is given.
+if (parsed && parsed.findLine != null) {
+  const ln = Number(parsed.findLine);
+  // lines[] is the full source (0-indexed); the excerpt prints 1-based numbers, so subtract 1.
+  if (Number.isInteger(ln) && ln >= 1 && ln <= lines.length) {
+    const exact = lines[ln - 1];
+    if (exact && exact.trim()) {
+      parsed.find = exact.trim();
+      parsed._findFromLine = ln; // breadcrumb for the log/raw
+    }
+  }
+}
 
 // VERIFY mechanically (knowledge-as-guard): does the cited line actually exist + is it
 // executable + unique? This is the loop's most-repeated failure encoded as a deterministic
