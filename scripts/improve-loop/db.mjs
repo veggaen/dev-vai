@@ -737,11 +737,18 @@ export function classStats(db, runId) {
  * predicate excludes them from every aggregate so the trend reflects Vai behavior only.
  * SQL fragment (no leading AND) so callers compose it into their WHERE clause.
  */
-export const NOT_INFRA_RESULT_SQL =
-  `(res.grade_reason IS NULL OR (res.grade_reason NOT LIKE '%grader unavailable%' AND res.grade_reason NOT LIKE '%counted as fail%'))`;
+// Excludes grader/runtime outages AND model-overload run errors. The 503/"server busy" + generic
+// "run error:" rows are the loop+runtime GPU-contention artifact (190 such rows measured 2026-06-28):
+// they describe infra, not a Vai answer, so counting them as failures craters the pass-rate and
+// mis-targets the loop. isInfraError now SKIPS new ones; this predicate also retroactively excludes
+// the historical rows from every aggregate (pure read-side — no data mutation). Build from a shared
+// pattern list so the SQL and BARE variants can never drift apart.
+const INFRA_REASON_PATTERNS = ['grader unavailable', 'counted as fail', 'run error', '503', 'server busy', 'overloaded', 'service unavailable'];
+const notInfraClause = (col) =>
+  `(${col} IS NULL OR (${INFRA_REASON_PATTERNS.map((p) => `${col} NOT LIKE '%${p}%'`).join(' AND ')}))`;
+export const NOT_INFRA_RESULT_SQL = notInfraClause('res.grade_reason');
 /** Same predicate for queries that alias the results table as `results`/no-alias. */
-const NOT_INFRA_RESULT_BARE =
-  `(grade_reason IS NULL OR (grade_reason NOT LIKE '%grader unavailable%' AND grade_reason NOT LIKE '%counted as fail%'))`;
+const NOT_INFRA_RESULT_BARE = notInfraClause('grade_reason');
 
 /** Campaign trend: pass-rate per finished run, for the eventual Campaign zoom. */
 export function campaignTrend(db) {
