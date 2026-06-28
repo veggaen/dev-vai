@@ -145,3 +145,15 @@ test('recordKnowledge + topKnowledge: capture, reinforce, decay, confidence-filt
     assert.equal(topKnowledge(db, 'other-scope').length, 0);
   } finally { db.close(); rmSync(f, { force: true }); }
 });
+
+test('recoverFind: a single-line cite of a WRAPPED multi-line declaration is recovered', async () => {
+  const { recoverFind } = await import('./proposal-verifier.mjs');
+  const src = 'const a = 1;\nconst FOO =\n  /bar/i;\nconst b = 2;';
+  // model cites the wrapped const as one line; recover the exact 2-line source span
+  assert.equal(recoverFind(src, 'const FOO = /bar/i;'), 'const FOO =\n  /bar/i;');
+  // ambiguous: the same wrapped construct appears twice → not recovered (no guessing)
+  const dup = 'const FOO =\n  /bar/i;\nconst FOO =\n  /bar/i;';
+  assert.equal(recoverFind(dup, 'const FOO = /bar/i;'), null);
+  // content corruption (model dropped \b) is NOT a near-miss → correctly not recovered
+  assert.equal(recoverFind('const RE =\n  /\bfoo/i;', 'const RE = /foo/i;'), null);
+});

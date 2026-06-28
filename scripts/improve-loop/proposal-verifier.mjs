@@ -33,8 +33,11 @@ export function isNonExecutableFind(find) {
  * intended line exists, the model just collapsed runs of spaces, dropped indentation, or used a
  * different quote glyph. Binary-rejecting those as "hallucinated" discards landable fixes. This
  * recovers them MECHANICALLY (no model call): if the find's whitespace-normalized form matches
- * exactly ONE source line's normalized form, return that line's EXACT text. Conservative — only a
- * UNIQUE single-line match is recovered; anything ambiguous or multi-line falls through to rejection.
+ * exactly ONE source line — OR one consecutive MULTI-LINE source span — return that source's EXACT
+ * text. The multi-line case is the dominant real failure (measured ~33 live "hallucinated-find"
+ * rejections): the model writes a wrapped declaration as ONE line, e.g. `const X = /regex/;`, but
+ * the source wraps it across two lines (`const X =\n  /regex/;`). Normalising newlines reconciles
+ * them. Conservative throughout — only a UNIQUE match (single- or multi-line) is recovered.
  * @returns {string|null} the exact source substring to use as find, or null if not recoverable.
  */
 export function recoverFind(source, find) {
@@ -42,15 +45,35 @@ export function recoverFind(source, find) {
   const norm = (s) => s.replace(/\s+/g, ' ').trim();
   const target = norm(find);
   if (target.length < 5) return null;            // too short to anchor safely
-  if (find.includes('\n')) return null;          // single-line recovery only (keep it safe)
+
+  const lines = source.split('\n');
   const matches = [];
-  for (const line of source.split('\n')) {
-    if (norm(line) === target) {
-      const exact = line.trim();
-      if (exact && !matches.includes(exact)) matches.push(exact);
+
+  // (a) single-line match (the original, fast path) — only when the find itself is single-line.
+  if (!find.includes('\n')) {
+    for (const line of lines) {
+      if (norm(line) === target) {
+        const exact = line.trim();
+        if (exact && !matches.includes(exact)) matches.push(exact);
+      }
     }
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) return null; // ambiguous
   }
-  return matches.length === 1 ? matches[0] : null; // unique match only
+
+  // (b) multi-line span match: slide a window of 2..4 consecutive source lines, normalise the JOIN,
+  // and compare to the find's normalised form. Recovers a model's single-line cite of a wrapped
+  // construct. Returns the EXACT multi-line source slice (verbatim, so the literal replace will hit).
+  for (let span = 2; span <= 4; span++) {
+    const hits = []; // every matching POSITION (not deduped) — 2 identical spans are still ambiguous
+    for (let i = 0; i + span <= lines.length; i++) {
+      const slice = lines.slice(i, i + span);
+      if (norm(slice.join(' ')) === target) hits.push(slice.join('\n'));
+    }
+    if (hits.length === 1) return hits[0]; // exactly one position at the smallest span wins
+    if (hits.length > 1) return null;      // ambiguous (multiple positions) — never guess
+  }
+  return null;
 }
 
 /**
