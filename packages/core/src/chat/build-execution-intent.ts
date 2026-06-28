@@ -64,7 +64,7 @@ export function classifyAgentBuildIntent(content: string): AgentBuildIntent {
   if (hasHardBuildVerb && hasTarget && !isQuestion) return 'build';
   // A build verb wrapped in a QUESTION or clearly conversational lead is a discussion *about*
   // building ("explain how I would build a price widget"), not a build → answer.
-  if ((hasHardBuildVerb || hasSoftBuildVerb) && isQuestion) return 'answer';
+  if (isQuestion && hasSoftBuildVerb) return 'answer';
   // A build-ish verb that is neither a clean build request nor conversational is the real hijack
   // case: a verb without a target ("improve the timeline ui", "can you make this more useful") →
   // ambiguous, so agent mode confirms before building.
