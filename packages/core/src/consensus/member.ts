@@ -254,7 +254,7 @@ function buildUserPrompt(input: CouncilInput): string {
 function extractJsonObject(raw: string): string | null {
   // Strip reasoning blocks first (deepseek-r1 et al. wrap output in <think>…</think> with their own
   // braces) so we don't grab JSON-looking content out of the reasoning instead of the answer.
-  let trimmed = String(raw ?? '').replace(/<think>[\s\S]*?<\/think>/gi, ' ').replace(/<\/?think>/gi, ' ').trim();
+  const trimmed = String(raw ?? '').replace(/<think>[\s\S]*?<\/think>/gi, ' ').replace(/<\/?think>/gi, ' ').trim();
   // A fenced ```json … ``` block ANYWHERE (not only when it's the whole message).
   const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
   const body = fenced ? fenced[1].trim() : trimmed;
