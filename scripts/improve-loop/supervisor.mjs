@@ -405,7 +405,17 @@ async function engineMain() {
       // for the dashboard; pure read, never throws into the loop.
       try {
         const { gatherMeaningSignals, chooseMeaningfulWork } = await import('./meaning-selector.mjs');
-        const meaning = chooseMeaningfulWork(gatherMeaningSignals(db));
+        // Feed the WHOLE-APP code-health signal (composite + the biggest concrete gap) so the
+        // codebase lane can compete — the loop now weighs "improve the app's structure/polish"
+        // alongside answer routing/quality. Read from the latest perpetual-health sample.
+        const lastSample = qualitySamples[qualitySamples.length - 1] ?? null;
+        const codebaseHealth = lastSample?.composite ?? null;
+        const bigFile = Number(lastSample?.signals?.maxFileLines ?? 0);
+        const todoN = Number(lastSample?.signals?.todoCount ?? 0);
+        const codebaseTopGap = bigFile > 8000 ? `a ${(bigFile / 1000).toFixed(0)}k-line file to decompose`
+          : todoN > 80 ? `${todoN} TODO/FIXME to resolve` : null;
+        const codebaseGaps = (bigFile > 8000 ? 1 : 0) + (todoN > 80 ? 1 : 0);
+        const meaning = chooseMeaningfulWork(gatherMeaningSignals(db, { codebaseHealth, codebaseGaps, codebaseTopGap }));
         if (meaning.lane) {
           log(`  🎯 ${meaning.headline}`);
           logLoopEvent(db, { cycle, kind: 'meaning', detail: { lane: meaning.lane, leverage: meaning.leverage, reason: meaning.reason, ranking: meaning.ranking.map((l) => ({ lane: l.lane, leverage: Math.round(l.leverage * 100) / 100 })) } });

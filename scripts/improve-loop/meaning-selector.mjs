@@ -24,14 +24,16 @@
 export const LANE_WEIGHT = {
   quality: 1.0,     // is the answer actually GOOD — what a human feels first
   capability: 0.9,  // can Vai DO more — high ceiling, the growth lane
-  routing: 0.7,     // did it route correctly — necessary, but table-stakes, not delight
+  codebase: 0.85,   // is the WHOLE APP complete/structured/polished — compounding craft debt
   reliability: 0.8, // recurring stuck weaknesses — compounding if left
+  routing: 0.7,     // did it route correctly — necessary, but table-stakes, not delight
 };
 
 /** A lane is "below bar" (worth working on) under these targets. Gap = how far below, normalized. */
 export const LANE_BAR = {
   quality: 8.0,     // out of 10 — below this, answers aren't excellent
   routing: 0.85,    // 0..1 pass-rate
+  codebase: 0.85,   // 0..1 perpetual-health composite — below this, the app has real craft debt
 };
 
 const clamp01 = (n) => Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0));
@@ -69,6 +71,22 @@ export function scoreLanes(signals = {}) {
       lane: 'capability', gap: depth, actionable: true,
       leverage: depth * LANE_WEIGHT.capability,
       reason: `${signals.capabilityGaps} capability proposal(s) waiting, none built — Vai's growth lane is idle`,
+    });
+  }
+
+  // CODEBASE lane — the WHOLE APP's craft: completeness, structure, polish, modern animation. Driven
+  // by the perpetual-health composite (tsc/tests/god-class file size/TODO debt) plus any named code
+  // gap (an oversized file to decompose, a missing test, an untyped/duplicated module). This is what
+  // makes the process improve the app itself — frontend + backend structure — not just answer routing.
+  // Below the bar = real craft debt; the gap is how far the composite sits under the target.
+  if (signals.codebaseHealth != null) {
+    const gap = clamp01((LANE_BAR.codebase - signals.codebaseHealth) / LANE_BAR.codebase);
+    const actionable = (signals.codebaseGaps ?? 0) > 0; // a concrete, buildable code-health target exists
+    if (gap > 0) lanes.push({
+      lane: 'codebase', gap, actionable,
+      leverage: gap * LANE_WEIGHT.codebase * (actionable ? 1 : 0.5),
+      reason: `codebase health ${(signals.codebaseHealth * 100).toFixed(0)}% vs bar ${Math.round(LANE_BAR.codebase * 100)}%`
+        + (signals.codebaseTopGap ? ` — top gap: ${signals.codebaseTopGap}` : (actionable ? `, ${signals.codebaseGaps} buildable` : ' — no concrete target yet')),
     });
   }
 
@@ -122,7 +140,7 @@ export function chooseMeaningfulWork(signals = {}) {
  * routing pass-rate + weakest class, average answer quality + sample count, unbuilt capability
  * count, and stuck quality-gap count. Never throws — a missing table yields a conservative signal.
  */
-export function gatherMeaningSignals(db) {
+export function gatherMeaningSignals(db, extra = {}) {
   const get = (s, d = null) => { try { return db.prepare(s).get() ?? d; } catch { return d; } };
   const routing = get("SELECT AVG(1.0*p/t) avg FROM (SELECT class, COUNT(*) t, SUM(passed) p FROM results GROUP BY class HAVING t>=4)", { avg: null });
   const weakest = get("SELECT class, 1.0*SUM(passed)/COUNT(*) pr FROM results GROUP BY class HAVING COUNT(*)>=4 ORDER BY pr ASC LIMIT 1", null);
@@ -137,6 +155,13 @@ export function gatherMeaningSignals(db) {
     capabilityGaps: Number(caps?.n ?? 0),
     stuckQualityGaps: Number(stuck?.n ?? 0),
     canActQuality: Number(stuck?.n ?? 0) > 0, // a stuck gap = a buildable guard target (innovation-arc)
+    // WHOLE-APP code health — injected by the caller (the supervisor already samples the perpetual-
+    // health composite each cycle; it can't be computed from a pure DB read since it shells tsc/git).
+    // codebaseHealth: 0..1 composite; codebaseGaps: count of concrete buildable code targets;
+    // codebaseTopGap: a human label for the biggest one (e.g. "vai-engine.ts 36k lines — decompose").
+    codebaseHealth: extra.codebaseHealth ?? null,
+    codebaseGaps: Number(extra.codebaseGaps ?? 0),
+    codebaseTopGap: extra.codebaseTopGap ?? null,
   };
 }
 

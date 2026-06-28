@@ -78,3 +78,21 @@ test('formatMeaning marks the chosen lane', () => {
   const plan = chooseMeaningfulWork({ routingPassRate: 0.3, routingWeakestClass: { class: 'a', passRate: 0.3 }, answerQuality: 9, answerSampleCount: 50 });
   assert.match(formatMeaning(plan), /→ routing/);
 });
+
+test('CODEBASE lane: whole-app craft debt competes when health is below bar', () => {
+  const lanes = scoreLanes({
+    routingPassRate: 0.95,                       // routing fine
+    codebaseHealth: 0.55, codebaseGaps: 1, codebaseTopGap: 'a 36k-line file to decompose',
+  });
+  const cb = lanes.find((l) => l.lane === 'codebase');
+  assert.ok(cb, 'codebase lane present when health below bar');
+  assert.ok(cb.gap > 0 && cb.actionable, 'has a gap and a buildable target');
+  assert.match(cb.reason, /decompose/, 'names the concrete top gap');
+  // with routing healthy, the whole-app craft lane should win
+  assert.equal(lanes[0].lane, 'codebase');
+});
+
+test('CODEBASE lane: silent when health is at/above bar (no busywork)', () => {
+  const lanes = scoreLanes({ routingPassRate: 0.7, codebaseHealth: 0.92, codebaseGaps: 0 });
+  assert.equal(lanes.find((l) => l.lane === 'codebase'), undefined, 'no codebase lane when healthy');
+});
