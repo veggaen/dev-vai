@@ -19,6 +19,7 @@ import { applyVerifiedFix } from './apply-fix.mjs';
 import { realApplyDeps, currentBranch, AUTO_IMPROVE_BRANCH, revertCommit } from './apply-runners.mjs';
 import { classifyRisk } from './risk-tier.mjs';
 import { verifyClassAcceptance, formatAcceptance } from './acceptance-verifier.mjs';
+import { colocatedTestPath } from './colocated-test.mjs';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
@@ -57,7 +58,6 @@ if (!DRY && head !== AUTO_IMPROVE_BRANCH) {
   process.exit(1);
 }
 
-const deps = realApplyDeps({ pkgTsconfig: TSCONFIG, branch: AUTO_IMPROVE_BRANCH });
 const summary = { applied: 0, reverted: 0, flagged: 0, skipped: 0 };
 const flaggedForVegga = [];
 
@@ -84,13 +84,19 @@ for (const p of pending) {
     continue;
   }
   const risk = classifyRisk(proposal);
-  process.stdout.write(`\n▸ [${p.class}] ${p.file}  (${risk.tier})\n`);
+  // VERIFY THE FILE'S OWN CONTRACT: run the edited file's co-located *.test.* (when one exists) in
+  // addition to tsc. tsc-green + prompt-recovery did NOT catch the loop breaking
+  // build-execution-intent.test.ts (2026-06-28). Running the sibling test reverts a fix that breaks
+  // the file's unit contract before it lands. No sibling test ⇒ tsc-only (unchanged behaviour).
+  const testPath = colocatedTestPath(p.file);
+  process.stdout.write(`\n▸ [${p.class}] ${p.file}  (${risk.tier})${testPath ? `  + test ${testPath}` : ''}\n`);
 
   if (DRY) {
-    console.log(`   would ${risk.tier === 'safe' ? 'APPLY+verify' : 'FLAG for Vegga'} — ${risk.reasons.join('; ') || 'no risk signals'}`);
+    console.log(`   would ${risk.tier === 'safe' ? 'APPLY+verify' : 'FLAG for Vegga'} — ${risk.reasons.join('; ') || 'no risk signals'}${testPath ? ` (verify runs ${testPath})` : ''}`);
     continue;
   }
 
+  const deps = realApplyDeps({ pkgTsconfig: TSCONFIG, branch: AUTO_IMPROVE_BRANCH, testPath });
   const r = await applyVerifiedFix(proposal, deps);
   if (r.committed) {
     // BEHAVIOURAL ACCEPTANCE: tsc-green proves the build, NOT that the bug is fixed. Re-run the
