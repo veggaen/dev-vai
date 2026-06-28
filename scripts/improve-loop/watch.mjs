@@ -255,7 +255,18 @@ function loopStatus() {
   const one = (s, ...a) => { try { return db.prepare(s).get(...a); } catch { return null; } };
 
   const run = one('SELECT id,status,started_at,ended_at FROM runs ORDER BY id DESC LIMIT 1');
-  const running = run?.status === 'running';
+  // LIVE detection must see ENGINE-MODE activity. The engine path (--engine) logs to loop_events and
+  // does NOT mark a runs.status='running' row, so reading runs.status alone showed "Idle" while the
+  // loop was actively grounding fixes (cycle in progress). Treat the loop as live if EITHER a run is
+  // marked running OR any loop_event was written in the last 3 minutes (a cycle can pause that long
+  // mid-observe/propose between event writes). This is what makes the dashboard honest about engine mode.
+  const lastEventAt = one("SELECT at FROM loop_events ORDER BY id DESC LIMIT 1")?.at;
+  const eventAgeMs = lastEventAt ? (Date.now() - new Date(lastEventAt).getTime()) : Infinity;
+  // 8-minute window: a single engine cycle can legitimately gap several minutes mid-observe/propose
+  // (measured: cycles 240→241 were ~9 min apart while running a 48-prompt observe sweep). A tighter
+  // window false-flags "Idle" during real work; 8 min flags genuinely-stopped without nagging.
+  const engineLive = Number.isFinite(eventAgeMs) && eventAgeMs < 480_000;
+  const running = run?.status === 'running' || engineLive;
   // Bounded-cycle health: how long the last finished run took + whether it stopped on the budget.
   const lastFinished = one("SELECT status,started_at,ended_at FROM runs WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT 1");
   const lastDurS = lastFinished?.ended_at ? Math.round((new Date(lastFinished.ended_at) - new Date(lastFinished.started_at)) / 1000) : null;
@@ -311,6 +322,30 @@ function loopStatus() {
   const landed = q("SELECT COUNT(*) n FROM consensus WHERE applied='committed'")[0]?.n ?? 0;
   const reverted = q("SELECT COUNT(*) n FROM consensus WHERE applied='reverted-acceptance'")[0]?.n ?? 0;
 
+  // ENGINE-MODE activity — the work the consensus table can't see. Without this the dashboard
+  // reported "3 fixes / 5 reverted" and looked near-dead while the engine had run 1000+ cycles
+  // (798 prototypes, 4000+ process runs). These make the perpetual loop's REAL throughput visible.
+  const cyclesRun = q("SELECT COUNT(DISTINCT cycle) n FROM loop_events WHERE kind='cycle'")[0]?.n ?? 0;
+  const prototypesBuilt = q("SELECT COUNT(*) n FROM loop_events WHERE kind='run:done' AND process='prototype' AND ok=1")[0]?.n ?? 0;
+  const proposalsTotal = (() => { try { return q("SELECT COUNT(*) n FROM proposals")[0]?.n ?? 0; } catch { return 0; } })();
+  const experimentsRun = (() => { try { return q("SELECT COUNT(*) n FROM experiments WHERE experiment_score IS NOT NULL")[0]?.n ?? 0; } catch { return 0; } })();
+  const cyclesLastHour = q("SELECT COUNT(DISTINCT cycle) n FROM loop_events WHERE kind='cycle' AND at > ?", new Date(Date.now() - 3600_000).toISOString())[0]?.n ?? 0;
+
+  // Add recent ENGINE cycles to the timeline so it shows live motion, not only consensus outcomes.
+  // One concise entry per recent cycle: what it planned + ran (the human story of "it's working").
+  for (const r of q(`SELECT cycle, MAX(at) at,
+      SUM(CASE WHEN kind='run:done' AND ok=1 THEN 1 ELSE 0 END) ran,
+      SUM(CASE WHEN kind='run:done' AND process='prototype' AND ok=1 THEN 1 ELSE 0 END) protos
+    FROM loop_events WHERE kind IN ('cycle','run:done') GROUP BY cycle ORDER BY cycle DESC LIMIT 8`)) {
+    if (!r.cycle) continue;
+    events.push({
+      at: r.at, kind: 'cycle',
+      title: `Engine cycle ${r.cycle}`,
+      detail: `${r.ran} process run(s)${r.protos ? `, ${r.protos} prototype(s) built+valued` : ''} — value-per-compute plan executed`,
+    });
+  }
+  events.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+
   db.close();
   return {
     running,
@@ -324,8 +359,11 @@ function loopStatus() {
     passPct,
     weakest: weakest ? { class: weakest.class, pct: Math.round((weakest.p / weakest.t) * 100), passed: weakest.p, total: weakest.t } : null,
     qualityTrend: qtrend.slice(-40),
-    events: events.slice(0, 14),
-    counts: { landed, reverted, innovations: innovations.length },
+    events: events.slice(0, 20),
+    counts: {
+      landed, reverted, innovations: innovations.length,
+      cyclesRun, prototypesBuilt, proposalsTotal, experimentsRun, cyclesLastHour,
+    },
   };
 }
 
@@ -423,6 +461,8 @@ input[type=color]{width:22px;height:22px;padding:0;border:none;background:none;c
 .ev.reverted::before{border-color:var(--bad)}
 .ev.innovation::before{border-color:var(--accent);box-shadow:0 0 8px var(--accent)}
 .ev.escalate::before{border-color:var(--warn)}
+.ev.cycle::before{border-color:var(--ink-faint)}
+.ev.cycle .t{color:var(--ink-dim)}
 .ev .t{font-size:14px;font-weight:500}
 .ev .d{color:var(--ink-dim);font-size:13px;margin-top:2px}
 .ev .when{color:var(--ink-faint);font-size:11px;margin-top:3px;font-variant-numeric:tabular-nums}
@@ -554,7 +594,9 @@ function render(s){
   // numbers
   const c=s.counts||{};
   $('nums').innerHTML=
-    '<div class="num good"><b>'+(c.landed||0)+'</b><span>fixes landed</span></div>'
+    '<div class="num acc"><b>'+(c.cyclesRun||0)+'</b><span>engine cycles</span></div>'
+    +'<div class="num good"><b>'+(c.prototypesBuilt||0)+'</b><span>fixes prototyped</span></div>'
+    +'<div class="num good"><b>'+(c.landed||0)+'</b><span>landed (verified)</span></div>'
     +'<div class="num bad"><b>'+(c.reverted||0)+'</b><span>reverted (caught wrong)</span></div>'
     +'<div class="num acc"><b>'+(c.innovations||0)+'</b><span>built itself</span></div>';
   // timeline
