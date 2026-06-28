@@ -31,6 +31,8 @@
  */
 import { spawn } from 'node:child_process';
 import { openDb } from './db.mjs';
+import { acquireLock } from './instance-lock.mjs';
+import { evictAllModels } from './driver.mjs';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
@@ -167,7 +169,23 @@ function runVisualProbe() {
 }
 
 let stop = false;
-process.on('SIGINT', () => { stop = true; log('SIGINT — finishing current cycle then stopping (resumable).'); });
+const LOCK_PATH = 'scripts/improve-loop/.supervisor.lock';
+
+/**
+ * Clean shutdown: free the GPU and release the single-instance lock. Run exactly once on the way
+ * out, no matter how we exit (graceful loop end, Ctrl-C, kill, fatal error). Evicting the model is
+ * the difference between "took a break and the GPU is free to game" and "a 5GB model stays pinned".
+ */
+let shuttingDown = false;
+async function cleanShutdown(release) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try {
+    const evicted = await evictAllModels();
+    if (evicted.length) log(`shutdown: evicted ${evicted.join(', ')} from VRAM (GPU freed).`);
+  } catch { /* never let cleanup throw */ }
+  try { release(); } catch { /* idempotent */ }
+}
 
 /**
  * engineMain — the GATED-PROCESS-ENGINE loop (--engine). Each cycle CHOOSES the highest
@@ -705,5 +723,32 @@ async function main() {
   log('living loop stopped. Corpus + proposals persisted; re-run to continue where it left off.');
 }
 
+// SINGLE-INSTANCE GUARD: refuse to start if a live supervisor already holds the lock. This is the
+// fix for the 5-copies-at-once pile-up that stalled the corpus and lagged the machine. A stale lock
+// from a crashed run is reclaimed automatically.
+const lock = acquireLock(LOCK_PATH);
+if (!lock.ok) {
+  log(`✋ another supervisor is already running (PID ${lock.holderPid}${lock.startedAt ? `, since ${lock.startedAt}` : ''}).`);
+  log(`   One living loop at a time (GPU + crash safety). Stop it first, or delete ${LOCK_PATH} if you're sure it's dead.`);
+  process.exit(1);
+}
+if (lock.reclaimed) log('reclaimed a stale lock from a previous crashed run.');
+
+// Signal handling: FIRST Ctrl-C / SIGTERM asks the loop to stop after the current cycle (resumable,
+// no torn DB write). A SECOND signal means "I mean it" → clean the GPU + lock and exit now.
+const onSignal = (sig) => {
+  if (!stop) {
+    stop = true;
+    log(`${sig} — finishing current cycle then stopping (resumable). Press again to force-quit now.`);
+  } else {
+    log(`${sig} again — forcing shutdown.`);
+    void cleanShutdown(lock.release).then(() => process.exit(0));
+  }
+};
+process.on('SIGINT', () => onSignal('SIGINT'));
+process.on('SIGTERM', () => onSignal('SIGTERM'));
+
 const entry = USE_ENGINE ? engineMain : main;
-entry().catch((e) => { log('fatal: ' + String(e)); process.exit(1); });
+entry()
+  .then(() => cleanShutdown(lock.release))
+  .catch(async (e) => { log('fatal: ' + String(e)); await cleanShutdown(lock.release); process.exit(1); });

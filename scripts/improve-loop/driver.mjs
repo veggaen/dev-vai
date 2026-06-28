@@ -29,6 +29,33 @@ export async function loadedVram() {
 }
 
 /**
+ * Evict ALL resident Ollama models from VRAM (keep_alive=0 per loaded model). Best-effort and
+ * idempotent — used on loop shutdown so a break/exit frees the GPU instead of leaving a ~5GB
+ * model pinned (the lag the user hit while gaming). Never throws; returns the names it asked to
+ * evict. Honours LOCAL_MODEL_URL like every other call here.
+ */
+export async function evictAllModels({ fetchImpl = fetch } = {}) {
+  const evicted = [];
+  try {
+    const res = await fetchImpl(`${OLLAMA}/api/ps`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return evicted;
+    const models = (await res.json()).models ?? [];
+    for (const m of models) {
+      try {
+        await fetchImpl(`${OLLAMA}/api/generate`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ model: m.name, keep_alive: 0 }),
+          signal: AbortSignal.timeout(8000),
+        });
+        evicted.push(m.name);
+      } catch { /* one model failing to evict must not block the others */ }
+    }
+  } catch { /* host unreachable / already down — nothing to evict */ }
+  return evicted;
+}
+
+/**
  * Name of the model currently RESIDENT in Ollama VRAM (the largest, if several), or
  * null if nothing is loaded / the host is unreachable. The grader uses this to judge on
  * the model that is ALREADY warm instead of forcing a different model in — an evict +
