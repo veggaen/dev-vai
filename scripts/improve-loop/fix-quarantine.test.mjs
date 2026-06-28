@@ -68,3 +68,19 @@ test('a LEGACY ban whose stored sig predates the current fixSignature formula is
   // A different fix on the same file is still allowed.
   assert.equal(isFixBanned(db, { ...fix, replace: 'text-zinc-300' }), false);
 });
+
+test('FIND-LEVEL ban: same line re-edited with 3 different replaces is banned (doom-loop guard)', () => {
+  // The same-line/different-replace thrash: each replace makes a fresh signature so the per-signature
+  // strike never bans → infinite retries on one dead line. Banned once ≥3 distinct variants hit it.
+  const db = tmpDb();
+  const base = { file: 'x.ts', find: 'if (cond) return a;' };
+  strikeFix(db, { ...base, replace: 'if (cond) return b;' }, 'tsc red');
+  strikeFix(db, { ...base, replace: 'if (cond) return c;' }, 'tsc red');
+  // 2 distinct variants, 1 strike each → still allowed (room for a real 3rd attempt)
+  assert.equal(isFixBanned(db, { ...base, replace: 'if (cond) return d;' }), false, '2 variants: not yet banned');
+  strikeFix(db, { ...base, replace: 'if (cond) return d;' }, 'tsc red');
+  // 3 distinct variants on the SAME find → the line is thrash → ban any further replace on it
+  assert.equal(isFixBanned(db, { ...base, replace: 'if (cond) return e;' }), true, '3 variants: find-level banned');
+  // A DIFFERENT find on the same file is unaffected.
+  assert.equal(isFixBanned(db, { file: 'x.ts', find: 'const z = 1;', replace: 'const z = 2;' }), false);
+});

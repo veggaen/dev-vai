@@ -371,7 +371,23 @@ export function isFixBanned(db, fix) {
   const byFields = db.prepare(
     'SELECT banned FROM fix_quarantine WHERE file=? AND find=? AND "replace"=? AND banned=1 LIMIT 1',
   ).get(fix.file ?? '', fix.find ?? '', fix.replace ?? '');
-  return !!(byFields && byFields.banned);
+  if (byFields && byFields.banned) return true;
+  // FIND-LEVEL ban (the same-line/different-replace doom-loop): the model keeps re-editing the SAME
+  // `find` line with a slightly different `replace` each cycle → each gets a fresh signature → the
+  // per-signature strike never reaches the ban limit → infinite retries on one dead line (observed
+  // on build-execution-intent.ts: 5 quarantine rows, same 2 finds, all stuck at strike 1). Ban a
+  // (file, find) once its strikes SUMMED across every replace-variant reach the limit.
+  try {
+    const agg = db.prepare(
+      'SELECT COALESCE(SUM(strikes),0) AS total, COUNT(*) AS variants FROM fix_quarantine WHERE file=? AND find=?',
+    ).get(fix.file ?? '', fix.find ?? '');
+    // Fire only on genuine thrash: ≥3 distinct replace-variants OR ≥3 total strikes on this one line.
+    // (A single signature already bans at STRIKE_LIMIT=2; this is strictly the cross-variant case, so
+    // require MORE than one signature's worth of failure before banning the whole line — leaves room
+    // for a legitimate 2nd distinct attempt to still land.)
+    if (agg && (Number(agg.variants) >= 3 || Number(agg.total) >= STRIKE_LIMIT + 1)) return true;
+  } catch { /* table shape — fall through */ }
+  return false;
 }
 
 // TARGET-LEVEL cooldown — the per-signature ban misses "distinct-find near-misses": the model
@@ -382,12 +398,35 @@ export function isFixBanned(db, fix) {
 export const TARGET_FAIL_LIMIT = 3;
 
 /** How many DISTINCT failed finds have hit this file (any class)? The near-miss signal the
- *  per-signature ban can't see. */
+ *  per-signature ban can't see. Counts BOTH the quarantine table AND reverted consensus rows:
+ *  a revert (tsc-red / acceptance-fail) doesn't always strike the quarantine, so counting only
+ *  quarantine undercounted (build-execution-intent.ts had 13 consensus reverts but only 2 quarantine
+ *  finds → never flagged exhausted → the loop kept burning cycles re-editing a dead file). Union of
+ *  distinct finds across both sources gives the true "how many dead edits has this file absorbed". */
 export function targetFailures(db, file) {
   if (!file) return 0;
   try {
-    const row = db.prepare('SELECT COUNT(DISTINCT find) n FROM fix_quarantine WHERE file=?').get(file);
-    return Number(row?.n ?? 0);
+    // WINDOWED so exhaustion is a recoverable circuit-breaker, not a permanent ban: only count
+    // failures from the last 48h. Recent reverts stop the loop bleeding on a dead file; once the
+    // file stops failing (a fix lands, or a senior changes it) the old failures age out and it
+    // becomes targetable again — mirrors the no-file staleness decay.
+    const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const finds = new Set();
+    // A missing/empty timestamp counts as in-window (don't let an untimestamped failure hide).
+    // Each source in its OWN try: the consensus.applied column is added lazily by apply-consensus,
+    // so on a fresh DB that query throws — it must not zero out the quarantine count.
+    try {
+      for (const r of db.prepare("SELECT DISTINCT find FROM fix_quarantine WHERE file=? AND (updated_at IS NULL OR updated_at='' OR updated_at >= ?)").all(file, since)) {
+        if (r.find) finds.add(String(r.find));
+      }
+    } catch { /* no quarantine table yet */ }
+    // Reverted consensus rows (tsc-red or acceptance-fail) are real failed edits on this file too.
+    try {
+      for (const r of db.prepare("SELECT DISTINCT find FROM consensus WHERE file=? AND applied LIKE 'reverted%' AND (created_at IS NULL OR created_at='' OR created_at >= ?)").all(file, since)) {
+        if (r.find) finds.add(String(r.find));
+      }
+    } catch { /* consensus.applied not present on a fresh DB */ }
+    return finds.size;
   } catch { return 0; }
 }
 
