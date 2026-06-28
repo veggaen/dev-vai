@@ -16,6 +16,7 @@ import type { WorkspaceStatusEvidence, WorkspaceStatusReader } from '../workspac
 import type { ProjectService } from '../projects/service.js';
 import type { LocalSteeringInput, SteeringPacket } from '../steering/local-steering-worker.js';
 import { authorizeConversationAccess } from '../access/conversations.js';
+import { TurnSerializer } from '../turn-serializer.js';
 import { chatWebSocketInboundSchema } from '@vai/api-types/chat-ws';
 import type { AdvisorTrace, ChatProgressStep } from '@vai/api-types/chat-ws';
 
@@ -36,6 +37,14 @@ export interface RegisterChatRoutesOptions {
 
 const SOCKET_OPEN = 1;
 const MAX_SOCKET_BUFFERED_BYTES = 1_000_000;
+
+// Process-wide serializer for engine turns. The runtime shares ONE VaiEngine whose generate paths
+// mutate instance state (_lastCitedAnswer, _lastSearchResponse, …) that is NOT safe across concurrent
+// turns — interleaving requests (e.g. a browser chat + the improve-loop's observe sweep) bled one
+// turn's curated answer into another's response (the "Norway → ORM answer" bug). The per-conversation
+// activeConversationTurns guard only blocks the same conversation; this serializes turns GLOBALLY so
+// the shared mutable state can't be corrupted, which also matches one-local-inference-at-a-time.
+const engineTurnSerializer = new TurnSerializer();
 
 function formatGrokFriendResult(result: GrokFriendResult): string {
   return [
@@ -489,7 +498,10 @@ export function registerChatRoutes(
 
           activeConversationTurns.add(conversationId);
           try {
-            for await (const chunk of chatService.sendMessage(
+            // Serialize the engine turn GLOBALLY (runIterable holds the lock until the stream is fully
+            // drained) so concurrent turns on the shared VaiEngine can't corrupt each other's state.
+            // The per-chunk side-effects (steering, sendJson) stay in this consumption loop.
+            for await (const chunk of engineTurnSerializer.runIterable(() => chatService.sendMessage(
               conversationId,
               data.content,
               image,
@@ -497,7 +509,7 @@ export function registerChatRoutes(
               noLearn,
               promptRewriteOverrides,
               { imageMode: data.imageMode === true, processDepth: data.processDepth },
-            )) {
+            ))) {
               if (chunk.type === 'conversation_resolved' && chunk.conversationId) {
                 fastify.log.warn(
                   { requested: data.conversationId, resolved: chunk.conversationId },
