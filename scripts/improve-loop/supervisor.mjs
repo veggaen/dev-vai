@@ -209,7 +209,7 @@ async function engineMain() {
   const { analyzeMotion } = await import('./motion.mjs');
   const { campaignTrend, answerExcellenceTrend, logLoopEvent, loopEventStats, recordKnowledge } = await import('./db.mjs');
   const { MIN_MOTION_SAMPLE, planNextExperiment, anyOpenExperiment, hasOpenExperiment, recordCandidate } = await import('./innovation-engine.mjs');
-  const { runNextExperiment } = await import('./experiment-runner.mjs');
+  const { runNextExperiment, drainExperiments } = await import('./experiment-runner.mjs');
   const { generateNovelExperiment } = await import('./experiment-generator.mjs');
   const { collectSignals, makeSample, analyzeQuality, verifyPerpetualWork, formatHealth } = await import('./perpetual-health.mjs');
   const { runPrototype } = await import('./prototype.mjs');
@@ -270,7 +270,7 @@ async function engineMain() {
     runChild,
     autoApply: AUTO_APPLY,
     anyOpen: (db) => anyOpenExperiment(db),
-    closeExperiment: (db) => runNextExperiment(db),
+    closeExperiment: (db) => drainExperiments(db), // drain the whole closeable backlog, not one
     planExperiment: (db) => planNextExperiment(db, { record: true }),
     generateNovel: async (db, scorecard) => {
       const cand = await generateNovelExperiment(db);

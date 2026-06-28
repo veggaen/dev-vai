@@ -11,6 +11,7 @@ import {
   measureCorpusMetric,
   runExperiment,
   runNextExperiment,
+  drainExperiments,
 } from './experiment-runner.mjs';
 import { startExperiment, finishExperiment, targetMetric, experimentHistory } from './innovation-engine.mjs';
 import { openDb, startRun, recordResult, upsertPrompt } from './db.mjs';
@@ -158,5 +159,32 @@ test('runNextExperiment: full lifecycle on a real corpus (queue→accumulate→c
     assert.equal(r.adopted, true);
     assert.ok(r.treatment > r.baseline);
     assert.equal(runNextExperiment(db).reason, 'no open experiment');
+  } finally { db.close(); rmSync(f, { force: true }); }
+});
+
+test('drainExperiments: closes a whole STALE backlog in one pass (unblocks the one-open guard)', () => {
+  const { f, db } = tmpDb();
+  try {
+    // 5 experiments with NO baseline → each is "unmeasurable" → abandoned on sight. This models the
+    // live 67-deep backlog that kept anyOpenExperiment() true forever and deadlocked prototype.
+    for (let i = 0; i < 5; i++) startExperiment(db, { type: 'model', hypothesis: 'h'+i, config: {} });
+    let open = db.prepare('SELECT COUNT(*) n FROM experiments WHERE delta IS NULL').get().n;
+    assert.equal(open, 5, 'backlog seeded');
+    const res = drainExperiments(db);
+    assert.equal(res.closed, 5, 'all 5 closed in one drain');
+    open = db.prepare('SELECT COUNT(*) n FROM experiments WHERE delta IS NULL').get().n;
+    assert.equal(open, 0, 'backlog fully drained → one-open guard releases');
+  } finally { db.close(); rmSync(f, { force: true }); }
+});
+
+test('drainExperiments: stops at a genuinely-fresh experiment (does not abandon what is still waiting)', () => {
+  const { f, db } = tmpDb();
+  try {
+    // A measurable experiment with a baseline but NO post-queue sample yet → legitimately waiting.
+    startExperiment(db, { type: 'model', hypothesis: 'fresh', config: {}, baselineScore: 0.5 });
+    const res = drainExperiments(db, { measure: () => ({ value: null, samplesSince: 0 }), runsSince: 0 });
+    assert.equal(res.closed, 0, 'a fresh waiting experiment is NOT force-closed');
+    assert.equal(res.stillWaiting, 1);
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM experiments WHERE delta IS NULL').get().n, 1);
   } finally { db.close(); rmSync(f, { force: true }); }
 });

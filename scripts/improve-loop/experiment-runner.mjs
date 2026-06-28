@@ -137,3 +137,36 @@ export function runNextExperiment(db, opts = {}) {
   if (!exp) return { ran: false, experimentId: null, reason: 'no open experiment' };
   return runExperiment(db, exp, opts);
 }
+
+/**
+ * DRAIN closeable experiments in one pass — fixes the deadlock where a BACKLOG of open experiments
+ * (measured live: 67, queued across days) keeps anyOpenExperiment() true forever, so the prototype
+ * process (gated "one change at a time") could NEVER run → no fix ever landed. runNextExperiment
+ * only closed ONE per cycle while innovate queued one per cycle, so the queue never drained.
+ * This closes every experiment that is now measurable OR stale (past STALE_RUNS) in a single call,
+ * bounded by maxClose so a huge backlog can't monopolise a cycle. Leaves only genuinely-fresh
+ * experiments (legitimately waiting for their first post-queue sample) open. Returns a summary.
+ */
+export function drainExperiments(db, opts = {}) {
+  const maxClose = opts.maxClose ?? 100;
+  const closed = [];
+  let stillOpen = 0;
+  for (let i = 0; i < maxClose; i++) {
+    const exp = nextOpenExperiment(db);
+    if (!exp) break;
+    const r = runExperiment(db, exp, opts);
+    if (r.ran) { closed.push({ id: exp.id, adopted: !!r.adopted, abandoned: !!r.abandoned }); }
+    else {
+      // This one is legitimately still waiting (fresh, has a post-queue sample pending). Since
+      // nextOpenExperiment is deterministic, it would return the same row forever — stop here.
+      stillOpen = 1;
+      break;
+    }
+  }
+  return {
+    closed: closed.length,
+    adopted: closed.filter((c) => c.adopted).length,
+    abandoned: closed.filter((c) => c.abandoned).length,
+    stillWaiting: stillOpen,
+  };
+}
