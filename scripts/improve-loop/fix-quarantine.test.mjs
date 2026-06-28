@@ -49,3 +49,22 @@ test('the doom-loop scenario: an empty-file fix gets banned after 2 reverts', ()
   strikeFix(db, deadFix, 'reverted — verify failed: tsc failed');
   assert.equal(isFixBanned(db, deadFix), true, 'banned after 2 — loop will skip it from now on');
 });
+
+test('a LEGACY ban whose stored sig predates the current fixSignature formula is still honoured', () => {
+  // The real corpus bug: old quarantine rows stored a sig from an older fixSignature() formula, so
+  // matching by sig alone returned false and the banned fix (BuildStatusBadge text-zinc-500) was
+  // re-attempted 885×. isFixBanned must also match by (file, find, replace) fields so a ban survives
+  // any signature-format drift. Simulate by inserting a banned row with a deliberately WRONG sig.
+  const db = tmpDb();
+  const fix = { file: 'apps/desktop/src/components/BuildStatusBadge.tsx', find: 'text-zinc-500', replace: 'text-zinc-400' };
+  db.prepare(
+    `INSERT INTO fix_quarantine (sig, file, find, "replace", strikes, banned, last_detail, updated_at)
+     VALUES ('legacy_wrong_sig', ?, ?, ?, 2, 1, 'BSOD doom-loop', '2026-01-01')`,
+  ).run(fix.file, fix.find, fix.replace);
+  // Sanity: the current formula would NOT match this stored sig.
+  assert.notEqual(fixSignature(fix), 'legacy_wrong_sig');
+  // …yet the ban is still honoured via the field-match fallback.
+  assert.equal(isFixBanned(db, fix), true, 'legacy ban honoured by field match despite sig drift');
+  // A different fix on the same file is still allowed.
+  assert.equal(isFixBanned(db, { ...fix, replace: 'text-zinc-300' }), false);
+});

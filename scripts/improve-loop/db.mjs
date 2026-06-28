@@ -359,10 +359,19 @@ export function strikeFix(db, fix, detail = '') {
   return { strikes: Number(row.strikes), banned: !!row.banned };
 }
 
-/** True if this exact fix has been banned (failed verify ≥ STRIKE_LIMIT times). */
+/** True if this exact fix has been banned (failed verify ≥ STRIKE_LIMIT times).
+ *  Matches by signature OR by exact (file, find, replace) fields. The field fallback is essential:
+ *  the fixSignature formula has drifted across versions, so legacy quarantine rows store a sig that
+ *  no longer recomputes from their own fields (verified on the live corpus: BuildStatusBadge.tsx
+ *  text-zinc-500 was banned but isFixBanned-by-sig returned false → 885 wasted re-attempts). Matching
+ *  the fields directly makes a ban survive any future signature-format change. */
 export function isFixBanned(db, fix) {
-  const row = db.prepare('SELECT banned FROM fix_quarantine WHERE sig=?').get(fixSignature(fix));
-  return !!(row && row.banned);
+  const bySig = db.prepare('SELECT banned FROM fix_quarantine WHERE sig=?').get(fixSignature(fix));
+  if (bySig && bySig.banned) return true;
+  const byFields = db.prepare(
+    'SELECT banned FROM fix_quarantine WHERE file=? AND find=? AND "replace"=? AND banned=1 LIMIT 1',
+  ).get(fix.file ?? '', fix.find ?? '', fix.replace ?? '');
+  return !!(byFields && byFields.banned);
 }
 
 // TARGET-LEVEL cooldown — the per-signature ban misses "distinct-find near-misses": the model

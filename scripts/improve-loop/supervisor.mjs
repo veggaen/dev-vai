@@ -30,7 +30,7 @@
  *   node scripts/improve-loop/supervisor.mjs --base-url http://host:3006 --db C:/tmp/vai-loop.sqlite
  */
 import { spawn } from 'node:child_process';
-import { openDb } from './db.mjs';
+import { openDb, isFixBanned } from './db.mjs';
 import { acquireLock } from './instance-lock.mjs';
 import { evictAllModels } from './driver.mjs';
 
@@ -132,6 +132,16 @@ async function actOnContrastConsensus(cycle, taste) {
   }
   if (!file) { log(`ACT: ${dim} found but never uniquely (all files have 2+ matches) — skip`); return null; }
   const vdb = openDb(DB_PATH);
+  // BACKOFF: don't re-propose a contrast swap that already failed verify ≥2× and was BANNED. Before
+  // this guard the contrast path grepped, picked a file, inserted a consensus row, and spawned
+  // apply-consensus EVERY visual cycle for an already-dead fix (BuildStatusBadge.tsx text-zinc-500
+  // burned 885 reverted-red attempts). The quarantine only kicked in INSIDE apply-consensus; check
+  // it HERE so a banned fix costs nothing instead of a full propose→apply round-trip.
+  if (isFixBanned(vdb, { file, find: dim, replace: lighter })) {
+    vdb.close();
+    log(`ACT: ${dim}→${lighter} in ${file.replace('apps/desktop/src/', '')} is BANNED (failed verify ≥2×) — skipping, not re-proposing.`);
+    return null;
+  }
   try { vdb.exec(`CREATE TABLE IF NOT EXISTS consensus (id INTEGER PRIMARY KEY AUTOINCREMENT, class TEXT, file TEXT, find TEXT, replace TEXT, agree_count INTEGER, personas TEXT, verified INTEGER, why TEXT, created_at TEXT)`); } catch {}
   // Replace only the first occurrence to stay surgical (apply-fix uses String.replace = first match).
   vdb.prepare('INSERT INTO consensus (class,file,find,replace,agree_count,personas,verified,why,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
