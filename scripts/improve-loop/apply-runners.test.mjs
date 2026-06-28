@@ -3,7 +3,7 @@
 // code that enforces "auto-apply only ever commits to council/auto-improve".
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { realApplyDeps, currentBranch, AUTO_IMPROVE_BRANCH } from './apply-runners.mjs';
+import { realApplyDeps, currentBranch, AUTO_IMPROVE_BRANCH, resolveInsideRoot } from './apply-runners.mjs';
 
 test('currentBranch returns a non-empty branch name in this repo', () => {
   const b = currentBranch();
@@ -33,4 +33,17 @@ test('verify() reports tsc-only green shape when no testPath is given (no throw)
   assert.equal(typeof deps.readFile, 'function');
   assert.equal(typeof deps.writeFile, 'function');
   assert.equal(deps.branch, AUTO_IMPROVE_BRANCH);
+});
+
+test('resolveInsideRoot: accepts repo-relative, rejects absolute + traversal (CodeRabbit #25 security)', () => {
+  // repo-relative paths resolve fine
+  assert.ok(resolveInsideRoot('packages/core/src/x.ts').endsWith('x.ts'));
+  // absolute paths are rejected (the proposal contract is repo-relative only)
+  assert.throws(() => resolveInsideRoot('C:/Windows/System32/evil.txt'), /absolute|escape/i);
+  assert.throws(() => resolveInsideRoot('/etc/passwd'), /absolute|escape/i);
+  // ../ traversal out of the repo is rejected
+  assert.throws(() => resolveInsideRoot('../../../../etc/passwd'), /escape/i);
+  assert.throws(() => resolveInsideRoot('packages/../../outside'), /escape/i);
+  // empty / non-string rejected
+  assert.throws(() => resolveInsideRoot(''), /non-empty/i);
 });

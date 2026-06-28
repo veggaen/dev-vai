@@ -14,19 +14,35 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { resolve, relative, isAbsolute } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 export const AUTO_IMPROVE_BRANCH = 'council/auto-improve';
 
+// Resolve the npx binary by name so we NEVER need shell:true. On Windows the executable is npx.cmd;
+// spawnSync can run a .cmd directly (shell:false) as long as it's named explicitly. This removes the
+// shell entirely from every call — no metacharacter interpretation, no path-with-spaces splitting
+// (the old shell:true for npx was a security + correctness hazard: pkgTsconfig/testPath went through
+// shell parsing). git/node were already shell:false; now npx is too.
+const NPX_BIN = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+
+/** Reject a repo-relative path that escapes ROOT (absolute or ../ traversal). The apply path trusts
+ *  `file`/`testPath` from model proposals; without this a malformed proposal could read/overwrite or
+ *  stage files OUTSIDE the repo. Returns the resolved absolute path, or throws on escape. */
+export function resolveInsideRoot(value) {
+  if (typeof value !== 'string' || value.trim() === '') throw new Error('path must be a non-empty string');
+  if (isAbsolute(value)) throw new Error(`refusing absolute path outside repo-relative contract: ${value}`);
+  const abs = resolve(ROOT, value);
+  const rel = relative(ROOT, abs);
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) throw new Error(`path escapes the checkout root: ${value}`);
+  return abs;
+}
+
 function sh(cmd, args, opts = {}) {
-  // shell:true ONLY for npx — on Windows spawnSync('npx', …) without it returns ENOENT (npx is
-  // npx.cmd). This is why tsc verify NEVER ran here: every apply hit ENOENT and the loop could never
-  // land a fix. But shell:true makes spawnSync re-parse args through the shell, so a commit -m message
-  // with spaces would split (git saw "Exclude" as a pathspec). git/node resolve WITHOUT a shell, so
-  // we keep them shell:false (args passed literally, spaces safe). Only npx needs the shell.
-  const useShell = /^npx(\.cmd)?$/i.test(cmd);
-  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8', timeout: opts.timeoutMs ?? 300_000, shell: useShell, ...opts });
+  // npx is invoked by its platform binary name (npx.cmd on Windows) so we can keep shell:false for
+  // EVERY command — no shell parsing of args, paths-with-spaces safe, no metacharacter injection.
+  const realCmd = /^npx$/i.test(cmd) ? NPX_BIN : cmd;
+  const r = spawnSync(realCmd, args, { cwd: ROOT, encoding: 'utf8', timeout: opts.timeoutMs ?? 300_000, shell: false, ...opts });
   // CRITICAL distinction: r.status===null means the process did NOT exit normally — it timed out
   // (r.error.code==='ETIMEDOUT') or failed to spawn. That is an INFRA failure, NOT a non-zero exit.
   // Conflating them ("code: r.status ?? 1") made a timed-out tsc look like a type error → every patch
@@ -78,8 +94,11 @@ export function realApplyDeps(opts = {}) {
 
   return {
     branch,
-    readFile: (file) => (existsSync(resolve(ROOT, file)) ? readFileSync(resolve(ROOT, file), 'utf8') : null),
-    writeFile: (file, contents) => writeFileSync(resolve(ROOT, file), contents),
+    // Resolve through resolveInsideRoot so a malformed proposal path (absolute or ../ traversal)
+    // can't read or overwrite host files outside the repo. Throws on escape → applyVerifiedFix
+    // treats it as a failed apply (reverted), never touching anything outside the checkout.
+    readFile: (file) => { const p = resolveInsideRoot(file); return existsSync(p) ? readFileSync(p, 'utf8') : null; },
+    writeFile: (file, contents) => writeFileSync(resolveInsideRoot(file), contents),
 
     verify: async () => {
       // 1) Typecheck — the cheapest strong signal that the edit didn't break the build. Timeout
@@ -96,6 +115,10 @@ export function realApplyDeps(opts = {}) {
       }
       // 2) Optional scoped tests — only when the caller names a test path (keeps verify fast).
       if (opts.testPath) {
+        // Reject a testPath that escapes the repo before handing it to vitest (same untrusted-path
+        // contract as readFile/writeFile).
+        try { resolveInsideRoot(opts.testPath); }
+        catch (e) { return { ok: false, detail: `unsafe testPath rejected: ${String(e.message)}` }; }
         const vt = sh('npx', ['vitest', 'run', opts.testPath], { timeoutMs: opts.verifyTimeoutMs ?? 360_000 });
         if (vt.infra) return { ok: false, infra: true, detail: `tests could not complete (infra) — not a test failure` };
         if (vt.code !== 0) {

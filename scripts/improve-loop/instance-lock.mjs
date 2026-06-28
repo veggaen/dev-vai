@@ -60,9 +60,21 @@ export function acquireLock(lockPath) {
     return { ok: false, holderPid, startedAt };
   }
 
-  // Stale lock (holder crashed). Reclaim it.
-  try { writeFileSync(lockPath, payload); } catch { /* fall through; best effort */ }
-  return { ok: true, release: () => releaseLock(lockPath), reclaimed: true };
+  // Stale lock (holder crashed). Reclaim it ATOMICALLY: unlink the dead lock, then re-attempt the
+  // exclusive `wx` create. If two contenders race, only ONE wins the re-create — the loser gets
+  // EEXIST and must re-read the (now-fresh) lock to report the real winner, never falsely returning
+  // ok:true. (A plain overwrite was non-exclusive: both racers could write + both claim success.)
+  try { unlinkSync(lockPath); } catch { /* another contender may have unlinked first — fine */ }
+  try {
+    writeFresh();
+    return { ok: true, release: () => releaseLock(lockPath), reclaimed: true };
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e; // real fs error — surface it
+    // Lost the reclaim race: someone else created the lock first. Report THEM, not a false success.
+    let pid = NaN; let since = null;
+    try { const p = JSON.parse(readFileSync(lockPath, 'utf8')); pid = Number(p.pid); since = p.startedAt ?? null; } catch {}
+    return { ok: false, holderPid: pid, startedAt: since };
+  }
 }
 
 /** Remove the lock file. Best-effort and idempotent (no-op if already gone). */
