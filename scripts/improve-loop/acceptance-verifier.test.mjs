@@ -114,6 +114,21 @@ test('verifyClassAcceptance: a SIBLING class regression rejects an otherwise-goo
   assert.equal(rep.regressed, 1);
 });
 
+test('verifyClassAcceptance: a SIBLING regression row is graded with its OWN class, not the fixed class', async () => {
+  // CodeRabbit finding: cross-class rows were graded with the fixed class's rubric. Each row must be
+  // judged against its own expected behaviour. Capture the class the grader is called with per prompt.
+  const selectRows = (_db, klass) => (klass === 'routing/fresh-data' ? [{ prompt: 'own', expected_intent: 'E' }] : []);
+  const selectPassing = (_db, klass) => (klass === 'answer/curated-trap' ? [{ prompt: 'sib', expected_intent: 'E' }] : []);
+  const seenClassByPrompt = {};
+  const grade = async (k, _e, prompt) => { seenClassByPrompt[prompt] = k; return { passed: true }; };
+  await verifyClassAcceptance(null, 'routing/fresh-data', {
+    runOne: async (p) => ({ p }), grade, selectRows, selectPassing,
+    siblingClasses: ['answer/curated-trap'],
+  });
+  assert.equal(seenClassByPrompt['own'], 'routing/fresh-data', 'own row graded with the fixed class');
+  assert.equal(seenClassByPrompt['sib'], 'answer/curated-trap', 'sibling row graded with ITS class');
+});
+
 test('verifyClassAcceptance: siblings passing keeps an accepted verdict', async () => {
   const selectRows = (_db, klass) => (klass === 'routing/fresh-data' ? [{ prompt: 'f1', expected_intent: 'E' }] : []);
   const selectPassing = (_db, klass) =>

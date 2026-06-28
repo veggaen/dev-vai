@@ -82,11 +82,14 @@ export async function verifyAcceptance({ rows = [], klass = '', runOne, grade, a
     const prompt = row?.prompt ?? '';
     const expected = row?.expected_intent ?? row?.expectedIntent ?? '';
     const regression = !!row?.regression; // a known-PASSING prompt re-run to catch breakage
+    // A row may carry its OWN class (sibling cross-class regression rows do). Grade against that,
+    // falling back to the run's class for normal same-class rows.
+    const rowClass = row?.klass ?? klass;
     let passed = false;
     let error = null;
     try {
       const vai = await runOne(prompt);
-      const g = await grade(klass, expected, prompt, vai);
+      const g = await grade(rowClass, expected, prompt, vai);
       passed = !!(g && g.passed);
     } catch (e) {
       error = String(e).slice(0, 120); // an infra error is NOT a recovery — counts as still-failing
@@ -119,7 +122,10 @@ export async function verifyClassAcceptance(db, klass, { runOne, grade, acceptRa
     for (const r of selectPassing(db, sib, regressionSample) ?? []) {
       if (seen.has(r.prompt)) continue;
       seen.add(r.prompt);
-      siblingPassing.push({ ...r, regression: true });
+      // Tag the row with ITS OWN class so the grader judges a sibling regression against the
+      // sibling's expected behaviour, not the fixed class's (CodeRabbit: cross-class rows must be
+      // graded with their own class — otherwise a sibling "regression" is judged by the wrong rubric).
+      siblingPassing.push({ ...r, regression: true, klass: sib });
     }
   }
   const rows = [...failing, ...passing, ...siblingPassing];
