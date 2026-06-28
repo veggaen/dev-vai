@@ -311,8 +311,9 @@ async function engineMain() {
                 { file: artifact.file, find: artifact.find, replace: artifact.replace },
                 { readFile: (p) => readFileSync(p, 'utf8') },
               );
-              // Observe mode has no quality signal — a verified candidate is a small positive
-              // (a real, applyable fix exists). In apply mode, value comes from the quality delta.
+              // Observe mode has no apply step — a verified candidate is itself small positive value
+              // (a real, applyable fix exists). In apply mode the test gate sets value from whether a
+              // commit actually landed+accepted, so we don't credit mere verification here.
               if (v.ok && !AUTO_APPLY) gctx.metricDelta = 0.05;
               return { pass: v.ok, detail: v.detail };
             },
@@ -322,17 +323,43 @@ async function engineMain() {
             review: reviewGate,
             // typecheck+test only when we actually apply (observe mode values on verification only).
             ...(AUTO_APPLY ? {
-              test: async () => {
+              test: async (gctx) => {
+                // Count real committed fixes BEFORE this apply, so we can tell if THIS prototype
+                // actually landed one. The engine's value function otherwise reads the global
+                // perpetual-health composite, which a single-file routing fix never moves in one
+                // cycle → every gate-passing fix was discarded as "no value" (0/331 ever adopted).
+                // Drive value from the ACTUAL outcome instead: a fix that committed + behaviourally
+                // recovered its class is real progress and must be adopted.
+                const committedBefore = ctx.db.prepare(
+                  "SELECT COUNT(*) n FROM consensus WHERE applied='committed'",
+                ).get().n;
                 await runChild('scripts/improve-loop/consensus-fix.mjs', ['--class', klass]);
                 const code = await runChild('scripts/improve-loop/apply-consensus.mjs', []);
-                return { pass: code === 0, detail: code === 0 ? 'apply-consensus green' : 'apply-consensus failed/reverted' };
+                const committedAfter = ctx.db.prepare(
+                  "SELECT COUNT(*) n FROM consensus WHERE applied='committed'",
+                ).get().n;
+                const landed = committedAfter > committedBefore;
+                // A landed+accepted commit is real value → drives valuePrototype to ADOPT (metricDelta
+                // is the fallback signal when there's no codebase-quality delta). No commit → no value,
+                // but the gate still "passes" iff apply-consensus didn't error/revert.
+                if (landed) gctx.metricDelta = 0.1;
+                return {
+                  pass: code === 0,
+                  detail: landed
+                    ? `committed+accepted a fix for ${klass} (real source change landed)`
+                    : (code === 0 ? 'apply-consensus ran; nothing newly committed (skipped/reverted)' : 'apply-consensus failed/reverted'),
+                };
               },
             } : {}),
           },
-          // Quality delta only matters when we APPLY (observe mode changes no source → Δ=0,
-          // which would always discard). In observe mode, fall back to the metric signal:
-          // verification passing means a real, applyable fix candidate exists (small positive).
-          sampleQuality: AUTO_APPLY ? sampleQuality : (async () => null),
+          // Value is driven by the ACTUAL outcome via metricDelta (set in the verify/test gates),
+          // NOT the global perpetual-health composite. A single-file fix never moves the codebase-
+          // wide composite in one cycle, so reading it made qualityDelta≈0 and discarded every
+          // gate-passing fix as "no value" (the 0/331-adopted defect). Returning null here makes
+          // valuePrototype fall back to metricDelta: +0.05 for a verified candidate (observe) or
+          // +0.1 for a committed+accepted fix (apply). The codebase composite still drives the
+          // separate perpetual-health verdict; it just shouldn't gate per-fix adoption.
+          sampleQuality: async () => null,
           computeOf: () => (AUTO_APPLY ? 3 : 1),
           experimentId: null,
           onEvent: (e) => logLoopEvent(ctx.db, { cycle, kind: 'prototype', process: 'prototype', detail: e }),
