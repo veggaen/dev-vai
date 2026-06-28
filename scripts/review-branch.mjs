@@ -72,11 +72,19 @@ async function main() {
 
   process.stderr.write(`[review-branch] ${range} → model ${MODEL} @ ${OLLAMA}${truncated ? ' (diff truncated)' : ''}\n\n`);
 
+  // Abort a stalled Ollama request instead of hanging forever (CodeRabbit #25). Overridable timeout.
+  const ac = new AbortController();
+  const timeoutMs = Number(process.env.REVIEW_TIMEOUT_MS) || 180_000;
+  const t = setTimeout(() => ac.abort(), timeoutMs);
   const res = await fetch(`${OLLAMA}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ model: MODEL, stream: false, messages: [{ role: 'user', content: prompt }], options: { temperature: 0.2 } }),
-  }).catch((e) => { console.error(`Ollama unreachable at ${OLLAMA}: ${e.message}. Is Ollama running?`); process.exit(1); });
+    signal: ac.signal,
+  }).catch((e) => {
+    const why = e.name === 'AbortError' ? `timed out after ${timeoutMs}ms` : `unreachable: ${e.message}`;
+    console.error(`Ollama ${why} at ${OLLAMA}. Is Ollama running?`); process.exit(1);
+  }).finally(() => clearTimeout(t));
 
   if (!res.ok) { console.error(`Ollama error ${res.status}: ${await res.text()}`); process.exit(1); }
   const data = await res.json();

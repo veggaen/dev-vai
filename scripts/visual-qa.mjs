@@ -62,25 +62,33 @@ async function runScenario(browser, id) {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(`PAGEERROR: ${e.message}`));
 
-  await page.goto(`${BASE}/qa-harness.html?scenario=${id}`, { waitUntil: 'networkidle', timeout: 25000 });
-  await page.waitForSelector('[data-testid="qa-scenario"]', { timeout: 10000 });
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: `${out}/settled.png` });
+  let tracingStopped = false;
+  try {
+    await page.goto(`${BASE}/qa-harness.html?scenario=${id}`, { waitUntil: 'networkidle', timeout: 25000 });
+    await page.waitForSelector('[data-testid="qa-scenario"]', { timeout: 10000 });
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${out}/settled.png` });
 
-  // Expand the settled tree (the summary button) — capture the expand transformation.
-  const summary = page.locator('[data-testid="process-tree"] button[aria-expanded]').first();
-  if (await summary.count()) {
-    await summary.hover(); await page.waitForTimeout(250);
-    await summary.click(); await page.waitForTimeout(600); // let the height/opacity ease settle
-    await page.screenshot({ path: `${out}/expanded.png`, fullPage: true });
+    // Expand the settled tree (the summary button) — capture the expand transformation.
+    const summary = page.locator('[data-testid="process-tree"] button[aria-expanded]').first();
+    if (await summary.count()) {
+      await summary.hover(); await page.waitForTimeout(250);
+      await summary.click(); await page.waitForTimeout(600); // let the height/opacity ease settle
+      await page.screenshot({ path: `${out}/expanded.png`, fullPage: true });
+    }
+    // Hover a child row to capture the row hover-state transformation.
+    const row = page.locator('.process-tree__row').nth(1);
+    if (await row.count()) { await row.hover(); await page.waitForTimeout(300); await page.screenshot({ path: `${out}/row-hover.png` }); }
+
+    await context.tracing.stop({ path: `${out}/trace.zip` });
+    tracingStopped = true;
+  } finally {
+    // Always release Playwright resources even if a goto/selector/assert above threw, or this scenario
+    // leaks a browser context + page on every failure (CodeRabbit #25).
+    if (!tracingStopped) await context.tracing.stop({ path: `${out}/trace.zip` }).catch(() => {});
+    await page.close().catch(() => {});
+    await context.close().catch(() => {});
   }
-  // Hover a child row to capture the row hover-state transformation.
-  const row = page.locator('.process-tree__row').nth(1);
-  if (await row.count()) { await row.hover(); await page.waitForTimeout(300); await page.screenshot({ path: `${out}/row-hover.png` }); }
-
-  await context.tracing.stop({ path: `${out}/trace.zip` });
-  await page.close();
-  await context.close();
   log(`  ${id}: console errors ${errors.length || 'none'} · shots ${out}/{settled,expanded,row-hover}.png · trace ${out}/trace.zip`);
   return errors;
 }

@@ -32,8 +32,18 @@ test('clean scan (no results) → no blocking, clean message', () => {
   assert.match(formatSemgrep(scan), /clean/);
 });
 
-test('unparseable output is handled (available, no findings, error noted)', () => {
+test('a non-zero run failure (exit >= 2) is not a clean scan and blocks', () => {
+  // exit 2 = semgrep crashed/config-errored — must NOT read as clean (CodeRabbit #25).
   const scan = semgrepScan({ runner: () => ({ notFound: false, code: 2, stdout: 'panic: not json' }) });
   assert.equal(scan.available, true);
+  assert.equal(scan.failed, true);
+  assert.match(scan.error, /run failed/);
+  assert.equal(hasBlockingFinding(scan), true);
+});
+
+test('unparseable output on a normal exit is handled (available, no findings, error noted)', () => {
+  const scan = semgrepScan({ runner: () => ({ notFound: false, code: 1, stdout: 'panic: not json' }) });
+  assert.equal(scan.available, true);
   assert.match(scan.error, /unparseable/);
+  assert.equal(hasBlockingFinding(scan), true); // a scan we couldn't read is not a green light
 });

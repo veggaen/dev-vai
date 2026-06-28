@@ -38,9 +38,13 @@ export function semgrepScan({ targets = ['.'], config = 'auto', runner = default
   if (res.notFound) {
     return { available: false, findings: [], error: 'semgrep not installed (free: pip install semgrep) — skipped' };
   }
-  // semgrep exits 0 (no findings) or 1 (findings present); both yield JSON on stdout.
+  // semgrep exits 0 (no findings) or 1 (findings present); both yield JSON on stdout. Exit >= 2 is a
+  // RUN FAILURE (config error, crash, timeout) — must NOT be read as a clean scan (CodeRabbit #25).
+  if (res.code >= 2) {
+    return { available: true, findings: [], error: `semgrep run failed (exit ${res.code})`, failed: true };
+  }
   let parsed;
-  try { parsed = JSON.parse(res.stdout || '{}'); } catch { return { available: true, findings: [], error: 'unparseable semgrep output' }; }
+  try { parsed = JSON.parse(res.stdout || '{}'); } catch { return { available: true, findings: [], error: 'unparseable semgrep output', failed: true }; }
   const findings = (parsed.results ?? []).map((f) => ({
     path: f.path,
     line: f.start?.line ?? 0,
@@ -51,9 +55,11 @@ export function semgrepScan({ targets = ['.'], config = 'auto', runner = default
   return { available: true, findings };
 }
 
-/** True when a scan turned up an ERROR-severity finding (the loop's "don't auto-apply" signal). */
+/** True when a scan turned up an ERROR-severity finding OR the scan itself failed to run — both are
+ *  "don't auto-apply" signals (a failed scan is not a clean bill of health; CodeRabbit #25). */
 export function hasBlockingFinding(scan) {
-  return scan.available && scan.findings.some((f) => f.severity === 'ERROR');
+  if (!scan.available) return false; // genuinely not installed → not a gate (handled elsewhere)
+  return Boolean(scan.failed) || scan.findings.some((f) => f.severity === 'ERROR');
 }
 
 /** Compact one-liner for the loop log. */
