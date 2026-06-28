@@ -791,11 +791,14 @@ const NOT_INFRA_RESULT_BARE = notInfraClause('grade_reason');
 
 /** Campaign trend: pass-rate per finished run, for the eventual Campaign zoom. */
 export function campaignTrend(db) {
+  // Only FINISHED runs (ended_at set). An in-progress run is a partial sample that drags the motion
+  // meter mid-cycle and makes the trend jitter (CodeRabbit #25). The current run is still observing.
   return db.prepare(
     `SELECT r.id AS run_id, r.started_at,
             COUNT(CASE WHEN ${NOT_INFRA_RESULT_SQL} THEN res.id END) AS total,
             COALESCE(SUM(CASE WHEN ${NOT_INFRA_RESULT_SQL} THEN res.passed ELSE 0 END),0) AS passed
      FROM runs r LEFT JOIN results res ON res.run_id = r.id
+     WHERE r.ended_at IS NOT NULL
      GROUP BY r.id ORDER BY r.id`,
   ).all();
 }
@@ -810,10 +813,13 @@ export function campaignTrend(db) {
 export function failingRowsForClass(db, klass) {
   try {
     return db.prepare(
+      // Ignore infra-noise rows (503/run-error) when picking the latest result per prompt — a
+      // transient infra failure must not be treated as the prompt's "currently failing" state
+      // (CodeRabbit #25), or acceptance re-runs phantom failures.
       `SELECT r.prompt_id, p.prompt, p.expected_intent, r.run_id, r.grade_reason
        FROM results r
        JOIN prompts p ON p.id = r.prompt_id
-       JOIN (SELECT prompt_id, MAX(run_id) AS mrun FROM results WHERE class = ? GROUP BY prompt_id) m
+       JOIN (SELECT prompt_id, MAX(run_id) AS mrun FROM results res WHERE class = ? AND ${NOT_INFRA_RESULT_SQL} GROUP BY prompt_id) m
          ON m.prompt_id = r.prompt_id AND m.mrun = r.run_id
        WHERE r.class = ? AND r.passed = 0
        ORDER BY r.prompt_id`,
@@ -846,10 +852,12 @@ export function classesForFile(db, file, excludeClass = '') {
 export function passingRowsForClass(db, klass, limit = 4) {
   try {
     return db.prepare(
+      // Same infra-noise exclusion as failingRowsForClass — the regression sample must reflect real
+      // passing behaviour, not a row whose latest result was a 503/run-error (CodeRabbit #25).
       `SELECT r.prompt_id, p.prompt, p.expected_intent
        FROM results r
        JOIN prompts p ON p.id = r.prompt_id
-       JOIN (SELECT prompt_id, MAX(run_id) AS mrun FROM results WHERE class = ? GROUP BY prompt_id) m
+       JOIN (SELECT prompt_id, MAX(run_id) AS mrun FROM results res WHERE class = ? AND ${NOT_INFRA_RESULT_SQL} GROUP BY prompt_id) m
          ON m.prompt_id = r.prompt_id AND m.mrun = r.run_id
        WHERE r.class = ? AND r.passed = 1
        ORDER BY r.run_id DESC LIMIT ?`,
@@ -988,10 +996,13 @@ export function ungroundableClasses(db) {
 export function answerExcellenceTrend(db) {
   try {
     return db.prepare(
+      // FINISHED runs only — an in-progress run is a partial sample that jitters the motion meter
+      // mid-cycle (CodeRabbit #25), same as campaignTrend.
       `SELECT r.id AS run_id, r.started_at,
               COUNT(res.answer_excellence) AS n,
               AVG(res.answer_excellence) AS avg
        FROM runs r LEFT JOIN results res ON res.run_id = r.id
+       WHERE r.ended_at IS NOT NULL
        GROUP BY r.id ORDER BY r.id`,
     ).all();
   } catch {

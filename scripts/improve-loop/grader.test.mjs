@@ -91,12 +91,19 @@ test('gradeLedger: low hit-rate AND unhealthy council both flip to reject', () =
   assert.equal(report.targets.length, 0);
 });
 
-test('gradeLedger: empty corpus is safe and council defaults to keep', () => {
+test('gradeLedger: empty corpus is safe and council is inconclusive without telemetry', () => {
+  // With no councilHealth telemetry, the council verdict must be inconclusive — NOT a synthesized
+  // "keep" that hides a measurement gap (CodeRabbit #25).
   const report = gradeLedger({});
   assert.deepEqual(report.targets, []);
   assert.deepEqual(report.stuckLessons, []);
-  assert.equal(report.verdicts.find((v) => v.agent === 'council members').verdict, 'keep');
+  assert.equal(report.verdicts.find((v) => v.agent === 'council members').verdict, 'inconclusive');
   assert.equal(typeof formatGrade(report), 'string');
+});
+
+test('gradeLedger: a measured healthy council response-rate still keeps', () => {
+  const report = gradeLedger({ councilHealth: { responseRate: 1 } });
+  assert.equal(report.verdicts.find((v) => v.agent === 'council members').verdict, 'keep');
 });
 
 test('WEAK_CLASS_THRESHOLD is a sane default', () => {

@@ -15,7 +15,7 @@ import {
   experimentBlocksPrototype,
 } from './experiment-runner.mjs';
 import { startExperiment, finishExperiment, targetMetric, experimentHistory } from './innovation-engine.mjs';
-import { openDb, startRun, recordResult, upsertPrompt } from './db.mjs';
+import { openDb, startRun, endRun, recordResult, upsertPrompt } from './db.mjs';
 
 function tmpDb() {
   const f = join(tmpdir(), `vai-exprun-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`);
@@ -27,6 +27,7 @@ function seedRun(db, passed, total, ex = null) {
     const pid = upsertPrompt(db, { prompt: `p${runId}-${k}`, klass: 'demo', expectedIntent: 'x', origin: 'seed' });
     recordResult(db, { runId, promptId: pid, klass: 'demo', readAs: 'demo', passed: k < passed, answerExcellence: ex });
   }
+  endRun(db, runId, 'ok'); // a seeded run is a FINISHED run — trends now exclude in-progress runs
   return runId;
 }
 

@@ -98,6 +98,11 @@ export async function gradeInterpretation(klass, expectedIntent, prompt, vai) {
   if (klass === 'answer/vague-overconfident') {
     // The class the user flagged: confident-sounding but generic, ungrounded prose
     // ("AI slop"). Deterministic surface scoring — ungameable, no model needed.
+    // An EMPTY answer is the worst case — it must fail this class, not pass as "not vague"
+    // (CodeRabbit #25: scoreVagueOverconfident('') returns non-vague, polluting recovery metrics).
+    if (!String(vai.text ?? '').trim()) {
+      return { passed: false, reason: 'empty answer — produced no response at all' };
+    }
     const verdict = scoreVagueOverconfident(vai.text ?? '');
     if (verdict.vague) {
       return { passed: false, reason: `vague/overconfident (score ${verdict.score}): ${verdict.signals.slice(0, 2).join('; ')}` };
@@ -115,14 +120,16 @@ export async function gradeInterpretation(klass, expectedIntent, prompt, vai) {
     // grades that dragged the pass rate down even when the answer was a correct advice reply.
     const builtSomething = /```|title=|installed dependencies|scaffold|here('?s| is) (your|the) (app|project)/i.test(answer);
     if (builtSomething) return { passed: false, reason: 'turned an innocent question into a build' };
-    // A build-shaped DEFLECTION counts as a build-misread too ("give me a target stack and
-    // I'll scaffold"), but ONLY when the answer itself solicits build inputs — not from the
-    // intent string. This keeps "team building fundamentals" advice (a correct answer) passing.
+    // A build-shaped DEFLECTION is itself a build-misread ("give me a target stack and I'll
+    // scaffold"). The ANSWER soliciting build inputs is the authoritative signal — do NOT also
+    // require readAsBuild (CodeRabbit #25: that let "what stack should I use?" deflections pass
+    // whenever the council intent string happened not to say "build"). The solicitation phrases below
+    // are build-specific (target stack / I'll scaffold / what to build) so "team building" advice,
+    // which doesn't solicit build inputs, still passes.
     const answerSolicitsBuild =
       /\b(?:target stack|tech stack|what (?:stack|framework|language)|one-line goal|i'?ll scaffold|scaffold (?:a|the|something)|what (?:do you )?want (?:me )?to build)\b/i.test(answer);
-    const readAsBuild = readAs && /\b(?:build (?:an? )?(?:app|project|tool|site|dashboard)|scaffold|create an app|make an app|treat (?:this|it) as a build)\b/.test(readAs);
-    if (answerSolicitsBuild && readAsBuild) {
-      return { passed: false, reason: `read+answered as a build: "${readAs}"` };
+    if (answerSolicitsBuild) {
+      return { passed: false, reason: `answered by soliciting build inputs (build-misread)${readAs ? ` · readAs:"${readAs}"` : ''}` };
     }
     return { passed: true, reason: 'answered as a question, not a build' };
   }

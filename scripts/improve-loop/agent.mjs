@@ -37,10 +37,17 @@ export function parseToolCall(raw) {
   const cands = [];
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== '{') continue;
-    let depth = 0;
+    let depth = 0, inStr = false, esc = false;
     for (let j = i; j < text.length; j++) {
-      if (text[j] === '{') depth++;
-      else if (text[j] === '}') { depth--; if (depth === 0) { cands.push(text.slice(i, j + 1)); break; } }
+      const ch = text[j];
+      // Quote-aware: braces inside a JSON string (e.g. a `find` line "if (x) {") must NOT count,
+      // or a valid object never closes (CodeRabbit #25). Track string state + backslash escapes.
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) { cands.push(text.slice(i, j + 1)); break; } }
     }
   }
   // Prefer a candidate that actually has a "tool"/"file"/"find" key; try last-first (post-reasoning).

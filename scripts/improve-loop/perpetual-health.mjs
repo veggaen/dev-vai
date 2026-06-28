@@ -75,7 +75,11 @@ export function analyzeQuality(samples = [], { window = 3, compositeEps = 0.01 }
 
   const perSignal = {};
   for (const [key, def] of Object.entries(SIGNALS)) {
-    const sv = xs.map((s) => Number(s.signals?.[key] ?? 0));
+    // Only build the series from samples that ACTUALLY measured this signal. The old `?? 0` made a
+    // skipped probe look like a real zero — a cheap (no-tsc) cycle then read as tscErrors=0 "perfect"
+    // and tanked/biased the trend (CodeRabbit #25, the companion to makeSample's unmeasured-skip).
+    const sv = xs.map((s) => s.signals?.[key]).filter((v) => v != null).map(Number);
+    if (sv.length < 2) { perSignal[key] = { current: sv.at(-1) ?? null, slope: 0, verdict: 'flat' }; continue; }
     const raw = seriesSlope(sv);
     // direction-aware: for a lower-is-better signal, a falling raw slope is IMPROVING.
     const orientedSlope = def.dir === 'down' ? -raw : raw;

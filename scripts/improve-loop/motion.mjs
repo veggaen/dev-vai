@@ -113,7 +113,10 @@ export function analyzeMotion(series = {}, opts = {}) {
     excellence,
     stagnation: { stalled, runsFlat: Math.max(passRate.stagnation.runsFlat, excellence.stagnation.runsFlat), window },
     recommendation,
-    headline: formatMotion({ state, passRate, excellence, stagnation: { stalled } }),
+    // Carry the epsilons so formatMotion draws arrows with the SAME thresholds analyzeMotion used —
+    // custom epsilons no longer disagree with the headline arrows (CodeRabbit #25).
+    passEps, exEps,
+    headline: formatMotion({ state, passRate, excellence, stagnation: { stalled }, passEps, exEps }),
   };
 }
 
@@ -136,9 +139,12 @@ const num1 = (n) => (n == null ? 'n/a' : (Math.round(n * 10) / 10).toString());
 /** One-line motion summary for the operator/dashboard. */
 export function formatMotion(m) {
   const stall = m.stagnation?.stalled ? ' · STALLED' : '';
+  // Use the epsilons the analysis ran with (fall back to the defaults) so the arrows match the verdict.
+  const pe = m.passEps ?? 0.01;
+  const ee = m.exEps ?? 0.2;
   return (
     `Perpetual motion: ${m.state}${stall}` +
-    ` · pass ${pct(m.passRate.current)} ${sign(m.passRate.slope, 0.01)}` +
-    ` · excellence ${num1(m.excellence.current)}/10 ${sign(m.excellence.slope, 0.2)}`
+    ` · pass ${pct(m.passRate.current)} ${sign(m.passRate.slope, pe)}` +
+    ` · excellence ${num1(m.excellence.current)}/10 ${sign(m.excellence.slope, ee)}`
   );
 }

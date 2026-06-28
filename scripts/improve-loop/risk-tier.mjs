@@ -80,9 +80,10 @@ export function classifyRisk(proposal) {
   }
   if (RISKY_PATH.test(file)) reasons.push(`risky path: ${file}`);
 
-  const both = `${find}\n${replace}`;
+  // Evaluate find and replace SEPARATELY — concatenating with \n breaks $-anchored content rules
+  // on the removed side (CodeRabbit #25), since the join glues find's tail to replace's head.
   for (const re of RISKY_CONTENT) {
-    if (re.test(both)) reasons.push(`risky content matched ${re}`);
+    if (re.test(find) || re.test(replace)) reasons.push(`risky content matched ${re}`);
   }
   // Added-side-only signals (introducing a risky construct even if the removed line was clean).
   for (const re of RISKY_ADDED) {

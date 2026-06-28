@@ -16,7 +16,7 @@ import {
   finishExperiment,
   experimentHistory,
 } from './innovation-engine.mjs';
-import { openDb, startRun, recordResult, upsertPrompt, proposalQualityStats } from './db.mjs';
+import { openDb, startRun, endRun, recordResult, upsertPrompt, proposalQualityStats } from './db.mjs';
 
 test('proposalQualityStats: per-class, bounded [0,1], unpolluted by other-lane consensus', () => {
   // Regression for the live 116× bug: the visual lane writes hundreds of ui/contrast
@@ -122,6 +122,7 @@ function seedRuns(db, perRunPass) {
       const pid = upsertPrompt(db, { prompt: `p${i}-${k}`, klass: 'demo', expectedIntent: 'x', origin: 'seed' });
       recordResult(db, { runId, promptId: pid, klass: 'demo', readAs: 'demo', passed: k < passed });
     }
+    endRun(db, runId, 'ok'); // a seeded run is FINISHED — trends now exclude in-progress runs
   });
 }
 

@@ -5,7 +5,9 @@ import { gradeGrounding, groundingAnchors, describeGrounding } from './grounding
 // Representative of the loop's OWN labelled examples (the 52× gap), so the test pins real behaviour.
 // ~70 words, confident, zero concrete anchors — the real 52× slop shape (long essay-soup).
 const SLOP = 'A good company culture is defined by its focus on amazing people, with leaders who invest in hiring, onboarding, and retaining top talent. It fosters a supportive and productive environment where everyone simply thrives. The best teams always win because they obviously prioritise collaboration, and undoubtedly the right mindset is the only way to build something that lasts and truly empowers everyone involved at the end of the day.';
-const GROUNDED = 'For React performance, open the React DevTools Profiler, record the slow interaction, and look for components re-rendering. Common fixes: 1. memoize with useMemo, 2. split context, 3. virtualize long lists.';
+// Genuinely grounded: a named tool (React DevTools), a code identifier (`useMemo`), AND a concrete
+// number (16ms) — not just a numbered checklist, which no longer self-qualifies (CodeRabbit #25).
+const GROUNDED = 'For React performance, open the React DevTools Profiler and record the slow interaction. If a component re-renders more than the 16ms frame budget, memoize it with `useMemo` or split the context provider.';
 
 test('groundingAnchors counts DISTINCT anchor kinds, not raw hits', () => {
   const a = groundingAnchors(GROUNDED);

@@ -124,10 +124,16 @@ export function gradeLedger({
       why: `Proposal hit-rate ${pct(proposalQuality.hitRate)} across ${proposalQuality.total} proposed classes is below the ${pct(HITRATE_FLOOR)} bar — tighten the propose prompt with grep-grounded evidence.`,
     });
   }
-  const rr = councilHealth.responseRate ?? 1;
-  verdicts.push(rr >= COUNCIL_HEALTH_GATE
-    ? { agent: 'council members', verdict: 'keep', why: `Council response-rate ${pct(rr)} is above the ${pct(COUNCIL_HEALTH_GATE)} health gate — convening + parse-rate healthy, no change warranted.` }
-    : { agent: 'council members', verdict: 'reject', why: `Council response-rate ${pct(rr)} is below the ${pct(COUNCIL_HEALTH_GATE)} gate — members aren't answering parseably; try a different model.` });
+  // Don't synthesize a 100% response-rate when telemetry is MISSING — that would emit a false "keep"
+  // and hide a measurement gap (CodeRabbit #25). Only verdict on a real measurement; otherwise say so.
+  const rr = councilHealth.responseRate;
+  if (rr == null) {
+    verdicts.push({ agent: 'council members', verdict: 'inconclusive', why: 'No council response-rate telemetry this window — cannot judge convening/parse health.' });
+  } else {
+    verdicts.push(rr >= COUNCIL_HEALTH_GATE
+      ? { agent: 'council members', verdict: 'keep', why: `Council response-rate ${pct(rr)} is above the ${pct(COUNCIL_HEALTH_GATE)} health gate — convening + parse-rate healthy, no change warranted.` }
+      : { agent: 'council members', verdict: 'reject', why: `Council response-rate ${pct(rr)} is below the ${pct(COUNCIL_HEALTH_GATE)} gate — members aren't answering parseably; try a different model.` });
+  }
 
   const stuckLessons = [...stuckTaste, ...stuckAnswer];
   return { targets, stuckLessons, verdicts, headline: formatGradeHeadline({ targets, stuck: stuckLessons.length }) };

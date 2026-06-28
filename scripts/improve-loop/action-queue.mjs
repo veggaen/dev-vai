@@ -48,7 +48,7 @@ export function buildActionQueue(grade = {}, { stuckBase = STUCK_PRIORITY_BASE }
   const actions = [];
 
   for (const s of grade.stuckLessons ?? []) {
-    const isVisual = s.lane === 'visual';
+    const isVisual = s.lane === 'visual' || s.lane === 'ui'; // 'ui' maps to the visual persona too (CodeRabbit #25)
     actions.push({
       type: isVisual ? 'visual-fix' : 'answer-fix',
       priority: stuckBase + Number(s.timesSeen ?? 0),

@@ -15,6 +15,8 @@
  * Pure + I/O-light (only reads the target file), so it unit-tests with an injected reader.
  */
 
+import { readFileSync } from 'node:fs';
+
 /** A `find` is non-executable if it is a comment, a bare string, or empty/prose. These are
  *  the lines that "look like a fix" but change no behaviour — qwen's #2 recurring failure. */
 export function isNonExecutableFind(find) {
@@ -85,7 +87,9 @@ export function recoverFind(source, find) {
  *   correctedFind is set when a near-miss find was whitespace-recovered to its exact source text.
  */
 export function verifyProposal(proposal, { readFile } = {}) {
-  const reader = readFile ?? ((p) => { const { readFileSync } = require('node:fs'); return readFileSync(p, 'utf8'); });
+  // ESM-safe default reader — `require` is not defined in an ES module, so the old fallback threw
+  // and turned every readable proposal into a false no-file when readFile was omitted (CodeRabbit #25).
+  const reader = readFile ?? ((p) => readFileSync(p, 'utf8'));
   if (!proposal || !proposal.find) return { ok: false, code: 'no-find', detail: 'proposal has no find line' };
   if (!proposal.file) return { ok: false, code: 'no-file', detail: 'proposal has no file' };
 

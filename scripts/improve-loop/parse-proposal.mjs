@@ -19,9 +19,15 @@
  */
 
 /** Double regex-style backslash escapes so a code line survives JSON.parse with its escapes literal.
- *  Keeps \" (quote) and \\ (already escaped) as-is; turns \b \s \w \. \n … into \\b \\s … */
+ *  Keeps the STRUCTURAL JSON escapes (\" \\ \/ \n \t \r \f \uXXXX) intact so a genuine multiline
+ *  find/replace stays multiline (CodeRabbit #25: doubling \n/\t/\r collapsed valid multiline edits
+ *  into literal "\n" text). Doubles the regex-only escapes (\b \s \w \d \. …) that aren't valid JSON. */
 export function repairJsonRegexEscapes(s) {
-  return String(s).replace(/\\(.)/g, (m, c) => (c === '"' || c === '\\') ? m : '\\\\' + c);
+  return String(s).replace(/\\(u[0-9a-fA-F]{4}|.)/g, (m, c) => {
+    // Valid JSON escapes — leave as-is.
+    if (m === '\\"' || m === '\\\\' || m === '\\/' || m === '\\n' || m === '\\t' || m === '\\r' || m === '\\f' || /^\\u[0-9a-fA-F]{4}$/.test(m)) return m;
+    return '\\\\' + c; // regex-only escape (\b \s \w \d \. etc.) → double so it stays literal
+  });
 }
 
 /** True if find/replace contains any C0 control char (0x00-0x1f) — a single code line never does,

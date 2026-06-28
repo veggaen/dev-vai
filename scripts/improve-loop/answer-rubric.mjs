@@ -18,6 +18,7 @@
  * council answer; db persists the verdict; the operator surfaces the compact form.
  */
 import { detectAnswerSignals } from './vague-answer.mjs';
+import { groundingAnchors } from './grounding-gate.mjs';
 
 const clamp = (n, lo = 0, hi = 10) => Math.max(lo, Math.min(hi, n));
 const round1 = (n) => Math.round(n * 10) / 10;
@@ -56,10 +57,17 @@ export function judgeAnswerExcellence(answer, opts = {}) {
     };
   }
 
-  // GROUNDING - concrete specifics (numbers/names/links/code/examples) vs ungrounded prose.
-  let grounding = grounded ? 8 : 4;
-  if (!grounded && words > 25) { grounding = 2; add('P1', 'no concrete grounding', `${words} words, no numbers/names/links/examples`, 'cite a number, name, file ref, or worked example'); }
-  if (confident && !grounded) { grounding = clamp(grounding - 1); }
+  // GROUNDING — by anchor DEPTH, not the boolean `grounded` flag. One stray anchor in a long answer
+  // used to score grounding=8 and dodge the "no concrete grounding" flaw (CodeRabbit #25). Score by
+  // how many DISTINCT concrete anchors the answer carries: ≥2 is genuinely grounded, 1 is thin, 0 is
+  // ungrounded prose. Short answers aren't penalised for thinness.
+  const anchorDepth = groundingAnchors(text).anchors;
+  let grounding = anchorDepth >= 2 ? 8 : anchorDepth === 1 ? 5 : 4;
+  if (anchorDepth < 2 && words > 25) {
+    grounding = anchorDepth === 1 ? 4 : 2;
+    add('P1', 'no concrete grounding', `${words} words, ${anchorDepth} concrete anchor(s)`, 'cite a number, name, file ref, or worked example');
+  }
+  if (confident && anchorDepth < 2) { grounding = clamp(grounding - 1); }
 
   // DIRECTNESS - answers the question, no throat-clearing preamble / prompt-restating.
   let directness = 8;

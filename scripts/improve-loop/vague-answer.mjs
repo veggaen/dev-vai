@@ -24,7 +24,9 @@ const HEDGE_MARKERS = [
 
 /** Concrete grounding: numbers, names, citations, code, units, dated facts. */
 const GROUNDING_MARKERS = [
-  /\d/,                                   // any digit (price, version, count, year)
+  // A MEANINGFUL number — decimal, multi-digit, %, or a number with a unit/year — NOT a bare list
+  // ordinal like "3 ways to…" (CodeRabbit #25: any-digit let generic prose self-qualify as grounded).
+  /\d[\d,]*\.\d|\b\d{2,}\b|\d+\s*(?:%|x|×|ms|s|kb|mb|gb|px|k|m|bn?|years?|hours?|days?|min|sec)|\$\s?\d|\b(?:19|20)\d{2}\b/i,
   /https?:\/\//i,                         // a link / source
   /`[^`]+`|```/,                          // code or an identifier in backticks
   /\b[A-Z][a-zA-Z]+(?:\.[a-z]{2,})\b/,    // file.ext / Some.Module

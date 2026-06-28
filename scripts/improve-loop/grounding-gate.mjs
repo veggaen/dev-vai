@@ -34,7 +34,11 @@ export const LONG_UNGROUNDED_WORDS = 60;
 export function groundingAnchors(answer) {
   const text = String(answer ?? '');
   const kinds = [];
-  if (/\d/.test(text)) kinds.push('number');
+  // Strip list-ordinal markers ("1. ", "2) ") first so a generic numbered checklist can't self-
+  // qualify as grounded via both 'number' AND 'enumerated' (CodeRabbit #25). 'number' then requires a
+  // MEANINGFUL number (decimal, multi-digit, %, unit, money, year) in the remaining prose.
+  const proseNoOrdinals = text.replace(/(^|\n)\s*\d+[.)]\s+/g, '$1');
+  if (/\d[\d,]*\.\d|\b\d{2,}\b|\d+\s*(?:%|x|×|ms|s|kb|mb|gb|px|k|m|bn?|years?|hours?|days?|min|sec)|\$\s?\d|\b(?:19|20)\d{2}\b/i.test(proseNoOrdinals)) kinds.push('number');
   if (/https?:\/\//i.test(text)) kinds.push('link');
   if (/`[^`]+`|```/.test(text)) kinds.push('code');
   if (/\b[A-Z][a-zA-Z]+(?:\.[a-z]{2,})\b/.test(text)) kinds.push('file-ref');

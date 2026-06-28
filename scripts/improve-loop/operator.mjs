@@ -361,10 +361,14 @@ async function doctor(opts) {
 
   const status = await printStatus(opts);
   const warnings = [...(status.warnings ?? [])];
-  if (warnings.length) {
+  // A FAIL must never be masked as WARN (CodeRabbit #25): if an earlier check set ok=false, report
+  // FAIL even when warnings also exist. WARN is only for "passed, with advisories".
+  if (!ok) {
+    console.log(`Doctor: FAIL${warnings.length ? ` (+ warnings: ${warnings.join(', ')})` : ''}`);
+  } else if (warnings.length) {
     console.log(`Doctor: WARN (${warnings.join(', ')})`);
   } else {
-    console.log(ok ? 'Doctor: PASS' : 'Doctor: FAIL');
+    console.log('Doctor: PASS');
   }
   return { ok, warnings };
 }

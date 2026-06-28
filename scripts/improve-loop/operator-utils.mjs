@@ -27,14 +27,20 @@ export function parseOperatorArgs(argv, env = process.env) {
     throw new Error(`unknown command '${command}'`);
   }
   const optionArgs = command === 'help' ? normalized : normalized.slice(1);
-  const mode = readFlag(optionArgs, '--mode', hasFlag(optionArgs, '--apply') ? 'apply' : 'observe');
+  const explicitApply = hasFlag(optionArgs, '--apply');
+  const mode = readFlag(optionArgs, '--mode', explicitApply ? 'apply' : 'observe');
   if (!['observe', 'apply'].includes(mode)) {
     throw new Error(`invalid --mode '${mode}'. Use observe or apply.`);
+  }
+  // Resolve a --mode/--apply CONFLICT up front (CodeRabbit #25: `--mode observe --apply` produced
+  // mode='observe' but apply=true, so buildSupervisorNodeArgs got inconsistent flags). They must agree.
+  if (explicitApply && mode !== 'apply') {
+    throw new Error(`conflicting flags: --apply implies apply mode, but --mode '${mode}' was given. Use one.`);
   }
   return {
     command,
     mode,
-    apply: mode === 'apply' || hasFlag(optionArgs, '--apply'),
+    apply: mode === 'apply',
     db: readFlag(optionArgs, '--db', env.VAI_IMPROVE_DB ?? DEFAULT_DB),
     baseUrl: readFlag(optionArgs, '--base-url', env.VAI_API ?? DEFAULT_BASE_URL),
     maxCycles: readFlag(optionArgs, '--max-cycles', '0'),
@@ -209,7 +215,7 @@ ${visualStream}
 Read the latest visual run as a compact council packet (no screenshots/trace):
 
 \`\`\`powershell
-node --experimental-sqlite scripts/improve-loop/operator.mjs visual --packet --db ${opts.db}
+${formatNodeCommand(['--experimental-sqlite', 'scripts/improve-loop/operator.mjs', 'visual', '--packet', '--db', opts.db])}
 \`\`\`
 
 Run the loop so it LOOKS at itself between text cycles (no-video, serial):

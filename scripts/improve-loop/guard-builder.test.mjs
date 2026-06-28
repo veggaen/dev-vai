@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { selectGuardShape, makeGuard, proveGuard, buildGuardFromDiscovery } from './guard-builder.mjs';
 
 const SLOP = 'A good company culture is defined by its focus on amazing people, with leaders who invest in hiring, onboarding, and retaining top talent. It fosters a supportive and productive environment where everyone simply thrives. The best teams always win because they obviously prioritise collaboration and the right mindset is the only way to build something lasting.';
-const GROUNDED = 'For React performance, open the React DevTools Profiler, record the slow interaction, and look for re-rendering components. Common fixes: 1. memoize with useMemo, 2. split context, 3. virtualize long lists.';
+// Genuinely grounded: a named tool, a code identifier (`useMemo`), AND a real number (16ms) — not
+// just a numbered checklist, which no longer self-qualifies as grounding (CodeRabbit #25).
+const GROUNDED = 'For React performance, open the React DevTools Profiler and record the slow interaction. If a component re-renders past the 16ms frame budget, memoize it with `useMemo` or split the context provider.';
 
 test('selectGuardShape maps a grounding lesson to the grounding shape', () => {
   const s = selectGuardShape({ lesson: 'no concrete grounding: cite a number, name, file ref' });

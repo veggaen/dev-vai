@@ -89,7 +89,15 @@ export function pickRoster(installed, { budgetBytes, max = 3, exclude = [] } = {
  */
 export async function withModelMounted(model, deps, fn) {
   const { waitForHeadroom, budgetBytes } = deps;
-  if (waitForHeadroom) await waitForHeadroom(budgetBytes).catch(() => {});
+  if (waitForHeadroom) {
+    // waitForHeadroom resolves with the CURRENT vram after its deadline (it doesn't throw). If it's
+    // still over budget, ABORT instead of mounting anyway — mounting a model with no headroom is the
+    // VRAM/BSOD hazard the guard exists to prevent (CodeRabbit #25).
+    const vram = await waitForHeadroom(budgetBytes).catch(() => null);
+    if (budgetBytes && typeof vram === 'number' && vram > budgetBytes) {
+      throw new Error(`no VRAM headroom for ${model}: ${(vram / 1e9).toFixed(1)}GB > budget ${(budgetBytes / 1e9).toFixed(1)}GB`);
+    }
+  }
   // The model is mounted lazily by the first generate call; ollama evicts it after keep_alive.
   return fn(model);
 }
@@ -152,8 +160,8 @@ export function buildBestAnswerVote(problem, candidates) {
   return (
     `You are judging proposed fixes from several AI models for this problem:\n${problem}\n\n` +
     `CANDIDATES:\n${list}\n\n` +
-    `Reply with STRICT JSON: {"best": <number>, "why": "<one sentence>"}. Pick the candidate most ` +
-    `likely to be correct AND complete (a truncated or partial code edit is WRONG). Only the number.`
+    `Reply with STRICT JSON only: {"best": <number>, "why": "<one sentence>"}. Pick the candidate most ` +
+    `likely to be correct AND complete (a truncated or partial code edit is WRONG). Output ONLY that JSON object.`
   );
 }
 
