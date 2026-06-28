@@ -17,18 +17,42 @@ import { TOOL_SPEC, runTool } from './tools.mjs';
 
 const MODEL = process.env.IMPROVE_GEN_MODEL ?? process.env.LOCAL_MODEL ?? 'qwen3:8b';
 
-/** Pull the first JSON object out of a model reply. */
-function parseToolCall(raw) {
-  const m = raw.match(/\{[\s\S]*?\}(?=\s*$|\s*[^}])/) ?? raw.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try { return JSON.parse(m[0]); } catch { return null; }
+/**
+ * Pull a tool-call JSON out of a model reply — ROBUSTLY, so every model gets a fair voice, not
+ * just ones that emit bare strict JSON. Reasoning models (deepseek-r1) wrap output in <think>…</think>
+ * and prose; others fence it in ```json. A too-strict parser silenced them ("no proposal") even when
+ * they HAD a valid answer. We: (1) strip <think> blocks, (2) prefer fenced ```json, (3) try EVERY
+ * balanced {...} candidate and return the first that parses into a tool-call object.
+ */
+export function parseToolCall(raw) {
+  if (!raw) return null;
+  // 1. Drop reasoning blocks so their stray braces don't get mistaken for the tool call.
+  let text = String(raw).replace(/<think>[\s\S]*?<\/think>/gi, ' ').replace(/<\/?think>/gi, ' ');
+  const tryParse = (s) => { try { const o = JSON.parse(s); return (o && typeof o === 'object' && (o.tool || o.file || o.find)) ? o : null; } catch { return null; } };
+  // 2. Prefer a fenced ```json … ``` block (most models' "final answer" format).
+  const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((m) => m[1]);
+  for (const f of fenced) { const o = tryParse(f.trim()); if (o) return o; }
+  // 3. Scan ALL balanced {...} candidates, longest-last (the real tool call usually comes after any
+  //    reasoning object). Balance-scan so nested braces are handled, not a greedy single regex.
+  const cands = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '{') continue;
+    let depth = 0;
+    for (let j = i; j < text.length; j++) {
+      if (text[j] === '{') depth++;
+      else if (text[j] === '}') { depth--; if (depth === 0) { cands.push(text.slice(i, j + 1)); break; } }
+    }
+  }
+  // Prefer a candidate that actually has a "tool"/"file"/"find" key; try last-first (post-reasoning).
+  for (const c of cands.reverse()) { const o = tryParse(c); if (o) return o; }
+  return null;
 }
 
 /**
  * Run the grounded proposal loop for one failure.
  * @returns {Promise<{proposal: object|null, transcript: string[]}>}
  */
-export async function proposeGrounded({ klass, summary, fails, hintFile, maxSteps = 6, preamble = '' }) {
+export async function proposeGrounded({ klass, summary, fails, hintFile, maxSteps = 9, preamble = '', model = MODEL }) {
   const transcript = [];
   const sys =
 `${preamble ? preamble + '\n\n' : ''}You are a senior engineer fixing a bug in the dev-vai TypeScript codebase.
@@ -54,7 +78,11 @@ Begin by locating the code. Your first reply must be a grep_repo or read_file ca
   for (let step = 0; step < maxSteps; step++) {
     await waitForVramHeadroom(7 * 1024 ** 3);
     let raw;
-    try { raw = await ollamaGenerate(MODEL, convo + '\n\nYour JSON tool call:', { numPredict: 300, timeoutMs: 120000 }); }
+    // think:false even for reasoning models HERE: the multi-step tool-loop IS the reasoning scaffold,
+    // and an 8B r1 with think:true burns its whole token budget on CoT and never emits the answer
+    // ("" every step → "no proposal"). Direct JSON is what the loop needs. (Proven: r1 returns clean
+    // tool-call JSON in ~7s with think off, vs 4617 truncated thinking-tokens with it on.)
+    try { raw = await ollamaGenerate(model, convo + '\n\nYour JSON tool call:', { numPredict: 400, timeoutMs: 120000, think: false }); }
     catch (e) { transcript.push(`step ${step}: model error ${String(e)}`); break; }
 
     const call = parseToolCall(raw);
@@ -76,7 +104,7 @@ Begin by locating the code. Your first reply must be a grep_repo or read_file ca
       let critRaw = '';
       try {
         await waitForVramHeadroom(7 * 1024 ** 3);
-        critRaw = await ollamaGenerate(MODEL, critiquePrompt, { numPredict: 320, timeoutMs: 120000 });
+        critRaw = await ollamaGenerate(model, critiquePrompt, { numPredict: 400, timeoutMs: 120000, think: false });
       } catch { /* keep original on critique failure */ }
       const revised = parseToolCall(critRaw);
       if (revised && revised.tool === 'propose' && revised.find) {

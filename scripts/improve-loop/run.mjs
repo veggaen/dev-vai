@@ -10,6 +10,7 @@
  * Usage:
  *   node scripts/improve-loop/run.mjs                 # default: ~6 generated / class
  *   node scripts/improve-loop/run.mjs --per-class 12 --vram-gb 7 --cooldown 2500
+ *   node scripts/improve-loop/run.mjs --seeds-only --limit 1  # one controlled probe
  *   node scripts/improve-loop/run.mjs --base-url http://localhost:3006
  *   node scripts/improve-loop/run.mjs --seeds-only    # no generation, just the known rows
  *
@@ -18,9 +19,12 @@
  */
 import {
   openDb, startRun, endRun, upsertPrompt, alreadyScored,
-  recordResult, queueFix, classStats, liveHeartbeat,
+  recordResult, queueFix, classStats, liveHeartbeat, recordAnswerLesson, lastScoredByPrompt,
+  reopenClass,
 } from './db.mjs';
-import { waitForVramHeadroom, loadedVram, runThroughVai, sleep } from './driver.mjs';
+import { judgeAnswerExcellence } from './answer-rubric.mjs';
+import { gradeWithAppGate, appVerdictToScore } from './app-quality.mjs';
+import { waitForVramHeadroom, loadedVram, runThroughVai, sleep, ensureRuntimeReady, isInfraError, isOverVramBudget } from './driver.mjs';
 import { generatePrompts, gradeInterpretation, mineFailures } from './brain.mjs';
 import { SEED_CLASSES } from './seeds.mjs';
 import { claudeWorkItems } from './claude-prompts.mjs';
@@ -35,6 +39,13 @@ const VRAM_BUDGET = Number(opt('--vram-gb', '7')) * 1024 ** 3;
 const COOLDOWN_MS = Number(opt('--cooldown', '2000'));
 const SEEDS_ONLY = has('--seeds-only');
 const DB_PATH = opt('--db', 'scripts/improve-loop/.corpus.sqlite');
+const LIMIT = Math.max(0, Number(opt('--limit', '0')) || 0);
+// WALL-CLOCK BUDGET (the stall fix): cap how long ONE observe run spends starting new turns. Without
+// this, a ~50-prompt list × up-to-220s/turn could block the whole loop for 28–91 min (measured),
+// freezing every other cycle phase. Default 8 min ≈ a handful of turns; resumable + least-recently-
+// scored-first ordering means each bounded cycle ADVANCES through the corpus instead of re-grinding.
+// 0 disables (legacy unbounded behaviour). An in-flight turn always finishes — we just stop STARTING new ones.
+const MAX_RUN_MS = Math.max(0, Number(opt('--max-run-ms', String(8 * 60_000))) || 0);
 // Claude authors the bulk of prompts; qwen contributes only this fraction as a
 // minority top-up per class (0 = none, 1 = full PER_CLASS). Default small.
 const QWEN_FRAC = Math.max(0, Math.min(1, Number(opt('--qwen-frac', '0.3'))));
@@ -82,6 +93,23 @@ async function main() {
   const runId = startRun(db, `per-class=${PER_CLASS} seeds-only=${SEEDS_ONLY}`);
   ui.runId = runId;
 
+  // Readiness gate (Verification-First): confirm the runtime is serving and pre-warm the
+  // model BEFORE any turn, so the first prompts don't AggregateError on a cold model and
+  // get mis-scored as Vai failures. Bakes in the manual curl-warm we used to do by hand.
+  ui.now = 'readying runtime (health + model warm)…';
+  const ready = await ensureRuntimeReady(BASE_URL).catch((e) => ({ ready: false, detail: String(e) }));
+  ui.now = ready.detail ?? (ready.ready ? 'runtime ready' : 'runtime not ready');
+  if (!ready.ready) {
+    process.stderr.write(`\n[improve-loop] ${ready.detail}\n`);
+    endRun(db, runId, 'aborted-runtime-down');
+    // Exit NON-ZERO so the engine knows observe could NOT run (vs ran-and-found-nothing). Exit code
+    // 0 made the engine count a runtime-down abort as a "successful" observe → the health check then
+    // cried "ran but landed NOTHING → meta-slop" every cycle, when the truth is just "Vai is down".
+    // 75 = EX_TEMPFAIL (a transient/retryable failure), distinguishing it from a real error (1).
+    process.exitCode = 75;
+    return;
+  }
+
   let interrupted = false;
   const onSig = () => { interrupted = true; };
   process.on('SIGINT', onSig);
@@ -112,6 +140,12 @@ async function main() {
       ui.now = `qwen tops up ${qwenN} prompts for ${c.klass}…`;
       render();
       ui.vram = await waitForVramHeadroom(VRAM_BUDGET);
+      if (isOverVramBudget(ui.vram, VRAM_BUDGET)) {
+        ui.crashes++;
+        ui.now = `infra skip qwen top-up (VRAM ${(ui.vram / GB).toFixed(1)}GB > budget ${(VRAM_BUDGET / GB).toFixed(1)}GB)`;
+        render();
+        continue;
+      }
       const gen = await generatePrompts(c.klass, c.expectedIntent, c.seeds, qwenN);
       for (const g of gen) {
         if (seen.has(g)) continue;
@@ -121,11 +155,32 @@ async function main() {
       await sleep(COOLDOWN_MS);
     }
   }
-  ui.total = work.length;
+  // LEAST-RECENTLY-SCORED FIRST: order the work so each wall-clock-bounded cycle ADVANCES through
+  // the corpus instead of re-grinding the front of a fixed list. A prompt never scored sorts first
+  // (epoch 0), then oldest-scored; ties keep the original authored order (stable). This is what makes
+  // the budget cut a stall WITHOUT starving prompts at the back of the list.
+  const lastScored = lastScoredByPrompt(db);
+  const ordered = work
+    .map((item, i) => ({ item, i, last: lastScored.get(item.prompt) ?? '' }))
+    .sort((a, b) => (a.last < b.last ? -1 : a.last > b.last ? 1 : a.i - b.i))
+    .map((x) => x.item);
+  const selectedWork = LIMIT > 0 ? ordered.slice(0, LIMIT) : ordered;
+  ui.total = selectedWork.length;
 
+  const runStartedAt = Date.now();
+  let budgetStopped = false;
   const failures = [];
-  for (const item of work) {
+  for (const item of selectedWork) {
     if (interrupted) break;
+    // WALL-CLOCK BUDGET: stop STARTING new turns once the cycle's time is spent (an in-flight turn
+    // already finished by here). Resumable: next cycle re-orders least-recently-scored-first and
+    // picks up where this one left off. This is the stall fix — a cycle can no longer run 90 min.
+    if (MAX_RUN_MS > 0 && Date.now() - runStartedAt >= MAX_RUN_MS) {
+      budgetStopped = true;
+      ui.now = `wall-clock budget reached (${Math.round(MAX_RUN_MS / 60000)}m) — stopping this cycle (resumable)`;
+      render();
+      break;
+    }
     const promptId = upsertPrompt(db, {
       prompt: item.prompt, klass: item.klass, expectedIntent: item.expectedIntent, origin: item.origin,
     });
@@ -137,6 +192,14 @@ async function main() {
     // CRASH GUARD: wait for VRAM headroom, then ONE serial turn.
     ui.vram = await waitForVramHeadroom(VRAM_BUDGET);
     render();
+    if (isOverVramBudget(ui.vram, VRAM_BUDGET)) {
+      ui.crashes++;
+      ui.now = `infra skip (VRAM ${(ui.vram / GB).toFixed(1)}GB > budget ${(VRAM_BUDGET / GB).toFixed(1)}GB)`;
+      ui.done++;
+      render();
+      await sleep(COOLDOWN_MS);
+      continue;
+    }
 
     let vai;
     try {
@@ -148,7 +211,20 @@ async function main() {
         },
       });
     } catch (err) {
-      ui.crashes++; // a timeout/error is recorded as a non-pass, loop continues
+      // Verification-First (constitution #3): an INFRA failure (cold model AggregateError,
+      // runtime down, socket reset) is NOT a Vai logic failure. Grading it pollutes the
+      // corpus with false negatives. So we SKIP it — not scored, not counted as a failure —
+      // and re-ready the runtime before the next turn. Only genuine answer-level errors
+      // (a real timeout while connected) fall through to be recorded.
+      if (isInfraError(err)) {
+        ui.crashes++; // tracked for the operator, but NOT written as a graded result
+        ui.now = `infra skip (${String(err).slice(0, 40)}) — re-readying…`;
+        await ensureRuntimeReady(BASE_URL).catch(() => {});
+        ui.done++;
+        await sleep(COOLDOWN_MS);
+        continue;
+      }
+      ui.crashes++;
       recordResult(db, {
         runId, promptId, klass: item.klass, passed: false,
         gradeReason: `run error: ${String(err).slice(0, 80)}`,
@@ -161,17 +237,58 @@ async function main() {
 
     ui.readAs = vai.council?.realIntent ?? '(no council)';
     const grade = await gradeInterpretation(item.klass, item.expectedIntent, item.prompt, vai);
+    // Verification-First: a grader-MODEL failure (not Vai's fault) must be SKIPPED, never
+    // recorded as a logic failure — the same rule the runThroughVai catch enforces above.
+    if (grade.infra) {
+      ui.crashes++;
+      ui.now = 'grader infra skip (model judge unavailable) — not scored';
+      ui.done++;
+      render();
+      await sleep(COOLDOWN_MS);
+      continue;
+    }
     ui.lastPass = grade.passed;
+
+    // Text-lane twin of the visual taste pass: grade HOW excellent the answer is.
+    // ALIGN WITH THE APP: grade with the SAME gate the live app ships through
+    // (evaluateChatAnswerQuality) when it's built — so the loop optimizes what actually decides
+    // shipping, not its own crude rubric (the misalignment that made results hollow + re-discovered a
+    // phantom grounding gap 79×). Falls back to the rubric when the dist isn't available. The crude
+    // rubric still runs too (kept for its craft sub-scores), but the APP gate drives the score+lesson.
+    const excellence = judgeAnswerExcellence(vai.text);
+    let overallScore = excellence.overall;
+    let lesson = excellence.lesson;
+    let appQualityJson = null;
+    const app = await gradeWithAppGate(item.prompt, vai.text, { strategy: vai.council?.outcome });
+    if (app) {
+      overallScore = appVerdictToScore(app.verdict, app.score);
+      // App-aligned lesson: name what the answer actually FAILED (actionability/comparison/honesty),
+      // the thing the app would reject it for — far more actionable than "cite a number".
+      lesson = app.verdict === 'pass'
+        ? 'app quality gate: PASS — keep this answer shape'
+        : `app quality gate: ${app.verdict.toUpperCase()} — missing: ${app.missing.slice(0, 3).join(', ') || 'quality'}`;
+      appQualityJson = JSON.stringify(app);
+    }
 
     recordResult(db, {
       runId, promptId, klass: item.klass,
       readAs: vai.council?.realIntent, outcome: vai.council?.outcome,
       agreement: vai.council?.agreement, answerExcerpt: vai.text,
       passed: grade.passed, gradeReason: grade.reason, durationMs: vai.durationMs,
+      answerExcellence: overallScore,
+      answerExcellenceJson: appQualityJson ?? JSON.stringify(excellence),
     });
+    recordAnswerLesson(db, { lesson, runId, overall: overallScore });
     if (!grade.passed) {
       failures.push({ klass: item.klass, reason: grade.reason });
       ui.failures++;
+    } else {
+      // RE-OPEN a recovered class. Stale 'propose:no-file' / 'class:recently-fixed' flags exclude a
+      // class from targeting and were NEVER cleared on recovery — so every class that ever got flagged
+      // dropped out for ~24h (the loop slowly starved its own target set). A PASS here is live proof the
+      // class is groundable + the prior fix held; reopenClass contradicts those flags (prefix-matched,
+      // since the no-file claim embeds a dynamic location) so the loop can re-target it if it regresses.
+      reopenClass(db, item.klass);
     }
     ui.done++;
     render();
@@ -183,10 +300,12 @@ async function main() {
     queueFix(db, { runId, klass: cand.klass, failureCount: cand.failureCount, location: cand.location, summary: cand.summary });
     ui.fixes++;
   }
-  endRun(db, runId, interrupted ? 'interrupted' : 'done');
+  const status = interrupted ? 'interrupted' : budgetStopped ? 'budget-stopped' : 'done';
+  endRun(db, runId, status);
   ui.vram = await loadedVram();
   render();
-  process.stdout.write(`\n${interrupted ? '■ interrupted (resumable)' : '✓ run complete'} — ${ui.fixes} fix candidates in ${DB_PATH}\n`);
+  const tag = interrupted ? '■ interrupted (resumable)' : budgetStopped ? '⏱ wall-clock budget reached (resumable — advances next cycle)' : '✓ run complete';
+  process.stdout.write(`\n${tag} — ${ui.fixes} fix candidates in ${DB_PATH}\n`);
   process.stdout.write(`  inspect: node scripts/improve-loop/report.mjs\n`);
 }
 

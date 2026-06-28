@@ -15,18 +15,35 @@
  *   class with a best-guess code location — queued for human approval, never
  *   auto-applied (loop is read-only on source).
  */
-import { ollamaGenerate } from './driver.mjs';
+import { ollamaGenerate, residentModel } from './driver.mjs';
+import { scoreVagueOverconfident } from './vague-answer.mjs';
 
 const GEN_MODEL = process.env.IMPROVE_GEN_MODEL ?? process.env.LOCAL_MODEL ?? 'qwen3:8b';
 
-/** Best-guess code location per class — where a fix for this class likely lives. */
-const CLASS_LOCATION = {
+/** Best-guess code location per class — where a fix for this class likely lives. Exported so
+ *  propose-fix can synthesize a fix target for ANY class without depending on a mined `fixes`
+ *  row (the fragile chain that starved the prototype loop). */
+export const CLASS_LOCATION = {
   'routing/build-verb-poison':
     'packages/core/src/chat/build-execution-intent.ts:100 (BUILD_VERB_ANYWHERE disqualifies clean questions)',
   'routing/fresh-data-trigger':
     'packages/core/src/chat/build-execution-intent.ts:88 (FRESH_DATA_LEAD too narrow) + search/pipeline.ts:247',
   'answer/opportunity-framing':
     'packages/core/src/chat/deterministic-facts-router.ts (no idea/opportunity answer contract)',
+  'answer/vague-overconfident':
+    'packages/core/src/chat/service.ts (draft quality contract) + council redraft gate (grounding not enforced before ship)',
+  // Real source locations for the four classes that were stuck at "(unknown — investigate)" —
+  // they were REAL weak classes (35–73% pass-rate, 78 failing rows) the loop could never fix
+  // because no file was mapped, so every proposal died at the no-file guard. Grounded against
+  // the actual router thicket (deterministic-facts-router.ts) + the follow-up resolver.
+  'routing/comparison':
+    'packages/core/src/chat/deterministic-facts-router.ts:1162 (comparePair matcher answers/defines one entity instead of comparing the two)',
+  'answer/curated-trap':
+    'packages/core/src/chat/deterministic-facts-router.ts:526 (longest-curated-key-wins fires a hardcoded answer too broadly)',
+  'answer/freshness-staleness':
+    'packages/core/src/chat/build-execution-intent.ts:88 (FRESH_DATA_LEAD misses time-sensitive facts → answered from frozen memory)',
+  'followup/context-carry':
+    'packages/core/src/chat/contextual-resolver.ts:27 (THING_REF pronoun/ordinal resolution against the prior turn)',
 };
 
 /** Ask qwen for N fresh prompts in a class. Returns string[] (best-effort parse). */
@@ -43,7 +60,10 @@ export async function generatePrompts(klass, expectedIntent, seedExamples, count
     `Output ONLY the questions, one per line, no numbering, no commentary.`;
   let raw = '';
   try {
-    raw = await ollamaGenerate(GEN_MODEL, prompt, { numPredict: 400 });
+    // Generate on the resident model (the one Vai is answering with) so the top-up doesn't
+    // evict it and force the next WS turn to cold-load under timeout. Falls back to GEN_MODEL.
+    const genModel = (await residentModel()) ?? GEN_MODEL;
+    raw = await ollamaGenerate(genModel, prompt, { numPredict: 400 });
   } catch {
     return [];
   }
@@ -75,30 +95,71 @@ export async function gradeInterpretation(klass, expectedIntent, prompt, vai) {
     if (gaveIdeas) return { passed: true, reason: 'proposed concrete ideas/opportunities' };
   }
 
+  if (klass === 'answer/vague-overconfident') {
+    // The class the user flagged: confident-sounding but generic, ungrounded prose
+    // ("AI slop"). Deterministic surface scoring — ungameable, no model needed.
+    const verdict = scoreVagueOverconfident(vai.text ?? '');
+    if (verdict.vague) {
+      return { passed: false, reason: `vague/overconfident (score ${verdict.score}): ${verdict.signals.slice(0, 2).join('; ')}` };
+    }
+    return { passed: true, reason: `grounded enough (score ${verdict.score})` };
+  }
+
   if (klass === 'routing/build-verb-poison') {
     // The prompt is a QUESTION that merely mentions a build gerund. It must be
     // answered as a question, not turned into a build / treated as build-intent.
+    // The AUTHORITATIVE signal is the ANSWER shape: did Vai actually scaffold, or ask the
+    // user for a stack/scaffold target? The council's `readAs` intent string alone is NOT
+    // reliable — it routinely contains the word "building"/"build" for a pure advice ask
+    // ("seeking guidance on team BUILDING fundamentals"), which produced false-negative
+    // grades that dragged the pass rate down even when the answer was a correct advice reply.
     const builtSomething = /```|title=|installed dependencies|scaffold|here('?s| is) (your|the) (app|project)/i.test(answer);
     if (builtSomething) return { passed: false, reason: 'turned an innocent question into a build' };
-    if (readAs && /build|scaffold|create an app|make an app/.test(readAs)) {
-      return { passed: false, reason: `council read it as a build: "${readAs}"` };
+    // A build-shaped DEFLECTION counts as a build-misread too ("give me a target stack and
+    // I'll scaffold"), but ONLY when the answer itself solicits build inputs — not from the
+    // intent string. This keeps "team building fundamentals" advice (a correct answer) passing.
+    const answerSolicitsBuild =
+      /\b(?:target stack|tech stack|what (?:stack|framework|language)|one-line goal|i'?ll scaffold|scaffold (?:a|the|something)|what (?:do you )?want (?:me )?to build)\b/i.test(answer);
+    const readAsBuild = readAs && /\b(?:build (?:an? )?(?:app|project|tool|site|dashboard)|scaffold|create an app|make an app|treat (?:this|it) as a build)\b/.test(readAs);
+    if (answerSolicitsBuild && readAsBuild) {
+      return { passed: false, reason: `read+answered as a build: "${readAs}"` };
     }
     return { passed: true, reason: 'answered as a question, not a build' };
   }
 
+  if (klass === 'answer/curated-trap') {
+    // Failure mode: an unrelated hardcoded curated answer fires on a question that isn't
+    // asking for it. The known offender is the Norway business-idea/legal-forms block — so
+    // its leak into a travel/weather/React/culture ask is a deterministic, ungameable FAIL.
+    // Distinctive tokens only (no bare "as"/"ans") so ordinary prose can't false-positive.
+    const leakedLegalForms = /\b(enk|aksjeselskap|\basa\b|\bnuf\b|sole proprietorship|general partnership)\b/i.test(answer)
+      && /benefit|disadvantage|liabilit|taxation/i.test(answer);
+    const leakedBusinessIdeas = /\b(business idea|startup idea|company you could start|business opportunit)\b/i.test(answer);
+    if (leakedLegalForms || leakedBusinessIdeas) {
+      return { passed: false, reason: 'unrelated curated business answer fired (curated-trap)' };
+    }
+    // Clean of the known leak → fall through to the (now-cheap, resident-model) judge to
+    // catch OTHER curated misfires without auto-passing.
+  }
+
   // Generic fallback: cheap LLM judge of interpretation match. Blind to prettiness.
+  // Judge on whatever model is ALREADY resident (no evict+cold-load swap — the grader's #1
+  // timeout source and a BSOD-rule violation); only fall back to GEN_MODEL when nothing is loaded.
   const judgePrompt =
     `A user asked: "${prompt}"\n` +
     `The expected interpretation is: ${expectedIntent}.\n` +
     `The assistant read it as: "${vai.council?.realIntent ?? '(unknown)'}" and answered (excerpt):\n` +
     `"${(vai.text ?? '').slice(0, 400)}"\n\n` +
     `Did the assistant interpret the question the way expected? Answer strictly "YES" or "NO" then a 6-word reason.`;
+  const judgeModel = (await residentModel()) ?? GEN_MODEL;
   try {
-    const verdict = await ollamaGenerate(GEN_MODEL, judgePrompt, { numPredict: 40 });
+    const verdict = await ollamaGenerate(judgeModel, judgePrompt, { numPredict: 40 });
     const passed = /^\s*yes\b/i.test(verdict);
     return { passed, reason: verdict.replace(/^\s*(yes|no)\b[:.\-\s]*/i, '').slice(0, 80) || 'judge verdict' };
   } catch {
-    return { passed: false, reason: 'grader unavailable — counted as fail (conservative)' };
+    // Verification-First: a grader-model failure is INFRA, not a Vai logic failure. Signal it
+    // so the caller SKIPS (re-readies) instead of polluting the corpus with a false negative.
+    return { infra: true, passed: false, reason: 'grader unavailable — infra skip (not a Vai failure)' };
   }
 }
 
