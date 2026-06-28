@@ -126,13 +126,28 @@ function isModuleScope(node) {
   return true;
 }
 
-/** A RegExp arg that can't be a compile-time constant (built from a var/template). */
+/** True for an arg that is NOT a compile-time constant string (built from a var/template/call). */
+function isConstStringArg(a) {
+  return ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a);
+}
+
+/** A RegExp construction that can't be a compile-time constant — its PATTERN or its FLAGS arg is
+ *  dynamic. The old check ignored the flags arg, so `new RegExp('x', someVar)` read as constant
+ *  (CodeRabbit #25). A bare `new RegExp(pattern)` with no args is treated as dynamic. */
 function argIsDynamic(call) {
-  const a = call.arguments[0];
-  if (!a) return false;
-  if (ts.isStringLiteral(a)) return false;            // constant → engine/JIT can hoist
-  if (ts.isNoSubstitutionTemplateLiteral(a)) return false;
-  return true; // identifier, template with substitutions, call, etc.
+  const pattern = call.arguments[0];
+  if (!pattern) return true;                          // new RegExp() with no literal pattern
+  if (!isConstStringArg(pattern)) return true;        // dynamic pattern
+  const flags = call.arguments[1];
+  if (flags && !isConstStringArg(flags)) return true; // constant pattern but DYNAMIC flags
+  return false;                                       // both constant → engine/JIT can hoist
+}
+
+function isFunctionLike(n) {
+  return ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n)
+    || ts.isArrowFunction(n) || ts.isFunctionExpression(n)
+    || ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n)
+    || ts.isConstructorDeclaration(n);
 }
 
 function countLoopsInBody(fnOrBlock) {
@@ -140,9 +155,11 @@ function countLoopsInBody(fnOrBlock) {
   const visit = (n) => {
     if (ts.isForStatement(n) || ts.isForOfStatement(n) || ts.isForInStatement(n)
       || ts.isWhileStatement(n) || ts.isDoStatement(n)) loops += 1;
-    n.forEachChild(visit);
+    // Do NOT descend into a NESTED function body — a loop inside a callback belongs to that callback,
+    // not the outer function (CodeRabbit #25: it was inflating the outer loop count).
+    n.forEachChild((c) => { if (!isFunctionLike(c)) visit(c); });
   };
-  fnOrBlock.forEachChild(visit);
+  fnOrBlock.forEachChild((c) => { if (!isFunctionLike(c)) visit(c); });
   return loops;
 }
 

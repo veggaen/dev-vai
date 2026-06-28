@@ -24,6 +24,7 @@ const sf = ts.createSourceFile(ENGINE, src, ts.ScriptTarget.Latest, true);
 
 let cls = null;
 sf.forEachChild((n) => { if (ts.isClassDeclaration(n) && n.name?.text === 'VaiEngine') cls = n; });
+if (!cls) { console.error('VaiEngine class not found'); process.exit(1); } // guard before reading cls.members (CodeRabbit #25)
 
 let method = null;
 for (const m of cls.members) {

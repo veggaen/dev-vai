@@ -22,6 +22,7 @@ const src = readFileSync(ENGINE, 'utf8');
 const sf = ts.createSourceFile(ENGINE, src, ts.ScriptTarget.Latest, true);
 let cls = null;
 sf.forEachChild((n) => { if (ts.isClassDeclaration(n) && n.name?.text === 'VaiEngine') cls = n; });
+if (!cls) { console.error('VaiEngine class not found'); process.exit(1); } // guard before reading cls.members (CodeRabbit #25)
 
 const byName = {};
 for (const m of cls.members) {
