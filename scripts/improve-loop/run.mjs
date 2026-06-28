@@ -20,6 +20,7 @@
 import {
   openDb, startRun, endRun, upsertPrompt, alreadyScored,
   recordResult, queueFix, classStats, liveHeartbeat, recordAnswerLesson, lastScoredByPrompt,
+  reopenClass,
 } from './db.mjs';
 import { judgeAnswerExcellence } from './answer-rubric.mjs';
 import { gradeWithAppGate, appVerdictToScore } from './app-quality.mjs';
@@ -281,6 +282,13 @@ async function main() {
     if (!grade.passed) {
       failures.push({ klass: item.klass, reason: grade.reason });
       ui.failures++;
+    } else {
+      // RE-OPEN a recovered class. Stale 'propose:no-file' / 'class:recently-fixed' flags exclude a
+      // class from targeting and were NEVER cleared on recovery — so every class that ever got flagged
+      // dropped out for ~24h (the loop slowly starved its own target set). A PASS here is live proof the
+      // class is groundable + the prior fix held; reopenClass contradicts those flags (prefix-matched,
+      // since the no-file claim embeds a dynamic location) so the loop can re-target it if it regresses.
+      reopenClass(db, item.klass);
     }
     ui.done++;
     render();

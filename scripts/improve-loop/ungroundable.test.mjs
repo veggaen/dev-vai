@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { openDb, recordKnowledge, ungroundableClasses } from './db.mjs';
+import { openDb, recordKnowledge, ungroundableClasses, reopenClass } from './db.mjs';
 import { buildLoopContext } from './loop-processes.mjs';
 
 const db0 = () => openDb(':memory:');
@@ -80,4 +80,19 @@ test('with no fixable class left, worstClass is null (engine yields, does not sp
   recordKnowledge(db, { scope: 'propose:no-file', claim: 'class "routing/comparison" has no resolvable source file', confirm: true });
   const ctx = buildLoopContext(db, { motion: { state: 'flat' }, cycle: 1 });
   assert.equal(ctx.worstClass, null, 'no groundable failing class ⇒ null, not the dead one');
+});
+
+test('reopenClass: a live PASS re-opens a stale no-file class; a later re-confirm re-excludes it', () => {
+  const db = db0();
+  const claim = 'class "routing/comparison" has no resolvable source file (location="x.ts:5") — propose cannot ground a fix';
+  recordKnowledge(db, { scope: 'propose:no-file', claim, kind: 'guard', confirm: true });
+  assert.equal(ungroundableClasses(db).has('routing/comparison'), true, 'flagged → excluded');
+  // observe sees the class PASS → reopen (prefix match handles the dynamic location in the claim)
+  const touched = reopenClass(db, 'routing/comparison');
+  assert.ok(touched >= 1, 'reopenClass matched the flag by class prefix');
+  assert.equal(ungroundableClasses(db).has('routing/comparison'), false, 'one PASS re-opens it');
+  // a later failed propose re-confirms → re-excluded (recoverable, not a permanent unlock)
+  recordKnowledge(db, { scope: 'propose:no-file', claim, kind: 'guard', confirm: true });
+  recordKnowledge(db, { scope: 'propose:no-file', claim, kind: 'guard', confirm: true });
+  assert.equal(ungroundableClasses(db).has('routing/comparison'), true, 're-confirm re-excludes');
 });

@@ -874,6 +874,36 @@ export function campaignClassStats(db) {
   }
 }
 
+/** RE-OPEN a class for targeting: contradict its stale 'propose:no-file' and 'class:recently-fixed'
+ *  flags. Called by observe when a class's prompt PASSES — live proof the class is groundable and the
+ *  prior fix held. Without this, every class that was ever flagged stayed excluded until the 24h decay,
+ *  so the loop slowly starved its own target set. Matches by class PREFIX because the no-file claim
+ *  embeds a dynamic location string (so an exact-claim contradiction would silently miss). Bumps
+ *  contradictions on every matching flag row; ungroundableClasses excludes only when conf ≥ contra,
+ *  so one PASS flips a stale flag groundable. Returns how many flag rows it touched. */
+export function reopenClass(db, klass) {
+  if (!klass) return 0;
+  let touched = 0;
+  try {
+    const now = new Date().toISOString();
+    for (const scope of ['propose:no-file', 'class:recently-fixed']) {
+      const rows = db.prepare(
+        "SELECT claim FROM project_knowledge WHERE scope=? AND claim LIKE ?",
+      ).all(scope, `class "${klass}" %`);
+      for (const r of rows) {
+        // Push contradictions strictly ABOVE confirmations so ONE live PASS decisively re-opens the
+        // class (ungroundableClasses excludes while confirmations >= contradictions). A later failed
+        // propose re-confirms and re-excludes — so this is a recoverable signal, not a permanent unlock.
+        db.prepare(
+          "UPDATE project_knowledge SET contradictions = confirmations + 1, last_seen = ? WHERE scope=? AND claim=?",
+        ).run(now, scope, r.claim);
+        touched += 1;
+      }
+    }
+  } catch { /* best-effort */ }
+  return touched;
+}
+
 /** Classes propose-fix has flagged as ungroundable (no resolvable source file). The engine must
  *  NOT keep picking these as "weakest" — they can never be fixed, only burn cycles. Confirmed
  *  ≥ contradicted ⇒ still considered ungroundable. Returns a Set of class names. */
