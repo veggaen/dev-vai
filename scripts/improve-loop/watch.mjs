@@ -377,150 +377,156 @@ function loopStatus() {
 function page() {
   return `<!doctype html><html lang="en"><head><meta charset="utf8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Vai · Improvement Loop</title>
+<title>Vai · Perpetual Process</title>
 <style>
 :root{
-  --bg:#07080c; --bg-2:#0c0e15; --panel:#0e1119; --line:rgba(255,255,255,.06);
-  --ink:#e8ecf4; --ink-dim:#8b93a7; --ink-faint:#5a6072;
-  --accent:#5b8cff; --good:#46d6a3; --warn:#f2c46b; --bad:#ff6b8a; --idle:#5a6072;
-  --r:14px; --ease:cubic-bezier(.4,0,.2,1);
+  --bg:#08090e; --bg-2:#0c0e16; --panel:#0f1119; --panel-2:#13161f; --line:rgba(255,255,255,.07);
+  --ink:#eef1f7; --ink-dim:#9aa1b2; --ink-faint:#5e6678;
+  --accent:#6a9bff; --good:#4fd6a6; --warn:#f3c970; --bad:#ff708e; --idle:#4a5163;
+  --r:18px; --r-sm:12px; --ease:cubic-bezier(.4,0,.2,1);
   --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
   --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
 }
-/* THEMES — switchable; custom accent via the picker writes --accent inline on <html>. */
-html[data-theme="aurora"]{--bg:#060810;--bg-2:#0a0e1a;--panel:#0d1322;--accent:#6ee7ff;--good:#5af2c0;--line:rgba(120,180,255,.08)}
-html[data-theme="ember"]{--bg:#0c0807;--bg-2:#140d0a;--panel:#1a0f0b;--accent:#ff9d5c;--good:#ffd27a;--bad:#ff6b6b;--line:rgba(255,160,100,.08)}
-html[data-theme="mono"]{--bg:#0a0a0b;--bg-2:#101012;--panel:#141417;--accent:#c9cdd6;--good:#c9cdd6;--warn:#c9cdd6;--bad:#ff6b8a;--ink-dim:#7c7f88;--line:rgba(255,255,255,.07)}
-html[data-theme="paper"]{--bg:#f6f6f3;--bg-2:#efefea;--panel:#fff;--ink:#16181d;--ink-dim:#5d6470;--ink-faint:#9aa0ac;--accent:#3b6fff;--good:#0f9d6b;--warn:#b8820a;--bad:#d6395c;--line:rgba(0,0,0,.08)}
+/* THEMES — accent only; the surface stays calm + dark. */
+html[data-theme="aurora"]{--accent:#67e8ff;--good:#5af2c0}
+html[data-theme="ember"]{--accent:#ff9d5c;--good:#ffd27a;--bad:#ff6b6b}
+html[data-theme="mono"]{--accent:#cdd2dc;--good:#cdd2dc;--warn:#cdd2dc}
+html[data-theme="violet"]{--accent:#b18cff;--good:#7af2c0}
+html[data-theme="paper"]{--bg:#f7f7f4;--bg-2:#f1f1ec;--panel:#fff;--panel-2:#fafafa;--ink:#15171d;--ink-dim:#5a6170;--ink-faint:#9098a6;--accent:#3b6fff;--good:#0f9d6b;--warn:#b8820a;--bad:#d6395c;--line:rgba(0,0,0,.08)}
 *{box-sizing:border-box}
 html,body{margin:0}
-body{background:radial-gradient(1200px 700px at 70% -10%,var(--bg-2),var(--bg) 60%);
-  color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;
-  line-height:1.5;letter-spacing:-.01em;min-height:100vh}
-.wrap{max-width:880px;margin:0 auto;padding:48px 28px 120px}
-/* header */
-.top{display:flex;align-items:center;gap:14px;margin-bottom:6px}
-.glyph{width:30px;height:30px;position:relative;flex:none}
-.glyph::before,.glyph::after{content:"";position:absolute;inset:0;border-radius:50%;
-  border:1.5px solid var(--accent);opacity:.9}
-.glyph::after{animation:breathe 3.4s var(--ease) infinite}
-.glyph i{position:absolute;inset:10px;border-radius:50%;background:var(--accent);
-  box-shadow:0 0 16px var(--accent);animation:pulse 3.4s var(--ease) infinite}
-@keyframes breathe{0%,100%{transform:scale(1);opacity:.5}50%{transform:scale(1.5);opacity:0}}
-@keyframes pulse{0%,100%{opacity:.7}50%{opacity:1}}
-h1{font-size:19px;font-weight:600;margin:0;letter-spacing:-.02em}
-.sub{color:var(--ink-dim);font-size:13px;margin:2px 0 0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);
+  -webkit-font-smoothing:antialiased;line-height:1.55;letter-spacing:-.011em;min-height:100vh}
+.wrap{max-width:760px;margin:0 auto;padding:40px 24px 140px}
+/* ── header ── */
+.top{display:flex;align-items:center;gap:13px;margin-bottom:34px}
+.glyph{width:32px;height:32px;position:relative;flex:none}
+.glyph::after{content:"";position:absolute;inset:0;border-radius:50%;border:1.5px solid var(--accent);opacity:.45;animation:breathe 3.6s var(--ease) infinite}
+.glyph i{position:absolute;inset:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 18px var(--accent);animation:pulse 3.6s var(--ease) infinite}
+@keyframes breathe{0%,100%{transform:scale(1);opacity:.4}50%{transform:scale(1.55);opacity:0}}
+@keyframes pulse{0%,100%{opacity:.65}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+h1{font-size:17px;font-weight:600;margin:0;letter-spacing:-.02em}
+.sub{color:var(--ink-faint);font-size:12.5px;margin:1px 0 0}
 .spacer{flex:1}
-.themes{display:flex;gap:7px;align-items:center}
-.swatch{width:18px;height:18px;border-radius:50%;cursor:pointer;border:1.5px solid var(--line);
-  transition:transform .2s var(--ease),border-color .2s}
-.swatch:hover{transform:scale(1.15)}
-.swatch.on{border-color:var(--ink)}
-input[type=color]{width:22px;height:22px;padding:0;border:none;background:none;cursor:pointer;border-radius:50%;overflow:hidden}
-/* status line */
-.status{display:flex;align-items:baseline;gap:12px;margin:30px 0 8px;flex-wrap:wrap}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--idle);align-self:center}
-.dot.live{background:var(--good);box-shadow:0 0 10px var(--good);animation:pulse 1.6s infinite}
+.themes{display:flex;gap:8px;align-items:center}
+.swatch{width:15px;height:15px;border-radius:50%;cursor:pointer;border:1.5px solid transparent;
+  transition:transform .18s var(--ease),border-color .18s;outline:none}
+.swatch:hover,.swatch:focus-visible{transform:scale(1.2)} .swatch.on{border-color:var(--ink)}
+input[type=color]{width:18px;height:18px;padding:0;border:none;background:none;cursor:pointer;border-radius:50%;overflow:hidden}
+/* ── HERO CARD: the one question — is it improving the app? ── */
+.hero{background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);
+  border-radius:var(--r);padding:24px 26px;margin-bottom:14px}
+.hero-top{display:flex;align-items:center;gap:11px;margin-bottom:18px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--idle);flex:none}
+.dot.live{background:var(--good);box-shadow:0 0 0 0 var(--good);animation:ring 2s var(--ease) infinite}
 .dot.blocked{background:var(--warn)}
-.state{font-size:22px;font-weight:600;letter-spacing:-.02em}
-.state-meta{color:var(--ink-dim);font-size:13px}
-.verdict{font-size:14px;margin:4px 0 0}
+@keyframes ring{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--good) 60%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.state{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.state-meta{color:var(--ink-faint);font-size:12px;margin-left:auto;font-variant-numeric:tabular-nums}
+.verdict{font-size:18px;font-weight:600;letter-spacing:-.02em;line-height:1.35}
 .verdict.good{color:var(--good)} .verdict.bad{color:var(--bad)} .verdict.warn{color:var(--warn)} .verdict.dim{color:var(--ink-dim)}
-/* trend */
-.trend{margin:26px 0 8px}
-.trend svg{display:block;width:100%;height:84px;overflow:visible}
-.trend .lbl{display:flex;justify-content:space-between;color:var(--ink-faint);font-size:11px;
-  text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px}
-/* summary chips (numbers, no pills) */
-.nums{display:flex;gap:36px;margin:24px 0 10px}
-.num b{display:block;font-size:26px;font-weight:600;letter-spacing:-.03em}
-.num span{color:var(--ink-dim);font-size:12px}
-.num.good b{color:var(--good)} .num.bad b{color:var(--bad)} .num.acc b{color:var(--accent)}
-/* collapsible section */
-.sec{border-top:1px solid var(--line);margin-top:4px}
+.meaning{font-size:13px;color:var(--ink-dim);margin-top:10px}
+.meaning b{color:var(--accent);font-weight:600}
+/* ── metric grid ── */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px}
+.metric{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-sm);padding:15px 16px}
+.metric b{display:block;font-size:24px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums;font-family:var(--mono)}
+.metric span{color:var(--ink-faint);font-size:11px;line-height:1.3;display:block;margin-top:3px}
+.metric.hl{border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+.metric.hl b{color:var(--accent)} .metric.good b{color:var(--good)} .metric.bad b{color:var(--bad)}
+/* ── trend ── */
+.trend{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-sm);padding:14px 16px 8px;margin-bottom:22px}
+.trend svg{display:block;width:100%;height:70px;overflow:visible}
+.trend .lbl{display:flex;justify-content:space-between;color:var(--ink-faint);font-size:10.5px;
+  text-transform:uppercase;letter-spacing:.12em;margin-bottom:6px;font-weight:500}
+.trend .lbl b{color:var(--ink);font-family:var(--mono);font-variant-numeric:tabular-nums}
+/* ── sections ── */
+.sec{border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:10px;background:var(--panel);overflow:hidden}
 .sec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;
-  padding:18px 2px;font-size:13px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;
-  color:var(--ink-dim);transition:color .2s}
+  padding:15px 18px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--ink-dim);transition:color .2s;user-select:none}
 .sec>summary:hover{color:var(--ink)}
 .sec>summary::-webkit-details-marker{display:none}
-.sec .chev{width:14px;height:14px;transition:transform .35s var(--ease);color:var(--ink-faint)}
+.sec .chev{width:13px;height:13px;transition:transform .35s var(--ease);color:var(--ink-faint);flex:none}
 .sec[open] .chev{transform:rotate(90deg)}
-.sec .count{margin-left:auto;color:var(--ink-faint);font-variant-numeric:tabular-nums}
-/* smooth collapse: grid-rows trick (animatable height) */
+.sec .count{margin-left:auto;color:var(--ink-faint);font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:12px;letter-spacing:0}
 .body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s var(--ease),opacity .3s var(--ease);opacity:0}
 .sec[open] .body{grid-template-rows:1fr;opacity:1}
 .body>div{overflow:hidden;min-height:0}
-.inner{padding:0 2px 22px}
-/* timeline */
-.tl{position:relative;padding-left:26px}
-.tl::before{content:"";position:absolute;left:6px;top:6px;bottom:6px;width:1px;background:var(--line)}
-.ev{position:relative;padding:0 0 22px}
-.ev::before{content:"";position:absolute;left:-23px;top:5px;width:9px;height:9px;border-radius:50%;
-  background:var(--bg);border:2px solid var(--idle)}
-.ev.landed::before{border-color:var(--good);box-shadow:0 0 8px var(--good)}
+.inner{padding:2px 18px 18px}
+/* ── timeline ── */
+.tl{position:relative;padding-left:22px}
+.tl::before{content:"";position:absolute;left:4px;top:8px;bottom:8px;width:1px;background:var(--line)}
+.ev{position:relative;padding:0 0 18px}
+.ev:last-child{padding-bottom:2px}
+.ev::before{content:"";position:absolute;left:-22px;top:4px;width:9px;height:9px;border-radius:50%;
+  background:var(--panel);border:2px solid var(--idle)}
+.ev.landed::before{border-color:var(--good);box-shadow:0 0 8px color-mix(in srgb,var(--good) 70%,transparent)}
 .ev.reverted::before{border-color:var(--bad)}
-.ev.innovation::before{border-color:var(--accent);box-shadow:0 0 8px var(--accent)}
+.ev.innovation::before{border-color:var(--accent);box-shadow:0 0 8px color-mix(in srgb,var(--accent) 70%,transparent)}
 .ev.escalate::before{border-color:var(--warn)}
-.ev.cycle::before{border-color:var(--ink-faint)}
-.ev.cycle .t{color:var(--ink-dim)}
-.ev .t{font-size:14px;font-weight:500}
-.ev .d{color:var(--ink-dim);font-size:13px;margin-top:2px}
+.ev.cycle::before{border-color:var(--ink-faint);width:6px;height:6px;left:-20.5px;top:6px}
+.ev.cycle .t{color:var(--ink-dim);font-weight:400}
+.ev .t{font-size:13.5px;font-weight:500}
+.ev .d{color:var(--ink-dim);font-size:12.5px;margin-top:2px}
 .ev .when{color:var(--ink-faint);font-size:11px;margin-top:3px;font-variant-numeric:tabular-nums}
-.row{display:flex;gap:10px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line)}
+.row{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
 .row:last-child{border-bottom:none}
-.row .k{color:var(--ink);font-size:14px}
-.row .v{color:var(--ink-dim);font-size:13px;margin-left:auto;font-variant-numeric:tabular-nums}
-.bar{height:3px;border-radius:2px;background:var(--line);position:relative;flex:1;max-width:160px;align-self:center;margin:0 12px}
-.bar i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--accent);transition:width .5s var(--ease)}
-.empty{color:var(--ink-faint);font-size:13px;padding:6px 0}
-.meaning{font-size:14px;color:var(--ink);margin:18px 0 4px}
-.meaning b{color:var(--accent);font-weight:600}
-.fade{opacity:0;transform:translateY(6px);transition:opacity .5s var(--ease),transform .5s var(--ease)}
+.row .k{color:var(--ink);font-size:13.5px}
+.row .v{color:var(--ink-dim);font-size:12.5px;margin-left:auto;font-variant-numeric:tabular-nums;font-family:var(--mono)}
+.bar{height:4px;border-radius:3px;background:var(--line);position:relative;flex:1;max-width:170px;margin:0 12px}
+.bar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--accent);transition:width .6s var(--ease)}
+.empty{color:var(--ink-faint);font-size:12.5px;padding:4px 0}
+.fade{opacity:0;transform:translateY(5px);transition:opacity .45s var(--ease),transform .45s var(--ease)}
 .fade.in{opacity:1;transform:none}
-code{font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
+code{font-family:var(--mono);font-size:12px;color:var(--ink-dim);background:var(--panel-2);padding:1px 6px;border-radius:5px}
 </style></head>
 <body><div class="wrap">
   <div class="top">
     <div class="glyph"><i></i></div>
-    <div><h1>Vai · Improvement Loop</h1><div class="sub" id="sub">connecting…</div></div>
+    <div><h1>Vai · Perpetual Process</h1><div class="sub" id="sub">connecting…</div></div>
     <div class="spacer"></div>
     <div class="themes" id="themes">
-      <span class="swatch" data-th="default" style="background:#5b8cff" title="Default"></span>
-      <span class="swatch" data-th="aurora" style="background:#6ee7ff" title="Aurora"></span>
-      <span class="swatch" data-th="ember" style="background:#ff9d5c" title="Ember"></span>
-      <span class="swatch" data-th="mono" style="background:#c9cdd6" title="Mono"></span>
-      <span class="swatch" data-th="paper" style="background:#f0f0ec;border-color:#ccc" title="Paper"></span>
-      <input type="color" id="custom" value="#5b8cff" title="Custom accent"/>
+      <span class="swatch" data-th="default" style="background:#6a9bff" title="Default" tabindex="0"></span>
+      <span class="swatch" data-th="aurora" style="background:#67e8ff" title="Aurora" tabindex="0"></span>
+      <span class="swatch" data-th="violet" style="background:#b18cff" title="Violet" tabindex="0"></span>
+      <span class="swatch" data-th="ember" style="background:#ff9d5c" title="Ember" tabindex="0"></span>
+      <span class="swatch" data-th="mono" style="background:#cdd2dc" title="Mono" tabindex="0"></span>
+      <span class="swatch" data-th="paper" style="background:#f0f0ec" title="Paper" tabindex="0"></span>
+      <input type="color" id="custom" value="#6a9bff" title="Custom accent"/>
     </div>
   </div>
 
-  <div class="status">
-    <span class="dot" id="dot"></span>
-    <span class="state" id="state">—</span>
-    <span class="state-meta" id="meta"></span>
+  <div class="hero">
+    <div class="hero-top">
+      <span class="dot" id="dot"></span>
+      <span class="state" id="state">—</span>
+      <span class="state-meta" id="meta"></span>
+    </div>
+    <div class="verdict dim" id="verdict">Reading the loop…</div>
+    <div class="meaning" id="meaning"></div>
   </div>
-  <div class="verdict dim" id="verdict"></div>
-  <div class="meaning" id="meaning"></div>
+
+  <div class="metrics" id="metrics"></div>
 
   <div class="trend" id="trendwrap" style="display:none">
-    <div class="lbl"><span>answer quality over time</span><span id="trendnow"></span></div>
-    <svg id="spark" viewBox="0 0 600 84" preserveAspectRatio="none"></svg>
+    <div class="lbl"><span>Answer quality over time</span><b id="trendnow"></b></div>
+    <svg id="spark" viewBox="0 0 600 70" preserveAspectRatio="none"></svg>
   </div>
 
-  <div class="nums" id="nums"></div>
-
   <details class="sec" id="sec-tl" open>
-    <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Timeline · what actually happened<span class="count" id="tl-count"></span></summary>
+    <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Timeline<span class="count" id="tl-count"></span></summary>
     <div class="body"><div><div class="inner"><div class="tl" id="tl"></div></div></div></div>
   </details>
 
-  <details class="sec" id="sec-built" open>
+  <details class="sec" id="sec-built">
     <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Built itself · proven<span class="count" id="built-count"></span></summary>
     <div class="body"><div><div class="inner" id="built"></div></div></div>
   </details>
 
   <details class="sec" id="sec-classes">
-    <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Where it's working<span class="count" id="cl-count"></span></summary>
+    <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Working on now<span class="count" id="cl-count"></span></summary>
     <div class="body"><div><div class="inner" id="classes"><div class="empty">loading…</div></div></div></div>
   </details>
 
@@ -552,7 +558,7 @@ applyTheme(localStorage.getItem('vai-theme')||'default',localStorage.getItem('va
 function spark(points){
   const wrap=$('trendwrap'); if(!points||points.length<2){wrap.style.display='none';return;}
   wrap.style.display='block';
-  const W=600,H=84,pad=6,vals=points.map(p=>p.avg);
+  const W=600,H=70,pad=6,vals=points.map(p=>p.avg);
   const min=Math.min(...vals,0),max=Math.max(...vals,10);
   const x=i=>pad+(W-2*pad)*i/(points.length-1);
   const y=v=>H-pad-(H-2*pad)*(v-min)/((max-min)||1);
@@ -573,32 +579,31 @@ function render(s){
   // status
   const blocked=s.blocked, running=s.running&&!blocked;
   $('dot').className='dot'+(running?' live':blocked?' blocked':'');
-  $('state').textContent=blocked?'Waiting on Vai runtime':running?'Running':'Idle';
-  $('sub').textContent='live · auto-refreshing · a loop that finds its own gaps, proves fixes, and escalates the big calls';
+  $('state').textContent=blocked?'Waiting on Vai runtime':running?'Working':'Idle';
+  $('sub').textContent='polishing the whole app — frontend, backend, structure & polish';
   const cyc=s.lastCycleSeconds!=null?('last cycle '+s.lastCycleSeconds+'s'+(s.lastCycleBounded?' · bounded':'')):'';
   $('meta').textContent=cyc;
-  // verdict
+  // verdict — the ONE answer: is the app actually getting better?
   const v=$('verdict');
-  if(blocked){v.className='verdict warn';v.textContent='Vai runtime is down — start it and the loop resumes automatically.';}
+  if(blocked){v.className='verdict warn';v.textContent='Runtime is down — start it and the process resumes automatically.';}
   else if(s.health){const w=s.health.working;
     v.className='verdict '+(w===true?'good':w===false?'bad':'dim');
-    v.textContent=(w===true?'Improving the codebase':w===false?'Running, not yet moving the needle':'Too early to tell')+(s.passPct!=null?' · routing '+s.passPct+'%':'');
-  } else v.textContent='';
-  // meaning
+    v.textContent=w===true?'Improving the codebase':w===false?'Running — not yet moving the needle':'Too early to tell';
+  } else {v.className='verdict dim';v.textContent='Warming up…';}
+  // meaning — what it has decided to work on
   if(s.meaning&&s.meaning.lane){
     const names={quality:'answer quality',capability:'new capabilities',routing:'routing correctness',reliability:'recurring weaknesses'};
-    $('meaning').innerHTML='Most meaningful right now → <b>'+esc(names[s.meaning.lane]||s.meaning.lane)+'</b> <span style="color:var(--ink-dim)">'+esc(s.meaning.reason||'')+'</span>';
-  } else $('meaning').textContent='';
+    $('meaning').innerHTML='Focus → <b>'+esc(names[s.meaning.lane]||s.meaning.lane)+'</b> · '+esc(s.meaning.reason||'');
+  } else if(s.passPct!=null){$('meaning').textContent='Routing accuracy '+s.passPct+'%';} else $('meaning').textContent='';
   // trend
   spark(s.qualityTrend);
-  // numbers
+  // metrics — co-residency fix means cycles should now climb steadily; landed is the real KPI
   const c=s.counts||{};
-  $('nums').innerHTML=
-    '<div class="num acc"><b>'+(c.cyclesRun||0)+'</b><span>engine cycles</span></div>'
-    +'<div class="num good"><b>'+(c.prototypesBuilt||0)+'</b><span>fixes prototyped</span></div>'
-    +'<div class="num good"><b>'+(c.landed||0)+'</b><span>landed (verified)</span></div>'
-    +'<div class="num bad"><b>'+(c.reverted||0)+'</b><span>reverted (caught wrong)</span></div>'
-    +'<div class="num acc"><b>'+(c.innovations||0)+'</b><span>built itself</span></div>';
+  $('metrics').innerHTML=
+    '<div class="metric"><b>'+(c.cyclesRun||0)+'</b><span>engine cycles</span></div>'
+    +'<div class="metric"><b>'+(c.prototypesBuilt||0)+'</b><span>fixes prototyped</span></div>'
+    +'<div class="metric hl"><b>'+(c.landed||0)+'</b><span>landed &amp; verified</span></div>'
+    +'<div class="metric bad"><b>'+(c.reverted||0)+'</b><span>caught wrong</span></div>';
   // timeline
   const evs=s.events||[]; $('tl-count').textContent=evs.length||'';
   $('tl').innerHTML=evs.length?evs.map(e=>
