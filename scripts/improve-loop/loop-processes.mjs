@@ -164,11 +164,16 @@ export function defineLoopProcesses(deps = {}) {
       run: async (ctx) => {
         const r = await runPrototypeFor(ctx);
         if (!r) return { produced: 0, skip: 'no prototype hypothesis this cycle' };
+        // Surface WHICH gate rejected the prototype so the dashboard/log can show a debuggable
+        // reason instead of an opaque "failed a gate" (was the #1 un-actionable signal — 329
+        // identical rejections with no cause). Reads the first failing gate from the ladder.
+        const failed = (r.gateResults ?? []).find((g) => !g.pass) ?? null;
         return {
           produced: r.adopted ? 1 : 0,
           adopted: r.adopted,
           value: r.valued?.value ?? 0,
           verdict: r.valued?.verdict ?? null,
+          failedGate: failed ? `${failed.name}: ${String(failed.detail ?? '').slice(0, 160)}` : null,
           attribution: r.attribution ?? null,
         };
       },

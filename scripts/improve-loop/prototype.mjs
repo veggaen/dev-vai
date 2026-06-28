@@ -116,7 +116,16 @@ export async function runPrototype(candidate, deps = {}) {
     metricDelta: ctx.metricDelta,
   });
   const adopted = shouldAdopt(valued);
-  emit({ type: 'prototype:done', adopted, value: valued.value, verdict: valued.verdict, attribution });
+  // Surface WHICH gate failed (name + detail) so a rejection is debuggable instead of an opaque
+  // "rejected: failed a gate". Without this the dashboard/log showed 329 identical rejections with
+  // no way to tell a legit reject (bad fix) from a gate bug (good fix wrongly blocked) — the #1
+  // reason "the loop runs forever but lands nothing" was un-actionable.
+  const failedGate = gateResults.find((g) => !g.pass) ?? null;
+  emit({
+    type: 'prototype:done', adopted, value: valued.value, verdict: valued.verdict, attribution,
+    failedGate: failedGate ? { name: failedGate.name, detail: String(failedGate.detail ?? '').slice(0, 200) } : null,
+    gateResults: gateResults.map((g) => ({ name: g.name, pass: g.pass })),
+  });
   return { adopted, valued, artifact, gateResults, attribution };
 }
 
