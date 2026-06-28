@@ -274,4 +274,42 @@ describe('evaluateChatAnswerQuality', () => {
     expect(report.verdict).toBe('fail');
     expect(report.missing.some((requirement) => requirement.label === 'core request focus')).toBe(true);
   });
+
+  describe('concrete grounding (closes the ×247 escalated gap)', () => {
+    it('flags a vague answer when the prompt explicitly asks for an example', () => {
+      const report = evaluateChatAnswerQuality({
+        prompt: 'How would I debounce a function in JavaScript? Give me an example.',
+        response: 'You can debounce by delaying execution until activity stops. It is a common technique that improves performance and is widely used in modern apps.',
+      });
+
+      expect(report.missing.some((requirement) => requirement.label === 'concrete grounding')).toBe(true);
+    });
+
+    it('passes when the answer cites a concrete specific (code / number / worked example)', () => {
+      const report = evaluateChatAnswerQuality({
+        prompt: 'How would I debounce a function in JavaScript? Give me an example.',
+        response: 'Use a timer. For example: `function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }` — a 300 ms delay is typical for input handlers.',
+      });
+
+      expect(report.missing.some((requirement) => requirement.label === 'concrete grounding')).toBe(false);
+    });
+
+    it('passes a how-much prompt when the answer gives a number', () => {
+      const report = evaluateChatAnswerQuality({
+        prompt: 'How much memory does the model use?',
+        response: 'qwen2.5-coder:7b pins about 5.2 GB of VRAM while resident.',
+      });
+
+      expect(report.missing.some((requirement) => requirement.label === 'concrete grounding')).toBe(false);
+    });
+
+    it('does not invent the requirement when no concrete is requested (false-positive guard)', () => {
+      const report = evaluateChatAnswerQuality({
+        prompt: 'Why do you prefer local-first AI?',
+        response: 'Local-first keeps things private and free. It avoids per-call costs and works offline, which fits the project north-star.',
+      });
+
+      expect(report.requirements.some((requirement) => requirement.label === 'concrete grounding')).toBe(false);
+    });
+  });
 });
