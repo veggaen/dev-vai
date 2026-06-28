@@ -26,15 +26,23 @@ if (!question) {
   process.exit(1);
 }
 
+// Only send the dev auth-bypass header to a LOOPBACK target. Sending it to an arbitrary --base-url /
+// VAI_API host makes this a ready-made bypass client if any non-local server honours it (CodeRabbit
+// #25, security). Off-loopback → no bypass header.
+const isLoopback = (() => {
+  try { const h = new URL(baseUrl).hostname; return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]'; }
+  catch { return false; }
+})();
 const ws = new WebSocket(`${baseUrl.replace(/^http/i, 'ws').replace(/\/$/, '')}/api/chat`, {
-  headers: { 'x-vai-dev-auth-bypass': '1' },
+  headers: isLoopback ? { 'x-vai-dev-auth-bypass': '1' } : {},
 });
 let council = [];
 let finished = false;
+let exitCode = 0; // non-zero on timeout/error so wrappers don't treat failures as success
 const TIMEOUT = Number(process.env.COUNCIL_UI_TIMEOUT_MS) || 200_000;
 const timer = setTimeout(() => {
   console.error('timeout');
-  finish();
+  finish(1);
 }, TIMEOUT);
 
 ws.on('open', () => ws.send(JSON.stringify({
@@ -56,14 +64,15 @@ ws.on('message', (data) => {
 
 ws.on('error', (error) => {
   console.error('ws', error.message);
-  finish();
+  finish(1);
 });
 
-function finish() {
+function finish(code = 0) {
   if (finished) return;
   finished = true;
+  exitCode = code || exitCode;
   clearTimeout(timer);
   console.log(formatCouncilSummary(council));
   try { ws.close(); } catch {}
-  process.exit(0);
+  process.exit(exitCode); // propagate timeout/network failures so a wrapper sees them (CodeRabbit #25)
 }

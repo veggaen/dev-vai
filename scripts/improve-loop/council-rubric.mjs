@@ -16,7 +16,10 @@
 
 const clamp = (n, lo = 0, hi = 10) => Math.max(lo, Math.min(hi, n));
 const round1 = (n) => Math.round(n * 10) / 10;
-const isFileRef = (s) => typeof s === 'string' && /[\w./-]+\.(ts|tsx|mjs|js|md|json)\b|:\d+/.test(s);
+// Real evidence is a FILE path with a code extension (optionally a :line suffix). The old regex also
+// accepted a bare `:123`, so "foo:1" or any colon-number string counted as grounded — inflating
+// grounding scores on non-evidence (CodeRabbit #25). Require an actual file reference.
+const isFileRef = (s) => typeof s === 'string' && /[\w./-]+\.(?:ts|tsx|mjs|js|md|json)\b(?::\d+)?/.test(s);
 const sigWords = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w.length > 3);
 
 /**

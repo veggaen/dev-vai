@@ -42,10 +42,14 @@ export const STALE_RUNS = 8;
  */
 export function experimentBlocksPrototype(db, { graceRuns = 2 } = {}) {
   try {
-    const exp = nextOpenExperiment(db);
+    // Check the NEWEST open experiment, not the oldest (CodeRabbit #25): with a backlog of open
+    // experiments, the oldest may be past grace while a NEWER one is still fresh. A code edit would
+    // confound that fresh measurement, so we must hold for it. nextOpenExperiment returns the oldest;
+    // query the most recent open row directly.
+    const exp = db.prepare('SELECT created_at FROM experiments WHERE delta IS NULL ORDER BY id DESC LIMIT 1').get();
     if (!exp) return false;
     const runsSince = countRunsSince(db, exp.created_at);
-    return runsSince < graceRuns; // fresh measurement in flight → hold; otherwise let the fix land
+    return runsSince < graceRuns; // a FRESH measurement is in flight → hold; otherwise let the fix land
   } catch { return false; }
 }
 

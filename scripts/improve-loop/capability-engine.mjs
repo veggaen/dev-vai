@@ -23,7 +23,7 @@ const MODEL = process.env.IMPROVE_GEN_MODEL ?? process.env.LOCAL_MODEL ?? 'qwen3
 
 /** The terminal tool the council emits to end its investigation: a feature proposal. */
 export const PROPOSAL_SPEC = `When you have read enough real code, emit ONE final proposal as strict JSON:
-  {"tool":"propose","area":"<voice|vision|tooling|council|reliability|delegation|capability-gap>",
+  {"tool":"propose","area":"<voice|vision|tooling|council|reliability|delegation|capability-gap|research|brainstorm|design|brand|growth|external-pull>",
    "title":"<short upgrade name>","capability":"<one sentence: the new thing Vai could DO>",
    "evidence":["<file.ts:line you actually read>", "..."],
    "steps":["<ordered build step>", "..."],
@@ -123,8 +123,11 @@ export async function synthesizeRound({ proposals = [], goal = PERPETUAL_GOAL, g
   const j = parseProposal(raw);
   if (!j || j.none || !j.title || !j.capability) return null;
   const names = Array.isArray(j.buildsOn) ? j.buildsOn.map(String) : (j.buildsOn ? [String(j.buildsOn)] : []);
-  const combined = usable.filter((p) => names.some((nm) => sameTitle(nm, p.title)));
-  const linked = combined.length >= 2 ? combined : usable.slice(0, 2); // a synthesis links ≥2 real siblings
+  const linked = usable.filter((p) => names.some((nm) => sameTitle(nm, p.title)));
+  // A real synthesis must LINK ≥2 actual sibling proposals. Don't fabricate one from usable.slice(0,2)
+  // when buildsOn didn't resolve — that inflated convergence scoring and persisted phantom backlog
+  // entries (CodeRabbit #25). Nothing genuinely converged ⇒ null, as the docstring promises.
+  if (linked.length < 2) return null;
   const evidence = [...new Set(linked.flatMap((p) => p.evidence ?? []))].slice(0, 6);
   return normalizeProposal({
     tool: 'propose', area: 'council', title: `Synthesis: ${j.title}`, capability: j.capability,
@@ -207,7 +210,17 @@ Begin: your first reply must be a grep_repo or find_symbol call.`;
       transcript.push(`step ${step}: PROPOSE ${proposal ? `${proposal.area} :: ${proposal.title}` : '(invalid shape)'}`);
       return { proposal, transcript };
     }
-    const result = await runToolImpl(call);
+    // Contain a tool failure to THIS step — a thrown grep_repo/read_file must not abort the whole
+    // round (CodeRabbit #25). Record it in the transcript + tell the model so it keeps steering this
+    // lens toward a proposal (or a clean give-up) instead of crashing proposeCapability().
+    let result;
+    try { result = await runToolImpl(call); }
+    catch (e) {
+      const err = String(e?.message ?? e).slice(0, 200);
+      transcript.push(`step ${step}: ${call.tool} FAILED → ${err}`);
+      convo += `\n\n[you called] ${JSON.stringify(call)}\n[tool error] ${err}\n[harness] That tool call failed. Try a different call, or emit the final "propose" JSON from what you've already read.`;
+      continue;
+    }
     const shown = String(result).slice(0, 1400);
     transcript.push(`step ${step}: ${call.tool}(${JSON.stringify(call.pattern ?? call.path ?? call.name ?? call.query ?? '')}) → ${shown.split('\n').length} lines`);
     // Escalate pressure as the step budget runs out so the model converges on a

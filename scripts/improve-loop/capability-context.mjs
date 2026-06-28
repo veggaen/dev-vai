@@ -37,7 +37,11 @@ export function distillGoal(masterPromptText = '') {
 /** Extract the OPEN backlog items' headlines (the "- **…**" bullets under "## Open")
  *  so the council can see what's already in flight and not re-propose it. */
 export function distillBacklog(backlogText = '', max = 8) {
-  const open = String(backlogText).split(/^##\s+/m).find((s) => /^Open/i.test(s)) ?? backlogText;
+  // ONLY scan the "## Open" section. The old fallback parsed the whole file when "## Open" was
+  // absent, so Done/archived bullets leaked into the "already in flight" lane and suppressed new
+  // proposals (CodeRabbit #25). No Open section ⇒ nothing is in flight ⇒ empty.
+  const open = String(backlogText).split(/^##\s+/m).find((s) => /^Open/i.test(s));
+  if (!open) return [];
   const heads = [...open.matchAll(/^- \*\*(.+?)\*\*/gm)].map((m) => m[1].trim());
   return heads.slice(0, max);
 }
@@ -46,7 +50,10 @@ export function distillBacklog(backlogText = '', max = 8) {
  *  blocks). Returns the longest/most-substantive recent messages, capped, as a
  *  proxy for "what V3gga keeps wanting". Cheap + deterministic — no model needed. */
 export function distillUserGoals(msgsText = '', { max = 6, minLen = 120 } = {}) {
-  const blocks = String(msgsText).split(/^---\s*#\d+.*?---$/m).map((b) => b.trim()).filter(Boolean);
+  // NEWEST-FIRST: the dump is append-only, so processing in file order fills `out` with the OLDEST
+  // qualifying asks and never reaches recent ones once `max` is hit — breaking the "what V3gga keeps
+  // asking for NOW" signal (CodeRabbit #25). Reverse so recent goals win the cap.
+  const blocks = String(msgsText).split(/^---\s*#\d+.*?---$/m).map((b) => b.trim()).filter(Boolean).reverse();
   const scored = blocks
     .filter((b) => b.length >= minLen)
     .map((b) => cap(b.replace(/\s+/g, ' '), 220));

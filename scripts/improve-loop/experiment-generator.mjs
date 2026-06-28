@@ -105,11 +105,15 @@ export async function generateNovelExperiment(db, { generate, recentVariants = [
   if (!gap) return null; // not enough signal to ground a real idea → honest null
   const prompt = buildGenPrompt(gap, recentVariants);
   const gen = generate ?? (async (p) => {
-    // Resident model only (no evict/cold-load — the BSOD + grader-timeout rule). One serial call.
-    const model = (await residentModel()) ?? GEN_MODEL;
+    // Resident model ONLY — if nothing is loaded, return null instead of cold-loading GEN_MODEL.
+    // Falling back to a cold load reintroduces the GPU evict/churn the co-resident roster avoids
+    // (CodeRabbit #25). An honest null here just means "no novel idea this cycle".
+    const model = await residentModel();
+    if (!model) return null;
     return ollamaGenerate(model, p, { numPredict: 160, timeoutMs: 60_000 });
   });
   let raw = '';
   try { raw = await gen(prompt); } catch { return null; }
+  if (raw == null) return null;
   return parseGenerated(raw, gap);
 }

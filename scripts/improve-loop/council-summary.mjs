@@ -45,6 +45,11 @@ function detailLines(member) {
 }
 
 export function summarizeCouncilMember(member) {
+  // Normalize to an object — this is fed from raw websocket progress, so a null/primitive member
+  // would throw on member.name/.pending and kill the CLI (CodeRabbit #25). Treat junk as a failed note.
+  if (member == null || typeof member !== 'object') {
+    return { useful: false, pending: false, failed: true, name: 'unknown', verdict: 'note', confidence: null, details: [] };
+  }
   const details = detailLines(member);
   const useful = details.length > 0 && !member.pending && !member.failed && !member.error;
   const verdict = meaningful(member.verdict) || meaningful(member.status) || 'note';

@@ -63,8 +63,11 @@ export function chooseCapability(proposals = [], opts = {}) {
     const cluster = clusterOf(p);
     const council = Number(p.council_overall ?? 0);
     if (council < minScore) { rejected.push({ title: p.title, why: `below council floor (${council} < ${minScore})` }); continue; }
-    let already = false;
-    try { already = !!seenInApp(p); } catch { already = false; }
+    // A novelty-check FAILURE must not read as "novel" — a grep/read error would then re-select a
+    // capability the app already ships (CodeRabbit #25). On error, treat as non-selectable (skip).
+    let already = false; let noveltyCheckFailed = false;
+    try { already = !!seenInApp(p); } catch { noveltyCheckFailed = true; }
+    if (noveltyCheckFailed) { rejected.push({ title: p.title, why: 'novelty check failed (grep/read error) — not selectable' }); continue; }
     if (already) { rejected.push({ title: p.title, why: 'capability already exists in the app — not novel' }); continue; }
     // finalScore blends council quality with real user value for the cluster.
     const userValue = USER_VALUE[cluster] ?? 0.5;

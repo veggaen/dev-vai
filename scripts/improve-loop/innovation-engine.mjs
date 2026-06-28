@@ -371,8 +371,12 @@ export function planNextExperiment(db, { record = false } = {}) {
  */
 export function recordCandidate(db, candidate, scorecard) {
   const metric = targetMetric(candidate.type);
+  // Keep the baseline in the TARGET metric's OWN units. For a grading experiment the metric is
+  // excellence (0..10); if excellence is unavailable do NOT fall back to passRate (0..1) — that
+  // persists a mismatched-unit baseline so later delta/adoption checks compare 0..10 vs 0..1
+  // (CodeRabbit #25). Leave it null instead; the runner abandons null-baseline arms as unmeasurable.
   const baselineScore = metric === 'excellence'
-    ? (scorecard.excellence.current ?? scorecard.passRate.current)
+    ? (scorecard.excellence.current ?? null)
     : scorecard.passRate.current;
   return startExperiment(db, {
     type: candidate.type,
