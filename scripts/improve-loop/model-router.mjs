@@ -50,20 +50,37 @@ export function judges(roleAssignments) {
   return roleAssignments.filter((r) => r.role === 'judge' || r.role === 'both').map((r) => r.name);
 }
 
-/** Choose the roster: installed models that individually fit the VRAM budget, capped at `max`.
- *  Ordering: CODER models first (best at code edits), then biggest-first (a bigger general model
- *  is usually a better localiser). Excludes the embedded Vai runtime model so we never evict the
- *  live app's model out from under it. */
+/** Choose the roster: models whose sizes SUM within the VRAM budget so they CO-RESIDE, capped at
+ *  `max`. Ordering: CODER models first (best at code edits), then biggest-first.
+ *
+ *  CO-RESIDENCY (the efficiency fix): the old code filtered each model INDIVIDUALLY (each ≤budget)
+ *  then took `max` — so on an 8.5GB budget it picked 3×~5GB models that cannot co-reside. Every
+ *  persona then evicted + cold-loaded the next 5GB model from disk; under the 90s persona timeout
+ *  the cold loads failed → "no proposal" → the council STALLED for minutes burning timeouts (the
+ *  measured 25-min-no-progress symptom). Greedy-pack within budget so the chosen models all stay
+ *  loaded at once — no swap thrash. Always keep ≥1 model (one strong model beats three that thrash).
+ *  Excludes the embedded Vai runtime model so we never evict the live app's model. */
 export function pickRoster(installed, { budgetBytes, max = 3, exclude = [] } = {}) {
   const ex = new Set(exclude);
-  return (installed || [])
+  const ranked = (installed || [])
     .filter((m) => m && m.name && !ex.has(m.name))
     .filter((m) => !budgetBytes || !m.sizeBytes || m.sizeBytes <= budgetBytes)
     .sort((a, b) =>
       (Number(isCoderModel(b.name)) - Number(isCoderModel(a.name))) || // coder models first
-      ((b.sizeBytes ?? 0) - (a.sizeBytes ?? 0)))                       // then biggest-first
-    .slice(0, max)
-    .map((m) => m.name);
+      ((b.sizeBytes ?? 0) - (a.sizeBytes ?? 0)));                      // then biggest-first
+  if (!budgetBytes) return ranked.slice(0, max).map((m) => m.name);
+  const chosen = [];
+  let used = 0;
+  for (const m of ranked) {
+    if (chosen.length >= max) break;
+    const size = Number(m.sizeBytes ?? 0);
+    // Always take the first (best) model; take subsequent ones only if they still fit alongside.
+    if (chosen.length === 0 || used + size <= budgetBytes) {
+      chosen.push(m.name);
+      used += size;
+    }
+  }
+  return chosen;
 }
 
 /**

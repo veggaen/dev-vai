@@ -11,9 +11,17 @@ const INSTALLED = [
   { name: 'huge:70b', sizeBytes: 40 * GB },
 ];
 
-test('pickRoster: biggest-first, excludes over-budget + excluded models, capped', () => {
+test('pickRoster: CO-RESIDENT pack within budget (sizes sum ≤ budget, no swap thrash)', () => {
+  // budget 8.5GB: deepseek-r1 (5.2) is taken first; qwen2.5:7b (4.7) would push the sum to 9.9 > 8.5
+  // so it's SKIPPED; qwen2.5:3b (1.9) fits alongside (5.2+1.9=7.1) → taken. The old code returned all
+  // three (≈11.8GB) which could not co-reside and caused cold-load thrash + persona timeouts.
   const r = pickRoster(INSTALLED, { budgetBytes: 8.5 * GB, max: 3, exclude: ['qwen3:8b'] });
-  assert.deepEqual(r, ['deepseek-r1:8b', 'qwen2.5:7b', 'qwen2.5:3b']); // huge:70b excluded by budget, qwen3 by name
+  assert.deepEqual(r, ['deepseek-r1:8b', 'qwen2.5:3b']); // huge:70b + qwen2.5:7b skipped (won't co-fit), qwen3 by name
+});
+
+test('pickRoster: always keeps at least one model even if the 2nd would overflow', () => {
+  const two = [{ name: 'a:8b', sizeBytes: 5 * GB }, { name: 'b:8b', sizeBytes: 5 * GB }];
+  assert.deepEqual(pickRoster(two, { budgetBytes: 6 * GB, max: 3 }), ['a:8b']); // one strong model > two that thrash
 });
 
 test('pickRoster: every model over budget ⇒ empty (never mounts something that wont fit)', () => {
