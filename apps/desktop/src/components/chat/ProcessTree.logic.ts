@@ -730,11 +730,15 @@ export function buildProcessTree(
   // stay buried in the member list — "the panel was split, here's who objected and why".
   if (council?.dissent && council.dissent.dissentingMembers.length > 0) {
     const d = council.dissent;
+    // Dissent is the panel working as intended (a minority view surfaced, not buried) — render
+    // it as a completed council note, NOT an error. The red error glyph (status 'bad') would
+    // miscommunicate "something broke"; the meaning lives in the label, carried by the calm
+    // council tone like every other panel row.
     nodes.push({
       id: 'council-dissent',
-      label: `Minority dissent — ${d.dissentingMembers.length} pushed back (${Math.round(d.dissentStrength * 100)}% of the panel)`,
-      shortLabel: 'Dissent',
-      status: 'bad',
+      label: `Minority view — ${d.dissentingMembers.length} pushed back (${Math.round(d.dissentStrength * 100)}% of the panel)`,
+      shortLabel: 'Minority view',
+      status: 'done',
       tone: 'council',
       children: d.dissentingMembers.map((m, i) => ({
         id: `council-dissent-${i}`,
@@ -742,7 +746,7 @@ export function buildProcessTree(
         kind: 'verdict',
         detail: `${Math.round(m.weight * 100)}% weight · ${Math.round(m.confidence * 100)}% sure`,
         note: m.concerns.length ? m.concerns.map((c) => `- ${c}`).join('\n') : 'objected (no specific concern given)',
-        status: 'bad',
+        status: 'done',
         tone: 'council',
         children: [],
       })),
@@ -750,22 +754,22 @@ export function buildProcessTree(
   }
 
   // Verification spine (transparency): how grounded the panel's answer was — surfaced as a
-  // quiet row so the user sees whether the council leaned on real fetched context (and whether
-  // the free web disputed any of it), not just a verdict. Advisory; does not gate anything.
+  // quiet row so the user sees whether the council leaned on real fetched context, not just a
+  // verdict. Advisory; does not gate anything. Status carried by the existing tone/glyph system
+  // (no inline status emoji — keeps the trace's visual language consistent).
   if (council?.provenance && council.provenance.total > 0) {
     const p = council.provenance;
     const c = p.counts;
-    const verdictLabel = p.verdict === 'contested' ? '⚠ contested (web disputed a grounding)'
-      : p.verdict === 'grounded' ? 'grounded'
+    const verdictLabel = p.verdict === 'grounded' ? 'grounded'
       : p.verdict === 'thin' ? 'thinly grounded'
       : 'no context used';
     nodes.push({
       id: 'council-provenance',
       label: `Grounding — ${verdictLabel} · ${Math.round(p.groundedness * 100)}% of fetched context used`,
       shortLabel: 'Grounding',
-      status: p.verdict === 'contested' ? 'bad' : 'done',
+      status: 'done',
       tone: 'verify',
-      note: `used ${c.used} · unused ${c.unused} · considered ${c.considered} · unavailable ${c.unavailable}${c.disputed ? ` · disputed ${c.disputed}` : ''} (of ${p.total} context items the panel touched)`,
+      note: `used ${c.used} · unused ${c.unused} · considered ${c.considered} · unavailable ${c.unavailable} (of ${p.total} context items the panel touched)`,
       children: [],
     });
   }
