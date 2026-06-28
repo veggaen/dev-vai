@@ -23,6 +23,17 @@ test('classifies connection/infra failures as infra (skip-not-grade)', () => {
   assert.equal(isInfraError(new Error('timeout')), true);
 });
 
+test('a 503 / server-busy / overload response is infra, not a content failure', () => {
+  // The exact corpus-poisoning failure this session: the loop + runtime both hit Ollama under GPU
+  // pressure → 503 server busy → was graded as an answer/curated-trap content failure (27% pass rate
+  // was mostly these). Overload must be SKIPPED like a timeout, never recorded as a Vai logic failure.
+  assert.equal(isInfraError(new Error('Local model request failed: 503 {"error":"server busy, please try again later"}')), true);
+  assert.equal(isInfraError(new Error('502 Bad Gateway')), true);
+  assert.equal(isInfraError(new Error('429 Too Many Requests')), true);
+  assert.equal(isInfraError(new Error('model is overloaded')), true);
+  assert.equal(isInfraError(new Error('503 Service Unavailable')), true);
+});
+
 test('accepts a bare string or a raw AggregateError name', () => {
   assert.equal(isInfraError('AggregateError'), true);
   assert.equal(isInfraError('ECONNREFUSED'), true);

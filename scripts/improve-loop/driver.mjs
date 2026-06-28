@@ -179,7 +179,11 @@ export function isInfraError(err) {
     ...(Array.isArray(err?.errors) ? err.errors.map((e) => `${e?.code ?? ''} ${e?.message ?? ''}`) : []),
   ];
   const s = parts.filter(Boolean).join(' ');
-  return /AggregateError|ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|EPIPE|fetch failed|socket hang up|WebSocket|timeout/i.test(s);
+  // Connection-level failures AND server-overload responses are infra, not Vai logic failures. A
+  // 503 / "server busy" means the local model is saturated (the loop + runtime both hit Ollama under
+  // GPU pressure) — grading it as a content failure poisoned the corpus (answer/curated-trap read as
+  // 27% almost entirely from 503s, mis-targeting the loop). Treat overload as a skip, like a timeout.
+  return /AggregateError|ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|EPIPE|fetch failed|socket hang up|WebSocket|timeout|\b503\b|\b502\b|\b429\b|server busy|overloaded|service unavailable|please try again/i.test(s);
 }
 
 /** Direct, low-cost Ollama generate — used for prompt generation + cheap grading. */
