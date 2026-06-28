@@ -36,6 +36,40 @@ test('verifyProposal: HALLUCINATED find (line not in file) is caught — the cor
   assert.equal(v.code, 'hallucinated-find');
 });
 
+test('verifyProposal: a whitespace near-miss find is RECOVERED to exact source text (not rejected)', () => {
+  // The model collapsed the indentation / spacing but the line really exists. Recover it.
+  const v = verifyProposal(
+    { file: 'f.ts', find: 'if (BUILD_VERB_ANYWHERE.test(text))   return false;', replace: 'if (BUILD_VERB_ANYWHERE.test(text) && ok) return false;' },
+    { readFile: reader },
+  );
+  assert.equal(v.ok, true, 'a recoverable near-miss should pass');
+  assert.equal(v.correctedFind, 'if (BUILD_VERB_ANYWHERE.test(text)) return false;', 'find corrected to the exact source line');
+});
+
+test('verifyProposal: a genuinely hallucinated find is STILL rejected (recovery does not weaken the guard)', () => {
+  const v = verifyProposal({ file: 'f.ts', find: 'if (NOPE.test(text)) return 99;', replace: 'x' }, { readFile: reader });
+  assert.equal(v.ok, false);
+  assert.equal(v.code, 'hallucinated-find');
+});
+
+test('recoverFind: only a UNIQUE single-line whitespace match is recovered', async () => {
+  const { recoverFind } = await import('./proposal-verifier.mjs');
+  const src = 'const a = 1;\nif (x)  return y;\nconst b = 2;';
+  // The model's find has single spacing; the SOURCE has double — recover returns the EXACT source text.
+  assert.equal(recoverFind(src, 'if (x) return y;'), 'if (x)  return y;', 'unique normalized match recovered to exact source text');
+  // ambiguous: two source lines normalize to the SAME target (differ only by spacing) → not
+  // recovered (no guessing which one the model meant).
+  // Two lines that differ only in space COUNT: they normalize identically but trim to different
+  // exact text → two distinct candidates → ambiguous, must not be recovered (no guessing).
+  const dup = 'return  foo(a);\nreturn foo(a);';
+  assert.equal(recoverFind(dup, 'return foo(a);'), null, 'ambiguous match must NOT be recovered');
+  // no match at all
+  assert.equal(recoverFind(src, 'totally absent line here'), null);
+  // too-short / multiline guards
+  assert.equal(recoverFind(src, 'a;'), null);
+  assert.equal(recoverFind(src, 'line1\nline2'), null);
+});
+
 test('verifyProposal: editing a comment or string is rejected as non-executable', () => {
   const vc = verifyProposal({ file: 'f.ts', find: '// a comment line that looks fixable', replace: '// fixed' }, { readFile: reader });
   assert.equal(vc.code, 'non-executable-find');

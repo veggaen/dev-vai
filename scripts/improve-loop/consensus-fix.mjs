@@ -204,17 +204,20 @@ if (ranked.length === 0) {
   // gate (exists, executable, unique, balanced). Only mark verified=1 when it genuinely is, so a
   // truncated/unbalanced patch can never reach apply-consensus as "verified".
   const finalVerdict = verifyProposal({ file: top.file, find, replace: top.replace ?? '' }, { readFile: (p) => readFileSync(p, 'utf8') });
+  // If the verifier whitespace-recovered a near-miss find to its EXACT source text, store THAT —
+  // otherwise the model's slightly-off find would fail the literal apply-time replace and revert.
+  const storedFind = finalVerdict.correctedFind ?? find;
   const distinctModels = [...new Set(group.map((g) => g.model ?? 'default'))];
   console.log(`WINNER · ${group.length}/${proposals.length} agreement · ${distinctModels.length} distinct model(s): ${distinctModels.join(', ')} · personas: ${[...new Set(group.map((g) => g.persona))].join(', ')}`);
   console.log('file:', top.file);
-  console.log('find:', JSON.stringify(find));
+  console.log('find:', JSON.stringify(storedFind) + (finalVerdict.correctedFind ? ' (whitespace-recovered from the model\'s near-miss)' : ''));
   console.log('replace:', JSON.stringify(top.replace));
   console.log('why:', top.why);
   if (!finalVerdict.ok) {
     console.log(`\n⛔ winner FAILED final verification (${finalVerdict.code}: ${finalVerdict.detail}) — NOT saved (would revert at apply). The bug needs human analysis.`);
   } else {
     db.prepare('INSERT INTO consensus (class,file,find,replace,agree_count,personas,verified,why,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(TARGET, top.file, find, top.replace ?? '', group.length, [...new Set(group.map((g) => g.persona))].join(','), 1, top.why ?? '', new Date().toISOString());
+      .run(TARGET, top.file, storedFind, top.replace ?? '', group.length, [...new Set(group.map((g) => g.persona))].join(','), 1, top.why ?? '', new Date().toISOString());
     console.log('\n→ saved to consensus table (re-verified). apply-consensus applies the winner.');
   }
 }

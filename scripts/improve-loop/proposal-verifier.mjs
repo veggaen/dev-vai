@@ -28,11 +28,38 @@ export function isNonExecutableFind(find) {
 }
 
 /**
+ * WHITESPACE-TOLERANT RECOVERY of a near-miss `find`. The loop's most-counted lesson (×29) is the
+ * model citing a `find` that isn't a VERBATIM substring — but very often it's a *near* miss: the
+ * intended line exists, the model just collapsed runs of spaces, dropped indentation, or used a
+ * different quote glyph. Binary-rejecting those as "hallucinated" discards landable fixes. This
+ * recovers them MECHANICALLY (no model call): if the find's whitespace-normalized form matches
+ * exactly ONE source line's normalized form, return that line's EXACT text. Conservative — only a
+ * UNIQUE single-line match is recovered; anything ambiguous or multi-line falls through to rejection.
+ * @returns {string|null} the exact source substring to use as find, or null if not recoverable.
+ */
+export function recoverFind(source, find) {
+  if (typeof source !== 'string' || typeof find !== 'string') return null;
+  const norm = (s) => s.replace(/\s+/g, ' ').trim();
+  const target = norm(find);
+  if (target.length < 5) return null;            // too short to anchor safely
+  if (find.includes('\n')) return null;          // single-line recovery only (keep it safe)
+  const matches = [];
+  for (const line of source.split('\n')) {
+    if (norm(line) === target) {
+      const exact = line.trim();
+      if (exact && !matches.includes(exact)) matches.push(exact);
+    }
+  }
+  return matches.length === 1 ? matches[0] : null; // unique match only
+}
+
+/**
  * Verify a proposal against the REAL file. Returns a structured verdict — never throws.
  * @param proposal {{ file, find, replace, why }}
  * @param {{ readFile?: (path)=>string }} opts  injectable reader for tests
- * @returns {{ ok:boolean, code:string, detail:string }}
+ * @returns {{ ok:boolean, code:string, detail:string, correctedFind?:string }}
  *   code ∈ no-find | no-file | hallucinated-find | non-executable-find | noop-replace | ok
+ *   correctedFind is set when a near-miss find was whitespace-recovered to its exact source text.
  */
 export function verifyProposal(proposal, { readFile } = {}) {
   const reader = readFile ?? ((p) => { const { readFileSync } = require('node:fs'); return readFileSync(p, 'utf8'); });
@@ -44,8 +71,17 @@ export function verifyProposal(proposal, { readFile } = {}) {
   catch { return { ok: false, code: 'no-file', detail: `cannot read ${proposal.file}` }; }
 
   // THE core learned guard: does the cited line actually exist in the file? (hallucination)
+  // Before rejecting, try a whitespace-tolerant recovery of a near-miss — this rescues the common
+  // case where the line IS there but the model collapsed spacing. A recovered find is re-validated
+  // below exactly like a verbatim one (uniqueness, executability, balance all still apply).
+  let correctedFind = null;
   if (!source.includes(proposal.find)) {
-    return { ok: false, code: 'hallucinated-find', detail: `find not present in ${proposal.file} (model hallucinated the line)` };
+    const recovered = recoverFind(source, proposal.find);
+    if (!recovered) {
+      return { ok: false, code: 'hallucinated-find', detail: `find not present in ${proposal.file} (model hallucinated the line)` };
+    }
+    correctedFind = recovered;
+    proposal = { ...proposal, find: recovered };
   }
   // Editing a comment/string changes no behaviour.
   if (isNonExecutableFind(proposal.find)) {
@@ -84,7 +120,14 @@ export function verifyProposal(proposal, { readFile } = {}) {
       return { ok: false, code: 'unbalanced-edit', detail: 'find/replace change bracket or regex-delimiter balance — the edit would corrupt the surrounding code (truncated find?)' };
     }
   }
-  return { ok: true, code: 'ok', detail: 'find exists, is executable, unique, and changes the line' };
+  return {
+    ok: true,
+    code: 'ok',
+    detail: correctedFind
+      ? 'find whitespace-recovered to exact source text, executable, unique, and changes the line'
+      : 'find exists, is executable, unique, and changes the line',
+    ...(correctedFind ? { correctedFind } : {}),
+  };
 }
 
 /**
