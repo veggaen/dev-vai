@@ -171,7 +171,23 @@ function hasConcreteGrounding(response: string): boolean {
 }
 
 function requestsComparison(prompt: string): boolean {
-  return /\b(?:compare|comparison|versus|vs\.?|difference between|trade-?offs?)\b/i.test(prompt);
+  // Explicit comparison cues.
+  if (/\b(?:compare|comparison|versus|vs\.?|difference between|trade-?offs?)\b/i.test(prompt)) return true;
+  // Implicit "A or B, which is better" framing — the shape that failed routing/comparison live
+  // ("sqlite or postgres for X?", "is it smarter to bootstrap or raise money?", "which is better
+  // for a solo founder, an ENK or an AS?"). Requires BOTH an " or " choice AND a preference cue, so
+  // "should I use a VPN or not?" (a yes/no, not a two-option pick) does not falsely qualify.
+  if (/\bor\s+not\b/i.test(prompt)) return false;        // "use a VPN or not?" is yes/no, not a pick
+  const hasChoice = /\b\w[\w.+#-]*\s+or\s+\w[\w.+#-]*/i.test(prompt);
+  if (!hasChoice) return false;
+  const hasPreferenceCue =
+    /\b(?:better|best|smarter|wiser|faster|safer|cheaper|stronger|recommend|prefer|which\s+(?:one|is|should|to)|should\s+i\s+(?:use|pick|choose|go\s+with))\b/i.test(prompt);
+  if (hasPreferenceCue) return true;
+  // Bare "X or Y for <use-case>?" where the question LEADS with the two options is an implicit
+  // pick even without a preference word ("sqlite or postgres for a local-first desktop app?").
+  // Anchored at the start + ends as a question, so "tell me about norway or its capital" (leads
+  // with a verb, no '?') does not qualify.
+  return /^\s*\w[\w.+#-]*\s+or\s+\w[\w.+#-]*\b/i.test(prompt) && /\?\s*$/.test(prompt);
 }
 
 function hasComparisonShape(response: string): boolean {

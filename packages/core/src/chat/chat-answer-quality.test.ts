@@ -275,6 +275,28 @@ describe('evaluateChatAnswerQuality', () => {
     expect(report.missing.some((requirement) => requirement.label === 'core request focus')).toBe(true);
   });
 
+  describe('implicit "A or B" comparison detection (routing/comparison failures)', () => {
+    it('requires a real comparison for "X or Y" preference questions', () => {
+      for (const prompt of [
+        'sqlite or postgres for a local-first desktop app?',
+        'is it smarter to bootstrap or raise money for a small saas?',
+        'which is better for a solo founder, an ENK or an AS in norway?',
+      ]) {
+        const vague = evaluateChatAnswerQuality({ prompt, response: 'Both are good options with their own strengths; it depends on your needs.' });
+        expect(vague.missing.some((r) => r.label === 'real comparison'), `should demand comparison: ${prompt}`).toBe(true);
+        const good = evaluateChatAnswerQuality({ prompt, response: 'For this case, prefer the first: it is faster and simpler to operate, whereas the second is better for multi-user write load. Pick the first unless you need concurrency.' });
+        expect(good.missing.some((r) => r.label === 'real comparison'), `good answer satisfies: ${prompt}`).toBe(false);
+      }
+    });
+
+    it('does not demand a comparison for yes/no or single-subject questions', () => {
+      for (const prompt of ['should I use a VPN or not?', 'what is recursion?', 'tell me about norway or its capital']) {
+        const r = evaluateChatAnswerQuality({ prompt, response: 'A short relevant answer.' });
+        expect(r.requirements.some((x) => x.label === 'real comparison'), `no comparison req: ${prompt}`).toBe(false);
+      }
+    });
+  });
+
   describe('concrete grounding (closes the ×247 escalated gap)', () => {
     it('flags a vague answer when the prompt explicitly asks for an example', () => {
       const report = evaluateChatAnswerQuality({
