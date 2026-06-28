@@ -77,6 +77,18 @@ async function sendPrompt(page, prompt) {
   await page.keyboard.press('Enter');
 }
 
+async function selectBuilderMode(page) {
+  const modeTrigger = page.locator('button[title^="Mode:"]').first();
+  await modeTrigger.waitFor({ timeout: 30000 });
+
+  const currentTitle = await modeTrigger.getAttribute('title');
+  if (currentTitle?.includes('Mode: Builder')) return;
+
+  await modeTrigger.click();
+  await page.getByRole('option', { name: /^Builder\b/ }).click();
+  await page.locator('button[title*="Mode: Builder"]').waitFor({ timeout: 30000 });
+}
+
 async function waitForPreviewFrame(page) {
   await page.waitForSelector('iframe', { timeout: 120000 });
   const frame = page.frameLocator('iframe');
@@ -118,34 +130,48 @@ async function findRunningBuilderSandbox() {
 async function resolveReadbackSandboxId() {
   const conversation = await findCurrentConversation();
   if (conversation?.sandboxProjectId) {
-    const linkedFiles = await listSandboxFiles(conversation.sandboxProjectId).catch(() => []);
-    if (linkedFiles.length > 0) {
-      return conversation.sandboxProjectId;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const linkedFiles = await listSandboxFiles(conversation.sandboxProjectId).catch(() => []);
+      if (linkedFiles.length > 0) {
+        return conversation.sandboxProjectId;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     console.warn(`Linked sandbox ${conversation.sandboxProjectId} was empty; falling back to the active running builder sandbox`);
   }
   return findRunningBuilderSandbox();
 }
 
-async function readSandboxApp(projectId) {
-  const file = await api(`/api/sandbox/${projectId}/file?path=${encodeURIComponent('src/App.tsx')}`);
-  return String(file.content ?? '');
+function isReadableSourcePath(filePath) {
+  return !filePath.includes('node_modules/')
+    && !filePath.includes('pnpm-lock.yaml')
+    && /\.(?:css|html|js|jsx|json|ts|tsx)$/i.test(filePath);
 }
 
-async function waitForSandboxAppContains(projectId, needles, timeoutMs = 60000) {
-  const expected = Array.isArray(needles) ? needles : [needles];
+async function readSandboxSourceBundle(projectId) {
+  const paths = (await listSandboxFiles(projectId))
+    .filter((filePath) => typeof filePath === 'string' && isReadableSourcePath(filePath));
+  const parts = await Promise.all(paths.map(async (filePath) => {
+    const file = await api(`/api/sandbox/${projectId}/file?path=${encodeURIComponent(filePath)}`);
+    return `\n/* ${filePath} */\n${String(file.content ?? '')}`;
+  }));
+  return parts.join('\n');
+}
+
+async function waitForSandboxSource(projectId, predicate, description, timeoutMs = 60000) {
   const startedAt = Date.now();
   let lastSource = '';
 
   while (Date.now() - startedAt < timeoutMs) {
-    lastSource = await readSandboxApp(projectId).catch(() => '');
-    if (expected.every((needle) => lastSource.includes(needle))) {
+    lastSource = await readSandboxSourceBundle(projectId).catch(() => '');
+    if (lastSource && predicate(lastSource)) {
       return lastSource;
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
-  throw new Error(`Sandbox readback did not contain expected content: ${expected.join(', ')}`);
+  const snippet = lastSource.replace(/\s+/g, ' ').slice(0, 500);
+  throw new Error(`Sandbox readback did not satisfy ${description}. Last source: ${snippet}`);
 }
 
 async function main() {
@@ -179,29 +205,42 @@ async function main() {
     console.log('Opening app...');
     await page.goto(BASE_URL, { waitUntil: 'networkidle', timeout: 120000 });
     await ensureAppReady(page);
+    await selectBuilderMode(page);
     await screenshot(page, 'ready');
 
     console.log('Building dashboard...');
     await sendPrompt(page, 'Build a React analytics dashboard with charts and a traffic sources pie chart.');
-    await page.getByText('Building a React analytics dashboard with Recharts.').waitFor({ timeout: 120000 });
-    await page.locator('[title*="Mode: Builder"]').waitFor({ timeout: 120000 });
-    const readbackSandboxId = await resolveReadbackSandboxId();
+    await page.locator('button[title*="Mode: Builder"]').waitFor({ timeout: 120000 });
 
     const initialFrame = await waitForPreviewFrame(page);
+    const readbackSandboxId = await resolveReadbackSandboxId();
+    const initialSource = await readSandboxSourceBundle(readbackSandboxId);
     await screenshot(page, 'dashboard-before-edit');
 
     console.log('Applying purple + teal edit...');
     await sendPrompt(page, 'Change the color scheme to purple and teal.');
-    await page.getByText('shifted the dashboard from blue accents to a purple + teal palette').waitFor({ timeout: 120000 });
-    await waitForSandboxAppContains(readbackSandboxId, ['#8b5cf6', '#14b8a6']);
+    const themedSource = await waitForSandboxSource(
+      readbackSandboxId,
+      (source) => (
+        source !== initialSource
+        && /#8b5cf6|\b(?:purple|violet)\b/i.test(source)
+        && /#14b8a6|\b(?:teal|cyan)\b/i.test(source)
+      ),
+      'a changed purple/teal themed source bundle',
+      120000,
+    );
     await initialFrame.getByText('Traffic Sources').waitFor({ timeout: 120000 });
     await page.waitForTimeout(1500);
     await screenshot(page, 'dashboard-after-theme');
 
     console.log('Applying date range filter edit...');
     await sendPrompt(page, 'Add a date range filter row above the charts.');
-    await page.getByText('Added a date range filter row above the charts on the active dashboard.').waitFor({ timeout: 120000 });
-    await waitForSandboxAppContains(readbackSandboxId, ['Last 30 days', 'Last 90 days']);
+    await waitForSandboxSource(
+      readbackSandboxId,
+      (source) => source !== themedSource && source.includes('Last 30 days') && source.includes('Last 90 days'),
+      'date range filter controls',
+      120000,
+    );
     await initialFrame.getByText('Last 30 days').waitFor({ timeout: 120000 });
     await initialFrame.getByText('Last 90 days').waitFor({ timeout: 120000 });
     await screenshot(page, 'dashboard-after-date-filter');

@@ -6,6 +6,21 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **PRIORITY 1 - Builder edit smoke applies files but misses requested theme** (2026-06-28)
+  - Evidence: PR #28 CI browser builder smoke selected Builder mode, built the
+    analytics dashboard, linked sandbox `a30b51f0`, and the purple/teal edit turn
+    enqueued two files, but sandbox source readback never contained a changed
+    purple/teal source bundle within 120s. Run `28334151991`, Verify job
+    `83937345494`, failure after screenshots `01-ready` and
+    `02-dashboard-before-edit`.
+  - Expected: edit-mode turns must update the active sandbox deterministically or
+    refuse with visible evidence; source readback and rendered iframe should
+    prove the edit.
+  - Next slice: inspect `useAutoSandbox` edit file application, conversation
+    `sandboxProjectId` binding, and `VaiEngine` dashboard edit handling around
+    `buildDashboardAppCode` / purple-teal routing; add a focused regression that
+    checks revision/file content after an edit.
+
 - **PRIORITY 0 - Capability kernel, not phrase-gated side routes** (2026-06-13)
   - unify deterministic handlers, repo tools, web research, council/model calls,
   and sandbox actions behind one inspectable capability contract:
