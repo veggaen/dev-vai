@@ -142,7 +142,12 @@ export function realApplyDeps(opts = {}) {
         if (add.code !== 0) throw new Error(`git add failed: ${add.out}`);
       }
       const commit = sh('git', ['commit', '-m', message]);
-      if (commit.code !== 0) throw new Error(`git commit failed: ${commit.out}`);
+      if (commit.code !== 0) {
+        // UNSTAGE the file we just `git add`-ed so a failed commit doesn't leave it staged — a staged
+        // blob would otherwise leak into the NEXT auto-commit (CodeRabbit #25). Best-effort reset.
+        if (file) sh('git', ['reset', '--quiet', 'HEAD', '--', file]);
+        throw new Error(`git commit failed: ${commit.out}`);
+      }
     },
   };
 }

@@ -64,8 +64,11 @@ const flaggedForVegga = [];
 // CORRECTNESS GUARD: verified=1 means the LINE exists, NOT that the patch is correct. The
 // consensus stage can converge on the right line but a wrong replacement (4/4 agreement is no
 // proof of correctness), and such rows are saved with a `why` that explains the rejection.
-// Never apply a proposal whose own rationale flags it as rejected/wrong/already-fixed.
-const REJECTED_WHY = /\b(rejected|wrong patch|incorrect|do not apply|already fixed|re-?introduces?|reintroduce|regression)\b/i;
+// Never apply a proposal whose own rationale flags it as rejected/wrong/already-fixed. Match
+// explicit apply-DENIAL phrases, NOT bare risk words — "prevents a regression" / "does not
+// reintroduce X" are GOOD rationales and must not be skipped (CodeRabbit #25: the old standalone
+// `regression`/`reintroduce` words false-rejected valid fixes).
+const REJECTED_WHY = /\b(?:rejected|wrong patch|incorrect|do not apply|don'?t apply|already fixed|will\s+re-?introduce|re-?introduces?\s+(?:the|a|an)\b|causes?\s+(?:a\s+)?regression|introduces?\s+(?:a\s+)?regression)\b/i;
 
 for (const p of pending) {
   const proposal = { file: p.file, find: p.find, replace: p.replace ?? '', why: p.why };
@@ -155,12 +158,12 @@ for (const p of pending) {
     flaggedForVegga.push({ file: p.file, class: p.class, reasons: r.reasons });
     console.log(`   ⚠ propose-only (risk tier) — left for Vegga: ${r.reasons.join('; ')}`);
   } else if (r.infra) {
-    // INFRA blip (tsc couldn't finish) — NOT a broken patch. Leave the proposal UNAPPLIED + unstruck
-    // so it's retried when the machine is free. Striking it here would quarantine a possibly-good fix
-    // for a timeout — the exact bug that meant the loop could never land anything under GPU load.
+    // INFRA blip (tsc couldn't finish) — NOT a broken patch. Leave the proposal genuinely RETRYABLE:
+    // do NOT set `applied` (the pending query is `applied IS NULL OR applied=''`), so a real later run
+    // re-attempts it. (CodeRabbit #25: the old `applied='skipped-infra'` removed it from pending
+    // forever, contradicting "will retry" — a possibly-good fix was silently dropped on one timeout.)
     summary.skipped++;
-    db.prepare("UPDATE consensus SET applied='skipped-infra' WHERE id=?").run(p.id);
-    console.log(`   ⏭ skipped (infra, NOT a bad patch) — ${r.verifyDetail} · will retry`);
+    console.log(`   ⏭ skipped (infra, NOT a bad patch) — ${r.verifyDetail} · left retryable`);
   } else if (r.verifyDetail && /reverted/i.test(r.verifyDetail)) {
     summary.reverted++;
     db.prepare("UPDATE consensus SET applied='reverted-red' WHERE id=?").run(p.id);

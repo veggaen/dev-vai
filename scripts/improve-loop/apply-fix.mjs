@@ -57,18 +57,23 @@ export async function applyVerifiedFix(proposal, deps) {
     return { applied: false, committed: false, tier, reasons: ['no-op (replace equals find)'] };
   }
 
+  // restore() never throws — the module's contract is "never throws", and a throw on the rollback
+  // path would leave the broken patch in the tree (CodeRabbit #25). Returns false if it couldn't.
+  const restore = () => { try { deps.writeFile(proposal.file, before); return true; } catch { return false; } };
+
   // Apply, then verify. Revert on red so the tree is never left broken.
-  deps.writeFile(proposal.file, after);
+  try { deps.writeFile(proposal.file, after); }
+  catch (err) { return { applied: false, committed: false, tier, reasons: [`apply write failed: ${String(err).slice(0, 80)}`] }; }
   let verifyResult;
   try {
     verifyResult = await deps.verify();
   } catch (err) {
-    deps.writeFile(proposal.file, before);
-    return { applied: false, committed: false, tier, reasons: [`verify threw: ${String(err).slice(0, 80)}`] };
+    const ok = restore();
+    return { applied: false, committed: false, tier, reasons: [`verify threw: ${String(err).slice(0, 80)}${ok ? '' : ' (WARNING: tree restore also failed)'}`] };
   }
 
   if (!verifyResult.ok) {
-    deps.writeFile(proposal.file, before); // revert — NEVER commit red OR on an infra blip
+    restore(); // revert — NEVER commit red OR on an infra blip
     // INFRA failure (tsc timed out / couldn't run) is NOT a broken patch. Signal it distinctly so the
     // caller SKIPS (retries later) instead of striking a possibly-good fix as dead — the difference
     // between "your patch is wrong" and "the typechecker didn't finish under load".

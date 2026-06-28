@@ -143,13 +143,27 @@ async function actOnContrastConsensus(cycle, taste) {
     return null;
   }
   try { vdb.exec(`CREATE TABLE IF NOT EXISTS consensus (id INTEGER PRIMARY KEY AUTOINCREMENT, class TEXT, file TEXT, find TEXT, replace TEXT, agree_count INTEGER, personas TEXT, verified INTEGER, why TEXT, created_at TEXT)`); } catch {}
-  // Replace only the first occurrence to stay surgical (apply-fix uses String.replace = first match).
+  // Build a FULL source-line find/replace (not a bare token) and run it through the same mechanical
+  // verifier apply-consensus trusts — so verified=1 actually means "validated edit", not just "token
+  // present" (CodeRabbit #25). The line containing `dim` becomes find; the same line with dim→lighter
+  // is replace. We already know `dim` appears exactly once in this file (picked above).
+  const findLine = content.split('\n').find((l) => l.includes(dim));
+  if (!findLine) { vdb.close(); return null; }
+  const replaceLine = findLine.replace(dim, lighter);
+  const { verifyProposal } = await import('./proposal-verifier.mjs');
+  const v = verifyProposal({ file, find: findLine.trim(), replace: replaceLine.trim() }, { readFile: (p) => fs.readFileSync(p, 'utf8') });
+  if (!v.ok) { vdb.close(); log(`ACT: contrast edit failed verify (${v.code}) — not inserting`); return null; }
+  const storedFind = v.correctedFind ?? findLine.trim();
   vdb.prepare('INSERT INTO consensus (class,file,find,replace,agree_count,personas,verified,why,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run('ui/contrast', file, dim, lighter, 1, 'council-ui', 1, `raise text contrast ${dim}→${lighter}`, new Date().toISOString());
+    .run('ui/contrast', file, storedFind, replaceLine.trim(), 1, 'council-ui', 1, `raise text contrast ${dim}→${lighter}`, new Date().toISOString());
   vdb.close();
   log(`cycle ${cycle} : ACT → ${dim}→${lighter} in ${file}`);
-  const out = await runChildCapture('scripts/improve-loop/apply-consensus.mjs', ['--tsconfig', 'apps/desktop/tsconfig.json']).catch(() => '');
-  const committed = /committed/i.test(out) && !/revert|❌|red/i.test(out);
+  // Forward --base-url so apply-consensus runs behavioural acceptance against THIS runtime, not its
+  // default (CodeRabbit #25). Parse the numeric summary instead of grepping for "red" — the summary
+  // always prints "reverted-red=N", so a substring match made `committed` false even on success.
+  const out = await runChildCapture('scripts/improve-loop/apply-consensus.mjs', ['--tsconfig', 'apps/desktop/tsconfig.json', '--base-url', BASE_URL]).catch(() => '');
+  const committedMatch = out.match(/applied\+committed=(\d+)/);
+  const committed = !!committedMatch && Number(committedMatch[1]) > 0;
   return { label: `${dim}→${lighter} in ${file.replace('apps/desktop/src/', '')}`, committed, detail: out.replace(/\x1b\[[0-9;]*m/g, '').slice(-900) };
 }
 
@@ -334,14 +348,16 @@ async function engineMain() {
                 // cycle → every gate-passing fix was discarded as "no value" (0/331 ever adopted).
                 // Drive value from the ACTUAL outcome instead: a fix that committed + behaviourally
                 // recovered its class is real progress and must be adopted.
-                const committedBefore = ctx.db.prepare(
-                  "SELECT COUNT(*) n FROM consensus WHERE applied='committed'",
-                ).get().n;
+                // Tolerate a missing consensus table (fresh DB, before consensus-fix creates it):
+                // default the count to 0 instead of throwing and killing the apply step (CodeRabbit #25).
+                const countCommitted = () => {
+                  try { return ctx.db.prepare("SELECT COUNT(*) n FROM consensus WHERE applied='committed'").get().n; }
+                  catch { return 0; }
+                };
+                const committedBefore = countCommitted();
                 await runChild('scripts/improve-loop/consensus-fix.mjs', ['--class', klass]);
-                const code = await runChild('scripts/improve-loop/apply-consensus.mjs', []);
-                const committedAfter = ctx.db.prepare(
-                  "SELECT COUNT(*) n FROM consensus WHERE applied='committed'",
-                ).get().n;
+                const code = await runChild('scripts/improve-loop/apply-consensus.mjs', ['--base-url', BASE_URL]);
+                const committedAfter = countCommitted();
                 const landed = committedAfter > committedBefore;
                 // A landed+accepted commit is real value → drives valuePrototype to ADOPT (metricDelta
                 // is the fallback signal when there's no codebase-quality delta). No commit → no value,
@@ -658,7 +674,7 @@ async function main() {
       // APPLY: the SAFE gated path — risk-gate + rejected-guard + tsc/vitest verify + commit
       // to council/auto-improve if green / revert if red. Refuses off-branch internally.
       log(`━━━ cycle ${cycle} : APPLY (verified-safe → council/auto-improve) ━━━`);
-      await runChild('scripts/improve-loop/apply-consensus.mjs', []);
+      await runChild('scripts/improve-loop/apply-consensus.mjs', ['--base-url', BASE_URL]);
     }
 
     // VISUAL CADENCE: between text cycles, let Vai LOOK at itself. Serial (one heavy task
