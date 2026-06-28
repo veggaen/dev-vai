@@ -1,13 +1,20 @@
-#!/usr/bin/env node
+#!/usr/bin/env tsx
+// Run with a TS-capable runner (tsx) — this CLI imports vai-engine.ts directly, which plain `node`
+// cannot load (CodeRabbit #25). e.g. `npx tsx scripts/capture-builder-golden.mjs [dest]`.
 /**
  * capture-builder-golden — snapshot the output of every pure generateBuilder* method
  * from the CURRENT VaiEngine, so we can prove byte-identical behavior after extraction.
  * Run BEFORE and AFTER; the two JSON outputs must be identical.
  */
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { tmpdir } from 'os';
+import { join, dirname } from 'path';
 import { VaiEngine } from '../packages/core/src/models/vai-engine.ts';
 
-const manifest = JSON.parse(readFileSync('c:/tmp/pure-methods.json', 'utf8'));
+// Portable temp paths (CodeRabbit #25: c:/tmp is Windows-only). Overridable via env/arg.
+const TMP = process.env.VAI_GOLDEN_DIR || tmpdir();
+const manifestPath = process.env.VAI_PURE_METHODS || join(TMP, 'pure-methods.json');
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 const engine = new VaiEngine({ testMode: true, rng: () => 0.42, now: () => 1_700_000_000_000 });
 
 // Representative args per signature shape. Pure methods ignore most of these,
@@ -32,7 +39,8 @@ for (const { name } of manifest) {
   }
 }
 
-const dest = process.argv[2] || 'c:/tmp/builder-golden.json';
+const dest = process.argv[2] || join(TMP, 'builder-golden.json');
+mkdirSync(dirname(dest), { recursive: true });
 writeFileSync(dest, JSON.stringify(out, null, 2));
 const sizes = Object.values(out).map((v) => typeof v === 'string' ? v.length : 0);
 console.log(`captured ${Object.keys(out).length} method outputs -> ${dest}`);

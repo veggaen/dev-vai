@@ -2,7 +2,10 @@
 // Capture the FULL thinking trace for one turn to locate where the bad text enters.
 import { WebSocket } from 'ws';
 const q = process.argv[2] || 'Who wrote Romeo and Juliet?';
-const ws = new WebSocket('ws://localhost:3006/api/chat?devAuthBypass=1');
+const BASE = process.env.VAI_API || 'http://localhost:3006';
+// devAuthBypass only for a loopback target (CodeRabbit #25, security).
+const isLoopback = (() => { try { const h = new URL(BASE).hostname; return h === 'localhost' || h === '127.0.0.1' || h === '::1'; } catch { return false; } })();
+const ws = new WebSocket(`${BASE.replace(/^http/i, 'ws')}/api/chat${isLoopback ? '?devAuthBypass=1' : ''}`);
 let text = '';
 const steps = [];
 ws.on('open', () => ws.send(JSON.stringify({
@@ -30,4 +33,5 @@ ws.on('message', (raw) => {
   }
   if (m.type === 'error') { console.log('ERROR', m.error); ws.close(); process.exit(1); }
 });
+ws.on('error', (e) => { console.error('connection failed:', e.message); process.exit(1); }); // CodeRabbit #25
 setTimeout(() => { console.log('timeout'); process.exit(2); }, 90000);

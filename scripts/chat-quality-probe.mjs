@@ -7,7 +7,13 @@
 import { WebSocket } from 'ws';
 
 const BASE = process.env.VAI_API || 'http://localhost:3006';
-const wsUrl = `${BASE.replace(/^http/i, 'ws')}/api/chat?devAuthBypass=1`;
+// Only attach devAuthBypass to a LOOPBACK target — sending it to an arbitrary VAI_API host turns this
+// probe into a bypass client if any non-local server honours it (CodeRabbit #25, security).
+const isLoopback = (() => {
+  try { const h = new URL(BASE).hostname; return h === 'localhost' || h === '127.0.0.1' || h === '::1'; }
+  catch { return false; }
+})();
+const wsUrl = `${BASE.replace(/^http/i, 'ws')}/api/chat${isLoopback ? '?devAuthBypass=1' : ''}`;
 
 const QUESTIONS = [
   { intent: 'factual', q: 'What is the capital of Japan?' },
@@ -26,7 +32,17 @@ function ask({ intent, q }) {
     const started = Date.now();
     let text = '';
     let thinking = null;
-    const timer = setTimeout(() => { try { ws.close(); } catch {} resolve({ intent, q, text, thinking, ms: Date.now() - started, timedOut: true }); }, 120000);
+    let settled = false;
+    // Single-shot settle so error/done/close/timeout can't double-resolve, and so the probe finishes
+    // the moment the socket closes instead of hanging for the full 120s timeout (CodeRabbit #25).
+    const settle = (extra) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { ws.close(); } catch {}
+      resolve({ intent, q, text, thinking, ms: Date.now() - started, ...extra });
+    };
+    const timer = setTimeout(() => settle({ timedOut: true }), 120000);
     ws.on('open', () => ws.send(JSON.stringify({
       conversationId: `quality-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       content: q, mode: 'chat', processDepth: 'balanced', allowLearn: false,
@@ -34,10 +50,11 @@ function ask({ intent, q }) {
     ws.on('message', (raw) => {
       let m; try { m = JSON.parse(raw.toString()); } catch { return; }
       if (m.type === 'text_delta' && m.textDelta) text += m.textDelta;
-      if (m.type === 'error') { clearTimeout(timer); ws.close(); resolve({ intent, q, error: m.error, ms: Date.now() - started }); }
-      if (m.type === 'done') { thinking = m.thinking || null; clearTimeout(timer); ws.close(); resolve({ intent, q, text, thinking, ms: Date.now() - started }); }
+      if (m.type === 'error') settle({ error: m.error });
+      if (m.type === 'done') { thinking = m.thinking || null; settle(); }
     });
-    ws.on('error', (e) => { clearTimeout(timer); resolve({ intent, q, error: String(e), ms: Date.now() - started }); });
+    ws.on('error', (e) => settle({ error: String(e) }));
+    ws.on('close', () => settle({ closed: true })); // resolve immediately on socket close
   });
 }
 
