@@ -47,6 +47,22 @@ test('a class that recovered (contradicted > confirmed) is NOT ungroundable', ()
   assert.equal(ungroundableClasses(db).has('x/y'), false, 'contradicted-more ⇒ groundable again');
 });
 
+test('STALENESS DECAY: a no-file flag not re-confirmed within 24h stops excluding the class', () => {
+  const db = db0();
+  const claim = 'class "answer/opportunity-framing" has no resolvable source file';
+  // A confirmed flag from 3 days ago — the codebase has changed since (a handler was added).
+  const old = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare(
+    "INSERT INTO project_knowledge (scope, claim, kind, confirmations, contradictions, first_seen, last_seen) VALUES ('propose:no-file', ?, 'guard', 2, 0, ?, ?)",
+  ).run(claim, old, old);
+  assert.equal(ungroundableClasses(db).has('answer/opportunity-framing'), false, 'stale flag ⇒ re-attemptable');
+
+  // A FRESH confirmation (today) still excludes — we only decay stale, unverified flags.
+  const fresh = 'class "answer/curated-trap" has no resolvable source file';
+  recordKnowledge(db, { scope: 'propose:no-file', claim: fresh, kind: 'guard', confirm: true });
+  assert.equal(ungroundableClasses(db).has('answer/curated-trap'), true, 'fresh flag still excludes');
+});
+
 test('buildLoopContext does NOT pick an ungroundable class as worstClass', () => {
   const db = db0();
   // weakest by pass-rate is the ungroundable one; the next-weakest is fixable.

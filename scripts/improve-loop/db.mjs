@@ -841,12 +841,22 @@ export function campaignClassStats(db) {
 export function ungroundableClasses(db) {
   const set = new Set();
   // (a) Reactive: classes propose-fix already flagged no-file (confirmed ≥ contradicted).
+  // STALENESS DECAY: a "no source file" claim reflects the codebase AT THE TIME it was made. The
+  // code changes (a senior or the loop adds the missing handler — e.g. opportunity-framing, comparison,
+  // context-carry all got real fixes 2026-06-28). A claim not RE-confirmed within the window is no
+  // longer trustworthy — let the loop re-attempt the class instead of locking it out forever. Fresh
+  // confirmations still exclude. This is what turns a one-time "model couldn't ground it" into a
+  // recoverable state rather than a permanent ban.
+  const UNGROUNDABLE_TTL_MS = 24 * 60 * 60 * 1000; // 24h since last confirmation
+  const now = Date.now();
   try {
     const rows = db.prepare(
-      "SELECT claim, confirmations, contradictions FROM project_knowledge WHERE scope='propose:no-file'",
+      "SELECT claim, confirmations, contradictions, last_seen FROM project_knowledge WHERE scope='propose:no-file'",
     ).all();
     for (const r of rows) {
       if (Number(r.confirmations) < Number(r.contradictions)) continue; // recovered → groundable again
+      const lastMs = Date.parse(r.last_seen ?? '');
+      if (Number.isFinite(lastMs) && now - lastMs > UNGROUNDABLE_TTL_MS) continue; // stale → re-attempt
       const m = /class "([^"]+)"/.exec(r.claim);
       if (m) set.add(m[1]);
     }
