@@ -56,7 +56,7 @@ export function classifyAgentBuildIntent(content: string): AgentBuildIntent {
   if (looksLikeFactualQuestion(text)) return 'answer';
 
   const hasHardBuildVerb = EXPLICIT_BUILD_REQUEST.test(text);
-  const hasSoftBuildVerb = SOFT_BUILD_VERB.test(text);
+  const hasSoftBuildVerb = SOFT_BUILD_VERB.test(text) && !text.endsWith('?');
   const hasTarget = EXPLICIT_BUILD_TARGET.test(text) || NAMED_PRODUCT_CLONE.test(text);
   const isQuestion = text.endsWith('?');
 
