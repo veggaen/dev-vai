@@ -209,7 +209,7 @@ async function engineMain() {
   const { analyzeMotion } = await import('./motion.mjs');
   const { campaignTrend, answerExcellenceTrend, logLoopEvent, loopEventStats, recordKnowledge } = await import('./db.mjs');
   const { MIN_MOTION_SAMPLE, planNextExperiment, anyOpenExperiment, hasOpenExperiment, recordCandidate } = await import('./innovation-engine.mjs');
-  const { runNextExperiment, drainExperiments } = await import('./experiment-runner.mjs');
+  const { runNextExperiment, drainExperiments, experimentBlocksPrototype } = await import('./experiment-runner.mjs');
   const { generateNovelExperiment } = await import('./experiment-generator.mjs');
   const { collectSignals, makeSample, analyzeQuality, verifyPerpetualWork, formatHealth } = await import('./perpetual-health.mjs');
   const { runPrototype } = await import('./prototype.mjs');
@@ -269,7 +269,10 @@ async function engineMain() {
   const registry = createRegistry(defineLoopProcesses({
     runChild,
     autoApply: AUTO_APPLY,
-    anyOpen: (db) => anyOpenExperiment(db),
+    // Prototype's "one change at a time" gate: hold only for a FRESH measurement (a code edit would
+    // confound it), but don't let a lingering experiment camp the slot forever — that deadlock kept
+    // fixes from ever landing. experimentBlocksPrototype releases past a short grace.
+    anyOpen: (db) => experimentBlocksPrototype(db),
     closeExperiment: (db) => drainExperiments(db), // drain the whole closeable backlog, not one
     planExperiment: (db) => planNextExperiment(db, { record: true }),
     generateNovel: async (db, scorecard) => {
@@ -285,8 +288,9 @@ async function engineMain() {
       const klass = ctx.worstClass;
       if (!klass) return null;
       // Re-check at RUN time (not just plan time): innovate may have opened an experiment earlier
-      // in THIS cycle. One change at a time — skip the prototype rather than stack on an open arm.
-      if (anyOpenExperiment(ctx.db)) return null;
+      // in THIS cycle. Hold only for a FRESH measurement (grace-aware) — a lingering experiment must
+      // not block the fix, else nothing ever lands.
+      if (experimentBlocksPrototype(ctx.db)) return null;
       const cycle = ctx.cycle ?? 0;
       return runPrototype(
         { type: 'code', hypothesis: `fix weakest class ${klass} (${Math.round((ctx.worstPassRate ?? 0) * 100)}%)`, config: { klass } },

@@ -31,6 +31,24 @@ import {
  *  normal case closes in 1-2 runs) so we only abandon genuinely stuck arms. */
 export const STALE_RUNS = 8;
 
+/**
+ * Should an OPEN experiment block the prototype (fix-landing) process this cycle? An experiment is an
+ * A/B MEASUREMENT; a code edit mid-measurement confounds it, so we hold prototype while one is FRESH
+ * (its post-queue sample is imminent). But a measurement that's been open a while must NOT camp the
+ * "one change at a time" slot indefinitely — that's the deadlock that kept fixes from EVER landing
+ * (prototype is the only process that adopts a fix, and an open experiment blocked it every cycle).
+ * So: block only if there's an open experiment younger than `graceRuns` runs; past that, let the fix
+ * proceed (the experiment will still close on its own via measure/stale). Returns boolean.
+ */
+export function experimentBlocksPrototype(db, { graceRuns = 2 } = {}) {
+  try {
+    const exp = nextOpenExperiment(db);
+    if (!exp) return false;
+    const runsSince = countRunsSince(db, exp.created_at);
+    return runsSince < graceRuns; // fresh measurement in flight → hold; otherwise let the fix land
+  } catch { return false; }
+}
+
 /** How many runs have been STARTED strictly after an ISO timestamp (the staleness clock).
  *  Counts ALL runs, not just motion-qualifying ones, so a stream of tiny probe runs still
  *  ages an experiment toward abandonment instead of trapping it. */

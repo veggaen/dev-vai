@@ -12,6 +12,7 @@ import {
   runExperiment,
   runNextExperiment,
   drainExperiments,
+  experimentBlocksPrototype,
 } from './experiment-runner.mjs';
 import { startExperiment, finishExperiment, targetMetric, experimentHistory } from './innovation-engine.mjs';
 import { openDb, startRun, recordResult, upsertPrompt } from './db.mjs';
@@ -186,5 +187,21 @@ test('drainExperiments: stops at a genuinely-fresh experiment (does not abandon 
     assert.equal(res.closed, 0, 'a fresh waiting experiment is NOT force-closed');
     assert.equal(res.stillWaiting, 1);
     assert.equal(db.prepare('SELECT COUNT(*) n FROM experiments WHERE delta IS NULL').get().n, 1);
+  } finally { db.close(); rmSync(f, { force: true }); }
+});
+
+test('experimentBlocksPrototype: holds for a FRESH experiment, releases a lingering one', async () => {
+  const { f, db } = tmpDb();
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    // no experiment → never blocks
+    assert.equal(experimentBlocksPrototype(db), false);
+    startExperiment(db, { type: 'model', hypothesis: 'h', config: {}, baselineScore: 0.6 });
+    // 0 runs since queued → fresh → blocks (don't confound an imminent measurement)
+    assert.equal(experimentBlocksPrototype(db, { graceRuns: 2 }), true);
+    // 3 runs elapse strictly AFTER the experiment's timestamp → past grace → release so a fix lands
+    await sleep(5);
+    for (let i = 0; i < 3; i++) startRun(db, 'r');
+    assert.equal(experimentBlocksPrototype(db, { graceRuns: 2 }), false);
   } finally { db.close(); rmSync(f, { force: true }); }
 });
