@@ -41,7 +41,14 @@ export function makeSample(raw = {}, at = new Date().toISOString()) {
   const signals = {};
   let wsum = 0; let acc = 0;
   for (const [key, def] of Object.entries(SIGNALS)) {
-    const v = Number(raw[key] ?? 0);
+    // Only score a signal that was ACTUALLY measured this cycle. Defaulting a missing signal to 0
+    // froze the composite: on cheap (no-tsc) cycles testsPassing/tscErrors/lintWarnings were absent
+    // → counted as 0/perfect every time → composite stuck at a constant (0.5135…) forever, so the
+    // health verdict was permanently "flat despite work" and could never detect improvement. Skipping
+    // unmeasured signals lets the composite move with the signals that DID run (maxFileLines shrinks
+    // as the god-class is decomposed; todoCount changes), and fold in tsc/tests on the cycles they run.
+    if (raw[key] == null) continue;
+    const v = Number(raw[key]);
     signals[key] = v;
     const n = clamp01(def.normalize(v, raw));
     acc += n * def.weight; wsum += def.weight;

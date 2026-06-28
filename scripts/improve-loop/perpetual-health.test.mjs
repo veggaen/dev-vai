@@ -20,6 +20,17 @@ test('makeSample: lower-is-better signals raise composite when they fall', () =>
   assert.ok(after.composite > before.composite); // fewer tsc errors = higher quality
 });
 
+test('makeSample: UNMEASURED signals are excluded, not scored as 0 (un-freezes the metric)', () => {
+  // The frozen-composite bug: on no-tsc cycles only cheap signals are collected. Defaulting the
+  // missing ones to 0 pinned the composite to a constant forever. Now only measured signals count,
+  // so the composite MOVES with the signals that did run.
+  const cheap1 = makeSample({ maxFileLines: 35152, todoCount: 38, tscErrors: 0 });
+  const cheap2 = makeSample({ maxFileLines: 30000, todoCount: 38, tscErrors: 0 }); // god-class shrank
+  assert.ok(cheap2.composite > cheap1.composite, 'composite must rise when maxFileLines falls');
+  assert.deepEqual(Object.keys(cheap1.signals).sort(), ['maxFileLines', 'todoCount', 'tscErrors'], 'only measured signals scored');
+  assert.ok(!('testsPassing' in cheap1.signals), 'an unmeasured signal is absent, not 0');
+});
+
 test('analyzeQuality: cold-start under 2 samples', () => {
   assert.equal(analyzeQuality([makeSample(raw())]).state, 'cold-start');
 });
