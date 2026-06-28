@@ -26593,7 +26593,12 @@ A simple 2-player tic-tac-toe with board display, move validation, and win/draw 
     }
 
     // ── Responsive / Mobile-first ──
-    if (/responsive\s+design|mobile.?first|responsive.*(?:what|explain|how|why)/i.test(input)) {
+    // Require an explicit responsive/mobile-first CSS cue. The old third alternative
+    // (`responsive.*(?:what|explain|how|why)`) used `.*` across the whole input, so any prompt that
+    // merely contained "responsive" plus a question word — or a context-bled follow-up — could be
+    // answered with this CSS primer (live curated-trap: "what makes a good company culture?" served
+    // the responsive-design answer). Anchor on the actual topic terms only.
+    if (/\bresponsive\s+(?:design|layout|web|site|ui)\b|\bmobile.?first\b/i.test(input)) {
       return '**Responsive design** means building websites that adapt to any screen size.\n\n' +
         '**Mobile-first approach:**\n' +
         '- Start with mobile layout, then enhance for larger screens\n' +
