@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  SIGNALS, makeSample, analyzeQuality, verifyPerpetualWork, formatHealth,
+  SIGNALS, makeSample, analyzeQuality, verifyPerpetualWork, formatHealth, collectSignals,
 } from './perpetual-health.mjs';
 
 const raw = (over = {}) => ({ testsPassing: 220, testsTotal: 220, tscErrors: 0, lintWarnings: 5, maxFileLines: 1800, todoCount: 30, ...over });
@@ -24,11 +24,40 @@ test('makeSample: UNMEASURED signals are excluded, not scored as 0 (un-freezes t
   // The frozen-composite bug: on no-tsc cycles only cheap signals are collected. Defaulting the
   // missing ones to 0 pinned the composite to a constant forever. Now only measured signals count,
   // so the composite MOVES with the signals that did run.
-  const cheap1 = makeSample({ maxFileLines: 35152, todoCount: 38, tscErrors: 0 });
-  const cheap2 = makeSample({ maxFileLines: 30000, todoCount: 38, tscErrors: 0 }); // god-class shrank
+  const cheap1 = makeSample({ maxFileLines: 35152, todoCount: 38 });
+  const cheap2 = makeSample({ maxFileLines: 30000, todoCount: 38 }); // god-class shrank
   assert.ok(cheap2.composite > cheap1.composite, 'composite must rise when maxFileLines falls');
-  assert.deepEqual(Object.keys(cheap1.signals).sort(), ['maxFileLines', 'todoCount', 'tscErrors'], 'only measured signals scored');
+  assert.deepEqual(Object.keys(cheap1.signals).sort(), ['maxFileLines', 'todoCount'], 'only measured signals scored');
   assert.ok(!('testsPassing' in cheap1.signals), 'an unmeasured signal is absent, not 0');
+  assert.ok(!('tscErrors' in cheap1.signals), 'a skipped typecheck is absent, not 0 errors');
+});
+
+test('collectSignals: omits tscErrors when the heavy typecheck probe is skipped', async () => {
+  const calls = [];
+  const sample = await collectSignals({
+    withTsc: false,
+    exec: async (file, args) => {
+      calls.push(`${file} ${args.join(' ')}`);
+      return { ok: true, out: '' };
+    },
+  });
+
+  assert.equal('tscErrors' in sample, false);
+  assert.ok(!calls.some((call) => call.includes('tsc')), 'must not run tsc when withTsc=false');
+});
+
+test('collectSignals: records tscErrors only when the typecheck probe runs', async () => {
+  const sample = await collectSignals({
+    withTsc: true,
+    exec: async (file, args) => {
+      if (file === 'npx' && args[0] === 'tsc') {
+        return { ok: false, out: 'src/a.ts(1,1): error TS2322: nope\nsrc/b.ts(2,1): error TS7006: nope' };
+      }
+      return { ok: true, out: '' };
+    },
+  });
+
+  assert.equal(sample.tscErrors, 2);
 });
 
 test('analyzeQuality: cold-start under 2 samples', () => {

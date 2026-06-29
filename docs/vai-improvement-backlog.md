@@ -969,6 +969,13 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Done
 
+- 2026-06-29 - Perpetual-health no longer treats skipped typecheck as perfect.
+  `collectSignals({ withTsc: false })` now omits `tscErrors` instead of emitting
+  `0`, so cheap loop samples do not fabricate "0 TypeScript errors" when the heavy
+  typecheck probe was deliberately skipped. Evidence: `perpetual-health.test.mjs`
+  now asserts omitted unmeasured signals and covers both `withTsc=false` and
+  `withTsc=true` collector paths.
+
 - 2026-06-22 - Perpetual improvement-loop operator switchboard. Added
   `scripts/improve-loop/operator.mjs` plus pure command utilities and node:test
   coverage so the loop now has a Windows-first `doctor/status/start/watch/report/

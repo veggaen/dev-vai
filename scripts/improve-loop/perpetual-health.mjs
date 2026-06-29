@@ -169,12 +169,11 @@ export async function collectSignals({ exec, cwd = process.cwd(), withTsc = fals
   } catch {}
   out.maxFileLines = maxLines;
 
-  // tsc errors (opt-in — heavy). 0 when not run, so it never fabricates a regression.
+  // tsc errors (opt-in — heavy). When not run, omit the signal entirely. A skipped
+  // typecheck is not evidence of "0 errors"; makeSample() will score only measured signals.
   if (withTsc) {
     const tsc = await run('npx', ['tsc', '--noEmit']).catch(() => ({ out: '' }));
     out.tscErrors = ((tsc.out || '').match(/error TS\d+/g) || []).length;
-  } else {
-    out.tscErrors = 0;
   }
   return out;
 }
