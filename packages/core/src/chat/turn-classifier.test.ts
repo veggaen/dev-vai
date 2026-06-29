@@ -115,6 +115,18 @@ describe('classifyTurn', () => {
       const r = classifyTurn('harden the response path so the chat is more robust', priorWithAssistant);
       expect(r.signals).toContain('quality-hardening');
     });
+
+    it('records lexical uniqueness hints without stealing the standalone question path', () => {
+      const r = classifyTurn('What is a good idea and how do I tell if it is unique?', []);
+      expect(r.kind).toBe('standalone-question');
+      expect(r.signals).toContain('uniqueness-hint');
+    });
+
+    it('records request-action-start for command-shaped improvement turns', () => {
+      const r = classifyTurn('please improve Vai chat routing', priorWithAssistant);
+      expect(r.signals).toContain('request-action-start');
+      expect(r.signals).toContain('self-improvement');
+    });
   });
 
   describe('case + punctuation tolerance', () => {

@@ -31,7 +31,8 @@ describe('salientTokens', () => {
   });
 
   it('preserves tech tokens with + and .', () => {
-    const tokens = salientTokens('compare c++ and node.js performance');
+    const tokens = salientTokens('compare c# c++ and node.js performance');
+    expect(tokens).toContain('c#');
     expect(tokens).toContain('c++');
     expect(tokens).toContain('node.js');
   });
