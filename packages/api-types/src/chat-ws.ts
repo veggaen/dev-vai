@@ -95,6 +95,8 @@ export const advisorTraceSchema = z.object({
   confidence: z.number().min(0).max(1).optional(),
   durationMs: z.number().nonnegative().optional(),
   error: z.string().min(1).optional(),
+  /** Live rolling preview of the advisor model's reasoning as it streams (thinking out loud). */
+  reasoningPreview: z.string().optional(),
 }).strict();
 
 const councilProgressMemberSchema = z.object({
@@ -108,6 +110,17 @@ const councilProgressMemberSchema = z.object({
   /** True while the member is still being consulted (before their note arrives). */
   pending: z.boolean().optional(),
   failed: z.boolean().optional(),
+  /**
+   * Live, rolling preview of the member's own reasoning as it generates — the model
+   * "thinking out loud" (DeepSeek-R1's <think> channel, or qwen's content as it streams).
+   * Present while `pending` so the UI can show what each model is actually working through
+   * instead of a bare "qwen is working". Capped/sanitized upstream; advisory only — the
+   * fact-quarantine still holds (this never becomes a user-facing fact). Cleared once the
+   * structured note arrives.
+   */
+  reasoningPreview: z.string().optional(),
+  /** Short label for the member's lens/role on the panel (e.g. "reasoning", "code"). */
+  role: z.string().optional(),
   realIntent: z.string().optional(),
   hiddenMeaning: z.string().optional(),
   missingCapability: z.string().optional(),

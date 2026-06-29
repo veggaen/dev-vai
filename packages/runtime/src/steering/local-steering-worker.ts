@@ -99,14 +99,119 @@ function stripJsonFence(value: string): string {
   return fenced ? fenced[1].trim() : trimmed;
 }
 
-export function parseSteeringPacket(raw: string): SteeringPacket | null {
+const TASK_SHAPES = taskShapeSchema.options;
+const RISK_FLAGS = riskFlagSchema.options;
+const ANSWER_LENGTHS = ['literal', 'short', 'medium', 'structured'] as const;
+
+/** Coerce a stringified/loose boolean ("true"/"yes"/1) to a real boolean, else undefined. */
+function coerceBool(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    if (['true', 'yes', '1', 'y'].includes(v)) return true;
+    if (['false', 'no', '0', 'n'].includes(v)) return false;
+  }
+  return undefined;
+}
+
+/** Coerce a number-ish confidence into [0,1], else undefined. */
+function coerceConfidence(value: unknown): number | undefined {
+  const n = typeof value === 'string' ? Number(value) : value;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return undefined;
+  if (n < 0) return 0;
+  if (n > 1) return n > 1 && n <= 100 ? n / 100 : 1; // 70 → 0.7, 200 → 1
+  return n;
+}
+
+/** Snap a free-text value to the nearest allowed enum member (case/space-insensitive substring). */
+function snapEnum<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
+  if (typeof value !== 'string') return undefined;
+  const v = value.trim().toLowerCase().replace(/[\s_]+/g, '-');
+  const exact = allowed.find((a) => a.toLowerCase() === v);
+  if (exact) return exact;
+  return allowed.find((a) => v.includes(a.toLowerCase()) || a.toLowerCase().includes(v));
+}
+
+/**
+ * Best-effort repair of a near-miss packet from a SMALL local model (e.g. qwen2.5:3b).
+ * A 3b model reliably emits the right STRUCTURE but trips on the strict schema: booleans
+ * as "true"/"yes", confidence as 70 instead of 0.7, a taskShape just outside the enum,
+ * missing optional arrays. Rather than discard the whole packet (the live failure — invalid
+ * every turn), we coerce only SHAPE/TYPE mistakes and snap enums to the nearest allowed
+ * value. We never invent safety-bearing content: anything we can't confidently coerce is
+ * left out and the strict schema rejects the result, so a truly garbage response still
+ * yields null. promptHash/actorId, when absent, are not fabricated here — the caller owns
+ * those, so we only repair them when the model echoed something usable.
+ */
+function coerceSteeringPacket(parsed: unknown, fallback: { promptHash?: string }): unknown {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
+  const p = parsed as Record<string, unknown>;
+  const qcRaw = (p.qualityContract && typeof p.qualityContract === 'object' && !Array.isArray(p.qualityContract))
+    ? p.qualityContract as Record<string, unknown>
+    : {};
+
+  const qualityContract = {
+    answerLength: snapEnum(qcRaw.answerLength, ANSWER_LENGTHS) ?? 'medium',
+    mustBeGuiding: coerceBool(qcRaw.mustBeGuiding) ?? false,
+    mustBeCurrent: coerceBool(qcRaw.mustBeCurrent) ?? false,
+    mustUseJson: coerceBool(qcRaw.mustUseJson) ?? false,
+    shouldAskClarifyingQuestion: coerceBool(qcRaw.shouldAskClarifyingQuestion) ?? false,
+  };
+
+  const riskFlags = Array.isArray(p.riskFlags)
+    ? p.riskFlags.map((f) => snapEnum(f, RISK_FLAGS)).filter((f): f is typeof RISK_FLAGS[number] => Boolean(f))
+    : [];
+  const retrievalHints = Array.isArray(p.retrievalHints)
+    ? p.retrievalHints.filter((h): h is string => typeof h === 'string')
+    : [];
+  const routeGuidance = Array.isArray(p.routeGuidance)
+    ? p.routeGuidance.filter((g): g is Record<string, unknown> =>
+        Boolean(g) && typeof g === 'object' && !Array.isArray(g))
+      .map((g) => ({
+        signal: snapEnum(g.signal, ['prefer', 'avoid'] as const),
+        handler: typeof g.handler === 'string' ? g.handler : undefined,
+        reason: typeof g.reason === 'string' ? g.reason : undefined,
+      }))
+      .filter((g) => g.signal && g.handler && g.reason)
+    : [];
+
+  const promptHash = typeof p.promptHash === 'string' && p.promptHash.length >= 16
+    ? p.promptHash
+    : fallback.promptHash;
+
+  return {
+    schemaVersion: 1,
+    actorId: typeof p.actorId === 'string' && p.actorId.length > 0 ? p.actorId : 'local:steering',
+    promptHash,
+    taskShape: snapEnum(p.taskShape, TASK_SHAPES) ?? 'open-chat',
+    qualityContract,
+    routeGuidance,
+    riskFlags,
+    retrievalHints,
+    confidence: coerceConfidence(p.confidence) ?? 0.5,
+  };
+}
+
+/**
+ * Parse a steering packet. Tries the strict schema first (a capable model's clean JSON
+ * passes untouched), then falls back to a best-effort coercion that salvages a small
+ * model's near-miss output. `fallback.promptHash` lets the caller supply the hash it already
+ * computed, since a 3b model frequently omits or mangles it. Returns null only when the
+ * response is unsalvageable.
+ */
+export function parseSteeringPacket(raw: string, fallback: { promptHash?: string } = {}): SteeringPacket | null {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(stripJsonFence(raw));
-    const result = steeringPacketSchema.safeParse(parsed);
-    return result.success ? result.data : null;
+    parsed = JSON.parse(stripJsonFence(raw));
   } catch {
     return null;
   }
+  const strict = steeringPacketSchema.safeParse(parsed);
+  if (strict.success) return strict.data;
+
+  const coerced = steeringPacketSchema.safeParse(coerceSteeringPacket(parsed, fallback));
+  return coerced.success ? coerced.data : null;
 }
 
 function defaultOutFile(): string {
@@ -193,7 +298,7 @@ export class LocalSteeringWorker {
     const promptHash = hashPrompt(redactedContent);
     const startedAt = Date.now();
     const raw = await this.callModel(input, redactedContent, promptHash);
-    const packet = parseSteeringPacket(raw);
+    const packet = parseSteeringPacket(raw, { promptHash });
     const durationMs = Date.now() - startedAt;
 
     await this.writeRecord({

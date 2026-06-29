@@ -289,6 +289,22 @@ describe('VaiEngine', () => {
     expect(answer).toBeNull();
   });
 
+  describe('classifyIntent — advice questions that mention a build gerund are not builds', () => {
+    const intentOf = (q: string) => (engine as any).classifyIntent(q, []);
+    it('reads "great idea when creating a company in norway" as advice, not build', () => {
+      // The Norway failure: "creating a company" matched the build regex → builder decline
+      // ("give me a target stack and I'll scaffold"). Must classify as explore/advice now.
+      expect(intentOf('what is a great idea when creating a company in norway?')).not.toBe('build');
+    });
+    it('reads "what startup makes sense in a small country" as advice, not build', () => {
+      expect(intentOf('what kind of startup makes sense in a small country with cheap clean energy?')).not.toBe('build');
+    });
+    it('still classifies a real imperative build as build', () => {
+      expect(intentOf('build me a dashboard that shows the btc price')).toBe('build');
+      expect(intentOf('create a react todo app')).toBe('build');
+    });
+  });
+
   it('emits no when local action evidence is explicitly negative', () => {
     vi.spyOn(engine as any, 'cachedRetrieveRelevant').mockReturnValue([
       { score: 0.9, text: 'Dogs should not eat chocolate because it can be toxic and harmful to them.', source: 'fixture' },

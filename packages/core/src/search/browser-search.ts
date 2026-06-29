@@ -124,7 +124,11 @@ async function launchBrowser(): Promise<PuppeteerBrowser> {
       '--disable-extensions',
       '--mute-audio',
       '--window-size=1280,900',
-      ...(headless ? [] : ['--window-position=-2400,-2400']),
+      // Keep the evidence browser out of the user's way WITHOUT parking it off-screen at
+      // -2400,-2400 (that made an unbringable, un-closable window stuck in the taskbar).
+      // Start it minimized at a real on-screen origin so it's reachable/closable if it ever
+      // surfaces. True invisibility is VAI_BROWSER_HEADLESS=1.
+      ...(headless ? [] : ['--window-position=0,0', '--start-minimized']),
       '--disable-blink-features=AutomationControlled',
       '--lang=en-US',
     ],

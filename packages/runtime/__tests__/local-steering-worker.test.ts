@@ -39,6 +39,46 @@ describe('LocalSteeringWorker', () => {
     expect(packet?.riskFlags).toContain('generic-fallback-risk');
   });
 
+  it('salvages a small model near-miss: stringy bools, percent confidence, loose enums', () => {
+    // The qwen2.5:3b failure class — right structure, wrong strict types. Previously this
+    // nulled the WHOLE packet ("invalid every turn"); now we coerce shape/type only.
+    const raw = JSON.stringify({
+      schemaVersion: 1,
+      actorId: 'local:qwen2.5:3b',
+      taskShape: 'code generation', // space instead of hyphen
+      qualityContract: {
+        answerLength: 'Structured', // wrong case
+        mustBeGuiding: 'true', // stringified bool
+        mustBeCurrent: 'no',
+        mustUseJson: 0,
+        shouldAskClarifyingQuestion: 'false',
+      },
+      riskFlags: ['generic fallback risk', 'not-a-real-flag'],
+      retrievalHints: ['blank page', 42],
+      confidence: 70, // percent, not [0,1]
+      // promptHash intentionally omitted — caller supplies it
+    });
+
+    const packet = parseSteeringPacket(raw, { promptHash: '1234567890abcdef' });
+    expect(packet).not.toBeNull();
+    expect(packet?.taskShape).toBe('code-generation');
+    expect(packet?.qualityContract.answerLength).toBe('structured');
+    expect(packet?.qualityContract.mustBeGuiding).toBe(true);
+    expect(packet?.qualityContract.mustBeCurrent).toBe(false);
+    expect(packet?.riskFlags).toEqual(['generic-fallback-risk']); // bad flag dropped, good one snapped
+    expect(packet?.retrievalHints).toEqual(['blank page']); // non-string dropped
+    expect(packet?.confidence).toBeCloseTo(0.7);
+    expect(packet?.promptHash).toBe('1234567890abcdef');
+  });
+
+  it('still returns null for unsalvageable garbage', () => {
+    expect(parseSteeringPacket('I think you should explain closures.')).toBeNull();
+    expect(parseSteeringPacket('{"totally":"unrelated"}', { promptHash: 'x'.repeat(16) })).not.toBeNull();
+    // ^ a bare object with a supplied hash salvages to safe defaults (open-chat, conf 0.5) —
+    // that's intentional: a usable low-confidence packet beats wasting the model round-trip.
+    expect(parseSteeringPacket('not json at all {[')).toBeNull();
+  });
+
   it('redacts common secrets before building steering prompts', () => {
     const redacted = redactSteeringText('api_key=abc123SECRET and ghp_1234567890abcdefghijklmnop');
 

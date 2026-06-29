@@ -647,6 +647,11 @@ const MIGRATION_SQL = [
   // gets it; the runtime init also ALTERs it (duplicate is ignored). Without
   // this the test DB lacks the column and every assistant insert fails.
   `ALTER TABLE messages ADD COLUMN plan TEXT`,
+  // Pruned process-trace snapshot per assistant turn, so the in-message ProcessTree
+  // can be re-expanded after the app is closed and reopened (the live trace is
+  // client-assembled and otherwise lost on reload). Canonical here so tests + prod
+  // both get the column; duplicate ALTER is ignored by the safe migration runner.
+  `ALTER TABLE messages ADD COLUMN progress_trace TEXT`,
   // Stage E — visual/fact grounding learning log (cross-check + vision outcomes).
   `CREATE TABLE IF NOT EXISTS visual_grounding_log (
     id TEXT PRIMARY KEY,
