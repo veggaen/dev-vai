@@ -6,6 +6,17 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **Built 2026-06-29 - Safe self-improvement loop stop command (DONE, tested 25/25)**
+  - Finding: the perpetual loop had safe single-instance locking and signal handling, but the operator surface exposed
+    no first-class stop command. That forced users/helpers toward `Ctrl+C` in the foreground or risky broad process
+    killing for background loops, which conflicts with the one-heavy-task-at-a-time safety model.
+  - Change: added `operator stop` / `self-improve:stop`, targeting only the PID recorded in
+    `scripts/improve-loop/.supervisor.lock`, writing a matching stop-request file for checkpoint/rest-boundary exits,
+    and adding `--force` for explicit last-resort shutdown. The supervisor now consumes matching stop requests in both
+    fixed and engine modes and during rest sleeps, while ignoring stale requests for other PIDs.
+  - Proof: `node --check` for `operator.mjs`, `operator-utils.mjs`, and `supervisor.mjs`; `operator.test.mjs` +
+    `instance-lock.test.mjs` -> 25/25 green; live `operator stop` with no lock reported no signal and left no stop file.
+
 - **Built 2026-06-29 - Intentionality and specificity lexical signals (DONE, tested 100/100)**
   - Finding: Vai could already surface request-start, intent-action, uniqueness, and source-reference signals, but
     user correction language such as "what I meant", "my intention", "be specific", and "not generic" was still

@@ -8,7 +8,7 @@ export function isOverRunBudget(now, startedAt, maxRunMs) {
   return maxRunMs > 0 && now - startedAt >= maxRunMs;
 }
 
-export const COMMANDS = new Set(['help', 'doctor', 'status', 'start', 'watch', 'report', 'handoff', 'visual']);
+export const COMMANDS = new Set(['help', 'doctor', 'status', 'start', 'stop', 'watch', 'report', 'handoff', 'visual']);
 export const HEARTBEAT_FRESH_MS = 15_000;
 export const STALE_RUNNING_MS = 15 * 60_000;
 
@@ -66,6 +66,7 @@ export function parseOperatorArgs(argv, env = process.env) {
     streamStdout: hasFlag(optionArgs, '--stream-stdout'),
     noVideo: hasFlag(optionArgs, '--no-video'),
     headed: hasFlag(optionArgs, '--headed'),
+    forceStop: hasFlag(optionArgs, '--force'),
     // Live stream + drive-a-real-turn so we judge the POPULATED ui (Timeline/ProcessTree).
     live: hasFlag(optionArgs, '--live'),
     send: hasFlag(optionArgs, '--send'),
@@ -170,6 +171,7 @@ export function classifyLoopLiveness({ run, heartbeat, nowMs = Date.now() }) {
 export function buildHandoffMarkdown(opts, now = new Date()) {
   const observe = formatNodeCommand(buildSupervisorNodeArgs({ ...opts, apply: false }));
   const apply = formatNodeCommand(buildSupervisorNodeArgs({ ...opts, apply: true }));
+  const stop = formatNodeCommand(['--experimental-sqlite', 'scripts/improve-loop/operator.mjs', 'stop', '--db', opts.db]);
   const watch = formatNodeCommand(buildWatchNodeArgs(opts));
   const report = formatNodeCommand(buildReportNodeArgs(opts));
   const visual = formatNodeCommand(buildVisualNodeArgs(opts));
@@ -198,6 +200,12 @@ Watch live:
 
 \`\`\`powershell
 ${watch}
+\`\`\`
+
+Stop the recorded supervisor without broad process kills:
+
+\`\`\`powershell
+${stop}
 \`\`\`
 
 Read the latest report:

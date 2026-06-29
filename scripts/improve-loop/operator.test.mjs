@@ -60,6 +60,18 @@ test('environment can designate runtime and corpus for delegated runs', () => {
   assert.equal(opts.db, 'C:/tmp/delegated.sqlite');
 });
 
+test('stop command parses as a graceful operator action by default', () => {
+  const opts = parseOperatorArgs(['stop'], {});
+  assert.equal(opts.command, 'stop');
+  assert.equal(opts.forceStop, false);
+});
+
+test('stop command supports an explicit force switch', () => {
+  const opts = parseOperatorArgs(['stop', '--force'], {});
+  assert.equal(opts.command, 'stop');
+  assert.equal(opts.forceStop, true);
+});
+
 test('pnpm argument separator is ignored before the command', () => {
   const opts = parseOperatorArgs(['--', 'watch', '--port', '4200'], {});
   assert.equal(opts.command, 'watch');
@@ -152,6 +164,7 @@ test('handoff includes observe, watch, report, apply, and delegation guidance', 
   const opts = parseOperatorArgs(['handoff', '--db', 'C:/tmp/vai-helper.sqlite', '--base-url', 'http://host:3006'], {});
   const md = buildHandoffMarkdown(opts, new Date('2026-06-22T00:00:00.000Z'));
   assert.match(md, /Observe forever/);
+  assert.match(md, /Stop the recorded supervisor/);
   assert.match(md, /council\/auto-improve/);
   assert.match(md, /C:\/tmp\/vai-helper\.sqlite/);
   assert.match(md, /http:\/\/host:3006/);

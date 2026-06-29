@@ -8,7 +8,7 @@
  * - handoff text for other agents or compute
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import {
   buildHandoffMarkdown,
@@ -22,6 +22,8 @@ import {
 } from './operator-utils.mjs';
 
 const ROOT = resolve(import.meta.dirname, '../..');
+const SUPERVISOR_LOCK_PATH = 'scripts/improve-loop/.supervisor.lock';
+const SUPERVISOR_STOP_PATH = 'scripts/improve-loop/.supervisor.stop';
 
 function abs(path) {
   return isAbsolute(path) ? path : resolve(ROOT, path);
@@ -33,6 +35,7 @@ function usage() {
 Usage:
   node --experimental-sqlite scripts/improve-loop/operator.mjs doctor [options]
   node --experimental-sqlite scripts/improve-loop/operator.mjs start [--mode observe|apply] [options]
+  node --experimental-sqlite scripts/improve-loop/operator.mjs stop [--force]
   node --experimental-sqlite scripts/improve-loop/operator.mjs status [options]
   node --experimental-sqlite scripts/improve-loop/operator.mjs watch [options]
   node --experimental-sqlite scripts/improve-loop/operator.mjs report [options]
@@ -59,6 +62,7 @@ Common options:
   --headed                   show the visual probe browser
   --packet                   print the latest visual run as a compact council packet (no probe)
   --visual-every <n>         (start) run a no-video visual probe every n text cycles
+  --force                    (stop) send SIGKILL instead of a graceful stop request
   --dry-run                  print the start command without running it
 `);
 }
@@ -79,6 +83,62 @@ function runNode(nodeArgs, env = {}) {
     console.error(String(err));
     process.exit(1);
   });
+}
+
+function readSupervisorLock() {
+  const path = abs(SUPERVISOR_LOCK_PATH);
+  if (!existsSync(path)) return null;
+  try {
+    const payload = JSON.parse(readFileSync(path, 'utf8'));
+    const pid = Number(payload.pid);
+    if (!Number.isInteger(pid) || pid <= 0) return { pid: null, startedAt: payload.startedAt ?? null, malformed: true };
+    return { pid, startedAt: payload.startedAt ?? null, malformed: false };
+  } catch {
+    return { pid: null, startedAt: null, malformed: true };
+  }
+}
+
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === 'EPERM';
+  }
+}
+
+function stopSupervisor(opts) {
+  const lock = readSupervisorLock();
+  if (!lock || !lock.pid) {
+    console.log(`No live supervisor lock found at ${SUPERVISOR_LOCK_PATH}.`);
+    console.log('If status still shows a stale running corpus row, it is safe to start a new observe run after confirming no old process is active.');
+    return { ok: true };
+  }
+
+  if (!isPidAlive(lock.pid)) {
+    console.log(`Supervisor lock is stale (PID ${lock.pid} is not running).`);
+    console.log(`Start will reclaim ${SUPERVISOR_LOCK_PATH}; no process was signaled.`);
+    return { ok: true };
+  }
+
+  const requestedAt = new Date().toISOString();
+  writeFileSync(abs(SUPERVISOR_STOP_PATH), JSON.stringify({
+    requestedAt,
+    pid: lock.pid,
+    force: Boolean(opts.forceStop),
+  }, null, 2));
+
+  const signal = opts.forceStop ? 'SIGKILL' : 'SIGTERM';
+  try {
+    process.kill(lock.pid, signal);
+    console.log(`${opts.forceStop ? 'Force stop' : 'Graceful stop'} requested for supervisor PID ${lock.pid}${lock.startedAt ? ` (since ${lock.startedAt})` : ''}.`);
+    console.log(`Stop request recorded at ${SUPERVISOR_STOP_PATH}.`);
+    return { ok: true };
+  } catch (err) {
+    console.log(`Stop request was written, but signaling PID ${lock.pid} failed: ${String(err?.message ?? err)}`);
+    return { ok: false };
+  }
 }
 
 async function runVisual(opts) {
@@ -396,6 +456,11 @@ async function main() {
     }
     runNode(args, { VAI_API: opts.baseUrl });
     return;
+  }
+
+  if (opts.command === 'stop') {
+    const result = stopSupervisor(opts);
+    process.exit(result.ok ? 0 : 1);
   }
 
   if (opts.command === 'watch') {

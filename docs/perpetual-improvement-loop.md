@@ -48,6 +48,17 @@ Watch it live:
 corepack pnpm self-improve:operator -- watch
 ```
 
+Ask a background loop to stop:
+
+```powershell
+corepack pnpm self-improve:stop
+```
+
+`stop` targets only the supervisor PID recorded in `scripts/improve-loop/.supervisor.lock`.
+It also writes a matching stop request so the supervisor can exit at the next
+checkpoint/rest boundary. Use `corepack pnpm self-improve:stop -- --force` only
+when the recorded supervisor process does not respond to the graceful request.
+
 Record one visual eyes-and-hands probe:
 
 ```powershell
@@ -74,7 +85,8 @@ corepack pnpm self-improve:status
 corepack pnpm self-improve:operator -- report
 ```
 
-Stop with `Ctrl+C`. The corpus is resumable.
+Stop a foreground loop with `Ctrl+C`; stop a background loop with
+`corepack pnpm self-improve:stop`. The corpus is resumable.
 
 ## Modes
 
@@ -313,6 +325,7 @@ A run is not "better" because it ran longer. Treat these as proof:
 
 - `doctor` passes before unattended runs.
 - The watch page shows fresh heartbeat and scored prompts.
+- `self-improve:stop` can stop the recorded supervisor without broad process kills.
 - `status` or `report` shows pass-rate movement and queued fixes.
 - Apply mode creates commits only on `council/auto-improve`.
 - Tests/typecheck/visual proof still pass before merge.
