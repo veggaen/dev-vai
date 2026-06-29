@@ -969,6 +969,12 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Done
 
+- 2026-06-29 - Consolidated green GitHub Actions Dependabot updates. Folded
+  the passing `pnpm/action-setup`, `actions/checkout`, and
+  `actions/dependency-review-action` bumps into one reviewed branch so `main`
+  only needs one CI/release cycle for the action refresh. Intentionally left
+  `actions/setup-node` out because its PR still had an unstable/failing check.
+
 - 2026-06-29 - Release runs after successful CI instead of duplicating the full
   test suite. The Release workflow now triggers from the `CI` workflow completing on
   `main` (or manual dispatch), checks out the exact CI head SHA, and only resolves/tags

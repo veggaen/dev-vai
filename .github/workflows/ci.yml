@@ -16,14 +16,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Non-blocking: the dependency-review action errors with "not supported on this repository"
       # until the GitHub "Dependency graph" feature is enabled in repo settings (Security & analysis).
       # Don't gate PRs on a repo-level setting that can't be toggled from code.
       - name: Review dependency changes
         continue-on-error: true
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
 
   verify:
     name: Verify (Node ${{ matrix.node-version }})
@@ -37,10 +37,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
@@ -253,10 +253,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
