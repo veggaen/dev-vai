@@ -6,6 +6,16 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **Built 2026-06-29 - Shared source-reference intent lexicon (DONE, tested 96/96)**
+  - Finding: after the source-aware evidence contract landed, explicit source/citation/reference detection still lived
+    inside `web-conclude-turn.ts`, which made it harder for routing, guidance, and later Council logic to reuse the
+    same intent signal.
+  - Change: moved source-reference request detection into `intent-lexicon.ts`, added source/citation/link/provenance
+    word sets and false-friend handling for "source code/source tree/source files", exposed the signal through
+    `summarizeLexicalSignals`, and re-exported it from `web-conclude-turn.ts` for compatibility.
+  - Proof: `intent-lexicon.test.ts` + `web-conclude-turn.test.ts` -> 23/23 green; downstream
+    `turn-classifier.test.ts` + `route-guidance.test.ts` -> 73/73 green; ESLint clean on changed files.
+
 - **Built 2026-06-29 - Source-aware fluency contract for web evidence (DONE, tested 16/16)**
   - Finding: Vai already retrieved sources for grounded turns, but the model-facing hint was too soft. It asked the
     answering model to "make that clear" without a strict rule for source numbers, unsupported citations, thin evidence,

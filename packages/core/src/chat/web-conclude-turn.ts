@@ -18,6 +18,9 @@ import {
 } from '../models/web-conclude-policy.js';
 import { isCapabilitiesFallbackResponse } from './capabilities-fallback.js';
 import { resolveContextualFollowUp } from './contextual-resolver.js';
+import { wantsExplicitSourceReferences } from './intent-lexicon.js';
+
+export { wantsExplicitSourceReferences } from './intent-lexicon.js';
 
 export type WebConcludeDependencies = {
   readonly testMode: boolean;
@@ -187,23 +190,6 @@ export async function fetchTurnWebEvidence(
   const result = await deps.search(searchQuery, deps.searchBudgetMs);
   if (!result || result.sources.length === 0) return null;
   return result;
-}
-
-export function wantsExplicitSourceReferences(input: string): boolean {
-  const normalized = normalizeWebConclusionInput(input).toLowerCase();
-  if (!normalized) return false;
-
-  const codeSourceFalseFriend =
-    /\bsource\s+(?:code|map|maps|file|files|tree|control|branch|directory|folder)\b/i.test(normalized);
-  const explicitEvidenceCue =
-    /\b(?:cite|cites|cited|citation|citations|footnote|footnotes|bibliography)\b/i.test(normalized)
-    || /\b(?:include|with|using|show|give|provide|add)\s+(?:credible\s+|primary\s+|official\s+)?(?:sources?|references?|links?)\b/i.test(normalized)
-    || /\b(?:sources?|references?)\s+(?:please|pls|for|on|about|included|attached)\b/i.test(normalized)
-    || /\baccording\s+to\s+(?:sources?|official|the\s+docs?|the\s+paper|research)\b/i.test(normalized);
-
-  if (explicitEvidenceCue) return true;
-  if (codeSourceFalseFriend) return false;
-  return /\b(?:sources?|references?)\b/i.test(normalized);
 }
 
 function buildSourceReferenceContract(query: string, result: SearchResponse): string {

@@ -3,6 +3,7 @@ import {
   extractLexicalTokens,
   salientLexicalTokens,
   summarizeLexicalSignals,
+  wantsExplicitSourceReferences,
 } from './intent-lexicon.js';
 
 describe('intent lexicon', () => {
@@ -46,5 +47,24 @@ describe('intent lexicon', () => {
     const summary = summarizeLexicalSignals('Is this one of a kind or just another clone?');
     expect(summary.hasUniquenessHint).toBe(true);
     expect(summary.uniquenessHints).toContain('one-of-a-kind');
+  });
+
+  it('detects explicit source-reference requests as shared lexical intent', () => {
+    expect(wantsExplicitSourceReferences('give me the answer with sources')).toBe(true);
+    expect(wantsExplicitSourceReferences('cite the official docs please')).toBe(true);
+    expect(wantsExplicitSourceReferences('according to the research, what changed?')).toBe(true);
+
+    const summary = summarizeLexicalSignals('Please compare these claims with citations and links');
+    expect(summary.hasSourceReferenceRequest).toBe(true);
+    expect(summary.sourceReferenceHints).toEqual(expect.arrayContaining(['citations', 'links']));
+  });
+
+  it('does not confuse source-code language with citation requests', () => {
+    expect(wantsExplicitSourceReferences('show me the source code for this widget')).toBe(false);
+    expect(wantsExplicitSourceReferences('search references in the source tree')).toBe(false);
+
+    const summary = summarizeLexicalSignals('find references in the source files');
+    expect(summary.hasSourceReferenceRequest).toBe(false);
+    expect(summary.sourceReferenceHints).toEqual([]);
   });
 });
