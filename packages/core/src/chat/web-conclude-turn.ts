@@ -189,6 +189,40 @@ export async function fetchTurnWebEvidence(
   return result;
 }
 
+export function wantsExplicitSourceReferences(input: string): boolean {
+  const normalized = normalizeWebConclusionInput(input).toLowerCase();
+  if (!normalized) return false;
+
+  const codeSourceFalseFriend =
+    /\bsource\s+(?:code|map|maps|file|files|tree|control|branch|directory|folder)\b/i.test(normalized);
+  const explicitEvidenceCue =
+    /\b(?:cite|cites|cited|citation|citations|footnote|footnotes|bibliography)\b/i.test(normalized)
+    || /\b(?:include|with|using|show|give|provide|add)\s+(?:credible\s+|primary\s+|official\s+)?(?:sources?|references?|links?)\b/i.test(normalized)
+    || /\b(?:sources?|references?)\s+(?:please|pls|for|on|about|included|attached)\b/i.test(normalized)
+    || /\baccording\s+to\s+(?:sources?|official|the\s+docs?|the\s+paper|research)\b/i.test(normalized);
+
+  if (explicitEvidenceCue) return true;
+  if (codeSourceFalseFriend) return false;
+  return /\b(?:sources?|references?)\b/i.test(normalized);
+}
+
+function buildSourceReferenceContract(query: string, result: SearchResponse): string {
+  const sourceCount = Math.min(result.sources.length, 5);
+  const sourceRange = sourceCount <= 1 ? '[1]' : `[1] through [${sourceCount}]`;
+  const explicit = wantsExplicitSourceReferences(query);
+
+  return [
+    'Evidence contract:',
+    `- The only citeable source numbers are ${sourceRange}.`,
+    '- Use [n] markers only for claims directly supported by that numbered source; never invent source numbers, URLs, or source titles.',
+    '- If the retrieved sources are thin, stale, off-topic, or disagree, say that plainly and separate evidence from inference.',
+    "- Keep the answer in the user's requested style; do not turn casual prompts into a research report.",
+    explicit
+      ? '- The user asked for sources/citations/references, so include concise [n] markers on the key factual claims.'
+      : '- Source markers are optional for casual framing, but factual/current claims from the web should carry a nearby [n].',
+  ].join('\n');
+}
+
 /** Give the answering model (e.g. Qwen fallback) the retrieved web snippets. */
 export function buildEvidenceContextSystemHint(query: string, result: SearchResponse): string {
   const snippets = result.sources.slice(0, 5).map((source, index) => {
@@ -199,8 +233,7 @@ export function buildEvidenceContextSystemHint(query: string, result: SearchResp
   return [
     'Web sources were retrieved for this turn.',
     'Ground factual claims in these sources when they apply.',
-    'When you rely on a source, make that clear in the answer (e.g. "According to …").',
-    'If the sources are thin or off-topic, say so briefly instead of inventing citations.',
+    buildSourceReferenceContract(query, result),
     `User question: ${query.trim()}`,
     'Sources:',
     snippets,
