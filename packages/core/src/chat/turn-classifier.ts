@@ -105,6 +105,9 @@ export function classifyTurn(
   const lexical = summarizeLexicalSignals(trimmed);
   if (lexical.startsWithRequestAction) signals.push('request-action-start');
   if (lexical.hasUniquenessHint) signals.push('uniqueness-hint');
+  if (lexical.hasIntentionalityHint) signals.push('intentionality-hint');
+  if (lexical.hasSpecificityHint) signals.push('specificity-hint');
+  if (lexical.hasSourceReferenceRequest) signals.push('source-reference-request');
 
   // A user's business-opportunity / ideas question ("what is a great idea when
   // creating a company in Norway?") is a STANDALONE question for business ideas —

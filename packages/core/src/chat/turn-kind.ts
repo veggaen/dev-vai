@@ -1,6 +1,7 @@
 import type { ConversationMode } from './modes.js';
 import { detectInstructionConstraint, isGenerationIntent } from './chat-quality.js';
 import { hasExplicitSoftwareBuildRequest, isProductEngineeringPlanningPrompt } from './product-engineering-intent.js';
+import { wantsExplicitSourceReferences } from './intent-lexicon.js';
 import { isExplicitResearchRequest, isExplicitWebSearchRequest } from '../models/explicit-web-search.js';
 import {
   isFreshLocalBusinessContactRequest,
@@ -90,6 +91,7 @@ export function classifyChatTurn(input: ClassifyChatTurnInput): ChatTurnKind {
     isExplicitWebSearchRequest(trimmed)
     || isExplicitResearchRequest(trimmed)
     || isFreshLocalRecommendationRequest(trimmed)
+    || wantsExplicitSourceReferences(trimmed)
     || RESEARCH_DISCOVERY_PATTERN.test(trimmed)
   ) {
     return 'research';

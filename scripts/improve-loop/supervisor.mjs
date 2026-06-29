@@ -30,6 +30,7 @@
  *   node scripts/improve-loop/supervisor.mjs --base-url http://host:3006 --db C:/tmp/vai-loop.sqlite
  */
 import { spawn } from 'node:child_process';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { openDb, isFixBanned } from './db.mjs';
 import { acquireLock } from './instance-lock.mjs';
 import { evictAllModels } from './driver.mjs';
@@ -79,6 +80,37 @@ const COMPUTE_BUDGET = Number(opt('--budget', '10'));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (m) => process.stdout.write(`[supervisor ${new Date().toLocaleTimeString()}] ${m}\n`);
+const LOCK_PATH = 'scripts/improve-loop/.supervisor.lock';
+const STOP_REQUEST_PATH = 'scripts/improve-loop/.supervisor.stop';
+let stop = false;
+
+function removeStopRequest() {
+  try { unlinkSync(STOP_REQUEST_PATH); } catch { /* already gone */ }
+}
+
+function consumeStopRequest() {
+  if (!existsSync(STOP_REQUEST_PATH)) return false;
+  let request = null;
+  try { request = JSON.parse(readFileSync(STOP_REQUEST_PATH, 'utf8')); } catch { /* malformed stop file still means stop */ }
+  const requestedPid = Number(request?.pid);
+  if (Number.isInteger(requestedPid) && requestedPid > 0 && requestedPid !== process.pid) {
+    removeStopRequest();
+    log(`ignored stale stop request for PID ${requestedPid}; current supervisor PID is ${process.pid}.`);
+    return false;
+  }
+  removeStopRequest();
+  stop = true;
+  log(`operator stop requested${request?.requestedAt ? ` at ${request.requestedAt}` : ''}; finishing current checkpoint and stopping.`);
+  return true;
+}
+
+async function restWithStop(seconds) {
+  const deadline = Date.now() + Math.max(0, seconds) * 1000;
+  while (!stop && Date.now() < deadline) {
+    if (consumeStopRequest()) break;
+    await sleep(Math.min(1000, Math.max(0, deadline - Date.now())));
+  }
+}
 
 /** Run a child, CAPTURE its stdout (for the council step so the watch page can show it). */
 function runChildCapture(script, extra = []) {
@@ -191,9 +223,6 @@ function runVisualProbe() {
     child.on('error', () => resolve(1));
   });
 }
-
-let stop = false;
-const LOCK_PATH = 'scripts/improve-loop/.supervisor.lock';
 
 /**
  * Clean shutdown: free the GPU and release the single-instance lock. Run exactly once on the way
@@ -407,6 +436,7 @@ async function engineMain() {
   try { qualitySamples.push(makeSample(await collectSignals({ withTsc: false }))); } catch {}
 
   for (let cycle = 1; cycle <= MAX_CYCLES && !stop; cycle++) {
+    if (consumeStopRequest()) break;
     const db = openDb(DB_PATH);
     let ran = [];
     try {
@@ -504,7 +534,7 @@ async function engineMain() {
 
     if (stop) break;
     log(`cycle ${cycle} done · resting ${REST_S}s (GPU breather)…`);
-    await sleep(REST_S * 1000);
+    await restWithStop(REST_S);
   }
   log('engine loop stopped. loop_events + corpus persisted; re-run to continue.');
 }
@@ -546,6 +576,7 @@ async function main() {
   const VISUAL_ONLY = has('--visual-only'); // skip text seeds; only inspect the live UI
 
   for (let cycle = 1; cycle <= MAX_CYCLES && !stop; cycle++) {
+    if (consumeStopRequest()) break;
     if (VISUAL_ONLY) {
       log(`━━━ cycle ${cycle} : EYES (probe → screenshot/video/taste) ━━━`);
       await runVisualProbe();
@@ -604,7 +635,7 @@ async function main() {
       } catch (e) { log('council-on-eyes skipped: ' + String(e).slice(0, 80)); }
       if (stop) break;
       log(`cycle ${cycle} done · resting ${REST_S}s…`);
-      await sleep(REST_S * 1000);
+      await restWithStop(REST_S);
       continue;
     }
     log(`━━━ cycle ${cycle} : OBSERVE ━━━`);
@@ -785,7 +816,7 @@ async function main() {
 
     if (stop) break;
     log(`cycle ${cycle} done · resting ${REST_S}s (GPU breather)…`);
-    await sleep(REST_S * 1000);
+    await restWithStop(REST_S);
   }
   log('living loop stopped. Corpus + proposals persisted; re-run to continue where it left off.');
 }

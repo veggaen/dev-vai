@@ -69,13 +69,13 @@ export function summarizeAcceptance(perPrompt = [], { klass = '', acceptRate = A
  * Re-run a set of failing rows through an injected runner + grader and summarize.
  * @param {{ rows, klass?, runOne, grade, acceptRate?, onResult? }} args
  *   rows    : [{ prompt, expected_intent }]  (e.g. from failingRowsForClass)
- *   runOne  : async (prompt) => vai           (e.g. runThroughVai bound to baseUrl)
+ *   runOne  : async (prompt, row) => vai      (e.g. runThroughVai bound to baseUrl)
  *   grade   : async (klass, expectedIntent, prompt, vai) => ({ passed })
  *   onResult: optional (perPromptResult) => void  (live progress)
  */
 export async function verifyAcceptance({ rows = [], klass = '', runOne, grade, acceptRate = ACCEPT_RATE, improveRate = IMPROVE_RATE, onResult } = {}) {
   if (typeof runOne !== 'function' || typeof grade !== 'function') {
-    throw new Error('verifyAcceptance requires runOne(prompt) and grade(klass,expected,prompt,vai)');
+    throw new Error('verifyAcceptance requires runOne(prompt,row) and grade(klass,expected,prompt,vai)');
   }
   const perPrompt = [];
   for (const row of rows) {
@@ -88,7 +88,7 @@ export async function verifyAcceptance({ rows = [], klass = '', runOne, grade, a
     let passed = false;
     let error = null;
     try {
-      const vai = await runOne(prompt);
+      const vai = await runOne(prompt, { ...row, klass: rowClass, regression });
       const g = await grade(rowClass, expected, prompt, vai);
       passed = !!(g && g.passed);
     } catch (e) {
@@ -153,11 +153,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const dbPath = opt('--db', 'scripts/improve-loop/.corpus.sqlite');
   if (!klass) { process.stderr.write('usage: --class <klass> [--base-url ..] [--db ..]\n'); process.exit(1); }
   const { openDb } = await import('./db.mjs');
-  const { runThroughVai, waitForVramHeadroom } = await import('./driver.mjs');
+  const { runThroughVai, runThroughVaiWithPrelude, waitForVramHeadroom } = await import('./driver.mjs');
   const { gradeInterpretation } = await import('./brain.mjs');
+  const { preludeForPromptClass } = await import('./context-scenarios.mjs');
   const db = openDb(dbPath);
   // Serial + VRAM-guarded re-run of each targeted failing row (BSOD rule).
-  const runOne = async (prompt) => { await waitForVramHeadroom(7 * 1024 ** 3); return runThroughVai(baseUrl, prompt, { timeoutMs: 220_000 }); };
+  const runOne = async (prompt, row = {}) => {
+    await waitForVramHeadroom(7 * 1024 ** 3);
+    const prelude = preludeForPromptClass(row.klass ?? klass, prompt);
+    return prelude.length > 0
+      ? runThroughVaiWithPrelude(baseUrl, prelude, prompt, { timeoutMs: 220_000 })
+      : runThroughVai(baseUrl, prompt, { timeoutMs: 220_000 });
+  };
   const grade = (k, expected, prompt, vai) => gradeInterpretation(k, expected, prompt, vai);
   const rep = await verifyClassAcceptance(db, klass, {
     runOne, grade,

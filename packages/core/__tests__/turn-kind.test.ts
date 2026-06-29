@@ -124,6 +124,28 @@ describe('classifyChatTurn', () => {
     })).toBe('research');
   });
 
+  it('classifies explicit source-reference answer requests as research', () => {
+    expect(classifyChatTurn({
+      userContent: 'Explain Docker with citations and source links',
+      mode: 'chat',
+      hasActiveSandbox: false,
+    })).toBe('research');
+
+    expect(classifyChatTurn({
+      userContent: 'show me the source code for this widget',
+      mode: 'chat',
+      hasActiveSandbox: false,
+    })).not.toBe('research');
+  });
+
+  it('keeps explicit build requests with source links in the builder lane', () => {
+    expect(classifyChatTurn({
+      userContent: 'Build a climate facts dashboard with source links',
+      mode: 'chat',
+      hasActiveSandbox: false,
+    })).toBe('builder');
+  });
+
   it('classifies creative writing like haiku as conversational (not builder even with stack words)', () => {
     expect(classifyChatTurn({
       userContent: 'write a haiku about typescript',

@@ -122,6 +122,19 @@ describe('classifyTurn', () => {
       expect(r.signals).toContain('uniqueness-hint');
     });
 
+    it('records intentionality and specificity hints for user correction language', () => {
+      const r = classifyTurn('What I meant was a precise answer specific to Vai, not generic.', priorWithAssistant);
+      expect(r.signals).toContain('intentionality-hint');
+      expect(r.signals).toContain('specificity-hint');
+      expect(r.signals).toContain('uniqueness-hint');
+    });
+
+    it('records source-reference requests as a shared classifier signal', () => {
+      const r = classifyTurn('Please compare these claims with citations and source links', []);
+      expect(r.signals).toContain('request-action-start');
+      expect(r.signals).toContain('source-reference-request');
+    });
+
     it('records request-action-start for command-shaped improvement turns', () => {
       const r = classifyTurn('please improve Vai chat routing', priorWithAssistant);
       expect(r.signals).toContain('request-action-start');

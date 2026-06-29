@@ -109,9 +109,16 @@ for (const p of pending) {
     let acceptDetail = '';
     if (ACCEPTANCE) {
       try {
-        const { runThroughVai, waitForVramHeadroom } = await import('./driver.mjs');
+        const { runThroughVai, runThroughVaiWithPrelude, waitForVramHeadroom } = await import('./driver.mjs');
         const { gradeInterpretation } = await import('./brain.mjs');
-        const runOne = async (prompt) => { await waitForVramHeadroom(7 * 1024 ** 3); return runThroughVai(BASE_URL, prompt, { timeoutMs: 220_000 }); };
+        const { preludeForPromptClass } = await import('./context-scenarios.mjs');
+        const runOne = async (prompt, row = {}) => {
+          await waitForVramHeadroom(7 * 1024 ** 3);
+          const prelude = preludeForPromptClass(row.klass ?? p.class, prompt);
+          return prelude.length > 0
+            ? runThroughVaiWithPrelude(BASE_URL, prelude, prompt, { timeoutMs: 220_000 })
+            : runThroughVai(BASE_URL, prompt, { timeoutMs: 220_000 });
+        };
         const grade = (k, expected, prompt, vai) => gradeInterpretation(k, expected, prompt, vai);
         // Sibling classes that share this file → their passing prompts are added as a cross-class
         // regression guard, so a fix for p.class that breaks a sibling's behaviour is reverted.

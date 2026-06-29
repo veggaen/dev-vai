@@ -84,6 +84,21 @@ test('verifyAcceptance: re-runs each row serially via injected runner+grader; er
   assert.match(cRow.error, /infra blip/);
 });
 
+test('verifyAcceptance: passes row metadata to the injected runner', async () => {
+  const seen = [];
+  const rows = [{ prompt: 'follow up', expected_intent: 'E', klass: 'followup/context-carry' }];
+  const runOne = async (prompt, row) => {
+    seen.push({ prompt, klass: row.klass, regression: row.regression });
+    return { ok: true };
+  };
+  const grade = async () => ({ passed: true });
+
+  const rep = await verifyAcceptance({ rows, klass: 'fallback/class', runOne, grade });
+
+  assert.equal(rep.verdict, 'accepted');
+  assert.deepEqual(seen, [{ prompt: 'follow up', klass: 'followup/context-carry', regression: false }]);
+});
+
 test('verifyAcceptance: throws without a runner/grader (no silent no-op)', async () => {
   await assert.rejects(() => verifyAcceptance({ rows: [{ prompt: 'a' }] }), /requires runOne/);
 });

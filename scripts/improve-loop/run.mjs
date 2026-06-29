@@ -24,11 +24,12 @@ import {
 } from './db.mjs';
 import { judgeAnswerExcellence } from './answer-rubric.mjs';
 import { gradeWithAppGate, appVerdictToScore } from './app-quality.mjs';
-import { waitForVramHeadroom, loadedVram, runThroughVai, sleep, ensureRuntimeReady, isInfraError, isOverVramBudget } from './driver.mjs';
+import { waitForVramHeadroom, loadedVram, runThroughVai, runThroughVaiWithPrelude, sleep, ensureRuntimeReady, isInfraError, isOverVramBudget } from './driver.mjs';
 import { generatePrompts, gradeInterpretation, mineFailures } from './brain.mjs';
 import { SEED_CLASSES } from './seeds.mjs';
 import { claudeWorkItems } from './claude-prompts.mjs';
 import { isOverRunBudget } from './operator-utils.mjs';
+import { preludeForPromptClass } from './context-scenarios.mjs';
 
 const args = process.argv.slice(2);
 const opt = (flag, def) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : def; };
@@ -204,13 +205,27 @@ async function main() {
 
     let vai;
     try {
-      vai = await runThroughVai(BASE_URL, item.prompt, {
+      const runOptions = {
         timeoutMs: 220_000,
         // Live heartbeat → dashboard shows partial output + phase mid-turn.
         onProgress: ({ partial, phase, elapsedMs }) => {
           liveHeartbeat(db, { runId, prompt: item.prompt, klass: item.klass, phase, partial, elapsedMs });
         },
-      });
+      };
+      const prelude = preludeForPromptClass(item.klass, item.prompt);
+      if (prelude.length > 0) {
+        liveHeartbeat(db, {
+          runId,
+          prompt: item.prompt,
+          klass: item.klass,
+          phase: `scenario:prelude:${prelude.length}`,
+          partial: prelude[0],
+          elapsedMs: 0,
+        });
+        vai = await runThroughVaiWithPrelude(BASE_URL, prelude, item.prompt, runOptions);
+      } else {
+        vai = await runThroughVai(BASE_URL, item.prompt, runOptions);
+      }
     } catch (err) {
       // Verification-First (constitution #3): an INFRA failure (cold model AggregateError,
       // runtime down, socket reset) is NOT a Vai logic failure. Grading it pollutes the

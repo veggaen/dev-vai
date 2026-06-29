@@ -1,12 +1,13 @@
 import { STOP_WORDS } from '../models/stop-words.js';
 
 const CHAT_FILLER_STOP_WORDS = [
-  'actually', 'again', 'already', 'around', 'basically', 'bit', 'called',
-  'currently', 'else', 'enough', 'exactly', 'feel', 'fine', 'first', 'got',
-  'guess', 'honest', 'honestly', 'kind', 'maybe', 'mean', 'much', 'okay',
-  'ok', 'one', 'please', 'quick', 'really', 'right', 'said', 'say',
-  'something', 'stuff', 'sure', 'thing', 'things', 'think', 'though',
-  'today', 'try', 'want', 'way', 'well',
+  'actually', 'again', 'already', 'anyway', 'around', 'basically', 'bit',
+  'called', 'currently', 'else', 'enough', 'exactly', 'feel', 'fine',
+  'first', 'got', 'guess', 'honest', 'honestly', 'kind', 'kinda', 'lot',
+  'lots', 'maybe', 'mean', 'much', 'okay', 'ok', 'one', 'perhaps', 'please',
+  'pretty', 'probably', 'quick', 'really', 'right', 'said', 'say',
+  'something', 'sort', 'sorta', 'stuff', 'sure', 'thing', 'things', 'think',
+  'though', 'today', 'try', 'usualy', 'usually', 'want', 'way', 'well',
 ] as const;
 
 export const CHAT_STOP_WORDS: ReadonlySet<string> = new Set([
@@ -15,24 +16,49 @@ export const CHAT_STOP_WORDS: ReadonlySet<string> = new Set([
 ]);
 
 export const REQUEST_START_WORDS: ReadonlySet<string> = new Set([
-  'add', 'adjust', 'build', 'can', 'change', 'clean', 'could', 'create',
-  'design', 'develop', 'edit', 'extend', 'fix', 'generate', 'go', 'harden',
-  'help', 'implement', 'improve', 'kindly', 'launch', 'make', 'patch',
-  'please', 'polish', 'prototype', 'refactor', 'rewrite', 'ship', 'start',
-  'update', 'upgrade', 'will', 'wire', 'would',
+  'add', 'adjust', 'analyze', 'assess', 'build', 'can', 'change', 'clean',
+  'could', 'create', 'design', 'develop', 'document', 'edit', 'evaluate',
+  'extend', 'fix', 'generate', 'go', 'harden', 'help', 'implement',
+  'improve', 'investigate', 'kindly', 'launch', 'make', 'measure', 'patch',
+  'please', 'polish', 'prototype', 'record', 'refactor', 'research',
+  'rewrite', 'ship', 'start', 'structure', 'trace', 'update', 'upgrade',
+  'validate', 'will', 'wire', 'would',
 ]);
 
 export const INTENT_ACTION_WORDS: ReadonlySet<string> = new Set([
-  'answer', 'audit', 'build', 'check', 'clone', 'compare', 'debug',
-  'decide', 'diagnose', 'explain', 'fix', 'grade', 'harden', 'inspect',
-  'merge', 'plan', 'prove', 'refactor', 'repair', 'review', 'route',
-  'search', 'ship', 'summarize', 'test', 'verify',
+  'analyze', 'answer', 'assess', 'audit', 'build', 'check', 'classify',
+  'clone', 'compare', 'debug', 'decide', 'diagnose', 'document', 'evaluate',
+  'explain', 'fix', 'grade', 'harden', 'inspect', 'investigate', 'measure',
+  'merge', 'monitor', 'observe', 'plan', 'prove', 'refactor', 'repair',
+  'reproduce', 'research', 'review', 'route', 'search', 'ship', 'summarize',
+  'test', 'trace', 'validate', 'verify',
 ]);
 
 export const UNIQUENESS_HINT_WORDS: ReadonlySet<string> = new Set([
-  'angle', 'defensible', 'different', 'differentiator', 'distinct',
-  'distinctive', 'edge', 'moat', 'novel', 'original', 'proprietary',
-  'rare', 'singular', 'standout', 'uncommon', 'unique', 'unusual',
+  'angle', 'bespoke', 'custom', 'defensible', 'different',
+  'differentiator', 'distinct', 'distinctive', 'edge', 'individual',
+  'moat', 'novel', 'novelty', 'original', 'ownable', 'proprietary',
+  'rare', 'signature', 'singular', 'standout', 'tailored', 'uncommon',
+  'unique', 'unrepeatable', 'unusual',
+]);
+
+export const INTENTIONALITY_HINT_WORDS: ReadonlySet<string> = new Set([
+  'aim', 'aimed', 'deliberate', 'deliberately', 'goal', 'goals',
+  'intended', 'intention', 'intentions', 'intentional', 'meaning', 'meant',
+  'purpose', 'purposeful', 'purposely', 'target', 'targeted',
+]);
+
+export const SPECIFICITY_HINT_WORDS: ReadonlySet<string> = new Set([
+  'concrete', 'exact', 'exactly', 'literal', 'literally', 'named',
+  'particular', 'precise', 'precisely', 'specific', 'specifically',
+  'targeted',
+]);
+
+export const SOURCE_REFERENCE_WORDS: ReadonlySet<string> = new Set([
+  'bibliography', 'cite', 'cited', 'cites', 'citation', 'citations',
+  'doi', 'evidence', 'footnote', 'footnotes', 'link', 'links', 'paper',
+  'papers', 'provenance', 'reference', 'references', 'source', 'sources',
+  'studies', 'study', 'url', 'urls',
 ]);
 
 const PRESERVED_SHORT_TOKENS = new Set([
@@ -40,15 +66,56 @@ const PRESERVED_SHORT_TOKENS = new Set([
 ]);
 
 const TOKEN_RE = /[a-z0-9][a-z0-9+#.]*/gi;
-const ONE_OF_A_KIND_RE = /\bone[-\s]+of[-\s]+a[-\s]+kind\b/i;
+const SOURCE_REFERENCE_FALSE_FRIEND_RE =
+  /\bsource\s+(?:code|map|maps|file|files|tree|control|branch|directory|folder)\b/i;
+const HARD_SOURCE_REFERENCE_INTENT_PATTERNS = [
+  /\b(?:cite|cites|cited|citation|citations|footnote|footnotes|bibliography)\b/i,
+  /\baccording\s+to\s+(?:sources?|official|the\s+docs?|the\s+paper|(?:the\s+)?research)\b/i,
+] as const;
+const SOURCE_REFERENCE_CONTEXT_INTENT_PATTERNS = [
+  /\b(?:include|with|using|show|give|provide|add)\s+(?:credible\s+|primary\s+|official\s+)?(?:(?:source\s+)?links?|sources?|references?)\b/i,
+  /\b(?:sources?|references?)\s+(?:please|pls|for|on|about|included|attached)\b/i,
+] as const;
+
+interface PhraseHint {
+  readonly hint: string;
+  readonly pattern: RegExp;
+}
+
+const UNIQUENESS_PHRASE_HINTS: readonly PhraseHint[] = [
+  { hint: 'one-of-a-kind', pattern: /\bone[-\s]+of[-\s]+a[-\s]+kind\b/i },
+  { hint: 'not-generic', pattern: /\bnot\s+(?:generic|boilerplate|template|cookie[-\s]?cutter)\b/i },
+  { hint: 'signature-features', pattern: /\bsignature\s+(?:features?|look|feel|style|identity)\b/i },
+  { hint: 'stand-out', pattern: /\bstand\s+out\b/i },
+];
+
+const INTENTIONALITY_PHRASE_HINTS: readonly PhraseHint[] = [
+  { hint: 'my-intention', pattern: /\bmy\s+intent(?:ion)?\b/i },
+  { hint: 'what-i-meant', pattern: /\bwhat\s+i\s+meant\b/i },
+  { hint: 'not-my-intent', pattern: /\bnot\s+(?:my|the)\s+intent(?:ion)?\b/i },
+  { hint: 'intended-answer', pattern: /\bintended\s+(?:answer|meaning|direction|result|outcome)\b/i },
+];
+
+const SPECIFICITY_PHRASE_HINTS: readonly PhraseHint[] = [
+  { hint: 'be-specific', pattern: /\bbe\s+specific\b/i },
+  { hint: 'exactly-what', pattern: /\bexactly\s+what\b/i },
+  { hint: 'specific-to', pattern: /\bspecific\s+to\b/i },
+  { hint: 'concrete-example', pattern: /\bconcrete\s+(?:example|steps?|details?)\b/i },
+];
 
 export interface LexicalSignalSummary {
   readonly tokens: readonly string[];
   readonly startWords: readonly string[];
   readonly intentWords: readonly string[];
   readonly uniquenessHints: readonly string[];
+  readonly intentionalityHints: readonly string[];
+  readonly specificityHints: readonly string[];
+  readonly sourceReferenceHints: readonly string[];
   readonly startsWithRequestAction: boolean;
   readonly hasUniquenessHint: boolean;
+  readonly hasIntentionalityHint: boolean;
+  readonly hasSpecificityHint: boolean;
+  readonly hasSourceReferenceRequest: boolean;
 }
 
 function unique(values: readonly string[]): string[] {
@@ -92,6 +159,25 @@ export function salientLexicalTokens(
   ));
 }
 
+function collectWordHints(tokens: readonly string[], lexicon: ReadonlySet<string>): string[] {
+  return unique(tokens.filter((token) => lexicon.has(token)));
+}
+
+function collectPhraseHints(text: string, hints: readonly PhraseHint[]): string[] {
+  return hints
+    .filter(({ pattern }) => pattern.test(text))
+    .map(({ hint }) => hint);
+}
+
+export function wantsExplicitSourceReferences(input: string): boolean {
+  const normalized = (input || '').toLowerCase().trim();
+  if (!normalized) return false;
+  if (HARD_SOURCE_REFERENCE_INTENT_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
+  if (SOURCE_REFERENCE_FALSE_FRIEND_RE.test(normalized)) return false;
+  if (SOURCE_REFERENCE_CONTEXT_INTENT_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
+  return /\b(?:sources?|references?)\b/i.test(normalized);
+}
+
 export function summarizeLexicalSignals(text: string): LexicalSignalSummary {
   const tokens = salientLexicalTokens(text);
   const rawTokens = extractLexicalTokens(text);
@@ -99,16 +185,34 @@ export function summarizeLexicalSignals(text: string): LexicalSignalSummary {
   const startWords = unique(leading.filter((token) => REQUEST_START_WORDS.has(token)));
   const intentWords = unique(tokens.filter((token) => INTENT_ACTION_WORDS.has(token)));
   const uniquenessHints = unique([
-    ...tokens.filter((token) => UNIQUENESS_HINT_WORDS.has(token)),
-    ...(ONE_OF_A_KIND_RE.test(text) ? ['one-of-a-kind'] : []),
+    ...collectWordHints(rawTokens, UNIQUENESS_HINT_WORDS),
+    ...collectPhraseHints(text, UNIQUENESS_PHRASE_HINTS),
   ]);
+  const intentionalityHints = unique([
+    ...collectWordHints(rawTokens, INTENTIONALITY_HINT_WORDS),
+    ...collectPhraseHints(text, INTENTIONALITY_PHRASE_HINTS),
+  ]);
+  const specificityHints = unique([
+    ...collectWordHints(rawTokens, SPECIFICITY_HINT_WORDS),
+    ...collectPhraseHints(text, SPECIFICITY_PHRASE_HINTS),
+  ]);
+  const hasSourceReferenceRequest = wantsExplicitSourceReferences(text);
+  const sourceReferenceHints = hasSourceReferenceRequest
+    ? collectWordHints(rawTokens, SOURCE_REFERENCE_WORDS)
+    : [];
 
   return {
     tokens,
     startWords,
     intentWords,
     uniquenessHints,
+    intentionalityHints,
+    specificityHints,
+    sourceReferenceHints,
     startsWithRequestAction: startWords.length > 0,
     hasUniquenessHint: uniquenessHints.length > 0,
+    hasIntentionalityHint: intentionalityHints.length > 0,
+    hasSpecificityHint: specificityHints.length > 0,
+    hasSourceReferenceRequest,
   };
 }
