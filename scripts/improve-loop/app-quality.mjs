@@ -14,21 +14,23 @@
  * Honest-degradation: if the dist isn't built, returns null and callers fall back to the rubric —
  * never throws into the loop.
  */
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 
-const ROOT = resolve(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '../..');
+// fileURLToPath handles Windows drive letters + percent-encoding correctly (CodeRabbit #25: the
+// hand-rolled pathname.replace broke on spaces/encoded chars).
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const DIST = resolve(ROOT, 'packages/core/dist/chat/chat-answer-quality.js');
 
 let _gate = null;
-let _loaded = false;
-/** Lazy-load the compiled app quality gate once. Returns the fn or null (dist missing/old). */
+/** Lazy-load the compiled app quality gate. Returns the fn or null (dist missing/old). */
 async function loadGate() {
-  if (_loaded) return _gate;
-  _loaded = true;
+  if (_gate) return _gate; // cache only a SUCCESSFUL load
   try {
-    if (!existsSync(DIST)) return (_gate = null);
+    // Don't permanently memoize a "dist missing" result — the dist may be built later in the same
+    // long-running loop (CodeRabbit #25). Re-check existsSync each call until the gate loads.
+    if (!existsSync(DIST)) return null;
     const mod = await import(pathToFileURL(DIST).href);
     _gate = typeof mod.evaluateChatAnswerQuality === 'function' ? mod.evaluateChatAnswerQuality : null;
   } catch { _gate = null; }

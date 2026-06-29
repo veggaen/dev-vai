@@ -28,6 +28,7 @@ import { waitForVramHeadroom, loadedVram, runThroughVai, sleep, ensureRuntimeRea
 import { generatePrompts, gradeInterpretation, mineFailures } from './brain.mjs';
 import { SEED_CLASSES } from './seeds.mjs';
 import { claudeWorkItems } from './claude-prompts.mjs';
+import { isOverRunBudget } from './operator-utils.mjs';
 
 const args = process.argv.slice(2);
 const opt = (flag, def) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : def; };
@@ -175,7 +176,7 @@ async function main() {
     // WALL-CLOCK BUDGET: stop STARTING new turns once the cycle's time is spent (an in-flight turn
     // already finished by here). Resumable: next cycle re-orders least-recently-scored-first and
     // picks up where this one left off. This is the stall fix — a cycle can no longer run 90 min.
-    if (MAX_RUN_MS > 0 && Date.now() - runStartedAt >= MAX_RUN_MS) {
+    if (isOverRunBudget(Date.now(), runStartedAt, MAX_RUN_MS)) {
       budgetStopped = true;
       ui.now = `wall-clock budget reached (${Math.round(MAX_RUN_MS / 60000)}m) — stopping this cycle (resumable)`;
       render();

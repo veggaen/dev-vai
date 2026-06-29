@@ -59,12 +59,21 @@ test('parseReview: extracts score + axes from a clean verdict', () => {
   assert.equal(v.harm, 'none');
 });
 
-test('parseReview: tolerant of surrounding prose; clamps score; flags unparseable', () => {
+test('parseReview: tolerant of surrounding prose; out-of-scale score is unparseable; flags unparseable', () => {
+  // SCORE: 1.4 is OUT of the [0,1] scale — it must NOT clamp to a perfect 1.0 pass (CodeRabbit #25);
+  // an out-of-scale reviewer answer is treated as unparseable so the gate can't be tricked into PASS.
   const v = parseReview('Sure! Here is my review.\n\nSCORE: 1.4\nINTENT: no\nHARM: possible\nCONCERN: loosens the price guard.\nHope this helps');
-  assert.equal(v.score, 1); // clamped
-  assert.equal(v.intent, 'no');
+  assert.equal(v.score, null);
+  assert.equal(v.parsed, false);
+  assert.equal(v.outOfScale, true);
+  assert.equal(v.intent, 'no'); // the other fields still parse
   assert.match(v.concern, /price guard/);
   assert.equal(parseReview('no structured output at all').parsed, false);
+
+  // An in-scale score still parses normally.
+  const ok = parseReview('SCORE: 0.8\nINTENT: yes\nHARM: none');
+  assert.equal(ok.score, 0.8);
+  assert.equal(ok.parsed, true);
 });
 
 test('reviewVerdict: PASS on high score, intent ok, no harm', () => {

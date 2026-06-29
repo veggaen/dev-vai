@@ -2,6 +2,12 @@ export const DEFAULT_DB = 'scripts/improve-loop/.corpus.sqlite';
 export const DEFAULT_BASE_URL = 'http://localhost:3006';
 export const DEFAULT_WATCH_PORT = '4123';
 
+/** The wall-clock budget guard, as a single pure function so run.mjs and its test exercise the SAME
+ *  logic (CodeRabbit #25: the test had reimplemented it inline). A maxRunMs of 0 disables the guard. */
+export function isOverRunBudget(now, startedAt, maxRunMs) {
+  return maxRunMs > 0 && now - startedAt >= maxRunMs;
+}
+
 export const COMMANDS = new Set(['help', 'doctor', 'status', 'start', 'watch', 'report', 'handoff', 'visual']);
 export const HEARTBEAT_FRESH_MS = 15_000;
 export const STALE_RUNNING_MS = 15 * 60_000;

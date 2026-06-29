@@ -28,7 +28,8 @@ test('grades an off-topic answer as fail with an actionable missing-list', async
 });
 
 test('returns null gracefully (caller falls back) — never throws', async () => {
-  // empty inputs must not throw regardless of gate availability
-  assert.doesNotReject(() => gradeWithAppGate('', ''));
-  assert.doesNotReject(() => gradeWithAppGate(null, null));
+  // empty inputs must not throw regardless of gate availability — AWAIT the assertions (CodeRabbit
+  // #25), otherwise a rejection escapes as an unhandled rejection and the test false-passes.
+  await assert.doesNotReject(() => gradeWithAppGate('', ''));
+  await assert.doesNotReject(() => gradeWithAppGate(null, null));
 });

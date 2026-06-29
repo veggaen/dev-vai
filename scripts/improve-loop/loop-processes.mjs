@@ -111,9 +111,14 @@ export function defineLoopProcesses(deps = {}) {
       value: (ctx) => (ctx.worstPassRate != null ? 0.9 * (1 - ctx.worstPassRate) + 0.1 : 0),
       run: async (ctx) => {
         const code = await runChild('scripts/improve-loop/propose-fix.mjs', ['--class', ctx.worstClass]);
-        if (autoApply) {
-          await runChild('scripts/improve-loop/consensus-fix.mjs', ['--class', ctx.worstClass]);
-          await runChild('scripts/improve-loop/apply-consensus.mjs', []);
+        // Gate each step on the PREVIOUS one succeeding (CodeRabbit #25): don't run consensus on a
+        // failed propose, and don't apply on a failed consensus — that wasted GPU and could apply
+        // against stale/partial state.
+        if (autoApply && code === 0) {
+          const consensusCode = await runChild('scripts/improve-loop/consensus-fix.mjs', ['--class', ctx.worstClass]);
+          if (consensusCode === 0) {
+            await runChild('scripts/improve-loop/apply-consensus.mjs', []);
+          }
         }
         return { produced: code === 0 ? 1 : 0, klass: ctx.worstClass };
       },
@@ -192,7 +197,9 @@ export function defineLoopProcesses(deps = {}) {
       value: (ctx) => Math.min(0.6, 0.1 + 0.08 * ctx.cyclesSinceVisual),
       run: async (ctx) => {
         const code = await runChild('scripts/improve-loop/operator.mjs', ['visual', '--no-video']);
-        setLoopState(ctx.db, 'cyclesSinceVisual', 0);
+        // Only reset the cadence counter on SUCCESS (CodeRabbit #25) — resetting after a failed run
+        // would push the next visual probe 3 cycles out even though this one didn't happen.
+        if (code === 0) setLoopState(ctx.db, 'cyclesSinceVisual', 0);
         return { produced: code === 0 ? 1 : 0 };
       },
     },
@@ -201,12 +208,15 @@ export function defineLoopProcesses(deps = {}) {
       description: 'generative capability council → backlog (feature-level proposals)',
       // The most expensive process. Only when long overdue, so it never crowds out cheaper,
       // higher-density work. This is where "spend the move well" matters most.
-      when: (ctx) => ctx.cyclesSinceCapability >= 8,
+      // Keep the most expensive process OUT of cold-start cycles — running the capability council
+      // before there's any corpus signal just burns 12 budget on ungrounded ideas (CodeRabbit #25).
+      when: (ctx) => ctx.hasData && ctx.cyclesSinceCapability >= 8,
       cost: () => 12,
       value: (ctx) => Math.min(0.7, 0.2 + 0.05 * ctx.cyclesSinceCapability),
       run: async (ctx) => {
         const code = await runChild('scripts/improve-loop/capability-engine.mjs', []);
-        setLoopState(ctx.db, 'cyclesSinceCapability', 0);
+        // Only reset the cadence counter when the council actually ran (CodeRabbit #25).
+        if (code === 0) setLoopState(ctx.db, 'cyclesSinceCapability', 0);
         // CHOOSE the one meaningful feature to build next — deduped, novel, ranked by real USER value
         // (not the council's self-score, which navel-gazes on voice/vote variants). Building a feature
         // is senior work (an 8B can't), so we ESCALATE the pick with its first slice instead of

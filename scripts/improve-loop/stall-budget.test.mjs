@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb, startRun, recordResult, upsertPrompt, lastScoredByPrompt } from './db.mjs';
+import { isOverRunBudget } from './operator-utils.mjs';
 
 const seed = (db, prompt, klass, scoredAt) => {
   const pid = upsertPrompt(db, { prompt, klass, expectedIntent: 'x', origin: 'seed' });
@@ -50,13 +51,11 @@ test('ordering is stable for equal scores (keeps authored order)', () => {
 });
 
 test('wall-clock budget logic: stop starting turns once elapsed >= budget', () => {
-  // Pure check of the guard condition used in run.mjs.
-  const MAX_RUN_MS = 5_000;
+  // Exercise the REAL guard run.mjs uses (CodeRabbit #25: this had reimplemented the condition
+  // inline, so the test could pass while the real guard drifted).
   const started = 1_000_000;
-  const overBudget = (now) => MAX_RUN_MS > 0 && now - started >= MAX_RUN_MS;
-  assert.equal(overBudget(started + 4_999), false); // still within budget
-  assert.equal(overBudget(started + 5_000), true);  // budget reached → stop
+  assert.equal(isOverRunBudget(started + 4_999, started, 5_000), false); // still within budget
+  assert.equal(isOverRunBudget(started + 5_000, started, 5_000), true);  // budget reached → stop
   // disabled (0) never stops
-  const noBudget = (now) => 0 > 0 && now - started >= 0;
-  assert.equal(noBudget(started + 10_000_000), false);
+  assert.equal(isOverRunBudget(started + 10_000_000, started, 0), false);
 });

@@ -44,7 +44,14 @@ async function healthy() {
 }
 
 let stop = false;
-process.on('SIGINT', () => { stop = true; log('SIGINT — stopping keeper (runtime will exit too).'); });
+let currentChild = null; // the live runtime child, so shutdown can terminate it (CodeRabbit #25)
+function shutdown(sig) {
+  stop = true;
+  log(`${sig} — stopping keeper and terminating the runtime child.`);
+  if (currentChild) { try { currentChild.kill('SIGTERM'); } catch {} }
+}
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 async function main() {
   // If something is ALREADY serving on the port (a runtime you started yourself), don't fight it.
@@ -61,7 +68,12 @@ async function main() {
       stdio: 'inherit',
       shell: true, // tsx is a .CMD on Windows
     });
-    const exited = new Promise((r) => { child.on('exit', (c) => r(c ?? 0)); child.on('error', () => r(1)); });
+    currentChild = child;
+    let exitedFlag = false;
+    const exited = new Promise((r) => {
+      child.on('exit', (c) => { exitedFlag = true; r(c ?? 0); });
+      child.on('error', () => { exitedFlag = true; r(1); });
+    });
 
     // Wait until it's healthy (up to 60s) or it exits early.
     const start = Date.now();
@@ -74,9 +86,25 @@ async function main() {
     }
     if (up) { log(`✅ runtime healthy at ${HEALTH}`); backoff = 1000; }
 
+    // KEEP POLLING /health while the child runs (CodeRabbit #25). A process can stay ALIVE but stop
+    // serving (event-loop wedged, deadlocked); the old `await exited` would never notice. Poll every
+    // 5s — if it goes unhealthy for two consecutive checks, kill it so the loop relaunches.
+    let unhealthyStreak = 0;
+    while (up && !stop && !exitedFlag) {
+      const raced = await Promise.race([exited.then(() => 'exited'), sleep(5000).then(() => null)]);
+      if (raced === 'exited' || stop) break;
+      if (await healthy()) { unhealthyStreak = 0; }
+      else if (++unhealthyStreak >= 2) {
+        log('runtime alive but not serving /health → killing to relaunch.');
+        try { child.kill('SIGTERM'); } catch {}
+        break;
+      }
+    }
+
     // Block until the child exits, then relaunch with backoff (crash resilience).
     const code = await exited;
-    if (stop) { try { child.kill(); } catch {} break; }
+    currentChild = null;
+    if (stop) break;
     log(`runtime exited (code ${code}) → relaunching in ${Math.round(backoff / 1000)}s (crash-resilient).`);
     await sleep(backoff);
     backoff = Math.min(MAX_BACKOFF, backoff * 2);

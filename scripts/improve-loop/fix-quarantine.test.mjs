@@ -40,14 +40,18 @@ test('quarantine is per-signature: banning one fix does not ban a different one'
   assert.equal(isFixBanned(db, { ...FIX, replace: 'text-zinc-300' }), false, 'a different replacement is still allowed');
 });
 
-test('the doom-loop scenario: an empty-file fix gets banned after 2 reverts', () => {
-  // Models the real BSOD bug: same un-appliable patch reverted every cycle. After 2 it stops.
+test('the doom-loop scenario: an empty-file fix gets banned at STRIKE_LIMIT reverts', () => {
+  // Models the real BSOD bug: same un-appliable patch reverted every cycle. Key the assertions to
+  // STRIKE_LIMIT, not a hardcoded 2 (CodeRabbit #25), so this still guards the real threshold if it
+  // changes.
   const db = tmpDb();
   const deadFix = { file: 'BuildStatusBadge.tsx', find: 'text-zinc-500', replace: 'text-zinc-400' };
+  for (let i = 1; i < STRIKE_LIMIT; i++) {
+    strikeFix(db, deadFix, 'reverted — verify failed: tsc failed');
+    assert.equal(isFixBanned(db, deadFix), false, `still trying after ${i} fail(s)`);
+  }
   strikeFix(db, deadFix, 'reverted — verify failed: tsc failed');
-  assert.equal(isFixBanned(db, deadFix), false, 'still trying after 1 fail');
-  strikeFix(db, deadFix, 'reverted — verify failed: tsc failed');
-  assert.equal(isFixBanned(db, deadFix), true, 'banned after 2 — loop will skip it from now on');
+  assert.equal(isFixBanned(db, deadFix), true, `banned at STRIKE_LIMIT (${STRIKE_LIMIT}) — loop will skip it`);
 });
 
 test('a LEGACY ban whose stored sig predates the current fixSignature formula is still honoured', () => {

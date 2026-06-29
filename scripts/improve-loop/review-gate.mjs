@@ -95,7 +95,11 @@ export function parseReview(raw) {
   const cm = s.match(/CONCERN:\s*(.+?)(?:\n|$)/i);
   const concern = cm ? cm[1].trim() : null;
   if (score == null) return { score: null, intent, minimal, harm, concern, parsed: false };
-  score = Math.max(0, Math.min(1, score));
+  // Do NOT clamp an out-of-scale score into a pass (CodeRabbit #25): a reviewer that answered on a
+  // 0-10 scale ("SCORE: 5") would clamp to 1.0 and auto-pass. An out-of-[0,1] score is unparseable.
+  if (!Number.isFinite(score) || score < 0 || score > 1) {
+    return { score: null, intent, minimal, harm, concern, parsed: false, outOfScale: true };
+  }
   return { score, intent, minimal, harm, concern, parsed: true };
 }
 

@@ -16,7 +16,7 @@
  *   node scripts/improve-loop/visual-probe.mjs --app http://localhost:5173/?devAuthBypass=1 --out C:/tmp/vai-eyes
  */
 import fs from 'node:fs/promises';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { judgeVisualExcellence } from './visual-rubric.mjs';
@@ -97,7 +97,10 @@ function emitEvent(type, data = {}) {
   };
   report.eventCount = event.seq;
   const line = `${JSON.stringify(event)}\n`;
-  if (STREAM_PATH) appendFileSync(STREAM_PATH, line, 'utf8');
+  if (STREAM_PATH) {
+    if (!emitEvent._dirReady) { mkdirSync(path.dirname(STREAM_PATH), { recursive: true }); emitEvent._dirReady = true; } // create the stream dir before the first emit (CodeRabbit #25)
+    appendFileSync(STREAM_PATH, line, 'utf8');
+  }
   if (STREAM_STDOUT) process.stdout.write(line);
 }
 
@@ -471,21 +474,28 @@ async function gatherVisualSignals(page) {
  *  follows still lands in the composer — an earlier version blurred it and broke input. */
 async function measureInteractionSignals(page, locator) {
   try {
-    return await locator.evaluate((el) => {
-      const snapshot = () => {
-        const cs = getComputedStyle(el);
-        return { outline: `${cs.outlineStyle} ${cs.outlineWidth} ${cs.outlineColor}`, boxShadow: cs.boxShadow, border: cs.borderColor };
-      };
-      const wasActive = document.activeElement === el;
+    // Baseline style with the element BLURRED.
+    const base = await locator.evaluate((el) => {
       el.blur();
-      const base = snapshot();
-      el.focus();
-      const focused = snapshot();
-      const focusRingVisible = focused.outline !== base.outline || focused.boxShadow !== base.boxShadow || focused.border !== base.border;
-      if (!wasActive) { /* keep it focused for the typing pass */ }
-      el.focus();
-      return { focusRingVisible };
+      const cs = getComputedStyle(el);
+      return { outline: `${cs.outlineStyle} ${cs.outlineWidth} ${cs.outlineColor}`, boxShadow: cs.boxShadow, border: cs.borderColor };
     });
+    // Focus via the KEYBOARD so :focus-visible fires — modern rings only show on keyboard focus, not
+    // a programmatic el.focus() (CodeRabbit #25), which would report a false "no focus ring".
+    await locator.evaluate((el) => el.blur());
+    await page.keyboard.press('Tab').catch(() => {});
+    // Tab may not land exactly on our element; ensure focus is on it for a fair :focus-visible read.
+    const focusedViaKeyboard = await locator.evaluate((el) => document.activeElement === el);
+    if (!focusedViaKeyboard) {
+      await locator.focus(); // Playwright focus dispatches a real focus; better than in-page el.focus()
+    }
+    const focused = await locator.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { outline: `${cs.outlineStyle} ${cs.outlineWidth} ${cs.outlineColor}`, boxShadow: cs.boxShadow, border: cs.borderColor };
+    });
+    const focusRingVisible = focused.outline !== base.outline || focused.boxShadow !== base.boxShadow || focused.border !== base.border;
+    await locator.focus(); // keep it focused for the typing pass that follows
+    return { focusRingVisible, focusedViaKeyboard };
   } catch {
     return { focusRingVisible: null };
   }
@@ -724,10 +734,18 @@ try {
   const interactionSignals = await measureInteractionSignals(page, textarea);
 
   emitEvent('hand.type', { chars: PROBE_TEXT.length });
-  // Input latency: time a single keypress until the value reflects it.
+  // Input latency: time a single keypress until the value ACTUALLY reflects it. The old code read
+  // el.value once and discarded the result without waiting, so the measurement was just keyboard.type's
+  // own duration (CodeRabbit #25). Poll on rAF until the char lands, bounded so a stuck input can't hang.
+  const firstChar = PROBE_TEXT[0] ?? 'x';
   const latencyStart = Date.now();
-  await page.keyboard.type(PROBE_TEXT[0] ?? 'x');
-  await textarea.evaluate((el, ch) => el.value.includes(ch), PROBE_TEXT[0] ?? 'x').catch(() => undefined);
+  await page.keyboard.type(firstChar);
+  await textarea.evaluate((el, ch) => new Promise((res) => {
+    if (el.value.includes(ch)) return res(true);
+    const check = () => { if (el.value.includes(ch)) res(true); else requestAnimationFrame(check); };
+    requestAnimationFrame(check);
+    setTimeout(() => res(false), 2000);
+  }), firstChar).catch(() => undefined);
   const inputLatencyMs = Date.now() - latencyStart;
   await page.keyboard.type(PROBE_TEXT.slice(1), { delay: 4 });
   await screenshot(page, '02-composer-typed');

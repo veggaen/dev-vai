@@ -62,23 +62,37 @@ async function groundTruth(repoUrl) {
 const REFUSAL = /\b(?:can(?:not|'t)|unable to|don'?t have the ability to|i'?m not able to)\s+(?:access|browse|fetch|read|analyze|view|reach)\b|no (?:internet|web) access|i cannot access/i;
 const HEDGE = /\b(?:might be|could be|appears to be|seems to be|possibly|may be|likely a)\b/gi;
 
+// Stop-words / generic dev tokens that ANY repo answer would mention — matching these is not evidence
+// the model actually read THIS repo (CodeRabbit #25: two generic tokens passed a hallucination GOOD).
+const GENERIC_TOKEN = new Set([
+  'app', 'api', 'web', 'src', 'code', 'test', 'tests', 'main', 'node', 'json', 'http', 'https',
+  'data', 'file', 'files', 'repo', 'project', 'server', 'client', 'build', 'config', 'index',
+  'javascript', 'typescript', 'python', 'react', 'package', 'library', 'framework', 'application',
+]);
+const isDistinctive = (t) => t.length >= 4 && !GENERIC_TOKEN.has(t);
+
 function judge(answer, truth) {
   const text = (answer || '').trim();
   if (!text) return { grade: 'BAD', why: 'empty answer' };
   if (REFUSAL.test(text)) return { grade: 'BAD', why: 'refused / claimed it cannot access the repo' };
 
+  // No ground truth (GitHub unreachable / rate-limited) ⇒ we can't judge groundedness. That's an
+  // INFRA SKIP, not a BAD answer (CodeRabbit #25) — don't punish the model for our missing data.
+  if (!truth) return { grade: 'SKIP', why: 'no GitHub ground truth available — cannot judge (infra skip)' };
+
   const lower = text.toLowerCase();
-  const hits = truth ? truth.tokens.filter((t) => lower.includes(t)) : [];
+  // Only DISTINCTIVE token matches count as real repo signals.
+  const hits = truth.tokens.filter((t) => isDistinctive(t) && lower.includes(t));
   const hedges = (text.match(HEDGE) || []).length;
 
-  if (truth && hits.length >= 2) {
+  if (hits.length >= 2) {
     return { grade: 'GOOD', why: `grounded in real repo signals: ${hits.slice(0, 5).join(', ')}` };
   }
-  if (truth && hits.length === 1 && hedges <= 1) {
+  if (hits.length === 1 && hedges <= 1) {
     return { grade: 'OK', why: `one real signal (${hits[0]}) but thin` };
   }
   if (hedges >= 3) return { grade: 'BAD', why: `vague hallucination — ${hedges} hedge phrases, no grounded signals` };
-  return { grade: 'BAD', why: 'no real repo signals found in the answer' };
+  return { grade: 'BAD', why: 'no distinctive repo signals found in the answer' };
 }
 
 function ask(content) {
@@ -102,7 +116,7 @@ function ask(content) {
   });
 }
 
-const tally = { GOOD: 0, OK: 0, BAD: 0 };
+const tally = { GOOD: 0, OK: 0, BAD: 0, SKIP: 0 };
 for (const repo of REPOS) {
   const truth = await groundTruth(repo);
   process.stderr.write(`\n# ${repo}\n  truth: ${truth ? `${truth.language} — ${truth.description}` : '(unavailable)'}\n`);
@@ -125,5 +139,5 @@ for (const repo of REPOS) {
 }
 
 console.log('\n' + '#'.repeat(80));
-console.log(`INTERVIEW RESULT  GOOD=${tally.GOOD || 0}  OK=${tally.OK || 0}  BAD=${tally.BAD || 0}`);
+console.log(`INTERVIEW RESULT  GOOD=${tally.GOOD || 0}  OK=${tally.OK || 0}  BAD=${tally.BAD || 0}  SKIP=${tally.SKIP || 0}`);
 process.exit((tally.BAD || 0) > 0 ? 1 : 0);

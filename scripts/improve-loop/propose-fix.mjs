@@ -73,8 +73,9 @@ const fails = db.prepare(
    WHERE r.class=? AND r.passed=0 ORDER BY r.run_id DESC LIMIT 8`,
 ).all(fix.class);
 
-// Ground qwen in the REAL file at the candidate location.
-const filePath = (fix.location.split(/[:\s(]/)[0] || '').trim();
+// Ground qwen in the REAL file at the candidate location. Guard a missing location so a class with
+// no location doesn't throw on .split (CodeRabbit #25) — it just falls through the no-file guard.
+const filePath = (String(fix.location ?? '').split(/[:\s(]/)[0] || '').trim();
 let source = '';
 let readOk = false;
 try { source = readFileSync(filePath, 'utf8'); readOk = source.trim().length > 0; }
@@ -149,11 +150,21 @@ if (lineHint && centerIdx >= 0) {
   const r = enclosingFunction(centerIdx);
   if (r && (r.end - r.start) <= WINDOW) fnRange = r;
 }
-const sourceExcerpt = fnRange
-  ? lines.slice(fnRange.start, fnRange.end).map((l, i) => `${fnRange.start + i + 1}: ${l}`).join('\n')
-  : centerIdx >= 0 && lines.length > WINDOW
-    ? excerptAround(centerIdx)
-    : lines.slice(0, WINDOW).map((l, i) => `${i + 1}: ${l}`).join('\n');
+// Track the EXCERPTED line range [excerptStart, excerptEnd) (1-based, inclusive start) so we can
+// later reject a findLine the model invented OUTSIDE what it actually saw (CodeRabbit #25).
+let excerptStartLine; let excerptEndLine;
+let sourceExcerpt;
+if (fnRange) {
+  excerptStartLine = fnRange.start + 1; excerptEndLine = fnRange.end;
+  sourceExcerpt = lines.slice(fnRange.start, fnRange.end).map((l, i) => `${fnRange.start + i + 1}: ${l}`).join('\n');
+} else if (centerIdx >= 0 && lines.length > WINDOW) {
+  const start = Math.max(0, centerIdx - Math.floor(WINDOW / 2));
+  excerptStartLine = start + 1; excerptEndLine = Math.min(lines.length, start + WINDOW);
+  sourceExcerpt = excerptAround(centerIdx);
+} else {
+  excerptStartLine = 1; excerptEndLine = Math.min(lines.length, WINDOW);
+  sourceExcerpt = lines.slice(0, WINDOW).map((l, i) => `${i + 1}: ${l}`).join('\n');
+}
 if (fnRange) console.log(`🎯 scoped excerpt to the enclosing function (lines ${fnRange.start + 1}–${fnRange.end})`);
 
 // Free web evidence (Vegga: council/Vai run local but HAVE web — use it). Opt-in via
@@ -241,13 +252,17 @@ const parsed = parseProposal(raw);
 // deterministic. Falls back to the model's `find` string when no usable line number is given.
 if (parsed && parsed.findLine != null) {
   const ln = Number(parsed.findLine);
-  // lines[] is the full source (0-indexed); the excerpt prints 1-based numbers, so subtract 1.
-  if (Number.isInteger(ln) && ln >= 1 && ln <= lines.length) {
+  // Reject a findLine OUTSIDE the excerpted range the model actually saw — a number beyond it is a
+  // hallucination, not a real pointer (CodeRabbit #25). Keep parsed.find (the model's string) so the
+  // mechanical verify can still try to locate it, but don't copy an out-of-excerpt source line.
+  if (Number.isInteger(ln) && ln >= excerptStartLine && ln <= excerptEndLine && ln <= lines.length) {
     const exact = lines[ln - 1];
     if (exact && exact.trim()) {
       parsed.find = exact.trim();
       parsed._findFromLine = ln; // breadcrumb for the log/raw
     }
+  } else {
+    parsed._findLineRejected = `findLine ${ln} outside excerpt ${excerptStartLine}-${excerptEndLine}`;
   }
 }
 

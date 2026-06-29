@@ -52,20 +52,7 @@ function snapshot() {
   return { run, stats, results, fixes, live, visualRun, visualLive, visualEvents, taste, tasteLessons, loopEvents, banned };
 }
 
-function parseData(data) {
-  try { return JSON.parse(data || '{}'); } catch { return {}; }
-}
-
-function compactData(type, data) {
-  if (type === 'check') return `${data.passed ? 'PASS' : 'FAIL'} ${data.name || ''}${data.detail ? ` - ${data.detail}` : ''}`;
-  if (type === 'vision.snapshot') return `${data.name || 'snapshot'} ${data.path || ''}`;
-  if (type === 'vision.target') return `${data.targetReceivesPointer ? 'target clear' : 'covered'} ${data.topLabel || ''}`;
-  if (type === 'hand.pointer' || type === 'hand.click') return `x=${data.x} y=${data.y}`;
-  if (type === 'hand.type') return `${data.chars ?? 0} chars`;
-  if (type === 'request.blocked_external') return data.text || '';
-  if (type === 'probe.done') return `${data.passed ? 'PASS' : 'FAIL'} ${data.reportPath || ''}`;
-  return JSON.stringify(data).slice(0, 220);
-}
+// (parseData/compactData were only used by the removed visualPanel — dropped as dead code, CodeRabbit #25.)
 
 function enginePanel(events, banned) {
   // The --engine heartbeat the UI used to miss: live cycles with their value-per-compute PLAN,
@@ -176,71 +163,9 @@ function liveFramePanel() {
     })();</script>`;
 }
 
-function tastePanel(taste, tasteLessons) {
-  if (!taste) return '';
-  const sc = taste.scores || {};
-  const ha = taste.humanAppeal || {};
-  const fc = taste.flawCounts || {};
-  const chip = (label, val, max = 10) => {
-    const frac = Math.max(0, Math.min(1, (Number(val) || 0) / max));
-    const hue = Math.round(frac * 120);
-    return `<span style="display:inline-flex;align-items:center;gap:6px;background:#10141c;border:1px solid #233;border-radius:6px;padding:4px 9px;font-size:12px;color:#cdd">
-      ${esc(label)} <b style="color:hsl(${hue} 70% 60%)">${esc(val)}</b></span>`;
-  };
-  const flaws = (taste.topFlaws || []).map((f) => {
-    const tone = f.severity === 'P0' ? '#f77' : f.severity === 'P1' ? '#fb8' : f.severity === 'P2' ? '#dd8' : '#9bd';
-    return `<div style="font-size:12px;color:#bbc;margin:4px 0"><b style="color:${tone}">${esc(f.severity)}</b> ${esc(f.symptom)}${f.selector ? ` <code style="color:#789">${esc(f.selector)}</code>` : ''}<div style="color:#8a9;margin-left:2px">→ ${esc(f.fixDirection)}</div></div>`;
-  }).join('');
-  const lessons = (tasteLessons || []).map((l) => `<div style="font-size:12px;color:#ac9;margin:3px 0">×${l.times_seen} ${esc(l.lesson)}</div>`).join('');
-  return `<h2>Visual taste (evidence-bound rubric)</h2>
-    <div style="background:#0f131b;border:1px solid #243045;border-radius:8px;padding:13px 15px;margin:8px 0 14px">
-      <div style="font-size:15px;font-weight:700;color:#dfe;margin-bottom:8px">${esc(taste.headline || '')}</div>
-      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:9px">
-        ${chip('composition', sc.composition)} ${chip('motion', sc.motion)} ${chip('feel', sc.interactionFeel)} ${chip('identity', sc.visualIdentity)} ${chip('emotion', sc.emotionalQuality)}
-      </div>
-      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:9px;border-top:1px solid #1e2838;padding-top:9px">
-        <span style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#789;align-self:center">human appeal</span>
-        ${chip('first', ha.firstImpression)} ${chip('modern', ha.modernPremium)} ${chip('interaction', ha.interaction)} ${chip('trust', ha.trustClarity)} ${chip('wow', ha.wow)} ${chip('keep-using', ha.keepUsing)}
-      </div>
-      ${ha.likeReason ? `<div style="font-size:12px;color:#9c9">+ ${esc(ha.likeReason)}</div>` : ''}
-      ${ha.dislikeReason ? `<div style="font-size:12px;color:#d99">− ${esc(ha.dislikeReason)}</div>` : ''}
-      ${flaws ? `<div style="border-top:1px solid #1e2838;margin-top:9px;padding-top:9px"><div style="font-size:11px;text-transform:uppercase;color:#789;margin-bottom:4px">top flaws (${fc.P0 || 0}×P0 ${fc.P1 || 0}×P1 ${fc.P2 || 0}×P2 ${fc.P3 || 0}×P3)</div>${flaws}</div>` : ''}
-      ${taste.tasteLesson ? `<div style="border-top:1px solid #1e2838;margin-top:9px;padding-top:9px;font-size:13px;color:#ce9"><b>taste lesson:</b> ${esc(taste.tasteLesson)}</div>` : ''}
-      ${lessons ? `<details data-k="taste-lessons" style="margin-top:8px"><summary style="cursor:pointer;color:#789;font-size:12px">accumulated taste lessons</summary>${lessons}</details>` : ''}
-    </div>`;
-}
-
-function visualPanel(visualRun, visualLive, visualEvents) {
-  if (!visualRun && !(visualEvents || []).length) return '';
-  const state = visualRun
-    ? `${esc(visualRun.status)}${visualRun.passed == null ? '' : ` / ${visualRun.passed ? 'pass' : 'fail'}`}`
-    : 'none';
-  const liveAge = visualLive?.updated_at ? Math.round((Date.now() - new Date(visualLive.updated_at).getTime()) / 1000) : null;
-  const rows = (visualEvents || []).map((event) => {
-    const data = parseData(event.data);
-    const tone = event.type === 'probe.done'
-      ? (data.passed ? '#8d9' : '#f99')
-      : event.type?.startsWith('hand.')
-        ? '#9bd'
-        : event.type?.startsWith('vision.')
-          ? '#dc9'
-          : '#b9c';
-    return `<div style="display:grid;grid-template-columns:74px 160px 1fr;gap:10px;align-items:start;background:#111723;border-left:3px solid ${tone};border-radius:6px;padding:8px 10px;margin:7px 0">
-      <code style="color:#778">#${event.visual_run_id}.${event.seq}</code>
-      <code style="color:${tone}">${esc(event.type)}</code>
-      <div style="font-size:12px;color:#bbc">${esc(compactData(event.type, data))}</div>
-    </div>`;
-  }).join('') || '<div style="color:#666">no visual events yet</div>';
-
-  return `<h2>Visual eyes/hands telemetry</h2>
-    <div style="background:#10141c;border:1px solid #243045;border-radius:8px;padding:12px 14px;margin:8px 0 14px">
-      <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:#9ab">
-        <span><b style="color:#dce">latest:</b> #${visualRun?.id ?? '-'} ${state}</span>
-        <span><b style="color:#dce">live:</b> ${visualLive ? `#${visualLive.visual_run_id}.${visualLive.seq} ${esc(visualLive.type)} (${liveAge}s ago)` : 'idle'}</span>
-        ${visualRun?.report_path ? `<span><b style="color:#dce">report:</b> <code>${esc(visualRun.report_path)}</code></span>` : ''}
-      </div>
-    </div>${rows}`;
-}
+// NOTE: the old server-rendered tastePanel()/visualPanel() were removed — they were defined but
+// never reached from the redesigned shell (CodeRabbit #25). Visual taste now renders client-side in
+// render() from loop.json's `taste`, and live visual telemetry shows via the live-frame image.
 
 /**
  * loopStatus — the PLAIN-LANGUAGE summary of what the loop is actually doing, for the hero panel.
@@ -535,6 +460,16 @@ code{font-family:var(--mono);font-size:12px;color:var(--ink-dim);background:var(
     <div class="body"><div><div class="inner" id="need"></div></div></div>
   </details>
 
+  <details class="sec" id="sec-visual">
+    <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Visual taste<span class="count" id="taste-count"></span></summary>
+    <div class="body"><div><div class="inner" id="taste"><div class="empty">no visual run yet</div></div></div></div>
+  </details>
+
+  <details class="sec" id="sec-council">
+    <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Council on your UI</summary>
+    <div class="body"><div><div class="inner">${councilPanel()}</div></div></div>
+  </details>
+
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -622,7 +557,17 @@ function render(s){
   // weakest class (single, in "where it's working")
   if(s.weakest){$('cl-count').textContent=s.weakest.pct+'%';
     $('classes').innerHTML='<div class="row"><span class="k"><code>'+esc(s.weakest.class)+'</code></span><span class="bar"><i style="width:'+s.weakest.pct+'%"></i></span><span class="v">'+s.weakest.pct+'% · '+s.weakest.passed+'/'+s.weakest.total+'</span></div><div class="empty" style="margin-top:8px">Weakest class the loop is currently working on.</div>';
+  } else { // CLEAR the stale card when the payload no longer carries a weakest class (CodeRabbit #25)
+    $('cl-count').textContent='';
+    $('classes').innerHTML='<div class="empty">No weak class right now.</div>';
   }
+  // visual taste (from loop.json) — previously gathered but never shown (CodeRabbit #25)
+  const t=s.taste;
+  if(t&&t.overall!=null){$('taste-count').textContent=t.overall+'/10';
+    const sc=t.scores||{};
+    const rows=Object.keys(sc).map(k=>'<div class="row"><span class="k">'+esc(k)+'</span><span class="bar"><i style="width:'+Math.round((Number(sc[k])||0)/10*100)+'%"></i></span><span class="v">'+esc(sc[k])+'/10</span></div>').join('');
+    $('taste').innerHTML='<div class="row"><span class="k"><b>overall</b></span><span class="v"><b>'+esc(t.overall)+'/10</b></span></div>'+rows+(t.lesson?'<div class="empty" style="margin-top:8px">'+esc(t.lesson)+'</div>':'');
+  } else { $('taste-count').textContent=''; $('taste').innerHTML='<div class="empty">no visual run yet</div>'; }
   // reveal fades
   requestAnimationFrame(()=>document.querySelectorAll('.fade:not(.in)').forEach((el,i)=>setTimeout(()=>el.classList.add('in'),i*45)));
 }

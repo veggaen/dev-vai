@@ -147,9 +147,12 @@ export async function runCycle(registry, ctx = {}, opts = {}) {
     const startedAt = Date.now();
     emit({ type: 'run:start', id });
     active.add(id);
-    // selectAndRun carries the active set so a composed sub-cycle can't re-enter THIS process.
+    // selectAndRun carries the active set so a composed sub-cycle can't re-enter THIS process, and
+    // gets the REMAINING budget (this cycle's budget minus what planning already spent), not the full
+    // budget again — otherwise composition could spend many multiples of the cap (CodeRabbit #25).
+    const remainingBudget = Number.isFinite(budget) ? Math.max(0, budget - (planned.spent ?? 0)) : budget;
     const selectAndRun = (subCtx = ctx, subOpts = {}) =>
-      runCycle(registry, { ...subCtx, _active: active }, { budget, floor, ...subOpts, depth: depth + 1, maxDepth, onEvent });
+      runCycle(registry, { ...subCtx, _active: active }, { budget: remainingBudget, floor, ...subOpts, depth: depth + 1, maxDepth, onEvent });
     try {
       const result = await p.run({ ...ctx, depth, selectAndRun });
       const outcome = { id, ok: true, ms: Date.now() - startedAt, result };
