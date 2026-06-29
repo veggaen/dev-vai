@@ -142,4 +142,17 @@ describe('web-conclude-policy', () => {
     // And such questions must NOT skip the web conclusion (they need fresh synthesis).
     expect(shouldSkipWebConclusion('What is a great idea when creating a company in norway?')).toBe(false);
   });
+
+  it('detects the venture/build-a-startup/adjective-frame phrasings the loop measured as missed', () => {
+    // These exact shapes scored as answer/opportunity-framing failures (misrouted to vague/search
+    // answers) because the cue pattern did not cover them. Now detected.
+    expect(isBusinessOpportunityRequest("what's a solid venture to launch in singapore's tech scene?")).toBe(true);
+    expect(isBusinessOpportunityRequest("what's a smart thing to build a startup around in the nordics?")).toBe(true);
+    expect(isBusinessOpportunityRequest("what's a promising startup sector this year?")).toBe(true);
+    expect(isBusinessOpportunityRequest('what is a hot market to invest a new company in?')).toBe(true);
+    // Guard against over-firing: 'solid' as a tech term, a build REQUEST, and procedural stay false.
+    expect(isBusinessOpportunityRequest('what is a solid framework for react?')).toBe(false);
+    expect(isBusinessOpportunityRequest('build me a startup landing page')).toBe(false);
+    expect(isBusinessOpportunityRequest('how do I incorporate a company in norway?')).toBe(false);
+  });
 });

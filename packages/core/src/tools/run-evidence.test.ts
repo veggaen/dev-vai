@@ -50,6 +50,34 @@ describe('isAllowlistedCommand — safe verification gate', () => {
   it('rejects npx pointing at a non-allowlisted tool', () => {
     expect(isAllowlistedCommand('npx', ['some-random-cli'])).toBe(false);
   });
+
+  it('allows read-only git verbs for council self-verification', () => {
+    expect(isAllowlistedCommand('git', ['status', '--porcelain'])).toBe(true);
+    expect(isAllowlistedCommand('git', ['diff', '--stat'])).toBe(true);
+    expect(isAllowlistedCommand('git', ['rev-parse', 'HEAD'])).toBe(true);
+    expect(isAllowlistedCommand('git', ['log', '-1'])).toBe(true);
+  });
+
+  it('REJECTS mutating git verbs (only read-only verbs are gated in)', () => {
+    expect(isAllowlistedCommand('git', ['push'])).toBe(false);
+    expect(isAllowlistedCommand('git', ['commit', '-m', 'x'])).toBe(false);
+    expect(isAllowlistedCommand('git', ['reset', '--hard'])).toBe(false);
+    expect(isAllowlistedCommand('git', ['checkout', '.'])).toBe(false);
+    expect(isAllowlistedCommand('git', [])).toBe(false); // no verb at all
+  });
+
+  it('allows `tauri info` but not build/dev', () => {
+    expect(isAllowlistedCommand('tauri', ['info'])).toBe(true);
+    expect(isAllowlistedCommand('tauri', ['build'])).toBe(false);
+    expect(isAllowlistedCommand('tauri', ['dev'])).toBe(false);
+  });
+
+  it('allows rustc version/explain checks but blocks cargo install/publish', () => {
+    expect(isAllowlistedCommand('rustc', ['--version'])).toBe(true);
+    expect(isAllowlistedCommand('cargo', ['check'])).toBe(true);
+    expect(isAllowlistedCommand('cargo', ['install', 'evil'])).toBe(false); // FORBIDDEN_TOKENS
+    expect(isAllowlistedCommand('cargo', ['publish'])).toBe(false);
+  });
 });
 
 describe('runCommandEvidence — refuses before spawning', () => {

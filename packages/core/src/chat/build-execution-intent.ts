@@ -56,16 +56,20 @@ export function classifyAgentBuildIntent(content: string): AgentBuildIntent {
   if (looksLikeFactualQuestion(text)) return 'answer';
 
   const hasHardBuildVerb = EXPLICIT_BUILD_REQUEST.test(text);
-  const hasSoftBuildVerb = SOFT_BUILD_VERB.test(text);
+  const hasSoftBuildVerb = SOFT_BUILD_VERB.test(text) && !text.endsWith('?');
   const hasTarget = EXPLICIT_BUILD_TARGET.test(text) || NAMED_PRODUCT_CLONE.test(text);
-  const isQuestion = text.endsWith('?') || CONVERSATIONAL_LEAD.test(text);
+  const isQuestion = text.endsWith('?');
 
   // A clear build verb AND a clear app target, phrased as a request (not a question) → build.
-  if (hasHardBuildVerb && hasTarget && !isQuestion) return 'build';
-  // Any build-ish intent that ISN'T a clean build request, and isn't clearly conversational, is
-  // ambiguous: a verb without a target, a question wrapping a build verb, or a soft "improve X".
-  if ((hasHardBuildVerb || hasSoftBuildVerb) && !CONVERSATIONAL_LEAD.test(text)) return 'ambiguous';
-  // Everything else is an answer turn.
+  if (hasHardBuildVerb && hasTarget && isQuestion) return 'build';
+  // A build verb wrapped in a QUESTION or clearly conversational lead is a discussion *about*
+  // building ("explain how I would build a price widget"), not a build → answer.
+  if (isQuestion && hasSoftBuildVerb) return 'answer';
+  // A build-ish verb that is neither a clean build request nor conversational is the real hijack
+  // case: a verb without a target ("improve the timeline ui", "can you make this more useful") →
+  // ambiguous, so agent mode confirms before building.
+  if ((hasHardBuildVerb || hasSoftBuildVerb) && !isQuestion) return 'ambiguous';
+  // No build verb at all (plain prose/discussion, even if it doesn't start with a lead word) → answer.
   return 'answer';
 }
 
@@ -85,7 +89,7 @@ const FACTUAL_QUESTION_LEAD =
   /^\s*(?:what(?:'s| is| are| was| were)?|who(?:'s| is| are| was| were)?|when(?:'s| is| was| did)?|where(?:'s| is| are)?|which|how (?:much|many|old|far|long|tall|big)|how (?:do(?:es)?|did|to)\b(?!\s+(?:i|we|you)?\s*(?:make|build|create|generate))|why|whose|is|are|was|were|does|do|did|can|could|will|would)\b/i;
 /** Short, fresh/real-time data asks — price, score, weather, latest, current value. */
 const FRESH_DATA_LEAD =
-  /\b(?:price|cost|worth|value|rate|exchange\s+rate|score|weather|temperature|forecast|latest|current(?:ly)?|right\s+now|today|this\s+(?:week|month|year)|how\s+much\s+(?:is|does|are)|stock\s+price|market\s+cap)\b/i;
+  /\b(?:price|cost|worth|value|rate|exchange\s+rate|score|weather|temperature|forecast|latest|current(?:ly)?|right\s+now|now|tonight|today|this\s+(?:week|month|year)|this\s+(?:morning|afternoon|evening)|how\s+much\s+(?:is|does|are)|stock\s+price|market\s+cap|up[\s-]to[\s-]date)\b/i;
 
 /** Any build/make/create verb anywhere — catches "how do I build X", "help me make Y". */
 const BUILD_VERB_ANYWHERE = /\b(?:build|make|create|generate|scaffold|develop|implement|code|design|spin\s*up|set\s*up|add|write)\b/i;

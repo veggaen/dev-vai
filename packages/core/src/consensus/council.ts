@@ -13,6 +13,8 @@ import { councilPlan, governConsensus } from './seriousness.js';
 import { routeTopic, selectMembers, type CouncilRoster } from './topic-router.js';
 import { MemberAvailabilityStore, type MemberAvailability } from './member-availability.js';
 import { proofTrustWeight, type ProofStatus } from './member-experiment.js';
+import { deliberate, isDeliberationEnabled, buildPeerNotes } from './deliberate.js';
+import { spineFromNotes } from './context-states.js';
 import type {
   CouncilAction,
   CouncilConsensus,
@@ -64,6 +66,12 @@ export interface RunCouncilOptions {
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_ESCALATE_BELOW = 0.5;
 const DEFAULT_MAX_ITEMS = 5;
+/**
+ * Minimum share of total panel weight a 'bad'-verdict minority must hold for its objection
+ * to be SURFACED as `consensus.dissent`. Below this it's noise (a single low-weight off-topic
+ * member); at/above it the dissent is auditable. Audit-only — does not change the outcome.
+ */
+const DISSENT_MIN_WEIGHT = 0.2;
 /** Off-specialty members still count, but less — the council's trust-weighting rule. */
 const OFF_TOPIC_WEIGHT = 0.6;
 
@@ -140,6 +148,7 @@ async function runOneMember(
   input: CouncilInput,
   timeoutMs: number,
   now: () => number,
+  onReasoningDelta?: (textSoFar: string) => void,
 ): Promise<CouncilMemberNote | null> {
   const startedAt = now();
   // A reasoning model needs more wall-clock than a terse generalist; extend the outer cap
@@ -152,7 +161,7 @@ async function runOneMember(
     timer = setTimeout(() => reject(new Error(`council member timed out after ${effectiveTimeoutMs}ms`)), effectiveTimeoutMs);
   });
   try {
-    const note = await Promise.race([member.review(input), timeout]);
+    const note = await Promise.race([member.review(input, { onReasoningDelta }), timeout]);
     // A returned note clears any prior down-state — the member is healthy again (green).
     liveAvailability.recordSuccess(member.id);
     return note;
@@ -251,6 +260,29 @@ export function reachConsensus(
     .filter((n) => (n.suggestedAction === 'web-search' || n.suggestedAction === 'local-business-search') && n.searchQuery.trim())
     .sort((a, b) => weightOf.get(b)! * b.confidence - weightOf.get(a)! * a.confidence)[0];
 
+  // Surface a serious minority objection so it is never silently buried in notes[] (Council
+  // Excellence + transparency). A dissent is members that returned verdict 'bad'; we only
+  // surface it when its combined weight is non-trivial (>= DISSENT_MIN_WEIGHT of the panel).
+  // The outcome/modal logic above is intentionally NOT changed by this — it's audit-only.
+  const dissenters = usable.filter((n) => n.verdict === 'bad');
+  const dissentWeightRaw = dissenters.reduce((s, n) => s + weightOf.get(n)!, 0);
+  const dissentStrength = totalWeight > 0 ? dissentWeightRaw / totalWeight : 0;
+  const dissent: CouncilConsensus['dissent'] = (dissenters.length > 0 && dissentStrength >= DISSENT_MIN_WEIGHT)
+    ? {
+        hasDissent: true,
+        dissentStrength,
+        dissentingMembers: dissenters
+          .sort((a, b) => weightOf.get(b)! - weightOf.get(a)!)
+          .map((n) => ({
+            memberId: n.memberId,
+            memberName: n.memberName,
+            weight: totalWeight > 0 ? weightOf.get(n)! / totalWeight : 0,
+            confidence: n.confidence,
+            concerns: n.concerns,
+          })),
+      }
+    : undefined;
+
   return {
     outcome,
     agreement,
@@ -264,6 +296,7 @@ export function reachConsensus(
     notes,
     memberIds: usable.map((n) => n.memberId),
     factsQuarantined: true,
+    ...(dissent ? { dissent } : {}),
   };
 }
 
@@ -321,6 +354,12 @@ export interface CouncilMemberProgress {
   readonly note?: CouncilMemberNote;
   /** Emitted immediately before a member starts reviewing — UI shows who's being asked. */
   readonly pendingMember?: { readonly name: string; readonly id: string };
+  /**
+   * Emitted while a member is mid-review and its model is streaming reasoning — carries the
+   * rolling preview so the UI can show what that member is thinking through, live. Same
+   * member identity as the preceding `pendingMember`. Advisory only; the note is still truth.
+   */
+  readonly reasoningMember?: { readonly name: string; readonly id: string; readonly preview: string };
   readonly partialNotes: readonly CouncilMemberNote[];
   readonly index: number;
   readonly total: number;
@@ -343,9 +382,21 @@ export async function* runCouncilStreaming(
   // the deadline only gates whether to start the NEXT one.
   const deadline = options.overallDeadlineMs !== undefined ? now() + options.overallDeadlineMs : undefined;
 
-  for (let index = 0; index < members.length; index++) {
+  // Fast-first ordering: when a wall-clock budget bounds the run, a slow-thinking member
+  // (DeepSeek-R1, ~60s) placed early STARVES the budget so the faster generalists never get
+  // asked — the measured "configured 3, only 2 ever speak" gap. Run fast members first and slow
+  // ones last (stable within each group) so the panel hears the MOST voices within the budget;
+  // the slow member still runs if time remains. No VRAM change — execution stays sequential.
+  const ordered = deadline === undefined
+    ? members
+    : [...members]
+        .map((m, i) => ({ m, i }))
+        .sort((a, b) => Number(a.m.slowThinking ?? false) - Number(b.m.slowThinking ?? false) || a.i - b.i)
+        .map((e) => e.m);
+
+  for (let index = 0; index < ordered.length; index++) {
     if (deadline !== undefined && index > 0 && now() >= deadline) break;
-    const member = members[index];
+    const member = ordered[index];
     yield {
       pendingMember: { name: member.displayName, id: member.id },
       partialNotes: [...partialNotes],
@@ -353,7 +404,39 @@ export async function* runCouncilStreaming(
       total: members.length,
     };
 
-    const note = await runOneMember(member, input, timeoutMs, now);
+    // Live reasoning pump: the member's model streams reasoning via a callback that runs
+    // DURING the await below. A callback can't `yield`, so we buffer the latest preview and
+    // a waiter that resolves on each new delta, then race the member promise against that
+    // waiter — draining previews as `reasoningMember` progress without blocking the review.
+    let latestPreview: string | null = null;
+    let signal: (() => void) | null = null;
+    const onReasoningDelta = (textSoFar: string) => {
+      latestPreview = textSoFar;
+      const fire = signal;
+      signal = null;
+      fire?.();
+    };
+    const memberPromise = runOneMember(member, input, timeoutMs, now, onReasoningDelta)
+      .then((value) => ({ done: true as const, value }));
+
+    let settled: { done: true; value: CouncilMemberNote | null } | undefined;
+    while (!settled) {
+      const deltaReady = latestPreview !== null
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => { signal = resolve; });
+      const winner = await Promise.race([memberPromise, deltaReady.then(() => ({ done: false as const }))]);
+      if (winner.done) { settled = winner; break; }
+      if (latestPreview !== null) {
+        yield {
+          reasoningMember: { name: member.displayName, id: member.id, preview: latestPreview },
+          partialNotes: [...partialNotes],
+          index,
+          total: members.length,
+        };
+        latestPreview = null;
+      }
+    }
+    const note = settled.value;
     if (note) {
       partialNotes.push(note);
       yield {
@@ -416,7 +499,16 @@ export async function convene(
   // whose proof FAILED counts less. So the council leans toward verified voices over speculation.
   const weightFor = (note: CouncilMemberNote) =>
     (note.topic === topic ? 1 : OFF_TOPIC_WEIGHT) * proofTrustWeight(note.proof?.status as ProofStatus | undefined);
-  const raw = await runCouncil(members, input, { ...options, weightFor });
+  // Multi-turn deliberation (flag-gated, Milestone 1 slice 3): when enabled, the panel runs a
+  // second peer-aware round on a split decision before consensus. Default OFF — the single-round
+  // runCouncil path below is unchanged. Same trust-weighting, same governConsensus.
+  let raw: CouncilConsensus;
+  if (isDeliberationEnabled()) {
+    const result = await deliberate(members, input, { ...options, weightFor });
+    raw = result.consensus;
+  } else {
+    raw = await runCouncil(members, input, { ...options, weightFor });
+  }
   const consensus = governConsensus(raw, plan.assessment);
   return { topic, assessment: plan.assessment, convened: true, consensus };
 }
@@ -455,13 +547,35 @@ export async function* conveneStreaming(
 
   const members = selectMembers(topic, roster);
   const weightFor = (note: CouncilMemberNote) => (note.topic === topic ? 1 : OFF_TOPIC_WEIGHT);
-  const stream = runCouncilStreaming(members, input, { ...options, weightFor });
-  let iter = await stream.next();
-  while (!iter.done) {
-    yield { ...iter.value, topic, assessment: plan.assessment };
-    iter = await stream.next();
+
+  // ── Round 1: independent reviews, streamed to the UI (unchanged default path). ──
+  const drain = async function* (gen: AsyncGenerator<CouncilMemberProgress, CouncilConsensus>): AsyncGenerator<ConveneStreamingProgress, CouncilConsensus> {
+    let it = await gen.next();
+    while (!it.done) {
+      yield { ...it.value, topic, assessment: plan.assessment };
+      it = await gen.next();
+    }
+    return it.value;
+  };
+  const round1Gen = drain(runCouncilStreaming(members, input, { ...options, weightFor }));
+  let r1 = await round1Gen.next();
+  while (!r1.done) { yield r1.value; r1 = await round1Gen.next(); }
+  let raw = r1.value;
+
+  // ── Round 2 (flag-gated, default OFF): peer-aware deliberation on a SPLIT panel, also
+  //    streamed so transparency holds. Same crash-safe sequential execution. Default behavior
+  //    is unchanged — without VAI_COUNCIL_DELIBERATE=1 we never enter this branch. ──
+  const usable = raw.notes.filter((n) => !n.error);
+  const split = usable.length >= 2 && new Set(usable.map((n) => n.verdict)).size > 1;
+  if (isDeliberationEnabled() && split) {
+    const peerNotes = buildPeerNotes(usable);
+    const round2Gen = drain(runCouncilStreaming(members, { ...input, peerNotes }, { ...options, weightFor }));
+    let r2 = await round2Gen.next();
+    while (!r2.done) { yield r2.value; r2 = await round2Gen.next(); }
+    // Keep round 2 only if it produced usable notes; otherwise round 1 stands (never regress).
+    if (r2.value.notes.some((n) => !n.error)) raw = r2.value;
   }
-  const raw = iter.value;
+
   const consensus = governConsensus(raw, plan.assessment);
   return { topic, assessment: plan.assessment, convened: true, consensus };
 }
@@ -478,6 +592,14 @@ export function toCouncilThinking(
     : cc?.contradicted
       ? `${consensus.summary} · web search disagreed — redrafting`
       : consensus.summary;
+  // Verification spine (advisory, transparency-only): provenance of what the panel grounded on
+  // (used/unused/considered/unavailable), built from the notes' attached ledgers; absent
+  // (verdict 'none') when no member fetched context. The ship/refuse decision on a web
+  // contradiction is already owned upstream by applyCrossCheck (ship→act) — the spine does NOT
+  // add a second gate. The `disputed` state is reserved for a future change that threads the
+  // cross-check subject through CouncilCrossCheck so used groundings can be matched; until then
+  // no production path marks an item disputed, so the spine reports plain provenance.
+  const provenance = spineFromNotes(consensus.notes);
   return {
     outcome: consensus.outcome,
     agreement: consensus.agreement,
@@ -501,6 +623,8 @@ export function toCouncilThinking(
       failed: Boolean(n.error),
     })),
     crossCheck: cc,
+    ...(consensus.dissent ? { dissent: consensus.dissent } : {}),
+    ...(provenance.total > 0 ? { provenance } : {}),
   };
 }
 

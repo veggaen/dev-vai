@@ -296,6 +296,15 @@ export const messages = sqliteTable('messages', {
    * no longer correlates with positive signals).
    */
   plan: text('plan'),
+  /**
+   * JSON snapshot of the PRUNED process trace (the progress steps + their council
+   * notes / tool summaries / process-log entries) for an assistant turn. The live
+   * trace is assembled on the client from streamed `progress` chunks and otherwise
+   * exists only in memory; without this column the in-message ProcessTree collapses
+   * to bare leaf rows after the app is closed and reopened (nothing left to expand).
+   * Pruned of bulky raw fields and size-capped so vai.db does not bloat.
+   */
+  progressTrace: text('progress_trace'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 

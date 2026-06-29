@@ -239,7 +239,6 @@ function StepRow({
   // collapses itself once it completes (keeping the finished trace quiet). Council
   // still gets the slower drip-reveal of its member notes for readability.
   const autoExpandRunning = live && running && expandable;
-  const autoExpandCouncil = autoExpandRunning && node.tone === 'council';
   const streamChildren = autoExpandRunning && open;
   const visibleChildCount = useProcessChildReveal(childCount, streamChildren);
   const visibleChildren = node.children.slice(0, visibleChildCount);

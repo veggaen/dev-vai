@@ -4,7 +4,11 @@ import {
   buildMemberContextLedger,
   labelForRequest,
   distinctiveTokens,
+  buildProvenanceSpine,
+  disputedLabelsFromCrossCheck,
+  spineFromNotes,
   type FetchedEvidence,
+  type MemberContextLedger,
 } from './context-states.js';
 
 /**
@@ -82,5 +86,101 @@ describe('buildMemberContextLedger', () => {
     const ledger = buildMemberContextLedger('m', [], 'note');
     expect(ledger.items).toEqual([]);
     expect(ledger.summary).toEqual({ used: 0, unused: 0, unavailable: 0 });
+  });
+});
+
+describe('buildProvenanceSpine — consensus-level verification spine (advisory)', () => {
+  const ledger = (memberId: string, states: Array<{ label: string; state: any }>): MemberContextLedger => ({
+    memberId,
+    items: states.map((s) => ({ label: s.label, tool: 'readFile' as const, state: s.state, reason: '' })),
+    summary: { used: 0, unused: 0, unavailable: 0 },
+  });
+
+  it('rolls up counts + groundedness across members', () => {
+    const spine = buildProvenanceSpine([
+      ledger('a', [{ label: 'f1', state: 'used' }, { label: 'f2', state: 'unused' }]),
+      ledger('b', [{ label: 'f3', state: 'used' }, { label: 'f4', state: 'unavailable' }]),
+    ]);
+    expect(spine.total).toBe(4);
+    expect(spine.counts.used).toBe(2);
+    expect(spine.groundedness).toBeCloseTo(0.5, 2);
+    expect(spine.verdict).toBe('grounded'); // >= 0.34 used, nothing disputed
+  });
+
+  it('marks a USED item disputed when a contradicting label is supplied → contested', () => {
+    const spine = buildProvenanceSpine(
+      [ledger('a', [{ label: 'price.ts', state: 'used' }, { label: 'g', state: 'used' }])],
+      ['price.ts'],
+    );
+    expect(spine.counts.disputed).toBe(1);
+    expect(spine.counts.used).toBe(1);
+    expect(spine.hasDisputed).toBe(true);
+    expect(spine.verdict).toBe('contested');
+  });
+
+  it('verdict "thin" when little fetched context actually grounded the answer', () => {
+    const spine = buildProvenanceSpine([ledger('a', [
+      { label: '1', state: 'unused' }, { label: '2', state: 'unused' }, { label: '3', state: 'used' },
+      { label: '4', state: 'considered' }, { label: '5', state: 'unused' },
+    ])]); // 1/5 used = 0.2 < 0.34
+    expect(spine.verdict).toBe('thin');
+  });
+
+  it('verdict "none" + no NaN when the panel touched no context (prompt-only)', () => {
+    const spine = buildProvenanceSpine([ledger('a', [])]);
+    expect(spine.total).toBe(0);
+    expect(spine.groundedness).toBe(0);
+    expect(spine.verdict).toBe('none');
+  });
+});
+
+describe('disputedLabelsFromCrossCheck — free web contradiction → spine disputed', () => {
+  const labels = ['readFile src/price.ts', 'grep /ETH/', 'listFiles src/'];
+
+  it('returns [] when the cross-check did not contradict (verified/inconclusive)', () => {
+    expect(disputedLabelsFromCrossCheck({ contradicted: false, subjectAliases: ['eth'] }, labels)).toEqual([]);
+    expect(disputedLabelsFromCrossCheck(null, labels)).toEqual([]);
+  });
+
+  it('marks context items whose label references a contradicted subject/value', () => {
+    const disputed = disputedLabelsFromCrossCheck({ contradicted: true, subjectAliases: ['eth'], value: '$3,200' }, labels);
+    expect(disputed).toContain('grep /ETH/');     // matches 'eth'
+    expect(disputed).not.toContain('listFiles src/');
+  });
+
+  it('chains into buildProvenanceSpine → contested verdict', () => {
+    const ledger: MemberContextLedger = {
+      memberId: 'a',
+      items: [{ label: 'grep /ETH/', tool: 'grep', state: 'used', reason: '' }],
+      summary: { used: 1, unused: 0, unavailable: 0 },
+    };
+    const disputed = disputedLabelsFromCrossCheck({ contradicted: true, subjectAliases: ['eth'] }, ['grep /ETH/']);
+    const spine = buildProvenanceSpine([ledger], disputed);
+    expect(spine.verdict).toBe('contested');
+    expect(spine.counts.disputed).toBe(1);
+  });
+});
+
+describe('spineFromNotes — build spine from council notes\' attached ledgers', () => {
+  it('aggregates note contextLedgers + applies disputed labels', () => {
+    const notes = [
+      { memberId: 'a', contextLedger: { items: [{ label: 'readFile x.ts', state: 'used', reason: '' }, { label: 'grep /Y/', state: 'unused', reason: '' }] } },
+      { memberId: 'b', contextLedger: { items: [{ label: 'grep /ETH/', state: 'used', reason: '' }] } },
+      { memberId: 'c' }, // no ledger → ignored
+    ];
+    const spine = spineFromNotes(notes, ['grep /ETH/']);
+    expect(spine.total).toBe(3);
+    expect(spine.counts.disputed).toBe(1);
+    expect(spine.verdict).toBe('contested');
+  });
+
+  it('empty/ledgerless notes → verdict none, no throw', () => {
+    expect(spineFromNotes([{ memberId: 'a' }]).verdict).toBe('none');
+    expect(spineFromNotes([]).verdict).toBe('none');
+  });
+
+  it('coerces an unknown state string to a safe kind (defensive)', () => {
+    const spine = spineFromNotes([{ memberId: 'a', contextLedger: { items: [{ label: 'l', state: 'weird', reason: '' }] } }]);
+    expect(spine.total).toBe(1); // counted, not crashed
   });
 });

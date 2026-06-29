@@ -130,6 +130,8 @@ export interface ChatChunk {
   readonly type:
     | 'text_delta'
     | 'reasoning_delta'
+    | 'draft_delta'
+    | 'info_block'
     | 'tool_call_delta'
     | 'progress'
     | 'turn_kind'
@@ -142,6 +144,28 @@ export interface ChatChunk {
     | 'image_result';
   readonly textDelta?: string;
   readonly reasoningDelta?: string;
+  /** Live WORK PRODUCT (not hidden thought): Vai's in-review DRAFT answer as it is written,
+   *  before the council accepts/redrafts it. Distinct from text_delta — this NEVER commits to
+   *  the final message body; the UI shows it in a discardable, clearly-labeled "Draft (in
+   *  review)" block. `draft` carries a small lifecycle envelope so the UI can explain what
+   *  happened (started / updated / cleared on redraft / committed / discarded) and so a future
+   *  PresenceBlock timeline needs no migration. `draftText` is the FULL draft-so-far
+   *  (cumulative, replace-not-append). */
+  readonly draftText?: string;
+  /** A deterministic, pre-rendered HTML "info block" (built server-side from structured data;
+   *  rendered in a sandboxed iframe). Append-only, addressable by id. */
+  readonly infoBlock?: { readonly id: string; readonly html: string; readonly title?: string };
+  readonly draft?: {
+    /** Lifecycle of the draft block. */
+    readonly phase: 'start' | 'delta' | 'reset' | 'committed' | 'discarded';
+    readonly turnId?: string;
+    /** Monotonic per-turn sequence so the UI can drop out-of-order frames. */
+    readonly seq: number;
+    /** What produced this block — keeps the presence model honest about provenance. */
+    readonly source: 'vai-draft';
+    /** This content may change or be withdrawn — the UI labels it accordingly. */
+    readonly isDiscardable: true;
+  };
   readonly toolCallDelta?: { readonly id: string; readonly name: string; readonly argumentsDelta: string };
   /** User-visible activity/progress for long-running research, analysis, and builder turns. */
   readonly progress?: {
@@ -159,6 +183,10 @@ export interface ChatChunk {
       readonly note?: string;
       readonly pending?: boolean;
       readonly failed?: boolean;
+      /** Live rolling preview of the member's reasoning while pending (thinking out loud). */
+      readonly reasoningPreview?: string;
+      /** Member lens/role label for the UI (e.g. "reasoning", "code"). */
+      readonly role?: string;
       readonly realIntent?: string;
       readonly hiddenMeaning?: string;
       readonly missingCapability?: string;

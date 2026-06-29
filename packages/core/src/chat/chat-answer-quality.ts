@@ -137,8 +137,57 @@ function hasCoreRequestFocus(prompt: string, response: string): boolean | null {
   return targets.some((token) => responseTokens.has(token));
 }
 
+/**
+ * The prompt EXPLICITLY asks for a concrete specific — a worked example, a number/quantity, a
+ * named thing, or a precise which-one. This is intentionally narrow: it fires only when the user
+ * demanded a concrete, so a generic "explain X" answer is never penalised for lacking one. Closes
+ * the loop's #1 unaddressed escalation (×247 "no concrete grounding: cite a number, name, file
+ * ref, or worked example") without inventing a false-positive gate on every answer.
+ */
+function requestsConcreteSpecificity(prompt: string): boolean {
+  return (
+    /\b(?:for example|an example|give an example|example of|worked example|concrete example|show me how|sample (?:code|output))\b/i.test(prompt)
+    || /\bhow (?:much|many|long|big|fast|often)\b/i.test(prompt)
+    || /\b(?:which|what) (?:file|function|command|flag|number|version|line)\b/i.test(prompt)
+    || /\b(?:name (?:a|an|the|some|one)|cite|specifically which)\b/i.test(prompt)
+  );
+}
+
+/**
+ * The response carries at least one concrete grounding anchor: a number/quantity, a code- or
+ * file-reference (backticks, dotted/slashed path, .ext), an explicit worked-example marker, or a
+ * quoted token. Lexical + structural, never a domain-token allowlist — so it generalises and does
+ * not freeze past prompts into a matcher (§8). True ⇒ the answer cited something concrete.
+ */
+function hasConcreteGrounding(response: string): boolean {
+  return (
+    /\b\d+(?:[.,]\d+)?\s*(?:%|ms|s|kb|mb|gb|x|×|px|lines?|times|files?|seconds?|minutes?|hours?)?\b/i.test(response)
+    || /`[^`]+`/.test(response)
+    || /\b[\w-]+\.(?:ts|tsx|js|mjs|jsx|json|md|py|rs|sql|sh|css|html|toml|yml|yaml)\b/i.test(response)
+    || /\b[\w-]+\/[\w./-]+\b/.test(response)
+    || /\b(?:e\.g\.|for (?:example|instance)|such as)\b/i.test(response)
+    || /["“][^"”]{2,}["”]/.test(response)
+  );
+}
+
 function requestsComparison(prompt: string): boolean {
-  return /\b(?:compare|comparison|versus|vs\.?|difference between|trade-?offs?)\b/i.test(prompt);
+  // Explicit comparison cues.
+  if (/\b(?:compare|comparison|versus|vs\.?|difference between|trade-?offs?)\b/i.test(prompt)) return true;
+  // Implicit "A or B, which is better" framing — the shape that failed routing/comparison live
+  // ("sqlite or postgres for X?", "is it smarter to bootstrap or raise money?", "which is better
+  // for a solo founder, an ENK or an AS?"). Requires BOTH an " or " choice AND a preference cue, so
+  // "should I use a VPN or not?" (a yes/no, not a two-option pick) does not falsely qualify.
+  if (/\bor\s+not\b/i.test(prompt)) return false;        // "use a VPN or not?" is yes/no, not a pick
+  const hasChoice = /\b\w[\w.+#-]*\s+or\s+\w[\w.+#-]*/i.test(prompt);
+  if (!hasChoice) return false;
+  const hasPreferenceCue =
+    /\b(?:better|best|smarter|wiser|faster|safer|cheaper|stronger|recommend|prefer|which\s+(?:one|is|should|to)|should\s+i\s+(?:use|pick|choose|go\s+with))\b/i.test(prompt);
+  if (hasPreferenceCue) return true;
+  // Bare "X or Y for <use-case>?" where the question LEADS with the two options is an implicit
+  // pick even without a preference word ("sqlite or postgres for a local-first desktop app?").
+  // Anchored at the start + ends as a question, so "tell me about norway or its capital" (leads
+  // with a verb, no '?') does not qualify.
+  return /^\s*\w[\w.+#-]*\s+or\s+\w[\w.+#-]*\b/i.test(prompt) && /\?\s*$/.test(prompt);
 }
 
 function hasComparisonShape(response: string): boolean {
@@ -420,6 +469,15 @@ function buildRequirements(input: ChatAnswerQualityInput): ChatAnswerQualityRequ
       label: 'real comparison',
       expected: 'state at least one meaningful difference or tradeoff between the compared options',
       matched: hasComparisonShape(response),
+    });
+  }
+
+  if (requestsConcreteSpecificity(prompt)) {
+    requirements.push({
+      kind: 'scope',
+      label: 'concrete grounding',
+      expected: 'cite a concrete specific — a number, a named thing, a code/file reference, or a worked example',
+      matched: hasConcreteGrounding(response),
     });
   }
 

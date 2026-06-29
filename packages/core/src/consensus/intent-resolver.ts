@@ -11,6 +11,7 @@
  * and runs in microseconds on every turn. Its output drives Stage B (subject-anchored
  * grounding) and Stage C (image path selection).
  */
+import { buildEntityMatcher, type EntityMatcher } from '../chat/entity-matcher.js';
 
 /** What kind of value the user is after — drives the comparison strategy in Stage B. */
 export type ValueKind = 'price' | 'count' | 'date' | 'entity' | 'none';
@@ -63,6 +64,13 @@ const ALIAS_GROUPS: ReadonlyArray<readonly string[]> = [
   ['usd', 'dollar', 'dollars'],
 ];
 
+// One compiled matcher per alias group, built once (was: a fresh `\b…\b` RegExp per
+// alias on every extractSubject call — nested over groups × aliases, found by
+// scripts/hotpath-scan.mjs). Each group's matcher reports which of its aliases the
+// text contains, longest-first, in one pass.
+const ALIAS_GROUP_MATCHERS: ReadonlyArray<{ group: readonly string[]; matcher: EntityMatcher }> =
+  ALIAS_GROUPS.map((group) => ({ group, matcher: buildEntityMatcher(group) }));
+
 const STOPWORDS = new Set([
   'the', 'and', 'for', 'with', 'this', 'that', 'from', 'your', 'you', 'are', 'was', 'has',
   'have', 'can', 'will', 'use', 'using', 'about', 'which', 'what', 'when', 'how', 'why',
@@ -94,19 +102,15 @@ function classifyValueKind(prompt: string): ValueKind {
  */
 function extractSubject(prompt: string, draft: string): { subject: string | null; aliases: string[] } {
   const text = `${prompt} ${draft}`;
-  // 1) Known asset alias anywhere → anchor on the canonical family.
-  for (const group of ALIAS_GROUPS) {
-    for (const alias of group) {
-      const re = new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-      if (re.test(text)) {
-        // Use the longest alias actually present as the display subject (eth → "ETH").
-        const present = group.filter((a) => new RegExp(`\\b${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
-        const display = present.sort((a, b) => b.length - a.length)[0] ?? group[0];
-        // Skip pure currency groups as a subject (USD is the unit, not the subject).
-        if (group.includes('usd')) continue;
-        return { subject: display.toUpperCase().length <= 5 ? display.toUpperCase() : titleCase(display), aliases: [...group] };
-      }
-    }
+  // 1) Known asset alias anywhere → anchor on the canonical family. One pass per
+  // group via the precompiled matcher; matchAll is already longest-first.
+  for (const { group, matcher } of ALIAS_GROUP_MATCHERS) {
+    const present = matcher.matchAll(text);
+    if (present.length === 0) continue;
+    // Skip pure currency groups as a subject (USD is the unit, not the subject).
+    if (group.includes('usd')) continue;
+    const display = present[0] ?? group[0]; // longest present alias (eth → "ETH")
+    return { subject: display.toUpperCase().length <= 5 ? display.toUpperCase() : titleCase(display), aliases: [...group] };
   }
   // 2) First distinctive token in the prompt.
   const promptToken = (prompt.match(/\b[A-Za-z][A-Za-z0-9.+-]{1,}\b/g) ?? [])
