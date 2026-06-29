@@ -17,7 +17,7 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
   - Proof: `node --check` for `operator.mjs`, `operator-utils.mjs`, and `supervisor.mjs`; `operator.test.mjs` +
     `instance-lock.test.mjs` -> 25/25 green; live `operator stop` with no lock reported no signal and left no stop file.
 
-- **Built 2026-06-29 - Intentionality and specificity lexical signals (DONE, tested 100/100)**
+- **Built 2026-06-29 - Intentionality and specificity lexical signals (DONE, tested 108/108)**
   - Finding: Vai could already surface request-start, intent-action, uniqueness, and source-reference signals, but
     user correction language such as "what I meant", "my intention", "be specific", and "not generic" was still
     invisible to the shared lexical layer. That made it harder for classifiers, guidance, and future Council review
@@ -25,10 +25,11 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
   - Change: extended `intent-lexicon.ts` with reusable word/phrase hint collectors, expanded request-start and
     intent-action vocabularies, added intentionality/specificity hint sets, strengthened uniqueness phrases such as
     "not generic" and "signature features", surfaced `intentionality-hint`, `specificity-hint`, and
-    `source-reference-request` through `turn-classifier.ts`, and let explicit source/citation answer requests choose
-    the `research` turn kind after the builder gate (so "build ... with source links" remains builder).
+    `source-reference-request` through `turn-classifier.ts`, let explicit source/citation answer requests choose
+    the `research` turn kind after the builder gate (so "build ... with source links" remains builder), and let
+    explicit source requests bypass stable local web defer while keeping "source code/source tree" language local-first.
   - Proof: `intent-lexicon.test.ts` + `turn-classifier.test.ts` + `turn-kind.test.ts` +
-    `web-conclude-turn.test.ts` -> 105/105 green; ESLint clean on changed chat files.
+    `web-conclude-turn.test.ts` -> 108/108 green; ESLint clean on changed chat files.
 
 - **Built 2026-06-29 - Shared source-reference intent lexicon (DONE, tested 96/96)**
   - Finding: after the source-aware evidence contract landed, explicit source/citation/reference detection still lived

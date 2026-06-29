@@ -68,11 +68,13 @@ const PRESERVED_SHORT_TOKENS = new Set([
 const TOKEN_RE = /[a-z0-9][a-z0-9+#.]*/gi;
 const SOURCE_REFERENCE_FALSE_FRIEND_RE =
   /\bsource\s+(?:code|map|maps|file|files|tree|control|branch|directory|folder)\b/i;
-const SOURCE_REFERENCE_INTENT_PATTERNS = [
+const HARD_SOURCE_REFERENCE_INTENT_PATTERNS = [
   /\b(?:cite|cites|cited|citation|citations|footnote|footnotes|bibliography)\b/i,
-  /\b(?:include|with|using|show|give|provide|add)\s+(?:credible\s+|primary\s+|official\s+)?(?:sources?|references?|links?)\b/i,
-  /\b(?:sources?|references?)\s+(?:please|pls|for|on|about|included|attached)\b/i,
   /\baccording\s+to\s+(?:sources?|official|the\s+docs?|the\s+paper|(?:the\s+)?research)\b/i,
+] as const;
+const SOURCE_REFERENCE_CONTEXT_INTENT_PATTERNS = [
+  /\b(?:include|with|using|show|give|provide|add)\s+(?:credible\s+|primary\s+|official\s+)?(?:(?:source\s+)?links?|sources?|references?)\b/i,
+  /\b(?:sources?|references?)\s+(?:please|pls|for|on|about|included|attached)\b/i,
 ] as const;
 
 interface PhraseHint {
@@ -170,8 +172,9 @@ function collectPhraseHints(text: string, hints: readonly PhraseHint[]): string[
 export function wantsExplicitSourceReferences(input: string): boolean {
   const normalized = (input || '').toLowerCase().trim();
   if (!normalized) return false;
-  if (SOURCE_REFERENCE_INTENT_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
+  if (HARD_SOURCE_REFERENCE_INTENT_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
   if (SOURCE_REFERENCE_FALSE_FRIEND_RE.test(normalized)) return false;
+  if (SOURCE_REFERENCE_CONTEXT_INTENT_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
   return /\b(?:sources?|references?)\b/i.test(normalized);
 }
 

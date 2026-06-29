@@ -203,6 +203,40 @@ describe('web-conclude-turn', () => {
     expect(search).not.toHaveBeenCalled();
   });
 
+  it('bypasses local defer when a stable explanation explicitly asks for sources', async () => {
+    const search = vi.fn(async () => testSearchResponse(['Docker packages apps into containers.']));
+    const result = await tryWebConcludeTurn(
+      'Explain Docker with citations and source links',
+      [],
+      {
+        testMode: false,
+        searchBudgetMs: 1000,
+        search,
+        synthesize: async () => 'Docker packages applications into containers [1].',
+      },
+    );
+
+    expect(result?.text).toContain('[1]');
+    expect(search).toHaveBeenCalledOnce();
+  });
+
+  it('keeps source-code examples on the local-first path', async () => {
+    const search = vi.fn();
+    const result = await tryWebConcludeTurn(
+      'How do I set up TypeScript with source code examples?',
+      [],
+      {
+        testMode: false,
+        searchBudgetMs: 1000,
+        search,
+        synthesize: vi.fn(),
+      },
+    );
+
+    expect(result).toBeNull();
+    expect(search).not.toHaveBeenCalled();
+  });
+
   it('gives contextual follow-ups to local routes before attempting web search', async () => {
     const search = vi.fn();
     const result = await tryWebConcludeTurn(
@@ -347,6 +381,23 @@ describe('web-conclude-turn', () => {
       },
       {},
       { ignoreLocalDefer: true },
+    );
+
+    expect(result?.sources).toHaveLength(1);
+    expect(search).toHaveBeenCalledOnce();
+  });
+
+  it('fetchTurnWebEvidence searches stable prompts when sources are explicitly requested', async () => {
+    const search = vi.fn(async () => testSearchResponse(['TypeScript setup docs describe tsconfig initialization.']));
+
+    const result = await fetchTurnWebEvidence(
+      'How do I set up TypeScript in a new project? Please cite sources.',
+      [],
+      {
+        testMode: false,
+        searchBudgetMs: 1000,
+        search,
+      },
     );
 
     expect(result?.sources).toHaveLength(1);

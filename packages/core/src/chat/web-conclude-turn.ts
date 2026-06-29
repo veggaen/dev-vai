@@ -69,6 +69,10 @@ function isRecommendationQuery(input: string): boolean {
   return false;
 }
 
+function shouldDeferToLocalBeforeWeb(input: string): boolean {
+  return !wantsExplicitSourceReferences(input) && shouldDeferWebConclusionToLocalRoutes(input);
+}
+
 function hasSubstantiveAssistantAnswer(history: readonly Message[]): boolean {
   for (let i = history.length - 1; i >= 0; i -= 1) {
     const message = history[i];
@@ -136,7 +140,7 @@ export async function tryWebConcludeTurn(
   if (hasLocalOnlyDirective(history)) return null;
   if (isLocalRewriteFollowUp(input)) return null;
   if (isContextualFollowUpFragment(input) && hasSubstantiveAssistantAnswer(history)) return null;
-  if (shouldDeferWebConclusionToLocalRoutes(input)) return null;
+  if (shouldDeferToLocalBeforeWeb(input)) return null;
 
   const query = expandQueryWithHistory(input, history);
   if (!shouldAttemptWebConclusion(query, context)) return null;
@@ -178,7 +182,7 @@ export async function fetchTurnWebEvidence(
   if (hasLocalOnlyDirective(history)) return null;
   if (isLocalRewriteFollowUp(input)) return null;
   if (isContextualFollowUpFragment(input) && hasSubstantiveAssistantAnswer(history)) return null;
-  if (!options.ignoreLocalDefer && shouldDeferWebConclusionToLocalRoutes(input)) return null;
+  if (!options.ignoreLocalDefer && shouldDeferToLocalBeforeWeb(input)) return null;
 
   const query = expandQueryWithHistory(input, history);
   if (!shouldAttemptWebConclusion(query, context)) return null;

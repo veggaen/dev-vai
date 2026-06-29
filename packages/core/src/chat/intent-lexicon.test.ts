@@ -69,6 +69,7 @@ describe('intent lexicon', () => {
   it('detects explicit source-reference requests as shared lexical intent', () => {
     expect(wantsExplicitSourceReferences('give me the answer with sources')).toBe(true);
     expect(wantsExplicitSourceReferences('cite the official docs please')).toBe(true);
+    expect(wantsExplicitSourceReferences('explain it with source links')).toBe(true);
     expect(wantsExplicitSourceReferences('according to the research, what changed?')).toBe(true);
 
     const summary = summarizeLexicalSignals('Please compare these claims with citations and links');
@@ -78,6 +79,7 @@ describe('intent lexicon', () => {
 
   it('does not confuse source-code language with citation requests', () => {
     expect(wantsExplicitSourceReferences('show me the source code for this widget')).toBe(false);
+    expect(wantsExplicitSourceReferences('How do I set up TypeScript with source code examples?')).toBe(false);
     expect(wantsExplicitSourceReferences('search references in the source tree')).toBe(false);
 
     const summary = summarizeLexicalSignals('find references in the source files');
