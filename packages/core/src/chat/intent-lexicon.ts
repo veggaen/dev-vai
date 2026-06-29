@@ -67,7 +67,7 @@ const PRESERVED_SHORT_TOKENS = new Set([
 
 const TOKEN_RE = /[a-z0-9][a-z0-9+#.]*/gi;
 const SOURCE_REFERENCE_FALSE_FRIEND_RE =
-  /\bsource\s+(?:code|map|maps|file|files|tree|control|branch|directory|folder)\b/i;
+  /\bsource[-\s]+(?:code|map|maps|file|files|tree|control|branch|directory|folder)\b/i;
 const HARD_SOURCE_REFERENCE_INTENT_PATTERNS = [
   /\b(?:cite|cites|cited|citation|citations|footnote|footnotes|bibliography)\b/i,
   /\baccording\s+to\s+(?:sources?|official|the\s+docs?|the\s+paper|(?:the\s+)?research)\b/i,
