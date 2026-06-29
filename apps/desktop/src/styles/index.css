@@ -496,6 +496,14 @@ html, body, #root {
   animation: vai-process-shimmer 1.4s ease-in-out infinite;
 }
 
+/* Live council reasoning stream: a quiet teleprompter feel — older lines fade out at the
+   top so the newest reasoning reads as "scrolling up". Mask is opacity-only (GPU-cheap,
+   rubric-safe); the element itself scrolls to its bottom in JS as deltas arrive. */
+.process-tree__reasoning {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.4em);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 1.4em);
+}
+
 html {
   background-color: var(--app-chrome-background);
 }
@@ -1490,6 +1498,23 @@ code, pre, kbd {
 @media (prefers-reduced-motion: reduce) {
   .process-tree__row--running::before { animation: none; opacity: 0.9; }
 }
+/* The FOCUSED row = the single step in flight RIGHT NOW (running + live tail). It must be the
+   one block your eye lands on and that, alone, tells the story. Stronger wash + a thicker rail +
+   a faint ring than a merely-running row, so focusDistinct is unmistakable (the probe measured
+   the old running rows as not visually distinct from each other). Token-driven, calm, motion on
+   transform/opacity only. */
+.process-tree__row--focused {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--accent) 16%, transparent),
+    color-mix(in oklab, var(--accent) 6%, transparent) 60%,
+    transparent
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 28%, transparent);
+}
+.process-tree__row--focused::before { width: 3.5px; height: 1.35rem; }
+.process-tree__row--focused .process-tree__chevron ~ span { color: var(--chat-strong); }
+
 /* Child rail — connector for nested sub-steps (council members, search results). */
 .process-tree__children {
   border-left: 1px solid var(--panel-border-soft);

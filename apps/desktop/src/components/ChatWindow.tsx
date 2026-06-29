@@ -44,6 +44,10 @@ import { CouncilProgressPanel } from './panels/CouncilProgressPanel.js';
 import { deriveLiveCouncilFromProgressSteps } from './chat/process-step-enrich.js';
 import { ComposerProcessStrip } from './chat/ComposerProcessStrip.js';
 import { ProcessDepthControl } from './chat/ProcessDepthControl.js';
+import { MicButton } from './chat/MicButton.js';
+import { MicDeviceMenu } from './chat/MicDeviceMenu.js';
+import { useVoiceDictation } from '../hooks/useVoiceDictation.js';
+import { detectCorrections, mishearingPrompt } from '../lib/voice/correction-detection.js';
 import { useComposerActivity } from '../hooks/useComposerActivity.js';
 import { resolveSendTimeWorkIntent } from '../lib/auto-sandbox-intent.js';
 import { extractFilesFromMarkdown } from '../lib/file-extractor.js';
@@ -279,6 +283,59 @@ export function ChatWindow() {
   const [mentionSelected, setMentionSelected] = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // ── Voice dictation ──────────────────────────────────────────────────────────
+  // What the last dictation inserted (the baseline we compare the sent text against
+  // to spot mishearings). Cleared when the user clears the composer or sends.
+  const dictatedBaselineRef = useRef<string>('');
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const [mishearAsk, setMishearAsk] = useState<{ prompt: string; term: string } | null>(null);
+  // Chosen mic for dictation (the right-click device menu). Persisted so it survives reloads;
+  // empty string = system default.
+  const [micDeviceId, setMicDeviceId] = useState<string>(() => {
+    try { return localStorage.getItem('vai-voice-device') ?? ''; } catch { return ''; }
+  });
+  const selectMicDevice = useCallback((id: string) => {
+    setMicDeviceId(id);
+    try { localStorage.setItem('vai-voice-device', id); } catch { /* non-fatal */ }
+  }, []);
+  // Where (if anywhere) the right-click mic device menu is open.
+  const [micMenuAt, setMicMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const dictation = useVoiceDictation({
+    disabled: isStreaming,
+    deviceId: micDeviceId || undefined,
+    onInterim: (text) => setInterimTranscript(text),
+    onFinal: (text) => {
+      setInterimTranscript('');
+      // Insert at cursor (or append), then remember what we dictated so a later
+      // manual edit can be detected as a correction / mishearing.
+      const ta = textareaRef.current;
+      setInput((prev) => {
+        const start = ta?.selectionStart ?? prev.length;
+        const end = ta?.selectionEnd ?? prev.length;
+        const sep = prev && start === prev.length && !/\s$/.test(prev) ? ' ' : '';
+        const next = prev.slice(0, start) + sep + text + prev.slice(end);
+        dictatedBaselineRef.current = next;
+        return next;
+      });
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    },
+  });
+  // Personal dictionary of corrected terms. Stored locally for now (no server
+  // endpoint yet); the seam is here so it can later POST to a /api/dictionary
+  // route and feed the improvement loop's grounding signals.
+  const addTermToDictionary = useCallback((term: string) => {
+    const clean = term.trim();
+    if (!clean) return;
+    try {
+      const key = 'vai-voice-dictionary';
+      const existing = JSON.parse(localStorage.getItem(key) ?? '[]') as string[];
+      if (!existing.some((t) => t.toLowerCase() === clean.toLowerCase())) {
+        localStorage.setItem(key, JSON.stringify([...existing, clean]));
+      }
+    } catch (err) {
+      console.warn('[voice] could not persist dictionary term:', err);
+    }
+  }, []);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const idePopupRef = useRef<HTMLDivElement>(null);
@@ -776,6 +833,20 @@ export function ChatWindow() {
     if (!isOverrideSend && pastedImage && !imageDescription.trim()) {
       descriptionRef.current?.focus();
       return;
+    }
+
+    // Correction learning: if this turn was dictated and the user edited a word
+    // before sending, that edit is a likely mishearing. Surface a gentle, NON-
+    // blocking "did we mishear you?" offer to add the corrected term to the
+    // dictionary — exactly the signal the user asked us to detect. We only check
+    // real composer sends (not programmatic overrides) and reset the baseline.
+    if (!isOverrideSend && dictatedBaselineRef.current.trim()) {
+      const correction = detectCorrections(dictatedBaselineRef.current, text);
+      const ask = mishearingPrompt(correction);
+      if (ask && correction.mishearings[0]) {
+        setMishearAsk({ prompt: ask, term: correction.mishearings[0].corrected });
+      }
+      dictatedBaselineRef.current = '';
     }
 
     const forcedMode = options?.forceMode;
@@ -1400,6 +1471,8 @@ export function ChatWindow() {
                         verification={msg.verification}
                         imageGenSteps={msg.imageGenSteps}
                         progressSteps={msg.progressSteps}
+                        liveDraft={msg.liveDraft}
+                        infoBlocks={msg.infoBlocks}
                         feedback={msg.feedback}
                         onFeedback={(helpful) => useChatStore.getState().setFeedback(msg.id, helpful)}
                         onFollowUp={(question) => { void handleSend(question); }}
@@ -1723,6 +1796,38 @@ export function ChatWindow() {
               </div>
             )}
 
+            {/* Live dictation preview — what the mic is hearing right now. */}
+            {dictation.listening && interimTranscript && (
+              <div className="flex items-center gap-2 px-4 pt-2 text-[11px] text-[color:var(--accent-text)]" aria-live="polite">
+                <span className="rounded-full bg-[color:var(--accent-soft)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em]">Listening</span>
+                <span className="min-w-0 flex-1 truncate italic">{interimTranscript}</span>
+              </div>
+            )}
+
+            {/* Correction learning: "did we mishear you?" — appears after a dictated
+                turn whose wording the user fixed. Non-blocking; the message already sent. */}
+            {mishearAsk && (
+              <div className="flex items-center gap-2 px-4 pt-2 text-[11px] text-zinc-300" aria-live="polite">
+                <span className="min-w-0 flex-1 truncate">{mishearAsk.prompt}</span>
+                <button
+                  type="button"
+                  onClick={() => { addTermToDictionary(mishearAsk.term); setMishearAsk(null); }}
+                  className="flex-shrink-0 rounded-md border border-[color:var(--accent-ring)] bg-[color:var(--accent-soft)] px-2 py-0.5 font-medium text-[color:var(--accent-text)] transition-colors hover:bg-[color:var(--accent-softer)]"
+                  title="Remember this spelling for next time"
+                >
+                  Add to dictionary
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMishearAsk(null)}
+                  className="flex-shrink-0 text-zinc-500 transition-colors hover:text-zinc-200"
+                  title="Dismiss"
+                >
+                  No thanks
+                </button>
+              </div>
+            )}
+
             <textarea
               ref={textareaRef}
               value={input}
@@ -1730,6 +1835,9 @@ export function ChatWindow() {
                 const v = e.target.value;
                 const pos = e.target.selectionStart ?? v.length;
                 setInput(v);
+                // Emptying the field discards any dictation baseline so a fresh
+                // typed message is never mistaken for a correction of old speech.
+                if (!v.trim()) dictatedBaselineRef.current = '';
                 syncMentionFromTextarea(v, pos);
               }}
               onSelect={(e) => {
@@ -1985,6 +2093,24 @@ export function ChatWindow() {
                   >
                     {charCount}
                   </motion.span>
+                )}
+                {dictation.supported && (
+                  <MicButton
+                    status={dictation.status}
+                    supported={dictation.supported}
+                    onHoldStart={() => void dictation.start()}
+                    onHoldEnd={() => void dictation.stop()}
+                    disabled={isStreaming}
+                    onContextMenu={(at) => setMicMenuAt(at)}
+                  />
+                )}
+                {micMenuAt && (
+                  <MicDeviceMenu
+                    at={micMenuAt}
+                    selectedId={micDeviceId}
+                    onSelect={selectMicDevice}
+                    onClose={() => setMicMenuAt(null)}
+                  />
                 )}
                 <AnimatePresence mode="wait">
                   {isStreaming ? (

@@ -1,0 +1,230 @@
+{
+  "gatheredAt": "2026-06-22T09:57:13.227Z",
+  "purpose": "Exemplar repos for the council improvement loop to learn architecture/quality patterns from.",
+  "repos": [
+    {
+      "slug": "pingdotgg/t3code",
+      "description": "",
+      "homepage": "https://t3.codes",
+      "primaryLanguage": "TypeScript",
+      "languages": [
+        "TypeScript",
+        "MDX",
+        "JavaScript",
+        "Astro",
+        "CSS",
+        "Swift",
+        "HTML",
+        "Objective-C++",
+        "Vue",
+        "Shell",
+        "Kotlin",
+        "C++",
+        "Ruby",
+        "Objective-C",
+        "Nix"
+      ],
+      "topics": [],
+      "stars": 12808,
+      "forks": 2578,
+      "openIssues": 482,
+      "license": "MIT",
+      "pushedAt": "2026-06-22T04:53:34Z",
+      "archived": false,
+      "readmeExcerpt": "# T3 Code\n\nT3 Code is a minimal web GUI for coding agents (currently Codex, Claude, Cursor, and OpenCode, more coming soon).\n\n## Installation\n\n> [!WARNING]\n> T3 Code currently supports Codex, Claude, Cursor, and OpenCode.\n> Install and authenticate at least one provider before use:\n>\n> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`\n> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`\n> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `cursor-agent login`\n> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`\n\n### Run without installing\n\n```bash\nnpx t3@latest\n```\n\nTip: Use `npx t3@latest --help` for the full CLI reference.\n\n### Desktop app\n\nInstall the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:\n\n#### Windows (`winget`)\n\n```bash\nwinget install T3Tools.T3Code\n```\n\n#### macOS (Homebrew)\n\n```bash\nbrew install --cask t3-code\n```\n\n#### Arch Linux (AUR)\n\n```bash\nyay -S t3code-bin\n```\n\n## Some notes\n\nWe are very very early in this project. Expect bugs.\n\nWe",
+      "qualitySignals": [
+        "high-adoption",
+        "licensed:MIT",
+        "no-topics",
+        "documented"
+      ]
+    },
+    {
+      "slug": "pingdotgg/uploadthing",
+      "description": "File uploads for modern web devs",
+      "homepage": "https://uploadthing.com",
+      "primaryLanguage": "TypeScript",
+      "languages": [
+        "TypeScript",
+        "Svelte",
+        "JavaScript",
+        "CSS",
+        "Vue",
+        "Nix",
+        "HTML",
+        "Shell"
+      ],
+      "topics": [],
+      "stars": 5152,
+      "forks": 424,
+      "openIssues": 49,
+      "license": "MIT",
+      "pushedAt": "2026-04-15T19:59:06Z",
+      "archived": false,
+      "readmeExcerpt": "<p align=\"center\">\n  <picture>\n  <source media=\"(prefers-color-scheme: dark)\" srcset=\"https://raw.githubusercontent.com/pingdotgg/uploadthing/main/assets/uploadthing-logo-dark-background.svg\">\n  <img src=\"https://github.com/pingdotgg/uploadthing/blob/main/assets/uploadthing-logo-light-background.svg\" width=\"480\" height=\"80\" alt=\"Logo for UploadThing\">\n</picture>\n</p>\n\n<p align=\"center\">\n  A thing for uploading files.\n</p>\n\n<div align=\"center\">\n  <a href=\"https://uploadthing.com\">Home</a> | <a href=\"https://docs.uploadthing.com\">Docs</a> | <a href=\"https://t3-tools.notion.site/776334c06d814dd08d450975bb983085\">Roadmap</a>\n</div>\n\n## Table of Contents\n\nThis repository contains the packages, docs and examples for uploadthing\n\n- [Next.js App Directory](https://github.com/pingdotgg/uploadthing/tree/main/examples/minimal-appdir) -\n  A simple example using the Next.js app directory\n- [Next.js Pages Directory](https://github.com/pingdotgg/uploadthing/tree/main/examples/minimal-pagedir) -\n  A simple example using the Next.js pages directory\n- [SolidStart SSR](https://github.com/pingdotgg/uploadthing/tree/main/examples/minimal-solidstart) -\n  A simple example using SSR with SolidStart\n- [Doc",
+      "qualitySignals": [
+        "high-adoption",
+        "licensed:MIT",
+        "no-topics",
+        "documented"
+      ]
+    },
+    {
+      "slug": "pingdotgg/lawn",
+      "description": "",
+      "homepage": "https://lawn.video",
+      "primaryLanguage": "TypeScript",
+      "languages": [
+        "TypeScript",
+        "CSS",
+        "Shell",
+        "JavaScript"
+      ],
+      "topics": [],
+      "stars": 607,
+      "forks": 175,
+      "openIssues": 16,
+      "license": "MIT",
+      "pushedAt": "2026-06-22T07:56:27Z",
+      "archived": false,
+      "readmeExcerpt": "# lawn\n\nVideo review platform for creative teams. Built by Theo.\n\n## IMPORTANT NOTICE\n\nI am, effectively, not accepting PRs at this time. This may change in the future. My preferred \"PR\" method is to describe problems in the issues tab and give me detailed prompts I can quickly copy/paste into my agent of choice.\n\n## ...why did you build this?\n\nI got tired of Frame.io slowly regressing. I wanted something simple, fast and reliable.\n\nI don't know how much time I'll have to maintain this long term, so I decided to open source it. I have no idea where this project is going long term.\n\nMy team is using lawn every day already. We intend to continue, and we intend to keep adding things we need throughout.\n\n## Docs\n\n- [Setup](docs/setup.md)\n- [Deployment](docs/deployment.md)\n- [Philosophy](docs/philosophy.md)",
+      "qualitySignals": [
+        "real-traction",
+        "licensed:MIT",
+        "no-topics",
+        "documented"
+      ]
+    },
+    {
+      "slug": "pewdiepie-archdaemon/odysseus",
+      "description": "Self-hosted AI workspace. ",
+      "homepage": "https://pewdiepie-archdaemon.github.io/odysseus/",
+      "primaryLanguage": "Python",
+      "languages": [
+        "Python",
+        "JavaScript",
+        "CSS",
+        "HTML",
+        "Shell",
+        "PowerShell",
+        "TypeScript",
+        "Dockerfile",
+        "Batchfile"
+      ],
+      "topics": [],
+      "stars": 75955,
+      "forks": 9878,
+      "openIssues": 1432,
+      "license": "AGPL-3.0",
+      "pushedAt": "2026-06-22T05:08:47Z",
+      "archived": false,
+      "readmeExcerpt": "<p align=\"center\">\n  <img src=\"docs/odysseus-wordmark.png\" alt=\"Odysseus\" width=\"238\">\n</p>\n\n<p align=\"center\">\n  A self-hosted AI workspace for chat, agents, research, documents, email, notes, calendar, and local model workflows.\n</p>\n\n<p align=\"center\">\n  <a href=\"#quick-start\">Quick Start</a> ·\n  <a href=\"docs/setup.md\">Setup Guide</a> ·\n  <a href=\"CONTRIBUTING.md\">Contributing</a> ·\n  <a href=\"ROADMAP.md\">Roadmap</a>\n</p>\n\n<p align=\"center\">\n  <a href=\"https://repology.org/project/odysseus-ai/versions\"><img src=\"https://repology.org/badge/vertical-allrepos/odysseus-ai.svg\" alt=\"Packaging status\"></a>\n</p>\n\n<p align=\"center\">\n  <img src=\"docs/odysseus-browser.jpg\" alt=\"Odysseus interface\">\n</p>\n\n---\n\n## Quick Start\n\n> `dev` is the default branch and gets the newest changes first. Use [`main`](https://github.com/pewdiepie-archdaemon/odysseus/tree/main) if you want the more curated branch.\n\n```bash\ngit clone https://github.com/pewdiepie-archdaemon/odysseus.git\ncd odysseus\ncp .env.example .env\ndocker compose up -d --build\n```\n\nOpen `http://localhost:7000` when the containers are healthy. The first admin password is printed in `docker compose logs odysseus`.\n\nNative installs, GPU no",
+      "qualitySignals": [
+        "high-adoption",
+        "licensed:AGPL-3.0",
+        "no-topics",
+        "documented"
+      ]
+    },
+    {
+      "slug": "colinhacks/zod",
+      "description": "TypeScript-first schema validation with static type inference",
+      "homepage": "https://zod.dev",
+      "primaryLanguage": "TypeScript",
+      "languages": [
+        "TypeScript",
+        "MDX",
+        "HTML",
+        "JavaScript",
+        "CSS",
+        "Shell"
+      ],
+      "topics": [
+        "runtime-validation",
+        "schema-validation",
+        "static-types",
+        "type-inference",
+        "typescript"
+      ],
+      "stars": 43027,
+      "forks": 2034,
+      "openIssues": 214,
+      "license": "MIT",
+      "pushedAt": "2026-06-13T00:19:54Z",
+      "archived": false,
+      "readmeExcerpt": "<p align=\"center\">\n  <img src=\"logo.svg\" width=\"200px\" align=\"center\" alt=\"Zod logo\" />\n  <h1 align=\"center\">Zod</h1>\n  <p align=\"center\">\n    TypeScript-first schema validation with static type inference\n    <br/>\n    by <a href=\"https://x.com/colinhacks\">@colinhacks</a>\n  </p>\n</p>\n<br/>\n\n<p align=\"center\">\n<a href=\"https://github.com/colinhacks/zod/actions?query=branch%3Amain\"><img src=\"https://github.com/colinhacks/zod/actions/workflows/test.yml/badge.svg?event=push&branch=main\" alt=\"Zod CI status\" /></a>\n<a href=\"https://opensource.org/licenses/MIT\" rel=\"nofollow\"><img src=\"https://img.shields.io/github/license/colinhacks/zod\" alt=\"License\"></a>\n<a href=\"https://www.npmjs.com/package/zod\" rel=\"nofollow\"><img src=\"https://img.shields.io/npm/dw/zod.svg\" alt=\"npm\"></a>\n<a href=\"https://discord.gg/KaSRdyX2vc\" rel=\"nofollow\"><img src=\"https://img.shields.io/discord/893487829802418277?label=Discord&logo=discord&logoColor=white\" alt=\"discord server\"></a>\n<a href=\"https://github.com/colinhacks/zod\" rel=\"nofollow\"><img src=\"https://img.shields.io/github/stars/colinhacks/zod\" alt=\"stars\"></a>\n</p>\n\n<div align=\"center\">\n  <a href=\"https://zod.dev/api\">Docs</a>\n  <span>&nbsp;&nbsp;•&nbsp;",
+      "qualitySignals": [
+        "high-adoption",
+        "licensed:MIT",
+        "self-described-topics",
+        "documented"
+      ]
+    },
+    {
+      "slug": "honojs/hono",
+      "description": "Web framework built on Web Standards",
+      "homepage": "https://hono.dev",
+      "primaryLanguage": "TypeScript",
+      "languages": [
+        "TypeScript",
+        "JavaScript",
+        "HTML"
+      ],
+      "topics": [
+        "aws-lambda",
+        "bun",
+        "cloudflare",
+        "cloudflare-workers",
+        "deno",
+        "npm",
+        "router",
+        "typescript",
+        "web-framework"
+      ],
+      "stars": 31062,
+      "forks": 1129,
+      "openIssues": 371,
+      "license": "MIT",
+      "pushedAt": "2026-06-18T02:18:11Z",
+      "archived": false,
+      "readmeExcerpt": "<div align=\"center\">\n  <a href=\"https://hono.dev\">\n    <img src=\"https://raw.githubusercontent.com/honojs/hono/main/docs/images/hono-title.png\" width=\"500\" height=\"auto\" alt=\"Hono\"/>\n  </a>\n</div>\n\n<hr />\n\n[](https://github.com/honojs/hono/actions)\n[](https://github.com/honojs/hono/blob/main/LICENSE)\n[](https://www.npmjs.com/package/hono)\n[](https://www.npmjs.com/package/hono)\n[](https://jsr.io/@hono/hono)\n[](https://bundlephobia.com/result?p=hono)\n[](https://bundlephobia.com/result?p=hono)\n[](https://github.com/honojs/hono/pulse)\n[](https://github.com/honojs/hono/commits/main)\n[](https://codecov.io/github/honojs/hono)\n[](https://discord.gg/KMh2eNSdxV)\n[](https://deepwiki.com/honojs/hono)\n\nHono - _**means flame🔥 in Japanese**_ - is a small, simple, and ultrafast web framework built on Web Standards. It works on any JavaScript runtime: Cloudflare Workers, Fastly Compute, Deno, Bun, Vercel, AWS Lambda, Lambda@Edge, and Node.js.\n\nFast, but not only fast.\n\n```ts\nimport { Hono } from 'hono'\nconst app = new Hono()\n\napp.get('/', (c) => c.text('Hono!'))\n\nexport default app\n```\n\n## Quick Start\n\n```bash\nnpm create hono@latest\n```\n\n## Features\n\n- **Ultrafast** 🚀 - The router `RegExpRouter`",
+      "qualitySignals": [
+        "high-adoption",
+        "licensed:MIT",
+        "self-described-topics",
+        "documented"
+      ]
+    },
+    {
+      "slug": "veggaen/DEV-VEGGASTARE",
+      "description": "Nextjs 14->15->16 with NextAuth 5 and still a work in progress",
+      "homepage": "https://dev-veggastare.vercel.app",
+      "primaryLanguage": "TypeScript",
+      "languages": [
+        "TypeScript",
+        "HTML",
+        "JavaScript",
+        "Python",
+        "CSS",
+        "PowerShell",
+        "PLpgSQL",
+        "Dockerfile",
+        "Shell"
+      ],
+      "topics": [],
+      "stars": 0,
+      "forks": 0,
+      "openIssues": 14,
+      "license": null,
+      "pushedAt": "2026-06-22T09:18:14Z",
+      "archived": false,
+      "readmeExcerpt": "# Veggastare\n# main rules\nAlways presume dev servers are running in vscode terminal window because I (the human vegga from the basement) usually start this with 'C:\\Users\\v3gga\\Documents\\DEV-VEGGASTARE> npm run start:project'",
+      "qualitySignals": [
+        "early/personal",
+        "no-license",
+        "no-topics",
+        "documented"
+      ]
+    }
+  ]
+}

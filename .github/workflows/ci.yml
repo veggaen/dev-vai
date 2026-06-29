@@ -65,6 +65,18 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # Free OSS static-analysis audit (the Semgrep helper's tool, in CI). Advisory:
+      # continue-on-error so it surfaces security/quality findings without blocking the build
+      # until we deliberately make it a gate. Free, no key, no data leaves GitHub's runner.
+      - name: Semgrep audit (free OSS, advisory)
+        if: matrix.node-version == 22
+        continue-on-error: true
+        shell: bash
+        run: |
+          python -m pip install --quiet semgrep || true
+          semgrep --config auto --severity ERROR --quiet \
+            packages/core/src packages/runtime/src apps/desktop/src || true
+
       # Heavy quality/regression gates below run for signal but are NON-BLOCKING (continue-on-error):
       # they exercise deterministic-engine answer quality and model/runtime-backed evals that have
       # long-standing, pre-existing failures (and the live-eval/browser steps need a model the CI

@@ -26,11 +26,17 @@ export function TurnProcessSection({
   durationMs,
 }: TurnProcessSectionProps) {
   const revealedCount = useProcessStepReveal(steps, isStreaming);
+  // The drip can still be draining for a beat AFTER the stream ends (fast turns).
+  // Treat that drain window as "live" so steps reveal sequentially and each gets its
+  // human dwell, instead of snapping to the full settled tree the instant streaming
+  // stops. Once every step is shown, this is false and the tree settles normally.
+  const draining = !isStreaming && revealedCount < steps.length;
+  const live = isStreaming || draining;
   const visibleSteps = useMemo(
-    () => (isStreaming ? steps.slice(0, revealedCount) : steps),
-    [isStreaming, steps, revealedCount],
+    () => (live ? steps.slice(0, revealedCount) : steps),
+    [live, steps, revealedCount],
   );
-  const pendingStepCount = isStreaming ? Math.max(0, steps.length - revealedCount) : 0;
+  const pendingStepCount = live ? Math.max(0, steps.length - revealedCount) : 0;
   const timelineView = useTimelineView();
 
   if (!isStreaming && steps.length === 0) return null;
@@ -40,7 +46,7 @@ export function TurnProcessSection({
   if (timelineView) {
     return (
       <Timeline
-        live={isStreaming}
+        live={live}
         steps={visibleSteps}
         council={council}
         durationMs={durationMs}
@@ -50,7 +56,7 @@ export function TurnProcessSection({
 
   return (
     <ProcessTree
-      live={isStreaming}
+      live={live}
       steps={visibleSteps}
       council={council}
       imageSteps={imageSteps}

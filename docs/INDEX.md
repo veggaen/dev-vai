@@ -9,6 +9,8 @@ This folder holds supporting documents for VeggaAI. The permanent authority docu
 
 ## Supporting docs
 
+- [`perpetual-improvement-loop.md`](perpetual-improvement-loop.md) - how to run, watch, delegate, and safely switch Vai's improvement loop
+
 - [`RESPONSE-QUALITY-CONTRACT.md`](RESPONSE-QUALITY-CONTRACT.md) - human, AI, and robot response-quality gates and evaluation method
 
 - [`TESTING-STRATEGY.md`](TESTING-STRATEGY.md) — test strategy and examples for JS/TS full-stack apps
