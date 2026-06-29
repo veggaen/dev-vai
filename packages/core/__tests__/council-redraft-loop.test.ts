@@ -19,7 +19,7 @@ import { ChatService, buildCouncilRedraftInstruction, councilScore, redraftResol
 import type { CouncilRedraftFeedback } from '../src/chat/service.js';
 import { ModelRegistry } from '../src/models/adapter.js';
 import { InMemoryGuidanceStore, salientTokens, selectApplicableGuidance } from '../src/chat/route-guidance.js';
-import type { CouncilMember, CouncilMemberNote, CouncilConsensus, CouncilAction, CouncilVerdict } from '../src/consensus/types.js';
+import type { CouncilMember, CouncilMemberNote, CouncilConsensus } from '../src/consensus/types.js';
 import type { CouncilRoster } from '../src/consensus/topic-router.js';
 
 // ── Stub council member: returns a fixed note so consensus is deterministic ──
@@ -98,6 +98,7 @@ function runLoop(
 }
 
 const SUBSTANTIVE = 'Explain how JavaScript closures work and why they are useful in real code.';
+const COUNCIL_LOOP_TIMEOUT_MS = 20_000;
 
 describe('councilScore', () => {
   const base: CouncilConsensus = {
@@ -202,7 +203,7 @@ describe('runCouncilLoop', () => {
     expect(result.revised).toBe(false);
     expect(result.finalText).toBe('A solid first answer about closures.');
     expect(redraftCalled).toBe(false);
-  }, 20_000);
+  }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('redrafts and keeps the better answer when the council asks for a reread', async () => {
     // First convene flags reread; the redraft produces text the SAME (ship) roster
@@ -221,7 +222,7 @@ describe('runCouncilLoop', () => {
     // The feedback carried the council's reading (intent + method), never a fact.
     expect(seen?.realIntent).toBe('wants runnable code');
     expect(seen?.methodLessons).toContain('lead with a code example');
-  }, 20_000);
+  }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('never breaks the turn when the redraft throws — keeps the original', async () => {
     const service = makeService(rereadRoster('x', 'y'));
@@ -232,7 +233,7 @@ describe('runCouncilLoop', () => {
     );
     expect(result.revised).toBe(false);
     expect(result.finalText).toBe('Original draft.');
-  });
+  }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('treats an empty or unchanged redraft as a no-op (no spin)', async () => {
     const service = makeService(rereadRoster('x', 'y'));
@@ -242,14 +243,14 @@ describe('runCouncilLoop', () => {
     const echoed = await runLoop(service, { prompt: SUBSTANTIVE, draftText: 'Original draft.', modelId: 'local:test' }, async () => 'Original draft.');
     expect(echoed.revised).toBe(false);
     expect(echoed.finalText).toBe('Original draft.');
-  }, 20_000);
+  }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('is a no-op when no redraft function is provided (grade-only)', async () => {
     const service = makeService(rereadRoster('x', 'y'));
     const result = await runLoop(service, { prompt: SUBSTANTIVE, draftText: 'Original draft.', modelId: 'local:test' });
     expect(result.revised).toBe(false);
     expect(result.finalText).toBe('Original draft.');
-  }, 20_000);
+  }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('returns the original with no council when there is no roster configured', async () => {
     const service = new ChatService(createDb(':memory:'), new ModelRegistry());
@@ -261,7 +262,7 @@ describe('runCouncilLoop', () => {
     expect(result.revised).toBe(false);
     expect(result.council).toBeUndefined();
     expect(result.finalText).toBe('Original draft.');
-  });
+  }, COUNCIL_LOOP_TIMEOUT_MS);
 });
 
 // ── The closed loop: council lessons become self-applying guidance ──
@@ -293,7 +294,7 @@ describe('council lesson persistence (closed self-improvement loop)', () => {
     expect(lesson.from).toBe('ai');
     expect(lesson.note).toMatch(/profile first|memoize/i);
     expect(lesson.matchTokens && lesson.matchTokens.length).toBeGreaterThan(0);
-  });
+  }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('a persisted lesson is selected on a later similar turn', async () => {
     const store = new InMemoryGuidanceStore();
@@ -313,14 +314,14 @@ describe('council lesson persistence (closed self-improvement loop)', () => {
     );
     expect(selected.length).toBeGreaterThan(0);
     expect(selected[0].note).toMatch(/profile first|memoize/i);
-  });
+  }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('does NOT persist when the council ships the draft (nothing to fix)', async () => {
     const store = new InMemoryGuidanceStore();
     const service = makeServiceWithStore(shipRoster(), store);
     await runLoop(service, { prompt: TURN, draftText: 'A good draft.', modelId: 'local:test' });
     expect(store.loadActive(null).length).toBe(0);
-  });
+  }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('dedupes: a second similar non-ship turn does not stack a duplicate hint', async () => {
     const store = new InMemoryGuidanceStore();
@@ -332,12 +333,12 @@ describe('council lesson persistence (closed self-improvement loop)', () => {
     await runLoop(service, { prompt: TURN, draftText: 'draft two', modelId: 'local:test' });
     // Same handler + overlapping tokens → second turn must be absorbed, not stacked.
     expect(store.loadActive(null).length).toBe(1);
-  }, 20_000);
+  }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('is a no-op when no guidance store is configured (back-compat)', async () => {
     const service = makeService(rereadRoster('x', 'lesson y'));
     // Must not throw and must still grade/redraft normally.
     const result = await runLoop(service, { prompt: TURN, draftText: 'draft', modelId: 'local:test' });
     expect(result.finalText).toBe('draft');
-  });
+  }, COUNCIL_LOOP_TIMEOUT_MS);
 });

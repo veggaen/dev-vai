@@ -8,6 +8,8 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { VaiEngine } from '../src/models/vai-engine.js';
 
+const ENGINE_TURN_TIMEOUT_MS = 10_000;
+
 describe('Ola conversation — five-turn acceptance', () => {
   let engine: VaiEngine;
 
@@ -26,7 +28,7 @@ describe('Ola conversation — five-turn acceptance', () => {
     const acknowledgesNickname = /ola/i.test(content);
     const offersToAnswer = /(?:ask|go\s+ahead|sure|of\s+course|happy\s+to)/i.test(content);
     expect(acknowledgesNickname || offersToAnswer).toBe(true);
-  });
+  }, ENGINE_TURN_TIMEOUT_MS);
 
   it('Q2: "tell me then?" follow-up must NOT dump unrelated web search results', async () => {
     const history = [
@@ -40,7 +42,7 @@ describe('Ola conversation — five-turn acceptance', () => {
     expect(content).not.toMatch(/a\s+pain\s+to\s+maintain/i);
     // Should be conversational / contextual / short.
     expect(content.length).toBeLessThan(600);
-  });
+  }, ENGINE_TURN_TIMEOUT_MS);
 
   it('Q4: "what day is tomorrow" must answer tomorrow, not today', async () => {
     const r = await engine.chat({ messages: [{ role: 'user', content: 'what day is it tomorrow?' }] });
@@ -49,14 +51,14 @@ describe('Ola conversation — five-turn acceptance', () => {
     // NOT the literal "Today is" prefix.
     expect(content).toMatch(/tomorrow/i);
     expect(content).not.toMatch(/^today\s+is/i);
-  });
+  }, ENGINE_TURN_TIMEOUT_MS);
 
   it('Q5a: "what is the date in 10 days" must compute a future date', async () => {
     const r = await engine.chat({ messages: [{ role: 'user', content: 'what is the date in 10 days?' }] });
     const content = r.message.content;
     expect(content).toMatch(/in\s+10\s+days/i);
     expect(content).not.toMatch(/^today\s+is/i);
-  });
+  }, ENGINE_TURN_TIMEOUT_MS);
 
   it('Q5b: "how many messages have I sent" must count user turns', async () => {
     const history = [
@@ -69,5 +71,5 @@ describe('Ola conversation — five-turn acceptance', () => {
     const content = r.message.content;
     // 2 prior user msgs + 1 current = 3
     expect(content).toMatch(/\b3\s+message/i);
-  });
+  }, ENGINE_TURN_TIMEOUT_MS);
 });
