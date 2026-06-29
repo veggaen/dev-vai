@@ -7,6 +7,7 @@ import {
   buildVisualNodeArgs,
   buildWatchNodeArgs,
   classifyLoopLiveness,
+  classifyStaleRunRecovery,
   formatNodeCommand,
   parseOperatorArgs,
 } from './operator-utils.mjs';
@@ -160,11 +161,18 @@ test('invalid mode fails closed', () => {
   assert.throws(() => parseOperatorArgs(['start', '--mode', 'chaos'], {}), /invalid --mode/);
 });
 
+test('recover-stale is a first-class operator command', () => {
+  const opts = parseOperatorArgs(['recover-stale', '--db', 'C:/tmp/vai-helper.sqlite'], {});
+  assert.equal(opts.command, 'recover-stale');
+  assert.equal(opts.db, 'C:/tmp/vai-helper.sqlite');
+});
+
 test('handoff includes observe, watch, report, apply, and delegation guidance', () => {
   const opts = parseOperatorArgs(['handoff', '--db', 'C:/tmp/vai-helper.sqlite', '--base-url', 'http://host:3006'], {});
   const md = buildHandoffMarkdown(opts, new Date('2026-06-22T00:00:00.000Z'));
   assert.match(md, /Observe forever/);
   assert.match(md, /Stop the recorded supervisor/);
+  assert.match(md, /Recover a stale crashed run marker/);
   assert.match(md, /council\/auto-improve/);
   assert.match(md, /C:\/tmp\/vai-helper\.sqlite/);
   assert.match(md, /http:\/\/host:3006/);
@@ -219,4 +227,44 @@ test('loop liveness warns when a running marker has no heartbeat and is old', ()
   });
   assert.equal(liveness.heartbeatAgeMs, null);
   assert.equal(liveness.staleRunning, true);
+});
+
+test('stale recovery allows interrupted marking when no supervisor is alive', () => {
+  const now = Date.parse('2026-06-22T12:00:00.000Z');
+  const recovery = classifyStaleRunRecovery({
+    nowMs: now,
+    run: { status: 'running', started_at: '2026-06-22T10:00:00.000Z' },
+    heartbeat: { updated_at: '2026-06-22T10:05:00.000Z' },
+    supervisorLock: null,
+    supervisorAlive: false,
+  });
+  assert.equal(recovery.action, 'recover');
+  assert.equal(recovery.ok, true);
+  assert.equal(recovery.reason, 'no-supervisor-lock');
+});
+
+test('stale recovery refuses while the recorded supervisor is alive', () => {
+  const now = Date.parse('2026-06-22T12:00:00.000Z');
+  const recovery = classifyStaleRunRecovery({
+    nowMs: now,
+    run: { status: 'running', started_at: '2026-06-22T10:00:00.000Z' },
+    heartbeat: { updated_at: '2026-06-22T10:05:00.000Z' },
+    supervisorLock: { pid: 1234 },
+    supervisorAlive: true,
+  });
+  assert.equal(recovery.action, 'refuse');
+  assert.equal(recovery.ok, false);
+  assert.equal(recovery.reason, 'supervisor-alive');
+});
+
+test('stale recovery refuses fresh running heartbeats', () => {
+  const now = Date.parse('2026-06-22T12:00:00.000Z');
+  const recovery = classifyStaleRunRecovery({
+    nowMs: now,
+    run: { status: 'running', started_at: '2026-06-22T11:59:00.000Z' },
+    heartbeat: { updated_at: '2026-06-22T11:59:55.000Z' },
+  });
+  assert.equal(recovery.action, 'refuse');
+  assert.equal(recovery.ok, false);
+  assert.equal(recovery.reason, 'heartbeat-fresh');
 });

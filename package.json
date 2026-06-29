@@ -64,6 +64,7 @@
     "self-improve:status": "node --experimental-sqlite scripts/improve-loop/operator.mjs status",
     "self-improve:start": "node --experimental-sqlite scripts/improve-loop/operator.mjs start",
     "self-improve:stop": "node --experimental-sqlite scripts/improve-loop/operator.mjs stop",
+    "self-improve:recover-stale": "node --experimental-sqlite scripts/improve-loop/operator.mjs recover-stale",
     "self-improve:handoff": "node --experimental-sqlite scripts/improve-loop/operator.mjs handoff",
     "self-improve:visual": "node --experimental-sqlite scripts/improve-loop/operator.mjs visual",
     "self-improve:watch": "node --experimental-sqlite scripts/improve-loop/watch.mjs",

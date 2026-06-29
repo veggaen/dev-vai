@@ -6,6 +6,17 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **Built 2026-06-29 - Stale improvement-run recovery command (DONE, tested 29/29)**
+  - Finding: `self-improve:doctor` could detect a crashed loop whose latest corpus run was still marked
+    `running`, but the operator had no first-class repair action. The safe next step was documented in prose,
+    leaving humans and helpers to decide manually whether to mutate the corpus state.
+  - Change: added `operator recover-stale` / `self-improve:recover-stale`. It marks only the latest stale
+    `running` row as the existing resumable `interrupted` state, refuses to act while the recorded supervisor
+    PID is alive, and includes the command in handoff/docs so future helpers inherit the recovery path.
+  - Proof: `node --check` for `operator.mjs` and `operator-utils.mjs`; `operator.test.mjs` +
+    `instance-lock.test.mjs` -> 29/29 green; live `operator recover-stale` marked run #899 interrupted and
+    the follow-up `operator doctor` reported `Doctor: PASS`.
+
 - **Built 2026-06-29 - Safe self-improvement loop stop command (DONE, tested 25/25)**
   - Finding: the perpetual loop had safe single-instance locking and signal handling, but the operator surface exposed
     no first-class stop command. That forced users/helpers toward `Ctrl+C` in the foreground or risky broad process

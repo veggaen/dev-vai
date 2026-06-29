@@ -8,7 +8,7 @@ export function isOverRunBudget(now, startedAt, maxRunMs) {
   return maxRunMs > 0 && now - startedAt >= maxRunMs;
 }
 
-export const COMMANDS = new Set(['help', 'doctor', 'status', 'start', 'stop', 'watch', 'report', 'handoff', 'visual']);
+export const COMMANDS = new Set(['help', 'doctor', 'status', 'start', 'stop', 'recover-stale', 'watch', 'report', 'handoff', 'visual']);
 export const HEARTBEAT_FRESH_MS = 15_000;
 export const STALE_RUNNING_MS = 15 * 60_000;
 
@@ -168,10 +168,34 @@ export function classifyLoopLiveness({ run, heartbeat, nowMs = Date.now() }) {
   };
 }
 
+export function classifyStaleRunRecovery({ run, heartbeat, supervisorLock = null, supervisorAlive = false, nowMs = Date.now() }) {
+  const liveness = classifyLoopLiveness({ run, heartbeat, nowMs });
+  if (!run) return { action: 'noop', ok: true, reason: 'no-run', liveness };
+  if (run.status !== 'running') return { action: 'noop', ok: true, reason: 'run-not-running', liveness };
+  if (!liveness.staleRunning) {
+    return {
+      action: 'refuse',
+      ok: false,
+      reason: liveness.heartbeatFresh ? 'heartbeat-fresh' : 'run-not-stale',
+      liveness,
+    };
+  }
+  if (supervisorLock?.pid && supervisorAlive) {
+    return { action: 'refuse', ok: false, reason: 'supervisor-alive', liveness };
+  }
+  return {
+    action: 'recover',
+    ok: true,
+    reason: supervisorLock?.pid ? 'supervisor-lock-stale' : 'no-supervisor-lock',
+    liveness,
+  };
+}
+
 export function buildHandoffMarkdown(opts, now = new Date()) {
   const observe = formatNodeCommand(buildSupervisorNodeArgs({ ...opts, apply: false }));
   const apply = formatNodeCommand(buildSupervisorNodeArgs({ ...opts, apply: true }));
   const stop = formatNodeCommand(['--experimental-sqlite', 'scripts/improve-loop/operator.mjs', 'stop', '--db', opts.db]);
+  const recoverStale = formatNodeCommand(['--experimental-sqlite', 'scripts/improve-loop/operator.mjs', 'recover-stale', '--db', opts.db]);
   const watch = formatNodeCommand(buildWatchNodeArgs(opts));
   const report = formatNodeCommand(buildReportNodeArgs(opts));
   const visual = formatNodeCommand(buildVisualNodeArgs(opts));
@@ -206,6 +230,12 @@ Stop the recorded supervisor without broad process kills:
 
 \`\`\`powershell
 ${stop}
+\`\`\`
+
+Recover a stale crashed run marker after confirming no supervisor PID is alive:
+
+\`\`\`powershell
+${recoverStale}
 \`\`\`
 
 Read the latest report:

@@ -23,7 +23,15 @@ corepack pnpm self-improve:doctor
 `Doctor: WARN` means the connected services are usable but the operator found
 state that needs attention, such as a run marked `running` with a stale
 heartbeat. Check that no old loop process is still active, then start a new
-cycle; the corpus is resumable.
+cycle; the corpus is resumable. If the warning is a stale run and there is no
+live supervisor process, recover the marker explicitly:
+
+```powershell
+corepack pnpm self-improve:recover-stale
+```
+
+`recover-stale` only marks the latest stale `running` corpus row as
+`interrupted`. It refuses to act when the recorded supervisor PID is still alive.
 
 Run forever in observe mode:
 
@@ -86,7 +94,9 @@ corepack pnpm self-improve:operator -- report
 ```
 
 Stop a foreground loop with `Ctrl+C`; stop a background loop with
-`corepack pnpm self-improve:stop`. The corpus is resumable.
+`corepack pnpm self-improve:stop`. If a previous process died and doctor still
+reports a stale `running` row after no supervisor is alive, use
+`corepack pnpm self-improve:recover-stale`. The corpus is resumable.
 
 ## Modes
 
@@ -326,6 +336,8 @@ A run is not "better" because it ran longer. Treat these as proof:
 - `doctor` passes before unattended runs.
 - The watch page shows fresh heartbeat and scored prompts.
 - `self-improve:stop` can stop the recorded supervisor without broad process kills.
+- `self-improve:recover-stale` turns a stale crashed `running` row into the
+  existing resumable `interrupted` state after confirming no supervisor PID is alive.
 - `status` or `report` shows pass-rate movement and queued fixes.
 - Apply mode creates commits only on `council/auto-improve`.
 - Tests/typecheck/visual proof still pass before merge.

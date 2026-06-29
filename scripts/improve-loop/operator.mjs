@@ -17,6 +17,7 @@ import {
   buildVisualNodeArgs,
   buildWatchNodeArgs,
   classifyLoopLiveness,
+  classifyStaleRunRecovery,
   formatNodeCommand,
   parseOperatorArgs,
 } from './operator-utils.mjs';
@@ -36,6 +37,7 @@ Usage:
   node --experimental-sqlite scripts/improve-loop/operator.mjs doctor [options]
   node --experimental-sqlite scripts/improve-loop/operator.mjs start [--mode observe|apply] [options]
   node --experimental-sqlite scripts/improve-loop/operator.mjs stop [--force]
+  node --experimental-sqlite scripts/improve-loop/operator.mjs recover-stale [options]
   node --experimental-sqlite scripts/improve-loop/operator.mjs status [options]
   node --experimental-sqlite scripts/improve-loop/operator.mjs watch [options]
   node --experimental-sqlite scripts/improve-loop/operator.mjs report [options]
@@ -138,6 +140,70 @@ function stopSupervisor(opts) {
   } catch (err) {
     console.log(`Stop request was written, but signaling PID ${lock.pid} failed: ${String(err?.message ?? err)}`);
     return { ok: false };
+  }
+}
+
+async function recoverStaleRun(opts) {
+  const dbPath = abs(opts.db);
+  if (!existsSync(dbPath)) {
+    console.log(`No improvement corpus yet at ${opts.db}.`);
+    return { ok: true };
+  }
+
+  const { openDb, readHeartbeat } = await import('./db.mjs');
+  const db = openDb(dbPath);
+  try {
+    const lastRun = db.prepare('SELECT id,status,started_at,ended_at,note FROM runs ORDER BY id DESC LIMIT 1').get();
+    const heartbeat = readHeartbeat(db);
+    const lock = readSupervisorLock();
+    const supervisorAlive = lock?.pid ? isPidAlive(lock.pid) : false;
+    const recovery = classifyStaleRunRecovery({
+      run: lastRun,
+      heartbeat,
+      supervisorLock: lock,
+      supervisorAlive,
+    });
+
+    if (!lastRun) {
+      console.log('No runs found in the improvement corpus.');
+      return { ok: true };
+    }
+    if (recovery.action === 'noop') {
+      console.log(`No stale recovery needed for latest run #${lastRun.id} (${lastRun.status}).`);
+      return { ok: true };
+    }
+    if (recovery.reason === 'supervisor-alive') {
+      console.log(`Refusing to mark run #${lastRun.id} interrupted because supervisor PID ${lock.pid} is still alive.`);
+      console.log('Use self-improve:stop first, then recover-stale if doctor still reports a stale run.');
+      return { ok: false };
+    }
+    if (recovery.action !== 'recover') {
+      console.log(`Refusing to recover run #${lastRun.id}: ${recovery.reason}.`);
+      return { ok: false };
+    }
+
+    const now = new Date().toISOString();
+    const age = recovery.liveness.heartbeatAgeMs == null
+      ? 'no heartbeat'
+      : `heartbeat stale for ${Math.round(recovery.liveness.heartbeatAgeMs / 1000)}s`;
+    const note = `operator recover-stale ${now}: marked interrupted after ${age} (${recovery.reason}).`;
+    const info = db.prepare(`
+      UPDATE runs
+         SET ended_at = ?, status = 'interrupted',
+             note = CASE WHEN note IS NULL OR note = '' THEN ? ELSE note || char(10) || ? END
+       WHERE id = ? AND status = 'running'
+    `).run(now, note, note, lastRun.id);
+
+    if (!info.changes) {
+      console.log(`Run #${lastRun.id} was not changed; it may already have been updated by another process.`);
+      return { ok: false };
+    }
+
+    console.log(`Recovered stale run #${lastRun.id}: status=interrupted, ended_at=${now}.`);
+    console.log('The corpus remains resumable; start a new observe cycle when ready.');
+    return { ok: true };
+  } finally {
+    db.close();
   }
 }
 
@@ -460,6 +526,11 @@ async function main() {
 
   if (opts.command === 'stop') {
     const result = stopSupervisor(opts);
+    process.exit(result.ok ? 0 : 1);
+  }
+
+  if (opts.command === 'recover-stale') {
+    const result = await recoverStaleRun(opts);
     process.exit(result.ok ? 0 : 1);
   }
 
