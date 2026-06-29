@@ -1,10 +1,47 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildEvidenceContextSystemHint,
   expandQueryWithHistory,
   fetchTurnWebEvidence,
   shouldAttemptWebConclusion,
   tryWebConcludeTurn,
+  wantsExplicitSourceReferences,
 } from './web-conclude-turn.js';
+import type { SearchResponse } from '../search/types.js';
+
+function testSearchResponse(sourceTexts: readonly string[] = ['Alpha source text']): SearchResponse {
+  return {
+    answer: 'Synthesized answer.',
+    confidence: 0.8,
+    plan: {
+      originalQuery: 'test query',
+      intent: 'test',
+      entities: ['test'],
+      constraints: {},
+      fanOutQueries: ['test query'],
+    },
+    rawResultCount: sourceTexts.length,
+    durationMs: 10,
+    sync: {
+      state: 'linear',
+      latencyMs: 10,
+      recommendedConcurrency: 1,
+      medianLatencyMs: 10,
+      p95LatencyMs: 10,
+      observations: 1,
+    },
+    sources: sourceTexts.map((text, index) => ({
+      text,
+      url: `https://example.com/${index + 1}`,
+      title: `Example ${index + 1}`,
+      domain: 'example.com',
+      favicon: '',
+      trust: { score: 0.9, tier: 'high', reason: 'test' },
+      rank: index,
+    })),
+    audit: [],
+  };
+}
 
 describe('web-conclude-turn', () => {
   it('detects substantive questions for web conclusion', () => {
@@ -114,6 +151,39 @@ describe('web-conclude-turn', () => {
 
     expect(result).toBeNull();
     expect(search).not.toHaveBeenCalled();
+  });
+
+  it('detects explicit source-reference requests without confusing source code with citations', () => {
+    expect(wantsExplicitSourceReferences('give me the answer with sources')).toBe(true);
+    expect(wantsExplicitSourceReferences('cite the official docs please')).toBe(true);
+    expect(wantsExplicitSourceReferences('find references for this claim')).toBe(true);
+    expect(wantsExplicitSourceReferences('show me the source code for this widget')).toBe(false);
+  });
+
+  it('builds a strict citation contract for retrieved web evidence', () => {
+    const prompt = buildEvidenceContextSystemHint(
+      'What changed in Node this month? Please include sources.',
+      testSearchResponse(['Node release notes mention a new LTS line.', 'The changelog lists the latest patches.']),
+    );
+
+    expect(prompt).toContain('Evidence contract:');
+    expect(prompt).toContain('The only citeable source numbers are [1] through [2].');
+    expect(prompt).toContain('never invent source numbers, URLs, or source titles');
+    expect(prompt).toContain('The user asked for sources/citations/references');
+    expect(prompt).toContain('[1] Example 1');
+    expect(prompt).toContain('[2] Example 2');
+    expect(prompt).not.toContain('[3] Example');
+  });
+
+  it('keeps source-backed casual answers from turning into research reports', () => {
+    const prompt = buildEvidenceContextSystemHint(
+      'is this still accurate?',
+      testSearchResponse(['The newer docs confirm the behavior still applies.']),
+    );
+
+    expect(prompt).toContain("Keep the answer in the user's requested style");
+    expect(prompt).toContain('factual/current claims from the web should carry a nearby [n]');
+    expect(prompt).not.toContain('The user asked for sources/citations/references');
   });
 
   it('gives stable how-to questions to local routes before attempting web search', async () => {

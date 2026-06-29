@@ -6,6 +6,18 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **Built 2026-06-29 - Source-aware fluency contract for web evidence (DONE, tested 16/16)**
+  - Finding: Vai already retrieved sources for grounded turns, but the model-facing hint was too soft. It asked the
+    answering model to "make that clear" without a strict rule for source numbers, unsupported citations, thin evidence,
+    or casual follow-ups that should stay conversational.
+  - Change: `buildEvidenceContextSystemHint` now inserts an evidence contract: only cite displayed source numbers,
+    never invent URLs/titles/source ids, mark key factual/current claims with nearby `[n]`, and explicitly separate thin,
+    stale, off-topic, or conflicting evidence from inference. It also detects explicit source/reference/citation requests
+    while avoiding the "source code" false-positive.
+  - Proof: `node node_modules\vitest\vitest.mjs run packages/core/src/chat/web-conclude-turn.test.ts` -> 16/16 green.
+    Local `pnpm --filter @vai/core typecheck` is parked separately because this checkout cannot resolve package-local
+    `@types/jsdom` and `@types/turndown`; the focused TS/Vitest path for the changed module compiles and passes.
+
 - **RESOLVED 2026-06-24 — VRAM guard starvation fixed by `--vram-gb 8.5` (decision delegated to agent)**
   - Action taken: killed run #13 (resumable, lost nothing), restarted observe+capability with `--vram-gb 8.5`.
     Chosen over keep-alive-shortening because evicting/reloading a 7.5 GB model every turn is sustained
