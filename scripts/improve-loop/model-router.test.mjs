@@ -1,0 +1,136 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { pickRoster, routeThroughModels, withModelMounted, tallyConsensus, buildBestAnswerVote, parseBestVote, isCoderModel, isReasoner, assignRoles, proposers, judges } from './model-router.mjs';
+
+const GB = 1024 ** 3;
+const INSTALLED = [
+  { name: 'deepseek-r1:8b', sizeBytes: 5.2 * GB },
+  { name: 'qwen3:8b', sizeBytes: 5.2 * GB },
+  { name: 'qwen2.5:7b', sizeBytes: 4.7 * GB },
+  { name: 'qwen2.5:3b', sizeBytes: 1.9 * GB },
+  { name: 'huge:70b', sizeBytes: 40 * GB },
+];
+
+test('pickRoster: CO-RESIDENT pack within budget (sizes sum ≤ budget, no swap thrash)', () => {
+  // budget 8.5GB: deepseek-r1 (5.2) is taken first; qwen2.5:7b (4.7) would push the sum to 9.9 > 8.5
+  // so it's SKIPPED; qwen2.5:3b (1.9) fits alongside (5.2+1.9=7.1) → taken. The old code returned all
+  // three (≈11.8GB) which could not co-reside and caused cold-load thrash + persona timeouts.
+  const r = pickRoster(INSTALLED, { budgetBytes: 8.5 * GB, max: 3, exclude: ['qwen3:8b'] });
+  assert.deepEqual(r, ['deepseek-r1:8b', 'qwen2.5:3b']); // huge:70b + qwen2.5:7b skipped (won't co-fit), qwen3 by name
+});
+
+test('pickRoster: always keeps at least one model even if the 2nd would overflow', () => {
+  const two = [{ name: 'a:8b', sizeBytes: 5 * GB }, { name: 'b:8b', sizeBytes: 5 * GB }];
+  assert.deepEqual(pickRoster(two, { budgetBytes: 6 * GB, max: 3 }), ['a:8b']); // one strong model > two that thrash
+});
+
+test('pickRoster: every model over budget ⇒ empty (never mounts something that wont fit)', () => {
+  assert.deepEqual(pickRoster(INSTALLED, { budgetBytes: 1 * GB }), []);
+});
+
+test('isCoderModel: recognises code-specialized models', () => {
+  assert.equal(isCoderModel('qwen2.5-coder:7b'), true);
+  assert.equal(isCoderModel('deepseek-coder:6.7b'), true);
+  assert.equal(isCoderModel('qwen3:8b'), false);
+});
+
+test('pickRoster: a CODER model is ranked first even if a general model is bigger', () => {
+  const withCoder = [
+    { name: 'qwen2.5-coder:7b', sizeBytes: 4.7 * GB },
+    ...INSTALLED,
+  ];
+  const r = pickRoster(withCoder, { budgetBytes: 8.5 * GB, max: 3 });
+  assert.equal(r[0], 'qwen2.5-coder:7b', 'the coder model leads the roundtable');
+});
+
+test('routeThroughModels: SERIAL — waits for headroom before EACH model, one at a time', async () => {
+  const order = [];
+  const res = await routeThroughModels('fix it', {
+    roster: ['a', 'b', 'c'],
+    waitForHeadroom: async () => order.push('wait'),
+    budgetBytes: 8.5 * GB,
+    generate: async (m) => { order.push(`gen:${m}`); return `ans-${m}`; },
+  });
+  // headroom check immediately precedes each model's generate, in order
+  assert.deepEqual(order, ['wait', 'gen:a', 'wait', 'gen:b', 'wait', 'gen:c']);
+  assert.equal(res.length, 3);
+  assert.ok(res.every((r) => r.ok));
+});
+
+test('routeThroughModels: one broken model is captured, never sinks the round', async () => {
+  const res = await routeThroughModels('p', {
+    roster: ['good', 'broken', 'good2'],
+    generate: async (m) => { if (m === 'broken') throw new Error('timeout'); return `ok-${m}`; },
+  });
+  assert.equal(res.find((r) => r.model === 'broken').ok, false);
+  assert.equal(res.filter((r) => r.ok).length, 2, 'the other two still produced');
+});
+
+test('withModelMounted: ensures headroom THEN runs fn with the model', async () => {
+  const seen = [];
+  const out = await withModelMounted('m1', { waitForHeadroom: async () => seen.push('headroom'), budgetBytes: 1 },
+    async (m) => { seen.push(`run:${m}`); return 42; });
+  assert.equal(out, 42);
+  assert.deepEqual(seen, ['headroom', 'run:m1']);
+});
+
+test('tallyConsensus: the answer the MOST DISTINCT models agree on wins', () => {
+  const results = [
+    { model: 'a', ok: true, answer: { fix: 'X' } },
+    { model: 'b', ok: true, answer: { fix: 'X' } },
+    { model: 'c', ok: true, answer: { fix: 'Y' } },
+    { model: 'd', ok: false, answer: null },
+  ];
+  const t = tallyConsensus(results, (a) => a.fix);
+  assert.equal(t.winner.key, 'X');
+  assert.deepEqual(t.winner.models.sort(), ['a', 'b']);
+  assert.equal(t.distinctModels, 3);
+});
+
+test('tallyConsensus: a tie is broken toward the bigger/earlier model (rosterRank)', () => {
+  const results = [
+    { model: 'big', ok: true, answer: { fix: 'A' } },
+    { model: 'small', ok: true, answer: { fix: 'B' } },
+  ];
+  const rank = (m) => (m === 'big' ? 0 : 9); // big is earlier/bigger
+  const t = tallyConsensus(results, (a) => a.fix, { rosterRank: rank });
+  assert.equal(t.winner.key, 'A', 'tie broken to the bigger model');
+});
+
+test('assignRoles: coders→propose, reasoners→judge, general→both (all seated by default)', () => {
+  const roles = assignRoles(['qwen2.5-coder:7b', 'deepseek-r1:8b', 'qwen3:8b']);
+  assert.equal(roles.find((r) => r.name === 'qwen2.5-coder:7b').role, 'propose');
+  assert.equal(roles.find((r) => r.name === 'deepseek-r1:8b').role, 'judge');
+  assert.equal(roles.find((r) => r.name === 'qwen3:8b').role, 'both');
+  assert.equal(roles.length, 3, 'every model stays seated — default to all');
+});
+
+test('assignRoles: a UI override wins over the default', () => {
+  const roles = assignRoles(['deepseek-r1:8b'], { override: { 'deepseek-r1:8b': 'propose' } });
+  assert.equal(roles[0].role, 'propose');
+  assert.equal(roles[0].reason, 'ui-override');
+});
+
+test('proposers / judges split by role (both counts for either)', () => {
+  const roles = assignRoles(['qwen2.5-coder:7b', 'deepseek-r1:8b', 'qwen3:8b']);
+  assert.deepEqual(proposers(roles).sort(), ['qwen2.5-coder:7b', 'qwen3:8b']); // coder + both
+  assert.deepEqual(judges(roles).sort(), ['deepseek-r1:8b', 'qwen3:8b']);       // reasoner + both
+});
+
+test('isReasoner recognises r1/qwq', () => {
+  assert.equal(isReasoner('deepseek-r1:8b'), true);
+  assert.equal(isReasoner('qwq:32b'), true);
+  assert.equal(isReasoner('qwen2.5-coder:7b'), false);
+});
+
+test('best-answer meta-vote prompt + parse round-trips', () => {
+  const p = buildBestAnswerVote('regex too narrow', [
+    { model: 'a', summary: 'add time-sensitive' },
+    { model: 'b', summary: 'truncated regex' },
+  ]);
+  assert.match(p, /CANDIDATES/);
+  assert.match(p, /from a/);
+  assert.deepEqual(parseBestVote('{"best": 1, "why": "complete"}', 2), { best: 1, why: 'complete' });
+  assert.equal(parseBestVote('{"best": 9}', 2), null, 'out-of-range rejected');
+  assert.equal(parseBestVote('no json here', 2), null);
+});

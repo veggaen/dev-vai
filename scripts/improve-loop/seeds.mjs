@@ -29,6 +29,20 @@ export const SEED_CLASSES = [
     ],
   },
   {
+    klass: 'answer/vague-overconfident',
+    expectedIntent:
+      'answer with concrete, grounded specifics (real names/numbers/files/examples) ' +
+      'and hedge where genuinely uncertain — NOT confident generic "AI slop"',
+    seeds: [
+      'tell me about your engine',                 // the exact reply the user flagged
+      'what can you do?',
+      'how do you work?',
+      'what makes you different from other assistants?',
+      'explain how your council works',
+      'why should I trust your answers?',
+    ],
+  },
+  {
     klass: 'answer/opportunity-framing',
     expectedIntent: 'propose concrete ideas/opportunities, not enumerate definitions or legal forms',
     seeds: [

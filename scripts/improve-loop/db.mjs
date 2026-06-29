@@ -17,6 +17,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 
 export function openDb(path) {
   mkdirSync(dirname(path), { recursive: true });
@@ -51,6 +52,8 @@ export function openDb(path) {
       passed INTEGER NOT NULL,         -- 1 = interpretation matched expectation
       grade_reason TEXT,
       duration_ms INTEGER,
+      answer_excellence REAL,          -- 0..10 craft score of the produced answer
+      answer_excellence_json TEXT,     -- full rubric verdict (scores/flaws/lesson)
       created_at TEXT NOT NULL,
       UNIQUE (run_id, prompt_id)       -- idempotent: re-run a prompt = replace
     );
@@ -64,7 +67,112 @@ export function openDb(path) {
       status TEXT NOT NULL DEFAULT 'queued',  -- queued | approved | rejected | applied
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS visual_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      status TEXT NOT NULL DEFAULT 'running',
+      app_url TEXT,
+      out_dir TEXT,
+      report_path TEXT,
+      event_stream TEXT,
+      passed INTEGER,
+      summary TEXT
+    );
+    CREATE TABLE IF NOT EXISTS visual_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      visual_run_id INTEGER NOT NULL,
+      seq INTEGER NOT NULL,
+      ts TEXT NOT NULL,
+      type TEXT NOT NULL,
+      data TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE (visual_run_id, seq)
+    );
+    CREATE TABLE IF NOT EXISTS visual_live (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      visual_run_id INTEGER,
+      seq INTEGER,
+      type TEXT,
+      data TEXT,
+      updated_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS taste_lessons (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lesson TEXT NOT NULL UNIQUE,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      times_seen INTEGER NOT NULL DEFAULT 1,
+      last_visual_run_id INTEGER,
+      last_overall REAL
+    );
+    CREATE TABLE IF NOT EXISTS answer_lessons (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lesson TEXT NOT NULL UNIQUE,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      times_seen INTEGER NOT NULL DEFAULT 1,
+      last_run_id INTEGER,
+      last_overall REAL
+    );
+    -- project_knowledge — the KNOWLEDGE SPINE. Unlike *_lessons (vague prose the model
+    -- averages into slop), a knowledge row is an EVIDENCE-BOUND, COUNTED fact about THIS
+    -- project, with a confidence that RISES on confirmation and FALLS on contradiction so
+    -- stale knowledge decays instead of misleading forever. scope groups facts by where
+    -- they apply (e.g. 'propose-fix', 'model:qwen3:8b', 'file:...'). claim is the actionable
+    -- fact. evidence is the machine-checkable backing (counts, file refs). kind distinguishes
+    -- a 'guard' (encodes a deterministic check) from an 'observation'.
+    CREATE TABLE IF NOT EXISTS project_knowledge (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope TEXT NOT NULL,
+      claim TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'observation',  -- 'guard' | 'observation'
+      evidence TEXT,
+      confirmations INTEGER NOT NULL DEFAULT 0,
+      contradictions INTEGER NOT NULL DEFAULT 0,
+      first_seen TEXT NOT NULL,
+      last_seen TEXT NOT NULL,
+      UNIQUE(scope, claim)
+    );
+    -- loop_events — the STRUCTURED TRACE of the process engine. Every decision (what was
+    -- eligible, what ran, what it cost, what it produced) is one row, so "is perpetual motion
+    -- TRUE?" is answerable from data, not vibes. cycle groups a cycle; phase = plan|run|health.
+    CREATE TABLE IF NOT EXISTS loop_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cycle INTEGER NOT NULL,
+      at TEXT NOT NULL,
+      kind TEXT NOT NULL,           -- 'plan' | 'run:start' | 'run:done' | 'run:error' | 'health' | 'cycle'
+      process TEXT,                 -- which process (null for cycle/health rows)
+      ok INTEGER,                   -- 1/0 for run outcomes
+      compute REAL,                 -- cost units spent
+      ms INTEGER,                   -- wall time
+      detail TEXT                   -- JSON blob (scorecard, result summary, verdict…)
+    );
+    -- loop_state — durable per-key counters the cheap when()/value() guards read (e.g.
+    -- cyclesSinceVisual). A tiny KV, NOT a growing corpus — bounded by the number of keys.
+    CREATE TABLE IF NOT EXISTS loop_state (
+      key TEXT PRIMARY KEY,
+      value REAL NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    -- fix_quarantine — a dead-fix ban list. A proposed fix (file+find+replace) that fails verify
+    -- repeatedly must NOT be re-attempted forever (the BSOD-empty-file doom-loop: ~900 cycles
+    -- re-trying the same un-appliable patch). After STRIKE_LIMIT failures the signature is banned,
+    -- and apply-consensus skips it. Bounded: one row per distinct dead fix, not a growing corpus.
+    CREATE TABLE IF NOT EXISTS fix_quarantine (
+      sig TEXT PRIMARY KEY,          -- hash of file|find|replace
+      file TEXT, find TEXT, "replace" TEXT,
+      strikes INTEGER NOT NULL DEFAULT 0,
+      banned INTEGER NOT NULL DEFAULT 0,
+      last_detail TEXT,
+      updated_at TEXT NOT NULL
+    );
   `);
+  // Lazy migration: upgrade corpus DBs created before the answer-excellence
+  // rubric landed, without dropping their accumulated rows.
+  for (const col of ['answer_excellence REAL', 'answer_excellence_json TEXT']) {
+    try { db.exec(`ALTER TABLE results ADD COLUMN ${col};`); } catch { /* column already present */ }
+  }
   return db;
 }
 
@@ -98,6 +206,494 @@ export function readHeartbeat(db) {
   try { return db.prepare('SELECT * FROM live WHERE id = 1').get() ?? null; } catch { return null; }
 }
 
+export function startVisualRun(db, { appUrl, outDir }) {
+  const info = db.prepare('INSERT INTO visual_runs (started_at, app_url, out_dir) VALUES (?, ?, ?)')
+    .run(new Date().toISOString(), appUrl ?? null, outDir ?? null);
+  return Number(info.lastInsertRowid);
+}
+
+export function endVisualRun(db, visualRunId, { status, passed, reportPath, eventStream, summary }) {
+  db.prepare(
+    `UPDATE visual_runs
+     SET ended_at = ?, status = ?, passed = ?, report_path = COALESCE(?, report_path),
+         event_stream = COALESCE(?, event_stream), summary = ?
+     WHERE id = ?`,
+  ).run(
+    new Date().toISOString(),
+    status,
+    passed == null ? null : (passed ? 1 : 0),
+    reportPath ?? null,
+    eventStream ?? null,
+    summary ?? null,
+    visualRunId,
+  );
+}
+
+export function recordVisualEvent(db, visualRunId, event) {
+  if (!event || typeof event !== 'object') return false;
+  if (event.type === 'hand.pointer' && Number(event.seq) % 5 !== 0) return false;
+
+  const data = JSON.stringify(event.data ?? {});
+  db.prepare(
+    `INSERT INTO visual_events (visual_run_id, seq, ts, type, data, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(visual_run_id, seq) DO UPDATE SET
+       ts=excluded.ts, type=excluded.type, data=excluded.data`,
+  ).run(
+    visualRunId,
+    Number(event.seq) || 0,
+    event.ts ?? new Date().toISOString(),
+    String(event.type ?? 'unknown').slice(0, 80),
+    data.slice(0, 4000),
+    new Date().toISOString(),
+  );
+  db.prepare(
+    `INSERT INTO visual_live (id, visual_run_id, seq, type, data, updated_at)
+     VALUES (1, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET visual_run_id=excluded.visual_run_id,
+       seq=excluded.seq, type=excluded.type, data=excluded.data, updated_at=excluded.updated_at`,
+  ).run(
+    visualRunId,
+    Number(event.seq) || 0,
+    String(event.type ?? 'unknown').slice(0, 80),
+    data.slice(0, 4000),
+    new Date().toISOString(),
+  );
+  return true;
+}
+
+export function readVisualLive(db) {
+  try { return db.prepare('SELECT * FROM visual_live WHERE id = 1').get() ?? null; } catch { return null; }
+}
+
+/** Accumulate a taste lesson across runs (deduped); how Vai builds taste through repetition. */
+export function recordTasteLesson(db, { lesson, visualRunId, overall }) {
+  if (!lesson) return;
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO taste_lessons (lesson, first_seen, last_seen, times_seen, last_visual_run_id, last_overall)
+     VALUES (?, ?, ?, 1, ?, ?)
+     ON CONFLICT(lesson) DO UPDATE SET
+       last_seen=excluded.last_seen, times_seen=taste_lessons.times_seen+1,
+       last_visual_run_id=excluded.last_visual_run_id, last_overall=excluded.last_overall`,
+  ).run(lesson, now, now, visualRunId ?? null, overall ?? null);
+}
+
+export function topTasteLessons(db, limit = 8) {
+  try {
+    return db.prepare('SELECT lesson, times_seen, last_overall FROM taste_lessons ORDER BY times_seen DESC, id DESC LIMIT ?').all(limit);
+  } catch {
+    return [];
+  }
+}
+
+/** Accumulate an answer-craft lesson across runs (deduped); the text-lane twin of
+ *  recordTasteLesson — how Vai builds answer taste through repetition. */
+export function recordAnswerLesson(db, { lesson, runId, overall }) {
+  if (!lesson) return;
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO answer_lessons (lesson, first_seen, last_seen, times_seen, last_run_id, last_overall)
+     VALUES (?, ?, ?, 1, ?, ?)
+     ON CONFLICT(lesson) DO UPDATE SET
+       last_seen=excluded.last_seen, times_seen=answer_lessons.times_seen+1,
+       last_run_id=excluded.last_run_id, last_overall=excluded.last_overall`,
+  ).run(lesson, now, now, runId ?? null, overall ?? null);
+}
+
+export function topAnswerLessons(db, limit = 8) {
+  try {
+    return db.prepare('SELECT lesson, times_seen, last_overall FROM answer_lessons ORDER BY times_seen DESC, id DESC LIMIT ?').all(limit);
+  } catch {
+    return [];
+  }
+}
+
+// ── KNOWLEDGE SPINE ──────────────────────────────────────────────────────────
+// capture → (confidence) → apply. The store the loop reads to stop repeating mistakes.
+
+/**
+ * Record (or reinforce) a piece of project knowledge. confirm=true bumps confirmations
+ * (the fact held again), confirm=false bumps contradictions (the fact was wrong this time).
+ * Idempotent per (scope, claim); evidence is overwritten with the latest backing. This is
+ * the CAPTURE half of the spine — call it wherever the loop produces a verifiable outcome.
+ */
+export function recordKnowledge(db, { scope, claim, kind = 'observation', evidence = null, confirm = true } = {}) {
+  if (!scope || !claim) return;
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO project_knowledge (scope, claim, kind, evidence, confirmations, contradictions, first_seen, last_seen)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(scope, claim) DO UPDATE SET
+       last_seen = excluded.last_seen,
+       evidence  = COALESCE(excluded.evidence, project_knowledge.evidence),
+       confirmations  = project_knowledge.confirmations  + ?,
+       contradictions = project_knowledge.contradictions + ?`,
+  ).run(scope, claim, kind, evidence, confirm ? 1 : 0, confirm ? 0 : 1, now, now, confirm ? 1 : 0, confirm ? 0 : 1);
+}
+
+// ── Dead-fix quarantine (loop-detection / anti-doom-loop) ────────────────────────────────────
+// A fix that fails verify STRIKE_LIMIT times is banned so the loop stops re-attempting it and
+// spends the compute on real work instead. Pure signature so it's stable across cycles.
+export const STRIKE_LIMIT = 2;
+
+/** Stable signature for a fix attempt. Same file+find+replace ⇒ same sig ⇒ strikes accumulate. */
+export function fixSignature({ file = '', find = '', replace = '' } = {}) {
+  return createHash('sha1').update(`${file}|${find}|${replace}`).digest('hex').slice(0, 16);
+}
+
+/** Record one verify FAILURE for a fix; bans it once it reaches STRIKE_LIMIT. Returns {strikes,banned}. */
+export function strikeFix(db, fix, detail = '') {
+  const sig = fixSignature(fix);
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO fix_quarantine (sig, file, find, "replace", strikes, banned, last_detail, updated_at)
+     VALUES (?, ?, ?, ?, 1, 0, ?, ?)
+     ON CONFLICT(sig) DO UPDATE SET
+       strikes = fix_quarantine.strikes + 1,
+       banned  = CASE WHEN fix_quarantine.strikes + 1 >= ${STRIKE_LIMIT} THEN 1 ELSE 0 END,
+       last_detail = excluded.last_detail,
+       updated_at  = excluded.updated_at`,
+  ).run(sig, fix.file ?? '', fix.find ?? '', fix.replace ?? '', String(detail).slice(0, 300), now);
+  const row = db.prepare('SELECT strikes, banned FROM fix_quarantine WHERE sig=?').get(sig);
+  return { strikes: Number(row.strikes), banned: !!row.banned };
+}
+
+/** True if this exact fix has been banned (failed verify ≥ STRIKE_LIMIT times).
+ *  Matches by signature OR by exact (file, find, replace) fields. The field fallback is essential:
+ *  the fixSignature formula has drifted across versions, so legacy quarantine rows store a sig that
+ *  no longer recomputes from their own fields (verified on the live corpus: BuildStatusBadge.tsx
+ *  text-zinc-500 was banned but isFixBanned-by-sig returned false → 885 wasted re-attempts). Matching
+ *  the fields directly makes a ban survive any future signature-format change. */
+export function isFixBanned(db, fix) {
+  const bySig = db.prepare('SELECT banned FROM fix_quarantine WHERE sig=?').get(fixSignature(fix));
+  if (bySig && bySig.banned) return true;
+  const byFields = db.prepare(
+    'SELECT banned FROM fix_quarantine WHERE file=? AND find=? AND "replace"=? AND banned=1 LIMIT 1',
+  ).get(fix.file ?? '', fix.find ?? '', fix.replace ?? '');
+  if (byFields && byFields.banned) return true;
+  // FIND-LEVEL ban (the same-line/different-replace doom-loop): the model keeps re-editing the SAME
+  // `find` line with a slightly different `replace` each cycle → each gets a fresh signature → the
+  // per-signature strike never reaches the ban limit → infinite retries on one dead line (observed
+  // on build-execution-intent.ts: 5 quarantine rows, same 2 finds, all stuck at strike 1). Ban a
+  // (file, find) once its strikes SUMMED across every replace-variant reach the limit.
+  try {
+    const agg = db.prepare(
+      'SELECT COALESCE(SUM(strikes),0) AS total, COUNT(*) AS variants FROM fix_quarantine WHERE file=? AND find=?',
+    ).get(fix.file ?? '', fix.find ?? '');
+    // Fire only on genuine thrash: ≥3 distinct replace-variants OR ≥3 total strikes on this one line.
+    // (A single signature already bans at STRIKE_LIMIT=2; this is strictly the cross-variant case, so
+    // require MORE than one signature's worth of failure before banning the whole line — leaves room
+    // for a legitimate 2nd distinct attempt to still land.)
+    if (agg && (Number(agg.variants) >= 3 || Number(agg.total) >= STRIKE_LIMIT + 1)) return true;
+  } catch { /* table shape — fall through */ }
+  return false;
+}
+
+// TARGET-LEVEL cooldown — the per-signature ban misses "distinct-find near-misses": the model
+// truncates the SAME long line slightly differently each cycle → a fresh signature every time →
+// never bans → reverts forever on one file. So also count DISTINCT failed finds per file, and treat
+// a file as a dead target once too many distinct edits there have failed. file → count of banned
+// (or distinct-find) failures.
+export const TARGET_FAIL_LIMIT = 3;
+
+/** How many DISTINCT failed finds have hit this file (any class)? The near-miss signal the
+ *  per-signature ban can't see. Counts BOTH the quarantine table AND reverted consensus rows:
+ *  a revert (tsc-red / acceptance-fail) doesn't always strike the quarantine, so counting only
+ *  quarantine undercounted (build-execution-intent.ts had 13 consensus reverts but only 2 quarantine
+ *  finds → never flagged exhausted → the loop kept burning cycles re-editing a dead file). Union of
+ *  distinct finds across both sources gives the true "how many dead edits has this file absorbed". */
+export function targetFailures(db, file) {
+  if (!file) return 0;
+  try {
+    // WINDOWED so exhaustion is a recoverable circuit-breaker, not a permanent ban: only count
+    // failures from the last 48h. Recent reverts stop the loop bleeding on a dead file; once the
+    // file stops failing (a fix lands, or a senior changes it) the old failures age out and it
+    // becomes targetable again — mirrors the no-file staleness decay.
+    const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const finds = new Set();
+    // A missing/empty timestamp counts as in-window (don't let an untimestamped failure hide).
+    // Each source in its OWN try: the consensus.applied column is added lazily by apply-consensus,
+    // so on a fresh DB that query throws — it must not zero out the quarantine count.
+    try {
+      for (const r of db.prepare("SELECT DISTINCT find FROM fix_quarantine WHERE file=? AND (updated_at IS NULL OR updated_at='' OR updated_at >= ?)").all(file, since)) {
+        if (r.find) finds.add(String(r.find));
+      }
+    } catch { /* no quarantine table yet */ }
+    // Reverted consensus rows (tsc-red or acceptance-fail) are real failed edits on this file too.
+    try {
+      for (const r of db.prepare("SELECT DISTINCT find FROM consensus WHERE file=? AND applied LIKE 'reverted%' AND (created_at IS NULL OR created_at='' OR created_at >= ?)").all(file, since)) {
+        if (r.find) finds.add(String(r.find));
+      }
+    } catch { /* consensus.applied not present on a fresh DB */ }
+    return finds.size;
+  } catch { return 0; }
+}
+
+/** True if a FILE is a dead target (≥ TARGET_FAIL_LIMIT distinct edits failed there) — the engine
+ *  should stop targeting classes that localise to it until something changes. */
+export function isTargetExhausted(db, file) {
+  return targetFailures(db, file) >= TARGET_FAIL_LIMIT;
+}
+
+/**
+ * OUTCOME MEMORY — was this EXACT patch already tried and rejected/reverted? The loop's keystone
+ * leak: the model re-proposed one already-rejected find→replace 66× (a senior superseded it in a
+ * commit, but nothing told the model). A proposal is "dead on arrival" if the same (file, find,
+ * replace) previously landed status='rejected'/'auto-rejected' in `proposals`, applied='reverted-red'
+ * /'skipped-rejected' in `consensus`, or sits banned in `fix_quarantine`. Returns the reason string
+ * (for the prompt feedback) or null. Read-only; never throws. This is what turns one wasted apply
+ * into a permanent "don't propose this again" — the difference between a loop and a doom-loop.
+ */
+export function priorRejection(db, { file, find, replace } = {}) {
+  if (!file || !find) return null;
+  const rep = String(replace ?? '');
+  try {
+    const p = db.prepare(
+      "SELECT status FROM proposals WHERE file=? AND find=? AND IFNULL(\"replace\",'')=? AND (status LIKE 'rejected:%' OR status LIKE 'auto-rejected:%') ORDER BY id DESC LIMIT 1",
+    ).get(file, find, rep);
+    if (p) return `this exact patch was already rejected: ${String(p.status).slice(0, 90)}`;
+  } catch { /* no proposals table */ }
+  try {
+    // Include 'reverted-acceptance' — a patch that passed tsc but did NOT recover the class's failing
+    // prompts (behaviourally wrong). Without this the loop re-proposes the same semantically-wrong
+    // patch every cycle: propose → apply → acceptance reverts → propose the SAME thing → forever.
+    // (Found by grading the live loop: the comparison-class \bbuild\b patch is tsc-green but wrong.)
+    const c = db.prepare(
+      "SELECT applied FROM consensus WHERE file=? AND find=? AND IFNULL(\"replace\",'')=? AND applied IN ('reverted-red','reverted-acceptance','skipped-rejected') ORDER BY id DESC LIMIT 1",
+    ).get(file, find, rep);
+    if (c) {
+      const why = c.applied === 'reverted-red' ? 'failed verification (reverted)'
+        : c.applied === 'reverted-acceptance' ? 'applied but did NOT fix the failing prompts (behaviourally reverted)'
+        : 'rejected';
+      return `this exact patch was already applied and ${why} — don't re-propose it`;
+    }
+  } catch { /* no consensus table */ }
+  return null;
+}
+
+/** The current ban list (for the watch UI): which dead fixes are quarantined, newest first. */
+export function bannedFixes(db, limit = 20) {
+  try {
+    return db.prepare(
+      'SELECT file, find, "replace", strikes, last_detail, updated_at FROM fix_quarantine WHERE banned=1 ORDER BY updated_at DESC LIMIT ?',
+    ).all(limit);
+  } catch { return []; }
+}
+
+
+/**
+ * Confidence of a knowledge row in [0,1], Laplace-smoothed: (confirm+1)/(confirm+contra+2).
+ * A fact confirmed 9× / contradicted 0× ≈ 0.91; confirmed 1 / contradicted 4 ≈ 0.29 (decays).
+ * Pure so callers/tests can score rows without a query.
+ */
+export function knowledgeConfidence(row) {
+  const c = Number(row?.confirmations ?? 0);
+  const x = Number(row?.contradictions ?? 0);
+  return (c + 1) / (c + x + 2);
+}
+
+/**
+ * Top knowledge for a scope, most-confident first, above a confidence floor so low/contradicted
+ * facts don't get re-injected (they're decaying out). This is the APPLY half — callers inject
+ * these into the relevant prompt. scope can be exact ('propose-fix') — prefix matching is the
+ * caller's job if it wants 'model:*'.
+ */
+export function topKnowledge(db, scope, { limit = 5, minConfidence = 0.5 } = {}) {
+  try {
+    const rows = db.prepare('SELECT * FROM project_knowledge WHERE scope = ?').all(scope);
+    return rows
+      .map((r) => ({ ...r, confidence: knowledgeConfidence(r) }))
+      .filter((r) => r.confidence >= minConfidence)
+      .sort((a, b) => b.confidence - a.confidence || b.confirmations - a.confirmations)
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+// ── ENGINE TRACE + DURABLE STATE ─────────────────────────────────────────────
+// The structured log that makes "is perpetual motion TRUE?" answerable from data.
+
+/** Append one engine event. Never throws into the loop (a logging failure must not stop work). */
+export function logLoopEvent(db, { cycle, kind, process = null, ok = null, compute = null, ms = null, detail = null } = {}) {
+  try {
+    db.prepare(
+      `INSERT INTO loop_events (cycle, at, kind, process, ok, compute, ms, detail)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      cycle ?? 0, new Date().toISOString(), kind, process,
+      ok == null ? null : (ok ? 1 : 0), compute, ms,
+      detail == null ? null : (typeof detail === 'string' ? detail : JSON.stringify(detail)),
+    );
+  } catch { /* logging is best-effort */ }
+}
+
+/** Recent engine events (newest first) — for the operator/dashboard + verification. */
+export function recentLoopEvents(db, limit = 50) {
+  try { return db.prepare('SELECT * FROM loop_events ORDER BY id DESC LIMIT ?').all(limit); }
+  catch { return []; }
+}
+
+/** Aggregate the trace into proof-of-motion stats: per-process run/ok counts, compute spent,
+ *  outcomes produced. This is the data behind "the loop is legitimately working." */
+export function loopEventStats(db, { sinceCycle = 0 } = {}) {
+  try {
+    const rows = db.prepare(
+      `SELECT process,
+              SUM(CASE WHEN kind='run:done' THEN 1 ELSE 0 END) AS done,
+              SUM(CASE WHEN kind='run:error' THEN 1 ELSE 0 END) AS errors,
+              COALESCE(SUM(compute),0) AS compute
+       FROM loop_events WHERE cycle > ? AND process IS NOT NULL
+       GROUP BY process ORDER BY done DESC`,
+    ).all(sinceCycle);
+    const cycles = db.prepare('SELECT COUNT(DISTINCT cycle) c FROM loop_events WHERE cycle > ?').get(sinceCycle).c;
+    return { cycles, perProcess: rows };
+  } catch { return { cycles: 0, perProcess: [] }; }
+}
+
+/** Durable KV the cheap guards read (e.g. cyclesSinceVisual). getLoopState returns def if unset. */
+export function getLoopState(db, key, def = 0) {
+  try { const r = db.prepare('SELECT value FROM loop_state WHERE key = ?').get(key); return r ? Number(r.value) : def; }
+  catch { return def; }
+}
+export function setLoopState(db, key, value) {
+  try {
+    db.prepare(
+      `INSERT INTO loop_state (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).run(key, Number(value), new Date().toISOString());
+  } catch { /* best-effort */ }
+}
+/** Atomic-ish increment for cycle counters (read+write in one call). */
+export function bumpLoopState(db, key, by = 1) {
+  const next = getLoopState(db, key, 0) + by;
+  setLoopState(db, key, next);
+  return next;
+}
+
+/** Answer-excellence distribution for a run (or campaign-wide when runId is null):
+ *  count graded, average craft score, and the worst score seen — the gradient the
+ *  loop climbs on text output. */
+export function answerExcellenceStats(db, runId = null) {
+  try {
+    const filter = runId == null
+      ? 'WHERE answer_excellence IS NOT NULL'
+      : 'WHERE run_id = ? AND answer_excellence IS NOT NULL';
+    const args = runId == null ? [] : [runId];
+    const row = db.prepare(
+      `SELECT COUNT(answer_excellence) AS n, AVG(answer_excellence) AS avg, MIN(answer_excellence) AS worst
+       FROM results ${filter}`,
+    ).get(...args);
+    return { n: Number(row?.n ?? 0), avg: row?.avg == null ? null : Number(row.avg), worst: row?.worst == null ? null : Number(row.worst) };
+  } catch {
+    return { n: 0, avg: null, worst: null };
+  }
+}
+
+export function latestVisualEvents(db, limit = 30) {
+  return db.prepare(
+    `SELECT e.*, r.status AS run_status, r.passed AS run_passed, r.report_path, r.event_stream
+     FROM visual_events e JOIN visual_runs r ON r.id = e.visual_run_id
+     ORDER BY e.id DESC LIMIT ?`,
+  ).all(limit);
+}
+
+export function latestVisualRun(db) {
+  try { return db.prepare('SELECT * FROM visual_runs ORDER BY id DESC LIMIT 1').get() ?? null; } catch { return null; }
+}
+
+/** All sampled events for one visual run, oldest first (the council/operator trail). */
+export function visualRunEvents(db, visualRunId) {
+  try {
+    return db.prepare('SELECT seq, ts, type, data FROM visual_events WHERE visual_run_id = ? ORDER BY seq ASC').all(visualRunId);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Compact "council packet" for the latest (or a given) visual run.
+ *
+ * Built ONLY from the sampled SQLite trail — never the full report file, never
+ * screenshots or the pointer trace. This is what a council member or helper agent
+ * reads to know "did Vai's eyes/hands work, and is the composer reachable", without
+ * being fed images or thousands of pointer points.
+ */
+export function buildVisualCouncilPacket(db, visualRunId = null) {
+  const run = visualRunId
+    ? db.prepare('SELECT * FROM visual_runs WHERE id = ?').get(visualRunId) ?? null
+    : latestVisualRun(db);
+  if (!run) return null;
+
+  const events = visualRunEvents(db, run.id);
+  const parse = (raw) => { try { return JSON.parse(raw || '{}'); } catch { return {}; } };
+
+  const checks = events
+    .filter((e) => e.type === 'check')
+    .map((e) => { const d = parse(e.data); return { name: d.name, passed: !!d.passed, detail: d.detail || '' }; });
+
+  const target = (() => {
+    const e = [...events].reverse().find((ev) => ev.type === 'vision.target');
+    if (!e) return null;
+    const d = parse(e.data);
+    return { reachable: !!d.targetReceivesPointer, topLabel: d.topLabel || null, targetLabel: d.targetLabel || null };
+  })();
+
+  const done = (() => {
+    const e = [...events].reverse().find((ev) => ev.type === 'probe.done');
+    return e ? parse(e.data) : null;
+  })();
+
+  // Taste verdict (evidence-bound rubric) — the higher-level UX/human-appeal judgment.
+  const rubricEvent = [...events].reverse().find((ev) => ev.type === 'vision.rubric');
+  const rubric = rubricEvent ? parse(rubricEvent.data) : null;
+  const flawEvents = events.filter((ev) => ev.type === 'vision.flaw').map((ev) => parse(ev.data));
+
+  const warnings = events
+    .filter((e) => e.type === 'console.error' || e.type === 'page.error' || e.type === 'request.failed')
+    .map((e) => { const d = parse(e.data); return `${e.type}: ${(d.text || '').slice(0, 160)}`; });
+  const optionalBlocked = events.filter((e) => e.type === 'request.blocked_external').length;
+
+  const screenshots = events.filter((e) => e.type === 'vision.snapshot').length;
+  const checksPassed = checks.filter((c) => c.passed).length;
+
+  return {
+    visualRunId: run.id,
+    status: run.status,
+    passed: run.passed == null ? null : !!run.passed,
+    appUrl: run.app_url ?? null,
+    reportPath: run.report_path ?? null,
+    eventStream: run.event_stream ?? null,
+    startedAt: run.started_at ?? null,
+    endedAt: run.ended_at ?? null,
+    checks: { passed: checksPassed, total: checks.length, list: checks },
+    composerReachable: target?.reachable ?? null,
+    topLayerTarget: target?.topLabel ?? null,
+    screenshots,
+    warnings,
+    optionalBlockedResources: optionalBlocked,
+    sampledEvents: events.length,
+    // Taste verdict travels in the council packet but stays compact: scores + appeal +
+    // flaw counts + the single taste lesson, plus the top few distinct flaws (not all repeats).
+    taste: rubric ? {
+      overall: rubric.overall,
+      scores: rubric.scores,
+      humanAppeal: rubric.humanAppeal,
+      flawCounts: rubric.flawCounts,
+      genericFlags: rubric.genericFlags,
+      tasteLesson: rubric.tasteLesson,
+      headline: rubric.headline,
+      topFlaws: flawEvents
+        .filter((f, i, arr) => arr.findIndex((x) => x.symptom === f.symptom && x.evidence?.selector === f.evidence?.selector) === i)
+        .sort((a, b) => ({ P0: 0, P1: 1, P2: 2, P3: 3 }[a.severity] - { P0: 0, P1: 1, P2: 2, P3: 3 }[b.severity]))
+        .slice(0, 5)
+        .map((f) => ({ severity: f.severity, symptom: f.symptom, fixDirection: f.fixDirection, selector: f.evidence?.selector ?? null })),
+    } : null,
+    headline: `visual #${run.id} ${run.status}${run.passed == null ? '' : run.passed ? '/pass' : '/fail'} · ${checksPassed}/${checks.length} checks · composer ${target?.reachable ? 'reachable' : target == null ? 'unknown' : 'covered'}${rubric ? ` · taste ${rubric.overall}/10 wow ${rubric.humanAppeal?.wow}/10` : ''}${warnings.length ? ` · ${warnings.length} warning(s)` : ''}`,
+  };
+}
+
 /** Insert a corpus prompt if absent; return its id either way. */
 export function upsertPrompt(db, { prompt, klass, expectedIntent, origin }) {
   db.prepare(
@@ -113,19 +709,43 @@ export function alreadyScored(db, runId, promptId) {
   return !!db.prepare('SELECT 1 FROM results WHERE run_id = ? AND prompt_id = ?').get(runId, promptId);
 }
 
+/**
+ * Map prompt → the ISO time it was MOST RECENTLY scored in ANY run (null = never). Lets a
+ * wall-clock-bounded cycle order its work LEAST-RECENTLY-SCORED FIRST, so each short cycle ADVANCES
+ * through the corpus instead of re-grinding the front of a fixed list every time (the stall fix:
+ * a 50-prompt run that times out at a budget would otherwise re-do prompts 1..N forever). Keyed by
+ * prompt TEXT so it works against the run.mjs work list before promptIds are assigned.
+ * @returns {Map<string, string>} prompt text → last_scored ISO
+ */
+export function lastScoredByPrompt(db) {
+  const m = new Map();
+  try {
+    const rows = db.prepare(
+      `SELECT p.prompt AS prompt, MAX(r.created_at) AS last_scored
+       FROM results r JOIN prompts p ON p.id = r.prompt_id GROUP BY p.prompt`,
+    ).all();
+    for (const r of rows) m.set(r.prompt, r.last_scored);
+  } catch { /* fresh corpus */ }
+  return m;
+}
+
 export function recordResult(db, r) {
   db.prepare(
     `INSERT INTO results
-       (run_id, prompt_id, class, read_as, outcome, agreement, answer_excerpt, passed, grade_reason, duration_ms, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (run_id, prompt_id, class, read_as, outcome, agreement, answer_excerpt, passed, grade_reason, duration_ms, answer_excellence, answer_excellence_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(run_id, prompt_id) DO UPDATE SET
        read_as=excluded.read_as, outcome=excluded.outcome, agreement=excluded.agreement,
        answer_excerpt=excluded.answer_excerpt, passed=excluded.passed,
-       grade_reason=excluded.grade_reason, duration_ms=excluded.duration_ms`,
+       grade_reason=excluded.grade_reason, duration_ms=excluded.duration_ms,
+       answer_excellence=excluded.answer_excellence, answer_excellence_json=excluded.answer_excellence_json`,
   ).run(
     r.runId, r.promptId, r.klass, r.readAs ?? null, r.outcome ?? null, r.agreement ?? null,
     (r.answerExcerpt ?? '').slice(0, 600), r.passed ? 1 : 0, r.gradeReason ?? null,
-    r.durationMs ?? null, new Date().toISOString(),
+    r.durationMs ?? null,
+    r.answerExcellence ?? null,
+    r.answerExcellenceJson ?? null,
+    new Date().toISOString(),
   );
 }
 
@@ -147,13 +767,306 @@ export function classStats(db, runId) {
   ).all(runId);
 }
 
+/**
+ * Infra-pollution guard (Verification-First). An older brain.mjs recorded grader/runtime
+ * OUTAGES as Vai FAILURES ("grader unavailable — counted as fail"). Those rows describe an
+ * infra hiccup, not a Vai answer, so counting them craters the measured pass-rate and lies
+ * to the motion meter. Current code SKIPS such turns instead of recording them, but the
+ * historical rows remain — and any stray legacy/manual write could reintroduce them. This
+ * predicate excludes them from every aggregate so the trend reflects Vai behavior only.
+ * SQL fragment (no leading AND) so callers compose it into their WHERE clause.
+ */
+// Excludes grader/runtime outages AND model-overload run errors. The 503/"server busy" + generic
+// "run error:" rows are the loop+runtime GPU-contention artifact (190 such rows measured 2026-06-28):
+// they describe infra, not a Vai answer, so counting them as failures craters the pass-rate and
+// mis-targets the loop. isInfraError now SKIPS new ones; this predicate also retroactively excludes
+// the historical rows from every aggregate (pure read-side — no data mutation). Build from a shared
+// pattern list so the SQL and BARE variants can never drift apart.
+const INFRA_REASON_PATTERNS = ['grader unavailable', 'counted as fail', 'run error', '503', 'server busy', 'overloaded', 'service unavailable'];
+const notInfraClause = (col) =>
+  `(${col} IS NULL OR (${INFRA_REASON_PATTERNS.map((p) => `${col} NOT LIKE '%${p}%'`).join(' AND ')}))`;
+export const NOT_INFRA_RESULT_SQL = notInfraClause('res.grade_reason');
+/** Same predicate for queries that alias the results table as `results`/no-alias. */
+const NOT_INFRA_RESULT_BARE = notInfraClause('grade_reason');
+
 /** Campaign trend: pass-rate per finished run, for the eventual Campaign zoom. */
 export function campaignTrend(db) {
+  // Only FINISHED runs (ended_at set). An in-progress run is a partial sample that drags the motion
+  // meter mid-cycle and makes the trend jitter (CodeRabbit #25). The current run is still observing.
   return db.prepare(
     `SELECT r.id AS run_id, r.started_at,
-            COUNT(res.id) AS total,
-            COALESCE(SUM(res.passed),0) AS passed
+            COUNT(CASE WHEN ${NOT_INFRA_RESULT_SQL} THEN res.id END) AS total,
+            COALESCE(SUM(CASE WHEN ${NOT_INFRA_RESULT_SQL} THEN res.passed ELSE 0 END),0) AS passed
      FROM runs r LEFT JOIN results res ON res.run_id = r.id
+     WHERE r.ended_at IS NOT NULL
      GROUP BY r.id ORDER BY r.id`,
   ).all();
+}
+
+/**
+ * The EXACT prompts currently failing for a class — each prompt's MOST RECENT result
+ * (max run_id) is a failure. This is the honest acceptance-verifier target: re-run THESE
+ * specific rows after a fix and confirm THEY moved, instead of trusting corpus-wide drift.
+ * try/catch-guarded so a fresh corpus returns [] instead of crashing.
+ * @returns {{prompt_id:number, prompt:string, expected_intent:string, run_id:number, grade_reason:string}[]}
+ */
+export function failingRowsForClass(db, klass) {
+  try {
+    return db.prepare(
+      // Ignore infra-noise rows (503/run-error) when picking the latest result per prompt — a
+      // transient infra failure must not be treated as the prompt's "currently failing" state
+      // (CodeRabbit #25), or acceptance re-runs phantom failures.
+      `SELECT r.prompt_id, p.prompt, p.expected_intent, r.run_id, r.grade_reason
+       FROM results r
+       JOIN prompts p ON p.id = r.prompt_id
+       JOIN (SELECT prompt_id, MAX(run_id) AS mrun FROM results res WHERE class = ? AND ${NOT_INFRA_RESULT_SQL} GROUP BY prompt_id) m
+         ON m.prompt_id = r.prompt_id AND m.mrun = r.run_id
+       WHERE r.class = ? AND r.passed = 0
+       ORDER BY r.prompt_id`,
+    ).all(klass, klass);
+  } catch {
+    return [];
+  }
+}
+
+/** Other classes that have historically produced VERIFIED consensus edits to the same file as
+ *  `klass` — i.e. classes whose behaviour shares this source file. A fix for one of them can
+ *  regress the others (proven: 3 classes co-edit build-execution-intent.ts). The cross-class
+ *  acceptance guard re-runs a regression sample of each of these after a same-file fix. Excludes
+ *  `klass` itself. Cheap, read-only, never throws. */
+export function classesForFile(db, file, excludeClass = '') {
+  if (!file) return [];
+  try {
+    return db.prepare(
+      `SELECT DISTINCT class FROM consensus WHERE file = ? AND verified = 1 AND class IS NOT NULL AND class <> ?`,
+    ).all(file, excludeClass).map((r) => r.class).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** Most-recently-PASSING prompts for a class — the REGRESSION sample. Acceptance re-runs a few of
+ *  these after a fix; if any now FAILS, the fix broke working behaviour and is rejected. This is
+ *  what makes "keep net improvements" safe: we keep fixes that recover failures WITHOUT breaking
+ *  passes. limit keeps it cheap (a handful of live turns, not the whole passing set). */
+export function passingRowsForClass(db, klass, limit = 4) {
+  try {
+    return db.prepare(
+      // Same infra-noise exclusion as failingRowsForClass — the regression sample must reflect real
+      // passing behaviour, not a row whose latest result was a 503/run-error (CodeRabbit #25).
+      `SELECT r.prompt_id, p.prompt, p.expected_intent
+       FROM results r
+       JOIN prompts p ON p.id = r.prompt_id
+       JOIN (SELECT prompt_id, MAX(run_id) AS mrun FROM results res WHERE class = ? AND ${NOT_INFRA_RESULT_SQL} GROUP BY prompt_id) m
+         ON m.prompt_id = r.prompt_id AND m.mrun = r.run_id
+       WHERE r.class = ? AND r.passed = 1
+       ORDER BY r.run_id DESC LIMIT ?`,
+    ).all(klass, klass, limit);
+  } catch {
+    return [];
+  }
+}
+
+/** Campaign-wide per-class pass-rate across ALL runs — the grader reads this to
+ *  spend the scarce one-at-a-time GPU budget on the LOWEST pass-rate class, not on
+ *  whichever class happened to fail in the latest tiny run. try/catch-guarded so a
+ *  fresh corpus (no results table populated yet) reports [] instead of crashing. */
+export function campaignClassStats(db) {
+  try {
+    return db.prepare(
+      `SELECT class, COUNT(*) AS total, COALESCE(SUM(passed),0) AS passed
+       FROM results WHERE ${NOT_INFRA_RESULT_BARE} GROUP BY class ORDER BY class`,
+    ).all();
+  } catch {
+    return [];
+  }
+}
+
+/** RE-OPEN a class for targeting: contradict its stale 'propose:no-file' and 'class:recently-fixed'
+ *  flags. Called by observe when a class's prompt PASSES — live proof the class is groundable and the
+ *  prior fix held. Without this, every class that was ever flagged stayed excluded until the 24h decay,
+ *  so the loop slowly starved its own target set. Matches by class PREFIX because the no-file claim
+ *  embeds a dynamic location string (so an exact-claim contradiction would silently miss). Bumps
+ *  contradictions on every matching flag row; ungroundableClasses excludes only when conf ≥ contra,
+ *  so one PASS flips a stale flag groundable. Returns how many flag rows it touched. */
+export function reopenClass(db, klass) {
+  if (!klass) return 0;
+  let touched = 0;
+  try {
+    const now = new Date().toISOString();
+    for (const scope of ['propose:no-file', 'class:recently-fixed']) {
+      const rows = db.prepare(
+        "SELECT claim FROM project_knowledge WHERE scope=? AND claim LIKE ?",
+      ).all(scope, `class "${klass}" %`);
+      for (const r of rows) {
+        // Push contradictions strictly ABOVE confirmations so ONE live PASS decisively re-opens the
+        // class (ungroundableClasses excludes while confirmations >= contradictions). A later failed
+        // propose re-confirms and re-excludes — so this is a recoverable signal, not a permanent unlock.
+        db.prepare(
+          "UPDATE project_knowledge SET contradictions = confirmations + 1, last_seen = ? WHERE scope=? AND claim=?",
+        ).run(now, scope, r.claim);
+        touched += 1;
+      }
+    }
+  } catch { /* best-effort */ }
+  return touched;
+}
+
+/** Classes propose-fix has flagged as ungroundable (no resolvable source file). The engine must
+ *  NOT keep picking these as "weakest" — they can never be fixed, only burn cycles. Confirmed
+ *  ≥ contradicted ⇒ still considered ungroundable. Returns a Set of class names. */
+export function ungroundableClasses(db) {
+  const set = new Set();
+  // (a) Reactive: classes propose-fix already flagged no-file (confirmed ≥ contradicted).
+  // STALENESS DECAY: a "no source file" claim reflects the codebase AT THE TIME it was made. The
+  // code changes (a senior or the loop adds the missing handler — e.g. opportunity-framing, comparison,
+  // context-carry all got real fixes 2026-06-28). A claim not RE-confirmed within the window is no
+  // longer trustworthy — let the loop re-attempt the class instead of locking it out forever. Fresh
+  // confirmations still exclude. This is what turns a one-time "model couldn't ground it" into a
+  // recoverable state rather than a permanent ban.
+  const UNGROUNDABLE_TTL_MS = 24 * 60 * 60 * 1000; // 24h since last confirmation
+  const now = Date.now();
+  try {
+    const rows = db.prepare(
+      "SELECT claim, confirmations, contradictions, last_seen FROM project_knowledge WHERE scope='propose:no-file'",
+    ).all();
+    for (const r of rows) {
+      if (Number(r.confirmations) < Number(r.contradictions)) continue; // recovered → groundable again
+      const lastMs = Date.parse(r.last_seen ?? '');
+      if (Number.isFinite(lastMs) && now - lastMs > UNGROUNDABLE_TTL_MS) continue; // stale → re-attempt
+      const m = /class "([^"]+)"/.exec(r.claim);
+      if (m) set.add(m[1]);
+    }
+  } catch { /* no knowledge table yet */ }
+  // (a2) Recently-fixed: a class that just got a committed fix is skipped until re-observed, so the
+  // engine doesn't re-target it while its stale failing results still sit in the corpus.
+  try {
+    const fixed = db.prepare(
+      "SELECT claim, confirmations, contradictions FROM project_knowledge WHERE scope='class:recently-fixed'",
+    ).all();
+    for (const r of fixed) {
+      if (Number(r.confirmations) < Number(r.contradictions)) continue; // re-observed as still failing → target again
+      const m = /class "([^"]+)"/.exec(r.claim);
+      if (m) set.add(m[1]);
+    }
+  } catch { /* no knowledge table yet */ }
+  // (b) Proactive: a class whose latest fix LOCATION is a placeholder (not a real file path) can
+  // never be grounded — skip it from cycle 1 instead of waiting for N wasted no-file proposals.
+  try {
+    const fixes = db.prepare(
+      'SELECT class, location FROM fixes WHERE id IN (SELECT MAX(id) FROM fixes GROUP BY class)',
+    ).all();
+    for (const f of fixes) {
+      const loc = String(f.location ?? '').trim();
+      // A real location starts with a path segment containing a "/" and a file-ish token; the
+      // placeholders look like "(unknown — investigate)" or are empty.
+      const filePart = (loc.split(/[:\s(]/)[0] || '').trim();
+      const looksLikePath = /[\\/].+\.(ts|tsx|js|jsx|mjs|cjs|json|md)$/i.test(filePart);
+      if (!loc || loc.startsWith('(') || !looksLikePath) { set.add(f.class); continue; }
+      // (c) EXHAUSTED TARGET: too many DISTINCT edits already failed on this file (the truncation
+      // near-miss loop). Stop targeting it — the models can't land a fix here; a human/senior must.
+      if (isTargetExhausted(db, filePart)) set.add(f.class);
+    }
+  } catch { /* no fixes table yet */ }
+  // (d) BANNED-OUT CLASS: a class whose proposals keep getting BANNED (skipped-quarantined — the
+  // SAME fix failed verify ≥2× and was quarantined) is one the models can only generate dead patches
+  // for; re-targeting it burns the council every cycle for nothing (measured: answer/curated-trap had
+  // 28 skipped-quarantined, 0 committed). Narrow on purpose: ONLY 'skipped-quarantined' counts (not
+  // reverted-red — a red revert may just need a better proposal, which is legitimate work). Excludes
+  // only when banned attempts dominate AND nothing has ever landed for the class. Recoverable: a
+  // committed fix drops it back in, and reopenClass clears it on a live PASS.
+  try {
+    const rows = db.prepare(
+      `SELECT class,
+         SUM(CASE WHEN applied='skipped-quarantined' THEN 1 ELSE 0 END) banned,
+         SUM(CASE WHEN applied='committed' THEN 1 ELSE 0 END) committed
+       FROM consensus WHERE applied IS NOT NULL AND applied <> '' GROUP BY class`,
+    ).all();
+    for (const r of rows) {
+      if (Number(r.committed) === 0 && Number(r.banned) >= 4) set.add(r.class);
+    }
+  } catch { /* no consensus table yet */ }
+  return set;
+}
+
+/** Answer-excellence trend: average craft score + sample count per run, oldest
+ *  first. The cross-run quality gradient the motion meter reads to tell whether
+ *  the council's OUTPUT is getting better over the perpetual run, not just its
+ *  read-the-prompt pass-rate. Runs with no scored answers report n=0, avg=null. */
+export function answerExcellenceTrend(db) {
+  try {
+    return db.prepare(
+      // FINISHED runs only — an in-progress run is a partial sample that jitters the motion meter
+      // mid-cycle (CodeRabbit #25), same as campaignTrend.
+      `SELECT r.id AS run_id, r.started_at,
+              COUNT(res.answer_excellence) AS n,
+              AVG(res.answer_excellence) AS avg
+       FROM runs r LEFT JOIN results res ON res.run_id = r.id
+       WHERE r.ended_at IS NOT NULL
+       GROUP BY r.id ORDER BY r.id`,
+    ).all();
+  } catch {
+    return [];
+  }
+}
+
+/** Proposal quality: of the failure CLASSES we proposed fixes for, how many
+ *  converged into a grep-verified consensus winner. Convergence is a per-class
+ *  question — propose-fix emits many persona proposals per class and consensus-fix
+ *  converges them into a verified winner for that class — so the metric is measured
+ *  at the class grain and SCOPED to the proposed classes. That keeps it bounded
+ *  [0,1] and stops unrelated lanes (e.g. the visual ui/* consensus the supervisor
+ *  also writes into this table) from inflating it past 100%. Low hit-rate with
+ *  enough proposed classes = the propose prompt is weak (the signal the innovation
+ *  engine reads to suggest a prompt experiment). Both tables are lazy, so a fresh
+ *  corpus reports zeros instead of crashing. */
+export function proposalQualityStats(db) {
+  const count = (sql) => { try { return Number(db.prepare(sql).get().c) || 0; } catch { return 0; } };
+  const total = count('SELECT COUNT(DISTINCT class) c FROM proposals');
+  const converged = count(
+    'SELECT COUNT(DISTINCT p.class) c FROM proposals p '
+    + 'WHERE EXISTS (SELECT 1 FROM consensus c WHERE c.verified=1 AND c.class=p.class)',
+  );
+  return { total, converged, hitRate: total > 0 ? converged / total : 0 };
+}
+
+/** Council health: fraction of results where the council actually convened (read_as
+ *  non-empty). A low response-rate means members aren't answering parseably — the
+ *  signal for a model experiment. runId null = campaign-wide. */
+export function councilResponseRate(db, runId = null) {
+  try {
+    const where = runId == null ? '' : 'WHERE run_id = ?';
+    const args = runId == null ? [] : [runId];
+    const row = db.prepare(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN read_as IS NOT NULL AND TRIM(read_as) <> '' THEN 1 ELSE 0 END) AS responded
+       FROM results ${where}`,
+    ).get(...args);
+    const total = Number(row?.total) || 0;
+    const responded = Number(row?.responded) || 0;
+    return { total, responded, responseRate: total > 0 ? responded / total : 1 };
+  } catch {
+    return { total: 0, responded: 0, responseRate: 1 };
+  }
+}
+
+/** Low-excellence count: graded answers scoring below `threshold` (out of 10) — the
+ *  raw count of weak-craft answers the grading experiments aim to shrink. The
+ *  threshold `?` sits in the SELECT (before the WHERE), so it is always the first
+ *  bound param; runId, when present, follows. */
+export function lowExcellenceCount(db, runId = null, threshold = 6) {
+  try {
+    const where = runId == null
+      ? 'WHERE answer_excellence IS NOT NULL'
+      : 'WHERE run_id = ? AND answer_excellence IS NOT NULL';
+    const args = runId == null ? [threshold] : [threshold, runId];
+    const row = db.prepare(
+      `SELECT COUNT(*) AS graded,
+              SUM(CASE WHEN answer_excellence < ? THEN 1 ELSE 0 END) AS low
+       FROM results ${where}`,
+    ).get(...args);
+    return { graded: Number(row?.graded) || 0, low: Number(row?.low) || 0, threshold };
+  } catch {
+    return { graded: 0, low: 0, threshold };
+  }
 }
