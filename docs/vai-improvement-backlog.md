@@ -969,6 +969,21 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Done
 
+- 2026-06-29 - Release workflow no longer tags `vundefined`. The main Release
+  workflow now resolves a valid semver root package version before tag/release steps,
+  grants `contents: write` only to the release job, and skips tag creation cleanly
+  when the root package is intentionally unversioned. Evidence: the failed main run
+  had already passed lint/typecheck/test/build and failed only on `git push vundefined`
+  with read-only token permissions; local version probe returns `should_release=false`.
+
+- 2026-06-29 - Shared chat intent lexicon. Added `packages/core/src/chat/intent-lexicon.ts`
+  so routing guidance and classifiers share one tested vocabulary layer for structural stop
+  words, request-start words, intent/action words, and uniqueness hints. `route-guidance`
+  now preserves distinctive short tech tokens such as `c#`/`c++`/`ui` while still dropping
+  grammar glue, and `turn-classifier` surfaces `request-action-start` plus `uniqueness-hint`
+  signals without rerouting ordinary standalone questions. Evidence: focused tests in
+  `intent-lexicon.test.ts`, `route-guidance.test.ts`, and `turn-classifier.test.ts`.
+
 - 2026-06-22 - Perpetual improvement-loop operator switchboard. Added
   `scripts/improve-loop/operator.mjs` plus pure command utilities and node:test
   coverage so the loop now has a Windows-first `doctor/status/start/watch/report/
