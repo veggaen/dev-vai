@@ -23,7 +23,7 @@ jobs:
       # Don't gate PRs on a repo-level setting that can't be toggled from code.
       - name: Review dependency changes
         continue-on-error: true
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
 
   verify:
     name: Verify (Node ${{ matrix.node-version }})
