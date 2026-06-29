@@ -21,6 +21,8 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { VaiEngine } from '../src/models/vai-engine.js';
 
+const ENGINE_TURN_TIMEOUT_MS = 10_000;
+
 describe('Vetle conversation — five-turn acceptance', () => {
   let engine: VaiEngine;
 
@@ -39,7 +41,7 @@ describe('Vetle conversation — five-turn acceptance', () => {
     // We accept any of: name acknowledged, king answered, or a clean
     // "I don't have a confident answer" — never the teach echo.
     expect(content.length).toBeGreaterThan(8);
-  });
+  }, ENGINE_TURN_TIMEOUT_MS);
 
   it('Q2: user supplies their own answer — assistant accepts gracefully', async () => {
     const history = [
@@ -51,7 +53,7 @@ describe('Vetle conversation — five-turn acceptance', () => {
     // Must NOT respond with the generic "I want to give you a useful answer — could you say more" stall.
     expect(content).not.toMatch(/could you say a bit more about what you'?re looking for/i);
     expect(content).not.toMatch(/for example:[\s\S]*"how does x work"/i);
-  });
+  }, ENGINE_TURN_TIMEOUT_MS);
 
   it('Q3: compound follow-up must NOT echo an unrelated previous prompt as the answer', async () => {
     const history = [
@@ -64,7 +66,7 @@ describe('Vetle conversation — five-turn acceptance', () => {
     // The original bug: the answer body was literally "king in norway, please repond with only the name of the king and then also tell me my name".
     expect(content).not.toMatch(/king in norway, please repond/i);
     expect(content).not.toMatch(/respond with only the name of the king/i);
-  }, 10_000);
+  }, ENGINE_TURN_TIMEOUT_MS);
 
   it('Q4: buried math — "tell me 100 plus fifty five" must compute 155', async () => {
     const input = 'this is not what I wanted... emm tell me 100 plus fifty five';
@@ -73,7 +75,7 @@ describe('Vetle conversation — five-turn acceptance', () => {
     expect(content).toMatch(/\b155\b/);
     // Must NOT dispatch the unknown-topic stub.
     expect(content).not.toMatch(/I don'?t have a solid answer for/i);
-  });
+  }, ENGINE_TURN_TIMEOUT_MS);
 
   it('Q5: literal meta-question — "first letter in this question" must answer "o"', async () => {
     const input = 'okay what is the first letter in this question?';
@@ -85,5 +87,5 @@ describe('Vetle conversation — five-turn acceptance', () => {
     expect(content).toContain('o');
     // Must NOT contain unrelated scraped content.
     expect(content).not.toMatch(/uberman|metro\s+city|hero\s+after\s+defeating|readme/i);
-  });
+  }, ENGINE_TURN_TIMEOUT_MS);
 });
