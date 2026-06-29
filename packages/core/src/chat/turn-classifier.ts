@@ -1,5 +1,6 @@
 import type { Message } from '../models/adapter.js';
 import { isBusinessOpportunityRequest } from '../models/web-conclude-policy.js';
+import { summarizeLexicalSignals } from './intent-lexicon.js';
 
 /**
  * Dynamic top-level classification of a user turn.
@@ -101,6 +102,9 @@ export function classifyTurn(
   const trimmed = input.trim().replace(/[?.!]+$/g, '').trim();
   const lower = trimmed.toLowerCase();
   const wordCount = countWords(trimmed);
+  const lexical = summarizeLexicalSignals(trimmed);
+  if (lexical.startsWithRequestAction) signals.push('request-action-start');
+  if (lexical.hasUniquenessHint) signals.push('uniqueness-hint');
 
   // A user's business-opportunity / ideas question ("what is a great idea when
   // creating a company in Norway?") is a STANDALONE question for business ideas —

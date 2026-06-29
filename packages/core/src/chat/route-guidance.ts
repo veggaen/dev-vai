@@ -1,5 +1,6 @@
 import type { QuestionIntent } from './question-intent.js';
 import type { TurnGuidance } from './turn-pipeline.js';
+import { salientLexicalTokens } from './intent-lexicon.js';
 
 /**
  * Persistent friend-steering for Vai's routing — the durable layer behind the
@@ -72,32 +73,13 @@ export interface SelectGuidanceOptions {
 
 const DEFAULT_CLASS_OVERLAP = 0.5;
 
-// Common words that carry no routing signal — excluded from salient tokens.
-const STOPWORDS = new Set([
-  'the', 'and', 'for', 'are', 'was', 'were', 'you', 'your', 'this', 'that',
-  'with', 'what', 'when', 'where', 'which', 'who', 'how', 'why', 'does', 'did',
-  'can', 'could', 'will', 'would', 'should', 'have', 'has', 'had', 'about',
-  'from', 'into', 'over', 'than', 'then', 'them', 'they', 'a', 'an',
-  'is', 'it', 'its', 'of', 'to', 'in', 'on', 'or', 'be', 'as', 'at', 'by',
-  'me', 'my', 'we', 'do', 'so', 'if', 'vs', 'between',
-]);
-
 /**
  * Extract distinctive tokens from a turn for class-scope matching. Lowercased,
  * de-duplicated, ≥3 chars, stopwords removed. Keeps `+`, `#`, `.` so tokens
  * like `c++`, `c#`, `node.js` survive. Pure.
  */
 export function salientTokens(text: string): string[] {
-  const raw = (text || '').toLowerCase().match(/[a-z0-9][a-z0-9+#.]{2,}/g) ?? [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const token of raw) {
-    const t = token.replace(/[.]+$/, '');
-    if (t.length < 3 || STOPWORDS.has(t) || seen.has(t)) continue;
-    seen.add(t);
-    out.push(t);
-  }
-  return out;
+  return salientLexicalTokens(text);
 }
 
 /**
