@@ -221,7 +221,7 @@ export async function ollamaGenerate(model, prompt, { timeoutMs = 90_000, numPre
  * council verdict (the same surface scripts/council-ask.mjs reads). Resolves with
  * { text, council, durationMs } or rejects on timeout/error.
  */
-export function runThroughVai(baseUrl, content, { timeoutMs = 220_000, modelId = 'vai:v0', onProgress } = {}) {
+export function runThroughVai(baseUrl, content, { timeoutMs = 220_000, modelId = 'vai:v0', onProgress, conversationId } = {}) {
   const wsUrl = `${baseUrl.replace(/^http/i, 'ws').replace(/\/$/, '')}/api/chat?devAuthBypass=1`;
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(wsUrl);
@@ -240,7 +240,7 @@ export function runThroughVai(baseUrl, content, { timeoutMs = 220_000, modelId =
       }
     };
     ws.on('open', () => ws.send(JSON.stringify({
-      conversationId: `improve-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      conversationId: conversationId ?? `improve-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       content, modelId, mode: 'chat', allowLearn: false,
     })));
     ws.on('message', (raw) => {
@@ -254,6 +254,22 @@ export function runThroughVai(baseUrl, content, { timeoutMs = 220_000, modelId =
       }
     });
     ws.on('error', (err) => { clearTimeout(timer); reject(new Error(String(err))); });
+  });
+}
+
+export async function runThroughVaiWithPrelude(baseUrl, prelude, content, opts = {}) {
+  const conversationId = `improve-scenario-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const turns = Array.isArray(prelude) ? prelude.filter((turn) => String(turn ?? '').trim()) : [];
+  for (const turn of turns) {
+    await runThroughVai(baseUrl, turn, {
+      ...opts,
+      conversationId,
+      onProgress: undefined,
+    });
+  }
+  return runThroughVai(baseUrl, content, {
+    ...opts,
+    conversationId,
   });
 }
 

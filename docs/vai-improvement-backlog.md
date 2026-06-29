@@ -6,6 +6,16 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **Built 2026-06-29 - Context-carry scenario harness for follow-up evals (DONE, tested 16/16)**
+  - Finding: the loop's weakest class, `followup/context-carry`, was being measured with fresh one-turn
+    conversations even though prompts like "what about the second one?" and "make that simpler" require
+    prior context. That produced noisy failures and queued fixes against an impossible evaluation shape.
+  - Change: added deterministic scenario preludes for `followup/context-carry`, threaded same-conversation
+    preludes through observe mode, and passed row metadata into acceptance checks so observe and recovery
+    verification grade the same behavior.
+  - Proof: `node --check` for `driver.mjs`, `run.mjs`, `acceptance-verifier.mjs`, and `apply-consensus.mjs`;
+    `context-scenarios.test.mjs` + `acceptance-verifier.test.mjs` -> 16/16 green.
+
 - **Built 2026-06-29 - Stale improvement-run recovery command (DONE, tested 29/29)**
   - Finding: `self-improve:doctor` could detect a crashed loop whose latest corpus run was still marked
     `running`, but the operator had no first-class repair action. The safe next step was documented in prose,
@@ -28,7 +38,7 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
   - Proof: `node --check` for `operator.mjs`, `operator-utils.mjs`, and `supervisor.mjs`; `operator.test.mjs` +
     `instance-lock.test.mjs` -> 25/25 green; live `operator stop` with no lock reported no signal and left no stop file.
 
-- **Built 2026-06-29 - Intentionality and specificity lexical signals (DONE, tested 108/108)**
+- **Built 2026-06-29 - Intentionality and specificity lexical signals (DONE, tested 110/110)**
   - Finding: Vai could already surface request-start, intent-action, uniqueness, and source-reference signals, but
     user correction language such as "what I meant", "my intention", "be specific", and "not generic" was still
     invisible to the shared lexical layer. That made it harder for classifiers, guidance, and future Council review
@@ -39,8 +49,11 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
     `source-reference-request` through `turn-classifier.ts`, let explicit source/citation answer requests choose
     the `research` turn kind after the builder gate (so "build ... with source links" remains builder), and let
     explicit source requests bypass stable local web defer while keeping "source code/source tree" language local-first.
+    Early web-concluded explicit source requests now also set cited-answer metadata and the `research-cited`
+    strategy instead of presenting sourced answers as generic `web-search`.
   - Proof: `intent-lexicon.test.ts` + `turn-classifier.test.ts` + `turn-kind.test.ts` +
-    `web-conclude-turn.test.ts` -> 108/108 green; ESLint clean on changed chat files.
+    `web-conclude-turn.test.ts` -> 108/108 green; the exact typoed-source engine/variant tests -> 2/2 green;
+    ESLint clean on changed chat files.
 
 - **Built 2026-06-29 - Shared source-reference intent lexicon (DONE, tested 96/96)**
   - Finding: after the source-aware evidence contract landed, explicit source/citation/reference detection still lived

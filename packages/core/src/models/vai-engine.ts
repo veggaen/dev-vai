@@ -79,7 +79,7 @@ import { tryGamingCasualSnippet } from '../chat/gaming-casual-snippets.js';
 import { tryEmitDecisionTake } from '../chat/decision-take.js';
 import { tryFormatOnlyFollowUp } from '../chat/format-only-followup.js';
 import { tryRecencyFollowUp } from '../chat/recency-followup.js';
-import { tryWebConcludeTurn } from '../chat/web-conclude-turn.js';
+import { tryWebConcludeTurn, wantsExplicitSourceReferences } from '../chat/web-conclude-turn.js';
 import { isCapabilitiesFallbackResponse } from '../chat/capabilities-fallback.js';
 import { tryEmitSingleClarifyingQuestion } from '../chat/single-clarifying-question.js';
 import {
@@ -7945,7 +7945,11 @@ export class VaiEngine implements ModelAdapter {
       structuredFormatFired = true;
     } else if (webConcluded) {
       this._lastSearchResponse = webConcluded.searchResult;
-      response = this.tracked('web-search', webConcluded.text, userContent, { confidenceOverride: 0.78 });
+      const explicitSourceRequest = wantsExplicitSourceReferences(userContent);
+      if (explicitSourceRequest) {
+        this._lastCitedAnswer = this.buildCitedAnswer(webConcluded.searchResult);
+      }
+      response = this.tracked(explicitSourceRequest ? 'research-cited' : 'web-search', webConcluded.text, userContent, { confidenceOverride: 0.78 });
       structuredFormatFired = true;
     } else if (gamingCasualPreflight) {
       response = this.tracked('gaming-casual', gamingCasualPreflight, userContent, { confidenceOverride: 0.82 });
