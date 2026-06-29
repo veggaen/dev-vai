@@ -43,10 +43,27 @@ describe('intent lexicon', () => {
     expect(summary.uniquenessHints).toEqual(expect.arrayContaining(['unique', 'defensible', 'angle']));
   });
 
+  it('summarizes expanded request starts and intent actions', () => {
+    const summary = summarizeLexicalSignals('Assess and validate this architecture, then trace the routing path');
+    expect(summary.startsWithRequestAction).toBe(true);
+    expect(summary.startWords).toContain('assess');
+    expect(summary.intentWords).toEqual(expect.arrayContaining(['assess', 'validate', 'trace']));
+  });
+
   it('detects one-of-a-kind as a uniqueness phrase', () => {
     const summary = summarizeLexicalSignals('Is this one of a kind or just another clone?');
     expect(summary.hasUniquenessHint).toBe(true);
     expect(summary.uniquenessHints).toContain('one-of-a-kind');
+  });
+
+  it('detects intentionality and specificity hints without losing stop-worded phrasing', () => {
+    const summary = summarizeLexicalSignals('What I meant was: make this exactly specific to Vai, not generic.');
+    expect(summary.hasIntentionalityHint).toBe(true);
+    expect(summary.intentionalityHints).toEqual(expect.arrayContaining(['meant', 'what-i-meant']));
+    expect(summary.hasSpecificityHint).toBe(true);
+    expect(summary.specificityHints).toEqual(expect.arrayContaining(['exactly', 'specific', 'specific-to']));
+    expect(summary.hasUniquenessHint).toBe(true);
+    expect(summary.uniquenessHints).toContain('not-generic');
   });
 
   it('detects explicit source-reference requests as shared lexical intent', () => {
