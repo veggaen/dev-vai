@@ -969,6 +969,13 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Done
 
+- 2026-06-29 - Release runs after successful CI instead of duplicating the full
+  test suite. The Release workflow now triggers from the `CI` workflow completing on
+  `main` (or manual dispatch), checks out the exact CI head SHA, and only resolves/tags
+  a valid semver package version. Evidence: the 2026-06-29 `Release` run after PR #29
+  failed in duplicated `pnpm test` timeouts while the matching `CI` run passed; release
+  should publish proven main commits, not run a second, harsher quality gate.
+
 - 2026-06-29 - Perpetual-health no longer treats skipped typecheck as perfect.
   `collectSignals({ withTsc: false })` now omits `tscErrors` instead of emitting
   `0`, so cheap loop samples do not fabricate "0 TypeScript errors" when the heavy
