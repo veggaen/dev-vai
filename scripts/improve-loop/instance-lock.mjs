@@ -15,6 +15,12 @@
  */
 import { readFileSync, writeFileSync, unlinkSync, openSync, closeSync } from 'node:fs';
 
+/** Tiny synchronous wait — acquireLock is sync, and the write window we're out-waiting is sub-ms. */
+function busyWaitMs(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { /* spin briefly */ }
+}
+
 /** True if a process with this PID is currently running. */
 function isAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -48,15 +54,27 @@ export function acquireLock(lockPath) {
   }
 
   // A lock file exists. Is its owner still alive?
+  // CAREFUL with a corrupt/empty payload: a contender can observe the lock during the WINNER's
+  // openSync('wx')→writeFileSync window, before the payload is written. Treating that empty read as
+  // "stale" would let the contender unlink + steal a lock that's actively being created (CodeRabbit
+  // #25, race). So we RE-READ a corrupt payload a few times with a short backoff; only if it stays
+  // unparseable do we treat it as a genuinely stale/corrupt lock and reclaim it.
   let holderPid = NaN;
   let startedAt = null;
-  try {
-    const prev = JSON.parse(readFileSync(lockPath, 'utf8'));
-    holderPid = Number(prev.pid);
-    startedAt = prev.startedAt ?? null;
-  } catch { /* unreadable/corrupt lock → treat as stale below */ }
+  let parsedOk = false;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const prev = JSON.parse(readFileSync(lockPath, 'utf8'));
+      holderPid = Number(prev.pid);
+      startedAt = prev.startedAt ?? null;
+      parsedOk = Number.isInteger(holderPid) && holderPid > 0;
+      if (parsedOk) break;
+    } catch { /* mid-write or corrupt — retry briefly before deciding it's stale */ }
+    busyWaitMs(20); // short, synchronous: the write window is microseconds; this just out-waits it
+  }
 
-  if (isAlive(holderPid)) {
+  // A readable payload with a LIVE pid → another supervisor owns it → refuse.
+  if (parsedOk && isAlive(holderPid)) {
     return { ok: false, holderPid, startedAt };
   }
 

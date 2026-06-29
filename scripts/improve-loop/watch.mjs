@@ -54,56 +54,9 @@ function snapshot() {
 
 // (parseData/compactData were only used by the removed visualPanel — dropped as dead code, CodeRabbit #25.)
 
-function enginePanel(events, banned) {
-  // The --engine heartbeat the UI used to miss: live cycles with their value-per-compute PLAN,
-  // each process run/result, and the perpetual-health verdict — grouped newest cycle first. This
-  // is what makes "what I see" == "what V3gga sees".
-  if (!(events || []).length && !(banned || []).length) {
-    return `<h2>Engine — live cycles</h2><div style="color:#667;font-size:12px;margin-bottom:14px">No engine cycles yet. Start with <code>supervisor.mjs --engine</code>.</div>`;
-  }
-  // Group events by cycle (events arrive newest-first; keep that order).
-  const byCycle = new Map();
-  for (const e of events) {
-    if (!byCycle.has(e.cycle)) byCycle.set(e.cycle, []);
-    byCycle.get(e.cycle).push(e);
-  }
-  const cycleBlocks = [...byCycle.entries()].slice(0, 8).map(([cycle, evs]) => {
-    const health = evs.find((e) => e.kind === 'health');
-    const plan = evs.find((e) => e.kind === 'plan');
-    const runs = evs.filter((e) => e.kind === 'run:done' || e.kind === 'run:error');
-    let hv = null;
-    try { hv = health ? JSON.parse(health.detail) : null; } catch {}
-    const working = hv?.working;
-    const tone = working === true ? '#8d9' : working === false ? '#f99' : '#dc9';
-    let chosen = [];
-    try { const p = plan ? JSON.parse(plan.detail) : null; chosen = p?.chosen || []; } catch {}
-    const runChips = runs.map((r) => {
-      const ok = r.kind === 'run:done' && r.ok;
-      let produced = 0; try { produced = JSON.parse(r.detail)?.produced ?? 0; } catch {}
-      const c = r.kind === 'run:error' ? '#f99' : ok ? '#8d9' : '#bbb';
-      return `<span style="display:inline-flex;gap:5px;align-items:center;background:#10141c;border:1px solid #233;border-radius:6px;padding:3px 8px;font-size:12px;color:${c}">${r.kind === 'run:error' ? '✗' : '✓'} ${esc(r.process)}${produced ? ` ·${produced}` : ''}${r.ms ? ` ${Math.round(r.ms)}ms` : ''}</span>`;
-    }).join(' ');
-    const at = (evs[0]?.at || '').slice(11, 19);
-    return `<div style="background:#0e1018;border:1px solid #243045;border-left:3px solid ${tone};border-radius:8px;padding:11px 13px;margin:9px 0">
-      <div style="display:flex;gap:10px;align-items:center;font-size:12px;color:#9ab">
-        <b style="color:#cde">cycle ${esc(cycle)}</b>
-        ${chosen.length ? `<span style="color:#8ad">plan: ${chosen.map(esc).join(', ')}</span>` : '<span style="color:#778">no move cleared the floor</span>'}
-        <span style="margin-left:auto;color:#566">${esc(at)}</span>
-      </div>
-      ${runChips ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">${runChips}</div>` : ''}
-      ${hv ? `<div style="margin-top:7px;font-size:12px;color:${tone}"><b>${working === true ? '✓ working' : working === false ? '✗ not working' : '… inconclusive'}</b> · quality ${esc(hv.composite ?? '?')} · ${esc(hv.reason || '')}</div>` : ''}
-    </div>`;
-  }).join('');
-
-  const banBlock = (banned || []).length ? `
-    <div style="background:#1a1410;border:1px solid #3a2a18;border-radius:8px;padding:11px 13px;margin:10px 0 16px">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#b95;margin-bottom:6px">🚫 quarantined dead fixes (won't retry — breaks the doom-loop)</div>
-      ${banned.map((b) => `<div style="font-size:12px;color:#caa;margin:3px 0"><code style="color:#e98">${esc((b.file || '').split('/').pop())}</code> · ${esc(b.find).slice(0, 38)} → ${esc(b.replace).slice(0, 38)} <span style="color:#866">(${b.strikes} strikes)</span></div>`).join('')}
-    </div>` : '';
-
-  return `<h2>Engine — live cycles (value-per-compute)</h2>
-    <div id="engine">${cycleBlocks}${banBlock}</div>`;
-}
+// NOTE: the server-rendered enginePanel() was removed — engine cycles + the quarantine block now
+// render CLIENT-SIDE in render() from loop.json (loopEvents + banned), so the live dashboard updates
+// without a reload and the panel is actually reachable (CodeRabbit #25).
 
 function councilPanel() {
   // Self-refreshing panel that shows the COUNCIL's overnight work on Vai's UI (read from
@@ -470,6 +423,16 @@ code{font-family:var(--mono);font-size:12px;color:var(--ink-dim);background:var(
     <div class="body"><div><div class="inner">${councilPanel()}</div></div></div>
   </details>
 
+  <details class="sec" id="sec-engine">
+    <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Engine — live cycles<span class="count" id="eng-count"></span></summary>
+    <div class="body"><div><div class="inner" id="engine"><div class="empty">no engine cycles yet</div></div></div></div>
+  </details>
+
+  <details class="sec" id="sec-live">
+    <summary><svg class="chev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l4 4-4 4"/></svg>Live view</summary>
+    <div class="body"><div><div class="inner">${liveFramePanel()}</div></div></div>
+  </details>
+
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -568,6 +531,21 @@ function render(s){
     const rows=Object.keys(sc).map(k=>'<div class="row"><span class="k">'+esc(k)+'</span><span class="bar"><i style="width:'+Math.round((Number(sc[k])||0)/10*100)+'%"></i></span><span class="v">'+esc(sc[k])+'/10</span></div>').join('');
     $('taste').innerHTML='<div class="row"><span class="k"><b>overall</b></span><span class="v"><b>'+esc(t.overall)+'/10</b></span></div>'+rows+(t.lesson?'<div class="empty" style="margin-top:8px">'+esc(t.lesson)+'</div>':'');
   } else { $('taste-count').textContent=''; $('taste').innerHTML='<div class="empty">no visual run yet</div>'; }
+  // engine — live cycles (the --engine heartbeat, from loop.json) — previously gathered but the
+  // redesigned shell never surfaced it (CodeRabbit #25).
+  const ev=s.loopEvents||[];
+  if(ev.length){
+    const byCycle=new Map();
+    for(const e of ev){ const c=e.cycle??'?'; if(!byCycle.has(c))byCycle.set(c,[]); byCycle.get(c).push(e); }
+    const blocks=[...byCycle.entries()].slice(0,8).map(([cycle,evs])=>{
+      const rows=evs.slice(0,12).map(e=>'<div class="row"><span class="k">'+esc(e.type||e.kind||'event')+'</span><span class="v">'+esc(String(e.detail??e.message??'').slice(0,90))+'</span></div>').join('');
+      return '<div class="ev fade" style="padding-bottom:10px"><div class="t">cycle '+esc(cycle)+'</div>'+rows+'</div>';
+    }).join('');
+    const bn=s.banned||[];
+    const banBlock=bn.length?'<div class="ev escalate fade" style="margin-top:8px"><div class="t">🚫 quarantined dead fixes (won\'t retry)</div>'+bn.map(b=>'<div class="d"><code>'+esc(String(b.file||"").split("/").pop())+'</code> '+esc(String(b.find).slice(0,32))+' → '+esc(String(b.replace).slice(0,32))+' ('+esc(b.strikes)+' strikes)</div>').join('')+'</div>':'';
+    $('eng-count').textContent=byCycle.size;
+    $('engine').innerHTML=(blocks||'')+banBlock||'<div class="empty">no engine cycles yet</div>';
+  } else { $('eng-count').textContent=''; $('engine').innerHTML='<div class="empty">no engine cycles yet</div>'; }
   // reveal fades
   requestAnimationFrame(()=>document.querySelectorAll('.fade:not(.in)').forEach((el,i)=>setTimeout(()=>el.classList.add('in'),i*45)));
 }

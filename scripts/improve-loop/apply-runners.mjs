@@ -14,7 +14,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { resolve, relative, isAbsolute } from 'node:path';
+import { resolve, relative, isAbsolute, win32 as pathWin32 } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 export const AUTO_IMPROVE_BRANCH = 'council/auto-improve';
@@ -31,7 +31,10 @@ const NPX_BIN = process.platform === 'win32' ? 'npx.cmd' : 'npx';
  *  stage files OUTSIDE the repo. Returns the resolved absolute path, or throws on escape. */
 export function resolveInsideRoot(value) {
   if (typeof value !== 'string' || value.trim() === '') throw new Error('path must be a non-empty string');
-  if (isAbsolute(value)) throw new Error(`refusing absolute path outside repo-relative contract: ${value}`);
+  // Reject absolute paths in EITHER convention — `C:/…` and `\\server\…` are not absolute under the
+  // POSIX isAbsolute() on Linux, so a Windows-absolute path would slip through and be mapped under
+  // ROOT (CodeRabbit #25). Check win32 too for a consistent repo-relative contract across platforms.
+  if (isAbsolute(value) || pathWin32.isAbsolute(value)) throw new Error(`refusing absolute path outside repo-relative contract: ${value}`);
   const abs = resolve(ROOT, value);
   const rel = relative(ROOT, abs);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) throw new Error(`path escapes the checkout root: ${value}`);
@@ -136,18 +139,27 @@ export function realApplyDeps(opts = {}) {
       if (head !== branch) {
         throw new Error(`refusing to commit: HEAD is '${head}', auto-improve only commits to '${branch}'`);
       }
+      // REQUIRE an explicit single target file. Without it, `git commit -m` would sweep in whatever
+      // is already staged, breaking the one-changed-file-only contract (CodeRabbit #25).
+      if (!file) throw new Error('refusing to commit: no explicit target file (one-file-only contract)');
+      const resolvedFile = resolveInsideRoot(file); // also enforce the repo-relative contract
       // Stage ONLY the changed file (never `git add -A`) so we can't sweep unrelated changes.
-      if (file) {
-        const add = sh('git', ['add', '--', file]);
-        if (add.code !== 0) throw new Error(`git add failed: ${add.out}`);
-      }
-      const commit = sh('git', ['commit', '-m', message]);
+      const add = sh('git', ['add', '--', resolvedFile]);
+      if (add.code !== 0) throw new Error(`git add failed: ${add.out}`);
+      // Commit ONLY that pathspec so anything else already staged is excluded from this commit.
+      const commit = sh('git', ['commit', '-m', message, '--', resolvedFile]);
       if (commit.code !== 0) {
         // UNSTAGE the file we just `git add`-ed so a failed commit doesn't leave it staged — a staged
         // blob would otherwise leak into the NEXT auto-commit (CodeRabbit #25). Best-effort reset.
-        if (file) sh('git', ['reset', '--quiet', 'HEAD', '--', file]);
+        sh('git', ['reset', '--quiet', 'HEAD', '--', resolvedFile]);
         throw new Error(`git commit failed: ${commit.out}`);
       }
+    },
+
+    // Best-effort unstage of a single file — lets apply-fix clean the index if commit fails (#25).
+    unstage: (file) => {
+      if (!file) return;
+      try { sh('git', ['reset', '--quiet', 'HEAD', '--', resolveInsideRoot(file)]); } catch { /* best-effort */ }
     },
   };
 }

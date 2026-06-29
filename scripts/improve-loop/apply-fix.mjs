@@ -95,9 +95,11 @@ export async function applyVerifiedFix(proposal, deps) {
   try {
     await deps.commit(message, proposal.file);
   } catch (err) {
-    // SAFETY: a failed commit must NOT leave the patch in the working tree (applied + maybe staged).
-    // Restore the original so the tree is never left dirty for the next run (which then saw the find
-    // "missing" and a stale modification). Revert to `before`; the caller treats this as infra-ish.
+    // SAFETY: a failed commit must NOT leave the patch in the working tree OR the git index. If
+    // `git add` succeeded but `git commit` failed, the staged blob would leak into the next
+    // auto-commit (CodeRabbit #25). Unstage first (best-effort), then restore the working tree to
+    // `before` so the next run sees a clean tree. The caller treats this as infra-ish.
+    try { deps.unstage?.(proposal.file); } catch { /* best-effort unstage */ }
     try { deps.writeFile(proposal.file, before); } catch { /* best-effort restore */ }
     return { applied: false, committed: false, infra: true, tier, reasons: [`verified, but commit failed (tree restored): ${String(err).slice(0, 80)}`], verifyDetail: verifyResult.detail };
   }
