@@ -6,6 +6,35 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **Built 2026-06-30 - Response-intelligence probe regressions (DONE, tested 8/8 + visual QA)**
+  - Finding: live/direct probes showed high-value prompts falling through to the wrong deterministic lanes:
+    Vai identity/process questions returned the generic no-confidence capabilities blurb, a Norway software-idea
+    prompt became a Norway country-fact card, and a Zustand/CSS-hover follow-up became a CSS specificity primer.
+  - Change: added deterministic self/process vocabulary for Vai and Council outcomes, a business-opportunity
+    route that beats country facts, and a Zustand + CSS-hover diagnosis route for chat timeline flicker.
+  - UI polish: tightened ProcessTree mobile wrapping/indentation and fixed the hidden copy-action flex sizing so
+    hover/focus tools stay tucked away at rest but remain usable in the visible audit surface.
+  - Research note: vLLM's public docs highlight prefix caching for repeated long context / multi-round chat and
+    chunked prefill to prioritize interactive decode work before large prefills; Browserbase positions cloud
+    browser sessions, search/fetch, and isolated automated testing as agent infrastructure. Vai's local analogue
+    should be a stable-context cache plus a scheduler that gives user-visible chat/process UI priority over
+    background improvement-loop work, with remote browser agents considered only as an optional visual QA backend.
+  - Proof: `vai-engine.test.ts` focused response-intelligence suite -> 8/8 green; direct `agent-speak-to-vai --direct`
+    probes returned `chat-fact-shim:meta-vai`, `business-opportunity-direction`, and the Zustand-specific diagnosis;
+    `visual-qa.mjs --scenario all` desktop and `--scenario council-full --w 390 --h 844` mobile captured ProcessTree
+    screenshots/traces with 0 console errors under `.codex-run/visual-qa-response-intelligence*`.
+  - Evidence: `.vai-agent-dialogue.log` 2026-06-30 probe suite; vLLM docs `https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/`
+    and `https://docs.vllm.ai/en/latest/configuration/optimization/`; Browserbase docs
+    `https://docs.browserbase.com/welcome/introduction`.
+
+- **Observed 2026-06-30 - Runtime channel can lag behind direct-engine intelligence (OPEN)**
+  - Finding: after the response route fix, `agent-speak-to-vai` through the normal direct-local/WS path first returned
+    the old "That isn't in my knowledge yet" fallback for a Vai self-identity prompt, then fell back to the source-level
+    direct engine and produced the correct `chat-fact-shim:meta-vai` answer. The answer contract is fixed, but the
+    runtime transport/cache path can still expose stale or incomplete behavior.
+  - Next slice: trace direct local pipe -> WS -> direct-engine fallback for fact-shim/meta-vai turns, then add a
+    regression probe that fails if a runtime user-path self-knowledge turn emits an empty WS capture or stale fallback.
+
 - **Built 2026-06-29 - Hyphenated source false-friend regression lock (DONE, tested 108/108)**
   - Finding: after the source-reference PR merged, the CodeRabbit thread for `source-code` / `source-tree`
     false friends was marked resolved, but the local regex still only excluded whitespace forms like

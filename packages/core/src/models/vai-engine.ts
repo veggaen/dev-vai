@@ -7561,6 +7561,7 @@ export class VaiEngine implements ModelAdapter {
       'mcq': 0.85, 'yesno': 0.85,
       'google-search': 0.80, 'discussion': 0.80,
       'expert-judgement': 0.82,
+      'business-opportunity-direction': 0.82,
       'short-topic-curated': 0.82,
       'conversational': 0.90,
       'networking': 0.90, 'creative-code': 0.85, 'best-practices': 0.90,
@@ -7966,7 +7967,7 @@ export class VaiEngine implements ModelAdapter {
     } else if (boundaryResponse) {
       response = this.tracked('boundary-response', boundaryResponse, userContent, { confidenceOverride: 0.9 });
       structuredFormatFired = true;
-    } else if (codeSnippetShim?.kind === 'code-snippet' || codeSnippetShim?.kind === 'concept-primer' || codeSnippetShim?.kind === 'compare-pair') {
+    } else if (codeSnippetShim?.kind === 'code-snippet' || codeSnippetShim?.kind === 'concept-primer' || codeSnippetShim?.kind === 'compare-pair' || codeSnippetShim?.kind === 'meta-vai') {
       response = this.tracked(`chat-fact-shim:${codeSnippetShim.kind}`, codeSnippetShim.reply, userContent, { confidenceOverride: 0.88 });
       structuredFormatFired = true;
     } else if (directPreflight !== null) {
@@ -9849,7 +9850,10 @@ export class VaiEngine implements ModelAdapter {
       if (frameworkTypeScript) return this.tracked('framework-devops', frameworkTypeScript, input);
     }
 
-    const factualCurated = this.tryFactualCurated(input);
+    const businessOpportunity = this.tryBusinessOpportunityDirection(input);
+    if (businessOpportunity !== null) return this.tracked('business-opportunity-direction', businessOpportunity, input);
+
+    const factualCurated = isBusinessOpportunityRequest(input) ? null : this.tryFactualCurated(input);
     if (factualCurated !== null) return this.tracked('factual-curated', factualCurated, input);
 
     // Strategy 0.0097: Curated list lookup ("the 8 planets", "the 5
@@ -16495,6 +16499,27 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     ].join('\n');
   }
 
+  private formatZustandHoverPerformanceDiagnosis(): string {
+    return [
+      '**Zustand + CSS hover diagnosis**',
+      '',
+      'Assuming the bug is a chat timeline that rerenders on every streamed token and hover menus flicker:',
+      '',
+      '1. **Store subscription is too broad**',
+      '   Components should not subscribe to the whole Zustand store or a selector that returns a fresh object every token. Select only the row fields each component needs, and use `shallow` or stable selectors for small object picks.',
+      '2. **Streaming tokens update the entire message list**',
+      '   Keep the high-frequency draft buffer separate from stable message rows. Batch token commits with `requestAnimationFrame`, then append the final message once instead of replacing the whole array for every token.',
+      '3. **Hover state is stored globally**',
+      '   Pure visual hover should be CSS (`:hover`, `:focus-within`, `group-hover`). Only store durable intent globally, such as "menu pinned open" or "active process node".',
+      '4. **Menus unmount under the cursor**',
+      '   Give each row a stable key, render hover menus in a predictable layer or portal, and keep the hit area alive with `pointerenter` / `pointerleave` plus a tiny close delay.',
+      '5. **Derived timeline rows are rebuilt every render**',
+      '   Memoize process-row derivation by message id + version, or compute it in the store when steps change. Do not sort/filter/map the full trace inside every token render.',
+      '',
+      'Good split: Zustand owns durable state and versioned data; CSS owns transient hover pixels; React memoization protects row components after the store shape is clean.',
+    ].join('\n');
+  }
+
   private tryConversationPhraseRecall(input: string, history: readonly Message[]): string | null {
     if (!/\b(?:exact\s+)?phrase\s+did\s+i\s+ask\s+you\s+to\s+remember\b/i.test(input)) return null;
     const userText = history.filter((message) => message.role === 'user').map((message) => message.content).join('\n');
@@ -16901,6 +16926,43 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     ].join('\n');
   }
 
+  private tryBusinessOpportunityDirection(input: string): string | null {
+    if (!isBusinessOpportunityRequest(input)) return null;
+
+    const norway = /\b(?:norway|norwegian|norge)\b/i.test(input);
+    const asksUniqueness = /\b(?:unique|generic|original|distinct|differentiator|defensible|moat|standout|ownable|uncommon)\b/i.test(input);
+
+    const candidate = norway
+      ? [
+        '**Candidate idea:** build a "Norwegian operations copilot" for small regulated businesses that turns messy obligations into daily work: Altinn-style filings, HMS/internal-control checklists, GDPR routines, WCAG accessibility checks, invoice/document triage, and municipality-specific deadlines.',
+        '',
+        'The wedge is not "AI dashboard for businesses". The wedge is a narrow, Norwegian workflow layer that knows local terminology, public-sector portals, compliance rhythms, and the difference between advice, evidence, and a task that must be completed by a human.',
+      ].join('\n')
+      : [
+        '**Candidate idea:** pick one painful repeated workflow for one narrow buyer, then build software that turns the workflow into a short operating loop with evidence, reminders, review, and action history.',
+        '',
+        'The wedge is not the broad category. The wedge is the buyer, the repeated pain, the data you can structure better than competitors, and the proof that the tool saves time or prevents mistakes.',
+      ].join('\n');
+
+    const uniqueness = asksUniqueness
+      ? [
+        '**How to tell if it is actually distinct:**',
+        '',
+        '1. **Specific buyer:** can you name the first 20 buyers without saying "everyone"?',
+        '2. **Specific trigger:** is there a moment where they must use it, such as a filing date, audit, incident, tender, shift handoff, or customer request?',
+        '3. **Specific data/workflow:** do you encode local forms, terminology, edge cases, templates, or integrations that a generic chatbot will not keep straight?',
+        '4. **Switching proof:** would the user still keep it after the novelty fades because it stores history, evidence, approvals, or team habits?',
+        '5. **Search test:** if five competitors say the same promise on their homepage, your idea is still generic. Your differentiator must survive being written as one plain sentence.',
+        '',
+        'A good one-sentence test: "For [narrow buyer], Vai handles [specific recurring job] using [local evidence/workflow] so they get [measurable result] without [current painful workaround]."',
+      ].join('\n')
+      : [
+        '**Validation path:** interview 10 target buyers, collect their current checklist/spreadsheet/email flow, build the smallest tool that replaces one weekly pain, then measure saved minutes, avoided mistakes, and whether they ask for the second workflow.',
+      ].join('\n');
+
+    return `${candidate}\n\n${uniqueness}`;
+  }
+
   private tryDirectCorpusTaskResponse(input: string, lower: string, history: readonly Message[]): string | null {
     const isBuilderHookSnippet = this._activeMode === 'builder' && /\buseDebouncedValue\b/i.test(input);
     const allowsChatDirectTask = this._activeMode === 'chat' || this._activeMode === 'plan';
@@ -16982,6 +17044,14 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       .join('\n')
       .toLowerCase();
     const context = `${taskInput.toLowerCase()}\n${lower}\n${recentText}`;
+
+    const asksZustandHoverPerformance =
+      /\bzustand\b/i.test(taskBody)
+      && /\bhover\b/i.test(taskBody)
+      && /\b(?:css|state|menu|menus?|flicker|specific|debug|previous|rerender|re[-\s]?render|timeline)\b/i.test(taskBody);
+    if (asksZustandHoverPerformance) {
+      return this.formatZustandHoverPerformanceDiagnosis();
+    }
 
     const asksReactPerformance =
       /\breact\b/i.test(taskBody)
