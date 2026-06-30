@@ -59,6 +59,13 @@ export interface DelegatedCouncilSelectionOptions {
   readonly preferFast?: boolean;
 }
 
+export interface DelegatedCouncilSelection {
+  readonly topic: CouncilTopic;
+  readonly candidates: readonly CouncilMember[];
+  readonly selected: readonly CouncilMember[];
+  readonly reason: string;
+}
+
 /**
  * Pick the members for a topic: the topic-specific roster if present, else the
  * default. De-dupes by id so an always-on member listed in both isn't doubled.
@@ -89,12 +96,28 @@ export function selectDelegatedMembers(
   roster: CouncilRoster,
   options: DelegatedCouncilSelectionOptions = {},
 ): CouncilMember[] {
+  return explainDelegatedSelection(topic, roster, options).selected.slice();
+}
+
+export function explainDelegatedSelection(
+  topic: CouncilTopic,
+  roster: CouncilRoster,
+  options: DelegatedCouncilSelectionOptions = {},
+): DelegatedCouncilSelection {
   const members = selectMembers(topic, roster);
   const maxMembers = options.maxMembers;
-  if (maxMembers === undefined || !Number.isFinite(maxMembers) || maxMembers >= members.length) return members;
-  if (maxMembers <= 0) return [];
+  if (maxMembers !== undefined && Number.isFinite(maxMembers) && maxMembers <= 0) {
+    return {
+      topic,
+      candidates: members,
+      selected: [],
+      reason: `Council routed this as ${topic}, but the member cap was 0 so no reviewers were delegated.`,
+    };
+  }
 
-  return members
+  const unbounded = maxMembers === undefined || !Number.isFinite(maxMembers) || maxMembers >= members.length;
+  const limit = unbounded ? members.length : Math.max(0, Math.floor(maxMembers));
+  const ranked = members
     .map((member, index) => ({ member, index }))
     .sort((a, b) => {
       const topicFit = Number(b.member.topic === topic) - Number(a.member.topic === topic);
@@ -104,7 +127,24 @@ export function selectDelegatedMembers(
         if (fastFit !== 0) return fastFit;
       }
       return a.index - b.index;
-    })
-    .slice(0, Math.max(0, Math.floor(maxMembers)))
-    .map((entry) => entry.member);
+    });
+  const selected = ranked.slice(0, limit).map((entry) => entry.member);
+  const names = selected.map((member) => member.displayName || member.id).join(', ') || 'no one';
+  const specialistAvailable = members.some((member) => member.topic === topic);
+  const specialistSelected = selected.some((member) => member.topic === topic);
+  const tieBreaker = specialistSelected && specialistAvailable
+    ? 'topic specialists win before speed'
+    : options.preferFast
+      ? 'fast non-thinking members break equal-topic ties'
+      : 'roster order breaks ties';
+  const capText = unbounded
+    ? `kept the full ${members.length}-member panel`
+    : `asked ${selected.length}/${members.length} members under the balanced cap`;
+
+  return {
+    topic,
+    candidates: members,
+    selected,
+    reason: `Council routed this turn as ${topic}; ${capText}: ${names}. Selection rule: ${tieBreaker}.`,
+  };
 }

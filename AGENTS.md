@@ -40,6 +40,7 @@ Practical consequences:
 | `GET /api/agent/introspect` (runtime, default `http://127.0.0.1:3006`) | Machine-readable self-description: models, council roster, pipeline stages, gates, blueprints, backlog. **Start here.** |
 | WS `GET /api/chat` (`chatWebSocketInboundSchema`) | Real user-path conversations. Send `{ conversationId?, content, mode: 'builder' \| 'chat' \| ... }`; stream `progress`/`text_delta`/`done` chunks. Builder turns stream `council-*` stages. |
 | Named pipe `\\.\pipe\vai-grok-direct` / TCP `127.0.0.1:48765` | Low-overhead direct agent channel (full ChatService intelligence). |
+| `pnpm agent:bootstrap` / `scripts/agent-bootstrap.mjs` | Offline-first tool map: cheap checks, expensive visual gates, delegation rules, and live introspect availability. |
 | `pnpm agent:speak` / `scripts/agent-speak-to-vai.mjs` | CLI one-shots to Vai. |
 | `node --import tsx` probe scripts | Drive `councilGenerateApp` / `ChatService` directly when diagnosing (see `scripts/council-codegen-eval.mts`). |
 

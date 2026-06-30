@@ -22,8 +22,10 @@ export {
   routeTopic,
   selectMembers,
   selectDelegatedMembers,
+  explainDelegatedSelection,
   type CouncilRoster,
   type DelegatedCouncilSelectionOptions,
+  type DelegatedCouncilSelection,
 } from './topic-router.js';
 
 export {

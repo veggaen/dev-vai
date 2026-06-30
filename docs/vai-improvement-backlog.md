@@ -40,6 +40,27 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
   - Next slice: expose the delegated member choice in the live Council UI/process trace so humans and agents can
     see "why this model was asked" instead of treating the Council as an opaque roster.
 
+- **Built 2026-06-30 - Agent bootstrap/tooling map + visible Council delegation rationale (DONE, tested 45/45)**
+  - Finding: agents were repeatedly rediscovering the same channels, narrow tests, live probes, and heavy visual
+    gates. The balanced Council selector also chose better members after the prior slice, but the live process UI
+    still did not explain why a particular member was asked.
+  - Change: added `docs/agent-tooling-guide.json`, `pnpm agent:bootstrap`, and an `agentTooling` block on
+    `/api/agent/introspect` so future agents and Vai's own loop can load cheap checks, expensive gates, delegation
+    rules, and research references from one machine-readable source. The introspect route now finds the repo root
+    robustly instead of assuming a specific launch cwd.
+  - Visibility: `selectDelegatedMembers` now has an explainable companion, and balanced Council turns stream a
+    `Council delegation` process-log row with the routed topic, cap, selected member(s), and tie-break rule. This
+    appears through the existing ProcessTree/ThinkingPanel path without a schema migration.
+  - Research note: current agent-tooling docs emphasize discoverable tools, bounded subagents, explicit MCP tool
+    metadata/listing, and browser automation as an optional isolated visual/E2E backend. Vai's local default should
+    stay deterministic: bootstrap map first, narrow tests second, heavy browser/model work only when the change
+    actually touches visible or live behavior.
+  - Proof: `agent-bootstrap.mjs` prints the guide and live runtime summary; focused tests
+    (`council.test.ts`, `council-roster-depth.test.ts`, `agent-introspect.test.ts`) -> 45/45 green;
+    `@vai/runtime` typecheck clean; `git diff --check` clean.
+  - Caveat: `@vai/core` typecheck is still blocked before project code by missing local dependency type entries
+    `@types/jsdom` and `@types/turndown` under `packages/core/node_modules`.
+
 - **Observed 2026-06-30 - Runtime channel can lag behind direct-engine intelligence (OPEN)**
   - Finding: after the response route fix, `agent-speak-to-vai` through the normal direct-local/WS path first returned
     the old "That isn't in my knowledge yet" fallback for a Vai self-identity prompt, then fell back to the source-level

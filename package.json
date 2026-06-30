@@ -33,6 +33,7 @@
     "vai:stop": "node scripts/vai-server.mjs stop",
     "vai:restart": "node scripts/vai-server.mjs restart",
     "vai:status": "node scripts/vai-server.mjs status",
+    "agent:bootstrap": "node scripts/agent-bootstrap.mjs",
     "agent:speak": "node scripts/agent-speak-to-vai.mjs",
     "agent:reload": "node scripts/agent-reload-vai.mjs",
     "chat:sessions:archive": "node scripts/archive-chat-sessions.mjs",

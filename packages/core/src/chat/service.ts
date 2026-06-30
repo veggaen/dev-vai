@@ -66,7 +66,7 @@ import type {
   CouncilConsensus,
 } from '../consensus/types.js';
 import type { CouncilRoster } from '../consensus/topic-router.js';
-import { routeTopic, selectDelegatedMembers } from '../consensus/topic-router.js';
+import { routeTopic, explainDelegatedSelection } from '../consensus/topic-router.js';
 import { convene, conveneStreaming, toCouncilThinking, type ConveneResult } from '../consensus/council.js';
 import { gatherWebEvidence, extractUrls } from '../consensus/web-evidence.js';
 import { buildCouncilReviewPacket } from '../consensus/review-packet.js';
@@ -77,6 +77,7 @@ import {
   buildVaiDraftProcessLog,
   buildVaiRedraftProcessLog,
   councilMembersFromNotes,
+  type ProcessLogEntry,
 } from './council-process-log.js';
 import { accumulateProgressStep, serializeProgressTrace, deserializeProgressTrace } from './progress-trace.js';
 import type { ChatProgressStep as ApiChatProgressStep } from '@vai/api-types/chat-ws';
@@ -903,14 +904,24 @@ export class ChatService {
    *   - 'quick'     → council is already skipped upstream (loop budget 0).
    * Override the balanced cap with VAI_COUNCIL_BALANCED_MEMBERS (default 1).
    */
-  private councilRosterForDepth(prompt?: string): CouncilRoster {
+  private councilRosterSelectionForDepth(prompt?: string): {
+    roster: CouncilRoster;
+    delegationLog?: readonly ProcessLogEntry[];
+  } {
     const roster = this.councilRoster!;
-    if (this.turnProcessDepth === 'deep') return roster;
+    if (this.turnProcessDepth === 'deep') return { roster };
     const envCap = Number(process.env.VAI_COUNCIL_BALANCED_MEMBERS);
     const cap = Number.isFinite(envCap) && envCap > 0 ? Math.floor(envCap) : 1;
     const topic = routeTopic(prompt ?? '');
-    const delegated = selectDelegatedMembers(topic, roster, { maxMembers: cap, preferFast: true });
-    return { default: delegated };
+    const selection = explainDelegatedSelection(topic, roster, { maxMembers: cap, preferFast: true });
+    return {
+      roster: { default: selection.selected },
+      delegationLog: [{
+        kind: 'action',
+        label: 'Council delegation',
+        body: selection.reason,
+      }],
+    };
   }
 
   /** Live-swap the council roster (driven by the council-config settings route). */
@@ -1235,13 +1246,19 @@ export class ChatService {
       if (!prepared) return undefined;
 
       const { input, councilTimeout, isSelfImprovement } = prepared;
-      yield { stage, label: 'Council reviewing Vai\'s proposal', status: 'running' };
+      const selection = this.councilRosterSelectionForDepth(input.prompt);
+      const partialLogs: ProcessLogEntry[] = [...(selection.delegationLog ?? [])];
+      yield {
+        stage,
+        label: 'Council reviewing Vai\'s proposal',
+        status: 'running',
+        processLog: partialLogs.length ? [...partialLogs] : undefined,
+      };
 
-      const partialLogs: ReturnType<typeof buildMemberDeliberationLog>[] = [];
       // Bound the WHOLE round by the loop's remaining wall-clock budget so slow cold
       // models can't hold the buffered answer hostage — the council yields the floor when
       // its time is up and consensus is built from whoever answered in time.
-      const stream = conveneStreaming(input, this.councilRosterForDepth(input.prompt), { timeoutMs: councilTimeout, overallDeadlineMs });
+      const stream = conveneStreaming(input, selection.roster, { timeoutMs: councilTimeout, overallDeadlineMs });
       let iter = await stream.next();
       while (!iter.done) {
         const progress = iter.value;
@@ -1332,7 +1349,8 @@ export class ChatService {
       // a box with the VRAM headroom via VAI_COUNCIL_CONCURRENCY=N.
       const envConcurrency = Number(process.env.VAI_COUNCIL_CONCURRENCY);
       const concurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? envConcurrency : 1;
-      const result = await convene(input, this.councilRosterForDepth(input.prompt), { timeoutMs: councilTimeout, concurrency });
+      const selection = this.councilRosterSelectionForDepth(input.prompt);
+      const result = await convene(input, selection.roster, { timeoutMs: councilTimeout, concurrency });
       if (!result.convened) return undefined;
       return await this.finalizeCouncilConvene(draft, result, isSelfImprovement);
     } catch (err) {
