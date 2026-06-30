@@ -79,11 +79,17 @@ describe('intent lexicon', () => {
 
   it('does not confuse source-code language with citation requests', () => {
     expect(wantsExplicitSourceReferences('show me the source code for this widget')).toBe(false);
+    expect(wantsExplicitSourceReferences('show me the source-code for this widget')).toBe(false);
     expect(wantsExplicitSourceReferences('How do I set up TypeScript with source code examples?')).toBe(false);
     expect(wantsExplicitSourceReferences('search references in the source tree')).toBe(false);
+    expect(wantsExplicitSourceReferences('search references in the source-tree')).toBe(false);
 
     const summary = summarizeLexicalSignals('find references in the source files');
     expect(summary.hasSourceReferenceRequest).toBe(false);
     expect(summary.sourceReferenceHints).toEqual([]);
+
+    const hyphenSummary = summarizeLexicalSignals('find references in the source-files');
+    expect(hyphenSummary.hasSourceReferenceRequest).toBe(false);
+    expect(hyphenSummary.sourceReferenceHints).toEqual([]);
   });
 });

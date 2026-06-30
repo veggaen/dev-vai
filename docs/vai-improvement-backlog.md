@@ -6,6 +6,15 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **Built 2026-06-29 - Hyphenated source false-friend regression lock (DONE, tested 108/108)**
+  - Finding: after the source-reference PR merged, the CodeRabbit thread for `source-code` / `source-tree`
+    false friends was marked resolved, but the local regex still only excluded whitespace forms like
+    `source code`. That left hyphenated codebase language at risk of being misread as a citation request.
+  - Change: broadened the false-friend matcher to `source[-\s]+...` and added explicit regression
+    coverage for `source-code`, `source-tree`, and `source-files` variants.
+  - Proof: `intent-lexicon.test.ts` + `web-conclude-turn.test.ts` + `turn-kind.test.ts` +
+    `turn-classifier.test.ts` -> 108/108 green; ESLint clean on the changed intent lexicon files.
+
 - **Built 2026-06-29 - Context-carry scenario harness for follow-up evals (DONE, tested 16/16)**
   - Finding: the loop's weakest class, `followup/context-carry`, was being measured with fresh one-turn
     conversations even though prompts like "what about the second one?" and "make that simpler" require
