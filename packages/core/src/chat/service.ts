@@ -66,6 +66,7 @@ import type {
   CouncilConsensus,
 } from '../consensus/types.js';
 import type { CouncilRoster } from '../consensus/topic-router.js';
+import { routeTopic, selectDelegatedMembers } from '../consensus/topic-router.js';
 import { convene, conveneStreaming, toCouncilThinking, type ConveneResult } from '../consensus/council.js';
 import { gatherWebEvidence, extractUrls } from '../consensus/web-evidence.js';
 import { buildCouncilReviewPacket } from '../consensus/review-packet.js';
@@ -896,23 +897,20 @@ export class ChatService {
    * sequential council costs 60-90s of pure model-swapping and made balanced turns
    * TIME OUT with empty answers. So:
    *   - 'deep'      → full panel (the user opted into thoroughness; worth the swaps).
-   *   - 'balanced'  → a SINGLE member (prefer one already warm), so no eviction cycle:
-   *                   the model stays resident and the turn answers in seconds.
+   *   - 'balanced'  → a bounded delegated panel (default one member): pick a topic
+   *                   specialist when one exists; otherwise prefer a fast non-thinking
+   *                   member so the turn avoids model-swap cascades.
    *   - 'quick'     → council is already skipped upstream (loop budget 0).
    * Override the balanced cap with VAI_COUNCIL_BALANCED_MEMBERS (default 1).
    */
-  private councilRosterForDepth(): CouncilRoster {
+  private councilRosterForDepth(prompt?: string): CouncilRoster {
     const roster = this.councilRoster!;
     if (this.turnProcessDepth === 'deep') return roster;
     const envCap = Number(process.env.VAI_COUNCIL_BALANCED_MEMBERS);
     const cap = Number.isFinite(envCap) && envCap > 0 ? Math.floor(envCap) : 1;
-    if (roster.default.length <= cap) return roster;
-    // Prefer a member that is NOT a slow-thinking model (those are the heaviest to load)
-    // so the single balanced reviewer is the fastest resident option.
-    const ranked = [...roster.default].sort(
-      (a, b) => Number(a.slowThinking ?? false) - Number(b.slowThinking ?? false),
-    );
-    return { default: ranked.slice(0, cap) };
+    const topic = routeTopic(prompt ?? '');
+    const delegated = selectDelegatedMembers(topic, roster, { maxMembers: cap, preferFast: true });
+    return { default: delegated };
   }
 
   /** Live-swap the council roster (driven by the council-config settings route). */
@@ -1243,7 +1241,7 @@ export class ChatService {
       // Bound the WHOLE round by the loop's remaining wall-clock budget so slow cold
       // models can't hold the buffered answer hostage — the council yields the floor when
       // its time is up and consensus is built from whoever answered in time.
-      const stream = conveneStreaming(input, this.councilRosterForDepth(), { timeoutMs: councilTimeout, overallDeadlineMs });
+      const stream = conveneStreaming(input, this.councilRosterForDepth(input.prompt), { timeoutMs: councilTimeout, overallDeadlineMs });
       let iter = await stream.next();
       while (!iter.done) {
         const progress = iter.value;
@@ -1334,7 +1332,7 @@ export class ChatService {
       // a box with the VRAM headroom via VAI_COUNCIL_CONCURRENCY=N.
       const envConcurrency = Number(process.env.VAI_COUNCIL_CONCURRENCY);
       const concurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? envConcurrency : 1;
-      const result = await convene(input, this.councilRosterForDepth(), { timeoutMs: councilTimeout, concurrency });
+      const result = await convene(input, this.councilRosterForDepth(input.prompt), { timeoutMs: councilTimeout, concurrency });
       if (!result.convened) return undefined;
       return await this.finalizeCouncilConvene(draft, result, isSelfImprovement);
     } catch (err) {

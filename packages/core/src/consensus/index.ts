@@ -18,7 +18,13 @@ export type {
   CouncilThinking,
 } from './types.js';
 
-export { routeTopic, selectMembers, type CouncilRoster } from './topic-router.js';
+export {
+  routeTopic,
+  selectMembers,
+  selectDelegatedMembers,
+  type CouncilRoster,
+  type DelegatedCouncilSelectionOptions,
+} from './topic-router.js';
 
 export {
   reachConsensus,

@@ -58,6 +58,20 @@ describe('buildLocalCouncilRoster — seat all installed models, niche-prioritiz
     expect(reasoning.some((m) => m.id === 'deepseek-r1:8b')).toBe(true);
   });
 
+  it('seats modern code-specialist local models on the code topic', () => {
+    const models = registryOf(['qwen3:8b', 'devstral:24b']);
+    const roster = buildLocalCouncilRoster(models, opts);
+    const code = roster?.byTopic?.code ?? [];
+    expect(code.some((m) => m.id === 'devstral:24b')).toBe(true);
+  });
+
+  it('seats explicit reasoning-specialist local models on the reasoning topic', () => {
+    const models = registryOf(['qwen2.5:7b', 'qwq:32b']);
+    const roster = buildLocalCouncilRoster(models, opts);
+    const reasoning = roster?.byTopic?.reasoning ?? [];
+    expect(reasoning.some((m) => m.id === 'qwq:32b')).toBe(true);
+  });
+
   it('returns undefined when there are no local models (council stays dormant)', () => {
     const roster = buildLocalCouncilRoster(registryOf([]), opts);
     expect(roster).toBeUndefined();

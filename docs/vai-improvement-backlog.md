@@ -27,6 +27,19 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
     and `https://docs.vllm.ai/en/latest/configuration/optimization/`; Browserbase docs
     `https://docs.browserbase.com/welcome/introduction`.
 
+- **Built 2026-06-30 - Balanced Council delegation now asks the best-fit specialist (DONE, tested 46/46)**
+  - Finding: the balanced Council path was efficient but too blunt: it capped the panel by choosing the fastest
+    default member, which could skip an already-seated code/reasoning specialist on turns where that specialist
+    was the whole point of delegating.
+  - Change: added `selectDelegatedMembers(topic, roster, { maxMembers, preferFast })` so balanced turns route the
+    prompt to a topic first, prefer a matching specialist, then use fast non-thinking members only as the tie-break.
+    Deep mode still keeps the full panel. Quick mode remains skipped upstream.
+  - Capability: expanded local model niche seating so installed specialist families like Devstral/Codestral,
+    QwQ/Magistral, and Qwen coder variants become explicit Council seats without adding paid APIs or downloads.
+  - Proof: focused consensus/runtime roster tests -> 46/46 green; `@vai/runtime` typecheck clean.
+  - Next slice: expose the delegated member choice in the live Council UI/process trace so humans and agents can
+    see "why this model was asked" instead of treating the Council as an opaque roster.
+
 - **Observed 2026-06-30 - Runtime channel can lag behind direct-engine intelligence (OPEN)**
   - Finding: after the response route fix, `agent-speak-to-vai` through the normal direct-local/WS path first returned
     the old "That isn't in my knowledge yet" fallback for a Vai self-identity prompt, then fell back to the source-level
