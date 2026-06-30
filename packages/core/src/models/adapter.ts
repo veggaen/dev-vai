@@ -293,6 +293,31 @@ export interface ChatChunk {
  * WS protocol and (future) HTTP/gRPC/agent-JSON skins — the "one structured
  * turn, many transports" contract.
  */
+export type AuditOutcomeKind = 'O1' | 'O2' | 'O3' | 'O4' | 'O5' | 'O6' | 'O7' | 'O8';
+
+export interface AuditMeta {
+  /** Honest async council outcome code. See docs/async-audit-revise-in-place-plan.md. */
+  readonly outcomeKind: AuditOutcomeKind;
+  /** True only when at least one council round actually convened. */
+  readonly convened: boolean;
+  /** True when the council loop selected revised text for the final answer. */
+  readonly revised: boolean;
+  /** True when the live draft surface received a reset event. */
+  readonly resetFired: boolean;
+  /** The draft-producing strategy/model tag at the time the council audited it. */
+  readonly draftStrategy?: string;
+  /** True only when the user-visible answer text changed after the audit. */
+  readonly visibleTextChanged: boolean;
+  /** Council read of the user's real intent, when a council convened. */
+  readonly realIntent?: string;
+  /** First actionable method lesson from the council, when present. */
+  readonly methodLesson?: string;
+  /** Raw advisory council outcome. This is not verification. */
+  readonly councilOutcome?: 'ship' | 'act' | 'escalate';
+  /** Bounded excerpt of the pre-reset visible draft, only when the answer changed. */
+  readonly priorTextExcerpt?: string;
+}
+
 export interface TurnThinking {
   /** Classified question intent (action-yesno | definition | factual-lookup | build | meta | other). */
   readonly intent: string;
@@ -327,6 +352,11 @@ export interface TurnThinking {
    * facts (see docs/capabilities/scis-consensus-council.md).
    */
   readonly council?: CouncilThinking;
+  /**
+   * Durable, honest metadata for the async council audit/revise loop. This is
+   * advisory metadata: never label these outcomes as "verified".
+   */
+  readonly auditMeta?: AuditMeta;
   /**
    * What vai:v0 drafted before council review / escalation. Process-only —
    * when council escalates to a generative arm, this is NOT the shipped answer.

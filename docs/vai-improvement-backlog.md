@@ -6,6 +6,18 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **Built 2026-06-30 - Honest async council audit metadata (Slice A, DONE, tested 39/39)**
+  - Finding: the async council loop could review or revise a draft, but the terminal message did not durably carry
+    which outcome occurred. The desktop store also cleared `liveDraft` on `done`, losing the pre-reset draft text
+    needed for an honest "what changed" audit surface after reload.
+  - Change: added a durable `auditMeta` contract with O1-O8 outcome codes, attached it to `done.thinking`, persisted
+    it in message `plan`, rehydrated it in the desktop store, and preserved a bounded pre-reset draft excerpt when
+    a visible reset happens. Grounded URL/repo drafts that suppress a redraft are recorded as original-kept rather
+    than revised, and fallback-council metadata only attaches when it still describes the shipped fallback text.
+  - Proof: `council-redraft-loop.test.ts` + `chatStore.test.ts` -> 39/39 green; `@vai/desktop` typecheck clean.
+    `@vai/core` package typecheck is currently blocked before project code by missing package-local
+    `@types/jsdom` and `@types/turndown`.
+
 - **Built 2026-06-29 - Hyphenated source false-friend regression lock (DONE, tested 108/108)**
   - Finding: after the source-reference PR merged, the CodeRabbit thread for `source-code` / `source-tree`
     false friends was marked resolved, but the local regex still only excluded whitespace forms like

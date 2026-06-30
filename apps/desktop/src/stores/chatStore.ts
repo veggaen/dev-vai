@@ -98,6 +98,21 @@ export interface TurnRoutePlanUI {
   candidates: TurnRouteCandidateUI[];
 }
 
+export type AuditOutcomeKindUI = 'O1' | 'O2' | 'O3' | 'O4' | 'O5' | 'O6' | 'O7' | 'O8';
+
+export interface AuditMetaUI {
+  outcomeKind: AuditOutcomeKindUI;
+  convened: boolean;
+  revised: boolean;
+  resetFired: boolean;
+  draftStrategy?: string;
+  visibleTextChanged: boolean;
+  realIntent?: string;
+  methodLesson?: string;
+  councilOutcome?: 'ship' | 'act' | 'escalate';
+  priorTextExcerpt?: string;
+}
+
 export interface TurnThinkingUI {
   intent: string;
   strategy: string;
@@ -113,6 +128,8 @@ export interface TurnThinkingUI {
   routePlan?: TurnRoutePlanUI;
   /** SCIS consensus council view (who reviewed, the consensus, intent, missing method). */
   council?: CouncilThinkingUI;
+  /** Durable honest metadata for async council review/revise outcomes. */
+  auditMeta?: AuditMetaUI;
   /** vai:v0 draft before council — visible in process even when council escalated. */
   vaiProposedDraft?: string;
 }
@@ -216,6 +233,8 @@ export interface ChatMessage {
   groundedBuildBrief?: GroundedBuildBriefUI;
   /** Vai-native thinking trace (strategy chain, intent, trust, confidence). */
   thinking?: TurnThinkingUI;
+  /** Rehydrated audit metadata from the persisted message plan. */
+  auditMeta?: AuditMetaUI;
   /** Exit-gate result. Exposed in the process panel, never prepended to answer text. */
   verification?: ResponseVerificationUI;
   /** Live image-generation steps (produce→verify→regenerate) shown as visible process. */
@@ -241,6 +260,7 @@ export interface ChatMessage {
     phase: 'start' | 'delta' | 'reset' | 'committed' | 'discarded';
     seq: number;
     turnId?: string;
+    priorText?: string;
   } | null;
   /** Deterministic HTML info blocks (sandboxed-iframe rendered) emitted by Vai/council. */
   infoBlocks?: { id: string; html: string; title?: string }[];
@@ -279,13 +299,52 @@ export function mergeProgressStepsForMessage(
   return [...normalizedExisting, incoming].slice(-MAX_PROGRESS_STEPS_PER_MESSAGE);
 }
 
-function parseEvidenceFromMessagePlan(plan: string | null | undefined): Partial<Pick<
+function isAuditMetaUI(value: unknown): value is AuditMetaUI {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<AuditMetaUI>;
+  return (
+    typeof candidate.outcomeKind === 'string' &&
+    ['O1', 'O2', 'O3', 'O4', 'O5', 'O6', 'O7', 'O8'].includes(candidate.outcomeKind) &&
+    typeof candidate.convened === 'boolean' &&
+    typeof candidate.revised === 'boolean' &&
+    typeof candidate.resetFired === 'boolean' &&
+    typeof candidate.visibleTextChanged === 'boolean'
+  );
+}
+
+export function auditPriorDraftExcerpt(text: string | undefined, maxLength = 600): string | undefined {
+  const normalized = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return undefined;
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+export function mergeAuditPriorDraftExcerpt(
+  thinking: TurnThinkingUI | undefined,
+  priorText: string | undefined,
+): TurnThinkingUI | undefined {
+  if (!thinking?.auditMeta || thinking.auditMeta.priorTextExcerpt || !thinking.auditMeta.visibleTextChanged) {
+    return thinking;
+  }
+  const priorTextExcerpt = auditPriorDraftExcerpt(priorText);
+  if (!priorTextExcerpt) return thinking;
+  return {
+    ...thinking,
+    auditMeta: {
+      ...thinking.auditMeta,
+      priorTextExcerpt,
+    },
+  };
+}
+
+export function parseAssistantMessagePlan(plan: string | null | undefined): Partial<Pick<
   ChatMessage,
-  'sources' | 'sourcePresentation' | 'researchTrace' | 'followUps' | 'confidence'
+  'sources' | 'sourcePresentation' | 'researchTrace' | 'followUps' | 'confidence' | 'auditMeta'
 >> {
   if (!plan) return {};
   try {
     const parsed = JSON.parse(plan) as {
+      auditMeta?: unknown;
       evidence?: {
         sources?: SearchSourceUI[];
         sourcePresentation?: SourcePresentationUI;
@@ -294,15 +353,22 @@ function parseEvidenceFromMessagePlan(plan: string | null | undefined): Partial<
         confidence?: number;
       };
     };
+    const out: Partial<Pick<
+      ChatMessage,
+      'sources' | 'sourcePresentation' | 'researchTrace' | 'followUps' | 'confidence' | 'auditMeta'
+    >> = {};
+    if (isAuditMetaUI(parsed.auditMeta)) {
+      out.auditMeta = parsed.auditMeta;
+    }
     const evidence = parsed.evidence;
-    if (!evidence?.sources?.length) return {};
-    return {
-      sources: evidence.sources,
-      sourcePresentation: evidence.sourcePresentation,
-      researchTrace: evidence.researchTrace,
-      followUps: evidence.followUps,
-      confidence: evidence.confidence,
-    };
+    if (evidence?.sources?.length) {
+      out.sources = evidence.sources;
+      out.sourcePresentation = evidence.sourcePresentation;
+      out.researchTrace = evidence.researchTrace;
+      out.followUps = evidence.followUps;
+      out.confidence = evidence.confidence;
+    }
+    return out;
   } catch {
     return {};
   }
@@ -686,7 +752,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         role: m.role as ChatMessage['role'],
         content: m.content,
         imageId: m.imageId,
-        ...(m.role === 'assistant' ? parseEvidenceFromMessagePlan(m.plan) : {}),
+        ...(m.role === 'assistant' ? parseAssistantMessagePlan(m.plan) : {}),
         ...(m.role === 'assistant' && m.modelId ? { respondingModelId: m.modelId } : {}),
         ...(m.role === 'assistant' && m.progressSteps?.length ? { progressSteps: m.progressSteps } : {}),
       }))),
@@ -1110,13 +1176,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const prev = target.liveDraft ?? null;
           if (prev && d && d.seq < prev.seq) return {}; // stale frame
           const phase = d?.phase ?? 'delta';
+          const nextText = chunk.draftText ?? prev?.text ?? '';
+          const priorText = phase === 'reset'
+            ? prev?.priorText ?? prev?.text
+            : prev?.priorText;
           msgs[idx] = {
             ...target,
             liveDraft: {
-              text: chunk.draftText ?? prev?.text ?? '',
+              text: nextText,
               phase,
               seq: d?.seq ?? (prev?.seq ?? 0) + 1,
               turnId: d?.turnId ?? prev?.turnId,
+              priorText,
             },
           };
           return { messages: msgs };
@@ -1148,7 +1219,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // The final answer has committed into message.content — retire the in-review draft block
         // so the UI shows the answer, not the stale draft.
         set((state) => {
-          const msgs = state.messages.map((m) => (m.liveDraft ? { ...m, liveDraft: null } : m));
+          const targetIndex = activeStreamingAssistantId
+            ? state.messages.findIndex((message) => message.id === activeStreamingAssistantId)
+            : state.messages.length - 1;
+          const msgs = state.messages.map((m, index) => {
+            if (index !== targetIndex || m.role !== 'assistant') {
+              return m.liveDraft ? { ...m, liveDraft: null } : m;
+            }
+            const thinking = mergeAuditPriorDraftExcerpt(chunk.thinking, m.liveDraft?.priorText);
+            return {
+              ...m,
+              liveDraft: null,
+              ...(chunk.modelId ? { respondingModelId: chunk.modelId } : {}),
+              ...(thinking ? { thinking } : {}),
+              ...(thinking?.auditMeta ? { auditMeta: thinking.auditMeta } : {}),
+            };
+          });
           return { messages: msgs, isStreaming: false, streamingConversationId: null };
         });
         // Capture assistant response + reasoning in dev logs
@@ -1164,23 +1250,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (reasoningText) {
             capture.thinking(reasoningText, { label: 'Model Reasoning' });
           }
-        }
-        if (chunk.modelId || chunk.thinking) {
-          set((state) => {
-            const msgs = [...state.messages];
-            const targetIndex = activeStreamingAssistantId
-              ? msgs.findIndex((message) => message.id === activeStreamingAssistantId)
-              : msgs.length - 1;
-            const target = targetIndex >= 0 ? msgs[targetIndex] : null;
-            if (target && target.role === 'assistant') {
-              msgs[targetIndex] = {
-                ...target,
-                ...(chunk.modelId ? { respondingModelId: chunk.modelId } : {}),
-                ...(chunk.thinking ? { thinking: chunk.thinking } : {}),
-              };
-            }
-            return { messages: msgs };
-          });
         }
         ws.close();
         if (activeWs === ws) activeWs = null;
