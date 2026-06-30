@@ -40,6 +40,7 @@ import { tryEmitFactShim, tryVaiSelfKnowledge } from './deterministic-facts-rout
 import { extractIdiomContext } from './programming-idioms.js';
 import { splitCompoundQuestion, classifyQuestionIntent } from './question-intent.js';
 import { classifyTurn } from './turn-classifier.js';
+import { intentFit } from './intent-fit.js';
 import {
   dispatchTurn,
   type TurnHandler,
@@ -2501,13 +2502,25 @@ export class ChatService {
       // handler's work only happens if every higher one declined.
       const det = (
         name: string,
-        fit: number,
+        prior: number,
         resolve: () => ServiceResolution | null,
         applicable = true,
         reason?: string,
       ): TurnHandler<ServiceResolution> => ({
         name,
-        score: () => (applicable ? { score: fit, reason } : null),
+        // Intent-aware fit: `prior` is the handler's constant base priority; the
+        // turn's classified intent + shape nudge it (bounded) so an off-intent
+        // handler loses even when its prior is high, and a fitting one can
+        // overtake a higher-listed rival. `intentFit` returns the prior unchanged
+        // for any handler/turn it has no opinion on, so this preserves today's
+        // order exactly until a signal fires. The handler's own `reason` and the
+        // fit reason are both surfaced into the visible dispatch plan.
+        score: (ctx) => {
+          if (!applicable) return null;
+          const { score, reason: fitReason } = intentFit(name, prior, ctx);
+          const combinedReason = [reason, fitReason].filter(Boolean).join(' · ') || undefined;
+          return { score, reason: combinedReason };
+        },
         resolve,
       });
       const handlers: TurnHandler<ServiceResolution>[] = [

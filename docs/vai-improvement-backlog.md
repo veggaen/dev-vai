@@ -6,6 +6,44 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **Built 2026-06-30 - Intent-aware handler scoring (DONE, tested: 17 unit + 4 live-probe + 476 src/chat green)**
+  - Finding: the scored chat dispatcher (`turn-pipeline.ts`) had the right architecture but the live
+    registry handed each handler a HARDCODED constant priority (0.99..0.89) and ranked on that — a code
+    comment at `service.ts:2497` admitted "intent/fit-based adjustment is layered on next". So routing was
+    decided by list-order + an `applicable` boolean gate, not by how well a turn FIT each handler (the
+    structural source of "intent miss" errors in the response-weakness taxonomy).
+  - Change: added `packages/core/src/chat/intent-fit.ts` (`intentFit(handler, prior, ctx)`) — a pure,
+    table-driven fit adjuster. The constant becomes a PRIOR; a turn's classified `QuestionIntent` + shape
+    `TurnClassification` nudges it (bounded). Wired into the `det()` score callback in `service.ts` so the
+    score is now `intentFit(name, prior, ctx)`; the per-handler reason + the on/off-lane fit reason both
+    ride through to the streamed `routePlan` (auditable trail, no UI change). Unmapped handler / no-rule
+    turn returns the prior UNCHANGED (regression-safety default).
+  - Tuning (caught by the proof bar): the first boost magnitude (0.06) was too large — it let fact-shim
+    LEAPFROG `chat-format-strict` on "Capital of Japan. One word only.", breaking the curated order and
+    failing the existing `chat-service` one-word-capital test (confirmed mine via stash-revert: passed on
+    baseline, failed with the change). Fixed by capping the boost at 0.004 (< the tightest 0.005 inter-prior
+    gap) so a fitting handler reinforces/tie-breaks but never overtakes a sibling seated above it. The
+    decisive off-lane demotion is the suppression multiplier (0.45), not the boost.
+  - HONEST scope finding (verified through the live ChatService, recorded so it isn't oversold): the scored
+    registry is only REACHED by turns that survive the upstream short-circuits — in practice the knowledge
+    lane (`factual-lookup`/`definition`) + identity/meta turns. Build/recommendation/product-quality asks
+    are intercepted upstream and never reach the registry, so intent-fit's SUPPRESSION rules for those
+    intents are defense-in-depth (a safety net if an upstream router ever lets one through), NOT a
+    day-to-day observable effect. The proven, measurable win is sharper BOOST-driven ranking on knowledge
+    turns: e.g. "what is the capital of Japan?" / "who is Ada Lovelace?" → fact-shim boosted 0.91→0.914 with
+    reason `on-lane (intent=factual-lookup)` and wins; "tell me about your engine" → `chat-vai-identity`.
+  - Proof: `intent-fit.test.ts` 17/17 (incl. the no-leapfrog / Japan-class invariant + unmapped=prior);
+    `intent-fit-routing-probe.test.ts` 4/4 driving the REAL ChatService and asserting the streamed route
+    plan; `turn-pipeline.test.ts` 12/12 (contract unchanged); `chat-service*.test.ts` 59/59 (the regressed
+    one-word-capital test fixed); ALL `src/chat` 476/476 green; tsc clean on the changed files. The 4
+    pre-existing `vai-engine` failures (deploy-fire-drill, auth/team/sandbox) fail identically on baseline
+    (stash-revert proven) and are unrelated to this change.
+  - Next slice: intent-fit currently only helps turns that reach the registry. The higher-leverage follow-up
+    is to make the UPSTREAM short-circuits (which intercept builds/recommendations) themselves intent-fit
+    aware, OR to fold a few of them into the scored registry so their decisions become rankable + auditable
+    the same way. Separately, the VaiEngine shim does NOT share this scoring (divergence) — porting it is a
+    second follow-up.
+
 - **Built 2026-06-30 - Response-intelligence probe regressions (DONE, tested 8/8 + visual QA)**
   - Finding: live/direct probes showed high-value prompts falling through to the wrong deterministic lanes:
     Vai identity/process questions returned the generic no-confidence capabilities blurb, a Norway software-idea
@@ -60,6 +98,19 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
     `@vai/runtime` typecheck clean; `git diff --check` clean.
   - Caveat: `@vai/core` typecheck is still blocked before project code by missing local dependency type entries
     `@types/jsdom` and `@types/turndown` under `packages/core/node_modules`.
+
+- **Built 2026-06-30 - Response-capability Council mission injected into self-improve loop (DONE, tested 11/11)**
+  - Finding: the generative capability council had access to the north-star, backlog, user goals, and runtime
+    introspect, but not a crisp operating brief for "random user message -> great Vai answer" work, nor the
+    verifier/updater self-improvement contract V3gga is asking for.
+  - Change: added `docs/vai-response-capability-loop.md` with an elite Council mission prompt, response weakness
+    taxonomy, fix-selection rules, and verifier/updater self-improvement rules. `capability-context.mjs` now injects
+    that brief plus a bounded summary of `docs/agent-tooling-guide.json` into the capability council context.
+  - Impact: every capability cycle can now investigate response quality, pick one concrete weakness, propose a
+    small code/test fix, and improve the verifier/updater itself when that is the bottleneck, while staying bounded
+    by cheap tests and the one-heavy-task rule.
+  - Proof: `node --test scripts/improve-loop/capability-context.test.mjs` -> 11/11 green; `node scripts/agent-bootstrap.mjs`
+    still prints the tool map and live runtime summary.
 
 - **Observed 2026-06-30 - Runtime channel can lag behind direct-engine intelligence (OPEN)**
   - Finding: after the response route fix, `agent-speak-to-vai` through the normal direct-local/WS path first returned
