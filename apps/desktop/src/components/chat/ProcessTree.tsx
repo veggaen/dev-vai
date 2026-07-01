@@ -494,7 +494,7 @@ function ReasoningStreamPanel({ body }: { body: string }) {
   }, [tail]);
   return (
     <div className="process-tree__panel py-1">
-      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] font-semibold tracking-wide text-[color:var(--chat-muted)]">
+      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-[color:var(--chat-muted)] opacity-70">
         <span className="vai-process-shimmer">Thinking out loud</span>
       </div>
       <pre
@@ -521,7 +521,7 @@ function ProcessNotePanel({ label, body }: { label: string; body: string }) {
   return (
     <div className="process-tree__panel group/panel relative py-1">
       <div className="mb-0.5 flex items-center justify-between gap-2">
-        <div className="process-tree__panel-label text-[10px] font-semibold tracking-wide text-[color:var(--chat-muted)]">
+        <div className="process-tree__panel-label text-[10px] text-[color:var(--chat-muted)] opacity-70">
           {ioLabel}
         </div>
         <button

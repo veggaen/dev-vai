@@ -125,6 +125,18 @@
     "vaiCouncil": "Balanced turns should ask a bounded best-fit specialist panel; deep turns may use the full roster; quick turns skip Council.",
     "visibility": "When a delegate/tool runs, surface who was asked, why, and what evidence it produced."
   },
+  "changelog": {
+    "path": "docs/COUNCIL-CHANGELOG.md",
+    "marker": "AGENT-DISCOVERY: council-self-improvement-changelog",
+    "writtenBy": "scripts/improve-loop/changelog.mjs (renderChangelogEntry + appendChangelogEntry)",
+    "use": "The side-note of what the Council/self-improvement loop changed about Vai, why, files touched, verification, and peer-review verdict. Newest entries first. Read this before re-proposing a self-change; APPEND here whenever the loop applies, shelves, or reverts a change to Vai. Each entry has a human body AND a fenced `council-change` JSON block for machine parsing (parseChangelog)."
+  },
+  "rejectedIdeaShelf": {
+    "scope": "idea:rejected",
+    "store": "project_knowledge (scripts/improve-loop/db.mjs)",
+    "writtenBy": "scripts/improve-loop/feature-review.mjs (shelveRejectedIdea + tokenizeRejectedIdea)",
+    "use": "Tokenized fingerprints of ideas the Council built, rejected twice, and agreed to stop chasing. Pull with checkShelvedIdeas before re-proposing a similar idea ('we tried this — here's why it failed'). A shelved idea becomes revivable only when several members flag new knowledge (flagIdeaRevivable) and its confidence decays below the floor."
+  },
   "externalResearchRefs": [
     {
       "name": "OpenAI tools guide",

@@ -1521,9 +1521,28 @@ code, pre, kbd {
   border-left: 1px solid var(--panel-border-soft);
 }
 
+/* Self-improvements — the "Council improved Vai" surface. Quiet at rest (one line); each opened
+   item gets a soft left rail matching the process-tree connector, so the two read as one family.
+   Token-bound, no pills/chips. The per-item copy reveals on hover/focus (progressive disclosure). */
+.self-improve__item {
+  border-left: 1px solid var(--panel-border-soft);
+  padding-left: 0.6rem;
+}
+.self-improve__item .process-tree__copy-btn--panel {
+  opacity: 0;
+}
+.self-improve__item:hover .process-tree__copy-btn--panel,
+.self-improve__item:focus-within .process-tree__copy-btn--panel {
+  opacity: 1;
+}
+
 @media (max-width: 520px) {
   .process-tree__timeline {
     padding-left: 0.15rem;
+  }
+  /* Touch: no hover, so keep the per-item copy always reachable rather than hidden. */
+  .self-improve__item .process-tree__copy-btn--panel {
+    opacity: 0.7;
   }
   .process-tree__timeline::before,
   .process-tree__step--last::after {
