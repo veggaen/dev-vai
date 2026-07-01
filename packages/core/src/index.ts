@@ -64,6 +64,7 @@ export type {
   ActorContributionPayload,
   GuidanceStore,
 } from './chat/route-guidance.js';
+export type { SelfImproveQueue, SelfImproveJob } from './chat/self-improve-queue-port.js';
 export type { ConversationRecord, MessageRecord, ImageRecord } from './chat/types.js';
 export {
   hasExplicitSoftwareExecutionAnchor,

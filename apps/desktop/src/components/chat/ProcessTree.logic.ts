@@ -164,6 +164,7 @@ function toneForStage(stage: string): ProcessTone {
   if (stage.startsWith('tool-batch')) return 'tool';
   if (stage.startsWith('council')) return 'council';
   if (stage === 'vai-draft' || stage === 'vai-redraft') return 'compose';
+  if (stage === 'multi-intent') return 'compose';
   if (stage === 'search' || stage === 'escalate' || stage === 'research') return 'search';
   if (stage === 'quality-check' || stage === 'verify') return 'verify';
   if (stage.startsWith('build') || stage === 'apply' || stage === 'preview') return 'build';
@@ -188,6 +189,7 @@ function shortLabelForStage(stage: string, label: string): string {
   if (stage === 'vai-redraft') return 'Vai revised';
   if (stage.startsWith('council')) return stage === 'council-vai' ? 'Council (Vai)' : 'Council';
   if (stage === 'vai-draft') return 'Vai proposed';
+  if (stage === 'multi-intent') return 'Requests';
   if (stage === 'search' || stage === 'research') return 'Searched';
   if (stage === 'quality-check' || stage === 'verify') return 'Verified';
   if (stage.startsWith('build') || stage === 'apply') return 'Built';

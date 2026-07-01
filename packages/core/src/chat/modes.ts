@@ -355,3 +355,33 @@ RIGOR (THORSEN-ALIGNED): Prefer falsifiable claims, boundary conditions, and “
 export function isConversationMode(value: string): value is ConversationMode {
   return value === 'chat' || value === 'agent' || value === 'builder' || value === 'plan' || value === 'debate';
 }
+
+/**
+ * Intent-conditioned lead directive for the Agent-mode system prompt.
+ *
+ * The Agent prompt necessarily carries heavy BUILD guidance ("output the COMPLETE
+ * working application files", "always include package.json", "default to action").
+ * On an ANSWER turn (a question / discussion) a local model pattern-matches that
+ * loudest, most-repeated instruction and emits a scaffolded app even though the
+ * turn was correctly classified as `answer` — the understanding→action gap (e.g.
+ * "what are great tools for computer intelligence?" answered with a Next.js todo
+ * app). The classifier already knows the intent; this puts that knowledge FIRST
+ * in the prompt so it overrides the buried build-bias.
+ *
+ * Prepended (highest priority) to the Agent prompt. Returns '' for `build` /
+ * `ambiguous` so the existing build-oriented prompt is unchanged on those turns.
+ */
+export function agentIntentLeadDirective(
+  agentBuildIntent: 'build' | 'answer' | 'ambiguous',
+): string {
+  if (agentBuildIntent !== 'answer') return '';
+  return [
+    'THIS TURN IS A QUESTION / DISCUSSION, NOT A BUILD REQUEST.',
+    '- Answer it directly in prose. Lead with the answer.',
+    '- Do NOT scaffold an app, output package.json, or emit title="path/to/file" code blocks.',
+    '- Do NOT fall back to a canned starter project (todo app, dashboard, etc.).',
+    '- Only include a small code snippet if it genuinely illustrates the answer.',
+    '- The build-oriented instructions below apply only when the user actually asks to build or change code.',
+    '',
+  ].join('\n');
+}

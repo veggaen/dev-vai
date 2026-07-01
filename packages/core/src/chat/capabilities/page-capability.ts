@@ -155,13 +155,13 @@ export const pageCapability: Capability = {
       }
     }
     // A "present"/"not found" claim must match the observation's existence.
+    const existenceClaims = selectorExistenceClaims(text);
     for (const [sel, obs] of observedSelectors) {
-      const presentClaim = new RegExp('`' + escapeRe(sel) + '` — present', 'i').test(text);
-      const notFoundClaim = new RegExp('`' + escapeRe(sel) + '` — not found', 'i').test(text);
-      if (presentClaim && !obs.exists) {
+      const claim = existenceClaims.get(sel);
+      if (claim === 'present' && !obs.exists) {
         return { ok: false, reason: `Answer says \`${sel}\` is present but it was not found — refusing.` };
       }
-      if (notFoundClaim && obs.exists) {
+      if (claim === 'not-found' && obs.exists) {
         return { ok: false, reason: `Answer says \`${sel}\` was not found but it exists — refusing.` };
       }
     }
@@ -171,6 +171,12 @@ export const pageCapability: Capability = {
   },
 };
 
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function selectorExistenceClaims(text: string): Map<string, 'present' | 'not-found'> {
+  const claims = new Map<string, 'present' | 'not-found'>();
+  const claimRe = /`([^`]+)`\s+—\s+(present|not\s+found)\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = claimRe.exec(text)) !== null) {
+    claims.set(match[1], match[2].toLowerCase().startsWith('present') ? 'present' : 'not-found');
+  }
+  return claims;
 }

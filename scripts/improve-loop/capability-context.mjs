@@ -71,19 +71,50 @@ export function distillUserGoals(msgsText = '', { max = 6, minLen = 120 } = {}) 
 
 /** Compose the final, bounded context string the lenses are given. Pure: takes the
  *  already-distilled pieces and renders one capped block. */
-export function composeContext({ goal, agents = '', backlog = [], userGoals = [], introspect = null } = {}) {
+export function summarizeToolingGuide(toolingGuideText = '') {
+  if (!toolingGuideText) return '';
+  try {
+    const guide = JSON.parse(toolingGuideText);
+    const wanted = new Set([
+      'agent-bootstrap',
+      'live-introspect',
+      'council-loop-tests',
+      'chat-policy-tests',
+      'runtime-roster-tests',
+      'desktop-process-ui-tests',
+      'engine-tests',
+      'runtime-typecheck',
+    ]);
+    const commands = Array.isArray(guide.commands)
+      ? guide.commands
+        .filter((cmd) => wanted.has(cmd.id))
+        .map((cmd) => `${cmd.id}: ${cmd.command}`)
+      : [];
+    const delegation = guide.delegation
+      ? [guide.delegation.localCodex, guide.delegation.vaiCouncil, guide.delegation.visibility].filter(Boolean)
+      : [];
+    return cap([...commands, ...delegation].join('\n'), 800);
+  } catch {
+    return cap(toolingGuideText, 800);
+  }
+}
+
+export function composeContext({ goal, agents = '', backlog = [], userGoals = [], responseLoop = '', toolingGuide = '', introspect = null } = {}) {
   const lines = [];
   lines.push('=== PERPETUAL GOAL (north-star) ===', goal ?? PERPETUAL_GOAL, '');
   if (agents) lines.push('=== WHAT VAI IS (AGENTS.md) ===', cap(agents, 600), '');
   if (backlog.length) lines.push('=== ALREADY IN FLIGHT (do not re-propose) ===', ...backlog.map((b) => `- ${b}`), '');
   if (userGoals.length) lines.push('=== WHAT V3GGA KEEPS ASKING FOR ===', ...userGoals.map((g) => `- ${g}`), '');
+  if (responseLoop) lines.push('=== RESPONSE CAPABILITY LOOP BRIEF ===', cap(responseLoop, 1200), '');
+  if (toolingGuide) lines.push('=== AGENT TOOLING + VERIFIER MAP ===', summarizeToolingGuide(toolingGuide), '');
   if (introspect) {
     const models = (introspect.models ?? introspect.council ?? []).slice?.(0, 8) ?? [];
     lines.push('=== LIVE RUNTIME (introspect) ===',
       `models/council: ${Array.isArray(models) ? models.map((m) => m.name ?? m.id ?? m).join(', ') : 'n/a'}`,
       introspect.pipeline ? `pipeline: ${(introspect.pipeline.stages ?? introspect.pipeline).toString().slice(0, 160)}` : '', '');
+    if (introspect.agentTooling) lines.push('runtime agentTooling: available via /api/agent/introspect', '');
   }
-  return cap(lines.filter((l) => l !== undefined).join('\n'), 3200);
+  return cap(lines.filter((l) => l !== undefined).join('\n'), 4600);
 }
 
 /** Best-effort runtime introspect over HTTP (injectable fetch for tests). */
@@ -111,16 +142,20 @@ export async function assembleContext({
     master: paths.master ?? 'MASTER_PROMPT.md',
     agents: paths.agents ?? 'AGENTS.md',
     backlog: paths.backlog ?? 'docs/vai-improvement-backlog.md',
+    responseLoop: paths.responseLoop ?? 'docs/vai-response-capability-loop.md',
+    toolingGuide: paths.toolingGuide ?? 'docs/agent-tooling-guide.json',
     msgs: paths.msgs ?? 'Temporary_files/_vetles_user_msgs.txt',
   };
   const goal = distillGoal(read(P.master));
   const agents = cap(read(P.agents), 600);
   const backlog = distillBacklog(read(P.backlog));
+  const responseLoop = read(P.responseLoop);
+  const toolingGuide = read(P.toolingGuide);
   const userGoals = distillUserGoals(read(P.msgs));
   const live = introspect ?? (baseUrl ? await fetchIntrospect(baseUrl) : null);
   return {
     goal,
-    context: composeContext({ goal, agents, backlog, userGoals, introspect: live }),
-    parts: { agents, backlog, userGoals, introspect: live },
+    context: composeContext({ goal, agents, backlog, userGoals, responseLoop, toolingGuide, introspect: live }),
+    parts: { agents, backlog, userGoals, responseLoop, toolingGuide, introspect: live },
   };
 }

@@ -65,6 +65,7 @@ import {
   shouldSkipWebConclusion,
 } from './web-conclude-policy.js';
 import { tryEmitFactShim } from '../chat/deterministic-facts-router.js';
+import { tryBusinessOpportunityDirection } from '../chat/business-opportunity-direction.js';
 import { extractIdiomContext } from '../chat/programming-idioms.js';
 import { classifyQuestionIntent, splitCompoundQuestion, combineCompoundAnswers } from '../chat/question-intent.js';
 import {
@@ -7561,6 +7562,7 @@ export class VaiEngine implements ModelAdapter {
       'mcq': 0.85, 'yesno': 0.85,
       'google-search': 0.80, 'discussion': 0.80,
       'expert-judgement': 0.82,
+      'business-opportunity-direction': 0.82,
       'short-topic-curated': 0.82,
       'conversational': 0.90,
       'networking': 0.90, 'creative-code': 0.85, 'best-practices': 0.90,
@@ -7966,7 +7968,7 @@ export class VaiEngine implements ModelAdapter {
     } else if (boundaryResponse) {
       response = this.tracked('boundary-response', boundaryResponse, userContent, { confidenceOverride: 0.9 });
       structuredFormatFired = true;
-    } else if (codeSnippetShim?.kind === 'code-snippet' || codeSnippetShim?.kind === 'concept-primer' || codeSnippetShim?.kind === 'compare-pair') {
+    } else if (codeSnippetShim?.kind === 'code-snippet' || codeSnippetShim?.kind === 'concept-primer' || codeSnippetShim?.kind === 'compare-pair' || codeSnippetShim?.kind === 'meta-vai') {
       response = this.tracked(`chat-fact-shim:${codeSnippetShim.kind}`, codeSnippetShim.reply, userContent, { confidenceOverride: 0.88 });
       structuredFormatFired = true;
     } else if (directPreflight !== null) {
@@ -9849,7 +9851,10 @@ export class VaiEngine implements ModelAdapter {
       if (frameworkTypeScript) return this.tracked('framework-devops', frameworkTypeScript, input);
     }
 
-    const factualCurated = this.tryFactualCurated(input);
+    const businessOpportunity = this.tryBusinessOpportunityDirection(input);
+    if (businessOpportunity !== null) return this.tracked('business-opportunity-direction', businessOpportunity, input);
+
+    const factualCurated = isBusinessOpportunityRequest(input) ? null : this.tryFactualCurated(input);
     if (factualCurated !== null) return this.tracked('factual-curated', factualCurated, input);
 
     // Strategy 0.0097: Curated list lookup ("the 8 planets", "the 5
@@ -16495,6 +16500,27 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     ].join('\n');
   }
 
+  private formatZustandHoverPerformanceDiagnosis(): string {
+    return [
+      '**Zustand + CSS hover diagnosis**',
+      '',
+      'Assuming the bug is a chat timeline that rerenders on every streamed token and hover menus flicker:',
+      '',
+      '1. **Store subscription is too broad**',
+      '   Components should not subscribe to the whole Zustand store or a selector that returns a fresh object every token. Select only the row fields each component needs, and use `shallow` or stable selectors for small object picks.',
+      '2. **Streaming tokens update the entire message list**',
+      '   Keep the high-frequency draft buffer separate from stable message rows. Batch token commits with `requestAnimationFrame`, then append the final message once instead of replacing the whole array for every token.',
+      '3. **Hover state is stored globally**',
+      '   Pure visual hover should be CSS (`:hover`, `:focus-within`, `group-hover`). Only store durable intent globally, such as "menu pinned open" or "active process node".',
+      '4. **Menus unmount under the cursor**',
+      '   Give each row a stable key, render hover menus in a predictable layer or portal, and keep the hit area alive with `pointerenter` / `pointerleave` plus a tiny close delay.',
+      '5. **Derived timeline rows are rebuilt every render**',
+      '   Memoize process-row derivation by message id + version, or compute it in the store when steps change. Do not sort/filter/map the full trace inside every token render.',
+      '',
+      'Good split: Zustand owns durable state and versioned data; CSS owns transient hover pixels; React memoization protects row components after the store shape is clean.',
+    ].join('\n');
+  }
+
   private tryConversationPhraseRecall(input: string, history: readonly Message[]): string | null {
     if (!/\b(?:exact\s+)?phrase\s+did\s+i\s+ask\s+you\s+to\s+remember\b/i.test(input)) return null;
     const userText = history.filter((message) => message.role === 'user').map((message) => message.content).join('\n');
@@ -16901,6 +16927,13 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     ].join('\n');
   }
 
+  private tryBusinessOpportunityDirection(input: string): string | null {
+    // Delegates to the shared pure emitter so this legacy cascade and
+    // ChatService's scored registry answer a business-idea ask with the SAME
+    // text — the Slice 4 divergence fix. (Was an inline copy here.)
+    return tryBusinessOpportunityDirection(input);
+  }
+
   private tryDirectCorpusTaskResponse(input: string, lower: string, history: readonly Message[]): string | null {
     const isBuilderHookSnippet = this._activeMode === 'builder' && /\buseDebouncedValue\b/i.test(input);
     const allowsChatDirectTask = this._activeMode === 'chat' || this._activeMode === 'plan';
@@ -16982,6 +17015,14 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
       .join('\n')
       .toLowerCase();
     const context = `${taskInput.toLowerCase()}\n${lower}\n${recentText}`;
+
+    const asksZustandHoverPerformance =
+      /\bzustand\b/i.test(taskBody)
+      && /\bhover\b/i.test(taskBody)
+      && /\b(?:css|state|menu|menus?|flicker|specific|debug|previous|rerender|re[-\s]?render|timeline)\b/i.test(taskBody);
+    if (asksZustandHoverPerformance) {
+      return this.formatZustandHoverPerformanceDiagnosis();
+    }
 
     const asksReactPerformance =
       /\breact\b/i.test(taskBody)

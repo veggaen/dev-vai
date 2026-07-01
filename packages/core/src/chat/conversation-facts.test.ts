@@ -21,6 +21,17 @@ describe('conversation facts', () => {
     expect(reply).toContain('Redis');
   });
 
+  it('keeps matching an existing project name literally when attaching later stacks', () => {
+    const history = [
+      { role: 'user' as const, content: 'project Brew&Co uses React. remember that.' },
+      { role: 'user' as const, content: 'For Brew&Co, switch the storage to SQLite.' },
+    ];
+    const reply = tryHandleFactRecall('what stack did i say project Brew&Co uses?', history)?.reply ?? '';
+    expect(reply).toContain('**Brew&Co**');
+    expect(reply).toContain('React');
+    expect(reply).toContain('SQLite');
+  });
+
   it('defers a stack question about an external URL to the repo handler (no project hijack)', () => {
     // Regression for the hono trace: "what stack does <github url> use?" was answered from
     // remembered project facts ("you said you're using Hono") instead of reading the repo.

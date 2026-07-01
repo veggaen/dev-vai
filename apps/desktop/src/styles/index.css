@@ -1378,7 +1378,7 @@ code, pre, kbd {
 }
 .process-tree__copy-actions {
   display: flex;
-  shrink: 0;
+  flex-shrink: 0;
   align-items: center;
   gap: 0.125rem;
   padding-top: 0.2rem;
@@ -1452,6 +1452,7 @@ code, pre, kbd {
 .process-tree__panel-body {
   max-height: 16rem;
   overflow: auto;
+  overflow-wrap: anywhere;
   padding: 0.35rem 0.45rem;
   border-radius: 0.375rem;
   background: color-mix(in oklab, var(--fg) 4%, transparent);
@@ -1519,6 +1520,52 @@ code, pre, kbd {
 .process-tree__children {
   border-left: 1px solid var(--panel-border-soft);
 }
+
+/* Self-improvements — the "Council improved Vai" surface. Quiet at rest (one line); each opened
+   item gets a soft left rail matching the process-tree connector, so the two read as one family.
+   Token-bound, no pills/chips. The per-item copy reveals on hover/focus (progressive disclosure). */
+.self-improve__item {
+  border-left: 1px solid var(--panel-border-soft);
+  padding-left: 0.6rem;
+}
+.self-improve__item .process-tree__copy-btn--panel {
+  opacity: 0;
+}
+.self-improve__item:hover .process-tree__copy-btn--panel,
+.self-improve__item:focus-within .process-tree__copy-btn--panel {
+  opacity: 1;
+}
+
+@media (max-width: 520px) {
+  .process-tree__timeline {
+    padding-left: 0.15rem;
+  }
+  /* Touch: no hover, so keep the per-item copy always reachable rather than hidden. */
+  .self-improve__item .process-tree__copy-btn--panel {
+    opacity: 0.7;
+  }
+  .process-tree__timeline::before,
+  .process-tree__step--last::after {
+    left: 0.8rem;
+  }
+  .process-tree__children {
+    margin-left: 0.7rem;
+    padding-left: 0.55rem;
+  }
+  .process-tree__row-wrap {
+    position: relative;
+  }
+  .process-tree__row {
+    padding-right: 1.75rem;
+  }
+  .process-tree__copy-actions {
+    position: absolute;
+    right: 0.1rem;
+    top: 0.15rem;
+    padding-top: 0;
+  }
+}
+
 @keyframes process-row-in {
   from { opacity: 0; transform: translateY(-3px); }
   to { opacity: 1; transform: translateY(0); }

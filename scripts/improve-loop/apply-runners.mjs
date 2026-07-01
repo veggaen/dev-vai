@@ -42,10 +42,15 @@ export function resolveInsideRoot(value) {
 }
 
 function sh(cmd, args, opts = {}) {
-  // npx is invoked by its platform binary name (npx.cmd on Windows) so we can keep shell:false for
-  // EVERY command — no shell parsing of args, paths-with-spaces safe, no metacharacter injection.
   const realCmd = /^npx$/i.test(cmd) ? NPX_BIN : cmd;
-  const r = spawnSync(realCmd, args, { cwd: ROOT, encoding: 'utf8', timeout: opts.timeoutMs ?? 300_000, shell: false, ...opts });
+  // WINDOWS .cmd FIX: current Node (post CVE-2024-27980) REFUSES to spawnSync a .cmd/.bat with
+  // shell:false — it throws EINVAL ("tsc could not complete (infra: EINVAL)"), which the loop
+  // silently treated as an infra skip → the apply path could NEVER verify → no fix ever committed.
+  // A .cmd MUST go through the shell. This is safe here: the only args are our own tsc/vitest flags
+  // + repo-relative paths already validated by resolveInsideRoot (no untrusted metacharacters). git
+  // and node (real .exe) still run shell:false. Non-Windows unaffected.
+  const isCmdScript = process.platform === 'win32' && /\.(cmd|bat)$/i.test(realCmd);
+  const r = spawnSync(realCmd, args, { cwd: ROOT, encoding: 'utf8', timeout: opts.timeoutMs ?? 300_000, shell: isCmdScript, ...opts });
   // CRITICAL distinction: r.status===null means the process did NOT exit normally — it timed out
   // (r.error.code==='ETIMEDOUT') or failed to spawn. That is an INFRA failure, NOT a non-zero exit.
   // Conflating them ("code: r.status ?? 1") made a timed-out tsc look like a type error → every patch

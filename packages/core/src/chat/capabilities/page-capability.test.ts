@@ -111,6 +111,19 @@ describe('pageCapability.verify — bind page claims to the observation', () => 
     expect(v.reason).toMatch(/present but it was not found/i);
   });
 
+  it('treats selector names with regex metacharacters as literal evidence labels', () => {
+    const tricky = 'button[data-action="save?"]';
+    const c = ctx('does it have the save button?', page({
+      selectors: [
+        { id: 'page:selector:https://example.com/#save', selector: tricky, exists: false, text: '' },
+      ],
+    }));
+    const tampered = { text: `**Page evidence (observed now, 1ms):**\n\n- **Title:** Example Domain\n  - \`${tricky}\` — present`, confidence: 0.9 } as never;
+    const v = pageCapability.verify(tampered, c);
+    expect(v.ok).toBe(false);
+    expect(v.reason).toMatch(/present but it was not found/i);
+  });
+
   it('REFUSES page-authoritative text with no evidence header', () => {
     const c = ctx('inspect https://example.com', page());
     const v = pageCapability.verify({ text: 'The page looks great, trust me.', confidence: 0.9 } as never, c);

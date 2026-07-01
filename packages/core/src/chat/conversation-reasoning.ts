@@ -74,6 +74,31 @@ const LANGUAGE_NAMES = [
   'PHP',
 ] as const;
 
+const DECISION_CLAUSES: readonly RegExp[] = [
+  /(?:use|choose|pick|switch\s+to|move\s+to)\s+(.+?)\s+for\s+prod(?:uction)?(?:\s+instead)?\s*[;,]\s*(.+?)\s+remains?\s+only\s+for\s+([^.?!]+)/i,
+  /(?:ship|run\s+on|use)\s+(.+?)\s+(?:in|for)\s+prod(?:uction)?\s*[.;,]\s*(?:keep\s+)?(.+?)(?:\s+around)?\s+only\s+(?:while\s+we\s+)?(?:evaluat(?:e|ing)\s+(?:the\s+)?|for\s+)([^.?!]+)/i,
+  /prod(?:uction)?\s+should\s+(?:run\s+on|use)\s+(.+?)\s*[;,]\s*(.+?)\s+is\s+(?:just|only)\s+for\s+([^.?!]+)/i,
+  /(?:take|move|promote|ship)\s+(.+?)\s+to\s+(?:the\s+)?live(?:\s+environment)?\s*[.;,]?\s+(.+?)\s+is\s+([^.?!]+?)\s+only\b/i,
+  /live\s+uses\s+(.+?)\s+now\s+and\s+(.+?)\s+belongs?\s+only\s+(?:in|for)\s+([^.?!]+)/i,
+];
+
+const ANCHORED_DECISION_CLAUSES: readonly RegExp[] = DECISION_CLAUSES.map(
+  (clause) => new RegExp(`\\b(?:decision|correction|commit(?:ted)?(?:\\s+choice)?)\\s*:?\\s*${clause.source}`, 'i'),
+);
+
+const FRONTEND_STACK_TOKENS: ReadonlyArray<{
+  readonly re: RegExp;
+  readonly token: string;
+  readonly label: string;
+  readonly typoDistance: number;
+}> = [
+  { re: /\breact\b/, token: 'react', label: 'React', typoDistance: 2 },
+  { re: /\btailwind\b/, token: 'tailwind', label: 'Tailwind', typoDistance: 2 },
+  { re: /\bsvelte\b/, token: 'svelte', label: 'Svelte', typoDistance: 2 },
+  { re: /\bvue\b/, token: 'vue', label: 'Vue', typoDistance: 0 },
+  { re: /\bvite\b/, token: 'vite', label: 'Vite', typoDistance: 0 },
+];
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -540,17 +565,10 @@ function emitProjectLanguageMap(content: string, history: readonly FactsHistoryM
 }
 
 function parseDecision(text: string): DecisionState | null {
-  const clauses = [
-    /(?:use|choose|pick|switch\s+to|move\s+to)\s+(.+?)\s+for\s+prod(?:uction)?(?:\s+instead)?\s*[;,]\s*(.+?)\s+remains?\s+only\s+for\s+([^.?!]+)/i,
-    /(?:ship|run\s+on|use)\s+(.+?)\s+(?:in|for)\s+prod(?:uction)?\s*[.;,]\s*(?:keep\s+)?(.+?)(?:\s+around)?\s+only\s+(?:while\s+we\s+)?(?:evaluat(?:e|ing)\s+(?:the\s+)?|for\s+)([^.?!]+)/i,
-    /prod(?:uction)?\s+should\s+(?:run\s+on|use)\s+(.+?)\s*[;,]\s*(.+?)\s+is\s+(?:just|only)\s+for\s+([^.?!]+)/i,
-    /(?:take|move|promote|ship)\s+(.+?)\s+to\s+(?:the\s+)?live(?:\s+environment)?\s*[.;,]?\s+(.+?)\s+is\s+([^.?!]+?)\s+only\b/i,
-    /live\s+uses\s+(.+?)\s+now\s+and\s+(.+?)\s+belongs?\s+only\s+(?:in|for)\s+([^.?!]+)/i,
-  ];
-  const anchored = clauses
-    .map((clause) => text.match(new RegExp(`\\b(?:decision|correction|commit(?:ted)?(?:\\s+choice)?)\\s*:?\\s*${clause.source}`, 'i')))
+  const anchored = ANCHORED_DECISION_CLAUSES
+    .map((clause) => text.match(clause))
     .filter((match): match is RegExpMatchArray => Boolean(match));
-  const matches = clauses
+  const matches = DECISION_CLAUSES
     .map((clause) => text.match(clause))
     .filter((match): match is RegExpMatchArray => Boolean(match));
   const match = anchored.at(-1) ?? matches.at(-1) ?? null;
@@ -887,14 +905,8 @@ function emitProjectMemoryAcknowledgement(content: string): ConversationReasonin
 
 function emitProjectDiagnostic(content: string): ConversationReasoningReply | null {
   const normalized = normalizeForMatching(content);
-  const frontendStack = [
-    { token: 'react', label: 'React', typoDistance: 2 },
-    { token: 'tailwind', label: 'Tailwind', typoDistance: 2 },
-    { token: 'svelte', label: 'Svelte', typoDistance: 2 },
-    { token: 'vue', label: 'Vue', typoDistance: 0 },
-    { token: 'vite', label: 'Vite', typoDistance: 0 },
-  ].filter(({ token, typoDistance }) =>
-    new RegExp(`\\b${token}\\b`).test(normalized)
+  const frontendStack = FRONTEND_STACK_TOKENS.filter(({ re, token, typoDistance }) =>
+    re.test(normalized)
     || (typoDistance > 0 && containsApproximateWord(normalized, token, typoDistance)),
   );
   if (/\bupload\b/.test(normalized) && /\b(?:large|size|limit|memory|fill)\b/.test(normalized)) {
