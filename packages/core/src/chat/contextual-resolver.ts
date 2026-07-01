@@ -250,9 +250,10 @@ export function rewritePronounFollowUp(input: string, topic: string): string | n
   if (!isRefinement && /^(?:can|could|would|will|please)\s+(?:you\s+)?(?:please\s+)?(?:make|build|create|do|show|give|write|generate|design|add|fix|help|set\s*up|scaffold|deploy|run|ship|render)\b|^(?:make|build|create|do|show|give|write|generate|design|add|fix|run|ship|render|please)\b/i.test(trimmed)) {
     return null;
   }
-  if (new RegExp(`\\b${escapeRegex(cleanedTopic)}\\b`, 'i').test(trimmed)) return null; // already named
-
+  // Compile the topic word-boundary regex once and reuse it for both the "already named" early
+  // return and the checks below (it was previously built twice — a redundant recompile per call).
   const topicRe = new RegExp(`\\b${escapeRegex(cleanedTopic)}\\b`, 'i');
+  if (topicRe.test(trimmed)) return null; // already named
   const restHasOtherProperNoun = /\b[A-Z][a-z]{2,}\b/.test(trimmed.replace(/^[A-Z]/, '')); // keep for callers; not used to block
 
   // Possessive + profile/link follow-ups ("got a link to his profiles?" -> searchable entity query).
