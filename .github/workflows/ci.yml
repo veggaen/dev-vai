@@ -168,7 +168,7 @@ jobs:
 
       - name: Upload benchmark and live eval artifacts
         if: matrix.node-version == 22 && always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vai-benchmark-and-live-eval-reports
           path: |
