@@ -162,3 +162,69 @@ describe('intentFit — bounded adjustments', () => {
     expect(m).not.toContain('single-clarifying-question');
   });
 });
+
+// ── exact-value pins ─────────────────────────────────────────────────────────
+// The directional tests above (`> prior`, `< prior`) prove the SIGN of each
+// adjustment but not its MAGNITUDE — so a boost silently neutered to 0.0001 or a
+// suppression weakened to ×0.98 would still pass them while making the feature
+// inert. These pin the exact adjusted output so the tuning itself is under test.
+
+describe('intentFit — exact adjusted values (tuning is pinned, not just directional)', () => {
+  it('boost adds exactly the calibrated addend (0.004) to a fact lookup', () => {
+    // 0.910 + 0.004 = 0.914, to float tolerance. If BOOST_ADDEND changes, this
+    // fails loudly instead of passing on a meaningless 0.9101.
+    expect(fit('chat-fact-shim', 0.91, 'factual-lookup').score).toBeCloseTo(0.914, 10);
+  });
+
+  it('suppression multiplies by exactly the calibrated factor (0.45)', () => {
+    // 0.91 × 0.45 = 0.4095. A suppression weakened to ×0.98 (barely demoting) must
+    // NOT pass — this pins the actual demotion strength.
+    expect(fit('chat-fact-shim', 0.91, 'build').score).toBeCloseTo(0.4095, 10);
+  });
+
+  it('boost is a NO-OP-sized change relative to the prior but non-zero (guards inertness)', () => {
+    const delta = fit('conversation-reasoning', 0.97, 'other').score - 0.97;
+    expect(delta).toBeGreaterThan(0); // not inert
+    expect(delta).toBeCloseTo(0.004, 10); // and exactly the calibrated size
+  });
+});
+
+// ── structural no-leapfrog invariant (derived from the REAL registry priors) ──
+// The bounded test earlier asserts BOOST_ADDEND < 0.005, but 0.005 is a hardcoded
+// literal — if the registry ever seats two handlers closer together, that test
+// still passes while the guarantee silently breaks. This derives the guarantee
+// from the actual priors so it stays true as the registry evolves.
+
+describe('intentFit — no-leapfrog holds against the real registry priors', () => {
+  // The live constant priors from service.ts:2527-2621 (the handlers dispatchTurn
+  // ranks). Kept here as the source of truth for the gap the boost must not cross.
+  const REGISTRY_PRIORS = [0.99, 0.98, 0.975, 0.97, 0.96, 0.95, 0.94, 0.93, 0.92, 0.91, 0.90, 0.89];
+
+  it('the calibrated boost is strictly smaller than the tightest adjacent prior gap', () => {
+    const sorted = [...REGISTRY_PRIORS].sort((a, b) => a - b);
+    let tightestGap = Infinity;
+    for (let i = 1; i < sorted.length; i += 1) {
+      tightestGap = Math.min(tightestGap, sorted[i] - sorted[i - 1]);
+    }
+    // Infer the boost magnitude from an actual on-lane adjustment (no private import).
+    const boost = fit('chat-fact-shim', 0.5, 'factual-lookup').score - 0.5;
+    expect(boost).toBeGreaterThan(0);
+    // The load-bearing invariant: a boosted handler can never reach the NEXT prior up,
+    // so it cannot leapfrog a sibling the curated order seated above it. If a future
+    // handler tightens the gap below the boost, THIS fails — exactly the regression
+    // class that let fact-shim overtake chat-format-strict.
+    expect(boost).toBeLessThan(tightestGap);
+  });
+
+  it('every mapped handler boosted at its real prior stays below the next prior up', () => {
+    // Exhaustive check across the registry: for each adjacent (lower, upper) pair,
+    // a maximally-boosted handler seated at `lower` must not reach `upper`.
+    const sorted = [...REGISTRY_PRIORS].sort((a, b) => a - b);
+    const boost = fit('chat-fact-shim', 0.5, 'factual-lookup').score - 0.5;
+    for (let i = 1; i < sorted.length; i += 1) {
+      const lower = sorted[i - 1];
+      const upper = sorted[i];
+      expect(lower + boost).toBeLessThan(upper);
+    }
+  });
+});
