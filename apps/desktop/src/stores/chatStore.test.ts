@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  auditPriorDraftExcerpt,
   resolveConversationSandboxProjectIdOption,
   isConversationWorking,
+  mergeAuditPriorDraftExcerpt,
   mergeProgressStepsForMessage,
+  parseAssistantMessagePlan,
   shouldResetSandboxOnSwitch,
 } from './chatStore.js';
 
@@ -17,6 +20,47 @@ describe('resolveConversationSandboxProjectIdOption', () => {
 
   it('preserves explicit null as a clean conversation request', () => {
     expect(resolveConversationSandboxProjectIdOption({ sandboxProjectId: null }, 'active-sandbox')).toBeNull();
+  });
+});
+
+describe('async audit metadata persistence helpers', () => {
+  it('rehydrates audit metadata from a persisted assistant plan without requiring evidence', () => {
+    const auditMeta = {
+      outcomeKind: 'O8',
+      convened: true,
+      revised: true,
+      resetFired: true,
+      draftStrategy: 'vai-buffered',
+      visibleTextChanged: true,
+      realIntent: 'wants the concrete fix',
+      methodLesson: 'lead with the fix',
+      councilOutcome: 'ship',
+    } as const;
+
+    expect(parseAssistantMessagePlan(JSON.stringify({ auditMeta }))).toEqual({ auditMeta });
+  });
+
+  it('preserves a bounded pre-reset draft excerpt when done thinking lacks one', () => {
+    const thinking = mergeAuditPriorDraftExcerpt({
+      intent: 'other',
+      strategy: 'vai-buffered',
+      strategyChain: [],
+      auditMeta: {
+        outcomeKind: 'O8',
+        convened: true,
+        revised: true,
+        resetFired: true,
+        visibleTextChanged: true,
+      },
+    }, 'First draft before the council rewrite.');
+
+    expect(thinking?.auditMeta?.priorTextExcerpt).toBe('First draft before the council rewrite.');
+  });
+
+  it('bounds prior draft excerpts for compact storage', () => {
+    const excerpt = auditPriorDraftExcerpt('x '.repeat(400));
+    expect(excerpt?.length).toBeLessThanOrEqual(600);
+    expect(excerpt?.endsWith('...')).toBe(true);
   });
 });
 

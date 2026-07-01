@@ -7,7 +7,7 @@ import type {
   ChatPromptRewriteResponseDepth,
 } from '../config/types.js';
 import { conversations, messages, images } from '../db/schema.js';
-import type { ModelRegistry, ModelAdapter, ChatChunk, Message, TokenUsage, TurnThinking, TurnRoutePlan } from '../models/adapter.js';
+import type { ModelRegistry, ModelAdapter, ChatChunk, Message, TokenUsage, TurnThinking, TurnRoutePlan, AuditMeta, AuditOutcomeKind } from '../models/adapter.js';
 import { SkillRouter } from '../models/skill-router.js';
 import type { ThorsenAdaptiveController } from '../thorsen/types.js';
 import {
@@ -80,6 +80,7 @@ import {
   councilMembersFromNotes,
   type ProcessLogEntry,
 } from './council-process-log.js';
+import { buildCouncilAuditMeta, withCouncilAuditVisibility } from './council-audit-meta.js';
 import { accumulateProgressStep, serializeProgressTrace, deserializeProgressTrace } from './progress-trace.js';
 import type { ChatProgressStep as ApiChatProgressStep } from '@vai/api-types/chat-ws';
 import { buildSearchProcessLog } from './search-process-log.js';
@@ -452,7 +453,24 @@ export interface CouncilRedraftFeedback {
 }
 
 type CouncilLoopProgressStep = NonNullable<ChatChunk['progress']>;
-type CouncilLoopResult = { council?: CouncilThinking; finalText: string; revised: boolean };
+type CouncilLoopResult = { council?: CouncilThinking; finalText: string; revised: boolean; auditMeta?: AuditMeta };
+
+function councilLoopAuditMeta(
+  outcomeKind: AuditOutcomeKind,
+  draft: CouncilDraftInput,
+  council: CouncilThinking | undefined,
+  revised: boolean,
+  convened = Boolean(council),
+): AuditMeta {
+  return buildCouncilAuditMeta({
+    outcomeKind,
+    draft,
+    council,
+    convened,
+    revised,
+    visibleTextChanged: revised,
+  });
+}
 
 function buildCouncilFeedbackDetail(feedback: CouncilRedraftFeedback): string {
   return buildCouncilFeedbackBody(feedback).replace(/\n\n/g, ' · ').slice(0, 480);
@@ -1812,7 +1830,11 @@ export class ChatService {
     // structural fix for the multi-pass cascade running away on slow models — the user
     // chose speed, so no council, no redraft, no round-2.
     if (loopBudgetMs <= 0) {
-      return { finalText: draft.draftText, revised: false };
+      return {
+        finalText: draft.draftText,
+        revised: false,
+        auditMeta: councilLoopAuditMeta('O1', draft, undefined, false, false),
+      };
     }
     const loopDeadline = Date.now() + loopBudgetMs;
     const budgetSpent = () => Date.now() >= loopDeadline;
@@ -1828,7 +1850,11 @@ export class ChatService {
     const first = firstIter.value;
     if (!first) {
       yield { stage: stages.round1, label: 'Council could not convene', status: 'done' };
-      return { finalText: draft.draftText, revised: false };
+      return {
+        finalText: draft.draftText,
+        revised: false,
+        auditMeta: councilLoopAuditMeta('O2', draft, undefined, false, false),
+      };
     }
 
     yield {
@@ -1868,7 +1894,12 @@ export class ChatService {
             first.consensus.recommendedAction === 'local-business-search' ||
             first.consensus.outcome === 'act')));
     if (!shouldRedraft) {
-      return { council: first.thinking, finalText: draft.draftText, revised: false };
+      return {
+        council: first.thinking,
+        finalText: draft.draftText,
+        revised: false,
+        auditMeta: councilLoopAuditMeta(first.consensus.outcome === 'ship' ? 'O3' : 'O5', draft, first.thinking, false),
+      };
     }
     // Budget guard: if round-1 already spent the loop's wall-clock budget (slow cold
     // models), ship round-1's verdict instead of paying for a redraft + a second full
@@ -1880,7 +1911,12 @@ export class ChatService {
         label: 'Skipped redraft — council budget spent (answer shipped)',
         status: 'done',
       };
-      return { council: first.thinking, finalText: draft.draftText, revised: false };
+      return {
+        council: first.thinking,
+        finalText: draft.draftText,
+        revised: false,
+        auditMeta: councilLoopAuditMeta('O4', draft, first.thinking, false),
+      };
     }
 
     const feedback: CouncilRedraftFeedback = {
@@ -1918,7 +1954,12 @@ export class ChatService {
         status: 'done',
         processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, draft.draftText),
       };
-      return { council: first.thinking, finalText: draft.draftText, revised: false };
+      return {
+        council: first.thinking,
+        finalText: draft.draftText,
+        revised: false,
+        auditMeta: councilLoopAuditMeta('O5', draft, first.thinking, false),
+      };
     }
     // URL on-topic retention guard: when the user pasted a link and the ORIGINAL draft
     // engaged with it (a grounded repo/page answer), a redraft that drops the subject
@@ -1933,7 +1974,12 @@ export class ChatService {
         status: 'done',
         processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, draft.draftText),
       };
-      return { council: first.thinking, finalText: draft.draftText, revised: false };
+      return {
+        council: first.thinking,
+        finalText: draft.draftText,
+        revised: false,
+        auditMeta: councilLoopAuditMeta('O6', draft, first.thinking, false),
+      };
     }
 
     yield {
@@ -1955,7 +2001,12 @@ export class ChatService {
         label: 'Shipped revision — council budget spent (skipped re-review)',
         status: 'done',
       };
-      return { council: first.thinking, finalText: cleaned, revised: true };
+      return {
+        council: first.thinking,
+        finalText: cleaned,
+        revised: true,
+        auditMeta: councilLoopAuditMeta('O7', draft, first.thinking, true),
+      };
     }
 
     yield {
@@ -1977,7 +2028,12 @@ export class ChatService {
         label: 'Council could not re-review — keeping revision',
         status: 'done',
       };
-      return { council: first.thinking, finalText: cleaned, revised: true };
+      return {
+        council: first.thinking,
+        finalText: cleaned,
+        revised: true,
+        auditMeta: councilLoopAuditMeta('O7', draft, first.thinking, true),
+      };
     }
 
     const improved = redraftResolvedConcern(first.consensus, second.consensus);
@@ -1997,8 +2053,18 @@ export class ChatService {
     };
 
     return improved
-      ? { council: second.thinking, finalText: cleaned, revised: true }
-      : { council: first.thinking, finalText: draft.draftText, revised: false };
+      ? {
+          council: second.thinking,
+          finalText: cleaned,
+          revised: true,
+          auditMeta: councilLoopAuditMeta('O8', draft, second.thinking, true),
+        }
+      : {
+          council: first.thinking,
+          finalText: draft.draftText,
+          revised: false,
+          auditMeta: councilLoopAuditMeta('O5', draft, first.thinking, false),
+        };
   }
 
   private async runCouncilLoop(
@@ -2009,7 +2075,11 @@ export class ChatService {
     const gen = this.runCouncilLoopGen(draft, redraft, stages);
     let next = await gen.next();
     while (!next.done) next = await gen.next();
-    return next.value ?? { finalText: draft.draftText, revised: false };
+    return next.value ?? {
+      finalText: draft.draftText,
+      revised: false,
+      auditMeta: councilLoopAuditMeta('O2', draft, undefined, false, false),
+    };
   }
 
   /**
@@ -3276,6 +3346,7 @@ export class ChatService {
       followUps?: ChatChunk['followUps'];
       confidence?: number;
     } | null = null;
+    let turnAuditMetaPersist: AuditMeta | undefined;
     const webConclusionContext = { activeMode: resolvedMode, hasActiveSandbox };
     const shouldAttachWebEvidence =
       Boolean(this.searchForEvidence)
@@ -3647,6 +3718,7 @@ export class ChatService {
       // Council grades vai:v0 FIRST. Only escalate to the generative arm when the
       // council splits (escalate) or the draft fails the existing fallback gates.
       let councilThinking: CouncilThinking | undefined;
+      let councilAuditMeta: AuditMeta | undefined;
       let councilEscalateToGenerative = false;
       if (!primaryFlip && !builderFiles && !codeReviewRejected && bufferedText.trim()) {
         const councilDraft = {
@@ -3679,6 +3751,10 @@ export class ChatService {
         }
         loop = councilStep.value ?? loop;
         councilThinking = loop.council;
+        councilAuditMeta = loop.auditMeta
+          ? { ...loop.auditMeta, draftStrategy: bufferedStrategy ?? loop.auditMeta.draftStrategy }
+          : undefined;
+        const preCouncilVisibleText = bufferedText;
         // A `url-request` draft already READ the real repo/page (GitHub API + README) and
         // grounded its answer in it. The council's redraft re-runs the engine on the nudge
         // text, which the keyword router then hijacks into a generic memo/decline — so the
@@ -3695,6 +3771,21 @@ export class ChatService {
           // The council rewrote the draft — clear the stale "Draft (in review)" block and show
           // the revised text so the UI can explain "draft revised by council".
           if (STREAM_DRAFTS && draftStarted) yield draftChunk('reset', bufferedText);
+        }
+        if (councilAuditMeta) {
+          councilAuditMeta = loop.revised && draftIsGroundedRepoRead
+            ? withCouncilAuditVisibility(councilAuditMeta, {
+                beforeText: preCouncilVisibleText,
+                afterText: preCouncilVisibleText,
+                resetFired: false,
+                outcomeKind: 'O6',
+                revised: false,
+              })
+            : withCouncilAuditVisibility(councilAuditMeta, {
+                beforeText: preCouncilVisibleText,
+                afterText: bufferedText,
+                resetFired: Boolean(loop.revised && !draftIsGroundedRepoRead && STREAM_DRAFTS && draftStarted),
+              });
         }
         councilEscalateToGenerative = councilThinking?.outcome === 'escalate';
         // Deterministic council-verdict info block: a clean, scannable HTML summary built from
@@ -3828,6 +3919,10 @@ export class ChatService {
           const done = chunk as any;
           const thinking = { ...(done.thinking ?? { strategy: 'vai-buffered', modelTag: bufferedModelId, confidence: latestConfidence ?? 0.6 }) };
           if (councilThinking) thinking.council = councilThinking;
+          if (councilAuditMeta) {
+            thinking.auditMeta = councilAuditMeta;
+            turnAuditMetaPersist = councilAuditMeta;
+          }
           if (vaiProposedDraft) thinking.vaiProposedDraft = vaiProposedDraft;
           return { ...done, thinking } as ChatChunk;
         };
@@ -4193,6 +4288,8 @@ export class ChatService {
         // redrafts once from the SAME escalated model, re-graded, better kept.
         // Builder file artifacts keep their own gates and are left alone.
         let fallbackCouncilThinking: CouncilThinking | undefined;
+        let fallbackCouncilAuditMeta: AuditMeta | undefined;
+        let fallbackCouncilReviewedText: string | undefined;
         const fbHasFileBlocksForCouncil = isBuilderMode && hasBuilderFileBlocks(fbText);
         if (!fbHasFileBlocksForCouncil && fbText.trim() && !councilEscalateToGenerative) {
           const fbCouncilHasEvidence = fallbackResult.sourceChunks.some(
@@ -4233,7 +4330,19 @@ export class ChatService {
           }
           loop = councilStep.value ?? loop;
           fallbackCouncilThinking = loop.council;
+          fallbackCouncilAuditMeta = loop.auditMeta
+            ? { ...loop.auditMeta, draftStrategy: responseModelId }
+            : undefined;
+          const preFallbackCouncilText = fbText;
           if (loop.revised) fbText = loop.finalText;
+          if (fallbackCouncilAuditMeta) {
+            fallbackCouncilAuditMeta = withCouncilAuditVisibility(fallbackCouncilAuditMeta, {
+              beforeText: preFallbackCouncilText,
+              afterText: fbText,
+              resetFired: false,
+            });
+          }
+          fallbackCouncilReviewedText = fbText;
         }
 
         // Builder file output from the escalated model is kept verbatim (its own
@@ -4382,6 +4491,10 @@ export class ChatService {
           fallbackThinking.council = councilThinking;
         } else if (fallbackCouncilThinking) {
           fallbackThinking.council = fallbackCouncilThinking;
+          if (fallbackCouncilAuditMeta && fallbackCouncilReviewedText === fbText) {
+            fallbackThinking.auditMeta = fallbackCouncilAuditMeta;
+            turnAuditMetaPersist = fallbackCouncilAuditMeta;
+          }
         }
 
         const decorateFallbackDone = (chunk: ChatChunk): ChatChunk => chunk.type === 'done'
@@ -4555,10 +4668,11 @@ export class ChatService {
 
     // Persist plan + baseline for model turns as well (critical for reference data
     // when steering caused the fall-through).
-    const modelPlanBlob = turnPlan || turnEvidencePersist
+    const modelPlanBlob = turnPlan || turnEvidencePersist || turnAuditMetaPersist
       ? JSON.stringify({
           ...(turnPlan ? { steered: turnPlan, baseline: turnBaselinePlan ?? null, hadGuidance: !!turnBaselinePlan } : {}),
           ...(turnEvidencePersist ? { evidence: turnEvidencePersist } : {}),
+          ...(turnAuditMetaPersist ? { auditMeta: turnAuditMetaPersist } : {}),
         })
       : undefined;
 

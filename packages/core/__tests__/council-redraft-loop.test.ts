@@ -18,6 +18,7 @@ import { createDb } from '../src/db/client.js';
 import { ChatService, buildCouncilRedraftInstruction, councilScore, redraftResolvedConcern } from '../src/chat/service.js';
 import type { CouncilRedraftFeedback } from '../src/chat/service.js';
 import { ModelRegistry } from '../src/models/adapter.js';
+import type { AuditOutcomeKind } from '../src/models/adapter.js';
 import { InMemoryGuidanceStore, salientTokens, selectApplicableGuidance } from '../src/chat/route-guidance.js';
 import type { CouncilMember, CouncilMemberNote, CouncilConsensus } from '../src/consensus/types.js';
 import type { CouncilRoster } from '../src/consensus/topic-router.js';
@@ -92,9 +93,19 @@ function runLoop(
   service: ChatService,
   draft: { prompt: string; draftText: string; modelId: string },
   redraft?: (feedback: CouncilRedraftFeedback) => Promise<string | undefined>,
-): Promise<{ council?: unknown; finalText: string; revised: boolean }> {
+): Promise<{
+  council?: unknown;
+  finalText: string;
+  revised: boolean;
+  auditMeta?: { outcomeKind: AuditOutcomeKind; convened: boolean; revised: boolean; visibleTextChanged: boolean; realIntent?: string; methodLesson?: string };
+}> {
   return (service as unknown as {
-    runCouncilLoop: (d: typeof draft, r?: typeof redraft) => Promise<{ council?: unknown; finalText: string; revised: boolean }>;
+    runCouncilLoop: (d: typeof draft, r?: typeof redraft) => Promise<{
+      council?: unknown;
+      finalText: string;
+      revised: boolean;
+      auditMeta?: { outcomeKind: AuditOutcomeKind; convened: boolean; revised: boolean; visibleTextChanged: boolean; realIntent?: string; methodLesson?: string };
+    }>;
   }).runCouncilLoop(draft, redraft);
 }
 
@@ -217,6 +228,12 @@ describe('runCouncilLoop', () => {
     expect(result.revised).toBe(false);
     expect(result.finalText).toBe('A solid first answer about closures.');
     expect(redraftCalled).toBe(false);
+    expect(result.auditMeta).toMatchObject({
+      outcomeKind: 'O3',
+      convened: true,
+      revised: false,
+      visibleTextChanged: false,
+    });
   }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('redrafts and keeps the better answer when the council asks for a reread', async () => {
@@ -233,6 +250,14 @@ describe('runCouncilLoop', () => {
     );
     expect(result.revised).toBe(true);
     expect(result.finalText).toContain('runnable closure example');
+    expect(result.auditMeta).toMatchObject({
+      outcomeKind: 'O8',
+      convened: true,
+      revised: true,
+      visibleTextChanged: true,
+      realIntent: 'wants runnable code',
+      methodLesson: 'lead with a code example',
+    });
     // The feedback carried the council's reading (intent + method), never a fact.
     expect(seen?.realIntent).toBe('wants runnable code');
     expect(seen?.methodLessons).toContain('lead with a code example');
@@ -247,6 +272,7 @@ describe('runCouncilLoop', () => {
     );
     expect(result.revised).toBe(false);
     expect(result.finalText).toBe('Original draft.');
+    expect(result.auditMeta?.outcomeKind).toBe('O5');
   }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('treats an empty or unchanged redraft as a no-op (no spin)', async () => {
@@ -254,9 +280,11 @@ describe('runCouncilLoop', () => {
     const empty = await runLoop(service, { prompt: SUBSTANTIVE, draftText: 'Original draft.', modelId: 'local:test' }, async () => '   ');
     expect(empty.revised).toBe(false);
     expect(empty.finalText).toBe('Original draft.');
+    expect(empty.auditMeta?.outcomeKind).toBe('O5');
     const echoed = await runLoop(service, { prompt: SUBSTANTIVE, draftText: 'Original draft.', modelId: 'local:test' }, async () => 'Original draft.');
     expect(echoed.revised).toBe(false);
     expect(echoed.finalText).toBe('Original draft.');
+    expect(echoed.auditMeta?.outcomeKind).toBe('O5');
   }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('is a no-op when no redraft function is provided (grade-only)', async () => {
@@ -264,6 +292,7 @@ describe('runCouncilLoop', () => {
     const result = await runLoop(service, { prompt: SUBSTANTIVE, draftText: 'Original draft.', modelId: 'local:test' });
     expect(result.revised).toBe(false);
     expect(result.finalText).toBe('Original draft.');
+    expect(result.auditMeta?.outcomeKind).toBe('O5');
   }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('redrafts a dropped multi-intent deliverable even when round 1 spends the budget', async () => {
@@ -315,6 +344,27 @@ describe('runCouncilLoop', () => {
     expect(result.revised).toBe(false);
     expect(result.council).toBeUndefined();
     expect(result.finalText).toBe('Original draft.');
+    expect(result.auditMeta).toMatchObject({
+      outcomeKind: 'O2',
+      convened: false,
+      revised: false,
+    });
+  }, COUNCIL_LOOP_TIMEOUT_MS);
+
+  it('records O1 when quick depth disables the council loop', async () => {
+    const service = makeService(shipRoster());
+    (service as unknown as { turnProcessDepth: 'quick' }).turnProcessDepth = 'quick';
+    const result = await runLoop(
+      service,
+      { prompt: SUBSTANTIVE, draftText: 'Original draft.', modelId: 'local:test' },
+      async () => 'unused revision',
+    );
+    expect(result.auditMeta).toMatchObject({
+      outcomeKind: 'O1',
+      convened: false,
+      revised: false,
+      visibleTextChanged: false,
+    });
   }, COUNCIL_LOOP_TIMEOUT_MS);
 });
 
