@@ -17,6 +17,7 @@ import type { ModelRegistry } from '@vai/core';
 export interface AgentIntrospectDeps {
   readonly models: ModelRegistry;
   readonly fallbackChain: readonly string[];
+  readonly repoRoot?: string;
 }
 
 function readDoc(repoRoot: string, relative: string): string | null {
@@ -28,9 +29,32 @@ function readDoc(repoRoot: string, relative: string): string | null {
   }
 }
 
+function readJsonDoc(repoRoot: string, relative: string): unknown | null {
+  const raw = readDoc(repoRoot, relative);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function findVaiRepoRoot(start = process.cwd()): string {
+  let dir = path.resolve(start);
+  for (let i = 0; i < 8; i += 1) {
+    if (existsSync(path.join(dir, 'AGENTS.md')) && existsSync(path.join(dir, 'package.json'))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return path.resolve(start, '..', '..');
+}
+
 export function registerAgentIntrospectRoutes(app: FastifyInstance, deps: AgentIntrospectDeps): void {
   app.get('/api/agent/introspect', async () => {
-    const repoRoot = path.resolve(process.cwd(), '..', '..');
+    const repoRoot = deps.repoRoot ?? findVaiRepoRoot();
     const localIds = deps.models.listByProvider('local').map((adapter) => adapter.id);
     const councilOrder = [...new Set([...deps.fallbackChain.filter((id) => id !== 'vai:v0'), ...localIds])].slice(0, 3);
 
@@ -72,7 +96,9 @@ export function registerAgentIntrospectRoutes(app: FastifyInstance, deps: AgentI
         directPipe: '\\\\.\\pipe\\vai-grok-direct',
         directTcp: '127.0.0.1:48765',
         evalHarness: 'scripts/council-codegen-eval.mts',
+        bootstrap: 'pnpm agent:bootstrap',
       },
+      agentTooling: readJsonDoc(repoRoot, path.join('docs', 'agent-tooling-guide.json')),
       keyPaths: {
         chatPolicy: 'packages/core/src/chat/service.ts',
         engine: 'packages/core/src/models/vai-engine.ts',

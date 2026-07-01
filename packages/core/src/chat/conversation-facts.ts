@@ -20,7 +20,7 @@
  * Caching can be layered later if profiling demands it. The extractor is
  * intentionally cheap (regex passes over user turns only).
  */
-import { buildEntityMatcher } from './entity-matcher.js';
+import { buildEntityMatcher, type EntityMatcher } from './entity-matcher.js';
 
 export interface FactsHistoryMessage {
   readonly role: 'user' | 'assistant' | 'system' | 'tool';
@@ -67,6 +67,14 @@ export interface ConversationFacts {
   readonly decisions: readonly DecisionFact[];
   readonly constraints: readonly ConstraintFact[];
   readonly iterationChanges: readonly IterationChange[];
+}
+
+interface ProjectAccumulator {
+  name: string;
+  descriptors: string[];
+  stacks: string[];
+  firstSeenTurn: number;
+  nameMatcher: EntityMatcher;
 }
 
 export interface FactRecallResult {
@@ -344,7 +352,7 @@ export function extractConversationFacts(
 ): ConversationFacts {
   // Mutable accumulator for projects so we can attach per-project stacks
   // as later turns mention them while that project is "active".
-  const projectAcc = new Map<string, { name: string; descriptors: string[]; stacks: string[]; firstSeenTurn: number }>();
+  const projectAcc = new Map<string, ProjectAccumulator>();
   const stacks: string[] = [];
   const featureNames: string[] = [];
   const decisions: DecisionFact[] = [];
@@ -366,6 +374,7 @@ export function extractConversationFacts(
           descriptors: [...p.descriptors],
           stacks: [],
           firstSeenTurn: p.firstSeenTurn,
+          nameMatcher: buildEntityMatcher([p.name]),
         });
       } else {
         const existing = projectAcc.get(key)!;
@@ -378,8 +387,7 @@ export function extractConversationFacts(
     // known project (without re-introducing it), switch active to that one.
     if (newProjects.length === 0) {
       for (const [key, entry] of projectAcc) {
-        const nameRe = new RegExp(`\\b${entry.name.replace(/[\\^$.*+?()[\\]{}|]/g, '\\\\$&')}\\b`, 'i');
-        if (nameRe.test(msg.content)) {
+        if (entry.nameMatcher.match(msg.content)) {
           activeProjectKey = key;
           break;
         }

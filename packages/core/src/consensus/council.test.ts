@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { reachConsensus, runCouncil, convene, toCouncilThinking, runCouncilStreaming, conveneStreaming } from './council.js';
-import { routeTopic, selectMembers } from './topic-router.js';
+import { routeTopic, selectMembers, selectDelegatedMembers, explainDelegatedSelection } from './topic-router.js';
 import { createCouncilMember, parseCouncilNote } from './member.js';
 import type { CouncilInput, CouncilMember, CouncilMemberNote } from './types.js';
 import type { ChatRequest, ChatResponse, ModelAdapter } from '../models/adapter.js';
@@ -62,11 +62,43 @@ describe('routeTopic', () => {
 
 describe('selectMembers', () => {
   const a = note({ verdict: 'good' });
-  const m = (id: string): CouncilMember => ({ id, displayName: id, topic: 'local', review: async () => ({ ...a, memberId: id }) });
+  const m = (id: string, topic: CouncilMember['topic'] = 'local', slowThinking = false): CouncilMember => ({
+    id,
+    displayName: id,
+    topic,
+    slowThinking,
+    review: async () => ({ ...a, memberId: id, topic }),
+  });
   it('prefers the topic roster, then default, de-duping by id', () => {
     const roster = { byTopic: { local: [m('local-1')] }, default: [m('local-1'), m('base')] };
     expect(selectMembers('local', roster).map((x) => x.id)).toEqual(['local-1', 'base']);
     expect(selectMembers('code', roster).map((x) => x.id)).toEqual(['local-1', 'base']); // falls back to default
+  });
+
+  it('delegates a balanced single-member panel to the topic specialist first', () => {
+    const roster = {
+      byTopic: { code: [m('devstral', 'code', true)] },
+      default: [m('qwen-general', 'other'), m('devstral', 'code', true)],
+    };
+    expect(selectDelegatedMembers('code', roster, { maxMembers: 1, preferFast: true }).map((x) => x.id))
+      .toEqual(['devstral']);
+  });
+
+  it('delegates to a fast member when topic fit is equal', () => {
+    const roster = { default: [m('deepseek-r1', 'reasoning', true), m('qwen-fast', 'other')] };
+    expect(selectDelegatedMembers('other', roster, { maxMembers: 1, preferFast: true }).map((x) => x.id))
+      .toEqual(['qwen-fast']);
+  });
+
+  it('explains which specialist was delegated and why', () => {
+    const roster = {
+      byTopic: { code: [m('devstral', 'code', true)] },
+      default: [m('qwen-general', 'other'), m('devstral', 'code', true)],
+    };
+    const selection = explainDelegatedSelection('code', roster, { maxMembers: 1, preferFast: true });
+    expect(selection.selected.map((x) => x.id)).toEqual(['devstral']);
+    expect(selection.reason).toContain('routed this turn as code');
+    expect(selection.reason).toContain('topic specialists win before speed');
   });
 });
 

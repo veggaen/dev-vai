@@ -45,12 +45,20 @@ function svcWithRoster(): ChatService {
   return svc;
 }
 
-const rosterForDepth = (svc: ChatService, depth: 'quick' | 'balanced' | 'deep') => {
+const selectionForDepth = (svc: ChatService, depth: 'quick' | 'balanced' | 'deep', prompt = 'Explain this tradeoff') => {
   (svc as unknown as { turnProcessDepth: string }).turnProcessDepth = depth;
-  return (svc as unknown as { councilRosterForDepth(): CouncilRoster }).councilRosterForDepth();
+  return (svc as unknown as {
+    councilRosterSelectionForDepth(prompt?: string): {
+      roster: CouncilRoster;
+      delegationLog?: readonly { label: string; body?: string }[];
+    };
+  }).councilRosterSelectionForDepth(prompt);
 };
 
-describe('councilRosterForDepth (VRAM-aware residency)', () => {
+const rosterForDepth = (svc: ChatService, depth: 'quick' | 'balanced' | 'deep', prompt?: string) =>
+  selectionForDepth(svc, depth, prompt).roster;
+
+describe('councilRosterSelectionForDepth (VRAM-aware residency)', () => {
   it('deep keeps the full 3-model panel', () => {
     const svc = svcWithRoster();
     expect(rosterForDepth(svc, 'deep').default.length).toBe(3);
@@ -80,5 +88,13 @@ describe('councilRosterForDepth (VRAM-aware residency)', () => {
       if (prev === undefined) delete process.env.VAI_COUNCIL_BALANCED_MEMBERS;
       else process.env.VAI_COUNCIL_BALANCED_MEMBERS = prev;
     }
+  });
+
+  it('balanced exposes a visible delegation reason for the process trace', () => {
+    const svc = svcWithRoster();
+    const selection = selectionForDepth(svc, 'balanced', 'Please explain the code tradeoff');
+    expect(selection.delegationLog?.[0]?.label).toBe('Council delegation');
+    expect(selection.delegationLog?.[0]?.body).toContain('routed this turn as code');
+    expect(selection.delegationLog?.[0]?.body).toContain('asked 1/3 members');
   });
 });

@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Compact agent bootstrap map for working on Vai without rediscovering the same tools, tests, and throttling rules every session.",
+  "principles": [
+    "Start with AGENTS.md and /api/agent/introspect before changing code.",
+    "Prefer narrow, decision-relevant tests before expensive full-suite runs.",
+    "Use read-only delegation for independent exploration; keep write scopes disjoint.",
+    "Make tool use visible in progress traces and backlog evidence.",
+    "One heavy GPU, browser, build, or disk task at a time on this Windows machine."
+  ],
+  "bootstrapOrder": [
+    "pnpm agent:bootstrap",
+    "pnpm vai:status",
+    "GET http://127.0.0.1:3006/api/agent/introspect",
+    "node scripts/agent-speak-to-vai.mjs --direct \"short probe\"",
+    "run the narrow tests for the files touched",
+    "record proven findings in docs/vai-improvement-backlog.md"
+  ],
+  "commands": [
+    {
+      "id": "agent-bootstrap",
+      "command": "pnpm agent:bootstrap",
+      "cost": "cheap",
+      "use": "Print the current agent tool map, live runtime availability, and safest first commands."
+    },
+    {
+      "id": "runtime-status",
+      "command": "pnpm vai:status",
+      "cost": "cheap",
+      "use": "Check whether the runtime is healthy before starting or restarting anything."
+    },
+    {
+      "id": "live-introspect",
+      "command": "Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3006/api/agent/introspect -TimeoutSec 10 | Select-Object -ExpandProperty Content",
+      "cost": "cheap",
+      "use": "Read Vai's live self-description: model roster, Council pipeline, channels, key paths, docs, and tooling map."
+    },
+    {
+      "id": "speak-direct",
+      "command": "node scripts/agent-speak-to-vai.mjs --direct \"<probe>\"",
+      "cost": "cheap",
+      "use": "Probe the deterministic engine without depending on stale runtime transport state."
+    },
+    {
+      "id": "speak-user-path",
+      "command": "node scripts/agent-speak-to-vai.mjs \"<probe>\"",
+      "cost": "medium",
+      "use": "Exercise the real user path through the live runtime and WebSocket stream."
+    },
+    {
+      "id": "council-routing-tests",
+      "command": "node node_modules/vitest/vitest.mjs run packages/core/src/consensus/council.test.ts packages/runtime/src/council/build-roster.test.ts",
+      "cost": "cheap",
+      "use": "Verify Council topic routing, delegation, and local model seating."
+    },
+    {
+      "id": "council-loop-tests",
+      "command": "node node_modules/vitest/vitest.mjs run packages/core/src/consensus/council.test.ts packages/core/__tests__/council-roster-depth.test.ts packages/core/__tests__/council-redraft-loop.test.ts packages/core/__tests__/council-directed-read.test.ts packages/core/__tests__/council-cross-check.test.ts",
+      "cost": "medium",
+      "use": "Verify Council routing, depth caps, redraft behavior, directed reads, and cross-checks without running the full suite."
+    },
+    {
+      "id": "chat-policy-tests",
+      "command": "node node_modules/vitest/vitest.mjs run packages/core/__tests__/chat-service.test.ts packages/core/__tests__/chat-service-clarifying-question.test.ts packages/core/src/chat/turn-classifier.test.ts packages/core/__tests__/turn-kind.test.ts packages/core/src/chat/turn-pipeline.test.ts packages/core/src/chat/route-guidance.test.ts packages/core/__tests__/vai-fallback.test.ts",
+      "cost": "medium",
+      "use": "Verify ChatService routing, fallback, classifier, and turn-policy changes."
+    },
+    {
+      "id": "runtime-roster-tests",
+      "command": "node node_modules/vitest/vitest.mjs run packages/runtime/src/council/build-roster.test.ts packages/runtime/src/council/model-niche-catalog.test.ts packages/runtime/__tests__/register-configured-models.test.ts packages/runtime/__tests__/server-chat-service-options.test.ts packages/core/__tests__/ollama-discovery.test.ts",
+      "cost": "medium",
+      "use": "Verify local model discovery, niche seating, configured model registration, and server ChatService options."
+    },
+    {
+      "id": "desktop-process-ui-tests",
+      "command": "node node_modules/vitest/vitest.mjs run apps/desktop/src/components/chat/ProcessTree.logic.test.ts apps/desktop/src/components/chat/ThinkingPanel.logic.test.ts apps/desktop/src/components/chat/LiveProcessStream.logic.test.ts apps/desktop/src/components/chat/TurnProcessSection.test.tsx apps/desktop/src/components/chat/process-step-enrich.test.ts apps/desktop/src/components/chat/process-humanize.test.ts apps/desktop/src/hooks/useProcessStepReveal.test.ts",
+      "cost": "medium",
+      "use": "Verify the in-chat process tree, ThinkingPanel evidence, live stream rows, and reveal behavior after UI/process payload changes."
+    },
+    {
+      "id": "engine-tests",
+      "command": "node node_modules/vitest/vitest.mjs run packages/core/__tests__/vai-engine.test.ts",
+      "cost": "cheap",
+      "use": "Verify deterministic response routes, regex lanes, and fact-shim behavior."
+    },
+    {
+      "id": "chat-quality-umbrella",
+      "command": "node scripts/verify-chat-build-quality.mjs",
+      "cost": "medium",
+      "use": "Focused chat/build/sandbox quality gate; use flags like --live, --unit-wide, --e2e-quick, or --promptfoo only when the change needs them."
+    },
+    {
+      "id": "runtime-typecheck",
+      "command": "corepack pnpm --filter @vai/runtime typecheck",
+      "cost": "medium",
+      "use": "Typecheck runtime changes including routes, server wiring, and Council roster code."
+    },
+    {
+      "id": "core-typecheck",
+      "command": "corepack pnpm --filter @vai/core typecheck",
+      "cost": "medium",
+      "use": "Typecheck core changes when local dependency type packages are present."
+    },
+    {
+      "id": "visual-process-capture",
+      "command": "node scripts/capture-vai-process-progression.mjs",
+      "cost": "heavy",
+      "use": "Capture the live process UI as a human-visible timeline, screenshots, and video."
+    },
+    {
+      "id": "visual-qa",
+      "command": "node scripts/visual-qa.mjs --scenario all",
+      "cost": "heavy",
+      "use": "Use Playwright eyes for desktop UI regressions after visible process or styling changes."
+    },
+    {
+      "id": "self-improve-status",
+      "command": "pnpm self-improve:status",
+      "cost": "cheap",
+      "use": "Inspect the self-improvement loop state before starting, stopping, or recovering it."
+    }
+  ],
+  "delegation": {
+    "localCodex": "Use subagents only for explicitly delegated, parallel, bounded work. Prefer explorers for read-only maps and workers only for disjoint file ownership.",
+    "vaiCouncil": "Balanced turns should ask a bounded best-fit specialist panel; deep turns may use the full roster; quick turns skip Council.",
+    "visibility": "When a delegate/tool runs, surface who was asked, why, and what evidence it produced."
+  },
+  "changelog": {
+    "path": "docs/COUNCIL-CHANGELOG.md",
+    "marker": "AGENT-DISCOVERY: council-self-improvement-changelog",
+    "writtenBy": "scripts/improve-loop/changelog.mjs (renderChangelogEntry + appendChangelogEntry)",
+    "use": "The side-note of what the Council/self-improvement loop changed about Vai, why, files touched, verification, and peer-review verdict. Newest entries first. Read this before re-proposing a self-change; APPEND here whenever the loop applies, shelves, or reverts a change to Vai. Each entry has a human body AND a fenced `council-change` JSON block for machine parsing (parseChangelog)."
+  },
+  "rejectedIdeaShelf": {
+    "scope": "idea:rejected",
+    "store": "project_knowledge (scripts/improve-loop/db.mjs)",
+    "writtenBy": "scripts/improve-loop/feature-review.mjs (shelveRejectedIdea + tokenizeRejectedIdea)",
+    "use": "Tokenized fingerprints of ideas the Council built, rejected twice, and agreed to stop chasing. Pull with checkShelvedIdeas before re-proposing a similar idea ('we tried this — here's why it failed'). A shelved idea becomes revivable only when several members flag new knowledge (flagIdeaRevivable) and its confidence decays below the floor."
+  },
+  "externalResearchRefs": [
+    {
+      "name": "OpenAI tools guide",
+      "url": "https://developers.openai.com/api/docs/guides/tools",
+      "lesson": "Keep tools dynamically discoverable and load only relevant tool surfaces to reduce context cost."
+    },
+    {
+      "name": "OpenAI Codex subagents",
+      "url": "https://developers.openai.com/codex/concepts/subagents",
+      "lesson": "Delegate parallel sidecar work, then validate and integrate locally."
+    },
+    {
+      "name": "MCP tools specification",
+      "url": "https://modelcontextprotocol.io/specification/2025-06-18/server/tools",
+      "lesson": "Tools need clear metadata, visible invocation, and human approval for risky operations."
+    },
+    {
+      "name": "Browserbase introduction",
+      "url": "https://docs.browserbase.com/welcome/introduction",
+      "lesson": "Remote browser agents are useful for isolated E2E and data extraction; local Playwright remains the default first visual gate."
+    }
+  ]
+}

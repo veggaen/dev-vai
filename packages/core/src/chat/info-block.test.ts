@@ -15,6 +15,8 @@ describe('info-block — deterministic, safe HTML', () => {
     });
     expect(html).toContain('Council verdict');
     expect(html).toContain('&lt;img onerror=x&gt;'); // escaped, not live
+    expect(html).toContain('color-scheme:dark');
+    expect(html).toContain('background:#111418');
     expect(html).not.toContain('<script');
     expect(html).not.toContain('<img onerror');
   });

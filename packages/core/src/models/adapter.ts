@@ -349,6 +349,35 @@ export interface TurnRoutePlan {
   readonly belowFloor: boolean;
   /** Candidates ranked best→worst, each with its fit and outcome. */
   readonly candidates: readonly TurnRouteCandidate[];
+  /**
+   * The question-intent this turn was classified as (feeds intent-fit scoring).
+   * Optional so pre-existing callers that don't compute it stay valid.
+   */
+  readonly intent?: string;
+  /**
+   * Which classifier layer decided the intent: `'regex'` (the high-precision
+   * fast path) or `'scorer'` (the lexical-feature fallback that shrinks the
+   * `'other'` bucket). Auditable trail for why an unusually-phrased turn routed
+   * the way it did.
+   */
+  readonly intentSource?: 'regex' | 'scorer';
+  /**
+   * The scorer's decision margin (top minus runner-up, 0..1) — only present when
+   * `intentSource === 'scorer'`. A small margin flags a turn the lexical scorer
+   * found genuinely ambiguous.
+   */
+  readonly intentMargin?: number;
+  /**
+   * Why no candidate cleared the confidence floor, when `belowFloor` is true —
+   * e.g. "no handler above floor for intent: recommendation". Drives the honest
+   * intent-directed escalation (Slice 3).
+   */
+  readonly belowFloorReason?: string;
+  /**
+   * Handlers that `intentFit` demoted off-lane this turn (name + why). Makes the
+   * suppression side of intent-fit visible in the stream, not just the winner.
+   */
+  readonly suppressionsApplied?: readonly string[];
 }
 
 export interface TurnRouteCandidate {

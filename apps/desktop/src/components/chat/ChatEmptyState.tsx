@@ -8,6 +8,7 @@
 
 import { motion, useReducedMotion } from 'framer-motion';
 import { VaiPlanetMark } from './VaiPlanetMark.js';
+import { SelfImprovements } from './SelfImprovements.js';
 import { useLayoutStore } from '../../stores/layoutStore.js';
 
 interface ChatEmptyStateProps {
@@ -43,6 +44,18 @@ export function ChatEmptyState(_props: ChatEmptyStateProps) {
       >
         {line}
       </motion.p>
+
+      {/* One quiet, collapsed line: what the Council recently improved about Vai. Renders nothing
+          until there is at least one entry, so the resting hero stays calm; open it to unfold the
+          recent self-improvements (each already expanded) and copy any for debugging. */}
+      <motion.div
+        initial={prefersReducedMotion ? false : { opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.45, duration: 0.5 }}
+        className="mt-6 w-full max-w-[30rem]"
+      >
+        <SelfImprovements pollMs={30000} />
+      </motion.div>
     </motion.div>
   );
 }

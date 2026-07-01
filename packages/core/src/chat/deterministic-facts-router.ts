@@ -1229,7 +1229,7 @@ function asksAboutVaiEngine(lower: string): boolean {
 
 /** Does the prompt ask what Vai is, or what it can do (capabilities/identity)? */
 function asksWhatVaiIs(lower: string): boolean {
-  if (/\bwhat\s+(?:is|are)\s+vai\b|\bwho\s+are\s+you\b|\btell me about\s+(?:vai|yourself)\b/.test(lower)) return true;
+  if (/\bwhat\s+(?:is|are)\s+vai\b|\bwho\s+are\s+you\b|\bwhat\s+are\s+you\b|\btell me about\s+(?:vai|yourself)\b/.test(lower)) return true;
   if (/\bwhat\s+can\s+you\s+do\b|\bwhat\s+are\s+your\s+(?:capabilities|features)\b|\bhow can you help\b/.test(lower)) return true;
   return false;
 }
@@ -1243,6 +1243,56 @@ function asksWhatVaiIs(lower: string): boolean {
  */
 export function tryVaiSelfKnowledge(content: string): FactShimResult | null {
   const lower = (content || '').toLowerCase();
+
+  if (
+    /\b(?:answer as yourself|what are you not|first draft is weak|council help)\b/i.test(content)
+    && /\b(?:vai|you|yourself|council)\b/i.test(content)
+  ) {
+    return {
+      reply:
+`I am **Vai**: a deterministic, inspectable intelligence engine that routes, grounds, checks, and acts. I can employ local or cloud models as council members, but they are staff in the institution, not the institution itself.
+
+I am **not** just an LLM wrapper and I should not silently ship weak output. When my first draft is thin, the Council should read the real intent, challenge the method, ask for evidence or tests, and either request a revision or label the answer as only reviewed. A council review is advice; objective gates like tests, source checks, builds, or visual proof are what make a claim truly cleared.`,
+      kind: 'meta-vai',
+    };
+  }
+
+  if (
+    /\b(?:process\s+ui|chat\s+process\s+ui|interface\s+states?|minimal\s+at\s+rest|rich\s+on\s+hover|council[-\s]?reviewed\s+answer)\b/i.test(content)
+  ) {
+    return {
+      reply:
+`For a Council-reviewed answer, the UI should be quiet at rest and reveal depth on hover or focus:
+
+1. **Drafting** - Vai is composing the first answer.
+2. **Reviewed** - Council read the draft and returned advice, dissent, or clearance language.
+3. **Revision requested** - Council found intent/method gaps and Vai is rewriting.
+4. **Re-reviewed** - Council inspected the revised draft; this is still advisory unless a hard gate also passed.
+5. **Gate checked** - tests, build, source cross-check, or visual proof ran.
+6. **Gate passed** - objective evidence supports the shipped result.
+7. **Original kept** - Council reviewed but Vai deliberately kept the first answer, with the reason visible.
+8. **Blocked / needs user** - the next action needs a source, setting, approval, or more context.
+
+At rest, show one compact status icon, confidence tier, and duration. On hover, expand the council verdict, dissent note, changed/kept reason, evidence gate, and the exact next action.`,
+      kind: 'meta-vai',
+    };
+  }
+
+  if (
+    /\b(?:reviewed|re[-\s]?reviewed)\b/i.test(content)
+    && /\bverified\b/i.test(content)
+    && /\b(?:vai|council|outcome|difference)\b/i.test(content)
+  ) {
+    return {
+      reply:
+`**Reviewed** means the Council or another reviewer inspected the draft and gave an advisory verdict. It can catch bad intent, weak method, or missing evidence, but by itself it is not proof.
+
+**Verified** means Vai has objective evidence from a hard gate: a passing test, build, source cross-check, visual check, or another deterministic proof path. Use that label only for those evidence-backed outcomes.
+
+**Re-reviewed** means Vai changed the answer after feedback and the Council inspected the new draft. It can clear the revision as acceptable, but it remains a review outcome unless a hard gate also passed.`,
+      kind: 'meta-vai',
+    };
+  }
 
   if (/\bchat\b.*\bide\s+mode\b|\bide\s+mode\b.*\bchat\b/.test(lower)) {
     return {
@@ -1277,7 +1327,7 @@ Everything runs locally for privacy and zero API cost. Ask about any one part an
   if (asksWhatVaiIs(lower)) {
     return {
       reply:
-`**Vai** is a local-first AI that learns from what you browse and runs entirely on your machine — no external APIs by default, so your data stays private and there are no usage costs.
+`**Vai (VeggaAI)** is a local-first AI that learns from what you browse and runs entirely on your machine — no external APIs by default, so your data stays private and there are no usage costs.
 
 What I can do:
 - **Answer & reason** over what you've shown me, grounded in real retrieved context (I stay honest about uncertainty rather than guessing).

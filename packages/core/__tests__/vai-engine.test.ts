@@ -474,6 +474,21 @@ describe('VaiEngine', () => {
     expect(response.message.content).not.toMatch(/-\s+\*\*ENK\b.*\*\*ASA\b/is);
   });
 
+  it('answers Norway software idea uniqueness prompts as opportunity strategy, not country facts', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.chat },
+        { role: 'user', content: 'What is a good idea for a small Norway software company, and how would I tell if it is actually unique rather than generic?' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toMatch(/Candidate idea|Norwegian operations copilot/i);
+    expect(response.message.content).toMatch(/Specific buyer|Search test|generic/i);
+    expect(response.message.content).not.toMatch(/Capital:\s*\*\*Oslo|fjord|sovereign wealth fund|Scandinavian country/i);
+    expect(engine.lastResponseMeta?.strategy).toBe('business-opportunity-direction');
+  });
+
   it('recovers Norway company-type corrections into the clarified topic', async () => {
     const response = await engine.chat({
       messages: [
@@ -658,6 +673,21 @@ describe('VaiEngine', () => {
 
     expect(correction.message.content).toMatch(/React performance diagnosis|Unnecessary re-renders|Profiler/i);
     expect(correction.message.content).not.toMatch(/React lets you build web pages|Meryl Streep|Wikipedia/i);
+  });
+
+  it('keeps Zustand plus CSS-hover debugging specific instead of drifting to CSS specificity', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.chat },
+        { role: 'user', content: 'Now make that previous debugging answer more specific to Zustand and CSS hover state.' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toMatch(/Zustand \+ CSS hover diagnosis/i);
+    expect(response.message.content).toMatch(/Store subscription|selector|shallow/i);
+    expect(response.message.content).toMatch(/:hover|focus-within|group-hover/i);
+    expect(response.message.content).not.toMatch(/CSS Cascade and Specificity|ID selectors/i);
   });
 
   it('keeps streamed corrective follow-ups on the direct task route before loose retrieval', async () => {
@@ -1842,6 +1872,51 @@ describe('VaiEngine', () => {
     expect(chunks.length).toBeGreaterThan(1);
     const fullText = chunks.join('');
     expect(fullText).toContain('VeggaAI');
+  });
+
+  it('answers Vai identity and Council weak-draft prompts from grounded self-knowledge', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.chat },
+        { role: 'user', content: 'Vai, answer as yourself: in two short paragraphs, what are you, what are you not, and how should the Council help when your first draft is weak?' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toMatch(/deterministic|inspectable|Vai/i);
+    expect(response.message.content).toMatch(/LLM wrapper/i);
+    expect(response.message.content).toMatch(/Council|first draft|review/i);
+    expect(response.message.content).not.toMatch(/I don't have a confident answer|Build projects/i);
+  });
+
+  it('answers Council process UI prompts with compact and expanded state vocabulary', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.chat },
+        { role: 'user', content: 'For a Council-reviewed answer, what process UI states should Vai show, and how should it stay minimal at rest but rich on hover?' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toMatch(/Drafting|Reviewed|Revision requested|Gate passed/i);
+    expect(response.message.content).toMatch(/At rest.*compact status icon/is);
+    expect(response.message.content).toMatch(/On hover.*council verdict.*evidence gate/is);
+    expect(response.message.content).not.toMatch(/I don't have a confident answer|Build projects/i);
+  });
+
+  it('distinguishes reviewed, verified, and re-reviewed without upgrading council-only outcomes', async () => {
+    const response = await engine.chat({
+      messages: [
+        { role: 'system', content: CONVERSATION_MODE_SYSTEM_PROMPTS.chat },
+        { role: 'user', content: 'Explain the difference between reviewed, verified, and re-reviewed in Vai. Do not use the word verified for a council-only outcome.' },
+      ],
+      noLearn: true,
+    });
+
+    expect(response.message.content).toMatch(/Reviewed.*advisory verdict/is);
+    expect(response.message.content).toMatch(/Verified.*hard gate/is);
+    expect(response.message.content).toMatch(/Re-reviewed.*Council inspected/is);
+    expect(response.message.content).not.toMatch(/council-only outcome is verified/i);
   });
 
   it('honestly says when it does not know something', async () => {

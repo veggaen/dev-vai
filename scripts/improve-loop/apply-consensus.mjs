@@ -20,6 +20,8 @@ import { realApplyDeps, currentBranch, AUTO_IMPROVE_BRANCH, revertCommit } from 
 import { classifyRisk } from './risk-tier.mjs';
 import { verifyClassAcceptance, formatAcceptance } from './acceptance-verifier.mjs';
 import { colocatedTestPath } from './colocated-test.mjs';
+import { appendChangelogEntry } from './changelog.mjs';
+import { headSha } from './apply-runners.mjs';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
@@ -146,6 +148,16 @@ for (const p of pending) {
       db.prepare("UPDATE consensus SET applied='reverted-acceptance' WHERE id=?").run(p.id);
       strikeFix(db, proposal, `acceptance failed: ${acceptDetail}`);
       recordKnowledge(db, { scope: 'apply:acceptance', claim: `a tsc-green fix for class "${p.class}" did NOT recover its failing prompts — tsc-green is not correctness`, kind: 'guard', confirm: true, evidence: acceptDetail });
+      // SIDE-NOTE: record the revert so the changelog tells the whole story (what the loop tried AND
+      // backed out), not just successes. Never throws into the apply flow.
+      appendChangelogEntry({
+        kind: 'reverted',
+        title: `reverted a fix for ${p.class} (behavioural acceptance failed)`,
+        why: p.why || 'tsc passed but the class\'s failing prompts did not recover',
+        class: p.class,
+        files: [p.file],
+        verification: `tsc green, then reverted — ${acceptDetail}`,
+      });
       console.log(`   ↩ REVERTED (acceptance): ${acceptDetail} — ${rev.detail}`);
     } else {
       summary.applied++;
@@ -157,6 +169,17 @@ for (const p of pending) {
       recordKnowledge(db, { scope: 'class:recently-fixed', claim: `class "${p.class}" just received a committed fix — re-observe before targeting again`, kind: 'guard', confirm: true, evidence: `commit on ${p.file}` });
       // ATTRIBUTABLE WIN: record the behavioural proof so "did the loop improve anything?" is answerable.
       if (ACCEPTANCE && acceptDetail) recordKnowledge(db, { scope: 'apply:accepted', claim: `class "${p.class}" fix recovered its failing prompts (behaviourally accepted)`, kind: 'observation', confirm: true, evidence: acceptDetail });
+      // SIDE-NOTE (V3gga's changelog): every landed autonomous change writes an entry humans/Copilot/
+      // agents can read — what changed, why, files, how it was verified. Best-effort; never throws.
+      appendChangelogEntry({
+        kind: 'integrated',
+        title: `${p.class}: ${p.why ? p.why : 'applied a verified fix'}`,
+        why: p.why || `fix for the "${p.class}" failure class`,
+        class: p.class,
+        files: [p.file],
+        verification: `${r.verifyDetail}${acceptDetail ? ` · ${acceptDetail}` : ''}`,
+        commit: headSha(),
+      });
       console.log(`   ✅ applied + committed — ${r.verifyDetail}${acceptDetail ? ` · ${acceptDetail}` : ''}`);
     }
   } else if (r.tier === 'review') {

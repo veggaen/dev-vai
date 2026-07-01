@@ -28,9 +28,9 @@ interface NicheEntry {
  */
 const CATALOG: readonly NicheEntry[] = [
   { test: /deepseek-?r1|deepseek-?reason/, topic: 'reasoning', note: 'DeepSeek-R1 — first-principles + edge-case reasoning' },
-  { test: /coder|code-?(?:llama|gemma|qwen|stral)|starcoder|codestral/, topic: 'code', note: 'Code-specialist model — repo/code reasoning' },
+  { test: /devstral|codestral|coder|code-?(?:llama|gemma|qwen|stral)|starcoder/, topic: 'code', note: 'Code-specialist model — repo/code reasoning' },
   { test: /qwen.*coder|qwen2\.5-coder|qwen3-coder/, topic: 'code', note: 'Qwen coder variant — code specialist' },
-  { test: /mistral-?small|mixtral|mistral-?nemo/, topic: 'reasoning', note: 'Mistral — strong tool-calling / structured reasoning' },
+  { test: /qwq|magistral|mistral-?small|mixtral|mistral-?nemo/, topic: 'reasoning', note: 'Reasoning-specialist local model — structured critique / tradeoffs' },
   { test: /dolphin|abliterat|uncensored/, topic: 'reasoning', note: 'Uncensored model — edge-case explorer (still fact-quarantined)' },
   { test: /gemma/, topic: 'factual', note: 'Gemma — dense factual/summary reasoning' },
   { test: /llava|bakllava|vision|moondream|minicpm-?v/, topic: 'factual', note: 'Vision model — image/factual verification' },

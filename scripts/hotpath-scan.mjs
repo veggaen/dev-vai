@@ -30,13 +30,15 @@
  */
 import ts from 'typescript';
 import { readFileSync, statSync, readdirSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { extname, join, relative } from 'node:path';
 
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
+const scanAll = args.includes('--all');
 const detIdx = args.indexOf('--detector');
 const onlyDetector = detIdx >= 0 ? args[detIdx + 1] : null;
-const roots = args.filter((a) => !a.startsWith('--') && a !== onlyDetector);
+const detectorValueIdx = detIdx >= 0 ? detIdx + 1 : -1;
+const roots = args.filter((a, index) => !a.startsWith('--') && index !== detectorValueIdx);
 
 const DEFAULT_ROOTS = [
   'packages/core/src/chat',
@@ -45,25 +47,56 @@ const DEFAULT_ROOTS = [
   'packages/core/src/synthesis',
 ];
 
+const ALL_ROOTS = [
+  'packages/core/src',
+  'packages/runtime/src',
+  'apps/desktop/src',
+  'scripts',
+];
+
 const ITER_METHODS = new Set(['map', 'filter', 'forEach', 'some', 'every', 'find', 'findIndex', 'reduce', 'flatMap']);
+const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']);
 
 /** Recursively collect .ts files (skip tests, dist, node_modules, .d.ts). */
 function collectFiles(root) {
   const out = [];
   let st;
   try { st = statSync(root); } catch { return []; } // missing path → skip
-  if (st.isFile()) return root.endsWith('.ts') ? [root] : [];
+  if (st.isFile()) return isSourceFile(root) ? [root] : [];
   const entries = readdirSync(root, { withFileTypes: true });
   for (const e of entries) {
     const p = join(root, e.name);
     if (e.isDirectory()) {
-      if (['node_modules', 'dist', '__tests__', '.git'].includes(e.name)) continue;
+      if (['node_modules', 'dist', 'build', 'coverage', '__tests__', '.git'].includes(e.name)) continue;
       out.push(...collectFiles(p));
-    } else if (e.name.endsWith('.ts') && !e.name.endsWith('.d.ts') && !e.name.includes('.test.')) {
+    } else if (isSourceFile(p)) {
       out.push(p);
     }
   }
   return out;
+}
+
+function isSourceFile(file) {
+  const ext = extname(file).toLowerCase();
+  const name = file.replace(/\\/g, '/').split('/').at(-1) ?? file;
+  return SOURCE_EXTENSIONS.has(ext)
+    && !name.endsWith('.d.ts')
+    && !name.includes('.test.')
+    && !name.includes('.spec.');
+}
+
+function scriptKindForFile(file) {
+  switch (extname(file).toLowerCase()) {
+    case '.tsx':
+    case '.jsx':
+      return ts.ScriptKind.TSX;
+    case '.js':
+    case '.mjs':
+    case '.cjs':
+      return ts.ScriptKind.JS;
+    default:
+      return ts.ScriptKind.TS;
+  }
 }
 
 /** Is this node lexically inside a loop or an iterator callback (before reaching fn boundary)? */
@@ -81,6 +114,7 @@ function loopContext(node) {
       && ts.isPropertyAccessExpression(cur.parent.expression)
       && ITER_METHODS.has(cur.parent.expression.name.text)
       && cur.parent.arguments.includes(cur)) {
+      if (isModuleScope(cur.parent)) return null;
       return 'iterator-callback';
     }
     // A regular function boundary means "not in a loop" for detector #1.
@@ -98,6 +132,18 @@ function isIteratorCallback(fn) {
     && ts.isPropertyAccessExpression(fn.parent.expression)
     && ITER_METHODS.has(fn.parent.expression.name.text)
     && fn.parent.arguments.includes(fn);
+}
+
+function isInsideModuleScopeIteratorCallback(node) {
+  let cur = node.parent;
+  while (cur) {
+    if ((ts.isArrowFunction(cur) || ts.isFunctionExpression(cur)) && isIteratorCallback(cur)) {
+      return isModuleScope(cur.parent);
+    }
+    if (ts.isFunctionDeclaration(cur) || ts.isMethodDeclaration(cur)) return false;
+    cur = cur.parent;
+  }
+  return false;
 }
 
 /** Nearest enclosing named function/method for reporting + per-call detection. */
@@ -165,7 +211,7 @@ function countLoopsInBody(fnOrBlock) {
 
 function scanFile(file) {
   const src = readFileSync(file, 'utf8');
-  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true);
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, scriptKindForFile(file));
   const findings = [];
   const add = (node, detector, detail) => {
     const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
@@ -184,7 +230,7 @@ function scanFile(file) {
       const ctx = loopContext(node);
       if (ctx && argIsDynamic(node)) {
         add(node, 'regex-in-loop', `new RegExp built per iteration (${ctx})`);
-      } else if (!ctx && !isModuleScope(node) && argIsDynamic(node)) {
+      } else if (!ctx && !isModuleScope(node) && !isInsideModuleScopeIteratorCallback(node) && argIsDynamic(node)) {
         add(node, 'regex-per-call', 'new RegExp recompiled on every call (not hoisted/memoized)');
       }
     }
@@ -202,18 +248,19 @@ function scanFile(file) {
 }
 
 // ── run ───────────────────────────────────────────────────────────────────────
-const scanRoots = roots.length ? roots : DEFAULT_ROOTS;
+const scanRoots = roots.length ? roots : (scanAll ? ALL_ROOTS : DEFAULT_ROOTS);
 const files = scanRoots.flatMap(collectFiles);
 let findings = files.flatMap(scanFile);
 if (onlyDetector) findings = findings.filter((f) => f.detector === onlyDetector);
 
-if (asJson) {
-  console.log(JSON.stringify({ scanned: files.length, findings }, null, 2));
-  process.exit(0);
-}
-
 const byDetector = {};
 for (const f of findings) (byDetector[f.detector] ??= []).push(f);
+const summary = Object.fromEntries(Object.entries(byDetector).map(([det, list]) => [det, list.length]));
+
+if (asJson) {
+  console.log(JSON.stringify({ roots: scanRoots, scanned: files.length, summary, findings }, null, 2));
+  process.exit(0);
+}
 
 console.log(`hotpath-scan — ${files.length} files scanned, ${findings.length} findings\n`);
 for (const [det, list] of Object.entries(byDetector)) {

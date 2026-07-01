@@ -24,7 +24,7 @@ import {
   type ChatAnswerQualityReport,
 } from './chat-answer-quality.js';
 import { isExplicitBuildExecutionRequest, looksLikeFactualQuestion, classifyAgentBuildIntent } from './build-execution-intent.js';
-import { CONVERSATION_MODE_SYSTEM_PROMPTS, DEFAULT_CONVERSATION_MODE, type ConversationMode, isConversationMode } from './modes.js';
+import { CONVERSATION_MODE_SYSTEM_PROMPTS, DEFAULT_CONVERSATION_MODE, type ConversationMode, isConversationMode, agentIntentLeadDirective } from './modes.js';
 import { tryHandleChatMeta } from './meta-router.js';
 import { renderInfoBlockHtml } from './info-block.js';
 import {
@@ -38,8 +38,9 @@ import { tryEmitContinuation } from './chat-continuation.js';
 import { tryEmitFormatStrict } from './format-strict-router.js';
 import { tryEmitFactShim, tryVaiSelfKnowledge } from './deterministic-facts-router.js';
 import { extractIdiomContext } from './programming-idioms.js';
-import { splitCompoundQuestion, classifyQuestionIntent } from './question-intent.js';
+import { splitCompoundQuestion, classifyQuestionIntent, classifyQuestionIntentSmart, type QuestionIntent } from './question-intent.js';
 import { classifyTurn } from './turn-classifier.js';
+import { intentFit } from './intent-fit.js';
 import {
   dispatchTurn,
   type TurnHandler,
@@ -66,6 +67,7 @@ import type {
   CouncilConsensus,
 } from '../consensus/types.js';
 import type { CouncilRoster } from '../consensus/topic-router.js';
+import { routeTopic, explainDelegatedSelection } from '../consensus/topic-router.js';
 import { convene, conveneStreaming, toCouncilThinking, type ConveneResult } from '../consensus/council.js';
 import { gatherWebEvidence, extractUrls } from '../consensus/web-evidence.js';
 import { buildCouncilReviewPacket } from '../consensus/review-packet.js';
@@ -76,6 +78,7 @@ import {
   buildVaiDraftProcessLog,
   buildVaiRedraftProcessLog,
   councilMembersFromNotes,
+  type ProcessLogEntry,
 } from './council-process-log.js';
 import { accumulateProgressStep, serializeProgressTrace, deserializeProgressTrace } from './progress-trace.js';
 import type { ChatProgressStep as ApiChatProgressStep } from '@vai/api-types/chat-ws';
@@ -93,6 +96,7 @@ import {
   type RouteGuidance,
   type GuidanceStore,
 } from './route-guidance.js';
+import { jobsFromConsensus, type SelfImproveQueue } from './self-improve-queue-port.js';
 import { extractActiveTopicBrief, hasTopicOverlap } from './active-topic-brief.js';
 import { resolveChatPromptRewriteConfig, rewriteChatPrompt } from './prompt-rewrite.js';
 import { buildTurnKindSystemHint, classifyChatTurn } from './turn-kind.js';
@@ -144,9 +148,14 @@ import {
   isFreshLocalBusinessContactRequest,
   needsLiveExternalEvidence,
   isFreshLocalRecommendationRequest,
+  isBusinessOpportunityRequest,
   isPureConversationalTurn,
   shouldSkipWebConclusion,
 } from '../models/web-conclude-policy.js';
+import { tryBusinessOpportunityDirection } from './business-opportunity-direction.js';
+import { composeIntentDirective, belowFloorReason } from './intent-directive.js';
+import { checkMultiIntentCoverage, describeMissingParts } from './multi-intent-coverage.js';
+import { detectMultiIntent } from './multi-intent.js';
 import { shouldPeerReviewCode } from './code-review-policy.js';
 import {
   resolveContextualFollowUp,
@@ -235,6 +244,40 @@ export interface ResponseReviewer {
   readonly review: (input: ResponseReviewInput) => Promise<ResponseReviewResult | null>;
 }
 
+/**
+ * Per-capability toggles for the intent-aware routing improvements. Each field
+ * defaults to `true` (the improvement is on); setting one `false` restores the
+ * prior behavior for that capability, so a class that regresses live can be
+ * pinned down or reverted without a redeploy. Removed as a unit after burn-in.
+ */
+export interface RoutingConfig {
+  /**
+   * Consult the lexical-feature scorer ({@link ./intent-scorer.ts}) when the
+   * regex classifier returns `'other'`, shrinking the `'other'` bucket. When
+   * `false`, only the regex verdict is used (the pre-Slice-2 behavior).
+   */
+  readonly smartIntent?: boolean;
+  /**
+   * Promote the build / recommendation / product-quality routes into the scored
+   * registry so they are rankable + intent-fit-suppressible (Slice 1).
+   */
+  readonly rankableRoutes?: boolean;
+  /**
+   * On a below-floor turn with a known intent, escalate to the model carrying an
+   * intent-shaped directive instead of generic prose (Slice 3).
+   */
+  readonly intentEscalation?: boolean;
+}
+
+/** Resolve a {@link RoutingConfig} against the all-on defaults. */
+function resolveRoutingConfig(config: RoutingConfig | undefined): Required<RoutingConfig> {
+  return {
+    smartIntent: config?.smartIntent ?? true,
+    rankableRoutes: config?.rankableRoutes ?? true,
+    intentEscalation: config?.intentEscalation ?? true,
+  };
+}
+
 export interface ChatServiceOptions {
   readonly promptRewrite?: Partial<ChatPromptRewriteConfig>;
   /** Optional knowledge retrieval function for enriching external model prompts */
@@ -281,6 +324,12 @@ export interface ChatServiceOptions {
    * `false` to measure the prompt-only baseline.
    */
   readonly contractLedger?: boolean;
+  /**
+   * Per-capability toggles for the intent-aware routing work. Each defaults ON;
+   * flip one to `false` to isolate its effect or as a live kill-switch during
+   * burn-in. See {@link RoutingConfig}.
+   */
+  readonly routing?: RoutingConfig;
   /** Optional hook for recording final usage/cost after a streamed turn completes. */
   readonly onUsage?: (entry: {
     id: string;
@@ -301,6 +350,14 @@ export interface ChatServiceOptions {
    * decide if re-calibration of weights, scopes, matching, or actor trust is needed.
    */
   readonly guidanceStore?: GuidanceStore;
+  /**
+   * Optional self-improvement queue port. When the council reaches a non-ship consensus that names a
+   * `missingCapability` (Vai's CODE is missing something), the service enqueues a self-improvement
+   * job here — the Council TRIGGERING its own improvement loop. The runtime persists it into the
+   * loop's queue, which the background loop drains through the gated, peer-reviewed pipeline.
+   * Best-effort + bounded, mirroring guidanceStore; a member triggers but never bypasses the gates.
+   */
+  readonly selfImproveQueue?: SelfImproveQueue;
   /**
    * Optional bounded reviewers that inspect selected drafts before release.
    * Reviewers can veto an answer but cannot silently replace it with their own.
@@ -361,7 +418,9 @@ function isChatServiceOptions(value: unknown): value is ChatServiceOptions {
       || 'searchForEvidence' in value
       || 'councilRoster' in value
       || 'guidanceStore' in value
+      || 'selfImproveQueue' in value
       || 'loadActiveGuidance' in value
+      || 'routing' in value
     );
 }
 
@@ -500,6 +559,11 @@ export function buildCouncilRedraftInstruction(feedback: CouncilRedraftFeedback)
   if (feedback.realIntent) lines.push(`What the user actually wants: ${feedback.realIntent}`);
   if (feedback.recommendedAction === 'reread-intent') {
     lines.push('You likely misread the ask. Re-read the true intent above and answer THAT, directly.');
+    // Guard the redraft against re-hijacking into a DIFFERENT canned template
+    // (the failure where a mis-scaffolded todo app was "fixed" by swapping in a
+    // jest-tests tutorial — still not the answer). If the real intent is a
+    // question, the redraft must be a direct answer, not another scaffold.
+    lines.push('Do NOT answer with a scaffolded app, a starter project, or an unrelated code tutorial. If the intent is a question, respond in prose that actually answers it.');
   }
   if (feedback.recommendedAction === 'web-search' || feedback.recommendedAction === 'local-business-search') {
     lines.push('The council requires live web evidence for this answer. Use the search results attached to this turn — quote concrete current facts (numbers, dates, sources). Do not say you lack API access when evidence is present.');
@@ -512,6 +576,12 @@ export function buildCouncilRedraftInstruction(feedback: CouncilRedraftFeedback)
   }
   if (feedback.concerns.length) {
     lines.push(`Specific concerns to fix: ${feedback.concerns.slice(0, 4).join('; ')}.`);
+  }
+  // Multi-intent coverage: if a concern names a dropped deliverable, make covering
+  // EVERY part non-negotiable — the redraft must satisfy each ask in the message,
+  // not just the first. Keep the part already answered; ADD the missing one.
+  if (feedback.concerns.some((c) => /did not address \d+ of the \d+ requests/i.test(c))) {
+    lines.push('The user made MORE THAN ONE request in that message. Keep the part you already answered correctly and ADD the missing part(s) in the same reply — a build request needs real files/code, an explanation needs prose. Do not drop any deliverable.');
   }
   lines.push('Rewrite the answer now, keeping everything that was already correct and fixing only what they flagged.');
   return lines.join('\n');
@@ -552,7 +622,16 @@ const FALLBACK_BUILDER_MIN_ANCHOR_COVERAGE = 0.8;
  * {@link TurnRoutePlan} carried on the thinking trace. Shadow capabilities (if
  * any) are appended as non-deciding candidates so their Capability-Kernel
  * scoring is visible for comparison without affecting the live decision. */
-function buildRoutePlan(plan: DispatchPlan, shadows: readonly ShadowScore[] = []): TurnRoutePlan {
+function buildRoutePlan(
+  plan: DispatchPlan,
+  shadows: readonly ShadowScore[] = [],
+  intentMeta?: {
+    intent?: string;
+    intentSource?: 'regex' | 'scorer';
+    intentMargin?: number;
+    belowFloorReason?: string;
+  },
+): TurnRoutePlan {
   const liveCandidates = plan.candidates.map((c) => ({
     name: c.name,
     score: c.score,
@@ -574,10 +653,20 @@ function buildRoutePlan(plan: DispatchPlan, shadows: readonly ShadowScore[] = []
       reason: s.verifyReason ? `${s.reason} — verify: ${s.verifyReason}` : s.reason,
       shadow: true,
     }));
+  // Surface the off-lane demotions intent-fit applied this turn (reason carries
+  // "off-lane"), so the suppression side of scoring is visible, not just the winner.
+  const suppressionsApplied = liveCandidates
+    .filter((c) => /off-lane/.test(c.reason ?? ''))
+    .map((c) => `${c.name}: ${c.reason}`);
   return {
     chosen: plan.chosen,
     belowFloor: plan.belowFloor,
     candidates: [...liveCandidates, ...shadowCandidates],
+    ...(intentMeta?.intent ? { intent: intentMeta.intent } : {}),
+    ...(intentMeta?.intentSource ? { intentSource: intentMeta.intentSource } : {}),
+    ...(intentMeta?.intentMargin !== undefined ? { intentMargin: intentMeta.intentMargin } : {}),
+    ...(intentMeta?.belowFloorReason ? { belowFloorReason: intentMeta.belowFloorReason } : {}),
+    ...(suppressionsApplied.length > 0 ? { suppressionsApplied } : {}),
   };
 }
 
@@ -845,8 +934,10 @@ export class ChatService {
   private readonly onUsage?: ChatServiceOptions['onUsage'];
   private readonly primaryGenerativeFlipEnabled: boolean;
   private readonly securityReviewEnabled: boolean;
+  private readonly routingConfig: Required<RoutingConfig>;
   private readonly contractLedgerEnabled: boolean;
   private readonly guidanceStore?: GuidanceStore;
+  private readonly selfImproveQueue?: SelfImproveQueue;
   /**
    * Learned per-capability success rates (the kernel's `history` term, finally alive).
    * Records verify outcomes per turn and feeds them back into capability scoring so a
@@ -896,23 +987,30 @@ export class ChatService {
    * sequential council costs 60-90s of pure model-swapping and made balanced turns
    * TIME OUT with empty answers. So:
    *   - 'deep'      → full panel (the user opted into thoroughness; worth the swaps).
-   *   - 'balanced'  → a SINGLE member (prefer one already warm), so no eviction cycle:
-   *                   the model stays resident and the turn answers in seconds.
+   *   - 'balanced'  → a bounded delegated panel (default one member): pick a topic
+   *                   specialist when one exists; otherwise prefer a fast non-thinking
+   *                   member so the turn avoids model-swap cascades.
    *   - 'quick'     → council is already skipped upstream (loop budget 0).
    * Override the balanced cap with VAI_COUNCIL_BALANCED_MEMBERS (default 1).
    */
-  private councilRosterForDepth(): CouncilRoster {
+  private councilRosterSelectionForDepth(prompt?: string): {
+    roster: CouncilRoster;
+    delegationLog?: readonly ProcessLogEntry[];
+  } {
     const roster = this.councilRoster!;
-    if (this.turnProcessDepth === 'deep') return roster;
+    if (this.turnProcessDepth === 'deep') return { roster };
     const envCap = Number(process.env.VAI_COUNCIL_BALANCED_MEMBERS);
     const cap = Number.isFinite(envCap) && envCap > 0 ? Math.floor(envCap) : 1;
-    if (roster.default.length <= cap) return roster;
-    // Prefer a member that is NOT a slow-thinking model (those are the heaviest to load)
-    // so the single balanced reviewer is the fastest resident option.
-    const ranked = [...roster.default].sort(
-      (a, b) => Number(a.slowThinking ?? false) - Number(b.slowThinking ?? false),
-    );
-    return { default: ranked.slice(0, cap) };
+    const topic = routeTopic(prompt ?? '');
+    const selection = explainDelegatedSelection(topic, roster, { maxMembers: cap, preferFast: true });
+    return {
+      roster: { default: selection.selected },
+      delegationLog: [{
+        kind: 'action',
+        label: 'Council delegation',
+        body: selection.reason,
+      }],
+    };
   }
 
   /** Live-swap the council roster (driven by the council-config settings route). */
@@ -945,8 +1043,10 @@ export class ChatService {
     this.primaryGenerativeFlipEnabled =
       resolvedOptions?.primaryGenerativeFlip ?? (process.env.VAI_PRIMARY_GENERATIVE === '1');
     this.securityReviewEnabled = resolvedOptions?.securityReview ?? true;
+    this.routingConfig = resolveRoutingConfig(resolvedOptions?.routing);
     this.contractLedgerEnabled = resolvedOptions?.contractLedger ?? true;
     this.guidanceStore = resolvedOptions?.guidanceStore;
+    this.selfImproveQueue = resolvedOptions?.selfImproveQueue;
     this.responseReviewers = resolvedOptions?.responseReviewers ?? [];
     this.loadActiveGuidance = resolvedOptions?.loadActiveGuidance;
     this.councilRoster = resolvedOptions?.councilRoster;
@@ -1220,6 +1320,7 @@ export class ChatService {
     }
 
     this.persistCouncilLessons(draft, consensus);
+    this.triggerSelfImprovement(draft, consensus);
 
     return {
       thinking: toCouncilThinking(result.topic, consensus, result.assessment),
@@ -1237,13 +1338,19 @@ export class ChatService {
       if (!prepared) return undefined;
 
       const { input, councilTimeout, isSelfImprovement } = prepared;
-      yield { stage, label: 'Council reviewing Vai\'s proposal', status: 'running' };
+      const selection = this.councilRosterSelectionForDepth(input.prompt);
+      const partialLogs: ProcessLogEntry[] = [...(selection.delegationLog ?? [])];
+      yield {
+        stage,
+        label: 'Council reviewing Vai\'s proposal',
+        status: 'running',
+        processLog: partialLogs.length ? [...partialLogs] : undefined,
+      };
 
-      const partialLogs: ReturnType<typeof buildMemberDeliberationLog>[] = [];
       // Bound the WHOLE round by the loop's remaining wall-clock budget so slow cold
       // models can't hold the buffered answer hostage — the council yields the floor when
       // its time is up and consensus is built from whoever answered in time.
-      const stream = conveneStreaming(input, this.councilRosterForDepth(), { timeoutMs: councilTimeout, overallDeadlineMs });
+      const stream = conveneStreaming(input, selection.roster, { timeoutMs: councilTimeout, overallDeadlineMs });
       let iter = await stream.next();
       while (!iter.done) {
         const progress = iter.value;
@@ -1334,7 +1441,8 @@ export class ChatService {
       // a box with the VRAM headroom via VAI_COUNCIL_CONCURRENCY=N.
       const envConcurrency = Number(process.env.VAI_COUNCIL_CONCURRENCY);
       const concurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? envConcurrency : 1;
-      const result = await convene(input, this.councilRosterForDepth(), { timeoutMs: councilTimeout, concurrency });
+      const selection = this.councilRosterSelectionForDepth(input.prompt);
+      const result = await convene(input, selection.roster, { timeoutMs: councilTimeout, concurrency });
       if (!result.convened) return undefined;
       return await this.finalizeCouncilConvene(draft, result, isSelfImprovement);
     } catch (err) {
@@ -1406,6 +1514,29 @@ export class ChatService {
       });
     } catch {
       // Persistence is advisory — a failed write must never break the turn.
+    }
+  }
+
+  /**
+   * The Council TRIGGERING its own improvement loop. When a non-ship consensus names a
+   * `missingCapability` (Vai's CODE is missing something needed to answer this class well), enqueue
+   * a self-improvement job through the injected port. The background loop later DRAINS the queue
+   * through the gated, peer-reviewed feature-review pipeline (build → self-match → peer review →
+   * branch-guarded apply). The member TRIGGERS (emits intent, like a vote); it never bypasses the
+   * gates, and this never edits code inline.
+   *
+   * Bounded + best-effort, exactly like persistCouncilLessons:
+   *  - Only when a selfImproveQueue is injected AND the council did NOT ship.
+   *  - Only for actionable capabilities (jobsFromConsensus filters vague/empty noise + dedups).
+   *  - A failed enqueue must never break the turn.
+   */
+  private triggerSelfImprovement(draft: CouncilDraftInput, consensus: CouncilConsensus): void {
+    if (!this.selfImproveQueue) return;
+    try {
+      const jobs = jobsFromConsensus(consensus, draft.prompt);
+      for (const job of jobs) this.selfImproveQueue.enqueue(job);
+    } catch {
+      // Enqueue is advisory — never let a queue failure break the answer.
     }
   }
 
@@ -1718,21 +1849,32 @@ export class ChatService {
       councilEvidenceHint = directedEvidence.systemHint;
     }
 
+    // Deterministic multi-intent COVERAGE check (Vai owns this, not the models —
+    // fact-quarantine). If the message carried multiple distinct asks and the draft
+    // dropped one (e.g. explained JWT but never built the app), FORCE a redraft even
+    // when the council said "ship" — a dropped deliverable is the "understanding →
+    // action" bug the council doesn't reliably catch. The missing-part description
+    // is threaded into the redraft feedback so the redraft knows exactly what to add.
+    const coverage = checkMultiIntentCoverage(draft.prompt, draft.draftText);
+    const missingPartHint = coverage.hasMissingPart ? describeMissingParts(coverage) : '';
+
     const shouldRedraft =
       Boolean(redraft) &&
-      first.consensus.outcome !== 'ship' &&
-      (first.consensus.recommendedAction === 'reread-intent' ||
-        first.consensus.recommendedAction === 'answer-directly' ||
-        first.consensus.recommendedAction === 'web-search' ||
-        first.consensus.recommendedAction === 'local-business-search' ||
-        first.consensus.outcome === 'act');
+      (coverage.hasMissingPart ||
+        (first.consensus.outcome !== 'ship' &&
+          (first.consensus.recommendedAction === 'reread-intent' ||
+            first.consensus.recommendedAction === 'answer-directly' ||
+            first.consensus.recommendedAction === 'web-search' ||
+            first.consensus.recommendedAction === 'local-business-search' ||
+            first.consensus.outcome === 'act')));
     if (!shouldRedraft) {
       return { council: first.thinking, finalText: draft.draftText, revised: false };
     }
     // Budget guard: if round-1 already spent the loop's wall-clock budget (slow cold
     // models), ship round-1's verdict instead of paying for a redraft + a second full
-    // convene. The answer stops waiting; the council stays advisory.
-    if (budgetSpent()) {
+    // convene. A deterministic dropped-deliverable finding is not advisory, though:
+    // we must pay for the one redraft and can still skip the round-2 re-review below.
+    if (budgetSpent() && !coverage.hasMissingPart) {
       yield {
         stage: stages.redraft,
         label: 'Skipped redraft — council budget spent (answer shipped)',
@@ -1745,7 +1887,12 @@ export class ChatService {
       realIntent: first.consensus.realIntent,
       methodLessons: first.consensus.methodLessons,
       missingCapabilities: first.consensus.missingCapabilities,
-      concerns: first.consensus.notes.flatMap((note) => note.concerns).filter(Boolean),
+      // Lead the concerns with the deterministic dropped-deliverable signal so the
+      // redraft addresses the missing part FIRST, before any softer council notes.
+      concerns: [
+        ...(missingPartHint ? [missingPartHint] : []),
+        ...first.consensus.notes.flatMap((note) => note.concerns).filter(Boolean),
+      ],
       recommendedAction: first.consensus.recommendedAction,
     };
 
@@ -2333,6 +2480,12 @@ export class ChatService {
     // profile/link fragments). The persisted user message stays verbatim.
     let effectiveContent = content;
 
+    // Classified question-intent, hoisted to method scope so the model-dispatch
+    // path (below the deterministic block) can shape a below-floor escalation to
+    // it (Slice 3). Assigned inside the block when classification runs; stays
+    // `'other'` for image-only / empty turns that never classify.
+    let dispatchQuestionIntent: QuestionIntent = 'other';
+
     // Chat-meta intent short-circuit: questions *about* the conversation itself
     // ("what was my first message", "summarize this chat") are answered
     // deterministically from persisted history and bypass model dispatch.
@@ -2485,13 +2638,25 @@ export class ChatService {
       // handler's work only happens if every higher one declined.
       const det = (
         name: string,
-        fit: number,
+        prior: number,
         resolve: () => ServiceResolution | null,
         applicable = true,
         reason?: string,
       ): TurnHandler<ServiceResolution> => ({
         name,
-        score: () => (applicable ? { score: fit, reason } : null),
+        // Intent-aware fit: `prior` is the handler's constant base priority; the
+        // turn's classified intent + shape nudge it (bounded) so an off-intent
+        // handler loses even when its prior is high, and a fitting one can
+        // overtake a higher-listed rival. `intentFit` returns the prior unchanged
+        // for any handler/turn it has no opinion on, so this preserves today's
+        // order exactly until a signal fires. The handler's own `reason` and the
+        // fit reason are both surfaced into the visible dispatch plan.
+        score: (ctx) => {
+          if (!applicable) return null;
+          const { score, reason: fitReason } = intentFit(name, prior, ctx);
+          const combinedReason = [reason, fitReason].filter(Boolean).join(' · ') || undefined;
+          return { score, reason: combinedReason };
+        },
         resolve,
       });
       const handlers: TurnHandler<ServiceResolution>[] = [
@@ -2531,6 +2696,20 @@ export class ChatService {
           const r = tryHandleFactRecall(content, metaHistory);
           return r ? { text: r.reply, confidence: 0.98, strategy: `chat-facts:${r.intent}` } : null;
         }, true, 'Stored fact recall for who/what/when lookups.'),
+        det('business-opportunity', 0.945, () => {
+          // Business-idea / opportunity direction ("a good software business idea?",
+          // the Norway class). Promoted from VaiEngine's cascade into the scored
+          // registry (Slice 1) so it is rankable + auditable, and it beats fact-shim
+          // (0.91) by prior so a business-idea ask can no longer be answered by a
+          // country-fact card. Uses the SHARED emitter both routers call (Slice 4),
+          // so ChatService and VaiEngine give the same answer. Gated on the actual
+          // business-opportunity intent, so it is inert on every other turn.
+          const reply = tryBusinessOpportunityDirection(content);
+          return reply
+            ? { text: reply, turnKind: 'analysis', confidence: 0.9, strategy: 'business-opportunity-direction' }
+            : null;
+        }, this.routingConfig.rankableRoutes && isBusinessOpportunityRequest(content),
+          'Business-idea / opportunity direction (beats country-fact cards).'),
         det('chat-product-engineering', 0.94, () => {
           const reply = tryEmitProductEngineeringMemo({ content });
           if (!reply) return null;
@@ -2639,7 +2818,16 @@ export class ChatService {
       // active. Both plans + the applied guidance records are the reference
       // data used later to decide if steering delivered benefit or if the
       // matching/weights/scopes/actor models need re-calibration.
-      const questionIntent = classifyQuestionIntent(content);
+      // Intent classification with the lexical-feature fallback: the regex fast
+      // path decides every turn it has a crisp opinion on (unchanged); the scorer
+      // only speaks to shrink the `'other'` bucket, so an unusually-phrased ask
+      // gets a real intent for intent-fit instead of falling through as `'other'`.
+      // Gated by `routing.smartIntent`; when off, only the regex verdict is used.
+      const questionIntentResult = this.routingConfig.smartIntent
+        ? classifyQuestionIntentSmart(content)
+        : { intent: classifyQuestionIntent(content), source: 'regex' as const, scorer: undefined };
+      const questionIntent = questionIntentResult.intent;
+      dispatchQuestionIntent = questionIntent;
       let activeGuidance: readonly RouteGuidance[] = [];
       if (this.guidanceStore) {
         activeGuidance = this.guidanceStore.loadActive(conversationId);
@@ -2796,6 +2984,9 @@ export class ChatService {
             plan: outcome.plan,
             baselinePlan,
             council,
+            intent: questionIntent,
+            intentSource: questionIntentResult.source,
+            intentMargin: questionIntentResult.scorer?.margin,
           });
           return;
         }
@@ -2836,7 +3027,20 @@ export class ChatService {
       });
 
     if (modePrompt) {
-      systemMessages.push({ role: 'system', content: modePrompt });
+      // Intent-condition the Agent prompt: on an ANSWER turn, prepend a directive
+      // that tells the model this is a question, NOT a build — so the prompt's
+      // heavy build guidance ("output the COMPLETE app", "always include
+      // package.json") can't hijack it into scaffolding a starter app for a plain
+      // question (the "what are great tools?" -> Next.js todo app failure). The
+      // classifier already knows the intent; this carries it into the prompt.
+      // No-op for build/ambiguous turns and for non-agent modes.
+      const agentLead = resolvedMode === 'agent'
+        ? agentIntentLeadDirective(classifyAgentBuildIntent(content))
+        : '';
+      systemMessages.push({
+        role: 'system',
+        content: agentLead ? `${agentLead}\n${modePrompt}` : modePrompt,
+      });
     }
 
     // Carry an upstream security hardening directive (soft prompt-injection)
@@ -2844,6 +3048,23 @@ export class ChatService {
     // without obeying the embedded override.
     if (securityHardenDirective) {
       systemMessages.push({ role: 'system', content: securityHardenDirective });
+    }
+
+    // Intent-directed escalation (Slice 3): reaching this dispatch path means no
+    // deterministic handler cleared the confidence floor. Rather than let the
+    // model answer shapelessly, inject a directive that carries the CLASSIFIED
+    // intent's expected shape (recommendation → a specific pick, factual → the
+    // answer first, etc.). Additive to the security directive; composes to null
+    // for `other`/`meta` so we never fabricate a shape the classifier couldn't
+    // name. Gated by `routing.intentEscalation`. `intentDirectiveApplied` rides
+    // into the route plan's `belowFloorReason` for the auditable trail.
+    let intentDirectiveApplied = false;
+    if (this.routingConfig.intentEscalation) {
+      const directive = composeIntentDirective(dispatchQuestionIntent);
+      if (directive) {
+        systemMessages.push({ role: 'system', content: directive });
+        intentDirectiveApplied = true;
+      }
     }
 
     // Anchor the model to the durable conversation contract — projects, stacks,
@@ -3120,6 +3341,33 @@ export class ChatService {
 
     yield { type: 'turn_kind', turnKind } as ChatChunk;
 
+    // Multi-intent breakdown (human-legible): when the message carries more than
+    // one distinct ask, show it up front — "I heard N requests" with each part and
+    // its kind — so the human can SEE that Vai understood every deliverable, and
+    // later see whether each was satisfied. This is the visible half of the
+    // coverage machinery that forces a redraft when a part is dropped.
+    {
+      const turnMultiIntent = detectMultiIntent(content);
+      if (turnMultiIntent.isMultiIntent) {
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'multi-intent',
+            label: `Heard ${turnMultiIntent.parts.length} requests in this message`,
+            detail: turnMultiIntent.parts
+              .map((p, i) => `${i + 1}. ${p.action === 'build' ? 'Build' : 'Answer'}: ${p.text}`)
+              .join('\n'),
+            status: 'running',
+            processLog: turnMultiIntent.parts.map((p, i) => ({
+              kind: 'thought' as const,
+              label: `Request ${i + 1} — ${p.action === 'build' ? 'build' : 'answer'}`,
+              body: p.text,
+            })),
+          },
+        } as ChatChunk;
+      }
+    }
+
     // Live reasoning (streamed via the progress pipe): the buffered vai:v0 pass
     // below can be slow and shows no text until it resolves, so surface a
     // human-readable "what I'm doing now" line instead of a dead spinner.
@@ -3294,7 +3542,10 @@ export class ChatService {
             strategy: 'vai-buffered',
             modelTag: bufferedModelId,
             confidence: latestConfidence ?? 0.6,
-            routePlan: buildRoutePlan(turnPlan, turnShadowScores),
+            routePlan: buildRoutePlan(turnPlan, turnShadowScores, {
+              intent: dispatchQuestionIntent,
+              belowFloorReason: belowFloorReason(dispatchQuestionIntent, intentDirectiveApplied),
+            }),
           };
         }
         bufferedChunks.push(doneChunk as ChatChunk);
@@ -4071,7 +4322,10 @@ export class ChatService {
           durationMs: durationMs ?? Date.now() - streamStartedAt,
         });
         if (turnPlan) {
-          fallbackThinking.routePlan = buildRoutePlan(turnPlan, turnShadowScores);
+          fallbackThinking.routePlan = buildRoutePlan(turnPlan, turnShadowScores, {
+            intent: dispatchQuestionIntent,
+            belowFloorReason: belowFloorReason(dispatchQuestionIntent, intentDirectiveApplied),
+          });
         }
         if (vaiProposedDraft) {
           fallbackThinking.vaiProposedDraft = vaiProposedDraft;
@@ -4247,7 +4501,10 @@ export class ChatService {
               strategy: 'model-primary',
               modelTag: primaryModelId,
               confidence: 0.6,
-              routePlan: buildRoutePlan(turnPlan, turnShadowScores),
+              routePlan: buildRoutePlan(turnPlan, turnShadowScores, {
+              intent: dispatchQuestionIntent,
+              belowFloorReason: belowFloorReason(dispatchQuestionIntent, intentDirectiveApplied),
+            }),
             }
           : { strategy: 'model-primary', modelTag: primaryModelId, confidence: 0.6 };
         if (councilThinking) t.council = councilThinking;
@@ -4356,6 +4613,11 @@ export class ChatService {
     baselinePlan?: DispatchPlan;
     /** SCIS council review of this draft (when roster configured and convened). */
     council?: CouncilThinking;
+    /** Classified question-intent + which layer decided it, for the route plan. */
+    intent?: string;
+    intentSource?: 'regex' | 'scorer';
+    /** Scorer decision margin, present only when the scorer decided the intent. */
+    intentMargin?: number;
   }): AsyncGenerator<ChatChunk, void, unknown> {
     const startedAt = Date.now();
     for (const chunk of args.preChunks ?? []) yield chunk;
@@ -4366,7 +4628,16 @@ export class ChatService {
     const durationMs = Date.now() - startedAt;
     const baseThinking = buildDeterministicThinking(args.strategy, args.content, durationMs, args.confidence);
     const finalThinking = {
-      ...(args.plan ? { ...baseThinking, routePlan: buildRoutePlan(args.plan) } : baseThinking),
+      ...(args.plan
+        ? {
+            ...baseThinking,
+            routePlan: buildRoutePlan(args.plan, [], {
+              intent: args.intent,
+              intentSource: args.intentSource,
+              intentMargin: args.intentMargin,
+            }),
+          }
+        : baseThinking),
       ...(args.council ? { council: args.council } : {}),
     };
     yield {
