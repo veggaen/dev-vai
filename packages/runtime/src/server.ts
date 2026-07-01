@@ -43,7 +43,9 @@ import { registerSkillRoutes } from './routes/skills.js';
 import { registerFeedbackRoutes } from './routes/feedback.js';
 import { registerSteeringRoutes } from './routes/steering.js';
 import { registerAgentIntrospectRoutes } from './routes/agent-introspect.js';
+import { registerCouncilChangelogRoutes } from './routes/council-changelog.js';
 import { createGuidanceStore } from './steering/guidance-store.js';
+import { createSelfImproveQueue } from './steering/self-improve-queue.js';
 import { computeSteeringLift } from './steering/analyze-steering.js';
 import { LocalSteeringWorker, localSteeringOptionsFromEnv } from './steering/local-steering-worker.js';
 import { friendReviewReviewersFromEnv } from './friend-review/panel-from-env.js';
@@ -351,6 +353,10 @@ export async function createServer(options?: ServerOptions) {
       },
       onUsage: config.enableUsageTracking ? (entry) => usageService.record(entry) : undefined,
       guidanceStore,
+      // The Council triggering its own improvement loops: a non-ship consensus naming a
+      // missingCapability enqueues a self-improvement job to the cross-process inbox the background
+      // loop drains through the gated feature-review pipeline. Best-effort; never blocks a turn.
+      selfImproveQueue: createSelfImproveQueue(),
       councilRoster,
       visionAdapter,
       imageProducer,
@@ -586,6 +592,7 @@ export async function createServer(options?: ServerOptions) {
   registerFeedbackRoutes(app, db);
   registerSteeringRoutes(app, guidanceStore);
   registerAgentIntrospectRoutes(app, { models, fallbackChain: effectiveConfig.fallbackChain.models });
+  registerCouncilChangelogRoutes(app);
 
   app.get('/api/usage', async (request) => {
     const query = request.query as { from?: string; to?: string };

@@ -708,6 +708,43 @@ async function main() {
       await runChild('scripts/improve-loop/apply-consensus.mjs', ['--base-url', BASE_URL]);
     }
 
+    // SELF-IMPROVE DRAIN: the Council TRIGGERS its own improvement loops by enqueuing jobs
+    // (missingCapability → self_improve_queue, written by the runtime during real turns). Here the
+    // loop DRAINS a budgeted, serial batch of them through the gated feature-build → feature-review
+    // pipeline (peer-reviewed, branch-guarded). Observe mode = preview (review only, no integrate);
+    // apply mode arms integration (still branch-guarded to council/auto-improve inside the job).
+    // One heavy task at a time; skipped entirely when the queue is empty (cheap check).
+    if (!stop) {
+      try {
+        const { openJobs, drainSelfImproveQueue, enqueueFromMissingCapability } = await import('./self-improve-queue.mjs');
+        const { ingestInbox } = await import('./self-improve-inbox.mjs');
+        const { recordKnowledge, topKnowledge, knowledgeConfidence } = await import('./db.mjs');
+        const { CLASS_LOCATION } = await import('./brain.mjs');
+        const sdb = openDb(DB_PATH);
+        // INGEST: pull jobs the RUNTIME produced during live turns (the Council triggering itself)
+        // from the cross-process inbox into the queue table. Resolve a code location to ground on
+        // from the job's class via CLASS_LOCATION (else null → the job aborts cleanly, not a crash).
+        const ingest = ingestInbox(sdb, {
+          enqueue: enqueueFromMissingCapability,
+          resolveLocation: (job) => CLASS_LOCATION[job.klass] ?? CLASS_LOCATION[job.intent] ?? null,
+          effects: { recordKnowledge, topKnowledge, knowledgeConfidence },
+        });
+        if (ingest.ingested > 0) log(`self-improve inbox: ingested ${ingest.ingested} (enqueued ${ingest.enqueued}, skipped ${ingest.skipped})`);
+        const pending = openJobs(sdb, 1).length;
+        if (pending > 0) {
+          log(`━━━ cycle ${cycle} : SELF-IMPROVE DRAIN (Council-triggered jobs) ━━━`);
+          const { runSelfImproveJob } = await import('./feature-review-job.mjs');
+          const summary = await drainSelfImproveQueue(sdb, {
+            budget: 3,
+            runJob: (job) => runSelfImproveJob(job, { db: sdb, integrate: AUTO_APPLY, log }),
+            onEvent: (e) => { if (e.type === 'job:done') log(`  drained job #${e.job.id} → ${e.result?.outcome} (${e.result?.detail ?? ''})`); },
+          });
+          log(`self-improve drain: ran ${summary.ran} job(s)`);
+        }
+        sdb.close();
+      } catch (e) { log('self-improve drain skipped: ' + String(e).slice(0, 80)); }
+    }
+
     // VISUAL CADENCE: between text cycles, let Vai LOOK at itself. Serial (one heavy task
     // at a time), no-video, recorded to the corpus for the watch page + council packet.
     if (VISUAL_EVERY > 0 && !stop && cycle % VISUAL_EVERY === 0) {
