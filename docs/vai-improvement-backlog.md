@@ -6,6 +6,30 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **QUEUED 2026-07-02 - vai-engine.ts decomposition, phase 2: the COUPLED dispatcher giants (the key to the routing bugs)**
+  - Why now: the 2 pre-existing failing tests (deploy-fire-drill + auth/team/sandbox → misrouted to the engine-identity
+    handler) are unfixable-in-practice because the routing lives in `generateResponse` (the 1884-line main dispatcher)
+    inside the 35k-line `vai-engine.ts` god-class. The self-improvement loop CORRECTLY refused to touch it (its
+    find/replace can't express a dispatcher reorder; it aborted cleanly rather than slop). Decomposing the dispatcher
+    is what makes those bugs fixable — by the loop OR a human. Decomposition and the routing bugs are the same problem.
+  - State: Slices 1-4 DONE + PROVEN byte-identical (56,447 → 35,201 lines, -38%). Pure methods already extracted
+    (builder-templates, algo-templates, knowledge-answers, code-emitters). Reusable tooling exists and is battle-tested:
+    `scripts/extract-pure-methods.mjs` (AST spans + this/super detection + auto-import-carry), `scripts/capture-method-golden.mjs`
+    (golden battery), regression tests lock byte-identity. tsc is the gate (caught missing-import + alias-collision bugs).
+  - Phase 2 = the COUPLED `this.`-using giants (need deps-as-params surgery, NOT plain extraction):
+    `tryFrameworkDevopsKnowledge` (2788), `tryAnswerEarlyHooks` (2246), `handleConversational` (1235),
+    `tryNorwegianLanguage` (1077), `tryCreativeCodeProject` (747), `tryAlgorithmCodeGen` (591), and LAST the
+    `generateResponse` dispatcher (1884) — split its routing table into a data-driven, TRACEABLE dispatch so a
+    misroute is a one-line table edit, not a swamp dive.
+  - Approach (per the council's prior endorsement): pass the few `this.` helpers each method calls as an explicit deps
+    object (or split into a sibling taking that deps object). Golden-snapshot each before/after; tsc + full core suite
+    (3596 tests) must stay green; one regression test per extracted module locking byte-identity.
+  - Method pitfalls (do NOT repeat): never brace-match by counting {} (they appear in string literals — use the AST);
+    never dedent extracted bodies (multi-line template literals have significant leading whitespace).
+  - Payoff: (1) the deploy/architecture routing bugs become fixable → greens the CI baseline → unblocks PR #3 + future
+    PRs; (2) the loop can then land routing fixes itself (traceable table vs 1884-line swamp); (3) stops the editor
+    crashes on opening the file. This is a large, careful, multi-slice effort — pick up as its own focused pass.
+
 - **Capability-Innovation 2026-07-01 — council round (strong 7.1/10)**
   - Context: generative capability council toward the north-star (voice + interface, any task,
     reliable, no lost details). council 7.1/10 (strong) · 10 lenses · 9 areas · top cluster 2
