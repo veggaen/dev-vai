@@ -56,6 +56,8 @@ export async function runSelfImproveJob(job, {
   integrate = false,
   log = () => {},
   changelogPath, // injectable so tests don't mutate the real docs changelog
+  applyBranch,   // branch the real apply is allowed to commit to (default council/auto-improve)
+  pkgTsconfig = 'packages/core/tsconfig.json', // tsconfig the verify step typechecks
 } = {}) {
   const instruction = job.instruction;
   const location = job.location;
@@ -96,11 +98,25 @@ export async function runSelfImproveJob(job, {
       }
       return votes;
     },
-    integrate: async () => {
+    integrate: async (artifact) => {
       if (!integrate) return { ok: false, detail: 'preview-only (integration not armed)' };
-      const { currentBranch, AUTO_IMPROVE_BRANCH } = await import('./apply-runners.mjs');
-      if (currentBranch() !== AUTO_IMPROVE_BRANCH) return { ok: false, detail: `off-branch (need ${AUTO_IMPROVE_BRANCH})` };
-      return { ok: true, detail: 'integration intent recorded (apply via apply-consensus)' };
+      const { currentBranch, AUTO_IMPROVE_BRANCH, realApplyDeps } = await import('./apply-runners.mjs');
+      const branch = applyBranch ?? AUTO_IMPROVE_BRANCH;
+      if (currentBranch() !== branch) return { ok: false, detail: `off-branch (need ${branch})` };
+      // ACTUALLY APPLY the reviewed artifact: risk-gate → exact find/replace → tsc(+colocated test)
+      // → commit-or-revert, branch-guarded. This is what makes "the Council implements + verifies"
+      // real instead of just "records intent". The artifact already carries {file,find,replace,why}.
+      const { applyVerifiedFix } = await import('./apply-fix.mjs');
+      const { colocatedTestPath } = await import('./colocated-test.mjs');
+      const testPath = colocatedTestPath(artifact.file);
+      const deps = realApplyDeps({ pkgTsconfig, branch, testPath });
+      const r = await applyVerifiedFix(
+        { file: artifact.file, find: artifact.find, replace: artifact.replace, why: artifact.why },
+        deps,
+      );
+      if (r.committed) return { ok: true, detail: `committed + verified — ${r.verifyDetail}` };
+      if (r.tier === 'review') return { ok: false, detail: `risk-tier '${r.tier}' — flagged, not auto-applied: ${(r.reasons ?? []).join('; ')}` };
+      return { ok: false, detail: r.verifyDetail || (r.reasons ?? []).join('; ') || 'apply failed' };
     },
     shelve: async (idea) => shelveRejectedIdea(db, idea, { recordKnowledge }),
   };

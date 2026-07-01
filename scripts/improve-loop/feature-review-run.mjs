@@ -46,6 +46,8 @@ const CLASS = opt('--class', 'feature');
 const INSTRUCTION = opt('--instruction', '');
 const ARTIFACT_PATH = opt('--artifact', '');
 const LOCATION = opt('--location', ''); // file[:line] to ground codegen on
+const APPLY_BRANCH = opt('--apply-branch', ''); // override the branch --integrate is allowed to commit to
+const PKG_TSCONFIG = opt('--tsconfig', 'packages/core/tsconfig.json'); // tsconfig the verify step typechecks
 const VRAM_GB = Number(opt('--vram-gb', '8.5'));
 const PEER_TIMEOUT = Number(opt('--peer-timeout', '90000'));
 // CodeRabbit augmentation: run the built change through CodeRabbit (free tier, cooldown-gated) so
@@ -169,16 +171,28 @@ async function main() {
         log('PREVIEW: feature cleared review — would integrate (pass --integrate to apply).');
         return { ok: false, detail: 'preview-only (integration not armed)' };
       }
-      // Branch-guarded real integration would live here (apply the diff, tsc/test, commit to
-      // council/auto-improve). For the first cut we record the intent to the changelog and defer
-      // the actual file apply to the existing apply-consensus path.
-      const { currentBranch, AUTO_IMPROVE_BRANCH } = await import('./apply-runners.mjs');
-      if (currentBranch() !== AUTO_IMPROVE_BRANCH) {
-        log(`refusing to integrate: HEAD is not ${AUTO_IMPROVE_BRANCH}`);
-        return { ok: false, detail: `off-branch (need ${AUTO_IMPROVE_BRANCH})` };
+      // REAL branch-guarded apply: risk-gate → exact find/replace → tsc(+colocated test) →
+      // commit-or-revert. This is what makes "the Council implements + verifies" real. The default
+      // guard branch is council/auto-improve; --apply-branch overrides it (for a safe proof branch).
+      const { currentBranch, realApplyDeps, AUTO_IMPROVE_BRANCH } = await import('./apply-runners.mjs');
+      const branch = APPLY_BRANCH || AUTO_IMPROVE_BRANCH;
+      if (currentBranch() !== branch) {
+        log(`refusing to integrate: HEAD is '${currentBranch()}', not '${branch}'`);
+        return { ok: false, detail: `off-branch (need ${branch})` };
       }
-      log('integrate armed + on council/auto-improve — recording integration intent to changelog.');
-      return { ok: true, detail: 'integration intent recorded (apply the diff via apply-consensus)' };
+      const { applyVerifiedFix } = await import('./apply-fix.mjs');
+      const { colocatedTestPath } = await import('./colocated-test.mjs');
+      const testPath = colocatedTestPath(artifact.file);
+      log(`integrate armed on ${branch} — applying + verifying (tsc${testPath ? ` + ${testPath}` : ''})…`);
+      const deps = realApplyDeps({ pkgTsconfig: PKG_TSCONFIG, branch, testPath });
+      const r = await applyVerifiedFix(
+        { file: artifact.file, find: artifact.find, replace: artifact.replace, why: artifact.why },
+        deps,
+      );
+      if (r.committed) { log(`✅ COMMITTED + VERIFIED: ${r.verifyDetail}`); return { ok: true, detail: `committed + verified — ${r.verifyDetail}` }; }
+      if (r.tier === 'review') { log(`⚠ risk-tier '${r.tier}' — flagged, not applied`); return { ok: false, detail: `risk-tier — ${(r.reasons ?? []).join('; ')}` }; }
+      log(`↩ not committed: ${r.verifyDetail || (r.reasons ?? []).join('; ')}`);
+      return { ok: false, detail: r.verifyDetail || (r.reasons ?? []).join('; ') || 'apply failed' };
     },
     shelve: async (idea) => shelveRejectedIdea(db, idea, { recordKnowledge }),
   };
