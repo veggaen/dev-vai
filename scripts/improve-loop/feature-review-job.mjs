@@ -100,6 +100,20 @@ export async function runSelfImproveJob(job, {
     },
     integrate: async (artifact) => {
       if (!integrate) return { ok: false, detail: 'preview-only (integration not armed)' };
+      // WORTHINESS GATE (V3gga's bar): tsc-green is not enough — the change must be GOOD, MEANINGFUL,
+      // well-engineered, configurable, future-proof. A cosmetic copy/comment tweak is rejected here
+      // BEFORE it ever commits, and shelved with the critique. Deterministic shape floor + model rubric.
+      const { judgeChangeWorth } = await import('./change-worth.mjs');
+      const worth = await judgeChangeWorth(
+        { instruction, file: artifact.file, find: artifact.find, replace: artifact.replace, why: artifact.why, sourceExcerpt: artifact.sourceExcerpt },
+        { generate: (p) => generate(p, { numPredict: 160 }) },
+      );
+      log(`  worthiness: ${worth.worthy ? 'WORTHY' : 'not worthy'} (${worth.worth}) — ${worth.reason}`);
+      if (!worth.worthy) {
+        // Shelve the unworthy idea so the loop doesn't keep re-proposing cosmetic noise.
+        const fp = shelveRejectedIdea(db, { instruction, file: artifact.file, reasons: [worth.reason] }, { recordKnowledge });
+        return { ok: false, detail: `not worthy of committing (${worth.worth}): ${worth.reason}`, shelvedAs: fp?.id, unworthy: true };
+      }
       const { currentBranch, AUTO_IMPROVE_BRANCH, realApplyDeps } = await import('./apply-runners.mjs');
       const branch = applyBranch ?? AUTO_IMPROVE_BRANCH;
       if (currentBranch() !== branch) return { ok: false, detail: `off-branch (need ${branch})` };

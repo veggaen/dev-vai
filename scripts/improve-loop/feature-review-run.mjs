@@ -54,6 +54,7 @@ const PEER_TIMEOUT = Number(opt('--peer-timeout', '90000'));
 // peers can improve their own suggestion before review. On by default when the CLI is available;
 // --no-coderabbit forces it off. A no-op (peers proceed without it) when the binary isn't present.
 const USE_CODERABBIT = !has('--no-coderabbit');
+const NO_WORTH = has('--no-worth'); // skip the worthiness gate (e.g. to demonstrate the old behaviour)
 
 function log(m) { process.stdout.write(`[feature-review ${new Date().toLocaleTimeString()}] ${m}\n`); }
 
@@ -170,6 +171,21 @@ async function main() {
       if (!INTEGRATE) {
         log('PREVIEW: feature cleared review — would integrate (pass --integrate to apply).');
         return { ok: false, detail: 'preview-only (integration not armed)' };
+      }
+      // WORTHINESS GATE: tsc-green ≠ worthy. A change must be meaningful, well-engineered,
+      // configurable, future-proof to commit — a cosmetic tweak is rejected here + shelved. (--no-worth to skip.)
+      if (!NO_WORTH) {
+        const { judgeChangeWorth } = await import('./change-worth.mjs');
+        const worth = await judgeChangeWorth(
+          { instruction: INSTRUCTION, file: artifact.file, find: artifact.find, replace: artifact.replace, why: artifact.why, sourceExcerpt: artifact.sourceExcerpt },
+          { generate: (p) => generate(p, { numPredict: 160 }) },
+        );
+        log(`  worthiness: ${worth.worthy ? 'WORTHY ✓' : 'NOT WORTHY ✗'} (${worth.worth}) — ${worth.reason}`);
+        if (!worth.worthy) {
+          const fp = shelveRejectedIdea(db, { instruction: INSTRUCTION, file: artifact.file, reasons: [worth.reason] }, { recordKnowledge });
+          log(`  → shelved as ${fp?.id} (not committing a sub-bar change)`);
+          return { ok: false, detail: `not worthy (${worth.worth}): ${worth.reason}` };
+        }
       }
       // REAL branch-guarded apply: risk-gate → exact find/replace → tsc(+colocated test) →
       // commit-or-revert. This is what makes "the Council implements + verifies" real. The default
