@@ -1,5 +1,6 @@
 import { isExplicitResearchRequest } from '../models/explicit-web-search.js';
 import { isFreshLocalRecommendationRequest } from '../models/web-conclude-policy.js';
+import { scoreQuestionIntent } from './intent-scorer.js';
 
 /**
  * Lightweight question-intent classifier.
@@ -65,6 +66,46 @@ export function classifyQuestionIntent(rawInput: string): QuestionIntent {
 /** True when the input is a yes/no question about whether an entity DOES something. */
 export function isActionYesNoQuestion(input: string): boolean {
   return classifyQuestionIntent(input) === 'action-yesno';
+}
+
+/**
+ * The confidence margin the lexical scorer must clear before its guess is
+ * allowed to REPLACE a regex `'other'`. Below this, the turn is genuinely
+ * ambiguous and we keep `'other'` (conservative — never invent an intent the
+ * features only weakly support). Tuned so a clean single-lane turn (one strong
+ * feature) passes while a mixed-signal turn does not.
+ */
+const SMART_ADOPT_MARGIN = 0.25;
+
+/**
+ * Intent classification with a lexical-feature fallback.
+ *
+ * This is a strict SUPERSET of {@link classifyQuestionIntent}: whenever the
+ * regex cascade returns a concrete intent, that verdict is returned UNCHANGED
+ * (the proven, high-precision path is never overridden). Only when the regex
+ * path bottoms out at `'other'` do we consult the {@link ./intent-scorer.ts}
+ * lexical scorer, and only adopt its top guess when it is (a) not itself
+ * `'other'` and (b) decisive enough (`margin >= SMART_ADOPT_MARGIN`). So this
+ * can only ever SHRINK the `'other'` bucket — it never reshapes a decision the
+ * regexes already made.
+ *
+ * @returns `{ intent, source, scorer }` — `source` is `'regex'` when the fast
+ *   path decided, `'scorer'` when the lexical fallback did, so the visible
+ *   route plan can show which layer classified the turn.
+ */
+export function classifyQuestionIntentSmart(rawInput: string): {
+  readonly intent: QuestionIntent;
+  readonly source: 'regex' | 'scorer';
+  readonly scorer?: ReturnType<typeof scoreQuestionIntent>;
+} {
+  const regexIntent = classifyQuestionIntent(rawInput);
+  if (regexIntent !== 'other') return { intent: regexIntent, source: 'regex' };
+
+  const scored = scoreQuestionIntent(rawInput);
+  if (scored.top.intent !== 'other' && scored.margin >= SMART_ADOPT_MARGIN) {
+    return { intent: scored.top.intent, source: 'scorer', scorer: scored };
+  }
+  return { intent: 'other', source: 'regex', scorer: scored };
 }
 
 // Compound-splittable starts are factual/yes-no only. "why"/"how" are excluded:

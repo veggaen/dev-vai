@@ -13,6 +13,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../styles/index.css';
+import { InfoBlock } from '../components/chat/InfoBlock.js';
 import { ProcessTree } from '../components/chat/ProcessTree.js';
 import type { ChatProgressStep, CouncilThinkingUI } from '../stores/chatStore.js';
 
@@ -31,6 +32,15 @@ const baseCouncil = (): CouncilThinkingUI => ({
 });
 
 type Scenario = { id: string; title: string; council: CouncilThinkingUI; steps?: ChatProgressStep[] };
+
+const legacyInfoBlockHtml = [
+  '<!doctype html><html><head><meta charset="utf-8"></head>',
+  '<body style="font-family:system-ui,-apple-system,sans-serif;color:#e6e6ee;background:transparent;margin:0;padding:2px">',
+  '<div style="display:flex;gap:10px;padding:3px 0;font-size:13px"><span style="color:#9ca3af;min-width:120px">outcome</span><span style="color:#fbbf24">act</span></div>',
+  '<div style="display:flex;gap:10px;padding:3px 0;font-size:13px"><span style="color:#9ca3af;min-width:120px">agreement</span><span style="color:#e6e6ee">100%</span></div>',
+  '<div style="display:flex;gap:10px;padding:3px 0;font-size:13px"><span style="color:#9ca3af;min-width:120px">recommended</span><span style="color:#e6e6ee">reread-intent</span></div>',
+  '</body></html>',
+].join('');
 
 export const QA_SCENARIOS: Scenario[] = [
   {
@@ -90,18 +100,25 @@ function pickScenario(): Scenario {
 
 function Harness() {
   const sc = pickScenario();
+  const showInfoBlock = new URLSearchParams(location.search).get('scenario') === 'info-block';
   return (
     <div style={{ minHeight: '100vh', padding: '40px 0', display: 'flex', justifyContent: 'center' }}>
-      <div style={{ width: 'min(680px, 92vw)' }} data-testid="qa-scenario" data-scenario={sc.id}>
+      <div style={{ width: 'min(680px, 92vw)' }} data-testid="qa-scenario" data-scenario={showInfoBlock ? 'info-block' : sc.id}>
         <p
           className="mb-4 text-[11px] uppercase tracking-[0.14em] text-[color:var(--chat-muted)]"
           style={{ fontFamily: 'JetBrains Mono, monospace' }}
         >
-          {sc.id}
+          {showInfoBlock ? 'info-block' : sc.id}
         </p>
-        <h1 className="mb-6 text-[15px] font-medium text-[color:var(--chat-strong)]">{sc.title}</h1>
-        {/* The real component, settled (live=false) so it renders the expanded settled tree. */}
-        <ProcessTree steps={sc.steps ?? baseSteps} council={sc.council} live={false} durationMs={4200} />
+        <h1 className="mb-6 text-[15px] font-medium text-[color:var(--chat-strong)]">
+          {showInfoBlock ? 'Legacy info block rows should render natively' : sc.title}
+        </h1>
+        {showInfoBlock ? (
+          <InfoBlock html={legacyInfoBlockHtml} title="Council verdict" />
+        ) : (
+          /* The real component, settled (live=false) so it renders the expanded settled tree. */
+          <ProcessTree steps={sc.steps ?? baseSteps} council={sc.council} live={false} durationMs={4200} />
+        )}
       </div>
     </div>
   );

@@ -119,6 +119,22 @@ describe('intent-fit routing probe (live ChatService)', () => {
     expect(r.chosen).toBe('chat-vai-identity');
   });
 
+  it('routes a business-idea ask to the business-opportunity lane, not a country-fact card (Norway class)', async () => {
+    // The documented failure class: "a good software business idea for Norway?" used
+    // to be answered by a Norway country-fact card. With the promoted, rankable
+    // business-opportunity handler (Slice 1) seated at 0.945 — above fact-shim (0.91)
+    // — it now owns the turn, and fact-shim is off-lane/suppressed below it.
+    const r = await routeOf('what is a good software business idea for Norway that is unique?');
+    expect(r.reachedRegistry).toBe(true);
+    expect(r.chosen).toBe('business-opportunity');
+    const fs = factShim(r.candidates);
+    if (fs) {
+      const biz = r.candidates.find((c) => c.name === 'business-opportunity');
+      expect(biz).toBeDefined();
+      expect(biz!.score).toBeGreaterThan(fs.score);
+    }
+  });
+
   it('surfaces intent-fit reasons into the streamed route plan (auditable trail)', async () => {
     // A knowledge lookup reliably reaches the registry; assert the fit reason rides
     // through to the visible plan so humans/AI can see WHY a handler scored as it did.

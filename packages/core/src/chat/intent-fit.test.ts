@@ -198,7 +198,7 @@ describe('intentFit — exact adjusted values (tuning is pinned, not just direct
 describe('intentFit — no-leapfrog holds against the real registry priors', () => {
   // The live constant priors from service.ts:2527-2621 (the handlers dispatchTurn
   // ranks). Kept here as the source of truth for the gap the boost must not cross.
-  const REGISTRY_PRIORS = [0.99, 0.98, 0.975, 0.97, 0.96, 0.95, 0.94, 0.93, 0.92, 0.91, 0.90, 0.89];
+  const REGISTRY_PRIORS = [0.99, 0.98, 0.975, 0.97, 0.96, 0.95, 0.945, 0.94, 0.93, 0.92, 0.91, 0.90, 0.89];
 
   it('the calibrated boost is strictly smaller than the tightest adjacent prior gap', () => {
     const sorted = [...REGISTRY_PRIORS].sort((a, b) => a - b);

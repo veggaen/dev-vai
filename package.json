@@ -87,6 +87,7 @@
     "visual:chat:audit:headless": "node scripts/vai-visual-conversation-audit.mjs --headless",
     "audit:benchmark:realism": "node scripts/vai-benchmark-realism-audit.mjs",
     "visual:ai:compare": "node scripts/compare-ai-answers-visual.mjs",
+    "audit:hotpath": "node scripts/hotpath-scan.mjs",
     "e2e:audit": "node scripts/e2e-audit-suite.mjs",
     "e2e:audit:quick": "node scripts/e2e-audit-suite.mjs --quick",
     "audit:platform": "node scripts/platform-audit.mjs",

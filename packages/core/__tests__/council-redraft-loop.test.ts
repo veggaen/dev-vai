@@ -23,12 +23,13 @@ import type { CouncilMember, CouncilMemberNote, CouncilConsensus } from '../src/
 import type { CouncilRoster } from '../src/consensus/topic-router.js';
 
 // ── Stub council member: returns a fixed note so consensus is deterministic ──
-function stubMember(id: string, note: Partial<CouncilMemberNote>): CouncilMember {
+function stubMember(id: string, note: Partial<CouncilMemberNote>, delayMs = 0): CouncilMember {
   return {
     id,
     displayName: id,
     topic: 'other',
     async review(): Promise<CouncilMemberNote> {
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
       return {
         memberId: id,
         memberName: id,
@@ -178,6 +179,19 @@ describe('buildCouncilRedraftInstruction', () => {
   it('tells Vai it misread the ask when action is reread-intent', () => {
     expect(buildCouncilRedraftInstruction(feedback)).toMatch(/misread/i);
   });
+  it('forbids re-hijacking the redraft into another scaffold/template on reread-intent', () => {
+    // The screenshot bug: a mis-scaffolded todo app was "fixed" by swapping in a
+    // jest-tests tutorial — still not the answer. The redraft must ban scaffolds.
+    const out = buildCouncilRedraftInstruction(feedback).toLowerCase();
+    expect(out).toContain('do not answer with a scaffolded app');
+    expect(out).toContain('actually answers it');
+  });
+  it('does NOT add the anti-scaffold ban when the action is not reread-intent', () => {
+    const out = buildCouncilRedraftInstruction({
+      ...feedback, recommendedAction: 'web-search',
+    }).toLowerCase();
+    expect(out).not.toContain('scaffolded app');
+  });
   it('never instructs the friends to supply facts (quarantine is explicit)', () => {
     const out = buildCouncilRedraftInstruction(feedback).toLowerCase();
     expect(out).toContain('you supply every fact yourself');
@@ -250,6 +264,45 @@ describe('runCouncilLoop', () => {
     const result = await runLoop(service, { prompt: SUBSTANTIVE, draftText: 'Original draft.', modelId: 'local:test' });
     expect(result.revised).toBe(false);
     expect(result.finalText).toBe('Original draft.');
+  }, COUNCIL_LOOP_TIMEOUT_MS);
+
+  it('redrafts a dropped multi-intent deliverable even when round 1 spends the budget', async () => {
+    const previousBudget = process.env.VAI_COUNCIL_LOOP_BUDGET_MS;
+    process.env.VAI_COUNCIL_LOOP_BUDGET_MS = '1';
+    try {
+      const service = makeService(rosterOf(
+        stubMember('m1', { verdict: 'good', suggestedAction: 'answer-directly', confidence: 0.9 }, 10),
+      ));
+      let seen: CouncilRedraftFeedback | undefined;
+      const jwtOnly = [
+        '**JWT (JSON Web Token):**',
+        'A JWT is a compact token. Structure: header.payload.signature.',
+        'Flow: login -> server creates JWT -> client stores it -> sends Authorization: Bearer.',
+      ].join('\n');
+      const result = await runLoop(
+        service,
+        {
+          prompt: 'Explain how JWT auth works and how to use it, and then build me a photographer portfolio app with nature images only and a social page when logged in.',
+          draftText: jwtOnly,
+          modelId: 'local:test',
+        },
+        async (feedback) => {
+          seen = feedback;
+          return `${jwtOnly}\n\npackage.json\nsrc/App.tsx\n\`\`\`tsx\nexport default function App() { return <main>Nature photographer portfolio with a logged-in social page</main>; }\n\`\`\``;
+        },
+      );
+
+      expect(result.revised).toBe(true);
+      expect(result.finalText).toContain('src/App.tsx');
+      expect(result.finalText).toMatch(/photographer portfolio/i);
+      expect(seen?.concerns[0]).toMatch(/draft did not address.*build/i);
+    } finally {
+      if (previousBudget === undefined) {
+        delete process.env.VAI_COUNCIL_LOOP_BUDGET_MS;
+      } else {
+        process.env.VAI_COUNCIL_LOOP_BUDGET_MS = previousBudget;
+      }
+    }
   }, COUNCIL_LOOP_TIMEOUT_MS);
 
   it('returns the original with no council when there is no roster configured', async () => {

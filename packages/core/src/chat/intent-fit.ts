@@ -96,6 +96,16 @@ const FIT_TABLE: Readonly<Record<string, FitRule>> = {
     boostSignals: ['self-improvement'],
   },
 
+  // Business-idea / opportunity direction. Boost on recommendation + the
+  // product-quality direction shapes so a business-idea ask stays on this lane
+  // and is not stolen by a generic country-fact answer (the Norway class). The
+  // handler is already gated on `isBusinessOpportunityRequest`, so the boost only
+  // ever nudges ranking on turns it genuinely serves.
+  'business-opportunity': {
+    boostIntents: ['recommendation', 'factual-lookup'],
+    boostClasses: ['product-quality-recommendation', 'vai-chat-quality-direction'],
+  },
+
   // Structured product-engineering memo + product-quality recommendation lane.
   'chat-product-engineering': {
     boostClasses: ['product-quality-recommendation'],

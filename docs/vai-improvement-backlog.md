@@ -6,6 +6,261 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **Capability-Innovation 2026-07-01 — council round (strong 7.1/10)**
+  - Context: generative capability council toward the north-star (voice + interface, any task,
+    reliable, no lost details). council 7.1/10 (strong) · 10 lenses · 9 areas · top cluster 2
+  - weakest council dimension: delegation (5/10) — improve the roundtable here next
+  - Proposals (PROPOSE-only — review + implement by V3gga/Opus; never auto-applied):
+    - **[council] Synthesis: Voice-First Task Execution with Gap Diagnosis** (impact 9.6/10) — Vai can reliably execute tasks through voice-first interaction, using real-world tools, while diagnosing and escalating capability gaps to V3gga/Opus-4 when needed.
+      - first slice: A voice-first interface that captures and processes real-time voice input, delegates tasks to real-world tools, and escalates with a one-liner summary when a task is unsolvable.
+      - verify: ship the first slice and confirm the combined behavior
+      - builds on: Voice-First Identity Clarification; Honest Capability Gap Diagnosis with Escalation; Capability-Gap Shareable Artifact
+      - evidence: packages/runtime/src/routes/agent-introspect.ts:65, packages/core/src/chat/capability-gap.test.ts:24, packages/core/src/chat/capability-gap.ts:80, packages/core/src/chat/capability-gap.ts:115
+    - **[brand] Voice-First Identity Clarification** (impact 8.7/10) — Vai is a voice-first interface that lets V3gga speak to Vai and get help with any task Vai is capable of — completed reliably, escalating honestly to V3gga/Opus-4 when Vai cannot.
+      - first slice: Update README.md with a one-line hook: 'Vai is a voice-first interface that lets V3gga speak to Vai and get help with any task Vai is capable of — completed reliably, escalating honestly to V3gga/Opus-4 when Vai cannot.'
+      - verify: Check README.md for the updated one-line hook and ensure it's the first line the user sees
+      - evidence: packages/runtime/src/routes/agent-introspect.ts:65
+    - **[capability-gap] Honest Capability Gap Diagnosis with Escalation** (impact 8/10) — Vai can diagnose capability gaps with honest messages and escalate to V3gga/Opus-4 when it cannot perform a task
+      - first slice: Implement the 'no-candidates' gap diagnosis and escalation logic
+      - verify: Test the gap diagnosis and escalation logic with unit tests to ensure it correctly identifies and escalates capability gaps
+      - evidence: packages/core/src/chat/capability-gap.test.ts:24, packages/core/src/chat/capability-gap.ts:80
+    - **[growth] Capability-Gap Shareable Artifact** (impact 7.1/10) — Vai can generate a shareable artifact when it cannot complete a task, encouraging users to showcase their interaction with Vai
+      - first slice: Add a function to generate a shareable artifact when a capability-gap is diagnosed
+      - verify: Check if the artifact is generated and shareable when a task is deemed unsolvable
+      - evidence: packages/core/src/chat/capability-gap.ts:80, packages/core/src/chat/capability-gap.test.ts:24
+    - **[reliability] Task Verification Flag** (impact 6.9/10) — Vai can flag tasks for verification to ensure all details are captured and no steps are missed
+      - first slice: Add a verification flag to task objects during routing
+      - verify: Check if verification flags are set and ensure tasks are flagged for review when complex or multi-step
+      - evidence: src/council/decision.ts:45, src/chat/handler.ts:112
+
+- **Built 2026-07-01 - Council self-trigger loop CONNECTED end-to-end (enqueue seam + cross-process inbox + drain wire) (DONE, 105 new tests; both typechecks clean; ChatService+council 95/95 unbroken)**
+  - Context: V3gga asked why `enqueueFromMissingCapability`/`drainSelfImproveQueue` were built-but-not-connected.
+    Wired the full chain so the Council actually triggers its own improvement loops from LIVE turns.
+  - **Enqueue seam (core):** `packages/core/src/chat/self-improve-queue-port.ts` — a `SelfImproveQueue` port +
+    `jobsFromConsensus` (pure: non-ship consensus + actionable missingCapabilities → jobs, vague-filtered + deduped).
+    `ChatService.triggerSelfImprovement(draft, consensus)` calls it at the SAME post-council seam as
+    `persistCouncilLessons` (service.ts:1310) — injected, bounded, best-effort, never breaks the turn. Added
+    `selfImproveQueue` to the options + the `isChatServiceOptions` guard (the flag-ignored bug the backlog warned of).
+    Exported the types from `@vai/core`. 8 tests.
+  - **Cross-process inbox bridge (loop):** `scripts/improve-loop/self-improve-inbox.mjs` — the runtime and the loop
+    are SEPARATE processes; rather than share one SQLite handle (locking/coupling), the runtime APPENDS jobs to an
+    append-only JSONL inbox (Temporary_files/self-improve-inbox.jsonl, mirroring the existing council-findings.json
+    signal-file pattern) and the loop INGESTS it into the queue table. `appendToInbox`/`readInbox`/`clearInbox`/
+    `ingestInbox` (tolerant parse, length caps, dedup+shelf via the injected enqueue). 9 tests.
+  - **Runtime impl:** `packages/runtime/src/steering/self-improve-queue.ts` — `createSelfImproveQueue()` implements
+    the port by appending to the inbox (same format as the .mjs reader); injected into ChatService in server.ts next
+    to guidanceStore. Both packages typecheck clean.
+  - **Drain wire (loop):** `scripts/improve-loop/feature-review-job.mjs` — `runSelfImproveJob(job)` routes ONE
+    queued job through the gated pipeline (feature-build → feature-review: self-match → peer review → rebuild-once →
+    keep-chasing → integrate|shelve|held), records the outcome to the changelog (injectable path for tests). The
+    supervisor cycle now (after APPLY, before the campaign snapshot) INGESTS the inbox then DRAINS a budgeted (3),
+    serial batch; observe mode = preview (review only), apply mode arms integration (still branch-guarded inside the
+    job). Skipped entirely when the queue is empty. 4 tests.
+  - Full chain now compiles + is tested end-to-end: live turn → ChatService.triggerSelfImprovement →
+    SelfImproveQueue.enqueue → inbox JSONL → (loop) ingestInbox → self_improve_queue → drainSelfImproveQueue →
+    runSelfImproveJob → feature-build → feature-review → integrate/shelve/held + changelog.
+  - Proof: inbox 9/9, queue-port 8/8, job 4/4 + the prior feature suites (self-improve-queue 13, feature-build 17,
+    feature-review 28, coderabbit 16, changelog 10) → 105 green this round; `@vai/core` + `@vai/runtime` typecheck
+    exit 0; `chat-service` + `council` 95/95 unbroken (the enqueue call on the hot path is safe).
+  - HONEST scope: the wiring is COMPLETE + unit-verified, but NOT yet exercised live end-to-end (would need the
+    runtime up producing a real missingCapability turn AND the loop running to drain it). The `resolveLocation` for
+    an ingested job uses CLASS_LOCATION[klass|intent]; a job whose class has no known location aborts cleanly
+    (no crash) rather than grounding codegen — so early real jobs may abort until location resolution is richer.
+  - Next: (1) live end-to-end smoke (runtime turn that yields a missingCapability → confirm a job appears in the
+    inbox → loop drains it); (2) richer resolveLocation (grep the repo for the capability rather than a static map);
+    (3) the user→council bridge's capture step now shares this exact seam — a weak-turn signal can enqueue the same way.
+
+- **Built 2026-07-01 - Council self-triggered loops (Level 1) + codegen build effect + CodeRabbit peer augmentation w/ cooldown (DONE, 84 new tests green; fixed-sequence loop verified producing; live end-to-end preview verified)**
+  - Context: continuation of the feature-review work. Three asks: (1) let council members TRIGGER their own
+    improvement loops; (2) give the feature-review protocol a real codegen `build`; (3) let peers run CodeRabbit
+    (free tier) on their suggestions with a cooldown workaround for its rate-limiting. Plus: run the supervised
+    fixed sequence and verify the council actually produces.
+  - **Verified the loop produces (ask 2):** ran `supervisor.mjs --max-cycles 1 --per-class 2` (observe-only, scratch
+    DB) against live Vai. It observed the `routing/build-verb-poison` class → Vai answered 100% (6/6) → `0 failures`
+    → correctly `0 proposals` (nothing to fix). VRAM stayed 7.0–7.2/8.5 GB with cooldowns, clean shutdown, model
+    evicted, resumable. HONEST: this proves the machinery runs + produces observations; it did NOT exercise
+    council-convene-on-failure because the tested class is already passing (a capability-council demo would show
+    proposal generation directly).
+  - **Level 1 self-triggered loop (ask 1):** `scripts/improve-loop/self-improve-queue.mjs` — a council member's
+    existing `missingCapability` note field becomes an ACTION. `instructionFromNote` synthesizes an instruction from
+    missingCapability + realIntent + methodLesson; `enqueueFromMissingCapability` writes a dedup'd, tokenized-
+    fingerprint job to a `self_improve_queue` table, SKIPPING duplicates and gaps that match a still-dead SHELVED
+    idea (revivable ones are allowed back); `enqueueFromCouncil` collapses two members naming the same gap into one
+    job; `drainSelfImproveQueue` runs up to a BUDGET (default 3) of jobs serially through an injected runner (the
+    feature-build→feature-review pipeline). Members TRIGGER (emit intent) but never BYPASS — the gated peer-reviewed
+    pipeline does the work. 13 tests (sqlite-gated, real temp DB).
+  - **Codegen build effect (ask 3a):** `scripts/improve-loop/feature-build.mjs` — instruction-driven grounded
+    codegen (distinct from propose-fix's class-driven bug localizer). `parseTargetLocation` (Windows-drive-safe:
+    only a trailing `:line` is the line, `C:/…` preserved), `selectExcerpt` (enclosing-function isolation from a
+    line hint, else keyword match, else head), `buildFeaturePrompt`, `shapeArtifact` (line-number grounding: copy
+    the REAL source line the model pointed at, ignore a corrupted retype; verify via proposal-verifier). Produces
+    the `{file,find,replace,diff,summary,sourceExcerpt}` artifact the review protocol consumes. Wired into
+    `feature-review-run.mjs` as the real `build` (replacing the supplied-artifact placeholder). 17 tests.
+    **Live end-to-end:** ran the full orchestration against qwen2.5-coder:7b in PREVIEW — build produced a verified
+    artifact, all 4 peers voted, self-match correctly returned "no" (blocked integration → forced rebuild →
+    keep-chasing → HELD because 2 peers still championed it). Every protocol branch fired; the throwaway target was
+    NOT modified (preview-safe); the changelog recorded the HELD outcome.
+  - **CodeRabbit peer augmentation + cooldown (ask 3b):** `scripts/improve-loop/coderabbit.mjs` —
+    `isCodeRabbitAvailable` (probe), `parseCodeRabbitAgentOutput` (DEFENSIVE parse of `cr --agent` JSON across
+    findings[]/comments[]/nested shapes → normalized findings, garbage → [] never throws), and `CodeRabbitBudget`
+    — a PERSISTED rolling-hour rate limiter (records call timestamps to a JSON file, refuses past ~3/hr with
+    time-until-next, survives restarts). `reviewWithCodeRabbit` checks the budget, runs `cr --agent`, folds
+    findings into the artifact's excerpt so peers improve their suggestion before review. Wired into
+    `feature-review-run.mjs` (`--no-coderabbit` to disable). 16 tests.
+    **HONEST CAVEAT:** the CodeRabbit CLI does not yet support Windows (vendor: "coming soon"), so on this machine
+    the probe returns false and the whole augmentation NO-OPS gracefully (peers proceed without it) — verified live.
+    The seam + cooldown are built + tested now; it lights up the moment `cr` is installed (Windows support, or WSL).
+    Free-tier limit confirmed ~3–4 reviews/hr (docs.coderabbit.ai/cli).
+  - Proof: `coderabbit 16 + feature-build 17 + feature-review 28 + changelog 10` → 71/71; `self-improve-queue` →
+    13/13 (sqlite); apply-fix/apply-runners unchanged; live supervisor + live feature-review preview both verified;
+    GPU freed after.
+  - Next: (1) wire `drainSelfImproveQueue` into a supervisor cycle so the queue actually drains each loop
+    (currently the module is built + tested but not yet called from supervisor.mjs); (2) wire
+    `enqueueFromMissingCapability` at the council's post-turn seam in service.ts so real turns populate the queue
+    (this is also the user->council bridge's capture step); (3) tune the codegen self-match — it read "no" on a
+    correct find/replace diff (a chat-framed self-match struggling to interpret a diff as "enthusiastic"); (4)
+    Level 2/3 (member-initiated tool call; council convenes on its own queue to schedule).
+
+- **Built 2026-07-01 - Council feature-review protocol + self-improvement changelog + in-app surface (DONE, 116 new/affected tests green, both typechecks clean, UI verified live 0 console errors)**
+  - Goal (V3gga): let the Council BUILD features, re-read its own creation against the original instruction, gather
+    MULTI-MEMBER peer advice (reasons + change-tips biased for modernization/scale), rebuild once on rejection, and
+    on a second rejection ask each peer "keep chasing?" — shelving dead ideas as a tokenized fingerprint that a future
+    similar message can pull (revivable only when several members flag new knowledge). Plus a changelog side-note for
+    humans/Copilot/agents, and a process-UI surface that shows self-improvements under a collapsed menu whose steps
+    open expanded.
+  - Slice A — `scripts/improve-loop/feature-review.mjs` (pure, injected effects): self-match prompt/parse; per-persona
+    peer vote (verdict+score+modern+scale+reason+tip) parse; `aggregatePeerVotes` (majority AND modern/scale floor —
+    a locally-correct but future-fragile change is HELD, not accepted); `buildRebuildBrief`; keep-chasing round +
+    `decideShelve` (shelve only if ALL peers stop; a champion → HELD); `tokenizeRejectedIdea` (order-independent key +
+    stable id) + `ideaOverlap` (Jaccard) + `shelveRejectedIdea`/`checkShelvedIdeas`/`flagIdeaRevivable` on the
+    `idea:rejected` knowledge scope (confidence rises on confirm, decays on revival flags); `runFeatureReview` state
+    machine (build → self-match → peer → rebuild-once → keep-chasing → integrate|shelve|held|aborted).
+  - Slice B — `scripts/improve-loop/changelog.mjs` + `docs/COUNCIL-CHANGELOG.md`: append-only, newest-first, dual
+    format (human body + fenced `council-change` JSON block, schema `council-change/1`). Discovery marker
+    `AGENT-DISCOVERY: council-self-improvement-changelog`; registered in `docs/agent-tooling-guide.json` under
+    `changelog` + `rejectedIdeaShelf` so agents find/append it on similar events.
+  - Slice C — in-app surface: `packages/runtime/src/routes/council-changelog.ts` (`GET /api/council/changelog`,
+    parses the same fenced blocks, clamps limit) registered in `server.ts`; `SelfImprovements.logic.ts` (pure shaping:
+    relative time, kind→plain label NOT uppercase pill, copyable text digest) + `SelfImprovements.tsx` (collapsed line
+    → opens with each entry ALREADY expanded; per-entry + copy-all for debugging; token-bound, VaiNode resting locus,
+    framer height/opacity only). Mounted quietly below the empty-state hero. Anti-Opus-4.8 audit: removed two
+    `tracking-wide font-semibold` micro-labels in `ProcessTree.tsx` (Thinking-out-loud + panel labels) → plain muted.
+    Confirmed the existing ProcessTree copy already covers every process (node/branch/tree × markdown/JSON).
+  - Slice D — wiring: `apply-consensus.mjs` writes a changelog entry on every committed fix AND on an
+    acceptance-revert (best-effort, never throws, after the one-file commit so it can't break staging).
+    `feature-review-run.mjs` — live orchestration shim (persona peers via VRAM-guarded serial `ollamaGenerate`,
+    shelf + changelog wired); PREVIEW by default, `--integrate` required + branch-guarded (mirrors `--apply`).
+  - Proof: `node --test feature-review.test.mjs changelog.test.mjs apply-fix.test.mjs apply-runners.test.mjs` → 60/60;
+    vitest `SelfImprovements.logic + ProcessTree.logic + ProcessTree.copy + council-changelog + agent-introspect` →
+    56/56; `@vai/desktop` + `@vai/runtime` typecheck clean; live route `GET /api/council/changelog` returned the
+    seeded entry (200); Playwright on the real dev app (portrait 430px + landscape 1024px) showed the collapsed
+    "1 recent self-improvement" line, click-to-expand with the why/area/files visible, **0 console errors**. Screens:
+    `scratchpad/ui-collapsed.png`, `ui-expanded.png`, `ui-landscape.png`.
+  - Next: (1) plug a real codegen `build` effect into `feature-review-run.mjs` so the Council builds features end-to-end
+    (currently reviews a supplied `--artifact` diff); tune peer prompts against live local models one-at-a-time.
+    (2) wire the live USER→council bridge (the still-missing piece: the loop sees seed prompts, not real chat turns).
+    (3) consider surfacing shelved-idea "we tried this" pulls in-chat when a message overlaps a fingerprint.
+
+- **Built 2026-07-01 - Multi-intent dropped-deliverable redraft hardening (PARTIAL: tests green; live build still needs deeper work)**
+  - Goal: pick up the stopped VS Code-agent work around "explain X and build Y" turns, verify it live, and harden the failure found by the live run.
+  - What was already wired and verified: `multi-intent.ts` decomposes answer+build turns, `multi-intent-coverage.ts` detects dropped parts, `service.ts` emits the "Heard N requests" progress step, and `ProcessTree.logic.ts` labels the stage as Requests.
+  - Live evidence before the fix: the photographer/JWT prompt showed "Heard 2 requests" and the initial draft answered only JWT. The council correctly marked the draft `needs-work`, but the generic wall-clock guard then showed "Skipped redraft - council budget spent (answer shipped)", so the deterministic dropped-deliverable signal did not actually force the redraft when the first council member was slow.
+  - Fix: `packages/core/src/chat/service.ts` now lets `coverage.hasMissingPart` bypass the pre-redraft budget skip. Slow turns can still skip the round-2 re-review after the redraft via the existing "Shipped revision - council budget spent" path.
+  - Regression proof: `packages/core/__tests__/council-redraft-loop.test.ts` now simulates a slow first council review plus a JWT-only draft for the exact photographer multi-intent prompt; the redraft must still run and return app-file evidence.
+  - Patched live outcome: the same prompt no longer silently ships the JWT-only answer, but the local live path still refused with "I can't build cleanly around that yet - not enough grounding..." and generated no preview files. Screenshot evidence: `C:/Users/v3gga/AppData/Local/Temp/vai-multi-intent-patched-live.png`.
+  - Tests: `node node_modules/vitest/vitest.mjs run packages/core/__tests__/council-redraft-loop.test.ts packages/core/src/chat/multi-intent-coverage.test.ts packages/core/src/chat/multi-intent.test.ts` -> 38/38 green; `node node_modules/vitest/vitest.mjs run packages/core/src/chat` -> 536/536 green.
+  - Typecheck note: `corepack pnpm --filter @vai/core typecheck` still fails before project code on missing package-local declarations for `@types/jsdom` and `@types/turndown`.
+  - Next: decide between (a) routing the missing build part into the real council codegen builder pipeline instead of generic redraft prose, or (b) answer-first and explicitly offer/queue the build as a next step when a mixed explanation+build turn cannot be completed in one pass. Also harden the auto-repair follow-up that answered "Live terminal output unavailable" after the failed one-file `index.html` sandbox apply.
+
+- **Built 2026-07-01 - Regex/hotpath hardening first slice (DONE, focused tests green; core typecheck blocked by missing local @types)**
+  - Goal (V3gga): "better every regex" and improve codebase functions for performance, debugging, and quality. First slice made the work measurable and removed three concrete regex recompilation findings without touching the active chat-routing changes already in the worktree.
+  - Changes:
+    - `page-capability.verify`: replaced per-selector dynamic `new RegExp(...)` checks with a single parsed selector-existence claim map. Selector labels with regex metacharacters are now treated strictly as evidence data, not patterns.
+    - `conversation-facts`: caches one `EntityMatcher` per discovered project name, so later active-project detection no longer rebuilds a regex for every known project on every user turn.
+    - `conversation-reasoning`: hoisted static production-decision and frontend-stack regex tables so they compile once at module load.
+    - `scripts/hotpath-scan.mjs`: widened the AST scanner to `.ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs`, added `--all`, fixed explicit-root argument handling, added JSON `roots` + `summary` counts, and taught it not to flag module-scope iterator callbacks that precompile regex tables once. Added `pnpm audit:hotpath`.
+  - Proof:
+    - `node node_modules/vitest/vitest.mjs run packages/core/src/chat/capabilities/page-capability.test.ts packages/core/src/chat/conversation-facts.test.ts` -> 17/17 green.
+    - `node node_modules/vitest/vitest.mjs run packages/core/src/chat/conversation-reasoning.test.ts packages/core/src/chat/capabilities/page-capability.test.ts packages/core/src/chat/conversation-facts.test.ts` -> 42/42 green.
+    - `node --test scripts/hotpath-scan.test.mjs` -> 12/12 green.
+    - `node scripts/hotpath-scan.mjs --json` default hot paths: 88 files, findings dropped from 47 to 42; `regex-in-loop` dropped from 5 to 0, `regex-per-call` stayed 17, `nested-loop` stayed 25.
+    - `node scripts/hotpath-scan.mjs --all --json`: 784 files scanned; 55 `regex-in-loop`, 129 `regex-per-call`, 312 `nested-loop` candidates. This is an audit queue, not a fail gate yet.
+  - Typecheck note: `corepack pnpm --filter @vai/core typecheck` currently fails before project code on missing package-local declarations: `packages/core/node_modules/@types/jsdom/index.d.ts` and `packages/core/node_modules/@types/turndown/index.d.ts`.
+  - Next: triage default `regex-per-call` findings (starting with `contextual-resolver.ts` and `conversation-reasoning.ts`), then separate true hotpath `nested-loop` risks from intentional small bounded loops.
+
+- **Built 2026-07-01 - Understanding->action gap: agent-mode todo-app hijack (DONE, tested 612 chat green, tsc clean)**
+  - Symptom (V3gga live, Agent mode): "What are great tools for computer intelligence to use?" was answered with a
+    scaffolded Next.js todo app. The council CORRECTLY caught it (3/3: "not a coding tutorial", reread-intent), but
+    the redraft swapped in a jest-tests tutorial - still not the answer. Two wrong actions on a correctly-understood
+    question. V3gga's framing: the PROCESS TRACE is already legible; the RESPONSE/ACTIONS don't match the understood
+    intent.
+  - Root cause (traced, not guessed): the classifier was RIGHT the whole time - `classifyQuestionIntent`='definition',
+    `classifyAgentBuildIntent`='answer', and raw VaiEngine returns `fallback` (0.15) in every mode. The todo app came
+    from the LIVE generative model reading the **Agent-mode system prompt**, which is dominated by build-imperatives
+    ("For build requests: output the COMPLETE working application files", "always include package.json", "Default to
+    action over discussion"). A local model pattern-matches the loudest instruction and scaffolds an app even though
+    the turn was correctly classified `answer`. The understanding was carried into routing but NOT into the prompt
+    handed to the model.
+  - Fix (both halves, one principle - carry the known intent into the model prompt):
+    - `modes.ts` `agentIntentLeadDirective(agentBuildIntent)`: on an `answer` turn, PREPEND a high-priority lead to
+      the Agent prompt - "THIS TURN IS A QUESTION / DISCUSSION, NOT A BUILD REQUEST ... Do NOT scaffold ... Do NOT
+      fall back to a canned starter (todo app, dashboard) ... the build instructions below apply only when the user
+      actually asks to build". No-op for `build`/`ambiguous` (build prompt unchanged). Wired at the `modePrompt`
+      injection in `service.ts`.
+    - `buildCouncilRedraftInstruction`: on `reread-intent`, added an explicit ban - "Do NOT answer with a scaffolded
+      app, a starter project, or an unrelated code tutorial. If the intent is a question, respond in prose that
+      actually answers it." - so the redraft can't re-hijack into a DIFFERENT template (the jest-tests swap).
+  - Proof: `agent-intent-lead.test.ts` 6 (incl. LIVE ChatService capture: the exact screenshot prompt in agent mode
+    now gets the no-scaffold lead; a real "build me a todo app" keeps the full build prompt); `council-redraft-loop.test.ts`
+    +2 (reread-intent bans scaffolds; other actions don't); ALL chat suites 612/612 green; tsc 0 errors. Reusable
+    method: when actions contradict a correct classification, capture the ACTUAL system messages sent to the model -
+    the contradiction is usually in the prompt, not the router.
+  - Next: re-judge live through the running desktop (`pnpm app:update`) on the exact prompt to confirm the model now
+    answers in prose. The deeper follow-up is thinning the Agent prompt's build-bias generally (it's heavy enough that
+    even the intent-lead is a counterweight, not a cure) and porting the same intent-lead to Builder mode.
+
+- **Built 2026-07-01 - Intent-accurate chat routing: 4-slice pass (DONE, tested 525 src/chat green + probes, tsc clean)**
+  - Goal (V3gga): make Vai smarter + more intent-accurate when responding in chat. Delivered as 4 slices,
+    each test-gated + flag-gated behind one `RoutingConfig` (all default ON) with an auditable `routePlan`.
+  - **Slice 2 - widen intent classification.** New pure `intent-scorer.ts` (`scoreQuestionIntent` +
+    `debugScoreQuestionIntent`): lexical-feature confidence distribution over `QuestionIntent`.
+    `question-intent.ts` gains `classifyQuestionIntentSmart` - a STRICT SUPERSET of the regex classifier that
+    only consults the scorer when regex returns `'other'` and only adopts a guess above a 0.25 margin, so it
+    can only ever SHRINK `'other'`, never reshape an existing verdict. Measured: recovers 91% (10/11) of a
+    labeled regex-missed set, 100% of the intent-less control set stays `'other'`, added latency p99 ~0.030ms
+    (~67x under the 2ms budget, `intent-scorer.bench.ts`). Intent + source + margin now ride the streamed
+    `routePlan` (`adapter.ts` gained optional `intent`/`intentSource`/`intentMargin`/`belowFloorReason`/
+    `suppressionsApplied`).
+  - **Slice 4 - kill the ChatService/VaiEngine divergence (foundation).** Root finding: `VaiEngine` (`vai-engine.ts:341`)
+    IS the `vai:v0` adapter, and its `generateResponse` is a legacy greedy `try*` cascade holding its own
+    business-opportunity/recommendation routing - a SECOND router reached on ChatService fallback. Extracted
+    the pure `tryBusinessOpportunityDirection` into shared `business-opportunity-direction.ts`; VaiEngine now
+    DELEGATES to it, so both routers answer a business-idea ask with the SAME text (no more divergent answers).
+  - **Slice 1 - make the route rankable.** Promoted business-opportunity into ChatService's scored registry as
+    a first-class handler (prior 0.945, seated above fact-shim 0.91, gated on `isBusinessOpportunityRequest` +
+    `routing.rankableRoutes`, reuses the shared emitter). `FIT_TABLE` boosts it on-lane. The documented Norway
+    "software business idea -> country-fact card" failure class is now FIXED and observable: the live routing
+    probe asserts `chosen === 'business-opportunity'` with fact-shim ranked below it. No-leapfrog invariant
+    preserved (new prior keeps tightest gap = 0.005 > 0.004 boost; exhaustive `REGISTRY_PRIORS` test updated).
+  - **Slice 3 - honest below-floor escalation.** New pure `intent-directive.ts` (`composeIntentDirective` +
+    `belowFloorReason`). On a below-floor escalation ChatService now injects a system directive carrying the
+    classified intent's expected shape BEFORE model dispatch (recommendation -> a specific pick, factual ->
+    answer first, ...). PROVEN live at the model boundary: "suggest a lightweight approach..." injects
+    "classified as a recommendation..."; "tell me a short story..." (intent `other`) injects NOTHING (no
+    fabricated shape); `routing.intentEscalation: false` gates it off.
+  - BUG found + fixed by the flag test: `isChatServiceOptions` didn't list `routing`, so a `{ routing }`-only
+    options object was silently ignored (flag would be a no-op in prod). Added `'routing' in value`.
+  - Proof: `intent-scorer` 20, `intent-coverage-probe` 3, `intent-directive` 6, `business-opportunity-direction`
+    5, `intent-fit` 22 (incl. updated no-leapfrog), live `intent-fit-routing-probe` 5 (incl. Norway) +
+    `intent-routeplan-surfacing` 5 (incl. directive-at-model-boundary + flag gating); ALL `src/chat` 525/525
+    green; tsc 0 errors. The 2 pre-existing `vai-engine` failures (deploy-fire-drill, auth/team/sandbox) fail
+    IDENTICALLY on baseline (stash-revert proven) - unrelated.
+  - Next slice: full VaiEngine router unification is deferred by design (a ~56k-line god-class mid-decomposition;
+    Slice 4 shared the highest-divergence route, business-opportunity, not the whole cascade). Also: `routePlan`
+    `belowFloorReason` only attaches on the richer fallback-thinking paths, not the trivial-stub fallback - the
+    behavior (directive injection) fires regardless, but wider routePlan coverage on all fallback branches is a
+    follow-up. Live re-judge through the running desktop app still recommended per the answer-path rule.
+
 - **Built 2026-06-30 - Intent-aware handler scoring (DONE, tested: 17 unit + 4 live-probe + 476 src/chat green)**
   - Finding: the scored chat dispatcher (`turn-pipeline.ts`) had the right architecture but the live
     registry handed each handler a HARDCODED constant priority (0.99..0.89) and ranked on that — a code
