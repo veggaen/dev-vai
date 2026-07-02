@@ -168,11 +168,11 @@ export function WorkspaceLayoutControls({
         type="button"
         onClick={toggleCouncilPanel}
         className={chipClass(showCouncilPanel, studio)}
-        title={tip(showCouncilPanel ? 'Hide council' : 'Show council', 'toggleCouncil')}
+        title={tip(showCouncilPanel ? 'Hide reasoning' : 'Show reasoning', 'toggleCouncil')}
         aria-pressed={showCouncilPanel}
       >
         <Users className="h-3.5 w-3.5" />
-        {showLabels && <span>Council</span>}
+        {showLabels && <span>Reasoning</span>}
       </button>
 
       {showBuilderPanel && (

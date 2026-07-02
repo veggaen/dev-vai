@@ -97,7 +97,7 @@ function GateBadge({ gate }: { gate: TimelineGate }) {
       title={gate.reason}
     >
       {gate.approved ? <ShieldCheck className="h-3 w-3" /> : <ShieldAlert className="h-3 w-3" />}
-      {gate.kind === 'council' ? 'Council' : gate.kind === 'quality' ? 'Verify' : 'Redraft'}
+      {gate.kind === 'council' ? 'Review' : gate.kind === 'quality' ? 'Verify' : 'Redraft'}
       {gate.confidence !== undefined ? ` ${Math.round(gate.confidence * 100)}%` : ''}
     </span>
   );
