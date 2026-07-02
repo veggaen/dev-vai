@@ -138,6 +138,18 @@ describe('grounded Vai self-knowledge (meta-vai) — regression for n-gram-soup 
     const r = tryEmitFactShim({ content: 'build me a physics engine for my game' });
     expect(r?.kind).not.toBe('meta-vai');
   });
+
+  it('does NOT hijack product and delivery architecture prompts as Vai self-knowledge', () => {
+    const delivery = tryEmitFactShim({
+      content: 'My app works locally, but every deploy turns into a fire drill. I am not sure whether the real fix is better architecture, better release discipline, or just fewer moving parts. What would you change first?',
+    });
+    expect(delivery?.kind).not.toBe('meta-vai');
+
+    const product = tryEmitFactShim({
+      content: 'what is the right architecture for a product where users chat with Vai, authenticate, manage teams, and launch generated apps into isolated sandboxes later?',
+    });
+    expect(product?.kind).not.toBe('meta-vai');
+  });
 });
 
 describe('grounded self-knowledge must NOT trip the decline-escalation guard', () => {
