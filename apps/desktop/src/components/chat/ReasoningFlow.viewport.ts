@@ -6,11 +6,39 @@
  * — the interesting part — SEMANTIC ZOOM: the detail a node reveals is a function of scale, not a
  * separate toggle. Zoomed out, nodes are bare hued dots (the turn's fingerprint); at rest, labels
  * appear; zoomed in, inline metadata fades in. Reveal-on-intent applied to the spatial axis.
+ *
+ * POSITION-BASED ZOOM: scale multiplies node POSITIONS (spacing), never glyph/text size. The
+ * component renders nodes at nodeX() and applies only translateX(panX) — there is no canvas
+ * scale() transform, so labels stay pixel-crisp and the frame can never be overflowed by scaled
+ * chrome. All screen math below treats "content" as the scale-1 layout described by
+ * baseContentWidth(); a screen coordinate is contentX * scale + panX, which keeps zoomAbout /
+ * clampPan / visibleWindow semantics intact.
  */
 
 export const MIN_SCALE = 0.45;
 export const MAX_SCALE = 2.6;
 export const DEFAULT_SCALE = 1;
+
+/** Content-space x of the first node's center at scale 1 — wide enough that the first label's
+ * left half sits fully inside the frame's edge fade at rest. */
+export const NODE_PAD = 56;
+/** Distance between node centers at scale 1. Zoom spreads or tightens THIS, not the glyphs. */
+export const BASE_SPACING = 96;
+/** Trailing room so the last node's label isn't clipped by the frame edge. */
+export const TAIL_PAD = 76;
+/** Scale used when jumping straight to a node's detail tier (must exceed the detail threshold). */
+export const DETAIL_ZOOM_SCALE = 1.7;
+
+/** Scale-1 width of the node layout — the "content width" every other function expects. */
+export function baseContentWidth(count: number): number {
+  if (count <= 0) return 0;
+  return NODE_PAD + (count - 1) * BASE_SPACING + TAIL_PAD;
+}
+
+/** Screen-space x (before pan) of a node's center: position scales, glyph size does not. */
+export function nodeX(index: number, scale: number): number {
+  return (NODE_PAD + index * BASE_SPACING) * scale;
+}
 
 /** How much one wheel/pinch notch multiplies scale. Kept gentle so zoom feels continuous. */
 export const ZOOM_STEP = 1.0015;
@@ -86,6 +114,45 @@ export function zoomTier(scale: number): ZoomTier {
 export function fitScale(contentWidth: number, viewportWidth: number, margin = 24): number {
   if (contentWidth <= 0) return DEFAULT_SCALE;
   return clampScale((viewportWidth - margin * 2) / contentWidth);
+}
+
+/**
+ * The viewport a "fit" action should land on: show everything, but never ENLARGE past the default
+ * scale (fitting three nodes must not blow them up to the zoom ceiling). Pan resets to the start.
+ */
+export function fitViewport(count: number, viewportWidth: number): Viewport {
+  const content = baseContentWidth(count);
+  const scale = Math.min(DEFAULT_SCALE, fitScale(content, viewportWidth));
+  return clampPan({ scale, panX: 0 }, content, viewportWidth);
+}
+
+/** Whether the current viewport differs from what fitViewport would produce (shows the fit glyph). */
+export function isAtFit(vp: Viewport, count: number, viewportWidth: number): boolean {
+  const fit = fitViewport(count, viewportWidth);
+  return Math.abs(vp.scale - fit.scale) < 0.01 && Math.abs(vp.panX - fit.panX) < 1;
+}
+
+/**
+ * Jump to a node's detail tier, centered on it. Positions come from the position model (nodeX),
+ * never DOM rects, so this stays correct for the first and last node alike; clampPan keeps the
+ * centering honest at the edges.
+ */
+export function zoomToNode(index: number, count: number, viewportWidth: number, scale = DETAIL_ZOOM_SCALE): Viewport {
+  const s = clampScale(scale);
+  const panX = viewportWidth / 2 - nodeX(index, s);
+  return clampPan({ scale: s, panX }, baseContentWidth(count), viewportWidth);
+}
+
+/**
+ * Pan such that the visible window (as a 0..1 fraction of scaled content) centers on `fraction` —
+ * the minimap scrub gesture. Returns the clamped viewport.
+ */
+export function panToFraction(vp: Viewport, fraction: number, contentWidth: number, viewportWidth: number): Viewport {
+  const scaledWidth = contentWidth * vp.scale;
+  if (scaledWidth <= 0) return vp;
+  const f = Math.min(1, Math.max(0, fraction));
+  const panX = viewportWidth / 2 - f * scaledWidth;
+  return clampPan({ scale: vp.scale, panX }, contentWidth, viewportWidth);
 }
 
 /**

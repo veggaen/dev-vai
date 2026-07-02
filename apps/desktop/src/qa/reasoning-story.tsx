@@ -60,6 +60,25 @@ const longSteps: ChatProgressStep[] = [
   { stage: 'quality-check', label: 'Verify', status: 'done', detail: 'Verification passed', durationMs: 260 },
 ] as unknown as ChatProgressStep[];
 
+// 40-step stress fixture — the perf budget: drag/zoom must stay smooth (transform-only work)
+// and the fit/minimap must remain usable at this density.
+const manySteps: ChatProgressStep[] = Array.from({ length: 40 }, (_, i) => {
+  const kinds = [
+    { stage: 'search', label: 'Gather evidence' },
+    { stage: 'reason', label: 'Reason' },
+    { stage: 'vai-draft', label: 'Vai drafts' },
+    { stage: 'quality-check', label: 'Verify' },
+  ];
+  const k = kinds[i % kinds.length];
+  return {
+    stage: `${k.stage}-${i}`,
+    label: `${k.label} ${i + 1}`,
+    status: 'done',
+    detail: `Step ${i + 1} of a very long turn.`,
+    durationMs: 300 + (i % 7) * 250,
+  };
+}) as unknown as ChatProgressStep[];
+
 function Story() {
   return (
     <div style={{ maxWidth: 760, margin: '3rem auto', padding: '0 1.5rem' }}>
@@ -75,6 +94,13 @@ function Story() {
       </h2>
       <div style={{ marginBottom: 48 }}>
         <ReasoningFlow steps={longSteps} council={council} live={false} durationMs={23460} />
+      </div>
+
+      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
+        ReasoningFlow — 40-step stress fixture (perf budget)
+      </h2>
+      <div style={{ marginBottom: 48 }} data-testid="many-step-story">
+        <ReasoningFlow steps={manySteps} live={false} durationMs={64000} />
       </div>
 
       <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>

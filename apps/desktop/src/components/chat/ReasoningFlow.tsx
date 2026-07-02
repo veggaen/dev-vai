@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Maximize2, Minus, Plus } from 'lucide-react';
+import { Maximize2 } from 'lucide-react';
 import type { ChatProgressStep, CouncilThinkingUI } from '../../stores/chatStore.js';
 import { VaiNode } from '../brand/VaiNode.js';
 import { type ProcessNode } from './ProcessTree.logic.js';
@@ -11,12 +11,16 @@ import {
   type FeatureNote,
 } from './Timeline.logic.js';
 import {
+  baseContentWidth,
   clampPan,
-  clampScale,
-  fitScale,
+  fitViewport,
+  isAtFit,
+  nodeX,
   panBy,
+  panToFraction,
   visibleWindow,
   zoomAbout,
+  zoomToNode,
   zoomTier,
   IDENTITY_VIEWPORT,
   type Viewport,
@@ -24,88 +28,143 @@ import {
 } from './ReasoningFlow.viewport.js';
 
 /**
- * Zoom/pan viewport for the spine. Wheel (or ctrl+wheel / pinch) zooms about the cursor; drag pans.
- * All math lives in ReasoningFlow.viewport (pure, tested); this hook is just the event plumbing and
- * clamps the result against the measured content/viewport widths so nodes never fly off-screen.
+ * Zoom/pan viewport for the spine — event plumbing over the pure position math in
+ * ReasoningFlow.viewport. Interaction policy (deliberate, the previous version got this wrong):
+ *
+ *   • Plain wheel is NEVER intercepted — the page keeps scrolling. Only ctrl+wheel (and trackpad
+ *     pinch, which browsers report as ctrl+wheel) zooms, about the cursor. The listener is attached
+ *     natively with { passive: false } on the frame itself so preventDefault actually works —
+ *     React's synthetic onWheel is passive at the document root and silently fails to stop the
+ *     page zoom/scroll, which was the root cause of the "zoom hijacks my scroll" bug.
+ *   • Drag pans. Double-click on the background fits; double-click a node jumps to its detail.
+ *   • Keyboard: ←/→ pan, +/− zoom about center, 0 fits. Tab walks the node buttons natively.
+ *
+ * Zoom moves node POSITIONS only (translateX per node) — no canvas scale(), so text stays crisp
+ * and nothing can overflow the frame by being scaled up.
  */
-function useSpineViewport(reduce: boolean) {
+function useSpineViewport(count: number, reduce: boolean) {
   const [vp, setVp] = useState<Viewport>(IDENTITY_VIEWPORT);
+  const [frameW, setFrameW] = useState(0);
+  const [smooth, setSmooth] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ startX: number; startPan: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const smoothTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contentWidth = baseContentWidth(count);
+  const vpRef = useRef(vp);
+  vpRef.current = vp;
 
-  const dims = () => ({
-    content: contentRef.current?.scrollWidth ?? 0,
-    frame: frameRef.current?.clientWidth ?? 0,
-  });
-
-  const apply = useCallback((next: Viewport) => {
-    const { content, frame } = dims();
-    setVp(clampPan(next, content, frame));
+  // Track the frame width (sidebar toggles, window resizes) and re-clamp so the view stays legal.
+  useLayoutEffect(() => {
+    const el = frameRef.current;
+    if (!el) return;
+    setFrameW(el.clientWidth);
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setFrameW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    if (reduce) return;
-    const rect = frameRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    // Horizontal-intent or ctrl → pan; otherwise zoom about the cursor. This keeps normal page
-    // scroll working while the pointer is merely passing over the spine (no zoom hijack unless
-    // the gesture is clearly a zoom: ctrlKey, or a mostly-vertical wheel while hovering).
-    if (e.ctrlKey || Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+  const apply = useCallback((next: Viewport) => {
+    const frame = frameRef.current?.clientWidth ?? 0;
+    setVp((cur) => {
+      const clamped = clampPan(next, contentWidth, frame);
+      return clamped.scale === cur.scale && clamped.panX === cur.panX ? cur : clamped;
+    });
+  }, [contentWidth]);
+
+  // Programmatic jumps (fit, zoom-to-node) glide; continuous input (wheel, drag) is immediate.
+  const applySmooth = useCallback((next: Viewport) => {
+    setSmooth(true);
+    if (smoothTimer.current) clearTimeout(smoothTimer.current);
+    smoothTimer.current = setTimeout(() => setSmooth(false), 280);
+    apply(next);
+  }, [apply]);
+  useEffect(() => () => { if (smoothTimer.current) clearTimeout(smoothTimer.current); }, []);
+
+  // Re-clamp when the content grows (steps stream in) or the frame resizes.
+  useLayoutEffect(() => { apply(vpRef.current); }, [contentWidth, frameW, apply]);
+
+  // Native non-passive wheel listener: ONLY ctrl+wheel/pinch zooms; plain wheel scrolls the page.
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el || reduce) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return; // plain wheel: never hijack page scroll
       e.preventDefault();
-      const anchorX = e.clientX - rect.left;
-      const factor = Math.exp(-e.deltaY * 0.0015);
-      apply(zoomAbout(vp, factor, anchorX));
-    } else {
-      e.preventDefault();
-      apply(panBy(vp, -e.deltaX));
-    }
-  }, [vp, apply, reduce]);
+      const rect = el.getBoundingClientRect();
+      const factor = Math.exp(-e.deltaY * 0.0035);
+      apply(zoomAbout(vpRef.current, factor, e.clientX - rect.left));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [reduce, apply]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
-    if (reduce) return;
-    if (e.button !== 0) return; // primary button only
-    // Only start a pan on empty canvas / background drag — never on a node button or the overlay
-    // controls (zoom cluster, minimap), whose clicks must not be swallowed by pointer capture.
+    if (reduce || e.button !== 0) return;
+    // Never swallow node or minimap interactions with pointer capture.
     const t = e.target as HTMLElement;
-    if (t.closest('.reasoning-node, .reasoning-zoom, .reasoning-minimap')) return;
-    drag.current = { startX: e.clientX, startPan: vp.panX };
+    if (t.closest('.reasoning-node, .reasoning-minimap, .reasoning-fit')) return;
+    drag.current = { startX: e.clientX, startPan: vpRef.current.panX };
     setDragging(true);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }, [vp.panX, reduce]);
+  }, [reduce]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!drag.current) return;
-    apply({ scale: vp.scale, panX: drag.current.startPan + (e.clientX - drag.current.startX) });
-  }, [vp.scale, apply]);
+    apply({ scale: vpRef.current.scale, panX: drag.current.startPan + (e.clientX - drag.current.startX) });
+  }, [apply]);
 
   const endDrag = useCallback(() => {
     drag.current = null;
     setDragging(false);
   }, []);
 
-  const zoomByButton = useCallback((factor: number) => {
-    const { frame } = dims();
-    apply(zoomAbout(vp, factor, frame / 2));
-  }, [vp, apply]);
-
   const fit = useCallback(() => {
-    const { content, frame } = dims();
-    const scale = fitScale(content, frame);
-    apply(clampPan({ scale, panX: 0 }, content, frame));
+    const frame = frameRef.current?.clientWidth ?? 0;
+    applySmooth(fitViewport(count, frame));
+  }, [count, applySmooth]);
+
+  const jumpToNode = useCallback((index: number) => {
+    const frame = frameRef.current?.clientWidth ?? 0;
+    applySmooth(zoomToNode(index, count, frame));
+  }, [count, applySmooth]);
+
+  const onDoubleClick = useCallback((e: React.MouseEvent) => {
+    if (reduce) return;
+    const t = e.target as HTMLElement;
+    if (t.closest('.reasoning-node, .reasoning-minimap, .reasoning-fit')) return;
+    fit();
+  }, [reduce, fit]);
+
+  const onKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (reduce || e.target !== e.currentTarget) return; // node buttons keep their own keys
+    const frame = frameRef.current?.clientWidth ?? 0;
+    const cur = vpRef.current;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); apply(panBy(cur, 80)); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); apply(panBy(cur, -80)); }
+    else if (e.key === '+' || e.key === '=') { e.preventDefault(); applySmooth(zoomAbout(cur, 1.25, frame / 2)); }
+    else if (e.key === '-' || e.key === '_') { e.preventDefault(); applySmooth(zoomAbout(cur, 1 / 1.25, frame / 2)); }
+    else if (e.key === '0') { e.preventDefault(); fit(); }
+  }, [reduce, apply, applySmooth, fit]);
+
+  const scrubTo = useCallback((fraction: number) => {
+    const frame = frameRef.current?.clientWidth ?? 0;
+    apply(panToFraction(vpRef.current, fraction, contentWidth, frame));
+  }, [apply, contentWidth]);
+
+  const zoomFromMinimap = useCallback((deltaY: number) => {
+    const frame = frameRef.current?.clientWidth ?? 0;
+    apply(zoomAbout(vpRef.current, Math.exp(-deltaY * 0.0035), frame / 2));
   }, [apply]);
 
-  // Re-clamp when the content width changes (steps stream in) so the view stays valid.
-  useLayoutEffect(() => {
-    const el = contentRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => apply(vp));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [vp, apply]);
+  const atFit = isAtFit(vp, count, frameW);
 
-  return { vp, frameRef, contentRef, dragging, onWheel, onPointerDown, onPointerMove, endDrag, zoomByButton, fit, setVp };
+  return {
+    vp, frameW, contentWidth, frameRef, dragging, smooth, atFit,
+    onPointerDown, onPointerMove, endDrag, onDoubleClick, onKeyDown,
+    fit, jumpToNode, scrubTo, zoomFromMinimap,
+  };
 }
 
 /**
@@ -168,7 +227,8 @@ export function ReasoningFlow({ steps, council, live = false, durationMs }: Reas
   const model = useMemo(() => buildTimelineModel(steps, council ?? undefined), [steps, council]);
   const reduce = useReducedMotion();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const view = useSpineViewport(!!reduce);
+  const count = model.phases.length;
+  const view = useSpineViewport(count, !!reduce);
   const tier: ZoomTier = zoomTier(view.vp.scale);
 
   // Selection auto-follows the live phase so the user watches the active step without clicking;
@@ -178,16 +238,21 @@ export function ReasoningFlow({ steps, council, live = false, durationMs }: Reas
   const effectiveSelectedId = selectedId ?? livePhase?.id ?? null;
   const selected = model.phases.find((p) => p.id === effectiveSelectedId) ?? null;
 
-  if (model.phases.length === 0) return null;
+  if (count === 0) return null;
 
   const total = durationMs ?? model.totalDurationMs;
   const doneCount = model.phases.filter((p) => p.status === 'done').length;
-  const progress = model.phases.length > 0 ? doneCount / model.phases.length : 0;
+  const progress = count > 0 ? doneCount / count : 0;
 
-  const select = (id: string) => {
+  const select = (id: string, index: number, viaKeyboard: boolean) => {
     userPicked.current = true;
     setSelectedId((cur) => (cur === id ? null : id));
+    // Keyboard activation and double-click both jump to the node's detail tier.
+    if (viaKeyboard && !reduce) view.jumpToNode(index);
   };
+
+  const railStart = nodeX(0, view.vp.scale);
+  const railEnd = nodeX(count - 1, view.vp.scale);
 
   return (
     <div className="reasoning-flow mb-3" data-testid="reasoning-flow" data-live={live ? '1' : '0'}>
@@ -201,7 +266,7 @@ export function ReasoningFlow({ steps, council, live = false, durationMs }: Reas
         />
         <span className="font-medium text-[color:var(--chat-body)]">Reasoning</span>
         <span className="opacity-70">
-          {model.rounds > 1 ? `${model.rounds} rounds` : `${model.phases.length} steps`}
+          {model.rounds > 1 ? `${model.rounds} rounds` : `${count} steps`}
           {total >= 500 ? ` · ${formatMs(total)}` : ''}
         </span>
         <span className="ml-auto text-[color:var(--chat-muted)]">
@@ -209,28 +274,42 @@ export function ReasoningFlow({ steps, council, live = false, durationMs }: Reas
         </span>
       </div>
 
-      {/* The spine — a zoomable, pannable constellation on a 2D canvas. Wheel zooms about the cursor,
-          drag pans, and detail is a function of zoom depth (semantic zoom). Controls + minimap reveal
-          on hover (reveal-on-intent). Under reduced-motion the whole thing degrades to a static rail. */}
+      {/* The spine — a pannable, zoomable constellation. Drag pans; ctrl+wheel/pinch zooms about
+          the cursor (plain wheel scrolls the page, untouched); double-click background fits;
+          double-click a node jumps to its detail. Detail is a function of zoom depth (semantic
+          zoom). Minimap reveals on hover/zoom and scrubs. Reduced-motion degrades to a static,
+          natively scrollable rail. */}
       <div
         className={`reasoning-spine-frame ${view.dragging ? 'reasoning-spine-frame--dragging' : ''} reasoning-tier-${tier}`}
         data-tier={tier}
+        data-reduce={reduce ? '1' : '0'}
         ref={view.frameRef}
-        onWheel={reduce ? undefined : view.onWheel}
+        tabIndex={reduce ? undefined : 0}
+        role="group"
+        aria-label="Reasoning timeline. Arrow keys pan, plus and minus zoom, zero fits the view."
         onPointerDown={reduce ? undefined : view.onPointerDown}
         onPointerMove={reduce ? undefined : view.onPointerMove}
         onPointerUp={view.endDrag}
+        onPointerCancel={view.endDrag}
         onPointerLeave={view.endDrag}
+        onDoubleClick={reduce ? undefined : view.onDoubleClick}
+        onKeyDown={reduce ? undefined : view.onKeyDown}
       >
         <div
-          className="reasoning-spine"
-          ref={view.contentRef}
+          className={`reasoning-spine ${view.smooth ? 'reasoning-spine--smooth' : ''}`}
           role="list"
           aria-label="Reasoning steps"
-          style={{ transform: `translateX(${view.vp.panX}px) scale(${view.vp.scale})`, transformOrigin: 'left center' }}
+          style={{
+            transform: `translateX(${view.vp.panX}px)`,
+            width: `${view.contentWidth * view.vp.scale}px`,
+          }}
         >
-          {/* Base rail + progress fill sit behind the nodes. */}
-          <div className="reasoning-rail" aria-hidden="true">
+          {/* Base rail + progress fill sit behind the nodes, spanning first→last node center. */}
+          <div
+            className="reasoning-rail"
+            aria-hidden="true"
+            style={{ left: `${railStart}px`, width: `${Math.max(railEnd - railStart, 0)}px` }}
+          >
             <motion.div
               className="reasoning-rail-fill"
               initial={false}
@@ -240,36 +319,46 @@ export function ReasoningFlow({ steps, council, live = false, durationMs }: Reas
           </div>
 
           {model.phases.map((phase, i) => (
-            <FlowNode
+            <div
               key={phase.id}
-              phase={phase}
-              index={i}
-              selected={phase.id === effectiveSelectedId}
-              live={live}
-              reduce={!!reduce}
-              tier={tier}
-              scale={view.vp.scale}
-              onSelect={() => select(phase.id)}
-            />
+              className="reasoning-node-slot"
+              style={{ transform: `translateX(${nodeX(i, view.vp.scale)}px)` }}
+            >
+              <FlowNode
+                phase={phase}
+                index={i}
+                selected={phase.id === effectiveSelectedId}
+                live={live}
+                reduce={!!reduce}
+                tier={tier}
+                onSelect={(viaKeyboard) => select(phase.id, i, viaKeyboard)}
+                onZoomTo={() => { if (!reduce) view.jumpToNode(i); }}
+              />
+            </div>
           ))}
         </div>
 
-        {!reduce && (
-          <SpineControls
-            vp={view.vp}
-            onZoomIn={() => view.zoomByButton(1.3)}
-            onZoomOut={() => view.zoomByButton(1 / 1.3)}
-            onFit={view.fit}
-          />
+        {/* One quiet fit glyph, only when the view has left its fit state (reveal-on-intent). */}
+        {!reduce && !view.atFit && (
+          <button type="button" className="reasoning-fit" onClick={view.fit} aria-label="Fit the whole timeline">
+            <Maximize2 className="h-3 w-3" />
+          </button>
         )}
         {!reduce && (
           <Minimap
             phases={model.phases}
             vp={view.vp}
-            frameRef={view.frameRef}
-            contentRef={view.contentRef}
+            contentWidth={view.contentWidth}
+            frameWidth={view.frameW}
+            onScrub={view.scrubTo}
+            onZoom={view.zoomFromMinimap}
           />
         )}
+
+        {/* Announce semantic-zoom tier changes to screen readers without visual noise. */}
+        <span className="sr-only" aria-live="polite">
+          {tier === 'overview' ? 'Overview: steps as dots' : tier === 'detail' ? 'Detail view' : ''}
+        </span>
       </div>
 
       {/* Spotlight — detail for the selected node, revealed on intent below the spine. */}
@@ -312,8 +401,8 @@ function FlowNode({
   live,
   reduce,
   tier,
-  scale,
   onSelect,
+  onZoomTo,
 }: {
   phase: TimelinePhase;
   index: number;
@@ -321,8 +410,8 @@ function FlowNode({
   live: boolean;
   reduce: boolean;
   tier: ZoomTier;
-  scale: number;
-  onSelect: () => void;
+  onSelect: (viaKeyboard: boolean) => void;
+  onZoomTo: () => void;
 }) {
   const running = phase.status === 'running';
   const bad = phase.status === 'bad';
@@ -343,10 +432,11 @@ function FlowNode({
     <motion.button
       type="button"
       role="listitem"
-      onClick={onSelect}
+      // e.detail === 0 → keyboard activation (Enter/Space): select AND zoom to the node's detail.
+      onClick={(e) => onSelect(e.detail === 0)}
+      onDoubleClick={(e) => { e.stopPropagation(); onZoomTo(); }}
       aria-pressed={selected}
       aria-label={phase.title}
-      title={phase.title}
       className={`reasoning-node ${selected ? 'reasoning-node--selected' : ''} ${bad ? 'reasoning-node--bad' : ''} ${running && live ? 'reasoning-node--live' : ''}`}
       style={{ ['--node-hue' as string]: hue }}
       initial={reduce ? false : { opacity: 0, y: 8, scale: 0.94 }}
@@ -354,10 +444,9 @@ function FlowNode({
       transition={reduce ? { duration: 0 } : { delay: Math.min(index * 0.04, 0.3), duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
       whileHover={reduce ? undefined : { y: -2 }}
     >
-      {/* Counter-scale the node's chrome by 1/scale so discs + labels stay a CONSTANT readable size
-          while the canvas scale only spreads nodes apart. This is true semantic zoom — zooming
-          reveals more room + more detail, it does not billboard the text. */}
-      <span className="reasoning-node-inner" style={{ transform: `scale(${1 / scale})` }}>
+      {/* Glyphs and labels render at CONSTANT size — zoom spreads node positions apart instead of
+          scaling this chrome, so text stays crisp and nothing can grow past the frame. */}
+      <span className="reasoning-node-inner">
         <span className="reasoning-node-glyph" aria-hidden="true">
           <span className="reasoning-node-disc" />
         </span>
@@ -374,59 +463,67 @@ function FlowNode({
   );
 }
 
-/** Zoom controls — a small cluster that reveals on frame-hover. Reveal-on-intent. */
-function SpineControls({
-  vp,
-  onZoomIn,
-  onZoomOut,
-  onFit,
-}: {
-  vp: Viewport;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onFit: () => void;
-}) {
-  return (
-    <div className="reasoning-zoom" role="group" aria-label="Zoom controls">
-      <button type="button" className="reasoning-zoom-btn" onClick={onZoomOut} aria-label="Zoom out" disabled={vp.scale <= clampScale(0.46)}>
-        <Minus className="h-3 w-3" />
-      </button>
-      <button type="button" className="reasoning-zoom-fit" onClick={onFit} aria-label="Fit to view">
-        <Maximize2 className="h-3 w-3" />
-        <span className="tabular-nums">{Math.round(vp.scale * 100)}%</span>
-      </button>
-      <button type="button" className="reasoning-zoom-btn" onClick={onZoomIn} aria-label="Zoom in" disabled={vp.scale >= clampScale(2.59)}>
-        <Plus className="h-3 w-3" />
-      </button>
-    </div>
-  );
-}
-
-/** Overview minimap — the whole turn as bare dots with a window marking what's on screen. */
+/**
+ * Overview minimap — the whole turn as bare dots with a window marking what's on screen. It IS the
+ * navigation instrument: drag/click scrubs the pan, wheel over it zooms. Visible whenever the view
+ * shows a sub-range, or on frame hover.
+ */
 function Minimap({
   phases,
   vp,
-  frameRef,
-  contentRef,
+  contentWidth,
+  frameWidth,
+  onScrub,
+  onZoom,
 }: {
   phases: readonly TimelinePhase[];
   vp: Viewport;
-  frameRef: React.RefObject<HTMLDivElement | null>;
-  contentRef: React.RefObject<HTMLDivElement | null>;
+  contentWidth: number;
+  frameWidth: number;
+  onScrub: (fraction: number) => void;
+  onZoom: (deltaY: number) => void;
 }) {
-  const [win, setWin] = useState({ start: 0, end: 1 });
-  useEffect(() => {
-    const content = contentRef.current?.scrollWidth ?? 0;
-    const frame = frameRef.current?.clientWidth ?? 0;
-    setWin(visibleWindow(vp, content, frame));
-  }, [vp, frameRef, contentRef]);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const scrubbing = useRef(false);
+  const win = visibleWindow(vp, contentWidth, frameWidth);
+  const isSubRange = win.end - win.start < 0.999;
 
-  // Only meaningful once the window is a real sub-range (i.e., zoomed/panned in).
-  if (win.end - win.start >= 0.999) return null;
+  const fractionAt = (clientX: number): number => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return 0;
+    return (clientX - rect.left) / rect.width;
+  };
+
+  // Wheel-zoom over the minimap needs preventDefault → native non-passive listener, scoped here.
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onZoom(e.deltaY);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [onZoom]);
+
+  if (!isSubRange) return null;
 
   return (
     <div className="reasoning-minimap" aria-hidden="true">
-      <div className="reasoning-minimap-track">
+      <div
+        className="reasoning-minimap-track"
+        ref={trackRef}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          scrubbing.current = true;
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          onScrub(fractionAt(e.clientX));
+        }}
+        onPointerMove={(e) => { if (scrubbing.current) onScrub(fractionAt(e.clientX)); }}
+        onPointerUp={() => { scrubbing.current = false; }}
+        onPointerCancel={() => { scrubbing.current = false; }}
+      >
         {phases.map((p) => {
           const bad = p.status === 'bad';
           const hue = bad

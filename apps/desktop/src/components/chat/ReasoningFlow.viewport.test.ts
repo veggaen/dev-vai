@@ -6,10 +6,20 @@ import {
   clampPan,
   zoomTier,
   fitScale,
+  fitViewport,
+  isAtFit,
   visibleWindow,
+  baseContentWidth,
+  nodeX,
+  zoomToNode,
+  panToFraction,
   IDENTITY_VIEWPORT,
   MIN_SCALE,
   MAX_SCALE,
+  NODE_PAD,
+  BASE_SPACING,
+  TAIL_PAD,
+  DETAIL_ZOOM_SCALE,
 } from './ReasoningFlow.viewport.js';
 
 describe('clampScale', () => {
@@ -89,5 +99,101 @@ describe('visibleWindow', () => {
     const w = visibleWindow({ scale: 2, panX: -800 }, 800, 800); // scaled width 1600
     expect(w.start).toBeCloseTo(0.5, 5);
     expect(w.end).toBeCloseTo(1, 5);
+  });
+});
+
+describe('position model (nodeX / baseContentWidth)', () => {
+  it('pins the layout constants so the visual rhythm is a deliberate choice', () => {
+    expect(NODE_PAD).toBe(56);
+    expect(BASE_SPACING).toBe(96);
+    expect(TAIL_PAD).toBe(76);
+    expect(DETAIL_ZOOM_SCALE).toBeGreaterThan(1.5); // must land in the detail tier
+  });
+  it('spreads positions with scale — spacing doubles, offsets stay proportional', () => {
+    expect(nodeX(0, 1)).toBe(NODE_PAD);
+    expect(nodeX(3, 1)).toBe(NODE_PAD + 3 * BASE_SPACING);
+    expect(nodeX(3, 2)).toBe(2 * (NODE_PAD + 3 * BASE_SPACING));
+  });
+  it('baseContentWidth covers first pad, spans, and label tail', () => {
+    expect(baseContentWidth(0)).toBe(0);
+    expect(baseContentWidth(1)).toBe(NODE_PAD + TAIL_PAD);
+    expect(baseContentWidth(5)).toBe(NODE_PAD + 4 * BASE_SPACING + TAIL_PAD);
+  });
+  it('screen position = contentX * scale + panX (the invariant zoomAbout preserves)', () => {
+    const vp = zoomAbout({ scale: 1, panX: 0 }, 1.5, nodeX(2, 1));
+    // the node under the anchor must still be under the anchor after the zoom
+    expect(nodeX(2, vp.scale) + vp.panX).toBeCloseTo(nodeX(2, 1), 5);
+  });
+});
+
+describe('fitViewport / isAtFit', () => {
+  it('never enlarges past the default scale for small turns', () => {
+    const vp = fitViewport(3, 800); // 3 nodes fit easily at scale 1
+    expect(vp.scale).toBe(1);
+    expect(vp.panX).toBeGreaterThanOrEqual(0);
+  });
+  it('shrinks to show a long turn entirely (floored at MIN_SCALE for extreme turns)', () => {
+    const count = 40;
+    const vp = fitViewport(count, 800);
+    expect(vp.scale).toBeLessThan(1);
+    // a 40-step turn is wider than MIN_SCALE allows — fit shows as much as legal, no further
+    const fits = baseContentWidth(count) * vp.scale <= 800 + 48;
+    expect(fits || vp.scale === MIN_SCALE).toBe(true);
+    // a moderate turn DOES fit fully
+    const vp12 = fitViewport(12, 800);
+    expect(baseContentWidth(12) * vp12.scale).toBeLessThanOrEqual(800 + 48);
+  });
+  it('isAtFit is true exactly at the fit viewport and false once zoomed or panned', () => {
+    const vp = fitViewport(10, 800);
+    expect(isAtFit(vp, 10, 800)).toBe(true);
+    expect(isAtFit({ scale: vp.scale * 1.4, panX: vp.panX }, 10, 800)).toBe(false);
+    expect(isAtFit({ scale: vp.scale, panX: vp.panX - 40 }, 10, 800)).toBe(false);
+  });
+});
+
+describe('zoomToNode', () => {
+  it('lands in the detail tier centered on a middle node', () => {
+    const count = 20;
+    const vp = zoomToNode(10, count, 800);
+    expect(zoomTier(vp.scale)).toBe('detail');
+    expect(nodeX(10, vp.scale) + vp.panX).toBeCloseTo(400, 5);
+  });
+  it('clamps at the edges — the LAST node cannot over-pan past the content end', () => {
+    const count = 20;
+    const vp = zoomToNode(count - 1, count, 800);
+    // clamped, so the content's right edge stays within the frame + margin
+    const scaledWidth = baseContentWidth(count) * vp.scale;
+    expect(vp.panX).toBeGreaterThanOrEqual(800 - scaledWidth - 24);
+    // and the node is still on screen
+    const screenX = nodeX(count - 1, vp.scale) + vp.panX;
+    expect(screenX).toBeGreaterThan(0);
+    expect(screenX).toBeLessThan(800);
+  });
+  it('handles the FIRST node (index 0) without going positive past the margin', () => {
+    const vp = zoomToNode(0, 20, 800);
+    expect(vp.panX).toBeLessThanOrEqual(24);
+  });
+  it('single-node turn stays legal', () => {
+    const vp = zoomToNode(0, 1, 800);
+    expect(Number.isFinite(vp.panX)).toBe(true);
+    expect(zoomTier(vp.scale)).toBe('detail');
+  });
+});
+
+describe('panToFraction (minimap scrub)', () => {
+  it('centers the window on the requested fraction of wide content', () => {
+    const content = 2000;
+    const vp = panToFraction({ scale: 1, panX: 0 }, 0.5, content, 800);
+    const w = visibleWindow(vp, content, 800);
+    expect((w.start + w.end) / 2).toBeCloseTo(0.5, 2);
+  });
+  it('clamps at both extremes and ignores nonsense fractions', () => {
+    const content = 2000;
+    expect(panToFraction({ scale: 1, panX: 0 }, -5, content, 800).panX).toBe(24);
+    expect(panToFraction({ scale: 1, panX: 0 }, 99, content, 800).panX).toBe(800 - content - 24);
+  });
+  it('is a no-op on empty content', () => {
+    const vp = { scale: 1, panX: 7 };
+    expect(panToFraction(vp, 0.5, 0, 800)).toEqual(vp);
   });
 });

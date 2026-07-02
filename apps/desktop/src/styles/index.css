@@ -1186,42 +1186,62 @@ code, pre, kbd {
   color: var(--chat-body);
 }
 
-/* The zoomable canvas frame. Clips the transformed content, fades its edges so overflow reads as
-   "more, keep looking", and hosts the hover-revealed controls + minimap. grab/grabbing cursor tells
-   the user it's pannable. */
+/* The pannable canvas frame. Clips content, isolates its stacking context and paint so nothing can
+   leak over the composer, and fades its edges so overflow reads as "more, keep looking". grab/
+   grabbing cursor tells the user it's pannable; pan-y + pinch-zoom lets vertical page scroll and
+   native pinch pass through untouched. */
 .reasoning-spine-frame {
   position: relative;
   overflow: hidden;
-  min-height: 84px;
+  isolation: isolate;
+  contain: layout paint;
+  height: 88px;
   cursor: grab;
-  touch-action: pan-y;
+  touch-action: pan-y pinch-zoom;
   border-radius: 0.75rem;
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
-  mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
 }
 .reasoning-spine-frame--dragging { cursor: grabbing; }
-
-.reasoning-spine {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 0.5rem 0.5rem;
-  min-width: max-content;
-  will-change: transform;
+.reasoning-spine-frame:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
+}
+/* Reduced motion: static rail with native horizontal scroll instead of drag/zoom. */
+.reasoning-spine-frame[data-reduce='1'] {
+  overflow-x: auto;
+  overflow-y: hidden;
+  cursor: default;
+  touch-action: auto;
 }
 
-/* Semantic-zoom tiers: overview collapses nodes to bare dots (tight gap = the turn's fingerprint);
-   detail loosens spacing so inline metadata has room. */
-.reasoning-tier-overview .reasoning-spine { gap: 0.9rem; }
-.reasoning-tier-detail .reasoning-spine { gap: 0.5rem; }
+/* The spine is a positioned canvas: node slots sit at absolute x positions computed from the
+   viewport scale (position-based zoom — glyphs and text never scale). Only translateX(panX)
+   moves during pan, so the hot path is compositor-only. */
+.reasoning-spine {
+  position: relative;
+  height: 88px;
+  will-change: transform;
+}
+/* Programmatic jumps (fit / zoom-to-node) glide; continuous wheel/drag input stays immediate. */
+.reasoning-spine--smooth,
+.reasoning-spine--smooth .reasoning-node-slot { transition: transform 240ms var(--ease-out-expo); }
 
-/* The rail sits vertically centred on the node glyphs (glyph row is ~26px tall). */
+/* A zero-width anchor at the node's center x — children center on the point regardless of label
+   width, and position updates are transform-only. */
+.reasoning-node-slot {
+  position: absolute;
+  top: 0.7rem;
+  left: 0;
+  width: 0;
+  display: flex;
+  justify-content: center;
+}
+
+/* The rail sits vertically centred on the node glyphs; its span (first→last node) is inline. */
 .reasoning-rail {
   position: absolute;
-  left: 1.25rem;
-  right: 1.25rem;
-  top: 1.4rem;
+  top: calc(0.7rem + 13px - 1px);
   height: 2px;
   border-radius: 2px;
   background: color-mix(in oklab, var(--panel-border-soft) 55%, transparent);
@@ -1244,6 +1264,7 @@ code, pre, kbd {
 .reasoning-node {
   position: relative;
   z-index: 1;
+  flex: none;
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -1255,8 +1276,7 @@ code, pre, kbd {
   transition: color 180ms var(--ease-out-expo);
 }
 .reasoning-node:hover { color: var(--chat-body); }
-/* Constant-size chrome; counter-scaled against the canvas scale in JS. transform-origin top-center
-   keeps the disc pinned to the rail regardless of counter-scale. */
+/* Constant-size chrome — zoom never scales this, it only moves the slot the node sits in. */
 .reasoning-node-inner {
   display: flex;
   flex-direction: column;
@@ -1332,59 +1352,45 @@ code, pre, kbd {
 @keyframes reasoning-meta-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 0.9; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .reasoning-node-meta { animation: none; } }
 
-/* Zoom controls — a quiet cluster, revealed on frame hover (reveal-on-intent). */
-.reasoning-zoom {
+/* One quiet fit glyph — appears only when the view has left its fit state. */
+.reasoning-fit {
   position: absolute;
   top: 0.4rem;
   right: 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.15rem;
-  padding: 0.12rem;
-  border-radius: 0.6rem;
-  background: color-mix(in oklab, var(--panel-bg-elevated) 88%, transparent);
-  border: 1px solid var(--panel-border-soft);
-  box-shadow: 0 4px 14px color-mix(in oklab, var(--shell-bg) 60%, transparent);
-  opacity: 0;
-  transform: translateY(-2px);
-  transition: opacity 180ms var(--ease-out-expo), transform 180ms var(--ease-out-expo);
-  pointer-events: none;
-}
-.reasoning-spine-frame:hover .reasoning-zoom,
-.reasoning-spine-frame:focus-within .reasoning-zoom { opacity: 1; transform: none; pointer-events: auto; }
-
-.reasoning-zoom-btn,
-.reasoning-zoom-fit {
+  z-index: 2;
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  height: 20px;
-  padding: 0 0.35rem;
-  border: 0;
-  border-radius: 0.45rem;
-  background: transparent;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--panel-border-soft);
+  border-radius: 0.5rem;
+  background: color-mix(in oklab, var(--panel-bg-elevated) 88%, transparent);
   color: var(--chat-muted);
   cursor: pointer;
-  font-size: 9.5px;
-  transition: background-color 140ms ease, color 140ms ease;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 180ms var(--ease-out-expo), transform 180ms var(--ease-out-expo),
+    background-color 140ms ease, color 140ms ease;
 }
-.reasoning-zoom-btn:hover:not(:disabled),
-.reasoning-zoom-fit:hover { background: var(--panel-bg-inset); color: var(--chat-body); }
-.reasoning-zoom-btn:disabled { opacity: 0.35; cursor: default; }
-.reasoning-zoom-fit { color: var(--chat-body); }
+.reasoning-spine-frame:hover .reasoning-fit,
+.reasoning-spine-frame:focus-within .reasoning-fit { opacity: 1; transform: none; }
+.reasoning-fit:hover { background: var(--panel-bg-inset); color: var(--chat-body); }
 
-/* Overview minimap — appears only when zoomed/panned into a sub-window. */
+/* Overview minimap — renders only when the view is a sub-window; it IS the navigation instrument
+   (scrub to pan, wheel to zoom), so it stays quietly visible while active and brightens on hover. */
 .reasoning-minimap {
   position: absolute;
   bottom: 0.35rem;
   left: 50%;
   transform: translateX(-50%);
   width: min(60%, 320px);
-  opacity: 0;
+  z-index: 2;
+  opacity: 0.55;
   transition: opacity 180ms var(--ease-out-expo);
-  pointer-events: none;
 }
-.reasoning-spine-frame:hover .reasoning-minimap { opacity: 1; }
+.reasoning-spine-frame:hover .reasoning-minimap,
+.reasoning-minimap:hover { opacity: 1; }
 .reasoning-minimap-track {
   position: relative;
   display: flex;
@@ -1396,6 +1402,8 @@ code, pre, kbd {
   border-radius: 6px;
   background: color-mix(in oklab, var(--panel-bg-inset) 80%, transparent);
   border: 1px solid var(--panel-border-soft);
+  cursor: ew-resize;
+  touch-action: none;
 }
 .reasoning-minimap-dot {
   width: 4px;
@@ -1411,7 +1419,7 @@ code, pre, kbd {
   border-radius: 6px;
   background: color-mix(in oklab, var(--accent) 12%, transparent);
   border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
-  transition: left 120ms linear, width 120ms linear;
+  pointer-events: none;
 }
 
 /* Spotlight — the revealed detail for the selected node. */
