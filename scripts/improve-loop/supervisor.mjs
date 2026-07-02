@@ -34,13 +34,17 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { openDb, isFixBanned } from './db.mjs';
 import { acquireLock } from './instance-lock.mjs';
 import { evictAllModels } from './driver.mjs';
+import { loadLoopConfig } from './loop-config.mjs';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
 const has = (f) => args.includes(f);
+// Layered loop config (defaults ← VAI_LOOP_* env ← CLI flags). Existing flags like --rest and
+// --budget keep working; sources records where each knob came from (echoed on watch /loop.json).
+const { config: LOOP_CONFIG, sources: LOOP_CONFIG_SOURCES } = loadLoopConfig({ argv: args });
 const MAX_CYCLES = Number(opt('--max-cycles', '0')) || Infinity; // 0 = forever
 const PER_CLASS = opt('--per-class', '4');
-const REST_S = Number(opt('--rest', '45'));        // breather between cycles (GPU rest)
+const REST_S = LOOP_CONFIG.restSeconds;        // breather between cycles (GPU rest)
 const DB_PATH = opt('--db', 'scripts/improve-loop/.corpus.sqlite');
 const BASE_URL = opt('--base-url', process.env.VAI_API ?? 'http://localhost:3006');
 const SEEDS_ONLY = has('--seeds-only');
@@ -76,10 +80,15 @@ const AUTO_APPLY = MODE === 'apply' || has('--apply');
 // cycle) instead of the fixed sequence. Default OFF — the proven fixed path stays the default
 // until the engine path is verified live. --budget caps compute units (≈ model calls) per cycle.
 const USE_ENGINE = has('--engine');
-const COMPUTE_BUDGET = Number(opt('--budget', '10'));
+const COMPUTE_BUDGET = LOOP_CONFIG.computeBudget;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (m) => process.stdout.write(`[supervisor ${new Date().toLocaleTimeString()}] ${m}\n`);
+{
+  // Make non-default knobs visible at startup — "which env var did I leave set?" is a real bug class.
+  const overridden = Object.entries(LOOP_CONFIG_SOURCES).filter(([, s]) => s !== 'default');
+  if (overridden.length) log(`config overrides: ${overridden.map(([k, s]) => `${k}=${JSON.stringify(LOOP_CONFIG[k])} (${s})`).join(', ')}`);
+}
 const LOCK_PATH = 'scripts/improve-loop/.supervisor.lock';
 const STOP_REQUEST_PATH = 'scripts/improve-loop/.supervisor.stop';
 let stop = false;

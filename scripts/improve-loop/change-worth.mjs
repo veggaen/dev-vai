@@ -20,13 +20,15 @@
  * poorly done. Pure scoring; orchestration injects the model.
  */
 
+import { LOOP_DEFAULTS } from './loop-config.mjs';
+
 // A change must clear this COMBINED worth score [0..1] to be considered worthy of committing.
 // Tuned strict: the whole point is to REJECT mediocre changes, not wave them through.
-export const WORTH_PASS_SCORE = 0.66;
+export const WORTH_PASS_SCORE = LOOP_DEFAULTS.worthPassScore;
 
 // The four worth dimensions (V3gga's bar), each 0..1, weighted into the model sub-score.
 export const WORTH_DIMENSIONS = ['meaningfulness', 'engineeringQuality', 'configurability', 'futureProofness'];
-export const DIMENSION_WEIGHTS = { meaningfulness: 0.35, engineeringQuality: 0.30, configurability: 0.15, futureProofness: 0.20 };
+export const DIMENSION_WEIGHTS = LOOP_DEFAULTS.dimensionWeights;
 
 /**
  * Classify the SHAPE of a find→replace change deterministically. Returns { kind, substantive } where

@@ -14,20 +14,19 @@
  *
  * Pure + I/O-free: takes already-measured signals, returns a ranked plan. Unit-tests without a DB.
  */
+import { LOOP_DEFAULTS } from './loop-config.mjs';
 
 /**
  * Each lane's "importance" — how much improving it actually matters to a real user. Routing is
  * table-stakes (a mis-routed turn is wrong) but capped; ANSWER QUALITY is what a human notices most;
  * CAPABILITY is high-ceiling (new things Vai can do) but lower-confidence to land. These are the
  * meaningful-ness weights — the thing that was missing when everything was treated as equal routing.
+ *
+ * quality 1.0 (what a human feels first) · capability 0.9 (growth lane, high ceiling) ·
+ * codebase 0.85 (compounding craft debt) · reliability 0.8 (stuck weaknesses compound) ·
+ * routing 0.7 (necessary, but table-stakes, not delight). Values live in loop-config.mjs.
  */
-export const LANE_WEIGHT = {
-  quality: 1.0,     // is the answer actually GOOD — what a human feels first
-  capability: 0.9,  // can Vai DO more — high ceiling, the growth lane
-  codebase: 0.85,   // is the WHOLE APP complete/structured/polished — compounding craft debt
-  reliability: 0.8, // recurring stuck weaknesses — compounding if left
-  routing: 0.7,     // did it route correctly — necessary, but table-stakes, not delight
-};
+export const LANE_WEIGHT = LOOP_DEFAULTS.laneWeights;
 
 /** A lane is "below bar" (worth working on) under these targets. Gap = how far below, normalized. */
 export const LANE_BAR = {

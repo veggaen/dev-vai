@@ -16,10 +16,15 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { openDb, classStats, latestVisualEvents, latestVisualRun, readHeartbeat, readVisualLive, buildVisualCouncilPacket, topTasteLessons, recentLoopEvents, bannedFixes } from './db.mjs';
+import { loadLoopConfig } from './loop-config.mjs';
 
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
-const PORT = Number(opt('--port', '4123'));
+// Layered loop config (defaults ← VAI_LOOP_* env ← this process's flags). Echoed on /loop.json so
+// the dashboard shows WHICH knobs are overridden and by what. Note: flags passed to the SUPERVISOR
+// live in that process — env overrides show here, supervisor-only flags don't.
+const { config: LOOP_CONFIG, sources: LOOP_CONFIG_SOURCES } = loadLoopConfig({ argv: args });
+const PORT = LOOP_CONFIG.watchPort;
 const DB_PATH = opt('--db', 'scripts/improve-loop/.corpus.sqlite');
 // The live-frame JPEG the probe overwrites while it drives the app — this is the shared
 // "we both watch the same thing" surface.
@@ -589,7 +594,9 @@ createServer((req, res) => {
   // The plain-language loop summary the hero panel polls — "what is the loop doing?" as data.
   if (req.url === '/loop.json') {
     let body = '{}';
-    try { body = JSON.stringify(loopStatus()); } catch (e) { body = JSON.stringify({ error: String(e).slice(0, 120) }); }
+    try {
+      body = JSON.stringify({ ...loopStatus(), config: LOOP_CONFIG, configSources: LOOP_CONFIG_SOURCES });
+    } catch (e) { body = JSON.stringify({ error: String(e).slice(0, 120) }); }
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
     res.end(body);
     return;
