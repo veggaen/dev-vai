@@ -81,6 +81,12 @@ import {
   type ProcessLogEntry,
 } from './council-process-log.js';
 import { buildCouncilAuditMeta, withCouncilAuditVisibility } from './council-audit-meta.js';
+import {
+  isStagnant,
+  escalationForStuck,
+  promptNeedsExternalFacts,
+  STAGNATION_THRESHOLD,
+} from './council-stagnation.js';
 import { accumulateProgressStep, serializeProgressTrace, deserializeProgressTrace } from './progress-trace.js';
 import type { ChatProgressStep as ApiChatProgressStep } from '@vai/api-types/chat-ws';
 import { buildSearchProcessLog } from './search-process-log.js';
@@ -1946,13 +1952,31 @@ export class ChatService {
       revisedText = undefined;
     }
     const cleaned = revisedText?.trim();
-    if (!cleaned || cleaned === draft.draftText.trim()) {
+    // Stagnation guard (scale-invariant "any repeat is bad"): a redraft that is empty, exactly the
+    // original, OR SEMANTICALLY the same attempt (reworded, same shingles) means the loop is stuck —
+    // Vai is drafting the same thing the council already rejected. Shipping that repeat is the
+    // failure the user watches. Surface the stuck signal + the escalation that would break it, then
+    // ship best-so-far honestly rather than a silent loop. (Executing the escalation live is the
+    // next slice; naming it here makes the stuck pattern visible in the timeline immediately.)
+    const isRepeat = !cleaned
+      || cleaned === draft.draftText.trim()
+      || isStagnant(cleaned, [draft.draftText], STAGNATION_THRESHOLD);
+    if (isRepeat) {
+      const escalation = escalationForStuck({
+        hasEvidence: Boolean(workingDraft.hasEvidence),
+        needsExternalFacts: promptNeedsExternalFacts(draft.prompt),
+        isAmbiguous: first.consensus.recommendedAction === 'ask-one-question'
+          || first.consensus.recommendedAction === 'reread-intent',
+        searchAlreadyTried: Boolean(directedEvidence),
+      });
       yield {
         stage: stages.redraft,
-        label: 'Vai kept the original draft',
-        detail: buildCouncilFeedbackDetail(feedback) || undefined,
+        label: cleaned && cleaned !== draft.draftText.trim()
+          ? 'Vai repeated the same answer — loop is stuck'
+          : 'Vai kept the original draft',
+        detail: `Stuck: ${escalation.reason}`,
         status: 'done',
-        processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, draft.draftText),
+        processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, cleaned || draft.draftText),
       };
       return {
         council: first.thinking,

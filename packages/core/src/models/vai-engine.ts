@@ -530,7 +530,12 @@ export class VaiEngine implements ModelAdapter {
     // ��������� CODE PATTERNS KNOWLEDGE ���������
     this.bootstrapCodePatterns();
     // ��������� CURRENT EVENTS KNOWLEDGE ���������
-    this.bootstrapCurrentEvents();
+    // DISABLED 2026-07-02: bootstrapCurrentEvents seeded hardcoded/fabricated "facts"
+    // (hommersåk village blurb, circle-k, a frozen 2026 Anthropic/Pentagon scenario). These
+    // poisoned the direct-match router — any query merely CONTAINING "hommersåk"/"circle k"
+    // hijacked to canned trivia and ignored the real ask (e.g. "number of pb hommersåk" →
+    // village weather). Current/entity facts must come from live web-search, never a frozen seed.
+    // this.bootstrapCurrentEvents();
     // ��������� BEST PRACTICES KNOWLEDGE ���������
     this.bootstrapBestPractices();
     // ��������� ADVANCED DOMAINS ���������
@@ -11480,6 +11485,33 @@ export class VaiEngine implements ModelAdapter {
 
     const lowerResponse = response.toLowerCase();
     const matchedTerms = groundingTerms.filter((term) => lowerResponse.includes(term));
+
+    // Intent-coverage gate (fixes the "number of pb hommersåk → village weather blurb" class):
+    // a canned entity answer often shares the ENTITY noun with the query while ignoring what was
+    // actually ASKED. If the query carries a concrete intent (a count, a contact detail, a price,
+    // an address…) and the response addresses NONE of that intent's vocabulary, it is not grounded
+    // — no matter how many entity tokens overlap. This keeps entity-fact lookups working while
+    // refusing to pass an answer that answers a different question than the one asked.
+    const lowerInput = input.toLowerCase();
+    const INTENT_SIGNALS: Array<{ ask: RegExp; addressed: RegExp }> = [
+      // count / quantity — "number of/how many X". Bare "phone number" is handled separately below,
+      // so this only fires for genuine counts (number OF, how many, antall).
+      { ask: /\b(number\s+of|count\s+of|how\s+many|amount\s+of|quantity\s+of|antall|hvor\s+mange)\b/, addressed: /\b(\d+|one|two|three|four|five|zero|none|several|there\s+(?:is|are|were)|count|total|found)\b/ },
+      // contact: phone / email — require an explicit phone/email/contact word, not bare "number".
+      { ask: /\b(phone|telephone|tel|telefon|mobile|email|e-mail|contact\s+(?:info|number|details))\b/, addressed: /(\+?\d[\d\s()-]{6,}|@[\w.-]+\.\w+|\bphone\b|\bemail\b|\bcontact\b)/ },
+      // address / location — require a street-type word in the answer, not just any digits (so
+      // "Rema 1000" doesn't count as an address).
+      { ask: /\b(address|adresse|located\s+at|street|postal\s+code|zip\s+code)\b/, addressed: /\b(street|gate\s|gata|road|vei\b|veien|avenue|\d{1,4}\s+[a-zæøå]+(?:gata|gate|veien|vei|street|road)|\bpostal\b|\bzip\b|\d{4}\s+[a-zæøå])\b/ },
+      // price / cost
+      { ask: /\b(price|cost|how\s+much|pris|koster|fee)\b/, addressed: /([$€£]\s?\d|\bkr\s?\d|\d+\s?(?:kr|nok|usd|eur|dollars?|kroner)|\bprice\b|\bcost\b|\bfree\b)/ },
+      // opening hours
+      { ask: /\b(opening\s+hours|open\s+today|closing\s+time|åpningstid|når\s+åpner)\b/, addressed: /(\d{1,2}[:.]\d{2}|\bopen\b|\bclosed\b|\bhours\b|mon|tue|wed|thu|fri|sat|sun)/ },
+    ];
+    for (const sig of INTENT_SIGNALS) {
+      if (sig.ask.test(lowerInput) && !sig.addressed.test(lowerResponse)) {
+        return false; // asked for X, answer never addresses X → not grounded
+      }
+    }
 
     if (matchedTerms.length >= Math.min(2, groundingTerms.length)) return true;
     return groundingTerms.some((term) => term.length >= 5 && lowerResponse.includes(term));

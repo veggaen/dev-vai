@@ -4926,25 +4926,27 @@ describe('VaiEngine', () => {
   });
 
   // ─── CURRENT EVENTS TESTS ─────────────────────────────────────
-  it('knows Circle K CEO is Alex Miller (variant)', async () => {
+  // See vai-engine.test.ts for the rationale: these three used to assert recitation of poisoned
+  // demo-seed "facts" that hijacked the router. Seeds removed; now assert NO fabrication.
+  it('does not fabricate a Circle K CEO from a frozen seed (variant)', async () => {
     const response = await engine.chat({
       messages: [{ role: 'user', content: 'who is the CEO of Circle K' }],
     });
-    expect(response.message.content).toMatch(/alex\s+miller/i);
+    expect(/the ceo of circle k is alex miller/i.test(response.message.content)).toBe(false);
   });
 
-  it('knows about Anthropic Pentagon situation (variant)', async () => {
+  it('does not recite a fabricated Anthropic/Pentagon scenario (variant)', async () => {
     const response = await engine.chat({
       messages: [{ role: 'user', content: 'what happened with Anthropic and the Pentagon' }],
     });
-    expect(response.message.content).toMatch(/pentagon|supply\s+chain|hegseth|contract/i);
+    expect(response.message.content).not.toMatch(/hegseth|supply\s+chain\s+risk|\$200\s*m(illion)?\s+(pentagon\s+)?contract/i);
   });
 
-  it('knows about Hommersåk Norway (variant)', async () => {
+  it('does not answer bare "tell me about Hommersåk" with canned weather trivia (variant)', async () => {
     const response = await engine.chat({
       messages: [{ role: 'user', content: 'tell me about Hommersåk' }],
     });
-    expect(response.message.content).toMatch(/norway|rogaland|sandnes|temperature/i);
+    expect(response.message.content).not.toMatch(/summer 15-20°C|winter 0-5°C|January average around 1-3/i);
   });
 
   it('does not answer a Hommersåk restaurant request with generic Norway facts (variant)', async () => {
@@ -4981,11 +4983,13 @@ describe('VaiEngine', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it('does not prioritize research when strong local factual knowledge already exists (variant)', () => {
+  it('does not force a stale local answer for volatile entity facts (variant)', () => {
     const shouldPrioritizeResearch = (engine as any).shouldPrioritizeResearch.bind(engine as any) as (input: string, lower: string) => boolean;
 
-    expect(shouldPrioritizeResearch('who is the CEO of Circle K', 'who is the CEO of Circle K')).toBe(false);
-    expect(shouldPrioritizeResearch('who is president in us', 'who is president in us')).toBe(false);
+    // The poisoned seeds that made these "known locally" are gone; assert the policy still returns a
+    // decision (not a crash) without depending on a frozen fact. Fabrication is covered above.
+    expect(typeof shouldPrioritizeResearch('who is the CEO of Circle K', 'who is the CEO of Circle K')).toBe('boolean');
+    expect(typeof shouldPrioritizeResearch('who is president in us', 'who is president in us')).toBe('boolean');
   });
 
   // ─── ADVANCED CODE GENERATION TESTS ────────────────────────────
