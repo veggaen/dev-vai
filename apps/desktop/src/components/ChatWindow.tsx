@@ -2183,10 +2183,8 @@ export function ChatWindow() {
       onFollowUp={(question) => { void handleSend(question); }}
     />
 
-    {/* Live Council Progress panel — Codex-style right contextual view.
-        Shows when user toggles or when latest assistant turn has council data.
-        This is the key "make council visible and actionable" surface so Vai feels like
-        a transparent, steerable friend rather than a black box. */}
+    {/* Right "Reasoning" panel — review surface for the latest turn.
+        Shows when user toggles or when the latest assistant turn has review data. */}
     {(showCouncilPanel || (() => {
       const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
       if (lastAssistant?.thinking?.council) return true;
@@ -2195,7 +2193,7 @@ export function ChatWindow() {
       }
       return false;
     })()) && (
-      <div className="flex h-full w-80 flex-shrink-0 border-l border-zinc-800 overflow-hidden">
+      <div className="flex h-full flex-shrink-0 overflow-hidden">
         <CouncilProgressPanel
           council={(() => {
             const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');

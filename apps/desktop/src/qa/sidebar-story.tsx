@@ -2,6 +2,8 @@ import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Plus, Search, Pin, Trash2, Code2, ChevronRight } from 'lucide-react';
 import { SidebarPanelHeader } from '../components/sidebar/SidebarPrimitives.js';
+import { CouncilProgressPanel } from '../components/panels/CouncilProgressPanel.js';
+import type { CouncilThinkingUI } from '../stores/chatStore.js';
 import '../styles/index.css';
 import { initOdysseusThemeFromStorage } from '../lib/odysseus-theme.js';
 
@@ -90,10 +92,45 @@ function Sidebar() {
   );
 }
 
+const reviewFixture: CouncilThinkingUI = {
+  outcome: 'act',
+  agreement: 0.66,
+  confidence: 0.7,
+  topic: 'factual',
+  summary: 'Panel approved with one dissent.',
+  realIntent: 'Compare the two options and recommend one.',
+  recommendedAction: 'search-web',
+  missingCapabilities: ['No live price feed for local listings'],
+  methodLessons: ['Cite the fetched source inline next to the number it backs.'],
+  members: [
+    { name: 'Local qwen3:8b', topic: 'code', verdict: 'good', confidence: 0.82, action: 'ship', note: 'Grounded and current. The draft cites both sources and the comparison holds up.' },
+    { name: 'deepseek-r1', topic: 'reasoning', verdict: 'needs-work', confidence: 0.44, action: 'redraft', note: 'Missed the follow-up intent — the user asked for a recommendation, not a summary.' },
+    { name: 'gemma2', topic: 'review', verdict: 'bad', confidence: 0.3, action: 'redraft', note: '', failed: true },
+  ],
+};
+
+function ReasoningPanelStory() {
+  return (
+    <div className="flex h-[560px] overflow-hidden rounded-[var(--layout-radius,12px)] border border-[color:var(--border)]">
+      <CouncilProgressPanel council={reviewFixture} onApplyLesson={() => {}} onReconvene={() => {}} onDesignMode={() => {}} onExportVisualPlan={() => {}} />
+    </div>
+  );
+}
+
+function ReasoningPanelEmptyStory() {
+  return (
+    <div className="flex h-[560px] overflow-hidden rounded-[var(--layout-radius,12px)] border border-[color:var(--border)]">
+      <CouncilProgressPanel council={null} />
+    </div>
+  );
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <div style={{ display: 'flex', gap: 32, padding: 40, alignItems: 'flex-start' }}>
       <Sidebar />
+      <ReasoningPanelStory />
+      <ReasoningPanelEmptyStory />
     </div>
   </StrictMode>,
 );
