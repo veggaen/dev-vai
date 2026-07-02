@@ -402,6 +402,9 @@ interface ChatState {
   broadcastTargetClientIds: string[];
   /** Per-conversation broadcast connections: conversationId → targetClientIds */
   broadcastChats: Record<string, string[]>;
+  /** Settled reasoning flows the user explicitly re-expanded (messageId → true).
+   *  Cleared when a new turn starts streaming so older flows fall back to their one-line rest. */
+  expandedProcess: Record<string, boolean>;
 
   fetchConversations: () => Promise<void>;
   createConversation: (modelId: string, mode?: ChatMode, options?: { sandboxProjectId?: string | null }) => Promise<string>;
@@ -428,6 +431,8 @@ interface ChatState {
   setQueuedMessage: (content: string | null) => void;
   appendToLastMessage: (text: string) => void;
   setFeedback: (messageId: string, helpful: boolean) => void;
+  /** Expand/collapse a settled turn's reasoning flow. */
+  setProcessExpanded: (messageId: string, expanded: boolean) => void;
   setLearningEnabled: (enabled: boolean) => void;
   /** Set the composer deliberation depth for subsequent turns. */
   setProcessDepth: (depth: 'quick' | 'balanced' | 'deep') => void;
@@ -634,6 +639,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   broadcastMode: false,
   broadcastTargetClientIds: [],
   broadcastChats: loadBroadcastChats(),
+  expandedProcess: {},
 
   fetchConversations: async () => {
     try {
@@ -946,6 +952,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [...state.messages, userMsg, assistantMsg],
       isStreaming: true,
       streamingConversationId: state.activeConversationId,
+      // A new turn taking the stage collapses older expanded reasoning flows back to their line.
+      expandedProcess: {},
     });
     activeStreamingAssistantId = assistantMsg.id;
 
@@ -1567,6 +1575,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   appendToLastMessage: (text: string) => {
     pendingStreamDelta += text;
     scheduleStreamDeltaFlush();
+  },
+
+  setProcessExpanded: (messageId: string, expanded: boolean) => {
+    set((state) => ({ expandedProcess: { ...state.expandedProcess, [messageId]: expanded } }));
   },
 
   setFeedback: (messageId: string, helpful: boolean) => {

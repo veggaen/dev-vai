@@ -62,6 +62,8 @@ interface FileAttachment {
 interface MessageBubbleProps {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  /** Stable message id — keys per-turn UI state (reasoning-flow expansion) in the store. */
+  messageId?: string;
   imageId?: string | null;
   imagePreview?: string;
   respondingModelId?: string;
@@ -615,7 +617,7 @@ function LiveDraftBlock({ text, phase }: { text: string; phase: 'start' | 'delta
 }
 
 export function MessageBubble({
-  role, content, imageId, imagePreview, files,
+  role, content, messageId, imageId, imagePreview, files,
   fallbackDeploy, recoveryPattern = 'silent', allIntents, onIntentAction,
   isLatest = false, isStreaming = false,
   respondingModelId, fallback,
@@ -981,6 +983,7 @@ export function MessageBubble({
                 vaiProposedDraft={thinking?.vaiProposedDraft}
                 imageSteps={imageGenSteps}
                 durationMs={thinking?.durationMs}
+                messageId={messageId}
               />
             )}
 

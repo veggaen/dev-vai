@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ReasoningFlow } from '../components/chat/ReasoningFlow.js';
+import { TurnProcessSection } from '../components/chat/TurnProcessSection.js';
 import type { ChatProgressStep, CouncilThinkingUI } from '../stores/chatStore.js';
 import '../styles/index.css';
 import { initOdysseusThemeFromStorage } from '../lib/odysseus-theme.js';
@@ -101,6 +102,13 @@ function Story() {
       </h2>
       <div style={{ marginBottom: 48 }} data-testid="many-step-story">
         <ReasoningFlow steps={manySteps} live={false} durationMs={64000} />
+      </div>
+
+      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
+        TurnProcessSection — settled rest (one line, click to expand)
+      </h2>
+      <div style={{ marginBottom: 48 }} data-testid="settled-collapse-story">
+        <TurnProcessSection isStreaming={false} steps={longSteps} council={council} durationMs={23460} messageId="story-settled" />
       </div>
 
       <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>

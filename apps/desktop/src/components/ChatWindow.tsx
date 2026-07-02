@@ -1446,6 +1446,7 @@ export function ChatWindow() {
                       <MessageBubble
                         role={msg.role}
                         content={msg.content}
+                        messageId={msg.id}
                         imageId={msg.imageId}
                         imagePreview={msg.imagePreview}
                         respondingModelId={msg.respondingModelId}

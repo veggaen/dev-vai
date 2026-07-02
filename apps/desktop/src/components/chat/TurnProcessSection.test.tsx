@@ -18,6 +18,34 @@ describe('TurnProcessSection', () => {
     expect(html).not.toContain('process-tree');
   });
 
+  it('live turn renders the full flow (spine visible, not collapsed)', () => {
+    const steps: ChatProgressStep[] = [
+      { stage: 'reason', label: 'Working through it', status: 'running' },
+    ];
+    const html = renderToStaticMarkup(<TurnProcessSection isStreaming steps={steps} />);
+    expect(html).toContain('data-collapsed="0"');
+    expect(html).toContain('reasoning-spine-frame');
+  });
+
+  // THE settled contract: a finished turn's resting surface is exactly one line — the headline.
+  // No spine, no ledger, no spotlight; everything else is revealed on click.
+  it('settled turn rests as exactly one line — no spine, ledger, or spotlight', () => {
+    const steps: ChatProgressStep[] = [
+      { stage: 'understand', label: 'Read the intent', status: 'done' },
+      { stage: 'quality-check', label: 'Verify', status: 'done', detail: 'Verification passed' },
+    ];
+    const html = renderToStaticMarkup(
+      <TurnProcessSection isStreaming={false} steps={steps} messageId="m1" />,
+    );
+    expect(html).toContain('data-collapsed="1"');
+    expect(html).toContain('Reasoning');
+    expect(html).not.toContain('reasoning-spine-frame');
+    expect(html).not.toContain('reasoning-ledger');
+    expect(html).not.toContain('reasoning-spotlight');
+    // The one line is the expand affordance.
+    expect(html).toContain('aria-expanded="false"');
+  });
+
   it('ProcessTree renders a waiting state with no steps while streaming', () => {
     const html = renderToStaticMarkup(<ProcessTree live steps={[]} />);
     expect(html).toContain('process-tree');

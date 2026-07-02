@@ -1528,6 +1528,14 @@ code, pre, kbd {
   transition: transform 200ms var(--ease-out-expo);
 }
 .reasoning-ledger-caret--open { transform: rotate(90deg); }
+/* Settled headline: the one-line rest of a finished turn. Caret whispers "there's more". */
+.reasoning-headline-caret {
+  color: var(--chat-muted);
+  opacity: 0.6;
+  transition: transform 200ms var(--ease-out-expo), opacity 160ms ease;
+}
+.reasoning-headline-caret--open { transform: rotate(90deg); }
+.reasoning-flow-headline:hover .reasoning-headline-caret { opacity: 1; }
 .reasoning-ledger-list {
   list-style: none;
   margin: 0;
@@ -1556,7 +1564,7 @@ code, pre, kbd {
 @media (prefers-reduced-motion: reduce) {
   .reasoning-node-glyph,
   .reasoning-rail-fill,
-  .reasoning-ledger-caret { transition: none; }
+  .reasoning-ledger-caret, .reasoning-headline-caret { transition: none; }
 }
 
 /* Nested row inside an inset block — theme-tuned lift/recess */

@@ -194,6 +194,10 @@ interface ReasoningFlowProps {
   readonly council?: CouncilThinkingUI | null;
   readonly live?: boolean;
   readonly durationMs?: number;
+  /** Settled rest: render ONLY the one-line header; the flow body is revealed on toggle. */
+  readonly collapsed?: boolean;
+  /** When provided (settled turns), the header toggles the collapsed state. */
+  readonly onToggleCollapsed?: (nextCollapsed: boolean) => void;
 }
 
 function formatMs(ms: number): string {
@@ -223,7 +227,7 @@ const PHASE_HUE: Record<TimelinePhaseId, string> = {
   deliver: 'var(--phase-verify)',
 };
 
-export function ReasoningFlow({ steps, council, live = false, durationMs }: ReasoningFlowProps) {
+export function ReasoningFlow({ steps, council, live = false, durationMs, collapsed = false, onToggleCollapsed }: ReasoningFlowProps) {
   const model = useMemo(() => buildTimelineModel(steps, council ?? undefined), [steps, council]);
   const reduce = useReducedMotion();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -253,27 +257,60 @@ export function ReasoningFlow({ steps, council, live = false, durationMs }: Reas
 
   const railStart = nodeX(0, view.vp.scale);
   const railEnd = nodeX(count - 1, view.vp.scale);
+  // Settled enrichment for the one-line rest: how often the gate sent the draft back.
+  const sentBack = model.phases.filter((p) => p.gate && !p.gate.approved).length;
+
+  const headline = (
+    <>
+      <VaiNode
+        state={live ? 'thinking' : model.approved ? 'done' : 'error'}
+        tone={live ? 'route' : 'verify'}
+        size={11}
+      />
+      <span className="font-medium text-[color:var(--chat-body)]">Reasoning</span>
+      <span className="opacity-70">
+        {model.rounds > 1 ? `${model.rounds} rounds` : `${count} steps`}
+        {!live && sentBack > 0 ? ` · sent back ${sentBack === 1 ? 'once' : sentBack === 2 ? 'twice' : `${sentBack} times`}` : ''}
+        {total >= 500 ? ` · ${formatMs(total)}` : ''}
+      </span>
+      <span className="ml-auto text-[color:var(--chat-muted)]">
+        {live ? 'thinking' : model.approved ? 'approved' : 'best so far'}
+      </span>
+    </>
+  );
 
   return (
-    <div className="reasoning-flow mb-3" data-testid="reasoning-flow" data-live={live ? '1' : '0'}>
+    <div className="reasoning-flow mb-3" data-testid="reasoning-flow" data-live={live ? '1' : '0'} data-collapsed={collapsed ? '1' : '0'}>
       {/* Header — quiet, no pills. The verdict is a word, not a badge. Thinking is never red;
-          red is reserved for a genuine "sent back / not approved" settled outcome. */}
-      <div className="mb-2.5 flex items-center gap-2 text-[11px] text-[color:var(--chat-muted)]">
-        <VaiNode
-          state={live ? 'thinking' : model.approved ? 'done' : 'error'}
-          tone={live ? 'route' : 'verify'}
-          size={11}
-        />
-        <span className="font-medium text-[color:var(--chat-body)]">Reasoning</span>
-        <span className="opacity-70">
-          {model.rounds > 1 ? `${model.rounds} rounds` : `${count} steps`}
-          {total >= 500 ? ` · ${formatMs(total)}` : ''}
-        </span>
-        <span className="ml-auto text-[color:var(--chat-muted)]">
-          {live ? 'thinking' : model.approved ? 'approved' : 'best so far'}
-        </span>
-      </div>
+          red is reserved for a genuine "sent back / not approved" settled outcome. Once the turn
+          settles this line IS the resting surface: the whole flow collapses behind it. */}
+      {onToggleCollapsed ? (
+        <button
+          type="button"
+          className="reasoning-flow-headline mb-2.5 flex w-full cursor-pointer items-center gap-2 text-[11px] text-[color:var(--chat-muted)]"
+          aria-expanded={!collapsed}
+          onClick={() => onToggleCollapsed(!collapsed)}
+        >
+          {headline}
+          <span className={`reasoning-headline-caret ${collapsed ? '' : 'reasoning-headline-caret--open'}`} aria-hidden="true">›</span>
+        </button>
+      ) : (
+        <div className="mb-2.5 flex items-center gap-2 text-[11px] text-[color:var(--chat-muted)]">
+          {headline}
+        </div>
+      )}
 
+      <AnimatePresence initial={false}>
+        {!collapsed && (
+          <motion.div
+            key="flow-body"
+            className="reasoning-flow-body"
+            style={{ overflow: 'hidden' }}
+            initial={reduce ? false : { opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
+            transition={reduce ? { duration: 0 } : { duration: 0.34, ease: [0.22, 1, 0.36, 1] }}
+          >
       {/* The spine — a pannable, zoomable constellation. Drag pans; ctrl+wheel/pinch zooms about
           the cursor (plain wheel scrolls the page, untouched); double-click background fits;
           double-click a node jumps to its detail. Detail is a function of zoom depth (semantic
@@ -378,6 +415,9 @@ export function ReasoningFlow({ steps, council, live = false, durationMs }: Reas
       </AnimatePresence>
 
       {model.featureNotes.length > 0 && <ImprovementLedger notes={model.featureNotes} reduce={!!reduce} />}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

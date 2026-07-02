@@ -26,7 +26,6 @@ import {
 import { isExplicitBuildExecutionRequest, looksLikeFactualQuestion, classifyAgentBuildIntent } from './build-execution-intent.js';
 import { CONVERSATION_MODE_SYSTEM_PROMPTS, DEFAULT_CONVERSATION_MODE, type ConversationMode, isConversationMode, agentIntentLeadDirective } from './modes.js';
 import { tryHandleChatMeta } from './meta-router.js';
-import { renderInfoBlockHtml } from './info-block.js';
 import {
   extractConversationFacts,
   tryHandleFactRecall,
@@ -3812,28 +3811,9 @@ export class ChatService {
               });
         }
         councilEscalateToGenerative = councilThinking?.outcome === 'escalate';
-        // Deterministic council-verdict info block: a clean, scannable HTML summary built from
-        // structured consensus data (rendered in a sandboxed iframe). Vai/council "showing the
-        // verdict" as a styled block, not a buried text line.
-        if (councilThinking) {
-          const tone = councilThinking.outcome === 'ship' ? 'good'
-            : councilThinking.outcome === 'escalate' ? 'bad' : 'warn';
-          yield {
-            type: 'info_block',
-            infoBlock: {
-              id: 'council-verdict',
-              title: 'Council verdict',
-              html: renderInfoBlockHtml({
-                kind: 'key-value',
-                rows: [
-                  { label: 'outcome', value: councilThinking.outcome, tone },
-                  { label: 'agreement', value: `${Math.round((councilThinking.agreement ?? 0) * 100)}%` },
-                  ...(councilThinking.realIntent ? [{ label: 'read as', value: councilThinking.realIntent }] : []),
-                ],
-              }),
-            },
-          } as ChatChunk;
-        }
+        // No standing verdict block here: the outcome/agreement live in the settled Reasoning
+        // line and the expanded flow's spotlight (desktop), so a separate info_block would be
+        // a duplicate resting surface.
       }
 
       const confidenceFallbackDecision = decideVaiFallback({
