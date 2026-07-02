@@ -192,6 +192,8 @@ Create observable end-to-end tests that simulate real human interaction so that 
 - Form input, submission, and async confirmation flows
 - Menu and navigation expand/collapse animations
 - Screenshot diffing at every meaningful interaction phase
+- Check what content is actualy showing, has something been hidden by overflow or wrong z-index?
+- Are there too many rounded box withing a roundedbox in the layout.. this can be overwhelming...
 - Timestamped recordings attached to reviews for human verification of AI-assisted changes
 
 **Special Focus for Model-Generated Interfaces:** Pay extra attention to z-index, overflow, clipping, and spacing issues that models frequently introduce in interactive elements.

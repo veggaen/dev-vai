@@ -400,34 +400,25 @@ function ChatsPanel() {
       <div className="flex-shrink-0 px-3 pb-2 pt-2">
         <button
           onClick={handleNewChat}
-          className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-colors ${
-            isLight
-              ? 'text-zinc-800 hover:bg-zinc-200/70'
-              : 'text-zinc-200 hover:bg-white/[0.05]'
-          }`}
+          className="sidebar-newchat group/nc mb-1.5 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium"
         >
-          <span className={`flex h-6 w-6 items-center justify-center rounded-md ${isLight ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-950'}`}>
+          <span className="sidebar-newchat-glyph flex h-6 w-6 items-center justify-center rounded-md">
             <Plus className="h-3.5 w-3.5" />
           </span>
-          New Chat
-          <span className={`ml-auto text-[10px] ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>Ctrl+N</span>
+          New chat
+          {/* Shortcut hint stays quiet, firms up on hover — reveal-on-intent. */}
+          <span className="sidebar-kbd ml-auto text-[10px] tabular-nums text-[color:var(--shell-text-muted)]">Ctrl+N</span>
         </button>
         <div className="relative">
           <Search
-            className={`pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 ${
-              isLight ? 'text-zinc-400' : 'text-zinc-600'
-            }`}
+            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--shell-text-muted)]"
           />
           <input
             ref={searchInputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search chats"
-            className={`w-full rounded-md py-1.5 pl-8 pr-3 text-sm outline-none transition-colors ${
-              isLight
-                ? 'bg-zinc-200/55 text-zinc-900 placeholder-zinc-400 focus:bg-white focus:ring-1 focus:ring-zinc-300'
-                : 'bg-white/[0.035] text-zinc-100 placeholder-zinc-600 focus:bg-white/[0.055] focus:ring-1 focus:ring-white/10'
-            }`}
+            className="sidebar-search w-full rounded-lg py-1.5 pl-8 pr-3 text-sm outline-none"
           />
         </div>
       </div>
@@ -441,17 +432,15 @@ function ChatsPanel() {
             <button
               type="button"
               onClick={() => toggleGroup(group.key)}
-              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
-                isLight ? 'text-zinc-600 hover:bg-zinc-200/60' : 'text-zinc-400 hover:bg-white/[0.035]'
-              }`}
+              className="sidebar-section-head group/sec flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left"
               aria-expanded={!collapsed}
             >
-              <ChevronRight className={`h-3 w-3 shrink-0 text-zinc-600 transition-transform ${collapsed ? '' : 'rotate-90'}`} />
+              <ChevronRight className={`h-3 w-3 shrink-0 text-[color:var(--shell-text-muted)] opacity-0 transition-all duration-150 group-hover/sec:opacity-100 ${collapsed ? '' : 'rotate-90 opacity-70'}`} />
               {group.key === 'pinned'
                 ? <Pin className="h-3 w-3 shrink-0 text-[color:var(--accent-text)]" />
                 : null}
-              <span className={`min-w-0 flex-1 truncate text-[11px] font-semibold ${group.key.startsWith('bucket:') || group.key === 'search-results' ? 'uppercase tracking-[0.14em] opacity-80' : ''}`}>{group.label}</span>
-              <span className={`text-[10px] tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>{group.items.length}</span>
+              <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-[color:var(--shell-text-muted)]">{group.label}</span>
+              <span className="sidebar-count text-[10px] tabular-nums text-[color:var(--shell-text-muted)]">{group.items.length}</span>
             </button>
             {!collapsed && group.items.map((conv) => {
               // Pin "Working…" to the chat that's ACTUALLY streaming, not whichever
@@ -501,14 +490,8 @@ function ChatsPanel() {
                   setDraggedConversationId(null);
                   setDragOverConversationId(null);
                 }}
-                className={`group relative ml-3 flex items-center gap-2 rounded-md px-2 py-1.5 transition-all duration-150 hover:translate-x-0.5 ${draggedConversationId === conv.id ? 'cursor-grabbing opacity-80' : 'cursor-grab'} ${conv.id === activeConversationId
-                  ? isLight
-                    ? 'bg-white text-zinc-950 shadow-sm'
-                    : 'bg-white/[0.065] text-zinc-100'
-                  : isLight
-                    ? 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
-                    : 'text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200'
-                  } ${dragOverConversationId === conv.id ? 'bg-[color:var(--accent-soft)]' : ''}`}
+                data-active={conv.id === activeConversationId ? '1' : undefined}
+                className={`sidebar-row group relative ml-2 flex items-center gap-2 rounded-lg px-2 py-1.5 ${draggedConversationId === conv.id ? 'cursor-grabbing opacity-80' : 'cursor-grab'} ${dragOverConversationId === conv.id ? 'sidebar-row--dropzone' : ''}`}
                 title={conv.title}
                 onClick={() => {
                   if (Date.now() < suppressSelectUntilRef.current) return;
@@ -523,7 +506,7 @@ function ChatsPanel() {
                 {conv.id === activeConversationId && (
                   <span
                     aria-hidden
-                    className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-r-full bg-[color:var(--accent)]"
+                    className="sidebar-row-accent absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-r-full"
                   />
                 )}
                 <div className="min-w-0 flex-1">
@@ -532,7 +515,7 @@ function ChatsPanel() {
                       <span title="Code / build chat">
                         <Code2
                           aria-hidden
-                          className={`h-3 w-3 shrink-0 ${isLight ? 'text-blue-600' : 'text-violet-400'}`}
+                          className="h-3 w-3 shrink-0 text-[color:var(--phase-route)]"
                         />
                       </span>
                     )}
@@ -549,11 +532,7 @@ function ChatsPanel() {
                             if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
                             if (e.key === 'Escape') { e.preventDefault(); setRenamingId(null); setRenameDraft(''); }
                           }}
-                          className={`min-w-0 flex-1 rounded border px-1 py-0.5 text-[13px] leading-tight outline-none ${
-                            isLight
-                              ? 'border-zinc-300 bg-white text-zinc-900'
-                              : 'border-white/15 bg-zinc-900 text-zinc-100'
-                          }`}
+                          className="sidebar-rename min-w-0 flex-1 rounded border px-1 py-0.5 text-[13px] leading-tight outline-none"
                         />
                       ) : (
                         <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{conv.title}</span>
@@ -567,22 +546,20 @@ function ChatsPanel() {
                           Working…
                         </span>
                       ) : (
-                        <span className={`flex-shrink-0 text-[10px] tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>
+                        <span className="flex-shrink-0 text-[10px] tabular-nums text-[color:var(--shell-text-muted)]">
                           {formatRelative(conv.updatedAt)}
                         </span>
                       )}
                     </div>
                   </div>
                   {conv.projectName && (
-                    <div className={`mt-0.5 truncate text-[10px] ${isLight ? 'text-zinc-500' : 'text-zinc-500'}`}>
+                    <div className="mt-0.5 truncate text-[10px] text-[color:var(--shell-text-muted)]">
                       {conv.projectName}
                     </div>
                   )}
                   {conv.mode && conv.mode !== 'chat' && !isCodeConversation(conv) && (
-                    <div className={`mt-0.5 flex items-center gap-1.5 text-[10px] ${isLight ? 'text-zinc-500' : 'text-zinc-500'}`}>
-                      <span className="flex-shrink-0 text-[9px] font-medium uppercase tracking-[0.12em]">
-                        {conv.mode}
-                      </span>
+                    <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[color:var(--shell-text-muted)]">
+                      <span className="flex-shrink-0 text-[10px]">{conv.mode}</span>
                     </div>
                   )}
                 </div>
@@ -594,12 +571,10 @@ function ChatsPanel() {
                   draggable={false}
                   aria-label={pinnedIds.has(conv.id) ? `Unpin ${conv.title}` : `Pin ${conv.title}`}
                   title={pinnedIds.has(conv.id) ? 'Unpin' : 'Pin to top'}
-                  className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded transition-all ${
+                  className={`sidebar-affordance flex h-5 w-5 flex-shrink-0 items-center justify-center rounded ${
                     pinnedIds.has(conv.id)
                       ? 'text-[color:var(--accent-text)] opacity-100'
-                      : `opacity-0 group-hover:opacity-100 ${
-                        isLight ? 'text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-700' : 'text-zinc-600 hover:bg-white/[0.06] hover:text-zinc-300'
-                      }`
+                      : 'opacity-0 group-hover:opacity-100'
                   }`}
                 >
                   {pinnedIds.has(conv.id) ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
@@ -611,9 +586,7 @@ function ChatsPanel() {
                   }}
                   draggable={false}
                   aria-label={`Delete ${conv.title}`}
-                  className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded opacity-0 transition-all group-hover:opacity-100 ${
-                    isLight ? 'text-zinc-400 hover:bg-red-50 hover:text-red-500' : 'text-zinc-600 hover:bg-red-500/10 hover:text-red-400'
-                  }`}
+                  className="sidebar-affordance sidebar-affordance--danger flex h-5 w-5 flex-shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-100"
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
@@ -628,9 +601,7 @@ function ChatsPanel() {
           <button
             type="button"
             onClick={() => setShowArchived((v) => !v)}
-            className={`mt-2 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] transition-colors ${
-              isLight ? 'text-zinc-500 hover:bg-zinc-200/60' : 'text-zinc-500 hover:bg-white/[0.035]'
-            }`}
+            className="sidebar-section-head mt-2 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px]"
           >
             <Archive className="h-3 w-3" />
             {showArchived ? 'Hide archived' : `Show ${archivedCount} archived`}
@@ -638,7 +609,7 @@ function ChatsPanel() {
         )}
 
         {filteredConversations.length === 0 && (
-          <p className={`px-3 py-8 text-center text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-600'}`}>
+          <p className="px-3 py-8 text-center text-xs text-[color:var(--shell-text-muted)]">
             {query.trim() ? 'No chats match that search yet.' : 'No conversations yet'}
           </p>
         )}

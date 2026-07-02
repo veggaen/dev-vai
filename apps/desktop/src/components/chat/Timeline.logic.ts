@@ -200,10 +200,19 @@ export function buildTimelineModel(
     const durationMs = (step as { durationMs?: number }).durationMs;
     if (typeof durationMs === 'number') totalDurationMs += durationMs;
 
+    // A gate keeps the phase's own identity in the TITLE (council vs. verify) so two gates in one
+    // turn don't both read as a generic "Approval gate" — the verdict lives in the summary/badge.
+    const gateTitle = gate
+      ? gate.kind === 'council'
+        ? PHASE_TITLE.deliberate
+        : gate.kind === 'quality'
+          ? 'Verify'
+          : PHASE_TITLE.gate
+      : PHASE_TITLE[phaseId];
     phases.push({
       id: `phase-${index}-${step.stage}`,
       phase: gate ? 'gate' : phaseId,
-      title: gate ? PHASE_TITLE.gate : PHASE_TITLE[phaseId],
+      title: gateTitle,
       summary: gate ? gate.reason : summarizeNodes(nodes, step.label),
       status: step.status === 'running' ? 'running' : gate && !gate.approved ? 'bad' : 'done',
       round,

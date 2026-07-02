@@ -5,13 +5,26 @@ import { ProcessTree } from './ProcessTree.js';
 import type { ChatProgressStep } from '../../stores/chatStore.js';
 
 describe('TurnProcessSection', () => {
-  it('renders ProcessTree waiting state with no steps while streaming', () => {
-    const html = renderToStaticMarkup(<TurnProcessSection isStreaming steps={[]} />);
+  // Tests run in the `node` environment (no window), where the timeline flag falls back to its
+  // DEFAULT (spatial ReasoningFlow, on). So TurnProcessSection renders ReasoningFlow here; the
+  // classic-ProcessTree cases below render ProcessTree directly to keep covering that surface.
+
+  it('renders the spatial ReasoningFlow by default', () => {
+    const steps: ChatProgressStep[] = [
+      { stage: 'reason', label: 'Working through it', status: 'done' },
+    ];
+    const html = renderToStaticMarkup(<TurnProcessSection isStreaming steps={steps} />);
+    expect(html).toContain('reasoning-flow');
+    expect(html).not.toContain('process-tree');
+  });
+
+  it('ProcessTree renders a waiting state with no steps while streaming', () => {
+    const html = renderToStaticMarkup(<ProcessTree live steps={[]} />);
     expect(html).toContain('process-tree');
     expect(html).toContain('Thinking');
   });
 
-  it('renders expandable process tree rows as steps arrive', () => {
+  it('ProcessTree renders expandable rows as steps arrive', () => {
     const steps: ChatProgressStep[] = [
       { stage: 'reason', label: 'Working through it', status: 'done' },
       {
@@ -26,7 +39,7 @@ describe('TurnProcessSection', () => {
         }],
       },
     ];
-    const html = renderToStaticMarkup(<TurnProcessSection isStreaming steps={steps} />);
+    const html = renderToStaticMarkup(<ProcessTree live steps={steps} />);
     expect(html).toContain('process-tree');
     expect(html).toContain('Working through it');
   });

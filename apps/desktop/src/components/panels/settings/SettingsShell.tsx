@@ -127,7 +127,7 @@ export function SettingsField({
 }) {
   return (
     <div className="space-y-2">
-      <label className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--color-subheader)]">
+      <label className="block text-[12px] font-medium text-[color:var(--fg)]">
         {label}
       </label>
       {hint && <p className="text-xs leading-5 text-[color:var(--color-muted)]">{hint}</p>}
@@ -251,9 +251,7 @@ export function ThemePresetGrid({
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-[color:var(--fg)]">{preset.label}</span>
             {isCustom && (
-              <span className="rounded-full border border-[color:var(--border)] px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-[color:var(--color-muted)]">
-                Custom
-              </span>
+              <span className="text-[10px] text-[color:var(--color-muted)]">Custom</span>
             )}
           </div>
         </button>
@@ -302,7 +300,7 @@ export function ThemePresetGrid({
 
       {customThemes.length > 0 && (
         <div>
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--color-subheader)]">
+          <div className="mb-2 text-[12px] font-medium text-[color:var(--color-muted)]">
             Your themes
           </div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3">

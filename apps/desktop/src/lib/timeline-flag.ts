@@ -1,16 +1,21 @@
 /**
- * Feature flag for the loop-aware Timeline view (vs. the classic ProcessTree). Additive and
- * reversible: when off (default), turns render exactly as before. Persisted in localStorage so the
- * choice survives reloads; toggled from Settings → Engine → "Turn process view".
+ * Feature flag for the spatial ReasoningFlow view (vs. the classic ProcessTree). Additive and
+ * reversible; persisted in localStorage so the choice survives reloads; toggled from
+ * Settings → Engine → "Turn process view".
+ *
+ * DEFAULT-ON as of 2026-07-02 after verifying ReasoningFlow against real multi-round turns
+ * (including error/aborted paths) in the live app. Unset → on; users who explicitly opt out
+ * (stored '0') still get the classic ProcessTree.
  */
 const STORAGE_KEY = 'vai-timeline-view';
 
 export function isTimelineViewEnabled(): boolean {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === 'undefined') return true;
   try {
-    return window.localStorage.getItem(STORAGE_KEY) === '1';
+    // Default on: only an explicit '0' opt-out disables it.
+    return window.localStorage.getItem(STORAGE_KEY) !== '0';
   } catch {
-    return false;
+    return true;
   }
 }
 

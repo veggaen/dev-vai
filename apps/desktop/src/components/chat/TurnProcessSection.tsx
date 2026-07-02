@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ChatProgressStep, CouncilThinkingUI } from '../../stores/chatStore.js';
 import { useProcessStepReveal } from '../../hooks/useProcessStepReveal.js';
 import { ProcessTree } from './ProcessTree.js';
-import { Timeline } from './Timeline.js';
+import { ReasoningFlow } from './ReasoningFlow.js';
 import { isTimelineViewEnabled } from '../../lib/timeline-flag.js';
 
 export interface TurnProcessSectionProps {
@@ -41,11 +41,12 @@ export function TurnProcessSection({
 
   if (!isStreaming && steps.length === 0) return null;
 
-  // Loop-aware Timeline (behind a flag) renders the same flat steps as phases/rounds/gates. Falls
-  // back to the classic ProcessTree when the flag is off — fully additive, nothing else changes.
+  // Spatial ReasoningFlow (behind the timeline flag) renders the same flat steps as a node
+  // constellation of phases/rounds/gates. Falls back to the classic ProcessTree when the flag is
+  // off — fully additive, nothing else changes.
   if (timelineView) {
     return (
-      <Timeline
+      <ReasoningFlow
         live={live}
         steps={visibleSteps}
         council={council}

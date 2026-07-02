@@ -731,7 +731,7 @@ export function SettingsPanel() {
 
           <SettingsSection
             title="Turn process view"
-            description="How each turn's work is shown in chat. Timeline groups it into phases, deliberation rounds, approval gates, and a lane of notes for improving Vai."
+            description="How each turn's work is shown in chat. The reasoning view is a spatial node constellation you can zoom, pan, and expand — phases, deliberation rounds, approval gates, and a lane of notes for improving Vai."
           >
             <SettingsCard>
               <SettingsSwitch
@@ -739,11 +739,11 @@ export function SettingsPanel() {
                 onChange={(on) => {
                   setTimelineViewEnabled(on);
                   setTimelineViewState(on);
-                  toast.success(on ? 'Timeline view on' : 'Classic process tree');
+                  toast.success(on ? 'Spatial reasoning view on' : 'Classic process tree');
                 }}
-                label="Loop-aware timeline"
+                label="Spatial reasoning view"
                 description={timelineView
-                  ? 'Showing phases, rounds, gates, and the self-improvement notes lane.'
+                  ? 'Zoomable node constellation — phases, rounds, gates, and the self-improvement notes lane.'
                   : 'Showing the classic top-down process tree.'}
               />
             </SettingsCard>

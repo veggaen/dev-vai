@@ -989,6 +989,112 @@ code, pre, kbd {
   .thinking-panel-trigger:hover .thinking-glyph::before { animation: none; opacity: 0.5; }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Sidebar primitives (SidebarPrimitives.tsx)
+
+   Token-only, no zinc, no uppercase micro-labels. Interactive density revealed
+   on hover (reveal-on-intent). Correct in both themes via the Odysseus tokens.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.sidebar-icon-btn {
+  color: var(--shell-text-muted);
+  transition: background-color 150ms var(--ease-out-expo), color 150ms var(--ease-out-expo);
+}
+.sidebar-icon-btn:hover {
+  background: var(--shell-surface-muted);
+  color: var(--shell-text);
+}
+
+.sidebar-section-head {
+  color: var(--shell-text-muted);
+  transition: background-color 150ms var(--ease-out-expo), color 150ms var(--ease-out-expo);
+}
+.sidebar-section-head:hover {
+  background: color-mix(in oklab, var(--shell-text) 5%, transparent);
+  color: var(--shell-text);
+}
+/* The count sits quiet at rest and firms up on hover — density on intent. */
+.sidebar-count { opacity: 0.6; transition: opacity 150ms var(--ease-out-expo); }
+.sidebar-section-head:hover .sidebar-count { opacity: 0.9; }
+
+.sidebar-row {
+  color: var(--shell-text-muted);
+  transition:
+    background-color 150ms var(--ease-out-expo),
+    color 150ms var(--ease-out-expo),
+    transform 150ms var(--ease-out-expo);
+}
+.sidebar-row:hover {
+  background: color-mix(in oklab, var(--shell-text) 6%, transparent);
+  color: var(--shell-text);
+}
+.sidebar-row[data-active='1'] {
+  background: var(--shell-surface-muted);
+  color: var(--shell-text);
+}
+.sidebar-row-accent {
+  background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 45%, transparent);
+  animation: sidebar-accent-in 220ms var(--ease-out-expo) both;
+}
+.sidebar-row:hover { transform: translateX(1px); }
+.sidebar-row--dropzone { background: var(--accent-soft) !important; }
+
+/* New-chat — the one primary action, quietly elevated. Its glyph inverts to the accent on hover. */
+.sidebar-newchat {
+  color: var(--shell-text);
+  transition: background-color 160ms var(--ease-out-expo);
+}
+.sidebar-newchat:hover { background: color-mix(in oklab, var(--shell-text) 6%, transparent); }
+.sidebar-newchat-glyph {
+  background: color-mix(in oklab, var(--shell-text) 10%, transparent);
+  color: var(--shell-text);
+  transition: background-color 160ms var(--ease-out-expo), color 160ms var(--ease-out-expo), transform 160ms var(--ease-out-expo);
+}
+.sidebar-newchat:hover .sidebar-newchat-glyph {
+  background: var(--accent);
+  color: var(--shell-bg);
+  transform: rotate(90deg);
+}
+.sidebar-kbd { opacity: 0; transition: opacity 160ms var(--ease-out-expo); }
+.sidebar-newchat:hover .sidebar-kbd { opacity: 0.75; }
+
+/* Search — inset field that lifts on focus, ring in the brand accent (not a generic zinc ring). */
+.sidebar-search {
+  background: color-mix(in oklab, var(--shell-text) 4%, transparent);
+  color: var(--shell-text);
+  transition: background-color 160ms var(--ease-out-expo), box-shadow 160ms var(--ease-out-expo);
+}
+.sidebar-search::placeholder { color: var(--shell-text-muted); }
+.sidebar-search:focus {
+  background: color-mix(in oklab, var(--shell-text) 7%, transparent);
+  box-shadow: 0 0 0 1px var(--accent-ring);
+}
+
+.sidebar-rename {
+  border-color: var(--accent-ring);
+  background: var(--shell-surface-strong);
+  color: var(--shell-text);
+}
+
+/* Row affordances (pin/delete) — hidden until row hover, tokenized hover states. */
+.sidebar-affordance {
+  color: var(--shell-text-muted);
+  transition: background-color 140ms ease, color 140ms ease, opacity 140ms ease;
+}
+.sidebar-affordance:hover { background: color-mix(in oklab, var(--shell-text) 8%, transparent); color: var(--shell-text); }
+.sidebar-affordance--danger:hover { background: color-mix(in oklab, var(--tone-bad) 14%, transparent); color: var(--tone-bad); }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-row:hover { transform: none; }
+  .sidebar-newchat, .sidebar-newchat-glyph, .sidebar-kbd, .sidebar-search, .sidebar-affordance { transition: none; }
+  .sidebar-newchat:hover .sidebar-newchat-glyph { transform: none; }
+}
+@keyframes sidebar-accent-in { from { transform: translateY(-50%) scaleY(0); } to { transform: translateY(-50%) scaleY(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-row, .sidebar-icon-btn, .sidebar-section-head, .sidebar-count { transition: none; }
+  .sidebar-row-accent { animation: none; }
+}
+
 /* Phase tones — pipeline nodes, track fills. Hue per macro-phase. */
 :root {
   --phase-read: #8b9bb4;
@@ -996,6 +1102,9 @@ code, pre, kbd {
   --phase-evidence: #e8b34d;
   --phase-compose: var(--accent);
   --phase-verify: #4ade80;
+  /* Distinct compose hue for the reasoning constellation, kept away from the accent-red so a
+     normal "Vai drafts" node never reads as a failure next to a real bad-tone (red) node. */
+  --phase-compose-node: #45c8b0;
 }
 
 .thinking-phase-fill { transition: width 480ms var(--ease-out-expo); min-width: 3px; }
@@ -1062,6 +1171,384 @@ code, pre, kbd {
   background: color-mix(in srgb, var(--tone-warn) 10%, var(--panel-bg-inset));
   border: 1px solid color-mix(in srgb, var(--tone-warn) 24%, var(--panel-border-soft));
   border-radius: 0.625rem;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Reasoning Constellation (ReasoningFlow.tsx)
+
+   A spatial, node-based presentation of a turn: phases are luminous nodes on a
+   horizontal spine, detail reveals into a spotlight on intent. Token-driven,
+   transform/opacity motion only, silenced under reduced-motion. No pills/chips.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.reasoning-flow {
+  font-size: 12px;
+  color: var(--chat-body);
+}
+
+/* The zoomable canvas frame. Clips the transformed content, fades its edges so overflow reads as
+   "more, keep looking", and hosts the hover-revealed controls + minimap. grab/grabbing cursor tells
+   the user it's pannable. */
+.reasoning-spine-frame {
+  position: relative;
+  overflow: hidden;
+  min-height: 84px;
+  cursor: grab;
+  touch-action: pan-y;
+  border-radius: 0.75rem;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+}
+.reasoning-spine-frame--dragging { cursor: grabbing; }
+
+.reasoning-spine {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0.5rem 0.5rem;
+  min-width: max-content;
+  will-change: transform;
+}
+
+/* Semantic-zoom tiers: overview collapses nodes to bare dots (tight gap = the turn's fingerprint);
+   detail loosens spacing so inline metadata has room. */
+.reasoning-tier-overview .reasoning-spine { gap: 0.9rem; }
+.reasoning-tier-detail .reasoning-spine { gap: 0.5rem; }
+
+/* The rail sits vertically centred on the node glyphs (glyph row is ~26px tall). */
+.reasoning-rail {
+  position: absolute;
+  left: 1.25rem;
+  right: 1.25rem;
+  top: 1.4rem;
+  height: 2px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--panel-border-soft) 55%, transparent);
+  overflow: hidden;
+}
+.reasoning-rail-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    to right,
+    color-mix(in oklab, var(--phase-read) 60%, transparent),
+    color-mix(in oklab, var(--phase-route) 65%, transparent),
+    color-mix(in oklab, var(--phase-verify) 70%, transparent)
+  );
+  box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 22%, transparent);
+}
+
+.reasoning-node {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--chat-muted);
+  cursor: pointer;
+  border-radius: 0.5rem;
+  transition: color 180ms var(--ease-out-expo);
+}
+.reasoning-node:hover { color: var(--chat-body); }
+/* Constant-size chrome; counter-scaled against the canvas scale in JS. transform-origin top-center
+   keeps the disc pinned to the rail regardless of counter-scale. */
+.reasoning-node-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.55rem 0.4rem;
+  transform-origin: top center;
+}
+.reasoning-node:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+/* The glyph well — a neutral socket that the hued disc sits inside. A ring in the node's own hue
+   appears on the selected node so the spotlight's subject is unambiguous without heavy chrome. */
+.reasoning-node-glyph {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--panel-bg-elevated);
+  box-shadow: 0 0 0 1px var(--panel-border-soft);
+  transition: box-shadow 220ms var(--ease-out-expo);
+}
+/* The disc carries the phase HUE (via --node-hue) all the way to the settled state, so the spine
+   reads as a color map of the turn rather than a row of identical green dots. */
+.reasoning-node-disc {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--node-hue, var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--node-hue, var(--accent)) 40%, transparent),
+    0 0 8px color-mix(in oklab, var(--node-hue, var(--accent)) 30%, transparent);
+}
+.reasoning-node--selected .reasoning-node-glyph {
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--node-hue, var(--accent)) 60%, transparent),
+    0 0 14px color-mix(in oklab, var(--node-hue, var(--accent)) 28%, transparent);
+}
+/* Live phase — the disc breathes the same "alive" language as the brand VaiNode. */
+.reasoning-node--live .reasoning-node-disc { position: relative; }
+.reasoning-node--live .reasoning-node-disc::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in oklab, var(--node-hue, var(--accent)) 55%, transparent), transparent 70%);
+  animation: vai-node-breathe 1.9s var(--ease-out-expo) infinite;
+}
+
+.reasoning-node-title {
+  font-size: 10.5px;
+  line-height: 1.1;
+  white-space: nowrap;
+  max-width: 8.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reasoning-node--selected .reasoning-node-title { color: var(--chat-strong); }
+
+.reasoning-node-time {
+  font-size: 9px;
+  color: var(--chat-muted);
+  opacity: 0.65;
+}
+/* Detail-tier inline metadata — fades in only when zoomed close. */
+.reasoning-node-meta {
+  font-size: 8.5px;
+  color: color-mix(in oklab, var(--node-hue, var(--accent)) 70%, var(--chat-muted));
+  opacity: 0.9;
+  animation: reasoning-meta-in 200ms var(--ease-out-expo) both;
+}
+@keyframes reasoning-meta-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 0.9; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .reasoning-node-meta { animation: none; } }
+
+/* Zoom controls — a quiet cluster, revealed on frame hover (reveal-on-intent). */
+.reasoning-zoom {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.12rem;
+  border-radius: 0.6rem;
+  background: color-mix(in oklab, var(--panel-bg-elevated) 88%, transparent);
+  border: 1px solid var(--panel-border-soft);
+  box-shadow: 0 4px 14px color-mix(in oklab, var(--shell-bg) 60%, transparent);
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 180ms var(--ease-out-expo), transform 180ms var(--ease-out-expo);
+  pointer-events: none;
+}
+.reasoning-spine-frame:hover .reasoning-zoom,
+.reasoning-spine-frame:focus-within .reasoning-zoom { opacity: 1; transform: none; pointer-events: auto; }
+
+.reasoning-zoom-btn,
+.reasoning-zoom-fit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 20px;
+  padding: 0 0.35rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--chat-muted);
+  cursor: pointer;
+  font-size: 9.5px;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.reasoning-zoom-btn:hover:not(:disabled),
+.reasoning-zoom-fit:hover { background: var(--panel-bg-inset); color: var(--chat-body); }
+.reasoning-zoom-btn:disabled { opacity: 0.35; cursor: default; }
+.reasoning-zoom-fit { color: var(--chat-body); }
+
+/* Overview minimap — appears only when zoomed/panned into a sub-window. */
+.reasoning-minimap {
+  position: absolute;
+  bottom: 0.35rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(60%, 320px);
+  opacity: 0;
+  transition: opacity 180ms var(--ease-out-expo);
+  pointer-events: none;
+}
+.reasoning-spine-frame:hover .reasoning-minimap { opacity: 1; }
+.reasoning-minimap-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3px;
+  height: 12px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--panel-bg-inset) 80%, transparent);
+  border: 1px solid var(--panel-border-soft);
+}
+.reasoning-minimap-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  opacity: 0.7;
+  flex: none;
+}
+.reasoning-minimap-window {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  transition: left 120ms linear, width 120ms linear;
+}
+
+/* Spotlight — the revealed detail for the selected node. */
+.reasoning-spotlight {
+  overflow: hidden;
+  margin-top: 0.25rem;
+}
+.reasoning-spotlight-inner {
+  border: 1px solid var(--panel-border-soft);
+  border-radius: 0.75rem;
+  background: var(--panel-bg-inset);
+  padding: 0.7rem 0.85rem;
+}
+.reasoning-spotlight-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+.reasoning-spotlight-title {
+  font-weight: 600;
+  color: var(--chat-strong);
+  font-size: 12px;
+}
+.reasoning-verdict {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--phase-verify);
+}
+.reasoning-verdict--warn { color: var(--tone-warn); }
+
+.reasoning-spotlight-summary {
+  margin: 0 0 0.5rem;
+  color: var(--chat-body);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* Notes read as quiet quoted text with a hairline rule, NOT a bordered box — this kills the
+   nested-panel bloat the prompt asks to banish while keeping the mono legibility. */
+.reasoning-note {
+  /* Override the global <pre> box (background + 1px border) so notes read as quiet quoted text
+     with only a hairline left rule — this is what kills the nested-panel bloat. */
+  background: transparent;
+  border: 0;
+  border-left: 2px solid color-mix(in oklab, var(--panel-border-soft) 70%, transparent);
+  border-radius: 0;
+  margin: 0.3rem 0 0.3rem 0.1rem;
+  padding: 0.05rem 0 0.05rem 0.7rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: color-mix(in oklab, var(--chat-body) 88%, var(--chat-muted));
+}
+
+.reasoning-subrow { padding: 0.1rem 0; }
+.reasoning-subrow-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 11px;
+}
+.reasoning-subdot {
+  position: relative;
+  top: 1px;
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--chat-muted) 70%, transparent);
+}
+.reasoning-subdot--live { background: var(--accent); box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 45%, transparent); }
+.reasoning-subdot--bad { background: var(--tone-bad); }
+.reasoning-subrow-label { color: var(--chat-body); }
+.reasoning-subrow-detail { color: var(--chat-muted); opacity: 0.8; }
+.reasoning-body-indent { margin-left: 0.75rem; }
+.reasoning-body-child { padding-left: 0.5rem; }
+
+/* Self-improvement ledger — Vai's "what I still need", kept apart from the flow. */
+.reasoning-ledger {
+  margin-top: 0.5rem;
+  border: 1px solid var(--panel-border-soft);
+  border-radius: 0.75rem;
+  background: color-mix(in oklab, var(--phase-evidence) 5%, var(--panel-bg-muted));
+  padding: 0.15rem 0.15rem;
+}
+.reasoning-ledger-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  background: transparent;
+  color: var(--chat-body);
+  cursor: pointer;
+  font-size: 11px;
+  border-radius: 0.6rem;
+}
+.reasoning-ledger-title { font-weight: 500; }
+.reasoning-ledger-caret {
+  margin-left: auto;
+  color: var(--chat-muted);
+  transition: transform 200ms var(--ease-out-expo);
+}
+.reasoning-ledger-caret--open { transform: rotate(90deg); }
+.reasoning-ledger-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.6rem 0.5rem;
+  overflow: hidden;
+}
+.reasoning-ledger-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.2rem 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.reasoning-ledger-kind {
+  flex: none;
+  font-size: 9.5px;
+  color: var(--chat-muted);
+  opacity: 0.85;
+}
+.reasoning-ledger-kind--missing-capability { color: var(--tone-bad); }
+.reasoning-ledger-kind--method-lesson { color: var(--phase-route); }
+.reasoning-ledger-text { color: var(--chat-body); }
+.reasoning-ledger-source { color: var(--chat-muted); opacity: 0.7; font-size: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reasoning-node-glyph,
+  .reasoning-rail-fill,
+  .reasoning-ledger-caret { transition: none; }
 }
 
 /* Nested row inside an inset block — theme-tuned lift/recess */
@@ -2387,11 +2874,27 @@ pre code {
     box-shadow 280ms var(--ease-out-expo);
 }
 
+.settings-nav-item { position: relative; }
 .settings-nav-item.is-active {
   color: var(--fg);
-  background: color-mix(in srgb, var(--accent) 5%, var(--panel-bg-muted));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
+  background: var(--shell-surface-muted);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
 }
+/* Clear "you are here" accent bar — same language as the sidebar active row. */
+.settings-nav-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 1.15rem;
+  width: 2px;
+  transform: translateY(-50%);
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 45%, transparent);
+}
+/* The active item's icon adopts the accent so the section reads at a glance. */
+.settings-nav-item.is-active svg { color: var(--accent); opacity: 1; }
 
 /* Preview / app panel — follows active Odysseus theme (not hardcoded zinc/blue) */
 .preview-panel-root {

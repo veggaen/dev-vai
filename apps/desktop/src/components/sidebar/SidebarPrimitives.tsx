@@ -1,32 +1,42 @@
 import type { ReactNode } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
+/**
+ * Shared sidebar primitives — the chrome every sidebar panel is built from.
+ *
+ * Rewritten to Vai's doctrine (see memory: "never hardcode zinc/violet — map to tokens";
+ * "BAN uppercase micro-labels"): all color comes from the Odysseus token system so the sidebar is
+ * correct in both themes WITHOUT per-component `isLight` forks, headings use sentence case with real
+ * hierarchy instead of tracked-out uppercase, and interactive density is revealed on hover
+ * (reveal-on-intent) rather than sitting at full weight on the resting surface.
+ *
+ * The `isLight` prop is retained on the signatures purely so existing call sites keep compiling; it
+ * is intentionally unused — tokens now carry the theme. It can be removed from callers in a later
+ * sweep.
+ */
+
 /** Shared shell header for expanded sidebar panels. */
 export function SidebarPanelHeader({
   title,
   subtitle,
-  isLight,
   onCollapse,
   action,
 }: {
   title: string;
   subtitle?: string;
-  isLight: boolean;
+  /** @deprecated theme is token-driven; retained for call-site compatibility. */
+  isLight?: boolean;
   onCollapse: () => void;
   action?: ReactNode;
 }) {
   return (
-    <header className="flex h-11 flex-shrink-0 items-center justify-between gap-2 px-4">
+    <header className="sidebar-header group/header flex h-12 flex-shrink-0 items-center justify-between gap-2 px-3.5">
       <div className="min-w-0">
-        <h2
-          className={`truncate text-[11px] font-semibold uppercase tracking-[0.18em] ${
-            isLight ? 'text-zinc-600' : 'text-zinc-400'
-          }`}
-        >
+        <h2 className="truncate text-[13px] font-semibold leading-tight text-[color:var(--shell-text)]">
           {title}
         </h2>
         {subtitle && (
-          <p className={`truncate text-[10px] ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>
+          <p className="truncate text-[11px] leading-tight text-[color:var(--shell-text-muted)]">
             {subtitle}
           </p>
         )}
@@ -36,9 +46,7 @@ export function SidebarPanelHeader({
         <button
           type="button"
           onClick={onCollapse}
-          className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors ${
-            isLight ? 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900' : 'text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200'
-          }`}
+          className="sidebar-icon-btn flex h-6 w-6 items-center justify-center rounded-md"
           title="Collapse sidebar"
           aria-label="Collapse sidebar"
         >
@@ -55,48 +63,45 @@ export function SidebarSection({
   count,
   collapsed,
   onToggle,
-  isLight,
   children,
 }: {
   label: string;
   count?: number;
   collapsed: boolean;
   onToggle: () => void;
-  isLight: boolean;
+  /** @deprecated theme is token-driven; retained for call-site compatibility. */
+  isLight?: boolean;
   children: ReactNode;
 }) {
   return (
-    <section className="mt-2">
+    <section className="mt-1.5">
       <button
         type="button"
         onClick={onToggle}
-        className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
-          isLight ? 'text-zinc-600 hover:bg-zinc-200/60' : 'text-zinc-400 hover:bg-white/[0.035]'
-        }`}
+        className="sidebar-section-head group/sec flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left"
         aria-expanded={!collapsed}
       >
         <ChevronRight
-          className={`h-3 w-3 shrink-0 text-zinc-600 transition-transform ${collapsed ? '' : 'rotate-90'}`}
+          className={`h-3 w-3 shrink-0 text-[color:var(--shell-text-muted)] opacity-0 transition-all duration-150 group-hover/sec:opacity-100 ${collapsed ? '' : 'rotate-90 opacity-70'}`}
           aria-hidden
         />
-        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-[0.14em] opacity-80">
+        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-[color:var(--shell-text-muted)]">
           {label}
         </span>
         {count != null && (
-          <span className={`text-[10px] tabular-nums ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`}>
+          <span className="sidebar-count text-[10px] tabular-nums text-[color:var(--shell-text-muted)]">
             {count}
           </span>
         )}
       </button>
-      {!collapsed && <ul className="list-none space-y-0.5 pl-1">{children}</ul>}
+      {!collapsed && <ul className="list-none space-y-0.5 pl-0.5">{children}</ul>}
     </section>
   );
 }
 
-/** Row inside a sidebar list — semantic button with optional accent bar. */
+/** Row inside a sidebar list — semantic button with an active accent bar. */
 export function SidebarListItem({
   active,
-  isLight,
   onClick,
   onContextMenu,
   title,
@@ -104,7 +109,8 @@ export function SidebarListItem({
   className = '',
 }: {
   active?: boolean;
-  isLight: boolean;
+  /** @deprecated theme is token-driven; retained for call-site compatibility. */
+  isLight?: boolean;
   onClick?: () => void;
   onContextMenu?: (event: React.MouseEvent) => void;
   title?: string;
@@ -118,20 +124,13 @@ export function SidebarListItem({
         onClick={onClick}
         onContextMenu={onContextMenu}
         title={title}
-        className={`group relative ml-3 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left transition-all duration-150 ${
-          active
-            ? isLight
-              ? 'bg-white text-zinc-950 shadow-sm'
-              : 'bg-white/[0.065] text-zinc-100'
-            : isLight
-              ? 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
-              : 'text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200'
-        } ${className}`}
+        data-active={active ? '1' : undefined}
+        className={`sidebar-row group relative ml-2 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-2 py-1.5 text-left ${className}`}
       >
         {active && (
           <span
             aria-hidden
-            className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-r-full bg-[color:var(--accent)]"
+            className="sidebar-row-accent absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-r-full"
           />
         )}
         {children}
@@ -140,9 +139,9 @@ export function SidebarListItem({
   );
 }
 
-export function SidebarEmptyState({ isLight, children }: { isLight: boolean; children: ReactNode }) {
+export function SidebarEmptyState({ children }: { isLight?: boolean; children: ReactNode }) {
   return (
-    <p className={`px-3 py-8 text-center text-xs ${isLight ? 'text-zinc-500' : 'text-zinc-600'}`}>
+    <p className="px-3 py-8 text-center text-xs text-[color:var(--shell-text-muted)]">
       {children}
     </p>
   );

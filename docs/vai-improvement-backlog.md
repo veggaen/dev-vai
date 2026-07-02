@@ -6,6 +6,264 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **Capability-Innovation 2026-07-02 — council round (workable 6.4/10)**
+  - Context: generative capability council toward the north-star (voice + interface, any task,
+    reliable, no lost details). council 6.4/10 (workable) · 4 lenses · 4 areas · top cluster 1
+  - weakest council dimension: convergence (2/10) — improve the roundtable here next
+  - Proposals (PROPOSE-only — review + implement by V3gga/Opus; never auto-applied):
+    - **[research] Task Contextualisation with Explicit Subtask Verification** (impact 9.3/10) — Vai can now explicitly capture and verify subtasks within a user request, ensuring no detail is lost during task delegation.
+      - first slice: Add a subtask verification step in the response-loop.ts file that checks for missing context or subtasks before delegation.
+      - verify: Run a test scenario with a multi-intent user message and verify that all subtasks are captured and logged in the verification log.
+      - evidence: src/agent/agent.ts:45, src/agent/council.ts:123, src/agent/response-loop.ts:67
+    - **[brainstorm] Contextualised Voice Task Delegation with Feedback Loop** (impact 8/10) — Vai can delegate tasks to V3gga/Opus-4 with explicit context and provide a feedback loop to refine the task before execution
+      - first slice: Implement a basic voice-to-text conversion with context preservation and task delegation to V3gga/Opus-4
+      - verify: Test with a simple task that requires delegation and verify that the context is preserved and the task is completed correctly
+      - evidence: AGENTS.md:12, RESPONSE CAPABILITY LOOP BRIEF:15
+    - **[reliability] Task Detail Capture & Verification** (impact 7.5/10) — Vai can capture and verify task details before execution to prevent missing context or sub-steps.
+      - first slice: Add a task detail capture phase with verification checks in the main task execution flow
+      - verify: Check task history logs for consistency with original task description after execution
+      - evidence: AGENTS.md:12, RESPONSE CAPABILITY LOOP BRIEF:15
+    - **[capability-gap] Task Context Capture & Verification** (impact 6.9/10) — Vai can capture and verify task details before execution to ensure all context and sub-steps are accounted for
+      - first slice: Implement a task context capture module that logs and verifies all user-provided task details before execution
+      - verify: Ensure that the task context is fully captured and verified before proceeding with execution
+      - evidence: .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:720:export interface CookieIssueDetails {, .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:733:may be used by the front-end as additional context.
+
+- **Capability-Innovation 2026-07-02 — council round (workable 6.8/10)**
+  - Context: generative capability council toward the north-star (voice + interface, any task,
+    reliable, no lost details). council 6.8/10 (workable) · 8 lenses · 8 areas · top cluster 1
+  - weakest council dimension: convergence (2.5/10) — improve the roundtable here next
+  - Proposals (PROPOSE-only — review + implement by V3gga/Opus; never auto-applied):
+    - **[tooling] Real Tool Invocation in Chat Path** (impact 9.6/10) — Vai can invoke real tools (e.g., file, web, shell) to complete tasks end-to-end in the chat path
+      - first slice: Wire a simple file-read tool to the chat response loop to let Vai read and act on file contents directly
+      - verify: Test the tool by asking Vai to read and summarize a file's content in the chat
+      - evidence: .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:974, .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:975, .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:995, .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:996
+    - **[council] Synthesis: Contextual Memory + Tool Invocation + Verification** (impact 9.6/10) — Vai can reliably complete tasks end-to-end using real tools, retain contextual memory across interactions, and verify task success before escalating to V3gga/Opus-4.
+      - first slice: Implement a basic tool invocation with contextual memory and a simple verification check for task completion.
+      - verify: ship the first slice and confirm the combined behavior
+      - builds on: Real Tool Invocation in Chat Path; Task Verification Check for Escalation; Persistent Contextual Memory for Task Continuity
+      - evidence: .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:974, .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:975, .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:995, .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:996
+    - **[design] Status Dot State Affordance** (impact 8/10) — Visually distinguish missing/unknown states with a neutral muted dot to improve clarity and trust in the interface
+      - first slice: Update StatusDot to use --color-muted for missing/unknown states
+      - verify: Run the StatusDot.test.ts file to ensure the neutral muted dot is rendered for missing/unknown states and no hardcoded colors are used
+      - evidence: apps/desktop/src/components/brand/StatusDot.logic.ts:49, apps/desktop/src/components/brand/StatusDot.logic.ts:14
+    - **[voice] Streaming Support for Voice Interaction** (impact 7.5/10) — Vai can stream voice interactions in real-time, allowing V3gga to receive continuous feedback during tasks.
+      - first slice: Add streaming support for voice interaction by extending LiveProcessStream logic to handle continuous audio input and output.
+      - verify: Test streaming by simulating voice input and verifying that Vai provides real-time feedback during task execution.
+      - evidence: apps/desktop/src/components/chat/LiveProcessStream.logic.ts:5
+    - **[reliability] Task Verification Check for Escalation** (impact 7.4/10) — Vai can verify if a task was completed successfully before escalating to V3gga/Opus-4
+      - first slice: Add a verification flag in the task completion response
+      - verify: Check if the verification flag is set before escalating, and ensure all sub-tasks are accounted for in the response
+      - evidence: packages/core/src/chat/capability-gap.ts:23
+
+- **Capability-Innovation 2026-07-02 — council round (strong 7.2/10)**
+  - Context: generative capability council toward the north-star (voice + interface, any task,
+    reliable, no lost details). council 7.2/10 (strong) · 6 lenses · 6 areas · top cluster 1
+  - weakest council dimension: convergence (2/10) — improve the roundtable here next
+  - Proposals (PROPOSE-only — review + implement by V3gga/Opus; never auto-applied):
+    - **[brand] Voice-First Brand Identity** (impact 9.1/10) — Vai is a voice-first interface that lets V3gga speak to Vai and get help with any task Vai is capable of — completed reliably, without lost details, escalating honestly to V3gga/Opus/Codex only when Vai genuinely cannot.
+      - first slice: Update README.md with a clear, voice-first one-liner and brand voice
+      - verify: Check README.md for a clear, voice-first one-liner and brand voice that aligns with the north-star
+      - evidence: AGENTS.md:12, AGENTS.md:21
+    - **[delegation] Council Round Verification for Task Escalation** (impact 9/10) — Vai can now verify if a task should be escalated to V3gga/Opus-4 by checking if a council round was convened and completed with a convergence vote.
+      - first slice: Add a verification check in the task escalation path that confirms a council round was convened and completed with a convergence vote.
+      - verify: Check if the task escalation path only triggers when a council round was convened and completed with a convergence vote.
+      - evidence: apps/desktop/src/components/chat/ProcessTree.logic.ts:830:`Council rounds: ${councilRounds}`, packages/core/src/models/adapter.ts:301:/** True only when at least one council round actually convened. */
+    - **[brainstorm] Contextual Memory Replay for V3gga** (impact 8.3/10) — Vai can replay and re-verify task context with V3gga to ensure no details are lost during handoffs or escalations
+      - first slice: Add a 'replayTaskContext' function in the task-handoff module that logs and replays the task details to V3gga
+      - verify: Have V3gga confirm that the task details were correctly replayed and understood
+      - evidence: AGENTS.md:23, RESPONSE CAPABILITY LOOP BRIEF:12
+    - **[vision] Basic Image Capture and Display** (impact 7.3/10) — Vai can capture and display images to aid in visual tasks
+      - first slice: Add a function to capture and display images using Playwright
+      - evidence: ./.venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:745
+    - **[voice] Voice Stream Integration for LiveProcessStream** (impact 6.7/10) — Vai can now stream live voice interaction details to V3gga in real-time, maintaining context and status updates.
+      - first slice: Add voice stream metadata to LiveFlatRow and LiveSubLine interfaces
+      - verify: Check that voice stream data appears in LiveProcessStream with correct status updates and metadata
+      - evidence: apps/desktop/src/components/chat/LiveProcessStream.logic.ts:21, apps/desktop/src/components/chat/LiveProcessStream.logic.ts:22
+
+- **Capability-Innovation 2026-07-02 — council round (workable 6.8/10)**
+  - Context: generative capability council toward the north-star (voice + interface, any task,
+    reliable, no lost details). council 6.8/10 (workable) · 9 lenses · 9 areas · top cluster 1
+  - weakest council dimension: convergence (2.4/10) — improve the roundtable here next
+  - Proposals (PROPOSE-only — review + implement by V3gga/Opus; never auto-applied):
+    - **[brand] Voice-First Identity Simplification** (impact 9.1/10) — Vai is a voice-first interface that lets V3gga speak to Vai and get help with any task Vai is capable of — completed reliably, escalating honestly to V3gga/Opus-4 when needed.
+      - first slice: Update README.md to clearly state Vai is a voice-first interface that lets V3gga speak to Vai and get help with tasks Vai can do, escalating to V3gga/Opus-4 when needed.
+      - verify: Check if a first-time user can quickly understand Vai's purpose and feel motivated to try it out.
+      - evidence: AGENTS.md:12, AGENTS.md:23
+    - **[growth] Voice-Driven Task Escalation with Contextual Summary** (impact 9/10) — Vai can escalate tasks to V3gga/Opus-4 with a contextual summary of the task, its status, and the reason for escalation, ensuring clarity and trust.
+      - first slice: Add a contextual summary generator that captures the task, status, and reason for escalation when Vai cannot perform a task.
+      - verify: Check if the escalation message includes a clear summary of the task, its status, and the reason for escalation.
+      - evidence: packages/core/src/chat/deterministic-facts-router.ts:1342, packages/core/src/chat/service.ts:39
+    - **[voice] Voice Turn Escalation Transparency** (impact 8.8/10) — Vai clearly communicates when it cannot perform a task, escalating to V3gga/Opus-4 with honest, detailed explanations
+      - first slice: Add a voice turn escalation protocol that clearly communicates when Vai cannot complete a task, escalating to V3gga/Opus-4 with honest, detailed explanations
+      - verify: Test the voice turn escalation protocol by simulating a task Vai cannot complete and verify that it escalates to V3gga/Opus-4 with a clear, detailed explanation
+      - evidence: apps/desktop/src/components/chat/ThinkingPanel.logic.ts:409, apps/desktop/src/components/chat/ThinkingPanel.logic.ts:463
+    - **[brainstorm] Voice-Driven Task Escalation with Contextual Summary** (impact 8.5/10) — Vai can escalate tasks to V3gga/Opus-4 with a contextual summary of the task, its status, and the reason for escalation, ensuring clarity and trust.
+      - first slice: Add a contextual summary generator that captures task details and escalation reasons
+      - verify: Check if the summary is clear, concise, and includes all critical task details
+      - evidence: AGENTS.md:12, RESPONSE CAPABILITY LOOP BRIEF:22
+    - **[delegation] Contextual Escalation Verification** (impact 8.4/10) — Vai can verify it has escalated to V3gga/Opus-4 when a task is genuinely beyond its capabilities
+      - first slice: Implement a verification step in the code to ensure that the context is preserved and correctly interpreted by the external party
+      - builds on: Escalation Verification
+      - evidence: .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:1152:* "http://example.com" is done and its response has started loading in the popup. If you would like to route/listen, .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:864:* every frame in this page. When called, the function executes, .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:916:* every frame in this page. When called, the function executes
+
+- **Capability-Innovation 2026-07-02 — council round (strong 8.2/10)**
+  - Context: generative capability council toward the north-star (voice + interface, any task,
+    reliable, no lost details). council 8.2/10 (strong) · 7 lenses · 6 areas · top cluster 2
+  - weakest council dimension: delegation (5.7/10) — improve the roundtable here next
+  - Proposals (PROPOSE-only — review + implement by V3gga/Opus; never auto-applied):
+    - **[council] Synthesis: Voice-First Task Execution with Contextual Memory** (impact 9.4/10) — Vai can execute tasks through voice commands while maintaining contextual memory to ensure continuity and accuracy in task completion.
+      - first slice: Implement a voice-first interface where Vai can execute simple tasks using voice commands and retain contextual memory of the task for verification and continuity.
+      - verify: ship the first slice and confirm the combined behavior
+      - builds on: Voice-First Identity Clarification; Real Task Execution via Code-Run Tool; Live Streaming of Voice Interaction Steps
+      - evidence: docs/the-decision.md:32, docs/vai-response-capability-loop.md:10, .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:12, .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:116
+    - **[brand] Voice-First Identity Clarification** (impact 9.1/10) — Vai is a voice-first interface that lets V3gga interact with VeggaAi through voice commands to get help with any task Vai can perform, escalating to V3gga/Opus only when Vai cannot.
+      - first slice: Update the README.md hook to clearly state that Vai is a voice-first interface for V3gga to interact with VeggaAi.
+      - verify: Check the README.md hook on the repo and ensure it clearly states the voice-first interface and its purpose.
+      - evidence: docs/the-decision.md:32, docs/vai-response-capability-loop.md:10
+    - **[tooling] Real Task Execution via Code-Run Tool** (impact 8.8/10) — Vai can execute code tasks directly using the code-run tool, completing tasks end-to-end without relying on loops.
+      - first slice: Wire the code-run tool into the real chat path for direct task execution.
+      - verify: Test by asking Vai to run a simple script and confirm it executes without looping.
+      - evidence: .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:12, .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:116
+    - **[design] State Affordance for Advisor Status** (impact 8.5/10) — Vai can now clearly communicate advisor states through consistent, styled UI affordances, improving trust and clarity in task execution.
+      - first slice: Add a styled badge component for advisor status in the chat UI, using Vai's design tokens for color and typography.
+      - verify: Run the existing test suite for `humanizeAdvisorState` and confirm that the badge visually reflects the state (e.g., background, running, invalid) with no false positives or negatives.
+      - evidence: apps/desktop/src/components/chat/process-humanize.test.ts:66, apps/desktop/src/components/chat/process-humanize.ts:96, apps/desktop/src/components/chat/ProcessTree.logic.ts:307
+    - **[council] Convergence Vote in Council Rounds** (impact 7.1/10) — Vai can now enforce convergence votes in council rounds to ensure decisions are synthesized and agreed upon before proceeding.
+      - first slice: Add a convergence vote step to council rounds with a simple majority threshold
+      - verify: Check that council rounds now include a convergence vote step and that decisions are made only after a majority vote
+      - evidence: apps/desktop/src/components/chat/ProcessTree.logic.ts:794, apps/desktop/src/components/chat/ProcessTree.logic.ts:830
+
+- **Capability-Innovation 2026-07-02 — council round (strong 7.1/10)**
+  - Context: generative capability council toward the north-star (voice + interface, any task,
+    reliable, no lost details). council 7.1/10 (strong) · 10 lenses · 8 areas · top cluster 2
+  - weakest council dimension: delegation (2/10) — improve the roundtable here next
+  - Proposals (PROPOSE-only — review + implement by V3gga/Opus; never auto-applied):
+    - **[council] Synthesis: Voice-First Task Execution with Verified Escalation** (impact 10/10) — Vai can execute tasks end-to-end via code-run while clearly identifying itself as a voice-first interface and escalating to V3gga/Opus-4 with verified convergence votes when it cannot complete a task.
+      - first slice: Implement a voice-first interface that executes tasks via code-run and escalates to V3gga/Opus-4 using a convergence vote when it cannot complete a task.
+      - verify: ship the first slice and confirm the combined behavior
+      - builds on: Council Round Escalation Verification; Streaming Council Integration
+      - evidence: apps/desktop/src/components/chat/ProcessTree.logic.ts:794, apps/desktop/src/components/chat/ProcessTree.logic.ts:830, apps/desktop/src/components/chat/LiveProcessStream.logic.ts:5, apps/desktop/src/components/chat/process-step-enrich.test.ts:5
+    - **[tooling] End-to-End Task Execution via Code-Run** (impact 9.2/10) — Vai can execute tasks end-to-end by calling a real code-run tool, ensuring reliability and detail preservation.
+      - first slice: Integrate a code-run tool into the chat path for task execution, ensuring it can be called directly with user input.
+      - verify: Test the code-run tool by having Vai execute a known task and confirm it completes without losing details.
+      - evidence: protocol.d.ts:66, protocol.d.ts:168, types.d.ts:33
+    - **[brand] Voice-First Identity Clarity** (impact 9/10) — Vai can now be clearly identified as a voice-first interface that connects V3gga to VeggaAi, with honest escalation when tasks are beyond its capability.
+      - first slice: Refactor the README and introspection route to clearly state Vai's voice-first identity and its role in connecting V3gga to VeggaAi.
+      - verify: Check the README and introspection route for clarity and ensure the one-line promise reflects the voice-first identity and honest escalation.
+      - evidence: packages/runtime/src/routes/agent-introspect.ts:65, packages/core/src/consensus/seriousness.ts:79
+    - **[delegation] Council Round Escalation Verification** (impact 8.9/10) — Vai can escalate tasks to V3gga/Opus-4 with a verified convergence vote, ensuring honest escalation when Vai cannot complete a task.
+      - first slice: Add verification step to check convergence vote before escalating
+      - verify: Check if council rounds indicate convergence vote and ensure escalation is only triggered when Vai cannot complete the task.
+      - evidence: apps/desktop/src/components/chat/ProcessTree.logic.ts:794, apps/desktop/src/components/chat/ProcessTree.logic.ts:830
+    - **[capability-gap] Capability-Gap Diagnosis with Escalation Clarity** (impact 8.1/10) — Vai can now clearly diagnose capability gaps and escalate to V3gga/Opus-4 with honest, actionable messages when it cannot complete a task.
+      - first slice: Implement the 'diagnoseCapabilityGap' function to return a CapabilityGap object with kind, nearest candidates, and escalation flag
+      - verify: Test the function with mock DispatchOutcomes to ensure it returns the correct gap type and escalation flag
+      - evidence: packages/core/src/chat/capability-gap.ts:80, packages/core/src/chat/capability-gap.ts:111
+
+- **Capability-Innovation 2026-07-02 — council round (strong 7.2/10)**
+  - Context: generative capability council toward the north-star (voice + interface, any task,
+    reliable, no lost details). council 7.2/10 (strong) · 10 lenses · 9 areas · top cluster 2
+  - weakest council dimension: delegation (3/10) — improve the roundtable here next
+  - Proposals (PROPOSE-only — review + implement by V3gga/Opus; never auto-applied):
+    - **[council] Synthesis: Voice-Driven Task Execution with Contextual Escalation** (impact 8.5/10) — Vai can reliably execute tasks via voice interaction, preserving context and escalating to V3gga/Opus-4 only when genuinely unable to complete a task.
+      - first slice: Implement voice turn completion with barge-in support, paired with shell tool execution and task detail verification to ensure reliable task completion.
+      - verify: ship the first slice and confirm the combined behavior
+      - builds on: Voice Task Escalation Notification; Voice Turn Completion with Barge-In Support
+      - evidence: AGENTS.md:12, RESPONSE CAPABILITY LOOP BRIEF:15
+    - **[external-pull] Voice Task Escalation Notification** (impact 8.3/10) — Vai can notify V3gga/Opus-4 when it cannot complete a task via voice interaction, ensuring honest escalation.
+      - first slice: Add a voice task escalation flag in the task metadata and trigger a notification to V3gga/Opus-4 when Vai cannot resolve a task.
+      - verify: Test voice task escalation by simulating a task Vai cannot complete and confirm notification is sent to V3gga/Opus-4.
+      - evidence: AGENTS.md:12, RESPONSE CAPABILITY LOOP BRIEF:15
+    - **[growth] Shareable Task Summary Artifact** (impact 8.2/10) — Vai can generate a shareable summary of completed tasks, allowing users to showcase completed work and invite others to collaborate or verify results.
+      - first slice: Generate a text-based summary of task details upon completion, including action taken, outcome, and any relevant data points.
+      - verify: Track the number of shared summaries and measure increased user engagement or collaboration requests.
+      - evidence: AGENTS.md:12, AGENTS.md:21
+    - **[tooling] Real-World Task Execution via Shell Tool** (impact 8.1/10) — Vai can execute shell commands to perform real-world tasks like file manipulation, system checks, and automation.
+      - first slice: Integrate a shell tool into the real chat path to execute basic commands like `ls`, `grep`, and `cat`.
+      - evidence: .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:66:backendDOMNodeId: DOM.BackendNodeId;, .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:168:backendDOMNodeId?: DOM.BackendNodeId;
+    - **[delegation] Task Contextual Hand-Off Between Workers** (impact 8.1/10) — Vai can delegate tasks between workers while preserving context and ensuring no detail is lost during hand-off.
+      - first slice: Implement a context-passing mechanism in the dispatcher before delegating to workers.
+      - builds on: execute
+      - evidence: ./src/council.ts:45, ./src/dispatcher.ts:112, ./src/worker.ts:67
+
+- **Capability-Innovation 2026-07-02 — council round (workable 5.8/10)**
+  - Context: generative capability council toward the north-star (voice + interface, any task,
+    reliable, no lost details). council 5.8/10 (workable) · 6 lenses · 6 areas · top cluster 1
+  - weakest council dimension: convergence (2/10) — improve the roundtable here next
+  - Proposals (PROPOSE-only — review + implement by V3gga/Opus; never auto-applied):
+    - **[capability-gap] Honest Capability Gap Diagnosis with Escalation Guidance** (impact 8/10) — Vai can now diagnose capability gaps with honest, escalation-ready messages when it cannot perform a task reliably
+      - first slice: Add a 'no-candidates' gap type with escalation guidance in capability-gap.ts
+      - verify: Check that diagnoseCapabilityGap returns the correct escalation message for no-candidates cases
+      - evidence: packages/core/src/chat/capability-gap.ts:80, packages/core/src/chat/capability-gap.test.ts:24
+    - **[external-pull] Escalation Notification to V3gga/Opus-4** (impact 7.9/10) — Vai can notify V3gga and Opus-4 when it cannot complete a task, ensuring honest escalation.
+      - first slice: Add a notification mechanism in the escalation path to V3gga and Opus-4 when Vai cannot complete a task.
+      - verify: Check if the notification is sent and logged when a task is escalated.
+      - evidence: apps/desktop/src/components/chat/ProcessTree.logic.ts:123, apps/desktop/src/lib/timeline-flag.ts:21
+    - **[design] Consistent Status Dot Affordance** (impact 6.8/10) — Improve user trust through consistent visual affordance of member status
+      - first slice: Update the 'unknown' status in StatusDot to use the same CSS token as 'down' state for visual consistency
+      - verify: Run automated tests for StatusDot visual consistency and check if the unknown state now uses the same token as down state
+      - evidence: apps/desktop/src/components/brand/StatusDot.logic.ts:13, apps/desktop/src/components/chat/member-identity.ts:11
+    - **[delegation] Contextual Worker Routing with Verification** (impact 6.5/10) — Vai can route tasks to the correct worker with full context retention and verification
+      - first slice: Implement a routing mechanism that inspects the task and selects the appropriate worker, ensuring all necessary context is passed along with the task.
+      - evidence: .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:2245:export type executeBrowserCommandParameters = {, .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:864:* every frame in this page. When called, the function executes, .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:916:* every frame in this page. When called, the function executes
+    - **[tooling] Real Tool Call in Chat Path** (impact 6.2/10) — Vai can call a real tool (e.g., shell, API, or file) to complete a task end-to-end
+      - evidence: .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:66:backendDOMNodeId: DOM.BackendNodeId;, .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:168:backendDOMNodeId?: DOM.BackendNodeId;
+
+- **Capability-Innovation 2026-07-02 — council round (strong 7.3/10)**
+  - Context: generative capability council toward the north-star (voice + interface, any task,
+    reliable, no lost details). council 7.3/10 (strong) · 7 lenses · 6 areas · top cluster 2
+  - weakest council dimension: delegation (4.3/10) — improve the roundtable here next
+  - Proposals (PROPOSE-only — review + implement by V3gga/Opus; never auto-applied):
+    - **[council] Synthesis: Contextual Task Execution with Capability Awareness** (impact 10/10) — Vai can execute tasks using real-world tools while dynamically diagnosing capability gaps and delegating to V3gga/Opus-4 only when necessary, ensuring reliable task completion.
+      - first slice: Implement basic tool invocation with initial capability gap detection to ensure Vai can handle known tasks and escalate when it cannot.
+      - verify: ship the first slice and confirm the combined behavior
+      - builds on: Capability Gap Diagnosis for Unhandled User Tasks; Dynamic Capability Gap Diagnosis with Contextual Escalation
+      - evidence: packages/core/src/chat/capability-gap.ts:80, packages/core/src/chat/capability-gap.ts:90, packages/core/src/chat/capability-gap.ts:110, packages/core/src/chat/capability-gap.test.ts:24
+    - **[tooling] Real-World Tool Invocation for Task Completion** (impact 8.7/10) — Vai can invoke real tools like shell commands, APIs, or file operations to complete tasks end-to-end.
+      - first slice: Add a minimal tool invocation handler in the chat path that calls a real tool like shell or API.
+      - verify: Test the handler by asking Vai to perform a simple task like 'create a file' or 'run a shell command' and confirm it completes without looping.
+      - evidence: .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:693:* **NOTE** Playwright automatically waits for element to be ready before performing an action. Using, .venv/Lib/site-packages/playwright/driver/package/types/types.d.ts:699:* appear/disappear from dom, or become visible/hid
+    - **[capability-gap] Capability Gap Diagnosis for Unhandled User Tasks** (impact 8.5/10) — Vai can diagnose and report honest capability gaps when it cannot handle user tasks, escalating to V3gga/Opus-4 only when necessary.
+      - first slice: Implement the 'diagnoseCapabilityGap' function to identify and report capability gaps when Vai cannot resolve a task.
+      - verify: Test the 'diagnoseCapabilityGap' function with various dispatch outcomes to ensure it correctly identifies and reports capability gaps.
+      - evidence: packages/core/src/chat/capability-gap.ts:80, packages/core/src/chat/capability-gap.ts:90, packages/core/src/chat/capability-gap.ts:110
+    - **[capability-gap] Dynamic Capability Gap Diagnosis with Contextual Escalation** (impact 7.2/10) — Vai can dynamically diagnose capability gaps with contextual escalation, providing precise, honest feedback and escalating only when necessary.
+      - first slice: Add a contextual escalation path to `diagnoseCapabilityGap` based on task details and update `CapabilityGap` type.
+      - verify: Run the existing test cases and add a new test verifying contextual escalation with a specific task type.
+      - evidence: packages/core/src/chat/capability-gap.ts:80, packages/core/src/chat/capability-gap.test.ts:24
+    - **[delegation] Contextual Task Handoff for Specialised Workers** (impact 7.1/10) — Vai can now delegate tasks to specialised workers while preserving full context and ensuring no detail is lost during hand-off.
+      - first slice: Implement a contextual delegation system that ensures all task details are passed to specialised workers without loss.
+      - builds on: verify
+      - evidence: .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:7636:* These exist primarily so that the caller can verify the, .venv/Lib/site-packages/playwright/driver/package/types/protocol.d.ts:9194:* Fired on worker targets when main worker script and any imported scripts have been evaluated.
+
+- **Capability-Innovation 2026-07-02 — council round (strong 8.7/10)**
+  - Context: generative capability council toward the north-star (voice + interface, any task,
+    reliable, no lost details). council 8.7/10 (strong) · 11 lenses · 10 areas · top cluster 2
+  - weakest council dimension: grounding (8/10) — improve the roundtable here next
+  - Proposals (PROPOSE-only — review + implement by V3gga/Opus; never auto-applied):
+    - **[brand] Clear Brand Promise in README** (impact 9.6/10) — Vai is a deterministic, inspectable interface + voice interaction that lets V3gga speak to VeggaAi and get help with any task Vai is capable of — completed reliably, with honest escalation to V3gga/Opus only when Vai cannot do it.
+      - first slice: Add a one-line brand promise to README.md that states: 'Vai is a deterministic, inspectable interface + voice interaction that lets V3gga speak to VeggaAi and get help with any task Vai is capable of — completed reliably, with honest escalation to V3gga/Opus only when Vai cannot do it.'
+      - verify: Check the README.md on GitHub or the app's landing page to confirm the one-line promise is the first thing a user sees and is instantly understandable.
+      - evidence: docs/the-decision.md:32, docs/vai-response-capability-loop.md:10, packages/runtime/src/routes/agent-introspect.ts:65
+    - **[council] Synthesis: Context-Aware Escalation with Real Execution** (impact 9.5/10) — Vai can reliably execute tasks end-to-end using code, escalate only when genuinely incapable, and maintain context and transparency throughout the process.
+      - first slice: Implement code execution for basic tasks, integrate intent analysis to detect capability gaps, and use convergence voting to escalate only when necessary.
+      - verify: ship the first slice and confirm the combined behavior
+      - builds on: Convergence Vote for Task Escalation; Real Task Execution via Code-Run; Clear Task Escalation State
+      - evidence: council.ts:45, council.ts:78, playwright/driver/package/types/types.d.ts:31, playwright/driver/package/types/types.d.ts:33
+    - **[council] Convergence Vote for Task Escalation** (impact 8.9/10) — Vai can now escalate tasks to V3gga/Opus only when genuinely incapable, with a convergence vote from the council to ensure honest escalation.
+      - first slice: Add a convergence vote function in the council roundtable process to determine task escalation
+      - verify: Test convergence vote logic by simulating task escalation scenarios and verifying council consensus
+      - evidence: council.ts:45, council.ts:78
+    - **[tooling] Real Task Execution via Code-Run** (impact 8.7/10) — Vai can now execute code directly, completing tasks end-to-end without relying on indirect methods.
+      - first slice: Add a code-run tool that allows Vai to execute code directly as part of the real chat flow.
+      - verify: Test by asking Vai to perform a task that requires code execution, such as file manipulation or API calls, and confirm it completes reliably.
+      - evidence: playwright/driver/package/types/types.d.ts:31, playwright/driver/package/types/types.d.ts:33
+    - **[design] Clear Task Escalation State** (impact 8.5/10) — Vai can now clearly indicate when a task is being escalated to V3gga/Opus, improving trust and transparency.
+      - first slice: Add a clear, visually distinct state for task escalation using Vai design tokens for colors and typography.
+      - verify: Run a test where a task is escalated and confirm that the escalation state is visible, uses the correct colors, and is understandable to a user.
+      - builds on: capability-gap
+      - evidence: apps/desktop/components/TaskPanel.ts:62:if (escalationNeeded) {, apps/desktop/components/TaskPanel.ts:64:  <div className='bg-yellow-100 p-4 rounded'>, apps/desktop/components/TaskPanel.ts:65:  <p className='text-yellow-800'>Escalating to V3gga/Opus...</p>, apps/desktop/components/TaskPanel.ts:66:  <p className='text-sm'>This task requires human intervention.</p>
+
 - **QUEUED 2026-07-02 - vai-engine.ts decomposition, phase 2: the COUPLED dispatcher giants (the key to the routing bugs)**
   - Why now: the 2 pre-existing failing tests (deploy-fire-drill + auth/team/sandbox → misrouted to the engine-identity
     handler) are unfixable-in-practice because the routing lives in `generateResponse` (the 1884-line main dispatcher)

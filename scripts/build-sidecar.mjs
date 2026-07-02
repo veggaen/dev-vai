@@ -104,8 +104,12 @@ cpSync(FILE_URI_TO_PATH_DIR, join(RUNTIME_NODE_MODULES_DIR, 'file-uri-to-path'),
 
 // jsdom (+ css-tree etc.) read their own files / use createRequire at runtime,
 // so they're `--external:jsdom` in build:bundle. Ship the whole closure flat.
+// jsdom is declared by @vai/core (not hoisted to the workspace root under pnpm's strict
+// linking), so resolve it from packages/core rather than this scripts context — a bare
+// require.resolve('jsdom') from here fails with MODULE_NOT_FOUND.
 console.log('[sidecar] Copying jsdom dependency closure (external — cannot be bundled)...');
-const JSDOM_DIR = resolve(require.resolve('jsdom/package.json'), '..');
+const coreRequire = createRequire(join(ROOT, 'packages/core/package.json'));
+const JSDOM_DIR = resolve(coreRequire.resolve('jsdom/package.json'), '..');
 const jsdomClosure = copyPackageClosure('jsdom', resolve(JSDOM_DIR, '..'), RUNTIME_NODE_MODULES_DIR);
 console.log(`[sidecar]   copied ${jsdomClosure.size} packages for jsdom`);
 
