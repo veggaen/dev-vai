@@ -3,6 +3,7 @@ import type { QuestionIntent } from './question-intent.js';
 import type { GitEvidence } from '../tools/git-evidence.js';
 import type { RunEvidence } from '../tools/run-evidence.js';
 import type { PageEvidence } from '../tools/page-evidence.js';
+import type { WebSourceLike, NoteLike } from '../synthesis/source-adapters.js';
 
 /**
  * Async-gathered evidence attached to a turn BEFORE dispatch. The dispatcher and
@@ -19,6 +20,12 @@ export interface TurnEvidence {
   readonly run?: RunEvidence;
   /** Real browser observation of a page (title/status/selectors), when the turn named a URL to inspect. */
   readonly page?: PageEvidence;
+  /** Web search snippets already gathered for this turn (verbatim, source-bound). */
+  readonly web?: readonly WebSourceLike[];
+  /** Google AI Overview text captured alongside the web results, when present. */
+  readonly aiOverview?: string | null;
+  /** Stored notes / knowledge entries scoped to the turn's subject. */
+  readonly notes?: readonly NoteLike[];
 }
 
 /**

@@ -53,6 +53,7 @@ import { liveContextCapability } from './capabilities/live-context-capability.js
 import { gitCapability, classifyGitQuery } from './capabilities/git-capability.js';
 import { execCapability, isExecQuery } from './capabilities/exec-capability.js';
 import { pageCapability } from './capabilities/page-capability.js';
+import { synthesisCapability, isSynthesisQuery } from './capabilities/synthesis-capability.js';
 import { inferRunCommand } from './capabilities/infer-run-command.js';
 import { runCommandEvidence, type RunEvidence } from '../tools/run-evidence.js';
 import { readFile as fsReadFile } from 'node:fs/promises';
@@ -2878,6 +2879,33 @@ export class ChatService {
         },
       });
 
+      // Deterministic cross-source synthesis capability — same wrapper shape as git:
+      // score via the capability's inspectable estimate + LEARNED history, resolve
+      // through its own verify gate, record real outcomes in the ledger. Registered
+      // only for synthesis-shaped turns (see below), so every other turn's handler
+      // list is unchanged.
+      const makeSynthesisHandler = (ctx: TurnContext): TurnHandler<ServiceResolution> => ({
+        name: 'synthesis',
+        score: () => {
+          const breakdown = synthesisCapability.estimate(ctx);
+          if (breakdown === null) return null;
+          const score = scoreWithHistory(breakdown, 'synthesis', this.capabilityLedger, turnClass);
+          return { score, reason: breakdown.reason };
+        },
+        resolve: () => {
+          const r = synthesisCapability.resolve(ctx);
+          if (!r) {
+            this.capabilityLedger.record('synthesis', 'declined', turnClass);
+            return null;
+          }
+          let ok = false;
+          try { ok = synthesisCapability.verify(r, ctx).ok; } catch { ok = false; }
+          this.capabilityLedger.record('synthesis', ok ? 'verifyPassed' : 'verifyFailed', turnClass);
+          if (!ok) return null;
+          return { text: r.text, turnKind: r.turnKind, confidence: r.confidence, strategy: 'synthesis' };
+        },
+      });
+
       // One understanding, scored once. `guidance` is the friend hint channel
       // (human + AI "that process wasn't good" steers). Stage 1: load the
       // conversation's persisted hints, keep the ones that apply to THIS turn
@@ -2976,6 +3004,12 @@ export class ChatService {
         // place in the ServiceResolution handler list (ServiceResolution extends Resolution).
         liveHandlers = [...liveHandlers, asTurnHandler(execCapability) as unknown as TurnHandler<ServiceResolution>];
       }
+      // Synthesis is registered only for synthesis-shaped turns (estimate would return
+      // null anyway; the gate keeps the list unchanged for everyone else). Its verify
+      // refuses <2 distinct sources, so a single-family turn falls through honestly.
+      if (isSynthesisQuery(understoodContent || content)) {
+        liveHandlers = [...liveHandlers, makeSynthesisHandler(turnContext)];
+      }
       const outcome = dispatchTurn(turnContext, liveHandlers, { confidenceFloor: 0.5 });
 
       // Shadow baseline (unsteered) for reference when guidance was present.
@@ -3002,7 +3036,7 @@ export class ChatService {
       // into live dispatch — the builder loop / agentic OODA invokes them deliberately.
       // Shadowing surfaces when they WOULD apply so their scoring can be trusted before any
       // future promotion. (The web-evidence path already handles pasted-URL reads live.)
-      const shadowCapabilities = [liveContextCapability, gitCapability, execCapability, pageCapability];
+      const shadowCapabilities = [liveContextCapability, gitCapability, execCapability, pageCapability, synthesisCapability];
       turnShadowScores = shadowCapabilities
         .map((cap) => shadowScore(cap, turnContext))
         .filter((s): s is ShadowScore => s !== null);

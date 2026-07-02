@@ -73,8 +73,10 @@ export function synthesizeAcrossSources(inputs: CrossSourceInputs): CrossSourceS
   };
 }
 
-/** Short source label for a citation from an evidence sourceId. */
-function citeLabel(sourceId: string): string {
+/** Short source label for a citation from an evidence sourceId. Exported so a verifier can
+ *  map known sourceIds to the labels the formatters render, and refuse any citation that
+ *  maps to no known source. */
+export function citeLabel(sourceId: string): string {
   if (sourceId.startsWith('web:ai-overview')) return 'Google AI Overview';
   if (sourceId.startsWith('web:')) return sourceId.slice('web:'.length);
   if (sourceId.startsWith('note:')) return `note ${sourceId.slice('note:'.length)}`;
