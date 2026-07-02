@@ -52,8 +52,9 @@ import { shadowScore, asTurnHandler, type ShadowScore } from './capability-kerne
 import { liveContextCapability } from './capabilities/live-context-capability.js';
 import { gitCapability, classifyGitQuery } from './capabilities/git-capability.js';
 import { execCapability, isExecQuery } from './capabilities/exec-capability.js';
-import { pageCapability } from './capabilities/page-capability.js';
+import { pageCapability, isPageQuery } from './capabilities/page-capability.js';
 import { synthesisCapability, isSynthesisQuery } from './capabilities/synthesis-capability.js';
+import { gatherPageEvidence, hasPageEvidence, type PageEvidence } from '../tools/page-evidence.js';
 import { inferRunCommand } from './capabilities/infer-run-command.js';
 import { runCommandEvidence, type RunEvidence } from '../tools/run-evidence.js';
 import { readFile as fsReadFile } from 'node:fs/promises';
@@ -636,6 +637,13 @@ const BUILDER_FALLBACK_SYSTEM_HINT = [
 
 /** Fallback artifacts need stronger source coverage than deterministic primary scaffolds. */
 const FALLBACK_BUILDER_MIN_ANCHOR_COVERAGE = 0.8;
+
+/**
+ * Fresh-data intent for page-shaped turns (A2): the ask is about the page's CURRENT state,
+ * so a live observation is warranted. Kept deliberately narrow — merely pasting a URL, or
+ * asking what a page generally covers, must NOT trigger a browser navigation.
+ */
+const FRESH_PAGE_DATA_RE = /\b(?:right now|currently|live|latest|today|at the moment|just now|still\s+(?:up|down|online|working|alive)|is\s+(?:it|the\s+(?:page|site))\s+(?:up|down|online|alive)|status(?:\s+of)?|reachable|responding)\b/i;
 
 /** Project a dispatcher {@link DispatchPlan} into the friend-readable
  * {@link TurnRoutePlan} carried on the thinking trace. Shadow capabilities (if
@@ -2979,6 +2987,26 @@ export class ChatService {
         } catch { /* never block the turn on tool invocation */ }
       }
 
+      // PAGE EVIDENCE (A2 — live promotion for fresh-data turns): when the turn names a URL
+      // AND asks for its CURRENT state ("is it up right now?", "what's the live status?"),
+      // actually observe the page (SSRF-guarded browser) and attach the observation. The
+      // fresh-data gate keeps a heavy browser navigation off every turn that merely pastes
+      // a link; failures leave evidence undefined and page stays a shadow capability.
+      let pageEvidence: PageEvidence | undefined;
+      const pageShaped = isPageQuery(understoodContent || content);
+      if (pageShaped && FRESH_PAGE_DATA_RE.test(understoodContent || content)) {
+        try {
+          const url = (understoodContent || content).match(/https?:\/\/[^\s<>"'`]+/i)?.[0];
+          if (url) {
+            const observed = await gatherPageEvidence(url, { timeoutMs: 15_000 }).catch(() => undefined);
+            // Attach only a REAL observation; a failed navigation must not let an honest
+            // "no page observed" decline win the turn.
+            if (hasPageEvidence(observed)) pageEvidence = observed;
+            console.log(`[page-invoke] observed ${url} → ${observed ? `${observed.ok ? `ok status ${observed.status}` : `failed: ${observed.error}`}` : 'no evidence'}`);
+          }
+        } catch { /* never block the turn on page observation */ }
+      }
+
       const turnContext: TurnContext = {
         content,
         understood: understoodContent,
@@ -2986,8 +3014,12 @@ export class ChatService {
         classification: turnClassification,
         intent: questionIntent,
         guidance: turnGuidance,
-        evidence: (gitEvidence || runEvidence)
-          ? { ...(gitEvidence ? { git: gitEvidence } : {}), ...(runEvidence ? { run: runEvidence } : {}) }
+        evidence: (gitEvidence || runEvidence || pageEvidence)
+          ? {
+            ...(gitEvidence ? { git: gitEvidence } : {}),
+            ...(runEvidence ? { run: runEvidence } : {}),
+            ...(pageEvidence ? { page: pageEvidence } : {}),
+          }
           : undefined,
       };
       // Append the git capability (closes over the just-built context) only when the
@@ -3009,6 +3041,14 @@ export class ChatService {
       // refuses <2 distinct sources, so a single-family turn falls through honestly.
       if (isSynthesisQuery(understoodContent || content)) {
         liveHandlers = [...liveHandlers, makeSynthesisHandler(turnContext)];
+      }
+      // Promote page from shadow to a LIVE decider ONLY when a real observation exists this
+      // turn (same safe-promotion shape as exec + runEvidence): page can answer "is <url> up
+      // right now?" from what the browser actually saw, but it never wins a turn where no
+      // page was observed — its verify gate + this guard both require the real observation.
+      const pageLive = hasPageEvidence(pageEvidence);
+      if (pageLive) {
+        liveHandlers = [...liveHandlers, asTurnHandler(pageCapability) as unknown as TurnHandler<ServiceResolution>];
       }
       const outcome = dispatchTurn(turnContext, liveHandlers, { confidenceFloor: 0.5 });
 
@@ -3036,7 +3076,11 @@ export class ChatService {
       // into live dispatch — the builder loop / agentic OODA invokes them deliberately.
       // Shadowing surfaces when they WOULD apply so their scoring can be trusted before any
       // future promotion. (The web-evidence path already handles pasted-URL reads live.)
-      const shadowCapabilities = [liveContextCapability, gitCapability, execCapability, pageCapability, synthesisCapability];
+      // Dedupe: when page was promoted live this turn it must not ALSO be shadow-scored —
+      // one capability, one appearance in the plan (and one set of ledger-relevant scores).
+      const shadowCapabilities = pageLive
+        ? [liveContextCapability, gitCapability, execCapability, synthesisCapability]
+        : [liveContextCapability, gitCapability, execCapability, pageCapability, synthesisCapability];
       turnShadowScores = shadowCapabilities
         .map((cap) => shadowScore(cap, turnContext))
         .filter((s): s is ShadowScore => s !== null);
@@ -4617,6 +4661,22 @@ export class ChatService {
           primarySawDone = true;
           if (chunk.usage) totalUsage = chunk.usage;
           if (chunk.durationMs !== undefined) durationMs = chunk.durationMs;
+          // Wiring fix: an adapter that emits its OWN `done` was passed through raw, so
+          // primary-only (keyless) setups lost the turn's route plan entirely — the
+          // Reasoning panel could never show why the turn routed the way it did. Decorate
+          // the pass-through done exactly like the synthetic one below.
+          if (turnPlan && !chunk.thinking?.routePlan) {
+            (chunk as { thinking?: TurnThinking }).thinking = {
+              strategy: 'model-primary',
+              modelTag: primaryModelId,
+              confidence: 0.6,
+              ...(chunk.thinking ?? {}),
+              routePlan: buildRoutePlan(turnPlan, turnShadowScores, {
+                intent: dispatchQuestionIntent,
+                belowFloorReason: belowFloorReason(dispatchQuestionIntent, intentDirectiveApplied),
+              }),
+            } as TurnThinking;
+          }
         }
         yield chunk;
       }
