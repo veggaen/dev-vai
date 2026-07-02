@@ -92,14 +92,17 @@ export function phaseForStage(stage: string): TimelinePhaseId {
   return 'intake';
 }
 
+// Display names intentionally diverge from the internal `Council*` types and `council-*` stages:
+// the product surface reads as plain "Reasoning" by owner decision — the deliberation is Vai's own
+// review pass, not a separate committee. Rename display strings here, never the types/APIs.
 const PHASE_TITLE: Record<TimelinePhaseId, string> = {
   intake: 'Message in',
   understand: 'Read the intent',
   gather: 'Gather evidence',
-  deliberate: 'Council deliberates',
-  compose: 'Vai drafts',
+  deliberate: 'Deliberating',
+  compose: 'Drafting',
   gate: 'Approval gate',
-  redraft: 'Vai revises',
+  redraft: 'Revising',
   build: 'Build',
   deliver: 'Deliver',
 };
@@ -125,8 +128,8 @@ function gateForStep(step: ChatProgressStep): TimelineGate | undefined {
       approved,
       confidence: avgConfidence,
       reason: approved
-        ? `${good}/${usable.length} members approved (avg ${Math.round(avgConfidence * 100)}%)`
-        : `${good}/${usable.length} approved — sent back for another round`,
+        ? `${good}/${usable.length} reviewers approved · ${Math.round(avgConfidence * 100)}%`
+        : `${good}/${usable.length} approved — sent back for another pass`,
     };
   }
   if (step.stage === 'quality-check' || step.stage === 'verify') {

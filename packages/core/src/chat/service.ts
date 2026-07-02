@@ -481,14 +481,17 @@ function buildCouncilFeedbackDetail(feedback: CouncilRedraftFeedback): string {
   return buildCouncilFeedbackBody(feedback).replace(/\n\n/g, ' · ').slice(0, 480);
 }
 
+// Progress labels read as plain "Reasoning"/"reviewers" by owner decision — the deliberation is
+// Vai's own review pass, not a separate committee. Rename display strings only; internal
+// Council* types, stages and APIs keep their names.
 function councilRoundDoneLabel(thinking: CouncilThinking, round: 1 | 2): string {
   if (thinking.outcome === 'escalate') {
-    return round === 2 ? 'Council still split after revision' : 'Council rejected Vai\'s proposal — escalating';
+    return round === 2 ? 'Reviewers still split after revision' : 'Reviewers rejected the draft — escalating';
   }
   if (thinking.outcome === 'ship') {
-    return round === 2 ? 'Council cleared the revised draft' : 'Council cleared Vai\'s proposal';
+    return round === 2 ? 'Reviewers cleared the revised draft' : 'Reviewers cleared the draft';
   }
-  return round === 2 ? 'Council re-reviewed Vai\'s revision' : 'Council asked Vai to revise';
+  return round === 2 ? 'Reviewers re-checked the revision' : 'Reviewers asked for a revision';
 }
 
 function toReviewPacketDraft(draft: CouncilDraftInput) {
@@ -1030,7 +1033,7 @@ export class ChatService {
       roster: { default: selection.selected },
       delegationLog: [{
         kind: 'action',
-        label: 'Council delegation',
+        label: 'Reviewer delegation',
         body: selection.reason,
       }],
     };
@@ -1365,7 +1368,7 @@ export class ChatService {
       const partialLogs: ProcessLogEntry[] = [...(selection.delegationLog ?? [])];
       yield {
         stage,
-        label: 'Council reviewing Vai\'s proposal',
+        label: 'Reviewers reading the draft',
         status: 'running',
         processLog: partialLogs.length ? [...partialLogs] : undefined,
       };
@@ -1385,7 +1388,7 @@ export class ChatService {
           yield {
             stage,
             label: total > 1
-              ? `Council member ${index + 1}/${total}: ${reasoningMember.name} thinking…`
+              ? `Reviewer ${index + 1}/${total}: ${reasoningMember.name} thinking…`
               : `${reasoningMember.name} thinking…`,
             status: 'running',
             councilMembers: [
@@ -1406,7 +1409,7 @@ export class ChatService {
           yield {
             stage,
             label: total > 1
-              ? `Council member ${index + 1}/${total}: ${pendingMember.name}`
+              ? `Reviewer ${index + 1}/${total}: ${pendingMember.name}`
               : `Asking ${pendingMember.name}`,
             status: 'running',
             councilMembers: [
@@ -1722,7 +1725,7 @@ export class ChatService {
         systemHint,
         progress: {
           stage: 'search',
-          label: `Council directed search: ${query.slice(0, 64)}${query.length > 64 ? '…' : ''}`,
+          label: `Reviewer-directed search: ${query.slice(0, 64)}${query.length > 64 ? '…' : ''}`,
           detail: `${sources.length} source${sources.length === 1 ? '' : 's'}`,
           status: 'done',
           processLog: buildSearchProcessLog({
@@ -1785,7 +1788,7 @@ export class ChatService {
       systemHint,
       progress: {
         stage: 'search',
-        label: `Council directed read: ${urls[0].slice(0, 64)}${urls[0].length > 64 ? '…' : ''}`,
+        label: `Reviewer-directed read: ${urls[0].slice(0, 64)}${urls[0].length > 64 ? '…' : ''}`,
         detail: `${sources.length} page${sources.length === 1 ? '' : 's'} read`,
         status: 'done',
         processLog: buildSearchProcessLog({ prompt: draft.prompt, sources }),
@@ -1854,7 +1857,7 @@ export class ChatService {
     }
     const first = firstIter.value;
     if (!first) {
-      yield { stage: stages.round1, label: 'Council could not convene', status: 'done' };
+      yield { stage: stages.round1, label: 'Reviewers could not convene', status: 'done' };
       return {
         finalText: draft.draftText,
         revised: false,
@@ -1913,7 +1916,7 @@ export class ChatService {
     if (budgetSpent() && !coverage.hasMissingPart) {
       yield {
         stage: stages.redraft,
-        label: 'Skipped redraft — council budget spent (answer shipped)',
+        label: 'Skipped revision — review budget spent (answer shipped)',
         status: 'done',
       };
       return {
@@ -1939,7 +1942,7 @@ export class ChatService {
 
     yield {
       stage: stages.redraft,
-      label: 'Vai revising from council feedback',
+      label: 'Revising from review feedback',
       detail: buildCouncilFeedbackDetail(feedback) || undefined,
       status: 'running',
     };
@@ -2007,7 +2010,7 @@ export class ChatService {
 
     yield {
       stage: stages.redraft,
-      label: 'Vai redrafted from council feedback',
+      label: 'Redrafted from review feedback',
       detail: buildCouncilFeedbackDetail(feedback) || undefined,
       status: 'done',
       processLog: buildVaiRedraftProcessLog(feedback, draft.draftText, cleaned),
@@ -2021,7 +2024,7 @@ export class ChatService {
     if (remainingBudget() < ROUND2_MIN_BUDGET_MS) {
       yield {
         stage: stages.round2,
-        label: 'Shipped revision — council budget spent (skipped re-review)',
+        label: 'Shipped revision — review budget spent (skipped re-review)',
         status: 'done',
       };
       return {
@@ -2034,7 +2037,7 @@ export class ChatService {
 
     yield {
       stage: stages.round2,
-      label: 'Council re-reviewing the revised draft',
+      label: 'Re-checking the revised draft',
       status: 'running',
     };
 
@@ -2048,7 +2051,7 @@ export class ChatService {
     if (!second) {
       yield {
         stage: stages.round2,
-        label: 'Council could not re-review — keeping revision',
+        label: 'Reviewers could not re-check — keeping revision',
         status: 'done',
       };
       return {
@@ -4105,7 +4108,7 @@ export class ChatService {
                 type: 'progress',
                 progress: {
                   stage: 'council-error',
-                  label: 'Council build crashed — falling back to the single-model arm',
+                  label: 'Multi-model build crashed — falling back to the single-model arm',
                   detail: (error instanceof Error ? error.message : String(error)).slice(0, 160),
                   status: 'done',
                 },

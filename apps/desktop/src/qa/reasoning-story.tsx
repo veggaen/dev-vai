@@ -36,13 +36,13 @@ const steps: ChatProgressStep[] = [
   { stage: 'search', label: 'Gather evidence', status: 'done', detail: 'Fetched 3 sources; 2 used, 1 stale.', durationMs: 2100 },
   {
     stage: 'council-vai-round-1',
-    label: 'Council deliberates',
+    label: 'Deliberating',
     status: 'done',
     detail: 'Panel of 3 reviewed the draft.',
     durationMs: 6100,
     councilMembers: council.members,
   } as unknown as ChatProgressStep,
-  { stage: 'vai-draft', label: 'Vai drafts', status: 'done', detail: 'Composed a 4-point comparison with a recommendation.', durationMs: 1400 },
+  { stage: 'vai-draft', label: 'Drafting', status: 'done', detail: 'Composed a 4-point comparison with a recommendation.', durationMs: 1400 },
   { stage: 'quality-check', label: 'Approval gate', status: 'done', detail: 'Verification passed', durationMs: 260 },
 ] as unknown as ChatProgressStep[];
 
@@ -51,11 +51,11 @@ const longSteps: ChatProgressStep[] = [
   { stage: 'understand', label: 'Read the intent', status: 'done', detail: 'Multi-part build request.', durationMs: 300 },
   { stage: 'search', label: 'Gather evidence', status: 'done', detail: 'Fetched 5 sources.', durationMs: 3100 },
   { stage: 'reason', label: 'Reason', status: 'done', detail: 'Planned a 4-file change.', durationMs: 900 },
-  { stage: 'council-vai-round-1', label: 'Council deliberates', status: 'done', detail: 'Round 1.', durationMs: 6100, councilMembers: council.members } as unknown as ChatProgressStep,
-  { stage: 'vai-draft', label: 'Vai drafts', status: 'done', detail: 'First draft.', durationMs: 1400 },
+  { stage: 'council-vai-round-1', label: 'Deliberating', status: 'done', detail: 'Round 1.', durationMs: 6100, councilMembers: council.members } as unknown as ChatProgressStep,
+  { stage: 'vai-draft', label: 'Drafting', status: 'done', detail: 'First draft.', durationMs: 1400 },
   { stage: 'quality-check', label: 'Verify', status: 'done', detail: 'fail: missed a case', durationMs: 400 },
-  { stage: 'vai-redraft', label: 'Vai revises', status: 'done', detail: 'Second pass.', durationMs: 1200 },
-  { stage: 'council-vai-round-2', label: 'Council deliberates', status: 'done', detail: 'Round 2.', durationMs: 5200, councilMembers: council.members } as unknown as ChatProgressStep,
+  { stage: 'vai-redraft', label: 'Revising', status: 'done', detail: 'Second pass.', durationMs: 1200 },
+  { stage: 'council-vai-round-2', label: 'Deliberating', status: 'done', detail: 'Round 2.', durationMs: 5200, councilMembers: council.members } as unknown as ChatProgressStep,
   { stage: 'build-apply', label: 'Build', status: 'done', detail: 'Applied patch.', durationMs: 2600 },
   { stage: 'preview', label: 'Build', status: 'done', detail: 'Preview rendered.', durationMs: 1800 },
   { stage: 'quality-check', label: 'Verify', status: 'done', detail: 'Verification passed', durationMs: 260 },
@@ -67,7 +67,7 @@ const manySteps: ChatProgressStep[] = Array.from({ length: 40 }, (_, i) => {
   const kinds = [
     { stage: 'search', label: 'Gather evidence' },
     { stage: 'reason', label: 'Reason' },
-    { stage: 'vai-draft', label: 'Vai drafts' },
+    { stage: 'vai-draft', label: 'Drafting' },
     { stage: 'quality-check', label: 'Verify' },
   ];
   const k = kinds[i % kinds.length];

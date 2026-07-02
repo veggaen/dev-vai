@@ -93,8 +93,8 @@ describe('councilRosterSelectionForDepth (VRAM-aware residency)', () => {
   it('balanced exposes a visible delegation reason for the process trace', () => {
     const svc = svcWithRoster();
     const selection = selectionForDepth(svc, 'balanced', 'Please explain the code tradeoff');
-    expect(selection.delegationLog?.[0]?.label).toBe('Council delegation');
-    expect(selection.delegationLog?.[0]?.body).toContain('routed this turn as code');
-    expect(selection.delegationLog?.[0]?.body).toContain('asked 1/3 members');
+    expect(selection.delegationLog?.[0]?.label).toBe('Reviewer delegation');
+    expect(selection.delegationLog?.[0]?.body).toContain('Routed this turn as code');
+    expect(selection.delegationLog?.[0]?.body).toContain('asked 1/3 reviewers');
   });
 });

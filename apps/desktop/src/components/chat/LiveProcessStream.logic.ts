@@ -1,6 +1,7 @@
 import type { ChatProgressStep } from '../../stores/chatStore.js';
 import { stripAnsi } from '../../lib/strip-ansi.js';
 import { panelLabelForLogKind } from './ProcessTree.logic.js';
+import { shortVerdict } from './process-humanize.js';
 
 /** Flat row for live streaming — no nested tree until a step is active. */
 export interface LiveFlatRow {
@@ -34,7 +35,7 @@ export function flattenStepsForLive(steps: readonly ChatProgressStep[]): LiveFla
         label: member.name,
         detail: member.failed
           ? stripAnsi(member.note?.trim() || 'no response')
-          : `${member.verdict} · ${Math.round(member.confidence * 100)}%`,
+          : `${shortVerdict(member.verdict)} · ${Math.round(member.confidence * 100)}%`,
       });
     }
     for (const [toolIndex, tool] of (step.toolRuns ?? []).entries()) {

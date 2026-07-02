@@ -138,13 +138,15 @@ export function explainDelegatedSelection(
       ? 'fast non-thinking members break equal-topic ties'
       : 'roster order breaks ties';
   const capText = unbounded
-    ? `kept the full ${members.length}-member panel`
-    : `asked ${selected.length}/${members.length} members under the balanced cap`;
+    ? `kept the full ${members.length}-reviewer panel`
+    : `asked ${selected.length}/${members.length} reviewers under the balanced cap`;
 
   return {
     topic,
     candidates: members,
     selected,
-    reason: `Council routed this turn as ${topic}; ${capText}: ${names}. Selection rule: ${tieBreaker}.`,
+    // "Reviewers", not "Council", in user-visible reason text — the product surface reads as
+    // plain "Reasoning" by owner decision; internal Council* names stay.
+    reason: `Routed this turn as ${topic}; ${capText}: ${names}. Selection rule: ${tieBreaker}.`,
   };
 }

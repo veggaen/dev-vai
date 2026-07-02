@@ -696,17 +696,17 @@ function CouncilPointer({ council }: { council: CouncilThinkingUI }) {
       onClick={() => { if (!showCouncilPanel) toggleCouncilPanel(); }}
       data-council-pointer={council.outcome}
       className="flex w-full items-center gap-2 rounded-lg thinking-surface-soft px-3.5 py-2.5 text-left text-[11px] transition-colors hover:text-[color:var(--chat-strong)] focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
-      title="Open the Council panel to see the full member debate, lessons and outcome"
+      title="Open the Reasoning panel to see the full review, lessons and outcome"
     >
       <Users aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[color:var(--accent-text)]" />
-      <span className="font-medium text-[color:var(--chat-strong)]">Council</span>
+      <span className="font-medium text-[color:var(--chat-strong)]">Reasoning</span>
       <span className={`flex items-center gap-1.5 font-medium ${outcomeStyle.tone}`}>
         <span className={`h-1.5 w-1.5 rounded-full ${outcomeStyle.dot}`} />
         {outcomeStyle.label}
       </span>
-      <span className="text-zinc-600">· {council.members.length} members · {Math.round(council.agreement * 100)}% agree</span>
+      <span className="text-[color:var(--chat-muted)]">· {council.members.length} reviewers · {Math.round(council.agreement * 100)}% agree</span>
       <span className="ml-auto flex items-center gap-1 text-[10px] text-[color:var(--accent-text)]">
-        {showCouncilPanel ? 'open →' : 'view debate →'}
+        {showCouncilPanel ? 'open →' : 'view review →'}
       </span>
     </button>
   );

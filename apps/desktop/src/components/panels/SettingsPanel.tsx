@@ -190,9 +190,9 @@ export function SettingsPanel() {
       if (!res.ok) throw new Error('save failed');
       const data = await res.json();
       setCouncilConfig(data);
-      toast.success('Council updated');
+      toast.success('Reviewers updated');
     } catch {
-      toast.error('Unable to update council');
+      toast.error('Unable to update reviewers');
     } finally {
       setCouncilSaving(false);
     }
@@ -751,8 +751,8 @@ export function SettingsPanel() {
 
           {councilConfig && (
             <SettingsSection
-              title="Council members"
-              description="Who deliberates on each substantive turn. Local lenses run the on-device model from several angles; Grok is an external paid voice (off by default)."
+              title="Reviewers"
+              description="Who reviews each substantive turn. Local lenses run the on-device model from several angles; Grok is an external paid voice (off by default)."
             >
               <SettingsCard className="space-y-3">
                 <SettingsSwitch

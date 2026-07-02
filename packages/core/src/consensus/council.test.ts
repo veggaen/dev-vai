@@ -97,7 +97,7 @@ describe('selectMembers', () => {
     };
     const selection = explainDelegatedSelection('code', roster, { maxMembers: 1, preferFast: true });
     expect(selection.selected.map((x) => x.id)).toEqual(['devstral']);
-    expect(selection.reason).toContain('routed this turn as code');
+    expect(selection.reason).toContain('Routed this turn as code');
     expect(selection.reason).toContain('topic specialists win before speed');
   });
 });

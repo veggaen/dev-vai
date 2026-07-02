@@ -50,9 +50,9 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItem[] = [
   },
   {
     id: 'council',
-    label: 'Council',
-    title: 'Vai Council',
-    description: 'Live SCIS consensus and review',
+    label: 'Reasoning',
+    title: 'Reasoning',
+    description: 'Live review of the current turn',
     icon: Users,
     shortcut: 'Ctrl+Shift+V',
     group: 'core',

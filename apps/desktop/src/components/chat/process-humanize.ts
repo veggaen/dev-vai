@@ -65,6 +65,18 @@ export function humanizeVerdict(verdict: string | undefined, confidencePct: numb
   }
 }
 
+/** Compact verdict for dense live rows: "needs-work" → "wants another pass". */
+export function shortVerdict(verdict: string | undefined): string {
+  switch ((verdict || '').trim()) {
+    case 'ship': return 'good to send';
+    case 'good': return 'looks solid';
+    case 'needs-work': return 'wants another pass';
+    case 'bad': return 'pushes back';
+    case 'reject': return 'rejects it';
+    default: return verdict?.trim() || 'reviewed it';
+  }
+}
+
 /**
  * The spoken line for a council member that is still being consulted.
  * Replaces "Member: … / Topic: … / Status: waiting for response".
@@ -138,7 +150,7 @@ export function humanizeLiveTail(active?: {
   if (active?.memberInFlight) {
     return `Consulting ${cleanModelName(active.memberInFlight)} on ${topicPhrase(active.memberTopic)}…`;
   }
-  if (stage.startsWith('council')) return 'Convening the council…';
+  if (stage.startsWith('council')) return 'Deliberating over the draft…';
   if (stage === 'vai-draft') return 'Drafting an answer…';
   if (stage === 'vai-redraft') return 'Revising the answer…';
   if (stage === 'search' || stage === 'research') return 'Searching for fresh facts…';

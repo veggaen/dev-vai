@@ -92,7 +92,7 @@ describe('process-humanize', () => {
       expect(tail).toMatch(/reasoning/i);
     });
     it('falls back to a stage phrase', () => {
-      expect(humanizeLiveTail({ stage: 'council-vai' })).toMatch(/council/i);
+      expect(humanizeLiveTail({ stage: 'council-vai' })).toMatch(/deliberating/i);
       expect(humanizeLiveTail({ stage: 'vai-draft' })).toMatch(/drafting/i);
       expect(humanizeLiveTail({ stage: 'search' })).toMatch(/searching/i);
       expect(humanizeLiveTail({ stage: 'verify' })).toMatch(/double-check/i);

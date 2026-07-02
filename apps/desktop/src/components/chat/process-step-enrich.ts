@@ -98,7 +98,7 @@ export function enrichProgressStepsWithCouncil(
         ? step.processLog
         : [{
             kind: 'verdict' as const,
-            label: 'Council consensus on Vai\'s draft',
+            label: 'Where the reviewers landed',
             body: consensusBody,
           }],
     };
