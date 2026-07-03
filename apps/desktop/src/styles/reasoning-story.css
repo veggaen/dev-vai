@@ -96,3 +96,75 @@
   color: var(--chat-muted);
   font-style: italic;
 }
+
+/* ── Presentation polish pass (loads after index.css → overrides win) ─────────
+   The spotlight stops reading like a debug dump: prose notes, calmer payload
+   blocks, breathing room; story rows read as a conversation with role rails. */
+
+/* Story rows as conversation: role-tinted left rail + soft bubble on speech. */
+.reasoning-story-feed {
+  margin-top: 0.375rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.reasoning-story-row {
+  border-radius: 0.55rem;
+  padding: 0.32rem 0.55rem;
+  border-left: 2px solid transparent;
+}
+.reasoning-story-row + .reasoning-story-row { border-top: none; }
+.reasoning-story-row--peer {
+  border-left-color: color-mix(in oklab, var(--phase-route, #a78bfa) 55%, transparent);
+  background: color-mix(in oklab, var(--phase-route, #a78bfa) 6%, transparent);
+  margin-left: 1.1rem;
+}
+.reasoning-story-row--gate {
+  border-left-color: color-mix(in oklab, var(--phase-verify, #34d399) 55%, transparent);
+  background: color-mix(in oklab, var(--phase-verify, #34d399) 6%, transparent);
+  margin-left: 1.1rem;
+}
+.reasoning-story-tone--warn.reasoning-story-row--gate {
+  border-left-color: color-mix(in oklab, var(--tone-warn) 60%, transparent);
+  background: color-mix(in oklab, var(--tone-warn) 7%, transparent);
+}
+.reasoning-story-row--vai {
+  border-left-color: color-mix(in oklab, var(--accent) 45%, transparent);
+}
+.reasoning-story-row--note { opacity: 0.85; }
+.reasoning-story-speaker { font-weight: 600; letter-spacing: 0.01em; }
+.reasoning-story-text { font-size: 12.5px; line-height: 1.55; }
+
+/* Spotlight: sentences are prose, not terminal output. */
+.reasoning-prose {
+  margin: 0.3rem 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--chat-body);
+  word-break: break-word;
+}
+.reasoning-note {
+  background: color-mix(in oklab, var(--fg) 4%, transparent);
+  border: 1px solid color-mix(in oklab, var(--panel-border-soft) 55%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.6rem;
+}
+.reasoning-spotlight-inner { padding: 0.75rem 0.95rem; }
+.reasoning-subrow { padding-top: 0.42rem; }
+.reasoning-subrow-head { gap: 0.5rem; font-size: 11.5px; }
+.reasoning-subrow-label { font-weight: 550; color: var(--chat-strong, var(--fg)); }
+.reasoning-subrow-detail {
+  font-size: 10px;
+  padding: 0.06rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--fg) 6%, transparent);
+  opacity: 0.9;
+}
+
+/* Spine polish: a touch more presence without noise. */
+.reasoning-spine-frame { height: 96px; }
+.reasoning-node-title { font-size: 11px; max-width: 104px; }
+.reasoning-node-glyph { height: 24px; width: 24px; }
+.reasoning-node-disc { height: 10px; width: 10px; }
+.reasoning-story-toggle { padding: 0.3rem 0.15rem; }
+.reasoning-story-title { font-size: 11.5px; letter-spacing: 0.02em; }

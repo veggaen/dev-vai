@@ -612,30 +612,53 @@ function Spotlight({ phase, live }: { phase: TimelinePhase; live: boolean }) {
   );
 }
 
+/** Sentences read as prose; only multi-line / structured payloads keep the mono block. */
+function isProse(note: string): boolean {
+  return !note.includes('\n') && note.length <= 240;
+}
+
+function Note({ text }: { text: string }) {
+  const t = text.trim();
+  return isProse(t)
+    ? <p className="reasoning-prose">{t}</p>
+    : <pre className="reasoning-note">{t}</pre>;
+}
+
 /** Recursive, quiet detail render for a phase's underlying ProcessTree node — no chips, tokens only. */
 function NodeBody({ node, depth = 0, live }: { node: ProcessNode; depth?: number; live: boolean }) {
   return (
     <div className={depth > 0 ? 'reasoning-body-child' : ''}>
-      {node.note?.trim() && node.children.length === 0 && (
-        <pre className="reasoning-note">{node.note.trim()}</pre>
-      )}
-      {node.children.map((child) => (
-        <div key={child.id} className="reasoning-subrow">
-          <div className="reasoning-subrow-head">
-            <span
-              className={`reasoning-subdot ${child.status === 'running' && live ? 'reasoning-subdot--live' : ''} ${child.status === 'bad' ? 'reasoning-subdot--bad' : ''}`}
-              aria-hidden="true"
-            />
-            <span className="reasoning-subrow-label">{child.label}</span>
-            {child.detail && <span className="reasoning-subrow-detail">{child.detail}</span>}
-          </div>
-          {(child.note?.trim() || child.children.length > 0) && (
-            <div className="reasoning-body-indent">
-              <NodeBody node={child} depth={depth + 1} live={live} />
+      {node.note?.trim() && node.children.length === 0 && <Note text={node.note} />}
+      {node.children.map((child) => {
+        // Collapse pointless single-child chains ("Advisor input → Action → hello"):
+        // when a child's ONLY content is one leaf note, hoist that note inline.
+        const soleLeaf =
+          !child.note?.trim() && child.children.length === 1
+          && child.children[0].children.length === 0 && child.children[0].note?.trim()
+            ? child.children[0]
+            : null;
+        return (
+          <div key={child.id} className="reasoning-subrow">
+            <div className="reasoning-subrow-head">
+              <span
+                className={`reasoning-subdot ${child.status === 'running' && live ? 'reasoning-subdot--live' : ''} ${child.status === 'bad' ? 'reasoning-subdot--bad' : ''}`}
+                aria-hidden="true"
+              />
+              <span className="reasoning-subrow-label">{child.label}</span>
+              {child.detail && <span className="reasoning-subrow-detail">{child.detail}</span>}
             </div>
-          )}
-        </div>
-      ))}
+            {soleLeaf ? (
+              <div className="reasoning-body-indent">
+                <Note text={soleLeaf.note ?? ''} />
+              </div>
+            ) : (child.note?.trim() || child.children.length > 0) && (
+              <div className="reasoning-body-indent">
+                <NodeBody node={child} depth={depth + 1} live={live} />
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

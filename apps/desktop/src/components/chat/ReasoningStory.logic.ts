@@ -75,14 +75,23 @@ function memberLine(
         : clip(`${shortVerdict(member.verdict)} · ${pct}%${note ? ` — ${note}` : ''}`),
     };
   }
-  const detail = firstLine(child.detail) || firstLine(child.note);
+  // No council match (e.g. a background advisor): speak the NOTE, minus the redundant
+  // leading name ("qwen2.5:3b is steering…" → "steering…"). A short detail like
+  // 'background' or 'action' is a tag, not speech — never surface it as the line.
+  const rawNote = firstLine(child.note);
+  const rawDetail = firstLine(child.detail);
+  const deName = rawNote.replace(
+    new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*(?:is|was|—|-|:)?\\s*`, 'i'),
+    '',
+  );
+  const body = deName || rawNote || (rawDetail.length > 16 ? rawDetail : '');
   return {
     id,
     speaker: name,
     to: 'Vai',
     role: 'peer',
     tone: child.status === 'bad' ? 'bad' : 'neutral',
-    text: clip(detail || (child.status === 'running' ? 'is weighing in…' : 'weighed in')),
+    text: clip(body || (child.status === 'running' ? 'is weighing in…' : 'weighed in')),
     live: child.status === 'running',
   };
 }

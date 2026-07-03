@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+// (refs used for the live auto-follow feed below)
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import type { TimelinePhase } from './Timeline.logic.js';
 import type { CouncilThinkingUI } from '../../stores/chatStore.js';
@@ -24,14 +25,9 @@ interface ReasoningStoryProps {
 export function ReasoningStory({ phases, council, live }: ReasoningStoryProps) {
   const lines = useMemo(() => buildStoryLines(phases, council), [phases, council]);
   const reduce = useReducedMotion();
-  // Live turns stream the story open; settled turns rest collapsed until asked.
-  const [open, setOpen] = useState(live);
-  const wasLive = useRef(live);
-  useEffect(() => {
-    if (wasLive.current === live) return;
-    wasLive.current = live;
-    setOpen(live);
-  }, [live]);
+  // Open by default: the surrounding flow body already collapses to one line at rest,
+  // so when it's visible the user has asked to see the turn — show the conversation.
+  const [open, setOpen] = useState(true);
 
   // Keep the newest line in view while streaming.
   const feedRef = useRef<HTMLOListElement>(null);
