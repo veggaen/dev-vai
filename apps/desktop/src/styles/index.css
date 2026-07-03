@@ -487,13 +487,100 @@ html, body, #root {
   animation: vai-cursor-blink 0.75s ease-in-out infinite;
 }
 
-/* Subtle shimmer for the live "Thinking…" line before the first process step arrives. */
+/* Live-activity shimmer — a bright band sweeping through the text itself (background-clip:
+   text), the way Copilot's agent timeline announces "this is happening right now". Falls back
+   to a gentle opacity pulse when background-clip text is unavailable or motion is reduced. */
 @keyframes vai-process-shimmer {
   0%, 100% { opacity: 0.55; }
   50% { opacity: 1; }
 }
 .vai-process-shimmer {
   animation: vai-process-shimmer 1.4s ease-in-out infinite;
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .vai-process-shimmer {
+    animation: vai-process-shimmer-sweep 2.2s linear infinite;
+    background: linear-gradient(
+      100deg,
+      var(--chat-muted) 20%,
+      var(--chat-strong) 42%,
+      color-mix(in srgb, var(--accent) 55%, var(--chat-strong)) 50%,
+      var(--chat-strong) 58%,
+      var(--chat-muted) 80%
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+}
+@keyframes vai-process-shimmer-sweep {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vai-process-shimmer {
+    animation: vai-process-shimmer 2.4s ease-in-out infinite;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: inherit;
+  }
+}
+
+/* Skeleton step rows — the backend has told us more steps exist (pendingStepCount) but the
+   staggered reveal hasn't shown them yet. Ghost bars keep the rhythm of real rows so arriving
+   content replaces a placeholder instead of pushing layout around (seamless-loading rule). */
+.process-skel {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.375rem;
+  list-style: none;
+}
+.process-skel__dot {
+  width: 7px; height: 7px;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--fg) 14%, transparent);
+  flex-shrink: 0;
+  margin-left: 0.85rem;
+}
+.process-skel__bar {
+  height: 0.55rem;
+  border-radius: 0.3rem;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--fg) 6%, transparent) 25%,
+    color-mix(in oklab, var(--fg) 12%, transparent) 50%,
+    color-mix(in oklab, var(--fg) 6%, transparent) 75%
+  );
+  background-size: 200% 100%;
+  animation: process-skel-sweep 1.6s linear infinite;
+}
+@keyframes process-skel-sweep {
+  from { background-position: 120% 0; }
+  to { background-position: -80% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .process-skel__bar { animation: none; }
+}
+
+/* Inline code token inside a step label — `backticked` fragments (queries, paths, symbols)
+   render as quiet monospace chips, the Copilot-timeline idiom for "this exact thing". */
+.process-code {
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: 0.92em;
+  padding: 0 0.3em;
+  border-radius: 0.3em;
+  background: color-mix(in oklab, var(--fg) 7%, transparent);
+  border: 1px solid color-mix(in oklab, var(--panel-border-soft) 60%, transparent);
+  color: var(--chat-body);
+  white-space: nowrap;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  vertical-align: bottom;
 }
 
 /* Live council reasoning stream: a quiet teleprompter feel — older lines fade out at the
@@ -1265,6 +1352,80 @@ code, pre, kbd {
   .vai-planet-atmosphere { animation: none; }
 }
 
+/* ── VaiKineticMark — empty-chat centerpiece v2 (wireframe monogram + tracers + glow) ── */
+.vai-kinetic {
+  isolation: isolate;
+  pointer-events: none;
+}
+/* The glow is a pure radial gradient that reaches full transparency well inside its own box —
+   no blur() filter, so nothing paints past the element and nothing gets clipped by ancestor
+   overflow (the old blur(40px) bled outside and produced hard cut edges in scroll containers). */
+.vai-kinetic-glow {
+  position: absolute;
+  inset: 4%;
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle at 50% 46%,
+    color-mix(in srgb, var(--accent) 22%, transparent) 0%,
+    color-mix(in srgb, var(--accent) 12%, transparent) 30%,
+    color-mix(in srgb, var(--accent) 5%, transparent) 52%,
+    transparent 72%
+  );
+}
+.vai-kinetic-glow--breathe {
+  animation: vai-kinetic-glow-breathe 4s ease-in-out infinite;
+}
+@keyframes vai-kinetic-glow-breathe {
+  0%, 100% { opacity: 0.65; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+/* Whole-glyph breath: 1 → 1.03 every 4s, opacity 1 → 0.88 — calm, never blinking */
+.vai-kinetic-breath {
+  animation: vai-kinetic-breath 4s ease-in-out infinite;
+}
+@keyframes vai-kinetic-breath {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.03); opacity: 0.88; }
+}
+/* Data packets racing the V contour — bright dash on a dim wireframe.
+   Path length ≈ 74 svg units; dash cycle matches so the loop is seamless. */
+.vai-kinetic-tracer {
+  stroke-dasharray: 10 64;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 60%, transparent));
+}
+.vai-kinetic-tracer--a {
+  animation: vai-kinetic-trace 3.6s linear infinite;
+}
+.vai-kinetic-tracer--b {
+  animation: vai-kinetic-trace 3.6s linear infinite;
+  animation-delay: -1.8s;
+  opacity: 0.55;
+}
+@keyframes vai-kinetic-trace {
+  from { stroke-dashoffset: 74; }
+  to { stroke-dashoffset: 0; }
+}
+/* Radar rings pulsing off the intelligence node */
+.vai-kinetic-radar {
+  transform-origin: 51.5px 12.5px;
+  animation: vai-kinetic-radar 4s ease-out infinite;
+}
+.vai-kinetic-radar--b { animation-delay: -2s; }
+@keyframes vai-kinetic-radar {
+  0% { transform: scale(1); opacity: 0.7; }
+  70%, 100% { transform: scale(2.6); opacity: 0; }
+}
+.vai-launchpad-line {
+  color: var(--chat-muted);
+  opacity: 0.75;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vai-kinetic-glow--breathe,
+  .vai-kinetic-breath,
+  .vai-kinetic-tracer,
+  .vai-kinetic-radar { animation: none; }
+}
+
 /* ═══════════════════════════════════════════════════════════════
    VaiNode — the intelligence-node motif as a live status glyph.
    The dot from the brand mark, breathing while Vai thinks. Hue is
@@ -1460,9 +1621,15 @@ code, pre, kbd {
 }
 .process-tree__row {
   border-radius: 0.5rem;
-  transition: background-color 150ms ease;
+  transition: background-color 150ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.process-tree__row:hover { background: color-mix(in oklab, var(--fg) 4%, transparent); }
+.process-tree__row:hover {
+  background: color-mix(in oklab, var(--fg) 4%, transparent);
+  transform: translateX(2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .process-tree__row:hover { transform: none; }
+}
 /* The step currently running — the eye must land here instantly. A soft accent
    wash + a breathing left rail clearly says "Vai is HERE right now", distinct from
    the settled (checkmarked) rows above it. Token-driven; calm, not loud. */
@@ -1521,9 +1688,260 @@ code, pre, kbd {
   border-left: 1px solid var(--panel-border-soft);
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   Chat merge gesture — hold a sidebar chat 250ms, drag onto another.
+   Ghost card + soft particle bloom + inline hint; a target row lights
+   up; the confirm card is a quiet, token-bound dialog. Motion lives on
+   transform/opacity only.
+   ═══════════════════════════════════════════════════════════════ */
+body.vai-merge-dragging { cursor: grabbing; user-select: none; }
+
+/* ═══ Custom window chrome (Tauri only) — replaces the OS titlebar so the frame
+   speaks the app's design language. Slim, token-bound, drag-region everywhere
+   except the control buttons. ═══ */
+.vai-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  flex-shrink: 0;
+  padding-left: 12px;
+  background: var(--app-chrome-background, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.vai-titlebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--chat-muted);
+}
+.vai-titlebar__controls {
+  display: flex;
+  height: 100%;
+}
+.vai-titlebar__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 100%;
+  color: var(--chat-muted);
+  transition: background-color 130ms ease, color 130ms ease;
+}
+.vai-titlebar__btn:hover {
+  background: color-mix(in oklab, var(--fg) 7%, transparent);
+  color: var(--fg);
+}
+.vai-titlebar__btn--close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.vai-merge-ghost {
+  position: fixed;
+  z-index: 90;
+  pointer-events: none;
+  transform: translate(-50%, -120%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.vai-merge-ghost__card {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 230px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--panel) 92%, var(--accent));
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent),
+    0 0 18px color-mix(in srgb, var(--accent) 38%, transparent),
+    0 8px 24px -8px rgb(0 0 0 / 0.55);
+  animation: vai-merge-glow 1.6s ease-in-out infinite;
+}
+@keyframes vai-merge-glow {
+  0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent), 0 0 14px color-mix(in srgb, var(--accent) 30%, transparent), 0 8px 24px -8px rgb(0 0 0 / 0.55); }
+  50% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent), 0 0 26px color-mix(in srgb, var(--accent) 52%, transparent), 0 8px 24px -8px rgb(0 0 0 / 0.55); }
+}
+.vai-merge-ghost__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vai-merge-ghost__hint {
+  font-size: 10.5px;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  color: var(--chat-muted);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid var(--panel-border-soft);
+  white-space: nowrap;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.vai-merge-ghost__hint--ready {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+/* Particle bloom: seven motes drifting up and out, staggered, forever. Transform-only. */
+.vai-merge-ghost__particles { position: absolute; inset: 0; }
+.vai-merge-ghost__particles i {
+  position: absolute;
+  left: 50%; top: 40%;
+  width: 3px; height: 3px;
+  border-radius: 9999px;
+  background: var(--accent);
+  opacity: 0;
+  animation: vai-merge-mote 2.1s ease-out infinite;
+}
+.vai-merge-ghost__particles i:nth-child(1) { animation-delay: 0s;    --mx: -26px; --my: -30px; }
+.vai-merge-ghost__particles i:nth-child(2) { animation-delay: 0.3s;  --mx: 24px;  --my: -34px; width: 2px; height: 2px; }
+.vai-merge-ghost__particles i:nth-child(3) { animation-delay: 0.6s;  --mx: -34px; --my: -12px; width: 2px; height: 2px; }
+.vai-merge-ghost__particles i:nth-child(4) { animation-delay: 0.9s;  --mx: 32px;  --my: -16px; }
+.vai-merge-ghost__particles i:nth-child(5) { animation-delay: 1.2s;  --mx: -14px; --my: -40px; }
+.vai-merge-ghost__particles i:nth-child(6) { animation-delay: 1.5s;  --mx: 12px;  --my: -42px; width: 2px; height: 2px; }
+.vai-merge-ghost__particles i:nth-child(7) { animation-delay: 1.8s;  --mx: 0px;   --my: -36px; }
+@keyframes vai-merge-mote {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  15% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--mx)), calc(-50% + var(--my))) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vai-merge-ghost__card { animation: none; }
+  .vai-merge-ghost__particles i { animation: none; opacity: 0; }
+}
+
+/* The row currently under the carried chat — unmistakably a drop zone. */
+.vai-merge-target {
+  background: color-mix(in srgb, var(--accent) 13%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+/* The row being carried stays dimmed in place so the list keeps its shape. */
+.vai-merge-source { opacity: 0.45; }
+
+.vai-merge-dialog__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  backdrop-filter: blur(3px);
+}
+.vai-merge-dialog {
+  width: min(30rem, calc(100vw - 2rem));
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent), 0 24px 64px -24px rgb(0 0 0 / 0.7);
+}
+.vai-merge-dialog__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.vai-merge-dialog__close {
+  margin-left: auto;
+  display: flex;
+  padding: 4px;
+  border-radius: 6px;
+  color: var(--chat-muted);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.vai-merge-dialog__close:hover { background: color-mix(in oklab, var(--fg) 6%, transparent); color: var(--fg); }
+.vai-merge-dialog__body {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--chat-muted);
+}
+.vai-merge-dialog__pair {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  min-width: 0;
+}
+.vai-merge-dialog__chip {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--chat-body);
+  background: color-mix(in oklab, var(--fg) 4%, transparent);
+  border: 1px solid var(--panel-border-soft);
+}
+.vai-merge-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.vai-merge-dialog__btn {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  color: var(--chat-body);
+  border: 1px solid var(--panel-border-soft);
+  transition: background-color 150ms ease, transform 160ms ease;
+}
+.vai-merge-dialog__btn:hover { background: color-mix(in oklab, var(--fg) 5%, transparent); }
+.vai-merge-dialog__btn--primary {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 24%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.vai-merge-dialog__btn--primary:hover {
+  background: color-mix(in srgb, var(--accent) 34%, var(--panel));
+  transform: translateY(-1px);
+}
+.vai-merge-dialog__btn:disabled { opacity: 0.6; pointer-events: none; }
+
 /* Self-improvements — the "Council improved Vai" surface. Quiet at rest (one line); each opened
    item gets a soft left rail matching the process-tree connector, so the two read as one family.
    Token-bound, no pills/chips. The per-item copy reveals on hover/focus (progressive disclosure). */
+
+/* Summary-line hover: a soft accent-tinted wash plus a gentle grow — alive, never a black slab.
+   (The generic .thinking-hover used --panel-bg-inset which reads as solid black on this hero.) */
+.self-improve__summary {
+  transition:
+    background-color 180ms ease,
+    color 150ms ease,
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 220ms ease;
+  will-change: transform;
+}
+.self-improve__summary:hover,
+.self-improve__summary:focus-visible {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  transform: scale(1.02);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.self-improve__summary:active {
+  transform: scale(0.99);
+}
+@media (prefers-reduced-motion: reduce) {
+  .self-improve__summary,
+  .self-improve__summary:hover { transform: none; }
+}
+
 .self-improve__item {
   border-left: 1px solid var(--panel-border-soft);
   padding-left: 0.6rem;
@@ -1631,11 +2049,56 @@ code, pre, kbd {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 8rem;
+  max-height: 10rem;
   overflow-y: auto;
+  scrollbar-width: thin;
 }
 .composer-activity-queue__item + .composer-activity-queue__item {
   margin-top: 0.125rem;
+}
+.composer-activity-queue__item--active {
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+}
+.composer-activity-queue__item--pending {
+  opacity: 0.45;
+}
+.composer-process-strip__count {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  color: var(--chat-strong);
+}
+/* Three-state todo glyphs: done ✓ / active ◉ / pending ○ */
+.composer-step-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+}
+.composer-step-glyph--done {
+  border: 1px solid color-mix(in oklab, var(--phase-verify) 70%, transparent);
+  color: var(--phase-verify);
+}
+.composer-step-glyph--active {
+  border: 1.5px solid var(--accent);
+  animation: composer-step-active-pulse 1.6s ease-in-out infinite;
+}
+.composer-step-glyph__core {
+  width: 0.3125rem;
+  height: 0.3125rem;
+  border-radius: 9999px;
+  background: var(--accent);
+}
+.composer-step-glyph--pending {
+  border: 1px solid color-mix(in oklab, var(--chat-muted) 55%, transparent);
+}
+@keyframes composer-step-active-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 35%, transparent); }
+  50% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 12%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-step-glyph--active { animation: none; }
 }
 .live-process-stream__current {
   display: flex;
@@ -2518,5 +2981,409 @@ pre code {
 
   .settings-drawer-backdrop {
     display: none;
+  }
+}
+
+/* ── ReasoningFlow — the spatial reasoning constellation ─────────────────────
+   The turn as a pannable, zoomable spine of hued phase nodes with a spotlight
+   detail sheet. Tokens only; every hue arrives via --node-hue (set inline from
+   the phase palette) so themes restyle it for free. Motion is transform/opacity
+   only and silenced under reduced-motion. */
+.reasoning-flow {
+  font-size: 12px;
+}
+.reasoning-flow-headline {
+  border-radius: 0.5rem;
+  padding: 0.3rem 0.4rem;
+  margin-left: -0.4rem;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+.reasoning-flow-headline:hover {
+  background: color-mix(in oklab, var(--fg) 5%, transparent);
+  color: var(--chat-body);
+}
+.reasoning-flow-headline:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+.reasoning-headline-caret {
+  margin-left: 0.15rem;
+  color: var(--chat-muted);
+  font-size: 13px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 200ms var(--ease-out-expo, ease);
+}
+.reasoning-headline-caret--open {
+  transform: rotate(90deg);
+}
+
+/* Frame — the clipped viewport for the spine. Edge fades tell the eye there is
+   more content in that direction; a focus ring makes the pan/zoom group keyboardable. */
+.reasoning-spine-frame {
+  position: relative;
+  height: 92px;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--panel-bg-muted) 55%, transparent);
+  border: 1px solid color-mix(in oklab, var(--panel-border-soft) 70%, transparent);
+  cursor: grab;
+  touch-action: pan-y;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+.reasoning-spine-frame--dragging {
+  cursor: grabbing;
+}
+.reasoning-spine-frame:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--panel-border-soft));
+}
+/* Reduced motion: no pan/zoom plumbing — the spine becomes a natively scrollable rail. */
+.reasoning-spine-frame[data-reduce='1'] {
+  overflow-x: auto;
+  cursor: default;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.reasoning-spine {
+  position: relative;
+  height: 100%;
+  will-change: transform;
+}
+.reasoning-spine--smooth {
+  transition: transform 280ms var(--ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1)), width 280ms var(--ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+/* Rail — the connective spine behind the nodes; the fill is the turn's progress. */
+.reasoning-rail {
+  position: absolute;
+  top: 37px;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--panel-border-soft) 80%, transparent);
+  overflow: hidden;
+  pointer-events: none;
+}
+.reasoning-rail-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    to right,
+    color-mix(in oklab, var(--phase-read) 70%, transparent),
+    color-mix(in oklab, var(--phase-verify) 80%, transparent)
+  );
+}
+
+/* Nodes — constant-size chrome positioned by transform; zoom spreads POSITIONS only. */
+.reasoning-node-slot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 0;
+  will-change: transform;
+}
+.reasoning-node {
+  position: absolute;
+  top: 14px;
+  left: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  background: none;
+  border: none;
+  padding: 0.25rem 0.4rem;
+  cursor: pointer;
+  color: var(--chat-muted);
+  border-radius: 0.6rem;
+  transition: color 160ms ease;
+}
+.reasoning-node:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+.reasoning-node-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+}
+.reasoning-node-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  width: 22px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--node-hue, var(--accent)) 12%, transparent);
+  transition: background-color 200ms ease, box-shadow 200ms ease;
+}
+.reasoning-node-disc {
+  height: 9px;
+  width: 9px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--node-hue, var(--accent)) 88%, var(--fg));
+  box-shadow: 0 0 7px color-mix(in oklab, var(--node-hue, var(--accent)) 45%, transparent);
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+.reasoning-node:hover .reasoning-node-glyph,
+.reasoning-node--selected .reasoning-node-glyph {
+  background: color-mix(in oklab, var(--node-hue, var(--accent)) 22%, transparent);
+}
+.reasoning-node--selected .reasoning-node-disc {
+  transform: scale(1.25);
+  box-shadow: 0 0 11px color-mix(in oklab, var(--node-hue, var(--accent)) 65%, transparent);
+}
+.reasoning-node--live .reasoning-node-disc {
+  animation: reasoning-node-breathe 1.9s var(--ease-out-expo, ease) infinite;
+}
+@keyframes reasoning-node-breathe {
+  0%, 100% { box-shadow: 0 0 5px color-mix(in oklab, var(--node-hue, var(--accent)) 35%, transparent); }
+  50% { box-shadow: 0 0 13px color-mix(in oklab, var(--node-hue, var(--accent)) 75%, transparent); }
+}
+.reasoning-node-title {
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  line-height: 1.2;
+  color: var(--chat-body);
+}
+.reasoning-node--selected .reasoning-node-title {
+  color: var(--chat-strong, var(--fg));
+}
+.reasoning-node-time,
+.reasoning-node-meta {
+  font-size: 9.5px;
+  line-height: 1.2;
+  color: var(--chat-muted);
+  opacity: 0.75;
+}
+.reasoning-node--bad .reasoning-node-title {
+  color: color-mix(in srgb, var(--tone-bad) 70%, var(--chat-body));
+}
+
+/* Fit control — one quiet glyph, bottom-right, only when the view left its fit. */
+.reasoning-fit {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  width: 22px;
+  border-radius: 0.45rem;
+  border: 1px solid color-mix(in oklab, var(--panel-border-soft) 80%, transparent);
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  color: var(--chat-muted);
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.reasoning-fit:hover {
+  color: var(--chat-body);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--panel-border-soft));
+}
+
+/* Minimap — the whole turn as dots with a viewport window; scrub + wheel-zoom. */
+.reasoning-minimap {
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  transform: translateX(-50%);
+  width: min(46%, 220px);
+  opacity: 0;
+  transition: opacity 200ms ease;
+  pointer-events: auto;
+}
+.reasoning-spine-frame:hover .reasoning-minimap,
+.reasoning-spine-frame:focus-within .reasoning-minimap {
+  opacity: 1;
+}
+.reasoning-minimap-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 14px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid color-mix(in oklab, var(--panel-border-soft) 70%, transparent);
+  cursor: pointer;
+}
+.reasoning-minimap-dot {
+  height: 4px;
+  width: 4px;
+  border-radius: 999px;
+  opacity: 0.85;
+}
+.reasoning-minimap-window {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--fg) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--fg) 22%, transparent);
+  pointer-events: none;
+}
+
+/* Spotlight — detail for the selected node, revealed below the spine. */
+.reasoning-spotlight {
+  margin-top: 0.5rem;
+}
+.reasoning-spotlight-inner {
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in oklab, var(--panel-border-soft) 70%, transparent);
+  background: color-mix(in srgb, var(--panel-bg-muted) 55%, transparent);
+  padding: 0.65rem 0.8rem;
+}
+.reasoning-spotlight-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+.reasoning-spotlight-title {
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--chat-strong, var(--fg));
+}
+.reasoning-verdict {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--phase-verify);
+}
+.reasoning-verdict--warn {
+  color: var(--tone-warn);
+}
+.reasoning-spotlight-summary {
+  margin: 0.35rem 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--chat-body);
+}
+.reasoning-note {
+  margin: 0.45rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--chat-body);
+}
+.reasoning-subrow {
+  padding: 0.3rem 0 0;
+}
+.reasoning-subrow-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 11px;
+}
+.reasoning-subdot {
+  align-self: center;
+  height: 5px;
+  width: 5px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--chat-muted) 70%, transparent);
+}
+.reasoning-subdot--live {
+  background: var(--accent);
+  animation: reasoning-node-breathe 1.9s ease infinite;
+}
+.reasoning-subdot--bad {
+  background: var(--tone-bad);
+}
+.reasoning-subrow-label {
+  color: var(--chat-body);
+}
+.reasoning-subrow-detail {
+  color: var(--chat-muted);
+  opacity: 0.85;
+  font-size: 10.5px;
+}
+.reasoning-body-child { padding-left: 0.15rem; }
+.reasoning-body-indent {
+  margin-left: 0.55rem;
+  padding-left: 0.55rem;
+  border-left: 1px solid color-mix(in oklab, var(--panel-border-soft) 75%, transparent);
+}
+
+/* Improvement ledger — Vai's "what I still need" lane. */
+.reasoning-ledger {
+  margin-top: 0.55rem;
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in oklab, var(--panel-border-soft) 70%, transparent);
+  background: color-mix(in srgb, var(--panel-bg-muted) 45%, transparent);
+  padding: 0.45rem 0.7rem;
+}
+.reasoning-ledger-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.5rem;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--chat-body);
+}
+.reasoning-ledger-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-ring);
+  border-radius: 0.4rem;
+}
+.reasoning-ledger-title { font-weight: 500; }
+.reasoning-ledger-caret {
+  margin-left: auto;
+  color: var(--chat-muted);
+  font-size: 13px;
+  line-height: 1;
+  transition: transform 200ms ease;
+}
+.reasoning-ledger-caret--open { transform: rotate(90deg); }
+.reasoning-ledger-list {
+  margin: 0.45rem 0 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+}
+.reasoning-ledger-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.22rem 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.reasoning-ledger-kind {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--chat-muted);
+}
+.reasoning-ledger-kind--missing-capability { color: var(--tone-warn); }
+.reasoning-ledger-kind--method-lesson { color: var(--phase-read); }
+.reasoning-ledger-kind--concern { color: color-mix(in srgb, var(--tone-bad) 80%, var(--chat-body)); }
+.reasoning-ledger-text { color: var(--chat-body); }
+.reasoning-ledger-source {
+  flex-shrink: 0;
+  color: var(--chat-muted);
+  opacity: 0.7;
+  font-size: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reasoning-node--live .reasoning-node-disc,
+  .reasoning-subdot--live {
+    animation: none;
+  }
+  .reasoning-spine--smooth {
+    transition: none;
   }
 }
