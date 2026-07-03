@@ -739,6 +739,19 @@ async function main() {
           effects: { recordKnowledge, topKnowledge, knowledgeConfidence },
         });
         if (ingest.ingested > 0) log(`self-improve inbox: ingested ${ingest.ingested} (enqueued ${ingest.enqueued}, skipped ${ingest.skipped})`);
+        // FLYWHEEL: the loop learns from its own terminal outcomes — recurring rejection
+        // reasons become standing directives, and aged held-for-review jobs get one
+        // bounded, lesson-annotated retry. Cheap (sqlite + changelog parse, no models).
+        try {
+          const { runOutcomeFlywheel } = await import('./outcome-flywheel.mjs');
+          const { readChangelogEntries } = await import('./changelog.mjs');
+          const fly = runOutcomeFlywheel(sdb, { entries: readChangelogEntries({ limit: 40 }) });
+          if (fly.retried > 0 || (fly.lessons?.length ?? 0) > 0) {
+            log(`outcome flywheel: ${fly.retried} held job(s) retried with lessons, ${fly.lessons.length} standing lesson(s)`);
+          }
+        } catch (err) {
+          log(`outcome flywheel skipped: ${err?.message ?? err}`);
+        }
         const pending = openJobs(sdb, 1).length;
         if (pending > 0) {
           log(`━━━ cycle ${cycle} : SELF-IMPROVE DRAIN (Council-triggered jobs) ━━━`);
