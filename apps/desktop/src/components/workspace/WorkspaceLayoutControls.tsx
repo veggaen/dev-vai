@@ -197,4 +197,17 @@ export function WorkspaceLayoutControls({
           title={tip(previewExpanded ? 'Restore layout' : 'App full width', 'appFullscreen')}
           aria-pressed={previewExpanded}
         >
-          {previewExpanded ? <Minimize2 className="h
+          {previewExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          {showLabels && <span>{previewExpanded ? 'Restore' : 'Full app'}</span>}
+        </button>
+      )}
+
+      {!showBuilderPanel && (
+        <span className="hidden items-center gap-1 text-[10px] text-[color:var(--color-muted)] sm:inline-flex" title="Chat workspace">
+          <MessageSquare className="h-3 w-3 opacity-60" aria-hidden />
+          Chat
+        </span>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vai Logo — 20 Variations</title>
+<style>
+  /* Matches the app's Odysseus dark tokens exactly */
+  :root {
+    --bg: #0b0d10;
+    --fg: #f2eee8;
+    --panel: #15181d;
+    --border: #303640;
+    --accent: #ff6b5f;
+    --muted: #9a948c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px/1.5 ui-monospace, 'Cascadia Code', Consolas, monospace;
+    padding: 48px clamp(16px, 4vw, 64px) 96px;
+    min-height: 100vh;
+  }
+  header { max-width: 1400px; margin: 0 auto 40px; }
+  h1 { font-size: 20px; letter-spacing: 0.06em; font-weight: 600; }
+  h1 .dot { color: var(--accent); }
+  header p { color: var(--muted); margin-top: 6px; font-size: 12px; }
+  .grid {
+    max-width: 1400px; margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 20px;
+  }
+  .tile {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 18px 16px;
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    transition: transform 220ms cubic-bezier(.22,1,.36,1), border-color 200ms ease, box-shadow 220ms ease;
+    cursor: pointer;
+  }
+  .tile:hover {
+    transform: translateY(-3px) scale(1.02);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    box-shadow: 0 8px 32px -12px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .tile svg { width: 132px; height: 132px; overflow: visible; }
+  .tile .label { text-align: center; }
+  .tile .num { color: var(--accent); font-size: 11px; letter-spacing: 0.1em; }
+  .tile .name { font-size: 12.5px; margin-top: 2px; }
+  .tile .desc { color: var(--muted); font-size: 10.5px; margin-top: 3px; line-height: 1.45; }
+
+  /* ── shared animations (subtle, on hover only where motion helps judgement) ── */
+  @keyframes trace { from { stroke-dashoffset: 74; } to { stroke-dashoffset: 0; } }
+  @keyframes radar { 0% { transform: scale(1); opacity: .7; } 70%,100% { transform: scale(2.4); opacity: 0; } }
+  @keyframes breathe { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+  @keyframes orbit { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .tracer { stroke-dasharray: 10 64; animation: trace 3.2s linear infinite; }
+  .radar { transform-origin: var(--o, 51.5px 12.5px); animation: radar 3.6s ease-out infinite; }
+  .soft { animation: breathe 4s ease-in-out infinite; }
+  .orbiter { transform-origin: 51.5px 12.5px; animation: orbit 9s linear infinite; }
+  @media (prefers-reduced-motion: reduce) { .tracer,.radar,.soft,.orbiter { animation: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Vai logo — 20 variations<span class="dot">.</span></h1>
+  <p>Solid inks only (no gradients → no circle splits). All glows are contained radials — nothing clips. Hover a tile to feel it. Pick by number.</p>
+</header>
+<div class="grid" id="grid"></div>
+
+<script>
+const A = '#ff6b5f';            // accent
+const F = '#f2eee8';            // fg
+const DIM = 'opacity="0.3"';
+const V  = 'M14 13 L32 51 L46 23';                 // canonical arms
+const HAIR = 'M46 23 L51.5 12.5';                  // constellation hairline
+const NODE = 'cx="51.5" cy="12.5" r="5.5"';
+
+const variations = [
+{ n: 1, name: 'Canon — solid ink', desc: 'The fixed production mark. One color, wireframe + live tracer.',
+  svg: `<path d="${V}" stroke="${A}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" ${DIM}/>
+        <path class="tracer" d="${V}" stroke="${A}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="${HAIR}" stroke="${A}" stroke-width="1" stroke-dasharray="2 3" opacity=".35"/>
+        <circle ${NODE} fill="${A}"/>` },
+{ n: 2, name: 'Duotone arms', desc: 'Left arm accent, right arm bone-white. Two solids, zero gradients.',
+  svg: `<path d="M14 13 L32 51" stroke="${A}" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M32 51 L46 23" stroke="${F}" stroke-width="3.5" stroke-linecap="round" opacity=".85"/>
+        <circle ${NODE} fill="${A}"/>` },
+{ n: 3, name: 'Orbit', desc: 'A thin satellite ring circles the node — intelligence in motion.',
+  svg: `<path d="${V}" stroke="${A}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>
+        <circle ${NODE} fill="${A}"/>
+        <g class="orbiter"><circle cx="51.5" cy="12.5" r="10" stroke="${F}" stroke-width=".8" fill="none" opacity=".4"/>
+        <circle cx="61.5" cy="12.5" r="1.6" fill="${F}"/></g>` },
+{ n: 4, name: 'Comet', desc: 'The node arrives with a dashed tail — momentum, deployment.',
+  svg: `<path d="${V}" stroke="${A}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>
+        <path d="M62 2 L54 10" stroke="${A}" stroke-width="2" stroke-linecap="round" stroke-dasharray="1 4" opacity=".7"/>
+        <circle ${NODE} fill="${A}"/>` },
+{ n: 5, name: 'Heavyweight', desc: 'Bold 5px arms. Confident, reads at 16px favicon size.',
+  svg: `<path d="${V}" stroke="${A}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="51.5" cy="12.5" r="6.5" fill="${A}"/>` },
+{ n: 6, name: 'Hairline', desc: 'Elegant 1.5px line art. Editorial, quiet, precise.',
+  svg: `<path d="${V}" stroke="${F}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="${HAIR}" stroke="${F}" stroke-width=".75" stroke-dasharray="2 3" opacity=".5"/>
+        <circle ${NODE} fill="${A}"/>` },
+{ n: 7, name: 'Echo', desc: 'A ghost outline trails the mark — motion blur frozen in place.',
+  svg: `<path d="M11 10 L29 48 L43 20" stroke="${A}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".18"/>
+        <path d="${V}" stroke="${A}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle ${NODE} fill="${A}"/>
+        <circle cx="48.5" cy="9.5" r="5.5" stroke="${A}" stroke-width="1" fill="none" opacity=".25"/>` },
+{ n: 8, name: 'Grounded node', desc: 'The dot lands at the vertex — the V cradles its intelligence.',
+  svg: `<path d="M14 13 L32 45 L46 23" stroke="${A}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+        <circle cx="32" cy="55" r="4.5" fill="${A}"/>
+        <circle class="radar" style="--o:32px 55px" cx="32" cy="55" r="6" stroke="${A}" stroke-width="1" fill="none"/>` },
+{ n: 9, name: 'Delta', desc: 'Closed triangle + floating node. Structural, architectural.',
+  svg: `<path d="M14 13 L32 51 L46 23 Z" stroke="${A}" stroke-width="2.5" stroke-linejoin="round" fill="none" opacity=".9"/>
+        <circle ${NODE} fill="${A}"/>` },
+{ n: 10, name: 'Circuit', desc: 'PCB-trace arms with via pads. The engine, literally.',
+  svg: `<path d="M14 13 L14 28 L32 51 L46 33 L46 23" stroke="${A}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity=".9"/>
+        <circle cx="14" cy="13" r="2.5" stroke="${A}" stroke-width="1.5" fill="none"/>
+        <circle cx="46" cy="23" r="2.5" stroke="${A}" stroke-width="1.5" fill="none"/>
+        <path d="${HAIR}" stroke="${A}" stroke-width="1" stroke-dasharray="2 2" opacity=".5"/>
+        <circle ${NODE} fill="${A}"/>` },
+{ n: 11, name: 'Sigil tile', desc: 'Negative-space V knocked out of a filled app-icon tile.',
+  svg: `<rect x="6" y="6" width="52" height="52" rx="13" fill="${A}"/>
+        <path d="M20 19 L32 45 L42 25" stroke="#0b0d10" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <circle cx="46.5" cy="17.5" r="4" fill="#0b0d10"/>` },
+{ n: 12, name: 'Constellation', desc: 'The V as plotted stars — Vai maps the space between points.',
+  svg: `<g fill="${A}"><circle cx="14" cy="13" r="2.2"/><circle cx="20" cy="25.7" r="1.6"/><circle cx="26" cy="38.3" r="1.6"/><circle cx="32" cy="51" r="2.2"/><circle cx="37" cy="41" r="1.6"/><circle cx="42" cy="31" r="1.6"/><circle cx="46" cy="23" r="2.2"/></g>
+        <path d="${V}" stroke="${A}" stroke-width=".8" opacity=".3" fill="none"/>
+        <path d="${HAIR}" stroke="${F}" stroke-width=".7" stroke-dasharray="1.5 2.5" opacity=".5"/>
+        <circle ${NODE} fill="${F}"/>` },
+{ n: 13, name: 'Facet', desc: 'Two flat-shaded planes fold into a ribbon V. Solid tones only.',
+  svg: `<path d="M12 12 L32 52 L36 43 L20 12 Z" fill="${A}"/>
+        <path d="M32 52 L48 22 L41 22 L32 40 Z" fill="${A}" opacity=".55"/>
+        <circle cx="52" cy="13" r="5" fill="${F}"/>` },
+{ n: 14, name: 'Velocity', desc: 'Italic slant + speed strokes. Vai executes fast.',
+  svg: `<path d="M20 13 L34 51 L50 23" stroke="${A}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M8 18 L15 18 M5 27 L13 27 M8 36 L14 36" stroke="${A}" stroke-width="1.5" stroke-linecap="round" opacity=".4"/>
+        <circle cx="55" cy="12" r="5" fill="${A}"/>` },
+{ n: 15, name: 'Calligraphic', desc: 'Curved arms breathe softness into the geometry.',
+  svg: `<path d="M14 13 Q26 34 32 51 Q38 34 46 23" stroke="${A}" stroke-width="3" stroke-linecap="round" fill="none"/>
+        <circle ${NODE} fill="${A}"/>` },
+{ n: 16, name: 'Hollow node', desc: 'The dot becomes a ring — an open eye, still listening.',
+  svg: `<path d="${V}" stroke="${A}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="51.5" cy="12.5" r="4.75" stroke="${A}" stroke-width="2.5" fill="none"/>
+        <circle cx="51.5" cy="12.5" r="1.2" fill="${A}"/>` },
+{ n: 17, name: 'Lockup', desc: 'Mark + wordmark baseline. For headers and splash.',
+  svg: `<g transform="translate(6,-2) scale(.82)"><path d="${V}" stroke="${A}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><circle ${NODE} fill="${A}"/></g>
+        <text x="32" y="60" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" letter-spacing="4" fill="${F}" opacity=".8">VAI</text>` },
+{ n: 18, name: 'Asymmetric reach', desc: 'One long arm, one short — reaching further on one side.',
+  svg: `<path d="M10 8 L32 54 L44 30" stroke="${A}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M44 30 L52 14" stroke="${A}" stroke-width="1" stroke-dasharray="2 3" opacity=".4"/>
+        <circle cx="54" cy="10" r="5" fill="${A}"/>` },
+{ n: 19, name: 'Resonance', desc: 'Static concentric rings — the node broadcasting, frozen mid-pulse.',
+  svg: `<path d="${V}" stroke="${A}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+        <circle cx="51.5" cy="12.5" r="4.5" fill="${A}"/>
+        <circle cx="51.5" cy="12.5" r="8.5" stroke="${A}" stroke-width="1" fill="none" opacity=".5"/>
+        <circle cx="51.5" cy="12.5" r="12.5" stroke="${A}" stroke-width=".8" fill="none" opacity=".25"/>` },
+{ n: 20, name: 'One line', desc: 'A single continuous stroke: down, up, out, and loop the node. Never lifts the pen.',
+  svg: `<path class="soft" d="M14 13 L32 51 L46 23 L51 13 A 5 5 0 1 1 47 9" stroke="${A}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>` },
+];
+
+const grid = document.getElementById('grid');
+for (const v of variations) {
+  const tile = document.createElement('div');
+  tile.className = 'tile';
+  tile.innerHTML = `
+    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">${v.svg}</svg>
+    <div class="label">
+      <div class="num">№ ${String(v.n).padStart(2, '0')}</div>
+      <div class="name">${v.name}</div>
+      <div class="desc">${v.desc}</div>
+    </div>`;
+  tile.title = `Click to copy: variation ${v.n} — ${v.name}`;
+  tile.addEventListener('click', () => {
+    navigator.clipboard?.writeText(`Vai logo variation ${v.n}: ${v.name}`);
+    tile.style.borderColor = A;
+    setTimeout(() => (tile.style.borderColor = ''), 600);
+  });
+  grid.appendChild(tile);
+}
+</script>
+</body>
+</html>

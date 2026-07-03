@@ -997,4 +997,30 @@ function CouncilSidebarView() {
               ? 'border-[color:var(--accent-ring)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]'
               : 'border-[color:var(--border)] text-zinc-500 hover:bg-white/5 hover:text-zinc-300'
           }`}
-          aria-pressed={showCounc
+          aria-pressed={showCouncilPanel}
+        >
+          {showCouncilPanel ? 'Right panel on' : 'Show right panel'}
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-[color:var(--border)] bg-[color:var(--panel)]/30">
+        <CouncilProgressPanel
+          council={council}
+          isOpen
+          onClose={returnToChat}
+          onApplyLesson={() => {
+            toast.success('Lesson queued for the next review');
+            returnToChat();
+          }}
+          onReconvene={() => {
+            toast('Requesting fresh council review…');
+            returnToChat();
+          }}
+          onDesignMode={returnToChat}
+          onExportVisualPlan={returnToChat}
+        />
+      </div>
+    </div>
+  );
+}
+

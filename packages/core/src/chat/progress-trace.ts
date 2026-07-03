@@ -109,6 +109,7 @@ function pruneStep(step: ChatProgressStep): ChatProgressStep {
     detail: clamp(step.detail),
     // A persisted step is always settled — running rows finalize to done.
     status: step.status === 'running' ? 'done' : step.status,
+    durationMs: step.durationMs,
     advisor: step.advisor,
     councilMembers: council?.length ? council : undefined,
     processLog: log?.length ? log : undefined,

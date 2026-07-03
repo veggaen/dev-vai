@@ -44,6 +44,7 @@ import { registerFeedbackRoutes } from './routes/feedback.js';
 import { registerSteeringRoutes } from './routes/steering.js';
 import { registerAgentIntrospectRoutes } from './routes/agent-introspect.js';
 import { registerCouncilChangelogRoutes } from './routes/council-changelog.js';
+import { registerKnowledgeGraphRoutes } from './routes/knowledge-graph.js';
 import { createGuidanceStore } from './steering/guidance-store.js';
 import { createSelfImproveQueue } from './steering/self-improve-queue.js';
 import { computeSteeringLift } from './steering/analyze-steering.js';
@@ -593,6 +594,7 @@ export async function createServer(options?: ServerOptions) {
   registerSteeringRoutes(app, guidanceStore);
   registerAgentIntrospectRoutes(app, { models, fallbackChain: effectiveConfig.fallbackChain.models });
   registerCouncilChangelogRoutes(app);
+  registerKnowledgeGraphRoutes(app, { chatService, auth: platformAuth });
 
   app.get('/api/usage', async (request) => {
     const query = request.query as { from?: string; to?: string };

@@ -150,6 +150,8 @@ export const chatProgressStepSchema = z.object({
   label: z.string().min(1),
   detail: z.string().optional(),
   status: z.enum(['running', 'done']),
+  /** Wall-clock cost of this step, attached when the stage settles — lets the timeline answer "where did time go". */
+  durationMs: z.number().nonnegative().optional(),
   advisor: advisorTraceSchema.optional(),
   /** Per-round council member snapshots for ProcessTree nesting. */
   councilMembers: z.array(councilProgressMemberSchema).optional(),

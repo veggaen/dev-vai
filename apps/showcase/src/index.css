@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent-hue: 243;
+  --accent: hsl(var(--accent-hue) 84% 67%);
+  --accent-soft: hsl(var(--accent-hue) 84% 67% / 0.16);
+  --pulse: hsl(calc(var(--accent-hue) + 130) 85% 55%);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  @apply bg-void text-zinc-200 font-body antialiased overflow-x-hidden;
+  cursor: none;
+}
+
+@media (pointer: coarse), (max-width: 767px) {
+  body {
+    cursor: auto;
+  }
+}
+
+::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a12;
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--accent), var(--pulse));
+  border-radius: 8px;
+  border: 2px solid #0a0a12;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* film grain */
+.noise::after {
+  content: '';
+  position: fixed;
+  inset: -50%;
+  z-index: 70;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: grain 8s steps(10) infinite;
+}
+
+@keyframes grain {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(-3%, 2%); }
+  40% { transform: translate(2%, -3%); }
+  60% { transform: translate(-2%, -2%); }
+  80% { transform: translate(3%, 3%); }
+}
+
+.glass {
+  background: rgba(18, 18, 30, 0.55);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 40%, black 30%, transparent 75%);
+}
+
+.text-gradient {
+  background: linear-gradient(120deg, #fff 20%, var(--accent) 50%, var(--pulse) 80%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.shimmer-border {
+  position: relative;
+  isolation: isolate;
+}
+.shimmer-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(120deg, transparent 30%, var(--accent) 48%, var(--pulse) 52%, transparent 70%);
+  background-size: 200% 200%;
+  animation: shimmer 3.2s linear infinite;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.shimmer-border:hover::before {
+  opacity: 1;
+}
+
+.hyperdrive {
+  filter: hue-rotate(90deg) saturate(1.3);
+  transition: filter 1.2s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .noise::after,
+  .shimmer-border::before {
+    animation: none;
+  }
+}

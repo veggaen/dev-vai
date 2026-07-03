@@ -137,7 +137,7 @@ export function splitCompoundQuestion(rawInput: string): string[] | null {
     .replace(/^(?:try\s+this|(?:hello[\s,]+)?quick\s+question)\s*[:,\-\s]*/i, '')
     .replace(/^(?:tell\s+me|and\s+tell\s+me|also\s+tell\s+me|hey\s+tell\s+me)\s+/i, '')
     .replace(/^i\s+need\s+(?:two|2)\s+things?\s*[:,\-\s]*/i, '')
-    .replace(/\s+(?:reply|respond|answer|just\s+give\s+me|give\s+me)\b[\s\S]*$/i, '')
+    .replace(/\s+(?:reply|respond|answer|just\s+(?:give|show|send)\s+me|(?:give|show|send)\s+me)\b[\s\S]*$/i, '')
     .trim();
   if (!input) return null;
   if (/```|title=|\bpath=/.test(input)) return null; // never split code/build payloads

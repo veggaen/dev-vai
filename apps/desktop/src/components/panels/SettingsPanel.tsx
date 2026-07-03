@@ -870,4 +870,10 @@ export function SettingsPanel() {
               label="Show owner tools"
               description={ownerFeaturesHidden ? 'Currently showing user experience' : 'Engine, workflow, and admin sections visible'}
             />
-          </Se
+          </SettingsCard>
+        </SettingsSection>
+      )}
+    </SettingsShell>
+    </div>
+  );
+}

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#282c34" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <title>Vai · ReasoningFlow Story</title>
+    <script>
+      /* Mirror the app's early theme paint so the story renders with REAL tokens. */
+      (function () {
+        var PRESETS = {
+          dark: { bg: '#282c34', fg: '#9cdef2', panel: '#111111', border: '#355a66', red: '#e06c75' },
+          light: { bg: '#f0ebe3', fg: '#5a5248', panel: '#faf6f0', border: '#d4cdc2', red: '#c47d5a' },
+        };
+        var pref = 'dark';
+        try { pref = new URLSearchParams(location.search).get('theme') || localStorage.getItem('vai-theme-preference') || 'dark'; } catch (_) {}
+        var c = PRESETS[pref] || PRESETS.dark;
+        var s = document.documentElement.style;
+        s.setProperty('--bg', c.bg); s.setProperty('--fg', c.fg); s.setProperty('--panel', c.panel);
+        s.setProperty('--border', c.border); s.setProperty('--red', c.red); s.setProperty('--accent', c.red);
+        s.setProperty('--sidebar-bg', c.panel); s.setProperty('--input-bg', c.panel);
+        s.setProperty('--input-border', c.border); s.setProperty('--brand-color', c.red);
+        document.documentElement.dataset.theme = pref;
+      })();
+    </script>
+  </head>
+  <body class="bg-[color:var(--bg)] text-[color:var(--fg)] antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/qa/reasoning-story.tsx"></script>
+  </body>
+</html>

@@ -72,4 +72,27 @@ export function TurnProcessSection({
       live={live}
       steps={visibleSteps}
       council={council}
-      imageSteps={imageSt
+      imageSteps={imageSteps}
+      vaiProposedDraft={vaiProposedDraft}
+      durationMs={durationMs}
+      pendingStepCount={pendingStepCount}
+    />
+  );
+}
+
+/** Subscribe to the Timeline-view flag (same-tab + cross-tab changes). */
+function useTimelineView(): boolean {
+  const [enabled, setEnabled] = useState(isTimelineViewEnabled);
+  useEffect(() => {
+    const update = () => setEnabled(isTimelineViewEnabled());
+    window.addEventListener('vai-timeline-view-change', update);
+    window.addEventListener('storage', update);
+    return () => {
+      window.removeEventListener('vai-timeline-view-change', update);
+      window.removeEventListener('storage', update);
+    };
+  }, []);
+  return enabled;
+}
+
+export default TurnProcessSection;

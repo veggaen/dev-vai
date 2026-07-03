@@ -606,4 +606,44 @@ function StepGlyph({ node, small, livePulse = false }: { node: ProcessNode; smal
   }
   return (
     <span className="mt-0.5 flex shrink-0 items-center justify-center" style={{ width: px, height: px }}>
-      <VaiNode state={node.status
+      <VaiNode state={node.status === 'bad' ? 'error' : 'thinking'} size={small ? 7 : 9} tone={nodeTone(node.tone)} />
+    </span>
+  );
+}
+
+function buildSummaryLine(nodes: readonly ProcessNode[], durationMs?: number): string {
+  const labels = nodes
+    .filter((n) => n.kind !== 'activity-map')
+    .map((n) => n.shortLabel ?? n.label);
+  if (labels.length === 0) return durationMs !== undefined ? `Worked for ${formatMs(durationMs)}` : 'Answered';
+  if (labels.length <= 3) return labels.join(' · ');
+  return `${labels.slice(0, 2).join(' · ')} · +${labels.length - 2} more`;
+}
+
+function formatMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+}
+
+/**
+ * Self-ticking elapsed timer (pattern borrowed from t3code's WorkingTimer): updates the
+ * span's textContent via a ref on a 1s interval, so a running row's clock advances WITHOUT
+ * re-rendering the row (and its children) every tick. Mounts when the row goes running and
+ * resets its start each mount.
+ */
+function LiveElapsed({ className }: { className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const startRef = useRef(Date.now());
+  useEffect(() => {
+    startRef.current = Date.now();
+    const tick = () => {
+      if (ref.current) ref.current.textContent = formatMs(Date.now() - startRef.current);
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return <span ref={ref} className={className}>0ms</span>;
+}
+
+export default ProcessTree;

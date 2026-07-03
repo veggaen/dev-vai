@@ -15430,7 +15430,7 @@ ${topic ? `For your **${topic}** issue specifically: ` : ''}The most common next
     const needDrivenProject = /\bi\s+need\s+(?:a\s+|an\s+|the\s+|my\s+)?(?:simple\s+|good\s+|great\s+|professional\s+|polished\s+)?(?:app|application|project|site|website|portfolio|gallery|dashboard|landing\s*page|homepage)\b/i.test(projectSourceInput)
       && /\b(?:can\s+you|could\s+you|help\s+me|make|build|create|design|develop)\b/i.test(projectSourceInput);
     const projectMatch = projectSourceInput.match(
-      /^\s*(?:please\s+)?(?:(?:can\s+you\s+|help\s+(?:me\s+)?)?(?:make|build|create|write|code|generate|give|design|scaffold|set\s*up|develop|start|upgrade|improve|polish|refine|revise|update|change|edit|iterate|rework|replace|include|add|turn)|i\s+(?:want|need))\s+(?:me\s+)?(?:a\s+|an\s+|the\s+|my\s+|current\s+)?(?:simple\s+|basic\s+|quick\s+|full[\s-]*stack\s+)?(.+?)(?:\s+(?:in|using|with)\s+(\w[\w#+]*))?\s*$/i
+      /^\s*(?:please\s+)?(?:(?:can\s+you\s+|help\s+(?:me\s+)?)?(?:make|build|create|write|code|generate|give|design|scaffold|set\s*up|develop|start|upgrade|improve|polish|refine|revise|update|change|edit|iterate|rework|replace|include|add|turn)|i\s+(?:want|need)|i(?:'d|\s+would)\s+like)\s+(?:me\s+)?(?:a\s+|an\s+|the\s+|my\s+|current\s+)?(?:simple\s+|basic\s+|quick\s+|full[\s-]*stack\s+)?(.+?)(?:\s+(?:in|using|with)\s+(\w[\w#+]*))?\s*$/i
     );
     const isBareCommerceProject = !projectMatch
       && /\b(?:sell|selling|shop|store|storefront|catalog|checkout|products?|ecommerce|commerce)\b/i.test(projectSourceInput)

@@ -189,4 +189,3 @@ function Meta({ term, value, mono = false }: { term: string; value: string; mono
 }
 
 export default SelfImprovements;
-           

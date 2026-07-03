@@ -1223,7 +1223,16 @@ function asksAboutVaiEngine(lower: string): boolean {
   if (!selfRef) return false;
   // A clear build/design task is never a question about Vai's engine, even if it says "your".
   if (/\b(?:design|build|create|make|implement|scaffold|architect)\b/.test(lower)) return false;
-  const aboutEngine = /\b(?:engine|architecture|how (?:does\s+)?(?:you|it|vai)\s+(?:work|run|operate)|internals?|under the hood|how (?:are|were) you (?:built|made)|tech stack)\b/.test(lower);
+  // The engine/architecture noun must be POSSESSIVELY self-directed ("your engine",
+  // "Vai's architecture") — a bare "architecture" plus an incidental "you"/"vai" elsewhere in
+  // the prompt is a product/engineering question, not a question about Vai itself. This was a
+  // real regression: "what is the right architecture for a product where users chat with Vai…"
+  // and "…better architecture… What would you change first?" were hijacked by the self-answer.
+  const aboutEngine =
+    /\b(?:vai'?s?|your|its)\s+(?:own\s+)?(?:engine|architecture|internals?|tech stack)\b/.test(lower)
+    || /\bhow\s+(?:does\s+)?(?:you|it|vai)\s+(?:work|run|operate)s?\b/.test(lower)
+    || /\bhow\s+(?:are|were)\s+you\s+(?:built|made)\b/.test(lower)
+    || /\bunder the hood\b/.test(lower);
   return aboutEngine;
 }
 

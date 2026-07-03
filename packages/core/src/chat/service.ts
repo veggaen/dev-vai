@@ -4141,6 +4141,9 @@ export class ChatService {
             const councilStartedAt = Date.now();
             console.log(`[council] start members=${councilMembers.map((m) => m.id).join(',')} edit=${Boolean(councilEdit)} brief=${JSON.stringify(content.slice(0, 80))}`);
             try {
+              // Per-stage wall clocks so the desktop timeline can attribute cost to each
+              // pipeline stage (architect/code/validate/review/repair/style/assemble).
+              const councilStageStartedAt = new Map<string, number>();
               for await (const event of councilGenerateApp({ brief: content, members: councilMembers, edit: councilEdit })) {
                 if (event.type === 'stage') {
                   console.log(`[council] ${event.stage}/${event.status}: ${event.label}${event.detail ? ` — ${event.detail.slice(0, 140)}` : ''}`);
@@ -4148,13 +4151,19 @@ export class ChatService {
                   console.log(`[council] result: ${event.result ? `shipped (${event.result.memberIds.join(',')}, repairs=${event.result.repairsUsed})` : 'null'}`);
                 }
                 if (event.type === 'stage') {
+                  const stageKey = `council-${event.stage}`;
+                  if (!councilStageStartedAt.has(stageKey)) councilStageStartedAt.set(stageKey, Date.now());
+                  const stageDurationMs = event.status === 'done'
+                    ? Date.now() - (councilStageStartedAt.get(stageKey) ?? Date.now())
+                    : undefined;
                   yield {
                     type: 'progress',
                     progress: {
-                      stage: `council-${event.stage}`,
+                      stage: stageKey,
                       label: event.label,
                       detail: event.detail,
                       status: event.status,
+                      ...(stageDurationMs !== undefined ? { durationMs: stageDurationMs } : {}),
                     },
                   } as ChatChunk;
                   continue;

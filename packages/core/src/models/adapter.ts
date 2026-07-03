@@ -173,6 +173,8 @@ export interface ChatChunk {
     readonly label: string;
     readonly detail?: string;
     readonly status: 'running' | 'done';
+    /** Wall-clock cost of the step, attached when the stage settles. */
+    readonly durationMs?: number;
     readonly councilMembers?: readonly {
       readonly memberId?: string;
       readonly name: string;
