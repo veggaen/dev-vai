@@ -1,14 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SttAdapter, SttSession, SttError } from '../lib/voice/stt-adapter.js';
 import { defaultSttAdapter } from '../lib/voice/web-speech-adapter.js';
+import {
+  applyProfile,
+  loadProfile,
+  prettifyTranscript,
+  type AppliedReplacement,
+} from '../lib/voice/speech-profile.js';
 
 export type DictationStatus = 'idle' | 'listening' | 'transcribing' | 'error' | 'unsupported';
+
+export interface DictationMeta {
+  /** The raw transcript exactly as the engine heard it (pre-groom). */
+  readonly raw: string;
+  /** Speech-profile rules that auto-applied — needed for self-heal learning at send. */
+  readonly applied: readonly AppliedReplacement[];
+}
 
 export interface UseVoiceDictationOptions {
   /** Receives the live (interim) transcript while listening — for a preview. */
   readonly onInterim?: (text: string) => void;
-  /** Receives the final transcript on release. The composer inserts it. */
-  readonly onFinal: (text: string) => void;
+  /**
+   * Receives the final transcript on release — GROOMED: the user's learned speech
+   * profile is applied first (auto-corrections they've taught us), then the
+   * deterministic prettify pass (casing, punctuation, fillers). `meta` carries the
+   * raw text + applied rules so the caller can feed the correction learner.
+   */
+  readonly onFinal: (text: string, meta?: DictationMeta) => void;
   readonly onError?: (error: SttError) => void;
   /** Engine override (defaults to the zero-dep Web Speech adapter). */
   readonly adapter?: SttAdapter;
@@ -77,7 +95,15 @@ export function useVoiceDictation(options: UseVoiceDictationOptions) {
     setStatus('transcribing');
     try {
       const finalText = await session.stop();
-      if (finalText.trim()) cbRef.current.onFinal(finalText.trim());
+      const raw = finalText.trim();
+      if (raw) {
+        // Groom: learned corrections first (so prettify sees the right words), then
+        // the deterministic prettify pass. Zero latency, model-free — the council/
+        // model hook point for a deeper groom sits AFTER this baseline.
+        const { text: corrected, applied } = applyProfile(raw, loadProfile());
+        const groomed = prettifyTranscript(corrected);
+        cbRef.current.onFinal(groomed || raw, { raw, applied });
+      }
     } finally {
       setStatus(supported ? 'idle' : 'unsupported');
     }

@@ -48,6 +48,7 @@ import { MicButton } from './chat/MicButton.js';
 import { MicDeviceMenu } from './chat/MicDeviceMenu.js';
 import { useVoiceDictation } from '../hooks/useVoiceDictation.js';
 import { detectCorrections, mishearingPrompt } from '../lib/voice/correction-detection.js';
+import { learnFromEdit, loadProfile, saveProfile, type AppliedReplacement } from '../lib/voice/speech-profile.js';
 import { useComposerActivity } from '../hooks/useComposerActivity.js';
 import { resolveSendTimeWorkIntent } from '../lib/auto-sandbox-intent.js';
 import { extractFilesFromMarkdown } from '../lib/file-extractor.js';
@@ -300,26 +301,45 @@ export function ChatWindow() {
   }, []);
   // Where (if anywhere) the right-click mic device menu is open.
   const [micMenuAt, setMicMenuAt] = useState<{ x: number; y: number } | null>(null);
+  // Speech-profile rules that auto-applied to the last dictation — the self-heal
+  // learner needs them at send time to notice when the user reverts one.
+  const appliedRulesRef = useRef<readonly AppliedReplacement[]>([]);
+  const insertDictated = useCallback((text: string, applied: readonly AppliedReplacement[] = []) => {
+    setInterimTranscript('');
+    appliedRulesRef.current = applied;
+    // Insert at cursor (or append), then remember what we dictated so a later
+    // manual edit can be detected as a correction / mishearing.
+    const ta = textareaRef.current;
+    setInput((prev) => {
+      const start = ta?.selectionStart ?? prev.length;
+      const end = ta?.selectionEnd ?? prev.length;
+      const sep = prev && start === prev.length && !/\s$/.test(prev) ? ' ' : '';
+      const next = prev.slice(0, start) + sep + text + prev.slice(end);
+      dictatedBaselineRef.current = next;
+      return next;
+    });
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [setInput]);
   const dictation = useVoiceDictation({
     disabled: isStreaming,
     deviceId: micDeviceId || undefined,
+    // Under Tauri the Rust-side Win+Alt watcher owns the hold chord globally (it routes
+    // back into the composer when this window is focused) — a second local listener
+    // would double-start the session. The mic button press still works everywhere.
+    holdChord: typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window ? () => false : undefined,
     onInterim: (text) => setInterimTranscript(text),
-    onFinal: (text) => {
-      setInterimTranscript('');
-      // Insert at cursor (or append), then remember what we dictated so a later
-      // manual edit can be detected as a correction / mishearing.
-      const ta = textareaRef.current;
-      setInput((prev) => {
-        const start = ta?.selectionStart ?? prev.length;
-        const end = ta?.selectionEnd ?? prev.length;
-        const sep = prev && start === prev.length && !/\s$/.test(prev) ? ' ' : '';
-        const next = prev.slice(0, start) + sep + text + prev.slice(end);
-        dictatedBaselineRef.current = next;
-        return next;
-      });
-      requestAnimationFrame(() => textareaRef.current?.focus());
-    },
+    onFinal: (text, meta) => insertDictated(text, meta?.applied ?? []),
   });
+  // Global dictation (Win+Alt anywhere) hands the transcript back to the composer when
+  // this window is the focused target.
+  useEffect(() => {
+    const onInsert = (e: Event) => {
+      const detail = (e as CustomEvent<{ text?: string; applied?: readonly AppliedReplacement[] }>).detail;
+      if (detail?.text) insertDictated(detail.text, detail.applied ?? []);
+    };
+    window.addEventListener('vai:dictation-insert', onInsert);
+    return () => window.removeEventListener('vai:dictation-insert', onInsert);
+  }, [insertDictated]);
   // Personal dictionary of corrected terms. Stored locally for now (no server
   // endpoint yet); the seam is here so it can later POST to a /api/dictionary
   // route and feed the improvement loop's grounding signals.
@@ -846,6 +866,18 @@ export function ChatWindow() {
       if (ask && correction.mishearings[0]) {
         setMishearAsk({ prompt: ask, term: correction.mishearings[0].corrected });
       }
+      // Speech-profile learning: every dictate→edit→send cycle teaches the profile.
+      // New substitutions become auto-apply rules after two sightings; editing an
+      // auto-applied correction BACK earns the rule a strike until it retires —
+      // the learner heals itself when it guessed wrong for this user.
+      try {
+        saveProfile(learnFromEdit(loadProfile(), {
+          insertedText: dictatedBaselineRef.current,
+          sentText: text,
+          applied: appliedRulesRef.current,
+        }));
+      } catch { /* learning must never block a send */ }
+      appliedRulesRef.current = [];
       dictatedBaselineRef.current = '';
     }
 
@@ -1380,22 +1412,28 @@ export function ChatWindow() {
           </div>
         )}
 
-        {!hasMessages ? (
-          /* ═══════════ WELCOME STATE ═══════════ */
-          <ChatEmptyState
-            onOpenSettings={() => setActivePanel('settings')}
-            onPrompt={(prompt) => {
-              setInput(prompt);
-              requestAnimationFrame(() => {
-                const ta = textareaRef.current;
-                if (!ta) return;
-                ta.focus();
-                ta.setSelectionRange(prompt.length, prompt.length);
-                adjustTextareaHeight();
-              });
-            }}
-          />
-        ) : (
+        {/* popLayout pops the exiting hero out of flow so the send-morph (node deploys upward,
+            arms snap flat) plays while the thread slides into place beneath it. */}
+        <AnimatePresence mode="popLayout" initial={false}>
+          {!hasMessages && (
+            /* ═══════════ WELCOME STATE ═══════════ */
+            <ChatEmptyState
+              key="chat-empty-state"
+              onOpenSettings={() => setActivePanel('settings')}
+              onPrompt={(prompt) => {
+                setInput(prompt);
+                requestAnimationFrame(() => {
+                  const ta = textareaRef.current;
+                  if (!ta) return;
+                  ta.focus();
+                  ta.setSelectionRange(prompt.length, prompt.length);
+                  adjustTextareaHeight();
+                });
+              }}
+            />
+          )}
+        </AnimatePresence>
+        {hasMessages && (
           /* ═══════════ MESSAGE THREAD ═══════════ */
           /* justify-end makes sparse messages sit at the bottom, above input */
           <div className={`mx-auto flex min-h-full w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100%-2rem))]' : 'max-w-[min(68rem,calc(100%-2rem))]'} flex-col px-4 py-5 md:px-5`}>
