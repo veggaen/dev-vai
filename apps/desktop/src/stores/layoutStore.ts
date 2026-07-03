@@ -72,6 +72,8 @@ interface LayoutState {
   showSecondarySidebar: boolean;
   /** Dedicated right Council Progress panel (Codex-style contextual view for SCIS council) */
   showCouncilPanel: boolean;
+  /** Full-screen knowledge graph overlay — the map of chats/projects and how they relate. */
+  showKnowledgeGraph: boolean;
 
   /** When non-null, settings drawer shrinks so theme edits preview on the canvas. */
   themeEditingBaseId: string | null;
@@ -114,6 +116,7 @@ interface LayoutState {
   toggleSecondarySidebar: () => void;
   /** Toggle the dedicated right Council Progress panel (Codex-style) */
   toggleCouncilPanel: () => void;
+  toggleKnowledgeGraph: () => void;
   setThemeEditingBaseId: (baseId: string | null) => void;
 
   /** Legacy compat — maps to sidebarState !== 'hidden' */
@@ -163,6 +166,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   screenClass: typeof window !== 'undefined' ? detectScreenClass() : 'desktop',
   showSecondarySidebar: false,
   showCouncilPanel: false,
+  showKnowledgeGraph: false,
   themeEditingBaseId: null,
 
   setThemeEditingBaseId: (themeEditingBaseId) => set({ themeEditingBaseId }),
@@ -311,6 +315,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   updateScreenClass: () => set({ screenClass: detectScreenClass() }),
   toggleSecondarySidebar: () => set((s) => ({ showSecondarySidebar: !s.showSecondarySidebar })),
   toggleCouncilPanel: () => set((s) => ({ showCouncilPanel: !s.showCouncilPanel })),
+  toggleKnowledgeGraph: () => set((s) => ({ showKnowledgeGraph: !s.showKnowledgeGraph })),
 }));
 
 /** Mode-specific input placeholders */

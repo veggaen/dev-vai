@@ -16,7 +16,10 @@ import { useVinextStore } from './stores/vinextStore.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useAutoSandbox } from './hooks/useAutoSandbox.js';
 import { VaiOverlaySystem } from './components/VaiOverlaySystem.js';
+import { GlobalDictation } from './components/chat/GlobalDictationOverlay.js';
 import { CursorFocusBox } from './components/CursorFocusBox.js';
+import { TitleBar } from './components/TitleBar.js';
+import { KnowledgeGraphView } from './components/KnowledgeGraphView.js';
 import { SettingsDrawer } from './components/panels/SettingsDrawer.js';
 import { AuthGate } from './components/AuthGate.js';
 import { toast } from 'sonner';
@@ -330,8 +333,17 @@ export function App() {
       {/* Vai AI cursor + overlays — covers entire viewport */}
       <VaiOverlaySystem />
 
+      {/* Win+Alt-anywhere dictation: listening pill, pasted toast, nowhere-to-type modal */}
+      <GlobalDictation />
+
       {/* Cursor focus box — follows mouse, highlights interactive elements */}
       <CursorFocusBox />
+
+      {/* App-owned window chrome — renders only inside the Tauri shell */}
+      <TitleBar />
+
+      {/* Knowledge graph — full-screen map of chats/projects (toggled from the toolbar) */}
+      <KnowledgeGraphView />
 
       {/* Layout mode toggle — rendered inside ChatWindow toolbar */}
 
@@ -349,7 +361,7 @@ export function App() {
           paddingBottom: `calc(var(--layout-margin) + var(--safe-bottom))`,
           paddingLeft: `calc(var(--layout-margin) + var(--safe-left))`,
           paddingRight: `calc(var(--layout-margin) + var(--safe-right))`,
-          height: `calc(100dvh - var(--safe-top) - var(--safe-bottom))`,
+          height: `calc(100dvh - var(--safe-top) - var(--safe-bottom) - var(--titlebar-height, 0px))`,
         }}
       >
         <div aria-hidden className="shell-atmosphere" />
