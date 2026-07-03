@@ -1,0 +1,98 @@
+/* ── ReasoningStory — the narrative lane of the timeline ──────────────────────
+   Attributed conversation feed under the reasoning spine: Vai's work as prose,
+   peers speaking TO Vai, the gate ruling in tone color. Tokens only. */
+
+.reasoning-story {
+  margin-top: 0.5rem;
+  border-top: 1px solid color-mix(in oklab, var(--panel-border-soft) 70%, transparent);
+  padding-top: 0.375rem;
+}
+
+.reasoning-story-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.25rem 0.125rem;
+  font-size: 11px;
+  color: var(--chat-muted);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.reasoning-story-toggle:hover { color: var(--chat-body); }
+
+.reasoning-story-title {
+  font-weight: 500;
+  color: var(--chat-body);
+}
+
+.reasoning-story-count { opacity: 0.65; }
+.reasoning-story[data-live="1"] .reasoning-story-count {
+  color: var(--accent-text);
+  opacity: 1;
+}
+
+.reasoning-story-caret {
+  margin-left: auto;
+  display: inline-block;
+  transition: transform 0.18s var(--ease-out-expo);
+  opacity: 0.55;
+}
+.reasoning-story-caret--open { transform: rotate(90deg); }
+
+.reasoning-story-feed {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  max-height: 15rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  /* Teleprompter fade at the top while scrolled (opacity-only mask, GPU-cheap). */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.2em);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 1.2em);
+}
+
+.reasoning-story-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.2rem 0.125rem;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.reasoning-story-row + .reasoning-story-row {
+  border-top: 1px solid color-mix(in oklab, var(--panel-border-soft) 35%, transparent);
+}
+
+.reasoning-story-speaker {
+  flex-shrink: 0;
+  min-width: 5.5rem;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--chat-muted);
+}
+.reasoning-story-row--vai   > .reasoning-story-speaker { color: color-mix(in oklab, var(--accent-text) 85%, var(--chat-body)); }
+.reasoning-story-row--peer  > .reasoning-story-speaker { color: color-mix(in oklab, var(--phase-route, #a78bfa) 85%, var(--chat-body)); }
+.reasoning-story-row--gate  > .reasoning-story-speaker { color: color-mix(in oklab, var(--phase-verify, #34d399) 85%, var(--chat-body)); }
+.reasoning-story-row--tool  > .reasoning-story-speaker { color: color-mix(in oklab, var(--phase-evidence, #f0ad4e) 85%, var(--chat-body)); }
+
+.reasoning-story-arrow {
+  margin: 0 0.3em;
+  opacity: 0.5;
+}
+
+.reasoning-story-text {
+  color: var(--chat-body);
+  min-width: 0;
+}
+.reasoning-story-tone--good .reasoning-story-text { color: color-mix(in oklab, var(--tone-good) 55%, var(--chat-body)); }
+.reasoning-story-tone--warn .reasoning-story-text { color: color-mix(in oklab, var(--tone-warn) 60%, var(--chat-body)); }
+.reasoning-story-tone--bad  .reasoning-story-text { color: color-mix(in oklab, var(--tone-bad) 60%, var(--chat-body)); }
+.reasoning-story-row--note .reasoning-story-text {
+  color: var(--chat-muted);
+  font-style: italic;
+}

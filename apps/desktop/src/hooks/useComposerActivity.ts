@@ -49,7 +49,11 @@ function useActiveStepElapsed(steps: readonly ChatProgressStep[], isStreaming: b
 export interface ComposerQueueItem {
   id: string;
   shortLabel: string;
-  status: 'running' | 'done';
+  /**
+   * `pending` = the step exists but hasn't been staggered into view yet — rendered dim like a
+   * todo that hasn't started.
+   */
+  status: 'running' | 'done' | 'pending';
 }
 
 /** Headline + compact queue for the composer strip — never duplicates the in-message ProcessTree. */
@@ -72,11 +76,21 @@ export function useComposerActivity(steps: readonly ChatProgressStep[], isStream
   const subActivity = deriveActiveSubActivity(activeStep);
   const activeStage = activeStep?.stage ?? 'reason';
 
-  const queue: ComposerQueueItem[] = visibleSteps.map((step, index) => ({
+  // Full todo-style queue: every known step, with not-yet-revealed ones shown as pending so the
+  // list reads like a task list (done ✓ / active ◉ / pending ○) instead of an append-only log.
+  const queue: ComposerQueueItem[] = steps.map((step, index) => ({
     id: `${step.stage}-${index}`,
     shortLabel: compactStepLabel(step),
-    status: step.status === 'running' ? 'running' : 'done',
+    status:
+      index >= revealedCount
+        ? 'pending'
+        : step.status === 'running'
+          ? 'running'
+          : 'done',
   }));
+
+  const doneCount = queue.filter((q) => q.status === 'done').length;
+  const totalCount = queue.length;
 
   const stepProgress = steps.length > 0
     ? `${Math.min(revealedCount, steps.length)}/${steps.length}`
@@ -87,6 +101,8 @@ export function useComposerActivity(steps: readonly ChatProgressStep[], isStream
     subActivity,
     queue,
     activeStage,
+    doneCount,
+    totalCount,
     stepProgress,
     elapsed: formatElapsed(turnElapsed),
     stepElapsed: formatElapsed(stepElapsed),

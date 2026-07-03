@@ -65,6 +65,18 @@ export function humanizeVerdict(verdict: string | undefined, confidencePct: numb
   }
 }
 
+/** Compact one-word verdict chip — for dense surfaces like the council progress panel. */
+export function shortVerdict(verdict: string | undefined): string {
+  switch ((verdict || '').trim()) {
+    case 'ship': return 'good to send';
+    case 'good': return 'looks solid';
+    case 'needs-work': return 'wants another pass';
+    case 'bad': return 'pushes back';
+    case 'reject': return 'rejects it';
+    default: return verdict?.trim() || 'reviewed';
+  }
+}
+
 /**
  * The spoken line for a council member that is still being consulted.
  * Replaces "Member: … / Topic: … / Status: waiting for response".

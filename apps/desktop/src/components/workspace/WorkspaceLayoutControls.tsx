@@ -14,6 +14,7 @@ import {
   Layers,
   Users,
   Focus,
+  Waypoints,
 } from 'lucide-react';
 import { useLayoutStore } from '../../stores/layoutStore.js';
 import { useShortcutsStore } from '../../stores/shortcutsStore.js';
@@ -69,6 +70,8 @@ export function WorkspaceLayoutControls({
     togglePreviewExpanded,
     showCouncilPanel,
     toggleCouncilPanel,
+    showKnowledgeGraph,
+    toggleKnowledgeGraph,
   } = useLayoutStore();
 
   const shortcut = useShortcutsStore((s) => s.getKeys);
@@ -175,6 +178,17 @@ export function WorkspaceLayoutControls({
         {showLabels && <span>Council</span>}
       </button>
 
+      <button
+        type="button"
+        onClick={toggleKnowledgeGraph}
+        className={chipClass(showKnowledgeGraph, studio)}
+        title={showKnowledgeGraph ? 'Hide knowledge graph' : 'Knowledge graph — map of chats & projects'}
+        aria-pressed={showKnowledgeGraph}
+      >
+        <Waypoints className="h-3.5 w-3.5" />
+        {showLabels && <span>Graph</span>}
+      </button>
+
       {showBuilderPanel && (
         <button
           type="button"
@@ -183,17 +197,4 @@ export function WorkspaceLayoutControls({
           title={tip(previewExpanded ? 'Restore layout' : 'App full width', 'appFullscreen')}
           aria-pressed={previewExpanded}
         >
-          {previewExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-          {showLabels && <span>{previewExpanded ? 'Restore' : 'Full app'}</span>}
-        </button>
-      )}
-
-      {!showBuilderPanel && (
-        <span className="hidden items-center gap-1 text-[10px] text-[color:var(--color-muted)] sm:inline-flex" title="Chat workspace">
-          <MessageSquare className="h-3 w-3 opacity-60" aria-hidden />
-          Chat
-        </span>
-      )}
-    </div>
-  );
-}
+          {previewExpanded ? <Minimize2 className="h

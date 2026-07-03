@@ -8,9 +8,11 @@ const STORAGE_KEY = 'vai-timeline-view';
 export function isTimelineViewEnabled(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    return window.localStorage.getItem(STORAGE_KEY) === '1';
+    // Default ON: the ReasoningFlow timeline is the canonical turn surface. Only an
+    // explicit '0' (Settings → Engine → "Turn process view") falls back to the tree.
+    return window.localStorage.getItem(STORAGE_KEY) !== '0';
   } catch {
-    return false;
+    return true;
   }
 }
 

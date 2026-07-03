@@ -47,7 +47,7 @@ function nodeTone(tone: ProcessTone | undefined): VaiNodeProps['tone'] {
   }
 }
 
-export function ProcessTree({ steps, council, live = false, imageSteps, vaiProposedDraft, durationMs, pendingStepCount: _pendingStepCount = 0 }: ProcessTreeProps) {
+export function ProcessTree({ steps, council, live = false, imageSteps, vaiProposedDraft, durationMs, pendingStepCount = 0 }: ProcessTreeProps) {
   const nodes = buildProcessTree(steps, council ?? undefined, imageSteps, vaiProposedDraft, live, !live);
   const hasNodes = nodes.length > 0;
   const showLiveTail = live;
@@ -133,7 +133,7 @@ export function ProcessTree({ steps, council, live = false, imageSteps, vaiPropo
                 <span className="vai-process-shimmer">Thinking…</span>
               </div>
             )}
-            <TimelineList nodes={nodes} allNodes={nodes} live={treeLive} showLiveTail={showLiveTail} tailLabel={tailLabel} />
+            <TimelineList nodes={nodes} allNodes={nodes} live={treeLive} showLiveTail={showLiveTail} tailLabel={tailLabel} pendingCount={pendingStepCount} />
           </motion.div>
           )
         )}
@@ -159,6 +159,43 @@ function deriveLiveTailLabel(steps: readonly ChatProgressStep[]): string {
   });
 }
 
+/**
+ * Render a step label with `backticked` fragments as quiet monospace tokens — the
+ * Copilot-timeline idiom for exact things (queries, paths, symbols). Plain text
+ * otherwise; no markdown engine needed for one delimiter.
+ */
+function LabelText({ text }: { text: string }) {
+  if (!text.includes('`')) return <>{text}</>;
+  const parts = text.split(/`([^`]+)`/g);
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? <code key={i} className="process-code">{part}</code> : <span key={i}>{part}</span>,
+      )}
+    </>
+  );
+}
+
+/**
+ * Ghost rows for steps the backend has announced but the reveal hasn't shown yet —
+ * content arrives INTO a placeholder instead of pushing layout around. Width varies
+ * per row so the ghosts read organic, not mechanical.
+ */
+function SkeletonRows({ count }: { count: number }) {
+  if (count <= 0) return null;
+  const rows = Math.min(count, 3);
+  return (
+    <>
+      {Array.from({ length: rows }, (_, i) => (
+        <li key={`skel-${i}`} className="process-skel" aria-hidden>
+          <span className="process-skel__dot" />
+          <span className="process-skel__bar" style={{ width: `${46 - i * 9}%`, opacity: 1 - i * 0.28 }} />
+        </li>
+      ))}
+    </>
+  );
+}
+
 function ProcessLiveTail({ label }: { label: string }) {
   const animated = useAnimatedEllipsis(true, label);
   return (
@@ -181,6 +218,7 @@ function TimelineList({
   expandAll = false,
   showLiveTail = false,
   tailLabel = 'Working',
+  pendingCount = 0,
 }: {
   nodes: readonly ProcessNode[];
   allNodes: readonly ProcessNode[];
@@ -188,6 +226,7 @@ function TimelineList({
   expandAll?: boolean;
   showLiveTail?: boolean;
   tailLabel?: string;
+  pendingCount?: number;
 }) {
   // Staggered reveal: when a turn bursts many steps in one tick, play the timeline FORWARD —
   // append rows one read-window at a time instead of dumping all at once — so a fast turn is
@@ -197,6 +236,8 @@ function TimelineList({
   const lastIndex = visibleNodes.length - 1;
   // The live tail keeps pulsing until the whole burst has been revealed.
   const tailVisible = showLiveTail || (live && revealedThrough < nodes.length - 1);
+  // Ghost rows = steps we KNOW are coming (reveal backlog + backend-announced pending).
+  const skeletonCount = live ? (nodes.length - visibleNodes.length) + pendingCount : 0;
   return (
     <ol className="process-tree__timeline space-y-0">
       <AnimatePresence initial={false}>
@@ -214,6 +255,7 @@ function TimelineList({
         ))}
         {tailVisible && <ProcessLiveTail key="live-tail" label={tailLabel} />}
       </AnimatePresence>
+      <SkeletonRows count={skeletonCount} />
     </ol>
   );
 }
@@ -341,7 +383,7 @@ function StepRow({
         <StepGlyph node={node} livePulse={running && live} />
         <span className="min-w-0 flex-1">
           <span className={running ? 'text-[color:var(--chat-strong)] font-medium' : 'text-[color:var(--chat-muted)]'}>
-            {displayLabel}
+            <LabelText text={displayLabel} />
           </span>
         {childCount > 0 && (
             <span className="ml-1.5 text-[10px] text-[color:var(--chat-muted)] opacity-70" title="Expand for in/out details">
@@ -564,44 +606,4 @@ function StepGlyph({ node, small, livePulse = false }: { node: ProcessNode; smal
   }
   return (
     <span className="mt-0.5 flex shrink-0 items-center justify-center" style={{ width: px, height: px }}>
-      <VaiNode state={node.status === 'bad' ? 'error' : 'thinking'} size={small ? 7 : 9} tone={nodeTone(node.tone)} />
-    </span>
-  );
-}
-
-function buildSummaryLine(nodes: readonly ProcessNode[], durationMs?: number): string {
-  const labels = nodes
-    .filter((n) => n.kind !== 'activity-map')
-    .map((n) => n.shortLabel ?? n.label);
-  if (labels.length === 0) return durationMs !== undefined ? `Worked for ${formatMs(durationMs)}` : 'Answered';
-  if (labels.length <= 3) return labels.join(' · ');
-  return `${labels.slice(0, 2).join(' · ')} · +${labels.length - 2} more`;
-}
-
-function formatMs(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
-}
-
-/**
- * Self-ticking elapsed timer (pattern borrowed from t3code's WorkingTimer): updates the
- * span's textContent via a ref on a 1s interval, so a running row's clock advances WITHOUT
- * re-rendering the row (and its children) every tick. Mounts when the row goes running and
- * resets its start each mount.
- */
-function LiveElapsed({ className }: { className?: string }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const startRef = useRef(Date.now());
-  useEffect(() => {
-    startRef.current = Date.now();
-    const tick = () => {
-      if (ref.current) ref.current.textContent = formatMs(Date.now() - startRef.current);
-    };
-    tick();
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, []);
-  return <span ref={ref} className={className}>0ms</span>;
-}
-
-export default ProcessTree;
+      <VaiNode state={node.status

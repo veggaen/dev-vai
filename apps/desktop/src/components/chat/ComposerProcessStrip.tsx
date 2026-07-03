@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { VaiNode, type VaiNodeProps } from '../brand/VaiNode.js';
@@ -22,9 +23,29 @@ function toneForStage(stage: string): VaiNodeProps['tone'] {
 
 const stripEase = [0.25, 0.1, 0.25, 1] as const;
 
+/** Three-state todo glyph: done, active (pulsing ring), pending. */
+function StepGlyph({ status }: { status: 'running' | 'done' | 'pending' }) {
+  if (status === 'done') {
+    return (
+      <span className="composer-step-glyph composer-step-glyph--done" aria-hidden="true">
+        <Check className="h-2 w-2" strokeWidth={3} />
+      </span>
+    );
+  }
+  if (status === 'running') {
+    return (
+      <span className="composer-step-glyph composer-step-glyph--active" aria-hidden="true">
+        <span className="composer-step-glyph__core" />
+      </span>
+    );
+  }
+  return <span className="composer-step-glyph composer-step-glyph--pending" aria-hidden="true" />;
+}
+
 /**
- * VS Code / Cursor-style status strip above the composer.
- * Headline + optional compact queue — never the full nested ProcessTree from the message.
+ * VS Code / Cursor-style todo strip above the composer.
+ * Header carries the live headline + (done/total) count; the drawer lists every step as a
+ * three-state todo (done / active / pending) with the active row highlighted and kept in view.
  */
 export function ComposerProcessStrip({
   activity,
@@ -38,6 +59,14 @@ export function ComposerProcessStrip({
   const isRunning = activity.queue.some((q) => q.status === 'running');
   const headline = useAnimatedEllipsis(isRunning, activity.headline);
   const subActivityAnimated = useAnimatedEllipsis(isRunning && Boolean(activity.subActivity), activity.subActivity ?? '');
+  const activeRowRef = useRef<HTMLLIElement | null>(null);
+  const activeId = activity.queue.find((q) => q.status === 'running')?.id;
+
+  // Keep the active todo visible as the list scrolls past its max height.
+  useEffect(() => {
+    if (!expanded || !activeId) return;
+    activeRowRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [expanded, activeId]);
 
   return (
     <AnimatePresence initial={false}>
@@ -57,6 +86,10 @@ export function ComposerProcessStrip({
             aria-expanded={expanded}
             className="composer-process-strip__bar flex w-full items-center gap-2 px-3 py-2 text-left"
           >
+            <ChevronDown
+              className={`h-3.5 w-3.5 shrink-0 opacity-50 transition-transform duration-200 ${expanded ? '' : '-rotate-90'}`}
+              aria-hidden="true"
+            />
             <VaiNode
               state={isRunning ? 'thinking' : 'done'}
               size={8}
@@ -81,14 +114,14 @@ export function ComposerProcessStrip({
                 </span>
               )}
             </span>
-        <span className="composer-process-strip__meta shrink-0 font-mono text-[10px] tabular-nums opacity-60">
-          {isRunning && activity.stepElapsed && `${activity.stepElapsed} · `}
-          {activity.stepProgress && `${activity.stepProgress} · `}{activity.elapsed}
-        </span>
-            <ChevronDown
-              className={`h-3.5 w-3.5 shrink-0 opacity-50 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
-              aria-hidden="true"
-            />
+            {activity.totalCount > 0 && (
+              <span className="composer-process-strip__count shrink-0 rounded-full px-1.5 py-0.5 font-mono text-[10px] tabular-nums">
+                {activity.doneCount}/{activity.totalCount}
+              </span>
+            )}
+            <span className="composer-process-strip__meta shrink-0 font-mono text-[10px] tabular-nums opacity-60">
+              {isRunning && activity.stepElapsed && `${activity.stepElapsed} · `}{activity.elapsed}
+            </span>
           </button>
 
           <motion.div
@@ -100,15 +133,23 @@ export function ComposerProcessStrip({
             }}
             transition={{ duration: 0.2, ease: stripEase }}
           >
-            <ol className="composer-activity-queue px-3 py-2" aria-label="Activity queue">
+            <ol className="composer-activity-queue px-2 py-1.5" aria-label="Turn steps">
               {activity.queue.map((item) => (
-                <li key={item.id} className="composer-activity-queue__item flex items-center gap-2 py-0.5 font-mono text-[10px]">
-                  {item.status === 'done' ? (
-                    <Check className="h-3 w-3 shrink-0 text-[color:var(--phase-verify)] opacity-80" aria-hidden="true" />
-                  ) : (
-                    <VaiNode state="thinking" size={6} tone={toneForStage(activity.activeStage)} />
-                  )}
-                  <span className={`truncate ${item.status === 'running' ? 'text-[color:var(--chat-strong)]' : 'text-[color:var(--chat-muted)]'}`}>
+                <li
+                  key={item.id}
+                  ref={item.status === 'running' ? activeRowRef : undefined}
+                  className={`composer-activity-queue__item flex items-center gap-2 rounded-md px-1.5 py-1 font-mono text-[10px] ${
+                    item.status === 'running' ? 'composer-activity-queue__item--active' : ''
+                  } ${item.status === 'pending' ? 'composer-activity-queue__item--pending' : ''}`}
+                >
+                  <StepGlyph status={item.status} />
+                  <span
+                    className={`truncate ${
+                      item.status === 'running'
+                        ? 'text-[color:var(--chat-strong)]'
+                        : 'text-[color:var(--chat-muted)]'
+                    }`}
+                  >
                     {item.shortLabel}
                   </span>
                 </li>

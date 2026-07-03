@@ -731,7 +731,7 @@ export function SettingsPanel() {
 
           <SettingsSection
             title="Turn process view"
-            description="How each turn's work is shown in chat. Timeline groups it into phases, deliberation rounds, approval gates, and a lane of notes for improving Vai."
+            description="How each turn's work is shown in chat. The reasoning flow lays every Vai and council process out on a zoomable spine — phases, deliberation rounds, approval gates, and a ledger of notes for improving Vai."
           >
             <SettingsCard>
               <SettingsSwitch
@@ -739,11 +739,11 @@ export function SettingsPanel() {
                 onChange={(on) => {
                   setTimelineViewEnabled(on);
                   setTimelineViewState(on);
-                  toast.success(on ? 'Timeline view on' : 'Classic process tree');
+                  toast.success(on ? 'Reasoning flow on' : 'Classic process tree');
                 }}
-                label="Loop-aware timeline"
+                label="Reasoning flow"
                 description={timelineView
-                  ? 'Showing phases, rounds, gates, and the self-improvement notes lane.'
+                  ? 'Showing the spatial reasoning constellation — drag to pan, ctrl+wheel to zoom, click a node for detail.'
                   : 'Showing the classic top-down process tree.'}
               />
             </SettingsCard>
@@ -870,10 +870,4 @@ export function SettingsPanel() {
               label="Show owner tools"
               description={ownerFeaturesHidden ? 'Currently showing user experience' : 'Engine, workflow, and admin sections visible'}
             />
-          </SettingsCard>
-        </SettingsSection>
-      )}
-    </SettingsShell>
-    </div>
-  );
-}
+          </Se

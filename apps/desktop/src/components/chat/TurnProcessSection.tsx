@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatProgressStep, CouncilThinkingUI } from '../../stores/chatStore.js';
 import { useProcessStepReveal } from '../../hooks/useProcessStepReveal.js';
 import { ProcessTree } from './ProcessTree.js';
-import { Timeline } from './Timeline.js';
+import { ReasoningFlow } from './ReasoningFlow.js';
 import { isTimelineViewEnabled } from '../../lib/timeline-flag.js';
 
 export interface TurnProcessSectionProps {
@@ -38,18 +38,31 @@ export function TurnProcessSection({
   );
   const pendingStepCount = live ? Math.max(0, steps.length - revealedCount) : 0;
   const timelineView = useTimelineView();
+  // ReasoningFlow settles like the ProcessTree: a live turn shows the full flow; once it settles
+  // it collapses to the one-line headline, and the user re-opens it on intent. Their manual choice
+  // sticks for the life of the message (no surprise re-collapse on re-render).
+  const [flowCollapsed, setFlowCollapsed] = useState(!live);
+  const wasLiveRef = useRef(live);
+  useEffect(() => {
+    if (wasLiveRef.current === live) return;
+    wasLiveRef.current = live;
+    setFlowCollapsed(!live);
+  }, [live]);
 
   if (!isStreaming && steps.length === 0) return null;
 
-  // Loop-aware Timeline (behind a flag) renders the same flat steps as phases/rounds/gates. Falls
-  // back to the classic ProcessTree when the flag is off — fully additive, nothing else changes.
+  // Reasoning flow (behind the timeline flag) renders the same flat steps as a spatial
+  // constellation — phases, rounds, gates, and the self-improvement ledger. Falls back to the
+  // classic ProcessTree when the flag is off — fully additive, nothing else changes.
   if (timelineView) {
     return (
-      <Timeline
+      <ReasoningFlow
         live={live}
         steps={visibleSteps}
         council={council}
         durationMs={durationMs}
+        collapsed={!live && flowCollapsed}
+        onToggleCollapsed={live ? undefined : (next) => setFlowCollapsed(next)}
       />
     );
   }
@@ -59,27 +72,4 @@ export function TurnProcessSection({
       live={live}
       steps={visibleSteps}
       council={council}
-      imageSteps={imageSteps}
-      vaiProposedDraft={vaiProposedDraft}
-      durationMs={durationMs}
-      pendingStepCount={pendingStepCount}
-    />
-  );
-}
-
-/** Subscribe to the Timeline-view flag (same-tab + cross-tab changes). */
-function useTimelineView(): boolean {
-  const [enabled, setEnabled] = useState(isTimelineViewEnabled);
-  useEffect(() => {
-    const update = () => setEnabled(isTimelineViewEnabled());
-    window.addEventListener('vai-timeline-view-change', update);
-    window.addEventListener('storage', update);
-    return () => {
-      window.removeEventListener('vai-timeline-view-change', update);
-      window.removeEventListener('storage', update);
-    };
-  }, []);
-  return enabled;
-}
-
-export default TurnProcessSection;
+      imageSteps={imageSt

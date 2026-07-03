@@ -13,6 +13,7 @@ import { apiFetch } from '../lib/api.js';
 import { getSidebarNavItem, getSidebarPanelTitle } from '../lib/sidebar-nav.js';
 import { toast } from 'sonner';
 import { SidebarPanelHeader } from './sidebar/SidebarPrimitives.js';
+import { useChatMergeDrag } from './sidebar/ChatMergeDrag.js';
 
 const SessionList = lazy(async () => ({ default: (await import('./SessionList.js')).SessionList }));
 const DockerPanel = lazy(async () => ({ default: (await import('./DockerPanel.js')).DockerPanel }));
@@ -395,6 +396,10 @@ function ChatsPanel() {
     });
   };
 
+  // Hold-to-combine: press a chat 250ms → glowing ghost → drop on another chat/project
+  // → confirm → Vai + council merge both into a new project. Quick drags still reorder.
+  const merge = useChatMergeDrag(conversations);
+
   return (
     <nav className="flex flex-col" aria-label="Conversations">
       <div className="flex-shrink-0 px-3 pb-2 pt-2">
@@ -461,8 +466,11 @@ function ChatsPanel() {
               return (
               <div
                 key={conv.id}
-                draggable
+                data-conv-id={conv.id}
+                draggable={!merge.isMergeDragging}
+                onPointerDown={(event) => merge.onRowPointerDown(conv.id, event)}
                 onDragStart={(event) => {
+                  if (merge.isMergeDragging) { event.preventDefault(); return; }
                   event.dataTransfer.effectAllowed = 'move';
                   event.dataTransfer.setData('text/plain', conv.id);
                   setDraggedConversationId(conv.id);
@@ -508,10 +516,11 @@ function ChatsPanel() {
                   : isLight
                     ? 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
                     : 'text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200'
-                  } ${dragOverConversationId === conv.id ? 'bg-[color:var(--accent-soft)]' : ''}`}
+                  } ${dragOverConversationId === conv.id ? 'bg-[color:var(--accent-soft)]' : ''} ${merge.mergeTargetId === conv.id ? 'vai-merge-target' : ''} ${merge.mergeSourceId === conv.id ? 'vai-merge-source' : ''}`}
                 title={conv.title}
                 onClick={() => {
                   if (Date.now() < suppressSelectUntilRef.current) return;
+                  if (Date.now() < merge.blockClicksUntil.current) return;
                   void selectConversation(conv.id);
                 }}
                 onContextMenu={(e) => {
@@ -685,6 +694,8 @@ function ChatsPanel() {
           </div>
         );
       })()}
+      {merge.overlay}
+      {merge.dialog}
     </nav>
   );
 }
@@ -986,30 +997,4 @@ function CouncilSidebarView() {
               ? 'border-[color:var(--accent-ring)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]'
               : 'border-[color:var(--border)] text-zinc-500 hover:bg-white/5 hover:text-zinc-300'
           }`}
-          aria-pressed={showCouncilPanel}
-        >
-          {showCouncilPanel ? 'Right panel on' : 'Show right panel'}
-        </button>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-[color:var(--border)] bg-[color:var(--panel)]/30">
-        <CouncilProgressPanel
-          council={council}
-          isOpen
-          onClose={returnToChat}
-          onApplyLesson={() => {
-            toast.success('Lesson queued for the next review');
-            returnToChat();
-          }}
-          onReconvene={() => {
-            toast('Requesting fresh council review…');
-            returnToChat();
-          }}
-          onDesignMode={returnToChat}
-          onExportVisualPlan={returnToChat}
-        />
-      </div>
-    </div>
-  );
-}
-
+          aria-pressed={showCounc

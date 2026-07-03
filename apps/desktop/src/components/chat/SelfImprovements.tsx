@@ -80,7 +80,7 @@ export function SelfImprovements({ pollMs = 0, load = defaultLoad }: SelfImprove
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[color:var(--chat-muted)] transition-colors thinking-hover hover:text-[color:var(--chat-body)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
+        className="group self-improve__summary flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[color:var(--chat-muted)] hover:text-[color:var(--chat-body)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
       >
         <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
         <VaiNode state="done" size={9} tone="verify" />
@@ -189,3 +189,4 @@ function Meta({ term, value, mono = false }: { term: string; value: string; mono
 }
 
 export default SelfImprovements;
+           
