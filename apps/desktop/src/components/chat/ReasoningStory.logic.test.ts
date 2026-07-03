@@ -116,3 +116,29 @@ describe('buildStoryLines', () => {
     expect(noteLine?.text.endsWith('…')).toBe(true);
   });
 });
+
+describe('story truthfulness (screenshot review fixes)', () => {
+  it('a skipped council is a quiet system fact, never Vai speech', () => {
+    const lines = buildStoryLines([phase({ id: 'c1', title: 'Council could not convene', phase: 'deliberate' })]);
+    expect(lines[0]).toMatchObject({ speaker: 'Council', role: 'gate', tone: 'neutral' });
+    expect(lines[0].text).toContain('skipped');
+  });
+
+  it('compose phases never echo the answer text into the story', () => {
+    const lines = buildStoryLines([
+      phase({ id: 'd1', title: 'Vai drafts', summary: 'Hey - what do you want me to tackle?', phase: 'compose' }),
+    ]);
+    expect(lines[0].text).toBe('Drafted the answer');
+  });
+
+  it('a bare title above self-explanatory child lines is suppressed', () => {
+    const p = phase({
+      id: 'p1', title: 'Local model friend continued in the background',
+      nodes: [node({ id: 'r', label: 'root', children: [node({ id: 'm', label: 'qwen2.5:3b', kind: 'submodel', note: 'qwen2.5:3b is steering quietly in the background.' })] })],
+    });
+    const lines = buildStoryLines([p]);
+    expect(lines).toHaveLength(1); // only the peer line — no title-as-speech
+    expect(lines[0]).toMatchObject({ speaker: 'qwen2.5:3b', role: 'peer' });
+    expect(lines[0].text).toContain('steering quietly');
+  });
+});

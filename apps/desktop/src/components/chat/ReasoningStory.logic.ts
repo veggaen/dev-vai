@@ -160,6 +160,7 @@ export function buildStoryLines(
   for (const phase of phases) {
     const running = phase.status === 'running';
     const summary = phase.summary && phase.summary !== phase.title ? phase.summary : '';
+    const children = nodeLines(phase, council ?? undefined);
 
     if (phase.gate) {
       out.push({
@@ -175,7 +176,29 @@ export function buildStoryLines(
         ),
         live: running,
       });
-    } else {
+    } else if (/council (?:could not|couldn't|didn't) convene|council skipped/i.test(`${phase.title} ${summary}`)) {
+      // A skipped council is a quiet system fact, never "Vai said…".
+      out.push({
+        id: `${phase.id}:head`,
+        speaker: 'Council',
+        role: 'gate',
+        tone: 'neutral',
+        text: 'skipped — nothing needed review this turn',
+        live: running,
+      });
+    } else if (phase.phase === 'compose' || phase.phase === 'redraft') {
+      // Never echo the answer's own words back into the story — the reply is right below.
+      out.push({
+        id: `${phase.id}:head`,
+        speaker: 'Vai',
+        role: 'vai',
+        tone: phase.status === 'bad' ? 'bad' : 'neutral',
+        text: phase.phase === 'redraft' ? 'Revised the draft' : running ? 'Drafting the answer…' : 'Drafted the answer',
+        live: running,
+      });
+    } else if (summary || children.length === 0) {
+      // A bare title above lines that already speak for themselves is noise — the head
+      // line earns its place only when it carries a real summary (or stands alone).
       out.push({
         id: `${phase.id}:head`,
         speaker: 'Vai',
@@ -186,7 +209,7 @@ export function buildStoryLines(
       });
     }
 
-    out.push(...nodeLines(phase, council ?? undefined));
+    out.push(...children);
   }
 
   // Keep the DOM bounded on very long turns: latest lines win (the transcript

@@ -103,13 +103,17 @@ function useSpineViewport(count: number, reduce: boolean) {
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (reduce || e.button !== 0) return;
+    // Nothing to pan when the whole spine already fits — a grab that moves nothing
+    // reads as a bug, so don't start one.
+    const frame = frameRef.current?.clientWidth ?? 0;
+    if (contentWidth * vpRef.current.scale <= frame + 4) return;
     // Never swallow node or minimap interactions with pointer capture.
     const t = e.target as HTMLElement;
     if (t.closest('.reasoning-node, .reasoning-minimap, .reasoning-fit')) return;
     drag.current = { startX: e.clientX, startPan: vpRef.current.panX };
     setDragging(true);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }, [reduce]);
+  }, [reduce, contentWidth]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!drag.current) return;
@@ -160,9 +164,11 @@ function useSpineViewport(count: number, reduce: boolean) {
   }, [apply]);
 
   const atFit = isAtFit(vp, count, frameW);
+  // The spine overflows the frame → panning is meaningful (drives the grab cursor).
+  const pannable = contentWidth * vp.scale > frameW + 4;
 
   return {
-    vp, frameW, contentWidth, frameRef, dragging, smooth, atFit,
+    vp, frameW, contentWidth, frameRef, dragging, smooth, atFit, pannable,
     onPointerDown, onPointerMove, endDrag, onDoubleClick, onKeyDown,
     fit, jumpToNode, scrubTo, zoomFromMinimap,
   };
@@ -318,7 +324,7 @@ export function ReasoningFlow({ steps, council, live = false, durationMs, collap
           zoom). Minimap reveals on hover/zoom and scrubs. Reduced-motion degrades to a static,
           natively scrollable rail. */}
       <div
-        className={`reasoning-spine-frame ${view.dragging ? 'reasoning-spine-frame--dragging' : ''} reasoning-tier-${tier}`}
+        className={`reasoning-spine-frame ${view.dragging ? 'reasoning-spine-frame--dragging' : ''} ${view.pannable ? '' : 'reasoning-spine-frame--fits'} reasoning-tier-${tier}`}
         data-tier={tier}
         data-reduce={reduce ? '1' : '0'}
         ref={view.frameRef}
@@ -645,7 +651,11 @@ function NodeBody({ node, depth = 0, live }: { node: ProcessNode; depth?: number
                 aria-hidden="true"
               />
               <span className="reasoning-subrow-label">{child.label}</span>
-              {child.detail && <span className="reasoning-subrow-detail">{child.detail}</span>}
+              {/* Machine kind-tags (thought/action/artifact/…) are dead words for a reader —
+                  only surface details that carry real information. */}
+              {child.detail && !/^(thought|action|artifact|event|reasoning|background|verdict)$/i.test(child.detail.trim()) && (
+                <span className="reasoning-subrow-detail">{child.detail}</span>
+              )}
             </div>
             {soleLeaf ? (
               <div className="reasoning-body-indent">
