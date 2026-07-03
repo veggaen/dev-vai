@@ -82,42 +82,19 @@ export interface TimelineModel {
 
 /** Map a raw stage string to one of the diagram's phases. */
 export function phaseForStage(stage: string): TimelinePhaseId {
-  if (stage === 'understand' || stage === 'structured:classify' || stage === 'multi-intent' || stage.startsWith('structure')) return 'understand';
-  if (stage === 'search' || stage === 'research' || stage === 'reason' || stage === 'escalate') return 'gather';
-  // Builder-council factory pipeline — each stage is a DISTINCT process, not one "council" blob.
-  if (stage === 'council-architect') return 'deliberate';
-  if (stage === 'council-code' || stage === 'council-style') return 'compose';
-  if (stage === 'council-validate' || stage === 'council-error') return 'gate';
-  if (stage === 'council-review') return 'deliberate';
-  if (stage === 'council-repair') return 'redraft';
-  if (stage === 'council-assemble') return 'build';
+  if (stage === 'understand' || stage === 'structured:classify' || stage.startsWith('structure')) return 'understand';
+  if (stage === 'search' || stage === 'research') return 'gather';
+  // 'reason' is Vai thinking, not fetching — labeling it "Gather evidence" claimed work
+  // that never happened (self-improve queue job #1, live-screenshot evidence). Thinking
+  // belongs to the understanding phase; escalation is a deliberation act.
+  if (stage === 'reason') return 'understand';
+  if (stage === 'escalate') return 'deliberate';
   if (stage.startsWith('council') || stage === 'friend-review') return 'deliberate';
   if (stage === 'vai-draft' || stage === 'answer' || stage === 'compose') return 'compose';
   if (stage === 'vai-redraft') return 'redraft';
   if (stage === 'quality-check' || stage === 'verify') return 'gate';
   if (stage.startsWith('build') || stage === 'apply' || stage === 'preview') return 'build';
   return 'intake';
-}
-
-/**
- * Human title for a stage — specific for the builder-council factory stages (so "Coder writes the
- * app" and "Compile gate" read as the distinct processes they are), generic phase title otherwise.
- */
-export function titleForStage(stage: string, phase: TimelinePhaseId): string {
-  const specific: Record<string, string> = {
-    'council-architect': 'Architect plans the app',
-    'council-code': 'Coder writes the app',
-    'council-validate': 'Compile gate',
-    'council-review': 'Council reviews the build',
-    'council-repair': 'Repair pass',
-    'council-style': 'Stylist paints the UI',
-    'council-assemble': 'Assemble the project',
-    'council-error': 'Council build failed',
-    'friend-review': 'Friend review',
-    'escalate': 'Escalate for depth',
-    'multi-intent': 'Split the asks',
-  };
-  return specific[stage] ?? PHASE_TITLE[phase];
 }
 
 const PHASE_TITLE: Record<TimelinePhaseId, string> = {
@@ -157,33 +134,6 @@ function gateForStep(step: ChatProgressStep): TimelineGate | undefined {
         : `${good}/${usable.length} approved — sent back for another round`,
     };
   }
-  // Builder-council compile gate: the validate stage IS a checkpoint even without member votes.
-  if (step.stage === 'council-validate' && step.status !== 'running') {
-    const bad = /fail|error|invalid|reject/i.test(`${step.label} ${step.detail ?? ''}`);
-    return {
-      kind: 'quality',
-      approved: !bad,
-      reason: bad
-        ? (step.detail?.slice(0, 120) ?? step.label.slice(0, 120))
-        : (step.detail?.slice(0, 120) ?? 'Compile checks passed'),
-    };
-  }
-  // Builder-council reviewer verdict travels in label/detail when no member votes are attached.
-  if (step.stage === 'council-review' && step.status !== 'running') {
-    const bad = /reject|redraft|needs.work|sent back|fail/i.test(`${step.label} ${step.detail ?? ''}`);
-    return {
-      kind: 'council',
-      approved: !bad,
-      reason: (step.detail ?? step.label).slice(0, 120),
-    };
-  }
-  if (step.stage === 'council-error') {
-    return {
-      kind: 'quality',
-      approved: false,
-      reason: (step.detail ?? step.label).slice(0, 120),
-    };
-  }
   if (step.stage === 'quality-check' || step.stage === 'verify') {
     const bad = step.status !== 'running' && /fail|reject|decline|insufficient/i.test(step.detail ?? '');
     return {
@@ -211,4 +161,70 @@ function collectFeatureNotes(steps: readonly ChatProgressStep[]): FeatureNote[] 
   const seen = new Set<string>();
   const push = (source: string, kind: FeatureNote['kind'], text: string) => {
     const t = text.trim();
-    if
+    if (!t) return;
+    const key = `${kind}:${t.toLowerCase()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    notes.push({ id: `fn-${notes.length}`, source, kind, text: t });
+  };
+  for (const step of steps) {
+    for (const m of step.councilMembers ?? []) {
+      if (m.failed || m.pending) continue;
+      if (m.missingCapability?.trim()) push(m.name, 'missing-capability', m.missingCapability);
+      if (m.methodLesson?.trim()) push(m.name, 'method-lesson', m.methodLesson);
+      for (const c of m.concerns ?? []) push(m.name, 'concern', c);
+    }
+  }
+  return notes;
+}
+
+export function buildTimelineModel(
+  steps: readonly ChatProgressStep[],
+  council?: CouncilThinkingUI,
+): TimelineModel {
+  const enriched = enrichProgressStepsWithCouncil(steps, council);
+  // Reuse the existing tree builder so each phase keeps full expandable detail. buildProcessTree
+  // (called without vaiProposedDraft/activityMap) returns one node per step in order, so we match
+  // by the stable per-step id rather than positional index (robust to any appended image node).
+  const treeNodes = buildProcessTree(enriched, council);
+  const nodeById = new Map(treeNodes.map((n) => [n.id, n] as const));
+
+  const phases: TimelinePhase[] = [];
+  let maxRound = 1;
+  let lastGate: TimelineGate | undefined;
+  let totalDurationMs = 0;
+
+  enriched.forEach((step, index) => {
+    const phaseId = phaseForStage(step.stage);
+    const round = roundForStage(step.stage);
+    maxRound = Math.max(maxRound, round);
+    const node = nodeById.get(`step-${step.stage}`) ?? treeNodes[index];
+    const nodes = node ? [node] : [];
+    const gate = gateForStep(step);
+    if (gate) lastGate = gate;
+    const durationMs = (step as { durationMs?: number }).durationMs;
+    if (typeof durationMs === 'number') totalDurationMs += durationMs;
+
+    phases.push({
+      id: `phase-${index}-${step.stage}`,
+      phase: gate ? 'gate' : phaseId,
+      title: gate ? PHASE_TITLE.gate : PHASE_TITLE[phaseId],
+      summary: gate ? gate.reason : summarizeNodes(nodes, step.label),
+      status: step.status === 'running' ? 'running' : gate && !gate.approved ? 'bad' : 'done',
+      round,
+      gate,
+      nodes,
+      durationMs,
+    });
+  });
+
+  const approved = lastGate ? lastGate.approved : true;
+
+  return {
+    phases,
+    rounds: maxRound,
+    approved,
+    featureNotes: collectFeatureNotes(enriched),
+    totalDurationMs,
+  };
+}

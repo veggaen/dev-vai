@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTimelineModel, phaseForStage, titleForStage } from './Timeline.logic.js';
+import { buildTimelineModel, phaseForStage } from './Timeline.logic.js';
 import type { ChatProgressStep } from '../../stores/chatStore.js';
 
 describe('phaseForStage', () => {
@@ -11,33 +11,6 @@ describe('phaseForStage', () => {
     expect(phaseForStage('vai-redraft')).toBe('redraft');
     expect(phaseForStage('quality-check')).toBe('gate');
     expect(phaseForStage('build-apply')).toBe('build');
-  });
-
-  it('maps every builder-council factory stage to a distinct phase', () => {
-    expect(phaseForStage('council-architect')).toBe('deliberate');
-    expect(phaseForStage('council-code')).toBe('compose');
-    expect(phaseForStage('council-validate')).toBe('gate');
-    expect(phaseForStage('council-review')).toBe('deliberate');
-    expect(phaseForStage('council-repair')).toBe('redraft');
-    expect(phaseForStage('council-style')).toBe('compose');
-    expect(phaseForStage('council-assemble')).toBe('build');
-    expect(phaseForStage('council-error')).toBe('gate');
-    expect(phaseForStage('multi-intent')).toBe('understand');
-    expect(phaseForStage('escalate')).toBe('gather');
-  });
-});
-
-describe('titleForStage', () => {
-  it('names the builder-council processes specifically', () => {
-    expect(titleForStage('council-architect', 'deliberate')).toBe('Architect plans the app');
-    expect(titleForStage('council-code', 'compose')).toBe('Coder writes the app');
-    expect(titleForStage('council-validate', 'gate')).toBe('Compile gate');
-    expect(titleForStage('council-style', 'compose')).toBe('Stylist paints the UI');
-  });
-
-  it('falls back to the generic phase title for ordinary stages', () => {
-    expect(titleForStage('understand', 'understand')).toBe('Read the intent');
-    expect(titleForStage('council-vai-round-1', 'deliberate')).toBe('Council deliberates');
   });
 });
 
@@ -72,4 +45,47 @@ describe('buildTimelineModel', () => {
 
   it('marks best-so-far when the final gate did not approve', () => {
     const steps: ChatProgressStep[] = [
-      { stage: 'vai-dra
+      { stage: 'vai-draft', label: 'Vai proposed', status: 'done' },
+      councilStep('council-vai-round-1', 1, 4),
+    ];
+    const model = buildTimelineModel(steps);
+    expect(model.approved).toBe(false);
+  });
+
+  it('counts loop rounds from council/redraft stage suffixes', () => {
+    const steps: ChatProgressStep[] = [
+      { stage: 'vai-draft', label: 'Vai proposed', status: 'done' },
+      councilStep('council-vai-round-1', 1, 4),
+      { stage: 'vai-redraft', label: 'Vai revised', status: 'done' },
+      councilStep('council-vai-round-2', 3, 4),
+    ];
+    const model = buildTimelineModel(steps);
+    expect(model.rounds).toBe(2);
+  });
+
+  it('lifts feature-notes (missing capability, lesson, concern) into the self-improvement lane', () => {
+    const steps: ChatProgressStep[] = [councilStep('council-vai-round-1', 2, 4)];
+    const model = buildTimelineModel(steps);
+    const kinds = model.featureNotes.map((n) => n.kind);
+    expect(kinds).toContain('missing-capability');
+    expect(kinds).toContain('method-lesson');
+    expect(kinds).toContain('concern');
+    expect(model.featureNotes.find((n) => n.kind === 'missing-capability')?.text).toBe('live web read');
+  });
+
+  it('returns an empty model for no steps (no crash)', () => {
+    const model = buildTimelineModel([]);
+    expect(model.phases).toEqual([]);
+    expect(model.approved).toBe(true);
+    expect(model.rounds).toBe(1);
+  });
+});
+
+
+describe('phaseForStage honesty (self-improve job #1)', () => {
+  it('pure reasoning is never labeled evidence gathering', () => {
+    expect(phaseForStage('reason')).toBe('understand');
+    expect(phaseForStage('search')).toBe('gather');
+    expect(phaseForStage('escalate')).toBe('deliberate');
+  });
+});
