@@ -1219,10 +1219,22 @@ function tryCasualCheer(content: string): FactShimResult | null {
  * engineering asks like "design a repo-native prediction engine". The self-reference is required.
  */
 function asksAboutVaiEngine(lower: string): boolean {
-  const selfRef = /\b(?:vai'?s?|your|yourself|you)\b/.test(lower);
+  const explicitHowVaiWorks = /\b(?:how (?:does\s+)?(?:you|it|vai) (?:work|run|operate)|how (?:are|were) you (?:built|made))\b/.test(lower);
+  const strongSelfRef = /\b(?:vai'?s?|your|yourself)\b/.test(lower);
+  const selfRef = strongSelfRef || explicitHowVaiWorks;
   if (!selfRef) return false;
   // A clear build/design task is never a question about Vai's engine, even if it says "your".
   if (/\b(?:design|build|create|make|implement|scaffold|architect)\b/.test(lower)) return false;
+
+  // Product/delivery architecture prompts often mention "you" or "Vai" while
+  // asking for advice about the user's app. Those should flow to the product
+  // architecture / expert-judgement routes, not the Vai-self-knowledge card.
+  const productArchitectureContext =
+    /\b(?:right architecture|architecture for|product where|users?\s+chat|generated apps?|auth(?:enticate|entication)?|teams?|sandbox(?:es)?|launch generated)\b/.test(lower)
+    && !/\b(?:your|vai'?s)\s+(?:own\s+)?(?:engine|architecture|internals?|tech stack)\b/.test(lower)
+    && !explicitHowVaiWorks;
+  if (productArchitectureContext) return false;
+
   const aboutEngine = /\b(?:engine|architecture|how (?:does\s+)?(?:you|it|vai)\s+(?:work|run|operate)|internals?|under the hood|how (?:are|were) you (?:built|made)|tech stack)\b/.test(lower);
   return aboutEngine;
 }
