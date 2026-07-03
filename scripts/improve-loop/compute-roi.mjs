@@ -19,17 +19,18 @@
  * the operator surfaces the verdict, the loop can act on the recommendation.
  */
 import { seriesSlope, classifyTrend } from './motion.mjs';
+import { LOOP_DEFAULTS } from './loop-config.mjs';
 
 /** A proposal at/above this impact is "qualified" — worth a human's scarce review time. */
-export const QUALITY_BAR = 7;
+export const QUALITY_BAR = LOOP_DEFAULTS.qualityBar;
 /** Below this many rounds we don't trust a trend (cold-start edge case). */
 export const MIN_ROUNDS = 3;
 /** Compute spent with ZERO shipped value beyond this ⇒ a hard waste signal. */
 export const WASTE_COMPUTE_FLOOR = 12;
 /** Sustained realized benefit-per-compute below this is "low" (plateau-low, not plateau-high). */
-export const ROI_FLOOR = 0.05;
+export const ROI_FLOOR = LOOP_DEFAULTS.roiFloor;
 /** Flat-band epsilon for the ROI slope (per round). */
-export const ROI_EPS = 0.01;
+export const ROI_EPS = LOOP_DEFAULTS.roiEps;
 
 const round2 = (n) => Math.round(n * 100) / 100;
 const num = (x) => Math.max(0, Number(x ?? 0));

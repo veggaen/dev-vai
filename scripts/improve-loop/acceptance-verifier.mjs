@@ -13,15 +13,16 @@
  * prompts SERIALLY (one heavy GPU task at a time — the BSOD rule) when given the live path.
  */
 import { failingRowsForClass, passingRowsForClass } from './db.mjs';
+import { LOOP_DEFAULTS } from './loop-config.mjs';
 
 /** Fraction of targeted failures that must recover for a FULLY-accepted verdict. */
-export const ACCEPT_RATE = 0.8;
+export const ACCEPT_RATE = LOOP_DEFAULTS.acceptRate;
 /** Minimum fraction of failures a fix must recover to count as NET IMPROVEMENT (kept, built on).
  *  The loop was reverting every fix that didn't reach 80% — so a fix recovering 2/5 real failures
  *  (genuine progress) was thrown away and nothing ever accumulated. A net-positive change that
  *  breaks NOTHING should be kept; perfection isn't required for progress. The regression guard
  *  (below) is what makes this safe — we keep improvements, never regressions. */
-export const IMPROVE_RATE = 0.25;
+export const IMPROVE_RATE = LOOP_DEFAULTS.improveRate;
 
 const round2 = (n) => Math.round(n * 100) / 100;
 

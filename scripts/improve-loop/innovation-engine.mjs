@@ -17,6 +17,7 @@
  */
 import { analyzeMotion } from './motion.mjs';
 import { speculate } from './speculator.mjs';
+import { LOOP_DEFAULTS } from './loop-config.mjs';
 import {
   campaignTrend,
   answerExcellenceTrend,
@@ -49,7 +50,7 @@ export const ADOPT_THRESHOLD_EXCELLENCE = 0.2;
  * (which, once the noise is filtered, is actually REGRESSING). A run needs a real sample
  * before its rate is signal, not noise. 8 ≈ one prompt per seed class.
  */
-export const MIN_MOTION_SAMPLE = 8;
+export const MIN_MOTION_SAMPLE = LOOP_DEFAULTS.minMotionSample;
 
 /** Start a new experiment. Returns the experiment id. */
 export function startExperiment(db, { type, hypothesis, config, baselineScore }) {
@@ -223,7 +224,7 @@ export function suggestExperiment(scorecard) {
  * rotate while still giving each idea a few cycles of rest before a retry. (The generated-
  * candidate fallback is the real INFINITE source; this just keeps the base pool alive.)
  */
-export const RETRY_COOLDOWN = 3;
+export const RETRY_COOLDOWN = LOOP_DEFAULTS.retryCooldown;
 
 /**
  * Anti-repetition WITH cooldown re-eligibility. A perpetual loop's worst meta-failure is

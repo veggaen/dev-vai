@@ -1,6 +1,8 @@
+import { LOOP_DEFAULTS } from './loop-config.mjs';
+
 export const DEFAULT_DB = 'scripts/improve-loop/.corpus.sqlite';
 export const DEFAULT_BASE_URL = 'http://localhost:3006';
-export const DEFAULT_WATCH_PORT = '4123';
+export const DEFAULT_WATCH_PORT = String(LOOP_DEFAULTS.watchPort);
 
 /** The wall-clock budget guard, as a single pure function so run.mjs and its test exercise the SAME
  *  logic (CodeRabbit #25: the test had reimplemented it inline). A maxRunMs of 0 disables the guard. */

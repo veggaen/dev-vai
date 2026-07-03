@@ -23,9 +23,11 @@
  * and sequences. Fully unit-testable with in-memory fake processes.
  */
 
+import { LOOP_DEFAULTS } from './loop-config.mjs';
+
 /** Minimum value-per-compute a process must clear to be worth running. Below this, skipping
  *  and saving the compute is the better move (the anti-waste floor). */
-export const DENSITY_FLOOR = 0.05;
+export const DENSITY_FLOOR = LOOP_DEFAULTS.densityFloor;
 
 /** Validate + normalise a process declaration. Throws on a malformed one (fail fast — a bad
  *  process in the registry is a programming error, not a runtime condition to swallow). */
@@ -56,7 +58,7 @@ export function createRegistry(processes = []) {
 /** Minimum effective cost for density. Every process consumes at least a cycle slot, so no process
  *  is truly "free" — flooring here stops a ~0-cost bookkeeping step from scoring near-infinite density
  *  and winning every cycle (the meta-slop starvation bug). 0.25 ≈ a quarter of a cheap model call. */
-export const MIN_COST = 0.25;
+export const MIN_COST = LOOP_DEFAULTS.minCost;
 
 /**
  * Score every process against the context. Returns ALL of them (eligible or not) with their
@@ -129,7 +131,7 @@ export function plan(registry, ctx = {}, { budget = Infinity, floor = DENSITY_FL
  * time — honouring the single-GPU / BSOD rule.
  */
 export async function runCycle(registry, ctx = {}, opts = {}) {
-  const { budget = Infinity, floor = DENSITY_FLOOR, depth = 0, maxDepth = 12, onEvent } = opts;
+  const { budget = Infinity, floor = DENSITY_FLOOR, depth = 0, maxDepth = LOOP_DEFAULTS.maxDepth, onEvent } = opts;
   const emit = (e) => { try { onEvent?.({ depth, ...e }); } catch {} };
 
   if (depth > maxDepth) return { ran: [], outcomes: [], plan: null, halted: 'max-depth' };
