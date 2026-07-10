@@ -56,6 +56,9 @@ jobs:
       - name: Platform audit
         run: pnpm audit:platform
 
+      - name: Repo hygiene (slop gate)
+        run: pnpm hygiene
+
       - name: Lint
         run: pnpm lint
 
@@ -267,7 +270,4 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build all packages
-        run: pnpm build
+        run: pnpm install --frozen-lo
