@@ -11,6 +11,7 @@ import {
   Cog,
   Keyboard,
   User,
+  Mic,
   Pencil,
   Settings2,
 } from 'lucide-react';
@@ -23,6 +24,7 @@ import { ThemeColorEditor } from './ThemeColorEditor.js';
 export type SettingsTabId =
   | 'appearance'
   | 'ai'
+  | 'voice'
   | 'integrations'
   | 'engine'
   | 'shortcuts'
@@ -38,6 +40,7 @@ interface SettingsNavItem {
 const NAV_ITEMS: SettingsNavItem[] = [
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'ai', label: 'AI defaults', icon: Bot },
+  { id: 'voice', label: 'Voice', icon: Mic },
   { id: 'integrations', label: 'Integrations', icon: Link2 },
   { id: 'engine', label: 'Engine', icon: Cog, ownerOnly: true },
   { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },

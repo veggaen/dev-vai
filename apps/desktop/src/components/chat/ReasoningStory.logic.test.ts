@@ -95,11 +95,12 @@ describe('buildStoryLines', () => {
     expect(lines[0].live).toBe(true);
   });
 
-  it('bounds the feed on very long turns, keeping the newest lines', () => {
+  it('keeps the FULL narrative on very long turns (scroll window, never truncation)', () => {
     const many = Array.from({ length: 80 }, (_, i) =>
       phase({ id: `p${i}`, title: `Step ${i}` }));
     const lines = buildStoryLines(many);
-    expect(lines.length).toBeLessThanOrEqual(48);
+    expect(lines.length).toBe(80);
+    expect(lines[0].text).toBe('Step 0');
     expect(lines[lines.length - 1].text).toBe('Step 79');
   });
 

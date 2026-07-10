@@ -14,6 +14,7 @@ export * from './sandbox.js';
 export * from './feedback.js';
 export * from './search.js';
 export * from './ingest.js';
+export * from './ide-ws.js';
 export * from './responses.js';
 export * from './session-responses.js';
 export * from './project-responses.js';

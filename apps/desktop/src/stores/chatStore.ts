@@ -9,6 +9,7 @@ import { useLayoutStore, type ChatMode } from './layoutStore.js';
 import { useSettingsStore } from './settingsStore.js';
 import { useAuthStore } from './authStore.js';
 import { useSandboxStore } from './sandboxStore.js';
+import { useWorkspaceStore } from './workspaceStore.js';
 import { extractFilesFromMarkdown } from '../lib/file-extractor.js';
 
 interface ImageAttachment {
@@ -283,12 +284,24 @@ export function mergeProgressStepsForMessage(
   existing: readonly ChatProgressStep[],
   incoming: ChatProgressStep,
 ): ChatProgressStep[] {
-  const priorIndex = existing.findIndex((step) => step.stage === incoming.stage);
+  let priorIndex = -1;
+  for (let index = existing.length - 1; index >= 0; index -= 1) {
+    if (existing[index]?.stage === incoming.stage) {
+      priorIndex = index;
+      break;
+    }
+  }
 
   if (priorIndex !== -1) {
-    const next = [...existing];
-    next[priorIndex] = mergeProgressStep(existing[priorIndex], incoming);
-    return next.slice(-MAX_PROGRESS_STEPS_PER_MESSAGE);
+    const prior = existing[priorIndex];
+    const identifiesOneLogicalStep = prior?.status === 'running'
+      || prior?.label === incoming.label
+      || /(?:^|-)round-?\d+(?:$|-)/i.test(incoming.stage);
+    if (identifiesOneLogicalStep) {
+      const next = [...existing];
+      next[priorIndex] = mergeProgressStep(prior, incoming);
+      return next.slice(-MAX_PROGRESS_STEPS_PER_MESSAGE);
+    }
   }
 
   const normalizedExisting = existing.map((step) =>
@@ -392,6 +405,8 @@ interface ChatState {
   learningEnabled: boolean;
   /** Composer deliberation depth for the next turn: quick / balanced / deep. */
   processDepth: 'quick' | 'balanced' | 'deep';
+  /** Explicit council seats for upcoming turns; null = full roundtable (server default). */
+  councilModelIds: string[] | null;
   /** Separate owner workspace for curating what can train Vai. */
   trainingWorkspace: boolean;
   /** Active broadcast ID being polled for IDE responses */
@@ -431,6 +446,7 @@ interface ChatState {
   setLearningEnabled: (enabled: boolean) => void;
   /** Set the composer deliberation depth for subsequent turns. */
   setProcessDepth: (depth: 'quick' | 'balanced' | 'deep') => void;
+  setCouncilModelIds: (ids: string[] | null) => void;
   setTrainingWorkspace: (enabled: boolean) => void;
   startOwnerTrainingSession: (modelId?: string, mode?: ChatMode) => Promise<string | null>;
   /** Post a steering guidance (avoid/prefer a handler) so it persists and affects future routing for this convo/class/global. */
@@ -458,6 +474,40 @@ function saveBroadcastChats(chats: Record<string, string[]>): void {
       window.localStorage.setItem('vai-broadcast-chats', JSON.stringify(chats));
     }
   } catch { /* silent */ }
+}
+
+export const LAST_ACTIVE_CONVERSATION_STORAGE_KEY = 'vai:lastActiveConversationId';
+
+function loadLastActiveConversationId(): string | null {
+  try {
+    const value = typeof window !== 'undefined'
+      ? window.localStorage.getItem(LAST_ACTIVE_CONVERSATION_STORAGE_KEY)
+      : null;
+    return value && value.trim() ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLastActiveConversationId(conversationId: string | null): void {
+  try {
+    if (typeof window === 'undefined') return;
+    if (conversationId) {
+      window.localStorage.setItem(LAST_ACTIVE_CONVERSATION_STORAGE_KEY, conversationId);
+    } else {
+      window.localStorage.removeItem(LAST_ACTIVE_CONVERSATION_STORAGE_KEY);
+    }
+  } catch { /* non-fatal persistence */ }
+}
+
+export function resolveConversationResumeId(
+  conversations: Array<{ id: string }>,
+  savedConversationId: string | null | undefined,
+): string | null {
+  if (!savedConversationId) return null;
+  return conversations.some((conversation) => conversation.id === savedConversationId)
+    ? savedConversationId
+    : null;
 }
 
 async function readApiError(response: Response, fallback: string): Promise<string> {
@@ -509,6 +559,7 @@ let broadcastPollTimer: ReturnType<typeof setInterval> | null = null;
 
 /** Monotonic token so only the most recent selectConversation call wins. */
 let selectConversationToken = 0;
+let resumeSelectionInFlight: string | null = null;
 
 /** Currently active streaming WebSocket. Only one may be open at a time. */
 let activeWs: WebSocket | null = null;
@@ -629,6 +680,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch { /* SSR / no storage */ }
     return 'balanced' as const;
   })(),
+  councilModelIds: (() => {
+    try {
+      const saved = localStorage.getItem('vai:councilModelIds');
+      if (saved) {
+        const parsed = JSON.parse(saved) as unknown;
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((v) => typeof v === 'string')) {
+          return parsed as string[];
+        }
+      }
+    } catch { /* SSR / no storage */ }
+    return null;
+  })(),
   trainingWorkspace: false,
   activeBroadcastId: null,
   broadcastMode: false,
@@ -640,6 +703,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const res = await apiFetch('/api/conversations?limit=50');
       const conversations = (await res.json()) as ConversationSummary[];
       set({ conversations });
+      const savedConversationId = loadLastActiveConversationId();
+      const resumeId = resolveConversationResumeId(conversations, savedConversationId);
+      if (savedConversationId && !resumeId) {
+        saveLastActiveConversationId(null);
+      }
+      if (!get().activeConversationId && resumeId && resumeSelectionInFlight !== resumeId) {
+        resumeSelectionInFlight = resumeId;
+        void get().selectConversation(resumeId).finally(() => {
+          if (resumeSelectionInFlight === resumeId) {
+            resumeSelectionInFlight = null;
+          }
+        });
+      }
     } catch {
       console.error('Failed to fetch conversations');
     }
@@ -686,6 +762,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     useLayoutStore.getState().setMode(useSettingsStore.getState().defaultConversationMode);
     useLayoutStore.getState().collapseBuilder();
     useSandboxStore.getState().reset();
+    saveLastActiveConversationId(null);
     set({
       activeConversationId: null,
       messages: [],
@@ -742,6 +819,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
       progressSteps?: ChatProgressStep[] | null;
     }>;
     const conversation = get().conversations.find((item) => item.id === id);
+    if (conversation?.sandboxProjectId) {
+      try {
+        await useSandboxStore.getState().attachProject(conversation.sandboxProjectId);
+        if (isStale()) return;
+        useLayoutStore.getState().expandBuilder();
+      } catch {
+        if (isStale()) return;
+        // External sandbox ids are process-local. After a runtime restart the
+        // durable conversation still knows its folder, so reopen that folder and
+        // atomically replace the stale id instead of falling into fresh-app mode.
+        if (conversation.workspaceRoot) {
+          try {
+            const reopened = await useSandboxStore.getState().openLocalFolder(conversation.workspaceRoot);
+            if (isStale()) return;
+            const patch = await apiFetch(`/api/conversations/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sandboxProjectId: reopened.id, workspaceRoot: conversation.workspaceRoot }),
+            });
+            if (!patch.ok) throw new Error('Unable to persist the restored project binding');
+            const updated = await patch.json() as Conversation;
+            set((state) => ({
+              conversations: state.conversations.map((item) => item.id === id ? updated : item),
+            }));
+            useLayoutStore.getState().expandBuilder();
+            return;
+          } catch {
+            // The folder itself is now unavailable; surface a stopped project
+            // instead of letting the next Builder turn invent a replacement app.
+          }
+        }
+        useSandboxStore.getState().reset();
+        useLayoutStore.getState().collapseBuilder();
+      }
+    }
     // Restore per-chat broadcast state
     const broadcastChats = get().broadcastChats;
     const isBroadcastChat = id in broadcastChats;
@@ -759,19 +871,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
       broadcastMode: isBroadcastChat,
       broadcastTargetClientIds: isBroadcastChat ? broadcastChats[id] : [],
     });
+    saveLastActiveConversationId(id);
     if (conversation?.mode) {
       useLayoutStore.getState().setMode(conversation.mode);
     }
 
     if (conversation?.sandboxProjectId) {
-      try {
-        await useSandboxStore.getState().attachProject(conversation.sandboxProjectId);
-      } catch {
-        if (isStale()) return;
-        useSandboxStore.getState().reset();
-        useLayoutStore.getState().collapseBuilder();
-      }
       return;
+    }
+
+    if (conversation?.workspaceRoot) {
+      try {
+        const reopened = await useSandboxStore.getState().openLocalFolder(conversation.workspaceRoot);
+        if (isStale()) return;
+        const patch = await apiFetch(`/api/conversations/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sandboxProjectId: reopened.id, workspaceRoot: conversation.workspaceRoot }),
+        });
+        if (!patch.ok) throw new Error('Unable to persist the restored project binding');
+        const updated = await patch.json() as Conversation;
+        set((state) => ({
+          conversations: state.conversations.map((item) => item.id === id ? updated : item),
+        }));
+        useLayoutStore.getState().expandBuilder();
+        return;
+      } catch {
+        // Fall through to the honest empty workspace state.
+      }
     }
 
     if (isStale()) return;
@@ -801,6 +928,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (updated.sandboxProjectId) {
       try {
         await useSandboxStore.getState().attachProject(updated.sandboxProjectId);
+        useLayoutStore.getState().expandBuilder();
       } catch {
         useSandboxStore.getState().reset();
         useLayoutStore.getState().collapseBuilder();
@@ -837,6 +965,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (updated.sandboxProjectId) {
         try {
           await useSandboxStore.getState().attachProject(updated.sandboxProjectId);
+          useLayoutStore.getState().expandBuilder();
         } catch {
           useSandboxStore.getState().reset();
           useLayoutStore.getState().collapseBuilder();
@@ -903,6 +1032,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (state.activeConversationId === id) {
       useLayoutStore.getState().setMode(useSettingsStore.getState().defaultConversationMode);
       useLayoutStore.getState().collapseBuilder();
+      saveLastActiveConversationId(null);
       set({ activeConversationId: null, messages: [], broadcastMode: false, broadcastTargetClientIds: [], broadcastChats: chats });
     } else {
       set({ broadcastChats: chats });
@@ -970,8 +1100,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Hint the server which model + mode to use if the conversation row is
       // missing on the backend (race recovery — see `conversation_resolved`).
       if (modelId) payload.modelId = modelId;
-      const layoutMode = useLayoutStore.getState().mode;
-      if (layoutMode) payload.mode = layoutMode;
+      // NOTE: this is the CHAT mode ('chat'|'agent'|'builder'|'plan'|'debate') — the
+      // layout store also has `layoutMode` ('compact'|'open'|'odyssey') which is
+      // visual-only and must never go on the wire.
+      const chatMode = useLayoutStore.getState().mode;
+      if (chatMode) payload.mode = chatMode;
       if (opts?.imageMode) payload.imageMode = true;
       if (image) {
         payload.image = {
@@ -992,6 +1125,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Per-turn deliberation depth (composer control). Omit 'balanced' (the server default).
       const depth = get().processDepth;
       if (depth && depth !== 'balanced') payload.processDepth = depth;
+      // Explicit council seats (composer roundtable picker). Omit for full roundtable.
+      const seats = get().councilModelIds;
+      if (seats && seats.length > 0) payload.councilModelIds = seats;
+
+      const wsRoot = useWorkspaceStore.getState().localRoot;
+      if (wsRoot) payload.workspaceRoot = wsRoot;
+      if (useWorkspaceStore.getState().requireDiffApproval) {
+        payload.requireDiffApproval = true;
+      }
 
       ws.send(JSON.stringify(payload));
 
@@ -1039,6 +1181,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           phase: string; label?: string; attempt?: number; matchScore?: number;
           flaws?: string[]; dataUrl?: string; width?: number; height?: number; accepted?: boolean;
         };
+        ideEvent?: { type: string; [key: string]: unknown };
       };
 
       // Server auto-created a conversation because our id was unknown — adopt
@@ -1046,11 +1189,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (chunk.type === 'conversation_resolved' && chunk.conversationId) {
         flushPendingStreamDelta();
         set({ activeConversationId: chunk.conversationId });
+        saveLastActiveConversationId(chunk.conversationId);
         void get().fetchConversations();
         return;
       }
 
-      if (chunk.type === 'progress' && chunk.progress) {
+      if (chunk.type === 'ide_event' && chunk.ideEvent) {
+        window.dispatchEvent(new CustomEvent('vai:ws-ide-event', { detail: chunk.ideEvent }));
+      } else if (chunk.type === 'progress' && chunk.progress) {
         set((state) => {
           const msgs = [...state.messages];
           const targetIndex = activeStreamingAssistantId
@@ -1572,68 +1718,4 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setFeedback: (messageId: string, helpful: boolean) => {
     set((state) => {
       const msgs = state.messages.map(m =>
-        m.id === messageId ? { ...m, feedback: helpful } : m,
-      );
-      return { messages: msgs };
-    });
-    // Fire-and-forget feedback to server
-    apiFetch('/api/feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messageId, helpful }),
-    }).catch(() => { /* silent */ });
-  },
-
-  postSteer: async (args) => {
-    try {
-      const res = await apiFetch('/api/steer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          conversationId: args.conversationId,
-          from: 'human',
-          author: 'desktop',
-          signal: args.signal,
-          handler: args.handler,
-          note: args.note || 'steered from UI',
-          scope: args.scope || 'class',
-          matchTokens: args.matchTokens,
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || json?.ok === false) {
-        return { ok: false, error: json?.error || 'steer failed' };
-      }
-      return { ok: true, guidance: json.guidance };
-    } catch (e: any) {
-      return { ok: false, error: e?.message || 'network error' };
-    }
-  },
-
-  setProcessDepth: (depth: 'quick' | 'balanced' | 'deep') => {
-    try { localStorage.setItem('vai:processDepth', depth); } catch { /* no storage */ }
-    set({ processDepth: depth });
-  },
-  setLearningEnabled: (enabled: boolean) => {
-    const auth = useAuthStore.getState();
-    if (!auth.isOwner || !get().trainingWorkspace) {
-      set({ learningEnabled: false });
-      return;
-    }
-    set({ learningEnabled: enabled });
-  },
-
-  setTrainingWorkspace: (enabled: boolean) => {
-    const auth = useAuthStore.getState();
-    if (!auth.isOwner) {
-      set({ trainingWorkspace: false, learningEnabled: false });
-      return;
-    }
-    set({ trainingWorkspace: enabled, learningEnabled: enabled ? get().learningEnabled : false });
-  },
-}));
-
-// Expose store for demo system (injectResponse needs setState access)
-if (typeof window !== 'undefined') {
-  (window as unknown as Record<string, unknown>).__vai_chat_store = useChatStore;
-}
+        m.id 

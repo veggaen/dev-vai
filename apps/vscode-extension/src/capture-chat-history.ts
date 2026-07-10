@@ -507,7 +507,7 @@ function bufferResponseText(requestIndex: number, combinedText: string): void {
  * Called when: 1) a new user message arrives (turn boundary), 2) extension disposes.
  */
 function flushPendingResponses(): void {
-  for (const [index, pending] of pendingResponses) {
+  for (const pending of pendingResponses.values()) {
     if (pending.timer) clearTimeout(pending.timer);
     handleResponseText(pending.combinedText);
   }
@@ -1322,7 +1322,7 @@ export function getAvailableChatSessions(): ChatSessionInfo[] {
 
   const sessions: ChatSessionInfo[] = [];
 
-  for (const [filename, tracked] of trackedFiles) {
+  for (const tracked of trackedFiles.values()) {
     // Parse header once and cache results
     if (!tracked.vscodeSessionId) {
       try {

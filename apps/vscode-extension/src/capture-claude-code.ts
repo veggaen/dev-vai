@@ -25,7 +25,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { pushEvent, getActiveSession, createSession, attachToSession, onSessionChange } from './session.js';
+import { pushEvent, getActiveSession, createSession, attachToSession } from './session.js';
 import { apiCall } from './api.js';
 
 /* ── State ─────────────────────────────────────────────────────── */

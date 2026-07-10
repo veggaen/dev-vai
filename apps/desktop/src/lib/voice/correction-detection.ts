@@ -125,9 +125,86 @@ export function detectCorrections(
   };
 }
 
-/** A short, friendly prompt for the most likely mishearing (or null if none). */
+// ── Plausibility gate ─────────────────────────────────────────────────────────
+// A word swap is only a MISHEARING worth learning if the two sound alike AND at
+// least one side is a distinctive word. This is what separates "leech → league"
+// (learn it) from "park → beach" (a change of mind — never learn it) and from
+// "their → there" (common-word homophone — a global rule would be unsafe).
+
+/** Common/function words a global replacement rule must never hinge on. */
+const COMMON_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'but', 'if', 'so', 'as', 'of', 'to', 'too', 'two',
+  'in', 'on', 'at', 'for', 'with', 'by', 'from', 'into', 'out', 'up', 'down', 'over',
+  'is', 'are', 'was', 'were', 'be', 'been', 'am', 'do', 'does', 'did', 'not', 'no', 'yes',
+  'this', 'that', 'these', 'those', 'it', 'its', 'here', 'there', 'their', 'they', 'them',
+  'i', 'you', 'he', 'she', 'we', 'me', 'him', 'her', 'us', 'my', 'your', 'our', 'his',
+  'now', 'then', 'than', 'when', 'what', 'who', 'how', 'why', 'where', 'can', 'will',
+]);
+
+/** Cheap, dependency-free phonetic key: vowels collapsed, doubles removed, like-sounds merged. */
+export function phoneticKey(word: string): string {
+  return word.toLowerCase().replace(/[^a-z]/g, '')
+    .replace(/ph/g, 'f').replace(/ck/g, 'k').replace(/gh/g, 'g').replace(/wr/g, 'r')
+    .replace(/[aeiou]+/g, 'a')
+    .replace(/(.)\1+/g, '$1')
+    .replace(/[sz]/g, 's').replace(/[dt]/g, 't');
+}
+
+function phraseKey(phrase: string): string {
+  return phrase.split(/\s+/).map(phoneticKey).filter(Boolean).join(' ');
+}
+
+function levenshtein(a: string, b: string): number {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => i);
+  for (let j = 1; j <= b.length; j += 1) {
+    let prev = dp[0];
+    dp[0] = j;
+    for (let i = 1; i <= a.length; i += 1) {
+      const tmp = dp[i];
+      dp[i] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[i], dp[i - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[a.length];
+}
+
+function levenshteinRatio(a: string, b: string): number {
+  const max = Math.max(a.length, b.length);
+  return max === 0 ? 1 : 1 - levenshtein(a, b) / max;
+}
+
+function hasRareToken(phrase: string): boolean {
+  return phrase.toLowerCase().split(/\s+/).some((t) => {
+    const clean = t.replace(/[^a-z0-9]/g, '');
+    return clean.length >= 3 && !COMMON_WORDS.has(clean);
+  });
+}
+
+/**
+ * Confidence that a `heard → corrected` swap is a real mishearing worth learning.
+ * - 'high'   : sounds identical AND distinctive → safe to accumulate silently.
+ * - 'medium' : sounds close AND distinctive → learn, but a confirm prompt is warranted.
+ * - 'none'   : mind-change, common-word homophone, or a rewrite → NEVER learn.
+ */
+export function plausibleMishearing(heard: string, corrected: string): 'high' | 'medium' | 'none' {
+  const h = heard.trim();
+  const c = corrected.trim();
+  if (!h || !c || norm(h) === norm(c)) return 'none';
+  if (c.split(/\s+/).length > 3) return 'none';                 // rewrite, not a fix
+  if (!hasRareToken(h) && !hasRareToken(c)) return 'none';      // common-word homophones
+  const orth = levenshteinRatio(norm(h), norm(c));
+  if (orth < 0.34 || orth > 0.95) return 'none';                // too far / effectively identical
+  const hk = phraseKey(h);
+  const ck = phraseKey(c);
+  if (!hk || !ck) return 'none';
+  if (hk === ck) return 'high';
+  const budget = Math.max(1, Math.ceil(Math.max(hk.length, ck.length) / 4));
+  return levenshtein(hk, ck) <= budget ? 'medium' : 'none';
+}
+
+/** A short, friendly prompt for the most likely PLAUSIBLE mishearing (or null). */
 export function mishearingPrompt(result: CorrectionResult): string | null {
-  const top = result.mishearings[0];
+  const top = result.mishearings.find((m) => plausibleMishearing(m.heard, m.corrected) !== 'none');
   if (!top) return null;
   return `Did we mishear you? We heard “${top.heard}” but you wrote “${top.corrected}”. Add “${top.corrected}” to your dictionary so we get it right next time?`;
 }

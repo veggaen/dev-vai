@@ -6,6 +6,140 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
 
 ## Open
 
+- **PARTIAL 2026-07-10 - Chat-to-software live proof, concise receipts, and honest rendered verification**
+  - Exact project-bound Agent edit passed the real desktop path end to end: disposable chat bound to the exact
+    `DEV_MPM/mpm-frontend` root, one-file mutation, visible HMR result in App, compact completion receipt, reversible
+    revision, byte-identical restore, and chat cleanup. Evidence: 18/18 in
+    `Temporary_files/chat-edit-live/2026-07-10T00-33-30-288Z`.
+  - Agent mode now applies its validated edit through the reversible sandbox API instead of stopping at an unexplained
+    approval card. Builder/Chat can still honor diff-review preference. Receipts now show a short result, at most two
+    proof lines, changed files on demand, and App/Code/Pop app actions. The visible assistant badge stays `Agent`.
+  - Fixed two false failure paths found live: a slow first Next compile no longer marks a still-compiling external app
+    failed, and cross-origin desktop health checks use no-CORS reachability so a healthy localhost app is not reported
+    as stopped. Exact-edit proof waits up to 45 seconds for large-project HMR.
+  - Harder council edit on Lawn passed 11/13: council changed only `src/lib/convex.tsx` and the revision restored it
+    byte-identically, but the requested marker never rendered. Lawn's visible setup screen is produced by another
+    runtime entrypoint, so the changed file was valid but not live. Evidence:
+    `Temporary_files/chat-council-edit-live/2026-07-10T00-38-16-819Z`.
+  - **Next required slice:** before acting, resolve the requested file/component to the effective runtime module graph;
+    after acting, require a rendered marker or screenshot delta before using completion language. A one-file diff and
+    reachable server are necessary evidence, not sufficient visual proof.
+
+- **DONE 2026-07-10 - Project-aware Env helper for Lawn and other integration-heavy apps**
+  - The App toolbar Env dialog now groups missing values into Core runtime, Authentication, Billing, Video, Storage,
+    and Other; puts the true boot values first; labels generated/server-only values; keeps inputs masked; and provides
+    official provider links for recognized Convex, Clerk, Stripe, Mux, Railway, Autumn, and Chunkify values.
+  - Only `VITE_CONVEX_URL` and `VITE_CLERK_PUBLISHABLE_KEY` are marked required to open Lawn. The copy explains that
+    Convex backend secrets must also be configured on the deployment, rather than pretending `.env.local` alone is
+    sufficient. The old 16-variable truncation is removed.
+  - Visual proof: 12/12, no browser errors, with header/footer fitting inside the short App pane and 25 Get-value links:
+    `Temporary_files/env-setup-modal-e2e/2026-07-10T00-55-23-334Z/03-env-modal.png`.
+
+- **DONE 2026-07-09 - Crash/reload recovery for project-bound chat edits**
+  - Problem observed live after a VS Code/app crash: Vai reopened the `mpm-frontend` chat, but the desktop hook
+    reprocessed a persisted exact-replace marker from the transcript. Because the external source file already
+    contained `Join the decentralized future`, the stale marker hit the guarded mismatch path
+    (`Expected 1 replacement(s), found 0`) and falsely put the preview into a stopped/failed state.
+  - Fixes landed: persist/resume the last active conversation; attach a conversation's sandbox project before
+    messages are committed; auto-expand project-bound chats; keep external previews in "warming" until the iframe
+    actually loads; and mark loaded assistant history as already processed so old action markers stay visible but
+    inert after reload/reselect.
+  - Live evidence: clean reload of `http://localhost:5173/?devAuthBypass=1` restored the exact-edit chat,
+    selected the App panel, mounted `http://localhost:4100`, showed no replacement mismatch or preview-stopped state,
+    and rendered the external MPM page with hero text `Join the decentralized future`.
+  - Test evidence: focused desktop/core regression run passed 61/61 tests:
+    `auto-sandbox-message-selection`, `chatStore`, `sandbox-actions`, `auto-sandbox-intent`,
+    `exact-workspace-edit`, and `build-execution-intent`; `corepack pnpm --filter @vai/desktop typecheck` passed.
+  - Remaining external-project notes, not Vai replay failures: first Next compile for this folder can be slow, and
+    the app logs WalletConnect/AppKit/Lit warnings. A transient `layout.js` syntax/chunk error disappeared after the
+    clean reload and the preview rendered normally.
+  - Follow-up: failure copy now says `App stopped` instead of `Preview stopped`, and the preview panel keeps a
+    same-project/same-port iframe visible when it has already loaded even if a stale failed status lands later.
+    Proof: post-patch reload showed no stopped card, one mounted iframe, and rendered `Join the decentralized future`.
+  - Follow-up: external/sandbox projects now get a real IDE-style split when Files is enabled: the file explorer docks
+    as a left rail beside Preview/Source instead of taking over a full-width top slab. The composer quick-connect was
+    renamed from `IDE` to `Ext IDE` so it is clear that button means an external VS Code/Cursor-style agent, not Vai's
+    built-in app workspace. Proof: post-patch live reload showed `page.tsx` in a 229px left rail, `http://localhost:4100`
+    still mounted in the right preview iframe, `Ext IDE` visible, no stopped card, and `@vai/desktop` typecheck green.
+  - Follow-up: the app/source switcher now speaks the user's language and supports both-at-once: `Preview` was renamed
+    to `App`, `Source` was renamed to `Code`, and a new `Split` mode shows Code and App side by side. Proof:
+    post-patch live reload showed `App`, `Code`, and `Split` buttons, no visible `Preview`/`Source` tab labels,
+    `page.tsx` on the code side, and the `http://localhost:4100` app iframe titled `App` on the other side.
+  - Follow-up: Lego UI popouts are now discoverable: Chat has a `Pop chat` control, the app workspace has a pop-out
+    control, and App popouts carry the active sandbox `projectId` so the detached window attaches to the same running
+    project. The `dev | preview | prod` pill is clarified as a real runtime environment switch: Dev = HMR dev server,
+    Preview = build + local production-like serve, Prod = gates + production build + serve. Proof: desktop typecheck
+    passed; live browser showed `Pop chat`, app popout control, and `Dev` / `Preview` / `Prod` lane titles; the chat
+    popout route opened as `?popout=chat` with title `Vai — Chat` in the in-app browser harness.
+
+- **PROPOSED 2026-07-09 - IDE-grade project workspace: remaining slices**
+  - Context: 2026-07-08/09 sessions landed the open-local-folder pipeline end to end (scan → review card with
+    README setup notes / missing env / Node engines / monorepo warnings → install → dev server → preview),
+    the run-command backbone + console script deck (build/lint/test/typecheck), project-wide search backend +
+    UI (match case, whole word, regex, replace-all with revertable revisions), external-folder safety
+    (never deleted), a 403 ownership fix, and a handoff-shell deadline + "Show the app now" escape.
+    Evidence: `scripts/test-open-folder-visual.mjs` 7/7 on `dev-t3code` (Temporary_files/open-folder-e2e/),
+    search API 393 matches across 5,581 files, V3gga's own screenshots.
+  - Remaining slices, in priority order:
+    1. Chat-to-edit proven live on an opened folder: chat request → council edit → file write → HMR → visible change.
+    2. Error lens: when the served app 500s/crashes at boot, show a readable crash card (real cause + "Fix with Vai"
+       chat handoff) instead of raw JSON in the iframe (dev-lawn missing VITE_CONVEX_URL is the repro).
+    3. Env switch (dev | preview | production bullet) on the app window + "Run build?" prompt on save in prod, built
+       on a blue-green shadow-port swap so version updates are instant and errors never replace a working app.
+    4. App-window header/organization design pass + diff-mode quality pass (current DiffReviewPanel is functional,
+       not distinctive).
+    5. Idea backlog from 2026-07-09 brainstorm (partial): version timeline scrubber, click-to-edit bridge,
+       one-heavy-task governor, multi-viewport grid, flight recorder (console+network timeline), env-var editor
+       with dev/preview/prod scopes, per-user data sandbox (Base44 mode), session recovery card, ghost diff preview.
+
+- **PROPOSED 2026-07-06 - Voice accuracy loop: confidence, phrase priming, calibration prompts, and repair UX**
+  - Context: V3gga reports current hold-to-dictate/paste flow finally lands text in the target input, but everyday
+    phrases can still mutate semantically, e.g. "Can you hear me?" -> "Can you help me?" The remaining issue is not
+    delivery; it is trust in the transcript.
+  - Evidence in current code: desktop already has recorder-first STT with selectable quality
+    (`apps/desktop/src/lib/voice/recorder-stt-adapter.ts`, `stt-quality.ts`), deterministic cleanup plus a promoted
+    local speech profile (`apps/desktop/src/lib/voice/speech-profile.ts`), post-dictation correction detection
+    (`apps/desktop/src/lib/voice/correction-detection.ts`), and voice settings/testing UI
+    (`apps/desktop/src/components/panels/settings/VoiceSettingsPanel.tsx`). Missing pieces are user-visible
+    confidence, phrase/context priming, an intentional calibration session, and a fast correction flow for ambiguous
+    phrases before paste.
+  - Proposed slices:
+    1. Add an "accuracy review" strip for low-confidence or high-risk words: show 2-3 alternatives inline before final
+       paste when the engine is uncertain or the sentence meaning flips.
+    2. Feed a compact dynamic phrasebook into STT where supported: personal dictionary, current app/screen words,
+       recent conversation terms, project names, commands, and common V3gga phrases.
+    3. Add a five-minute calibration mode with phonetically dense prompt cards plus user-specific names/tools; measure
+       word error rate before/after and promote repeated corrections into the speech profile.
+    4. Store correction pairs with context, not only raw replacement rules: phrase before/after, target app, language,
+       device, quality tier, and whether the user accepted/reverted the fix.
+    5. Build a small "voice lab" evaluation harness: fixed sentence pack, recorded samples, WER/semantic-drift score,
+       and pass/fail thresholds so improvements are proven instead of felt.
+  - First slice: add a Voice Settings "Accuracy Coach" panel that runs 12 short phrases, captures expected vs heard,
+    writes a local report, and seeds the speech profile only after confirmation. Verify with focused unit tests for
+    scoring/profile promotion and a live desktop transcription run.
+  - Partial 2026-07-06: fast-display slice landed. Live draft word preview now defaults on, starts without blocking the
+    recorder, labels interim words as draft, preserves latest Web Speech interim text on stop, and external global
+    dictation pastes the locally cleaned final immediately instead of waiting for polish. Proof: focused desktop voice
+    tests 24/24 green and `corepack pnpm --filter @vai/desktop typecheck` passed.
+  - Partial 2026-07-06 follow-up: confirmed mishearing prompts now promote the heard->corrected pair immediately when
+    V3gga clicks "Remember correction" instead of waiting for a second occurrence; local PCM now trims leading/trailing
+    silence before Whisper to reduce dead-air latency and hallucination risk. Proof: focused voice tests 28/28 green
+    and `corepack pnpm --filter @vai/desktop typecheck` passed. Bundle verification remains blocked by an existing
+    desktop/browser build issue in `packages/core/src/db/client.ts` importing `node:fs` through the Vite client bundle.
+
+- **DONE 2026-07-04 - Voice dictation pipeline: transparent global bubble + local cleanup phase**
+  - Fixed the standalone dictation bubble route so the Tauri transparent window no longer inherits the main app's dark
+    `html/body/#root` canvas. Proof: browser inspection of `?view=dictation-bubble` showed `html`, `body`, and `#root`
+    all computed as transparent, with the "Cleaning locally..." phase visible.
+  - Added local Ollama transcript cleanup as the default post-raw-text phase (`/api/stt/polish`, default
+    `local:qwen2.5:3b`) and surfaced raw -> local cleanup -> final in composer/global dictation UI. Proof:
+    injected route test returned `cleanup.configured=true` and polished "hello comma..." to a clean sentence.
+  - Important remaining gap: Qwen/DeepSeek text models are now the cleanup intelligence, but they still need a raw
+    text source; they do not directly decode waveform audio. Desktop global dictation now avoids pretending Web Speech
+    is equivalent to the recorder path because Web Speech cannot be pinned to the selected mic.
+  - Build/sync to the installed desktop copy was not rerun in this pass because Codex approval quota blocked the
+    elevated `corepack pnpm build:desktop` command.
+
 - **QUEUED 2026-07-02 - vai-engine.ts decomposition, phase 2: the COUPLED dispatcher giants (the key to the routing bugs)**
   - Why now: the 2 pre-existing failing tests (deploy-fire-drill + auth/team/sandbox → misrouted to the engine-identity
     handler) are unfixable-in-practice because the routing lives in `generateResponse` (the 1884-line main dispatcher)
@@ -1623,3 +1757,113 @@ evidence; mark items DONE with proof (test/screenshot/run). Agents: read
     files. Proof: desktop typecheck clean, lint 0 errors, TTS adapter 4/4.
   - NEXT small wire: auto-speak the final answer when the toggle is on (a store flag + speak on
     `done`); then unified presence-block timeline + multi-party rooms.
+
+- **DONE 2026-07-09 - Explorer-bound Agent edits now work on large real files**
+  - Reproduced through the visible user path: paperclip -> Folder -> Windows Explorer selection of
+    `C:\Users\v3gga\Documents\DEV_MPM\mpm-frontend` -> highlighted Agent chat -> live Next preview.
+  - The first real edit failed safely: Vai proposed generic `index.html` / `src/App.tsx` artifacts
+    and left the bound Next project unchanged. Root cause: whole-file council regeneration
+    deliberately excludes a 188k `app/page.tsx`, but chat did not route exact literal edits to the
+    existing revision-tracked Search & Replace capability.
+  - Added a deterministic exact-edit lane: two quoted literals + edit verb, one case-sensitive
+    match in one file, visible council review, URI-encoded replace action, and an atomic
+    `expectedReplacements: 1` server guard. A changed match count aborts before any write.
+  - Live proof: Agent chat changed line 2696 from `Participate in a decentralized ecosystem` to
+    `Join the decentralized future`; SHA-256 changed from
+    `49364A7223DA47D00F05F86470E68B57CDA2756BB8A4084990FE7F07FA8C7D5C` to
+    `8C0A1B18F685D1D69C143F16620BC96D937009C083BACD0133CF5EA0C3973F2A`.
+    The running preview hot-reloaded the new pixels, the old text was absent, and a cold Vai reload
+    produced zero fresh browser errors. Focused regressions: 36/36 passed. The broader TypeScript
+    command was attempted but blocked by the environment approval/usage gate, so it is not claimed.
+  - Also hardened external Next preview recovery: use the project-local Next CLI without a shell,
+    ignore stale process close events, mark unexpected exits honestly, and clear generated `.next`
+    output before an untracked external-project restart. Runtime regressions: 26/26 passed.
+
+- **DONE 2026-07-09 - External Vite/Bun projects now fail honestly when the rendered app 500s**
+  - Stress-tested `C:\Users\v3gga\Documents\dev-lawn` through the visible open-folder path. The
+    project correctly scanned as Vite + Bun and surfaced missing `.env.example` variables plus the
+    Windows-incompatible `bash scripts/dev.sh` warning.
+  - Found the gap: Vite could report "ready" while the embedded app root returned a raw
+    `{"status":500,"unhandled":true,"message":"HTTPError"}` page caused by
+    `Error: Missing VITE_CONVEX_URL`. Vai previously treated that as a live preview.
+  - Added an external-project preview health check after ready, promoted concrete stderr causes over
+    generic HTTP wrappers, and made the failure card derive useful causes from project logs when the
+    store-level error is missing.
+  - Hardened `scripts/test-open-folder-visual.mjs`: it now identifies Bun, waits robustly for the
+    review-card `Start anyway` button, detects `App stopped` as a first-class visual state, fails raw
+    HTTP 5xx JSON/error overlays instead of counting them as rendered content, and exits non-zero on
+    failed proof.
+  - Proof: final visible run captured
+    `Temporary_files/open-folder-e2e/2026-07-09T17-58-28-771Z/06-final-state.png`, showing
+    `Reported cause: Preview failed: cause: Error: Missing VITE_CONVEX_URL` before the copy cleanup.
+    Focused regressions: runtime sandbox manager + PreviewPanel + sandbox actions, 31/31 passed.
+
+- **DONE 2026-07-09 - Preview failure repair prompt no longer turns into lifecycle slop**
+  - Stress-tested the next human path after the lawn failure: `App stopped` -> `Stage repair prompt`
+    -> chat composer -> send to Vai.
+  - Found a real gap: the prompt was correctly prefilled with `Missing VITE_CONVEX_URL`, but the
+    deterministic engine matched its broad sandbox lifecycle route and answered with a generic
+    "Queued / Building / Running / Crashed / Expired / Quota-blocked" design note. The council
+    verdict even read the intent correctly, so the bug was route precedence, not UI state.
+  - Fixes landed: the repair prompt now adds missing-env guardrails ("do not invent secrets; add a
+    setup-required fallback only if safe; otherwise list exact env vars"), and `vai-engine` now has a
+    concrete missing-env preview repair lane before the generic lifecycle advice route.
+  - Hardened `scripts/test-preview-repair-prompt-visual.mjs` with `--send`: it clicks the failure
+    card repair button, verifies the composer prompt, sends through the visible chat path, and polls
+    only this run's persisted conversation so older identical prompts cannot spoof success.
+  - Proof: visual send run
+    `Temporary_files/preview-repair-prompt-e2e/2026-07-09T18-17-49-058Z/06-after-repair-response.png`
+    passed 14/14. The response now says the preview is stopped because `VITE_CONVEX_URL` is missing,
+    refuses to fabricate it, suggests `.env.local` / env store setup, and offers a setup-required UI
+    fallback only as an explicit next change. Focused engine + desktop regressions: 864/864 passed.
+
+- **DONE 2026-07-10 - Chat repair now applies safe missing-env code patches end to end**
+  - Continued the lawn stress test through the actual IDE promise: `App stopped` -> `Stage repair
+    prompt` -> send in chat -> Vai emits a guarded workspace edit -> desktop applies it -> preview
+    hot-reloads.
+  - Found the next gap: the previous route produced a good explanation but did not mutate code. Added
+    deterministic, narrow workspace repair rails for known setup crashes:
+    `src/lib/convex.tsx` stops throwing on missing `VITE_CONVEX_URL`, and
+    `app/routes/__root.tsx` stops throwing on missing `VITE_CLERK_PUBLISHABLE_KEY`.
+    Both rails emit existing revision-tracked `{{replace:...}}` actions with
+    `expectedReplacements: 1`, and both refuse to invent secrets or deployment URLs.
+  - Live proof 1: visible send run
+    `Temporary_files/preview-repair-prompt-e2e/2026-07-09T23-19-34-472Z/06-after-repair-response.png`
+    passed 14/14 and applied the Convex fallback. That surfaced the next honest blocker:
+    `Missing VITE_CLERK_PUBLISHABLE_KEY`.
+  - Live proof 2: visible send run
+    `Temporary_files/preview-repair-prompt-e2e/2026-07-09T23-25-45-343Z/06-after-repair-response.png`
+    passed 15/15 and applied the Clerk/root fallback. Final preview proof
+    `Temporary_files/dev-lawn-preview-proof/2026-07-09T23-28-47-443Z/01-preview-rendered.png`
+    passed 6/6: HTTP 200, setup-required screen rendered, both env vars listed, no crash page, and
+    no browser console errors.
+  - Focused regressions: `exact-workspace-edit`, `vai-engine`, and `vai-engine-variants` passed
+    867/867. The visual script now accepts whichever `VITE_*` var is actually failing, so it can
+    keep stress-testing the next setup blocker rather than hard-coding Convex.
+
+- **DONE 2026-07-10 - Real env setup helper for opened projects**
+  - Added the next IDE layer after setup-required fallbacks: Dev-Vai can now inspect missing vars
+    from `.env.example`, show an `Env` toolbar action for active projects, and write user-provided
+    values to `.env.local` without echoing secrets back.
+  - Runtime endpoints:
+    `GET /api/sandbox/:id/env-local` returns only variable names/status, and
+    `POST /api/sandbox/:id/env-local` writes provided values into `.env.local`.
+    Values are never invented; the UI explicitly says Vai will not fabricate keys, deployment URLs,
+    or secrets.
+  - UI proof: visible run
+    `Temporary_files/env-setup-modal-e2e/2026-07-09T23-44-20-275Z/03-env-modal.png`
+    passed 10/10: `dev-lawn` opened, toolbar `Env` appeared, modal opened, listed
+    `VITE_CONVEX_URL` and `VITE_CLERK_PUBLISHABLE_KEY`, warned that Vai will not invent secrets,
+    and produced no browser runtime errors.
+  - Focused regressions: runtime sandbox manager + PreviewPanel tests passed 30/30; shared env schema
+    smoke accepted valid env names and rejected invalid names. Package typecheck remains blocked by
+    missing ambient `@types/*` packages in the local workspace, unrelated to this slice.
+
+- **PROPOSED 2026-07-10 - Sonny Sangha GitHub repos as recurring IDE stress pool**
+  - Verified the current GitHub profile page for `sonnysangha`: 63 public repositories, heavily
+    TypeScript/Next/Clerk/Convex/Sanity/Stripe/Expo shaped. This is a useful pool because the apps
+    stress the real Dev-Vai workflow: clone/open, detect stack, detect missing env, start honestly,
+    help add real env values, and prove chat-to-code edits visually.
+  - Added `docs/test-pools/sonnysangha-github.md` with candidate lanes, safety rules, a per-repo
+    scorecard, and a first three-repo batch: `clerk-waitlist-demo`, `arcjet-nextjs-15-demo`, and
+    `ticket-marketplace-saas-nextjs15-convex-clerk-stripe-connect`.

@@ -92,10 +92,8 @@ async function captureVideoContent(videoId: string) {
   const description = getVideoDescription();
 
   // ---- Transcript (the actual spoken words) ----
-  let transcript = '';
-
   // Method 1: Parse captions from ytInitialPlayerResponse (most reliable — available before page renders)
-  transcript = await tryExtractCaptionsFromPageData();
+  let transcript = await tryExtractCaptionsFromPageData();
 
   // Method 2: Parse from inline scripts
   if (!transcript) {

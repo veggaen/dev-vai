@@ -17,6 +17,7 @@ import type { ProjectService } from '../projects/service.js';
 import type { LocalSteeringInput, SteeringPacket } from '../steering/local-steering-worker.js';
 import { authorizeConversationAccess } from '../access/conversations.js';
 import { TurnSerializer } from '../turn-serializer.js';
+import { WorkspaceTurnCoordinator, buildWorkspaceColleagueNote } from '../workspace-coordinator.js';
 import { chatWebSocketInboundSchema } from '@vai/api-types/chat-ws';
 import type { AdvisorTrace, ChatProgressStep } from '@vai/api-types/chat-ws';
 
@@ -239,6 +240,10 @@ export function registerChatRoutes(
 ) {
   const ownerNorm = options.ownerEmail.trim().toLowerCase();
   const activeConversationTurns = new Set<string>();
+  // Colleague-awareness for concurrent chats attached to the same local folder:
+  // each workspace turn registers here and receives a who's-working/what-shipped
+  // snapshot injected into its system prompt.
+  const workspaceCoordinator = new WorkspaceTurnCoordinator();
 
   function isOwnerEmail(email: string | null | undefined): boolean {
     return email?.trim().toLowerCase() === ownerNorm;
@@ -497,6 +502,18 @@ export function registerChatRoutes(
           }
 
           activeConversationTurns.add(conversationId);
+          // Workspace colleague awareness — register this turn against the attached
+          // folder (if any) and fold the snapshot into the system prompt so the
+          // council sequences around sibling chats instead of colliding with them.
+          let effectiveSystemPrompt = data.systemPrompt;
+          const turnWorkspaceRoot = data.workspaceRoot;
+          if (turnWorkspaceRoot) {
+            const snapshot = workspaceCoordinator.beginTurn(turnWorkspaceRoot, conversationId, data.content);
+            const note = buildWorkspaceColleagueNote(turnWorkspaceRoot, snapshot);
+            if (note) {
+              effectiveSystemPrompt = effectiveSystemPrompt ? `${effectiveSystemPrompt}\n\n${note}` : note;
+            }
+          }
           try {
             // Serialize the engine turn GLOBALLY (runIterable holds the lock until the stream is fully
             // drained) so concurrent turns on the shared VaiEngine can't corrupt each other's state.
@@ -505,10 +522,14 @@ export function registerChatRoutes(
               conversationId,
               data.content,
               image,
-              data.systemPrompt,
+              effectiveSystemPrompt,
               noLearn,
               promptRewriteOverrides,
-              { imageMode: data.imageMode === true, processDepth: data.processDepth },
+              {
+                imageMode: data.imageMode === true,
+                processDepth: data.processDepth,
+                councilModelIds: data.councilModelIds,
+              },
             ))) {
               if (chunk.type === 'conversation_resolved' && chunk.conversationId) {
                 fastify.log.warn(
@@ -536,6 +557,7 @@ export function registerChatRoutes(
             }
           } finally {
             activeConversationTurns.delete(conversationId);
+            if (turnWorkspaceRoot) workspaceCoordinator.endTurn(turnWorkspaceRoot, conversationId);
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Unknown error';

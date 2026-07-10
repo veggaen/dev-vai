@@ -30,17 +30,38 @@ import {
   ensureViteReactEntrypoint,
   type ExtractedFile,
 } from '../lib/file-extractor.js';
-import { selectNextAutoSandboxMessage } from '../lib/auto-sandbox-message-selection.js';
-import { extractDeployActions, extractTemplateActions } from '../lib/sandbox-actions.js';
-import { resolveAutoSandboxIntent, isChatOnlyAssistantTurn } from '../lib/auto-sandbox-intent.js';
+import {
+  assistantMessageIds,
+  selectNextAutoSandboxMessage,
+  shouldMarkConversationHistoryProcessed,
+} from '../lib/auto-sandbox-message-selection.js';
+import {
+  extractDeployActions,
+  extractReplaceActions,
+  extractTemplateActions,
+  type ReplaceAction,
+} from '../lib/sandbox-actions.js';
+import {
+  resolveAutoSandboxIntent,
+  resolveSendTimeWorkIntent,
+  resolveTerminalNoActionStatus,
+  isChatOnlyAssistantTurn,
+  shouldStageGeneratedFilesForReview,
+} from '../lib/auto-sandbox-intent.js';
 import {
   buildGroundedExecutionRepairPlan,
   shouldTriggerGroundedExecutionRepair,
 } from '../lib/grounded-build-execution.js';
 import { isNonPreviewableCodeFileSet } from '../lib/non-previewable-file-set.js';
 import { extractBrowserRuntimeErrors } from '../lib/sandbox-runtime-validation.js';
-import { serializeProjectUpdateArtifact, type ProjectUpdateArtifact } from '../lib/project-artifact.js';
+import {
+  buildProjectCompletionSummary,
+  serializeProjectUpdateArtifact,
+  type ProjectUpdateArtifact,
+} from '../lib/project-artifact.js';
 import { toast } from 'sonner';
+import { useWorkspaceStore } from '../stores/workspaceStore.js';
+import { existingPreviewRemainedHealthy } from '../lib/preview-verification.js';
 
 /** Max number of automatic repair attempts before giving up */
 const MAX_REPAIR_ATTEMPTS = 2;
@@ -157,14 +178,21 @@ function hasMeaningfulActiveSandbox(input: {
 async function waitForDevServer(port: number, timeoutMs = VERIFY_TIMEOUT_MS): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3000);
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 2000);
-      const res = await fetch(`http://localhost:${port}`, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (res.ok) return true;
+      // Sandbox apps are a different localhost origin from the desktop shell.
+      // A normal fetch is rejected by CORS even when the app is healthy, which
+      // previously produced a false “preview stopped responding” receipt.
+      const res = await fetch(`http://localhost:${port}`, {
+        signal: ctrl.signal,
+        mode: 'no-cors',
+      });
+      if (res.ok || res.type === 'opaque') return true;
     } catch {
       // not ready yet
+    } finally {
+      clearTimeout(timer);
     }
     await new Promise((r) => setTimeout(r, 1200));
   }
@@ -238,6 +266,7 @@ async function fetchSandboxStatus(projectId: string, apiBase: string): Promise<{
 
 export function useAutoSandbox() {
   const isStreaming = useChatStore((s) => s.isStreaming);
+  const streamingConversationId = useChatStore((s) => s.streamingConversationId);
   const messages = useChatStore((s) => s.messages);
   const conversations = useChatStore((s) => s.conversations);
   const activeConversationId = useChatStore((s) => s.activeConversationId);
@@ -252,6 +281,7 @@ export function useAutoSandbox() {
   const createProject = useSandboxStore((s) => s.createProject);
   const attachProject = useSandboxStore((s) => s.attachProject);
   const writeFiles = useSandboxStore((s) => s.writeFiles);
+  const replaceText = useSandboxStore((s) => s.replaceText);
   const clearBuildActivity = useSandboxStore((s) => s.clearBuildActivity);
   const installDeps = useSandboxStore((s) => s.installDeps);
   const scaffoldFromTemplate = useSandboxStore((s) => s.scaffoldFromTemplate);
@@ -287,6 +317,7 @@ export function useAutoSandbox() {
   }, []);
 
   const processedMessageIdsRef = useRef<Set<string>>(new Set());
+  const hydratedConversationIdRef = useRef<string | null>(null);
   /** Count consecutive repair attempts for the current response chain */
   const repairAttemptsRef = useRef(0);
 
@@ -569,7 +600,17 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
       }
 
       const previewLoaded = await waitForPreviewIframeLoad(port, previewLoadBaseline);
-      if (!previewLoaded) {
+      const currentPreview = useSandboxStore.getState();
+      const existingPreviewHealthy = existingPreviewRemainedHealthy({
+        port,
+        baselineLoadCount: previewLoadBaseline,
+        devPort: currentPreview.devPort,
+        lastPreviewPort: currentPreview.lastPreviewPort,
+        previewLoadCount: currentPreview.previewLoadCount,
+        previewReady: currentPreview.previewReady,
+        status: currentPreview.status,
+      });
+      if (!previewLoaded && !existingPreviewHealthy) {
         withCapture((capture) => {
           capture.verification('Preview server responded but the app shell never loaded the iframe', {
             target: 'preview-runtime',
@@ -583,7 +624,9 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
       }
 
       withCapture((capture) => {
-        capture.verification(`Preview verified on port ${port}`, {
+        capture.verification(previewLoaded
+          ? `Preview verified on port ${port}`
+          : `Preview remained mounted and responsive through HMR on port ${port}`, {
           target: 'preview-runtime',
           status: 'passed',
           port,
@@ -644,6 +687,110 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
 
     return triggerRepair(port, filesApplied, buildError, undefined, capturedStderr);
   }, [setBuildStatus, triggerRepair, withCapture]);
+
+  const processReplace = useCallback(async (action: ReplaceAction) => {
+    const conversationId = activeConversationId;
+    const conversationSandboxId = activeConversation?.sandboxProjectId ?? null;
+    let stateBefore = useSandboxStore.getState();
+    if (conversationSandboxId && stateBefore.projectId !== conversationSandboxId) {
+      setBuildStatus({ step: 'writing', message: `Attaching project for ${action.paths[0]}...` });
+      await attachProject(conversationSandboxId);
+      stateBefore = useSandboxStore.getState();
+    }
+    if (!stateBefore.projectId) {
+      setBuildStatus({ step: 'failed', message: 'No attached project for the exact edit.' });
+      return;
+    }
+
+    setBuildStatus({ step: 'writing', message: `Editing ${action.paths[0]}...` });
+    const logStartIndex = stateBefore.logs.length;
+    try {
+      const result = await replaceText(action);
+      const currentState = useSandboxStore.getState();
+      let previewVerified = false;
+      if (currentState.devPort) {
+        await new Promise((resolve) => setTimeout(resolve, 1800));
+        // Large Next.js projects can spend tens of seconds recompiling after a
+        // one-line edit. Keep the exact-edit receipt pending long enough to
+        // distinguish a slow HMR pass from a genuinely stopped preview.
+        const reachable = await waitForDevServer(currentState.devPort, 45_000);
+        const browserErrors = reachable
+          ? await waitForBrowserRuntimeErrors(logStartIndex, 3_500)
+          : ['Preview stopped responding after the exact edit.'];
+        if (!reachable || browserErrors.length > 0) {
+          const projectUpdate = buildProjectUpdateMessage(
+            action.summary ?? `Updated ${action.paths[0]}, but preview needs attention.`,
+            [
+              ...(action.details ?? [
+                `Applied one guarded exact replacement in ${action.paths[0]}.`,
+              ]),
+              browserErrors[0] ?? 'Preview verification failed after the edit.',
+            ],
+            [],
+          );
+          await injectProjectUpdate(projectUpdate, conversationId);
+          recordProjectUpdateArtifact(projectUpdate);
+          setBuildStatus({
+            step: 'failed',
+            message: browserErrors[0] ?? 'Preview verification failed after the exact edit.',
+          });
+          toast.error('The edit landed, but the preview needs attention');
+          return;
+        }
+        previewVerified = true;
+      }
+
+      setBuildStatus({
+        step: 'ready',
+        message: previewVerified
+          ? `Updated ${action.paths[0]} and verified port ${currentState.devPort}`
+          : `Updated ${action.paths[0]}`,
+      });
+      toast.success(`Updated ${action.paths[0]} (1 exact match)`);
+      const projectUpdate = buildProjectUpdateMessage(
+        action.summary ?? `Complete — updated ${action.paths[0]}.`,
+        [
+          ...(action.details ?? [
+            `Replaced one case-sensitive match; the operation was aborted unless the match count was exactly one.`,
+          ]),
+          ...(previewVerified && currentState.devPort
+            ? [`Preview remained reachable on port ${currentState.devPort}.`]
+            : []),
+        ],
+        [],
+      );
+      await injectProjectUpdate(projectUpdate, conversationId);
+      recordProjectUpdateArtifact(projectUpdate);
+      withCapture((capture) => {
+        capture.checkpoint(`Applied exact text edit to ${action.paths[0]}`, {
+          checkpoint: 'exact-replace-applied',
+          status: 'completed',
+          sandboxProjectId: currentState.projectId ?? undefined,
+          conversationId: conversationId ?? undefined,
+          files: action.paths,
+          port: currentState.devPort ?? undefined,
+        });
+        capture.artifact('Recorded reversible exact-edit revision', {
+          artifactType: 'project-update',
+          label: action.paths[0],
+          value: result.revisionId ?? 'revision unavailable',
+        });
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setBuildStatus({ step: 'failed', message });
+      toast.error(message);
+    }
+  }, [
+    activeConversationId,
+    activeConversation?.sandboxProjectId,
+    attachProject,
+    injectProjectUpdate,
+    recordProjectUpdateArtifact,
+    replaceText,
+    setBuildStatus,
+    withCapture,
+  ]);
 
   const processFiles = useCallback(async (files: ExtractedFile[], forceFreshProject = false) => {
     files = ensureViteReactEntrypoint(files);
@@ -773,7 +920,21 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
         await setConversationSandbox(conversationId, pid);
       }
 
-      // Write files
+      // Agent is the autonomous chat + code lane: validated edits write through
+      // the reversible sandbox API and are immediately verified below. Builder
+      // and Chat still honour the explicit diff-review preference.
+      if (shouldStageGeneratedFilesForReview({
+        mode: useLayoutStore.getState().mode,
+        requireDiffApproval: useWorkspaceStore.getState().requireDiffApproval,
+      })) {
+        await useWorkspaceStore.getState().addExtractedProposals(
+          files.map((f) => ({ path: f.path, content: f.content })),
+        );
+        setBuildStatus({ step: 'idle', message: 'Review proposed changes in the IDE panel' });
+        toast.info(`Review ${files.length} proposed file change${files.length > 1 ? 's' : ''} before applying`);
+        return;
+      }
+
       setBuildStatus({ step: 'writing', message: `Writing ${files.length} file${files.length > 1 ? 's' : ''}...` });
       await writeFiles(files.map((f) => ({ path: f.path, content: f.content })));
       toast.success(`${files.length} file${files.length > 1 ? 's' : ''} written to sandbox`);
@@ -1034,9 +1195,13 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
         failureClass,
       });
 
-      const projectLabel = currentState.projectName ? ` for ${currentState.projectName}` : '';
       const projectUpdate = buildProjectUpdateMessage(
-        `Applied ${files.length} file${files.length === 1 ? '' : 's'}${projectLabel}.`,
+        buildProjectCompletionSummary({
+          projectName: currentState.projectName,
+          fileCount: files.length,
+          previewVerified,
+          previewReachable,
+        }),
         details,
         files,
         artifact,
@@ -1284,6 +1449,40 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
   }, [activeConversationId, deployStack, setBuildStatus, setConversationSandbox, injectProjectUpdate, recordProjectUpdateArtifact, withCapture]);
 
   useEffect(() => {
+    if (!activeConversationId) {
+      hydratedConversationIdRef.current = null;
+      processedMessageIdsRef.current.clear();
+      repairAttemptsRef.current = 0;
+      return;
+    }
+
+    if (hydratedConversationIdRef.current === activeConversationId) {
+      return;
+    }
+
+    hydratedConversationIdRef.current = activeConversationId;
+    repairAttemptsRef.current = 0;
+
+    if (!shouldMarkConversationHistoryProcessed({
+      activeConversationId,
+      isStreaming,
+      streamingConversationId,
+      messages,
+    })) {
+      return;
+    }
+
+    const assistantIds = assistantMessageIds(messages);
+    assistantIds.forEach((id) => processedMessageIdsRef.current.add(id));
+    if (assistantIds.length > 0) {
+      console.info('[auto-sandbox] loaded-history-marked-processed', {
+        activeConversationId,
+        assistantCount: assistantIds.length,
+      });
+    }
+  }, [activeConversationId, isStreaming, messages, streamingConversationId]);
+
+  useEffect(() => {
     if (isStreaming) {
       return;
     }
@@ -1303,6 +1502,7 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
     const _normalizedPrompt = userPrompt.toLowerCase();
     const templateActions = extractTemplateActions(lastMsg.content);
     const deployActions = extractDeployActions(lastMsg.content);
+    const replaceActions = extractReplaceActions(lastMsg.content);
     const files = extractFilesFromMarkdown(lastMsg.content);
     const sandboxState = useSandboxStore.getState();
     const hasActiveProject = hasMeaningfulActiveSandbox({
@@ -1310,12 +1510,20 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
       attachedProjectId: sandboxState.projectId,
       attachedFiles: sandboxState.files,
     });
+    const hasProjectForIntent = hasActiveProject || Boolean(activeConversation?.sandboxProjectId);
     const sandboxIntent = resolveAutoSandboxIntent({
       userPrompt,
       mode: effectiveMode,
-      hasActiveProject,
+      hasActiveProject: hasProjectForIntent,
       hasPackageJsonOutput: hasPackageJson(files),
     });
+    const sendTimeWorkIntent = resolveSendTimeWorkIntent({
+      userPrompt,
+      mode: effectiveMode,
+      hasActiveProject: hasProjectForIntent,
+    });
+
+    const canApplyReplaceAction = hasActiveProject || Boolean(activeConversation?.sandboxProjectId);
 
     console.info('[auto-sandbox] assistant-complete', {
       messageId: lastMsg.id,
@@ -1325,17 +1533,31 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
       sandboxProjectId: activeConversation?.sandboxProjectId ?? null,
       attachedProjectId: sandboxState.projectId,
       hasActiveProject,
+      hasProjectForIntent,
       fileCount: files.length,
       templateCount: templateActions.length,
       deployCount: deployActions.length,
+      replaceCount: replaceActions.length,
       explicitChatBuildRequest: sandboxIntent.explicitChatBuildRequest,
       explicitChatEditRequest: sandboxIntent.explicitChatEditRequest,
       turnKind: lastMsg.turnKind,
     });
+    // Atomic exact-text actions are emitted for unique literal edits in large
+    // real files. Apply them before chat-only/file-block routing.
+    if (replaceActions.length > 0 && canApplyReplaceAction && sandboxIntent.explicitChatEditRequest) {
+      enqueue(() => processReplace(replaceActions[0]));
+      return;
+    }
 
     // Chat/research/analysis answers must not trigger builder recovery or stale file bars.
     if (isChatOnlyAssistantTurn(lastMsg, files.length)) {
       clearBuildActivity();
+      const terminalStatus = resolveTerminalNoActionStatus({
+        workIntent: sendTimeWorkIntent.intent,
+        hasActiveProject,
+        assistantContent: lastMsg.content,
+      });
+      if (terminalStatus) setBuildStatus(terminalStatus);
       console.info('[auto-sandbox] chat-only-turn-skip', { messageId: lastMsg.id, turnKind: lastMsg.turnKind });
       return;
     }
@@ -1409,30 +1631,4 @@ Please diagnose the issue and provide corrected file(s). Output only the files t
         hasActiveProject,
       });
       triggerMissingActionRepair({
-        groundedBrief: lastMsg.groundedBuildBrief,
-        sandboxIntent,
-        hasActiveProject,
-        userPrompt,
-      });
-      return;
-    }
-
-    const groundedBriefMessage = lastMsg.groundedBuildBrief
-      ? `${lastMsg.groundedBuildBrief.nextStep} No runnable preview was emitted yet.`
-      : null;
-    const noFileMessage = looksIncomplete
-      ? 'Reply ended early. Preview is unchanged until files land.'
-      : groundedBriefMessage
-        ? `Grounded direction ready. ${groundedBriefMessage}`
-      : hasActiveProject
-        ? 'Preview unchanged. The last Builder reply did not apply code changes yet.'
-        : 'Vai answered in chat, but no files were generated for preview yet.';
-    setBuildStatus({
-      step: hasActiveProject ? 'ready' : 'failed',
-      message: noFileMessage,
-    });
-    if (!hasActiveProject) {
-      toast.info('No runnable update was generated from the last Builder reply');
-    }
-  }, [effectiveMode, enqueue, isStreaming, messages, processDeploy, processFiles, processTemplate, setBuildStatus, triggerMissingActionRepair, clearBuildActivity]);
-}
+        grounde

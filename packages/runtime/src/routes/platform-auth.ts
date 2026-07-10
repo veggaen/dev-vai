@@ -16,7 +16,7 @@ function renderDevicePage(title: string, body: string): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(title)}</title>
+    <title>${escapeHtml(title)} · Vai</title>
     <style>
       :root { color-scheme: dark; }
       body {
@@ -24,51 +24,59 @@ function renderDevicePage(title: string, body: string): string {
         min-height: 100vh;
         display: grid;
         place-items: center;
-        background: radial-gradient(circle at top, #1f2937, #09090b 58%);
+        background: #090b0d;
+        background-image: radial-gradient(circle at 16% 10%, rgba(16, 185, 129, 0.10), transparent 34%),
+          radial-gradient(circle at 90% 90%, rgba(59, 130, 246, 0.07), transparent 28%);
         color: #f4f4f5;
-        font-family: "Segoe UI", sans-serif;
+        font-family: "Segoe UI", system-ui, sans-serif;
       }
       main {
-        width: min(560px, calc(100vw - 32px));
-        padding: 28px;
-        border: 1px solid rgba(244, 244, 245, 0.12);
-        border-radius: 18px;
-        background: rgba(24, 24, 27, 0.9);
-        box-shadow: 0 32px 80px rgba(0, 0, 0, 0.35);
+        width: min(420px, calc(100vw - 32px));
+        padding: 36px 32px;
+        border: 1px solid rgba(244, 244, 245, 0.10);
+        border-radius: 20px;
+        background: rgba(16, 18, 20, 0.92);
+        box-shadow: 0 32px 100px rgba(0, 0, 0, 0.48);
+        text-align: center;
       }
-      h1 { margin: 0 0 12px; font-size: 24px; }
-      p { margin: 0 0 14px; color: #d4d4d8; line-height: 1.55; }
-      .card {
-        margin: 18px 0;
-        padding: 14px 16px;
-        border-radius: 14px;
-        background: rgba(39, 39, 42, 0.72);
-        border: 1px solid rgba(244, 244, 245, 0.08);
+      .mark {
+        display: grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        margin: 0 auto 18px;
+        border-radius: 12px;
+        border: 1px solid rgba(110, 231, 183, 0.25);
+        background: rgba(110, 231, 183, 0.10);
+        color: #6ee7b7;
+        font-weight: 600;
+        font-size: 17px;
       }
+      h1 { margin: 0 0 8px; font-size: 21px; letter-spacing: -0.02em; }
+      p { margin: 0 0 10px; color: #a1a1aa; line-height: 1.6; font-size: 14px; }
+      .who { color: #e4e4e7; }
       .button {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding: 12px 16px;
+        margin-top: 14px;
+        padding: 11px 22px;
         border-radius: 12px;
-        background: #2563eb;
-        color: white;
+        background: #f4f4f5;
+        color: #09090b;
         text-decoration: none;
         font-weight: 600;
+        font-size: 14px;
         border: 0;
         cursor: pointer;
       }
-      code {
-        font-family: Consolas, monospace;
-        padding: 2px 6px;
-        border-radius: 6px;
-        background: rgba(63, 63, 70, 0.7);
-      }
-      .muted { color: #a1a1aa; font-size: 14px; }
+      .button:hover { background: #ffffff; }
+      .muted { color: #71717a; font-size: 12px; margin-top: 16px; }
     </style>
   </head>
   <body>
     <main>
+      <div class="mark" aria-hidden="true">V</div>
       <h1>${escapeHtml(title)}</h1>
       ${body}
     </main>
@@ -76,20 +84,19 @@ function renderDevicePage(title: string, body: string): string {
 </html>`;
 }
 
+/**
+ * Best-effort tab close. Browsers only honor window.close() for script-opened
+ * tabs, so this page never PROMISES to close — it tries, and if the tab is
+ * still alive it shows honest "you can close this tab" copy instead.
+ */
 function renderAutoCloseScript(): string {
   return `<script>
-window.setTimeout(() => {
-  try {
-    window.close();
-  } catch {
-    // Ignore browser tabs that cannot be closed programmatically.
-  }
-}, 1200);
+setTimeout(() => { try { window.close(); } catch { /* not script-opened */ } }, 900);
 </script>`;
 }
 
-function renderCloseButton(): string {
-  return `<button class="button" type="button" onclick="window.close()">Close this tab</button>`;
+function renderDoneFooter(): string {
+  return `<p class="muted">All done — you can close this tab.</p>${renderAutoCloseScript()}`;
 }
 
 export function registerPlatformAuthRoutes(app: FastifyInstance, auth: PlatformAuthService) {
@@ -104,14 +111,9 @@ export function registerPlatformAuthRoutes(app: FastifyInstance, auth: PlatformA
   app.get('/api/auth/browser-complete', async (_request, reply) => {
     reply.type('text/html; charset=utf-8');
     return renderDevicePage(
-      'Sign-in complete',
-      `<p>Your VeggaAI browser sign-in finished successfully.</p>
-      <div class="card">
-        <p>The desktop app should reconnect on its own within a few seconds.</p>
-      </div>
-      ${renderCloseButton()}
-      <p class="muted">This tab will try to close itself automatically.</p>
-      ${renderAutoCloseScript()}`,
+      'You’re signed in',
+      `<p>The app reconnects on its own — nothing else to do here.</p>
+      ${renderDoneFooter()}`,
     );
   });
 
@@ -189,12 +191,8 @@ export function registerPlatformAuthRoutes(app: FastifyInstance, auth: PlatformA
         const providerLabel = auth.getProviderLabel(auth.getDefaultProvider());
         reply.type('text/html; charset=utf-8');
         return renderDevicePage(
-          'Sign in to continue',
-          `<p>Finish linking <code>${escapeHtml(deviceLink.clientName)}</code> to this VeggaAI runtime.</p>
-          <div class="card">
-            <p>You are linking code <code>${escapeHtml(deviceLink.userCode)}</code>.</p>
-            <p class="muted">Sign in with the VeggaAI platform account you want this client to use.</p>
-          </div>
+          'Connect your app',
+          `<p>Sign in once and <span class="who">${escapeHtml(deviceLink.clientName)}</span> is connected.</p>
           <a class="button" href="${escapeHtml(loginUrl)}">Continue with ${escapeHtml(providerLabel)}</a>`,
         );
       }
@@ -203,26 +201,18 @@ export function registerPlatformAuthRoutes(app: FastifyInstance, auth: PlatformA
         await auth.approveDeviceLink(userCode, request);
         reply.type('text/html; charset=utf-8');
         return renderDevicePage(
-          'Device linked',
-          `<p><code>${escapeHtml(deviceLink.clientName)}</code> is now linked to <code>${escapeHtml(viewer.user.email)}</code>.</p>
-          <div class="card">
-            <p>The desktop app should reconnect automatically now.</p>
-          </div>
-          ${renderCloseButton()}
-          <p class="muted">This tab will try to close itself automatically.</p>
-          ${renderAutoCloseScript()}`,
+          'You’re connected',
+          `<p><span class="who">${escapeHtml(deviceLink.clientName)}</span> is signed in as <span class="who">${escapeHtml(viewer.user.email)}</span> and reconnects on its own.</p>
+          ${renderDoneFooter()}`,
         );
       }
 
       reply.type('text/html; charset=utf-8');
       return renderDevicePage(
-        'Approve device link',
-        `<p><code>${escapeHtml(deviceLink.clientName)}</code> wants to use your local VeggaAI runtime session.</p>
-        <div class="card">
-          <p>Signed in as <code>${escapeHtml(viewer.user.email)}</code>.</p>
-          <p>Link code: <code>${escapeHtml(deviceLink.userCode)}</code>.</p>
-        </div>
-        <a class="button" href="/api/auth/device?userCode=${encodeURIComponent(deviceLink.userCode)}&auto=1">Approve</a>`,
+        'Approve connection',
+        `<p><span class="who">${escapeHtml(deviceLink.clientName)}</span> wants to use your account <span class="who">${escapeHtml(viewer.user.email)}</span> on this machine.</p>
+        <a class="button" href="/api/auth/device?userCode=${encodeURIComponent(deviceLink.userCode)}&auto=1">Approve</a>
+        <p class="muted">Not you? Just close this tab — nothing is connected until you approve.</p>`,
       );
     },
   );
@@ -242,11 +232,9 @@ export function registerPlatformAuthRoutes(app: FastifyInstance, auth: PlatformA
       if (wantsHtml) {
         reply.type('text/html; charset=utf-8');
         return renderDevicePage(
-          'Device linked',
-          `<p>This client is now linked to <code>${escapeHtml(user.email)}</code>.</p>
-          <div class="card">
-            <p>You can close this tab and return to your client.</p>
-          </div>`,
+          'You’re connected',
+          `<p>This client is signed in as <span class="who">${escapeHtml(user.email)}</span>.</p>
+          ${renderDoneFooter()}`,
         );
       }
 

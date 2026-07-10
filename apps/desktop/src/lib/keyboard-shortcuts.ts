@@ -17,8 +17,11 @@ export type ShortcutId =
   | 'knowledge'
   | 'cycleLayout'
   | 'toggleSources'
-  | 'toggleCouncil'
-  | 'appFullscreen';
+  | 'appFullscreen'
+  | 'attachWorkspace'
+  | 'toggleDiff'
+  | 'detachWorkspace'
+  | 'projectPanel';
 
 export interface ShortcutDefinition {
   id: ShortcutId;
@@ -45,8 +48,11 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   { id: 'knowledge', keys: 'Ctrl+Shift+K', description: 'Open knowledge base', category: 'navigation' },
   { id: 'cycleLayout', keys: 'Ctrl+Shift+M', description: 'Cycle layout density', category: 'workspace' },
   { id: 'toggleSources', keys: 'Ctrl+Shift+S', description: 'Toggle sources panel', category: 'panels' },
-  { id: 'toggleCouncil', keys: 'Ctrl+Shift+V', description: 'Toggle council panel', category: 'panels' },
-  { id: 'appFullscreen', keys: 'Ctrl+Shift+P', description: 'Expand app to full width', category: 'workspace' },
+  { id: 'appFullscreen', keys: 'Ctrl+Alt+P', description: 'Expand app to full width', category: 'workspace' },
+  { id: 'projectPanel', keys: 'Ctrl+Shift+I', description: 'Open chats with code badges', category: 'navigation' },
+  { id: 'attachWorkspace', keys: 'Ctrl+Shift+O', description: 'Attach a project folder to this chat', category: 'workspace' },
+  { id: 'toggleDiff', keys: 'Ctrl+Alt+D', description: 'Toggle diff review panel', category: 'panels' },
+  { id: 'detachWorkspace', keys: 'Ctrl+Shift+W', description: 'Detach workspace folder', category: 'workspace' },
 ];
 
 const DEFAULT_BY_ID = new Map(DEFAULT_SHORTCUTS.map((s) => [s.id, s]));

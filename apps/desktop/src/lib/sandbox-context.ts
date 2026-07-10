@@ -28,9 +28,22 @@ function normalizePath(value: string): string {
   return value.replace(/\\/g, '/');
 }
 
+/** Files the user literally named in the prompt are THE edit target — they must
+ *  dominate every generic heuristic. Live failure: "In components/Navbar.tsx,
+ *  change the navbar brand text" snapshot-picked page/layout/globals instead,
+ *  so the model never saw Navbar.tsx and produced an unrelated landing page. */
+function namedFileScore(normalizedPath: string, promptLower: string): number {
+  const fileName = normalizedPath.split('/').pop() ?? '';
+  if (!fileName || !fileName.includes('.')) return 0;
+  if (promptLower.includes(normalizedPath.toLowerCase())) return 400; // full relative path named
+  if (promptLower.includes(fileName.toLowerCase())) return 250;       // basename named
+  return 0;
+}
+
 function scorePath(path: string, userPrompt: string): number {
   const normalized = normalizePath(path);
-  let score = 0;
+  const promptLower = userPrompt.toLowerCase();
+  let score = namedFileScore(normalized, promptLower);
 
   for (const entry of HIGH_PRIORITY_PATTERNS) {
     if (entry.pattern.test(normalized)) score += entry.weight;

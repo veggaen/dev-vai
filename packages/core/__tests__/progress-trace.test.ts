@@ -47,6 +47,13 @@ describe('accumulateProgressStep', () => {
     expect(trace[0].councilMembers).toHaveLength(1); // preserved
     expect(trace[0].detail).toBe('final');
   });
+
+  it('preserves repeated observable actions that reuse a generic stage', () => {
+    let trace: ChatProgressStep[] = [];
+    trace = accumulateProgressStep(trace, step({ stage: 'council-review', label: 'Reviewing edit', status: 'done' }));
+    trace = accumulateProgressStep(trace, step({ stage: 'council-review', label: 'Re-reviewing repair', status: 'running' }));
+    expect(trace.map((entry) => entry.label)).toEqual(['Reviewing edit', 'Re-reviewing repair']);
+  });
 });
 
 describe('serialize/deserialize round-trip', () => {
@@ -93,12 +100,4 @@ describe('serialize/deserialize round-trip', () => {
   });
 
   it('returns undefined for empty / null / corrupt input', () => {
-    expect(serializeProgressTrace([])).toBeUndefined();
-    expect(serializeProgressTrace(undefined)).toBeUndefined();
-    expect(deserializeProgressTrace(null)).toBeUndefined();
-    expect(deserializeProgressTrace('')).toBeUndefined();
-    expect(deserializeProgressTrace('{not json')).toBeUndefined();
-    expect(deserializeProgressTrace('[]')).toBeUndefined();
-    expect(deserializeProgressTrace('[{"junk":1}]')).toBeUndefined(); // no stage/label/status
-  });
-});
+    expec

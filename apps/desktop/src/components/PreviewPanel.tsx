@@ -3,10 +3,11 @@ import { apiFetch } from '../lib/api.js';
 import {
   RefreshCw, Smartphone, Tablet, Monitor, Copy, ExternalLink,
   Code2, Eye, Trash2, Download, CheckCircle, XCircle, Loader2,
-  Camera, Terminal, FolderTree, Play, Square,
-  ArrowLeft, ArrowRight, Save, RotateCcw, MessageSquare, File, Moon, Sun,
+  Camera, Terminal, FolderTree, Play, Square, Columns2,
+  ArrowLeft, ArrowRight, Save, RotateCcw, MessageSquare, File, Moon, Sun, KeyRound,
 } from 'lucide-react';
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { Group, Panel } from 'react-resizable-panels';
 import { AnimatePresence, motion } from 'framer-motion';
 import { TemplateGallery } from './TemplateGallery.js';
 import { DeployProgress } from './DeployProgress.js';
@@ -14,13 +15,15 @@ import { VaiMark } from './brand/VaiMark.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import { useCursorStore } from '../stores/cursorStore.js';
 import { useChatStore } from '../stores/chatStore.js';
+import { groupEnvGuides } from '../lib/env-assistance.js';
 import { SandboxAppToggle } from './SandboxAppToggle.js';
 import { WorkspaceLayoutControls } from './workspace/WorkspaceLayoutControls.js';
+import { HoverResizeHandle } from './workspace/HoverResizeHandle.js';
 import { createPreviewRepairPrompt, PreviewFailureState } from './preview/PreviewFailureState.js';
 
 /* ── Types ── */
 
-type ViewMode = 'preview' | 'code';
+type ViewMode = 'preview' | 'code' | 'split';
 type BreakpointKey = 'mobile' | 'tablet' | 'desktop';
 type CodeLanguage = 'script' | 'markup' | 'style' | 'data' | 'plain';
 
@@ -46,8 +49,214 @@ const STUDIO_PREVIEW_TIPS = [
   'Ask for Discussion or Plan mode when you want to save iterations for trickier product calls.',
   'Version history in your workflow can restore an earlier sandbox when an edit goes sideways.',
   'Pick Stripe, PayPal, Klarna, Vipps, or mock checkout — Vai can wire the UI to match.',
-  'Toggle mobile preview to catch layout issues before you ship.',
+  'Toggle mobile app view to catch layout issues before you ship.',
 ] as const;
+
+interface EnvStatus {
+  exampleVars: string[];
+  configuredVars: string[];
+  missingEnvVars: string[];
+  envLocalExists: boolean;
+}
+
+function missingEnvFromMessage(message: string): string | null {
+  return /\bMissing\s+([A-Z][A-Z0-9_]*|VITE_[A-Z0-9_]+)\b/i.exec(message)?.[1] ?? null;
+}
+
+function EnvSetupDialog({
+  projectId,
+  failureMessage,
+  onClose,
+  onSaved,
+}: {
+  projectId: string;
+  failureMessage: string;
+  onClose: () => void;
+  onSaved: () => Promise<void> | void;
+}) {
+  const fallbackVar = missingEnvFromMessage(failureMessage);
+  const [status, setStatus] = useState<EnvStatus | null>(null);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBusy(true);
+    setErrorText(null);
+    apiFetch(`/api/sandbox/${projectId}/env-local`)
+      .then(async (res) => {
+        const data = await res.json().catch(() => null) as EnvStatus | { error?: string } | null;
+        if (!res.ok) throw new Error((data as { error?: string } | null)?.error ?? 'Unable to inspect env status');
+        if (!cancelled) setStatus(data as EnvStatus);
+      })
+      .catch((err) => {
+        if (!cancelled) setErrorText(err instanceof Error ? err.message : 'Unable to inspect env status');
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(false);
+      });
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  const vars = useMemo(() => {
+    const fromStatus = status?.missingEnvVars ?? [];
+    const combined = fallbackVar ? [fallbackVar, ...fromStatus] : fromStatus;
+    return [...new Set(combined)];
+  }, [fallbackVar, status?.missingEnvVars]);
+
+  const envGroups = useMemo(() => groupEnvGuides(vars), [vars]);
+
+  const canSave = vars.some((name) => values[name]?.trim());
+
+  const save = useCallback(async () => {
+    if (!canSave || busy) return;
+    setBusy(true);
+    setErrorText(null);
+    try {
+      const bodyValues = Object.fromEntries(
+        Object.entries(values)
+          .filter(([key, value]) => vars.includes(key) && value.trim().length > 0),
+      );
+      const res = await apiFetch(`/api/sandbox/${projectId}/env-local`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: bodyValues }),
+      });
+      const data = await res.json().catch(() => null) as { error?: string } | null;
+      if (!res.ok) throw new Error(data?.error ?? 'Unable to write .env.local');
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setErrorText(err instanceof Error ? err.message : 'Unable to write .env.local');
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, canSave, onClose, onSaved, projectId, values, vars]);
+
+  return (
+    <motion.div
+      className="absolute inset-0 z-30 flex items-center justify-center overflow-hidden bg-black/55 p-4 backdrop-blur-sm"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Set environment values"
+    >
+      <motion.div
+        className="flex max-h-[calc(100%-2rem)] w-[min(720px,94vw)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/95 shadow-2xl"
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 8, scale: 0.98 }}
+      >
+        <div className="shrink-0 border-b border-white/10 px-5 py-4">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-300">Project setup</p>
+          <h2 className="mt-1 text-lg font-semibold tracking-[-0.03em] text-white">Connect the services this app needs</h2>
+          <p className="mt-2 text-xs leading-6 text-zinc-400">
+            Start with Core runtime and Authentication. Billing, video, and storage can wait until you test those features. Values stay masked and are written only to this project's .env.local.
+          </p>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {busy && !status ? (
+            <div className="flex items-center gap-2 rounded-xl border border-violet-500/20 bg-violet-500/10 px-3 py-2 text-xs text-violet-200">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Inspecting .env.example…
+            </div>
+          ) : vars.length === 0 ? (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-6 text-amber-200">
+              I could not infer a missing env variable from this failure. Open the console or README setup notes for the project-specific keys.
+            </div>
+          ) : (
+            <div>
+              {envGroups.map(({ group, guides }, groupIndex) => (
+                <section key={group} className={groupIndex === 0 ? '' : 'mt-6 border-t border-white/10 pt-5'}>
+                  <div className="mb-3 flex items-baseline justify-between gap-3">
+                    <h3 className="text-xs font-semibold text-zinc-100">{group}</h3>
+                    {group === 'Core runtime' ? (
+                      <span className="text-[10px] font-medium text-emerald-300">Start here</span>
+                    ) : null}
+                  </div>
+                  <div className="space-y-4">
+                    {guides.map((guide) => {
+                      const name = guide.name;
+                      return (
+                        <label key={name} className="block">
+                          <span className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span className="font-mono text-[11px] font-semibold text-zinc-200">{name}</span>
+                            <span className="text-[10px] text-zinc-500">{guide.service}</span>
+                            {guide.generated ? <span className="text-[10px] text-sky-300">Usually generated</span> : null}
+                            {guide.requiredToBoot ? <span className="text-[10px] font-medium text-emerald-300">Required to open</span> : null}
+                            {guide.serverOnly ? <span className="text-[10px] text-amber-300">Server only</span> : null}
+                            {guide.getValueUrl ? (
+                              <a
+                                href={guide.getValueUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="ml-auto inline-flex items-center gap-1 text-[10px] font-medium text-violet-300 transition hover:text-violet-200"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                Get value <ExternalLink className="h-2.5 w-2.5" />
+                              </a>
+                            ) : null}
+                          </span>
+                          <span className="mb-2 block text-[10px] leading-4 text-zinc-500">{guide.description}</span>
+                          <input
+                            type="password"
+                            value={values[name] ?? ''}
+                            onChange={(e) => setValues((current) => ({ ...current, [name]: e.target.value }))}
+                            placeholder={guide.generated ? 'Run provider setup, or paste an existing value…' : guide.serverOnly ? 'Paste the server-only value…' : 'Paste the real value…'}
+                            className="w-full rounded-lg border border-white/10 bg-black/45 px-3 py-2 font-mono text-xs text-zinc-100 outline-none transition focus:border-violet-400/70"
+                            autoComplete="off"
+                            spellCheck={false}
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
+          {status && status.configuredVars.length > 0 && (
+            <p className="mt-3 text-[11px] leading-5 text-zinc-500">
+              Already configured: {status.configuredVars.slice(0, 10).join(', ')}
+              {status.configuredVars.length > 10 ? '…' : ''}
+            </p>
+          )}
+          {errorText && (
+            <div className="mt-3 rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-300" role="alert">
+              {errorText}
+            </div>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-white/10 px-5 py-4">
+          <p className="max-w-[430px] text-[11px] leading-5 text-zinc-500">
+            Save restarts the App. Backend secrets used by Convex must also be added to that deployment's environment.
+          </p>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={busy}
+              className="rounded-xl px-3 py-2 text-xs font-medium text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={!canSave || busy}
+              className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              Save & restart
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
 
 function detectCodeLanguage(path: string | null): CodeLanguage {
   const ext = path?.split('.').pop()?.toLowerCase() ?? '';
@@ -256,7 +465,7 @@ function BuildDashboard({
       ? {
         label: 'Live',
         badge: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-200',
-        copy: activeStepLabel || 'The preview is connected and ready to inspect.',
+        copy: activeStepLabel || 'The app is connected and ready to inspect.',
       }
       : status === 'failed' || buildStatus.step === 'failed'
         ? {
@@ -280,17 +489,17 @@ function BuildDashboard({
     {
       label: 'Live surface',
       value: devPort ? 'Connected' : 'Not live yet',
-      detail: devPort ? previewUrl : 'A local preview URL appears here when the sandbox boots.',
+      detail: devPort ? previewUrl : 'A local app URL appears here when the sandbox boots.',
     },
     {
       label: 'Files',
       value: hasFiles ? String(files.length) : '0',
-      detail: hasFiles ? 'Generated source files are ready to inspect.' : 'No source bundle has landed yet.',
+      detail: hasFiles ? 'Generated code files are ready to inspect.' : 'No code bundle has landed yet.',
     },
     {
       label: 'Viewport',
       value: BREAKPOINTS[breakpoint].label.replace(/\s*\(.*\)/, ''),
-      detail: 'Current preview width for the live iframe surface.',
+      detail: 'Current app width for the live iframe surface.',
     },
     {
       label: 'Workspace',
@@ -334,7 +543,7 @@ function BuildDashboard({
                 }`}
               >
                 <Eye className="h-3.5 w-3.5" />
-                Open Preview
+                Open App
               </button>
               <button
                 onClick={onOpenCode}
@@ -396,10 +605,10 @@ function BuildDashboard({
                 </div>
                 <div className={`px-3 py-3 ${studioChrome ? 'bg-white' : 'bg-zinc-950/55'}`}>
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Live target</div>
-                  <div className={`mt-2 truncate font-mono text-[12px] ${studioChrome ? 'text-zinc-700' : 'text-zinc-300'}`}>{devPort ? previewUrl : 'Preview pending'}</div>
+                  <div className={`mt-2 truncate font-mono text-[12px] ${studioChrome ? 'text-zinc-700' : 'text-zinc-300'}`}>{devPort ? previewUrl : 'App pending'}</div>
                   <p className="mt-2 text-[11px] leading-6 text-zinc-500">
                     {devPort
-                      ? 'Use Preview when you want to verify layout, hover states, and end-user polish.'
+                      ? 'Use App when you want to verify layout, hover states, and end-user polish.'
                       : 'Once the sandbox exposes a port, the live URL will appear here automatically.'}
                   </p>
                 </div>
@@ -408,7 +617,7 @@ function BuildDashboard({
           </section>
 
           <section className={`border px-4 py-4 ${studioChrome ? 'border-zinc-200 bg-white/90' : 'border-zinc-800/70 bg-zinc-950/40'}`}>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">Source snapshot</div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">Code snapshot</div>
             <div className="mt-4">
               {featuredFiles.length > 0 ? (
                 <div className={`overflow-hidden border ${studioChrome ? 'border-zinc-200' : 'border-zinc-800/70'}`}>
@@ -475,7 +684,7 @@ function PreviewHandoffShell({
     <div className="flex h-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(99,102,241,0.12),rgba(9,9,11,0)_48%),linear-gradient(180deg,rgba(9,9,11,0.96),rgba(17,24,39,0.98))] p-6">
       <div className="w-full max-w-2xl rounded-[2rem] border border-zinc-800/80 bg-zinc-950/80 p-6 shadow-[0_28px_80px_rgba(0,0,0,0.32)] backdrop-blur-xl">
         <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
-          <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2.5 py-1 text-violet-200">Live preview handoff</span>
+          <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2.5 py-1 text-violet-200">Live app handoff</span>
           {activeStep ? (
             <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-zinc-200">{activeStep}</span>
           ) : null}
@@ -490,7 +699,7 @@ function PreviewHandoffShell({
             <div className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/15">
               <div className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             </div>
-            <span className="truncate font-mono">{previewUrl ?? 'Preparing live preview...'}</span>
+            <span className="truncate font-mono">{previewUrl ?? 'Preparing live app...'}</span>
           </div>
           {steps && steps.length > 0 ? (
             <div className="mt-4 space-y-2">
@@ -586,7 +795,7 @@ function buildFileTreeEntries(files: string[]): FileTreeEntry[] {
 /* ═══════════════════════════════════
    Code View — syntax-highlighted source viewer
    ═══════════════════════════════════ */
-function CodeView({ projectId }: { projectId: string }) {
+export function CodeView({ projectId, showExplorer = true }: { projectId: string; showExplorer?: boolean }) {
   const { files, writeFiles, fetchFiles } = useSandboxStore();
   const sendMessage = useChatStore((s) => s.sendMessage);
   const themePreference = useLayoutStore((state) => state.themePreference);
@@ -599,15 +808,64 @@ function CodeView({ projectId }: { projectId: string }) {
   const [saved, setSaved] = useState(false);
   const [askingVai, setAskingVai] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [explorerCollapsed, setExplorerCollapsed] = useState(false);
+  const [explorerWidth, setExplorerWidth] = useState(256);
+  const [explorerResizeArmed, setExplorerResizeArmed] = useState(false);
   const activeRequestRef = useRef(0);
+  const explorerHoverTimerRef = useRef<number | null>(null);
+  const explorerResizeRef = useRef({ startX: 0, startWidth: 256 });
   const fileTreeEntries = buildFileTreeEntries(files.filter((file) => !file.includes('node_modules') && !file.endsWith('.lock')));
+  const explorerVisible = showExplorer && !explorerCollapsed;
+
+  const clearExplorerHoverTimer = useCallback(() => {
+    if (explorerHoverTimerRef.current != null) {
+      window.clearTimeout(explorerHoverTimerRef.current);
+      explorerHoverTimerRef.current = null;
+    }
+  }, []);
+
+  const beginExplorerResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    clearExplorerHoverTimer();
+    setExplorerResizeArmed(true);
+    explorerResizeRef.current = { startX: event.clientX, startWidth: explorerWidth };
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const delta = moveEvent.clientX - explorerResizeRef.current.startX;
+      const next = Math.max(160, Math.min(520, explorerResizeRef.current.startWidth + delta));
+      setExplorerWidth(next);
+    };
+    const handleUp = () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+      setExplorerResizeArmed(false);
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp, { once: true });
+  }, [clearExplorerHoverTimer, explorerWidth]);
+
+  const armExplorerResize = useCallback(() => {
+    clearExplorerHoverTimer();
+    explorerHoverTimerRef.current = window.setTimeout(() => setExplorerResizeArmed(true), 500);
+  }, [clearExplorerHoverTimer]);
+
+  const disarmExplorerResize = useCallback(() => {
+    clearExplorerHoverTimer();
+    setExplorerResizeArmed(false);
+  }, [clearExplorerHoverTimer]);
 
   useEffect(() => {
     setSelectedFile(null);
     setContent('');
     setDraft('');
     setIsEditing(false);
+    setExplorerCollapsed(false);
+    setExplorerWidth(256);
   }, [projectId]);
+
+  useEffect(() => {
+    if (!showExplorer) setExplorerCollapsed(false);
+  }, [showExplorer]);
 
   useEffect(() => {
     void fetchFiles();
@@ -731,54 +989,109 @@ function CodeView({ projectId }: { projectId: string }) {
 
   return (
     <div className={`flex h-full min-h-0 flex-col md:flex-row ${isLight ? 'bg-white' : 'bg-zinc-950'}`}>
-      <aside className={`flex max-h-48 w-full shrink-0 flex-col border-b md:max-h-none md:w-64 md:border-b-0 md:border-r ${
-        isLight ? 'border-zinc-200 bg-zinc-50/90' : 'border-zinc-800/60 bg-zinc-950/90'
-      }`}>
-        <div className={`border-b px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] ${
-          isLight ? 'border-zinc-200 text-zinc-500' : 'border-zinc-800/50 text-zinc-500'
-        }`}>
-          Project Explorer
-        </div>
-        <div className="flex-1 overflow-auto px-2 py-2">
-          {fileTreeEntries.map((entry) => {
-            if (entry.isDirectory) {
-              return (
-                <div
-                  key={entry.id}
-                className="truncate py-1 text-[11px] font-medium text-zinc-500"
-                  style={{ paddingLeft: `${entry.depth * 14 + 8}px` }}
-                >
-                  {entry.name}
-                </div>
-              );
-            }
+      {explorerVisible && (
+        <aside className={`flex max-h-48 w-full shrink-0 flex-col border-b md:max-h-none md:w-64 md:border-b-0 md:border-r ${
+          isLight ? 'border-zinc-200 bg-zinc-50/90' : 'border-zinc-800/60 bg-zinc-950/90'
+        }`} style={{ width: `${explorerWidth}px` }}>
+          <div className={`flex items-center justify-between gap-2 border-b px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] ${
+            isLight ? 'border-zinc-200 text-zinc-500' : 'border-zinc-800/50 text-zinc-500'
+          }`}>
+            <span>Project Explorer</span>
+            <button
+              type="button"
+              onClick={() => setExplorerCollapsed(true)}
+              className={`rounded px-1.5 py-0.5 text-[10px] normal-case tracking-normal transition-colors ${
+                isLight ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900' : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200'
+              }`}
+              title="Collapse code explorer"
+            >
+              Collapse
+            </button>
+          </div>
+          <div className="flex-1 overflow-auto px-2 py-2">
+            {fileTreeEntries.map((entry) => {
+              if (entry.isDirectory) {
+                return (
+                  <div
+                    key={entry.id}
+                    className="truncate py-1 text-[11px] font-medium text-zinc-500"
+                    style={{ paddingLeft: `${entry.depth * 14 + 8}px` }}
+                  >
+                    {entry.name}
+                  </div>
+                );
+              }
 
-            const isActive = selectedFile === entry.path;
-            return (
-              <button
-                key={entry.id}
-                onClick={() => setSelectedFile(entry.path)}
-                className={`flex w-full items-center rounded-md py-1.5 text-left text-[11px] transition-colors ${
-                  isActive
-                    ? isLight ? 'bg-zinc-200 text-zinc-900' : 'bg-zinc-800 text-zinc-100'
-                    : isLight ? 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-                }`}
-                style={{ paddingLeft: `${entry.depth * 14 + 8}px`, paddingRight: '8px' }}
-                title={entry.path}
-              >
-                <File className={`mr-2 h-3.5 w-3.5 shrink-0 ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`} />
-                <span className="truncate">{entry.name}</span>
-              </button>
-            );
-          })}
+              const isActive = selectedFile === entry.path;
+              return (
+                <button
+                  key={entry.id}
+                  onClick={() => setSelectedFile(entry.path)}
+                  className={`flex w-full items-center rounded-md py-1.5 text-left text-[11px] transition-colors ${
+                    isActive
+                      ? isLight ? 'bg-zinc-200 text-zinc-900' : 'bg-zinc-800 text-zinc-100'
+                      : isLight ? 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                  }`}
+                  style={{ paddingLeft: `${entry.depth * 14 + 8}px`, paddingRight: '8px' }}
+                  title={entry.path}
+                >
+                  <File className={`mr-2 h-3.5 w-3.5 shrink-0 ${isLight ? 'text-zinc-400' : 'text-zinc-600'}`} />
+                  <span className="truncate">{entry.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+      )}
+      {explorerVisible && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize code explorer"
+          title={explorerResizeArmed ? 'Drag to resize the explorer' : 'Hover to resize the explorer'}
+          onPointerDown={beginExplorerResize}
+          onMouseEnter={armExplorerResize}
+          onMouseLeave={disarmExplorerResize}
+          className={`group relative hidden w-[10px] shrink-0 cursor-col-resize items-center justify-center md:flex ${
+            explorerResizeArmed ? 'z-10 bg-[color:var(--accent-soft)]' : ''
+          }`}
+        >
+          <div className={`h-full w-[2px] rounded-full transition-all duration-200 ${
+            explorerResizeArmed
+              ? 'bg-[color:var(--accent)] opacity-100 shadow-[0_0_12px_color-mix(in_srgb,var(--accent)_45%,transparent)]'
+              : isLight ? 'bg-zinc-300 opacity-60 group-hover:opacity-90' : 'bg-zinc-800 opacity-70 group-hover:opacity-100'
+          }`} />
+          {explorerResizeArmed && (
+            <span className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rotate-90 select-none text-[9px] font-medium uppercase tracking-[0.14em] text-[color:var(--accent-text)]">
+              resize
+            </span>
+          )}
         </div>
-      </aside>
+      )}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className={`flex items-center justify-between border-b px-3 py-1 ${
           isLight ? 'border-zinc-200 bg-zinc-50/60' : 'border-zinc-800/40'
         }`}>
-          <span className="truncate text-[10px] text-zinc-500">{selectedFile || 'No file selected'}</span>
+          <div className="flex min-w-0 items-center gap-1.5">
+            {showExplorer && (
+              <button
+                type="button"
+                onClick={() => setExplorerCollapsed((current) => !current)}
+                className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+                  explorerCollapsed
+                    ? isLight ? 'bg-zinc-200 text-zinc-800 hover:bg-zinc-300' : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+                    : isLight ? 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800' : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+                }`}
+                title={explorerCollapsed ? 'Restore code explorer' : 'Collapse code explorer'}
+                aria-pressed={!explorerCollapsed}
+              >
+                <FolderTree className="h-3 w-3" />
+                {explorerCollapsed ? 'Explorer' : 'Files'}
+              </button>
+            )}
+            <span className="truncate text-[10px] text-zinc-500">{selectedFile || 'No file selected'}</span>
+          </div>
           <div className="flex items-center gap-1">
             {selectedFile && (
               <>
@@ -920,12 +1233,82 @@ function CodeView({ projectId }: { projectId: string }) {
 /* ═══════════════════════════════════════════════════════════════════════
    Toolbar — Preview/Code toggle, URL bar, responsive breakpoints, actions
    ═══════════════════════════════════════════════════════════════════════ */
+/**
+ * LaneSwitch — the three-stop environment pill: dev | preview | prod.
+ * Dev is the default lane (hot reload). Preview builds and serves the real
+ * bundle; prod adds lint+typecheck gates first. Blue-green: the running app
+ * keeps serving until the new lane is ready, so switching never shows a hole.
+ */
+function LaneSwitch() {
+  const envLane = useSandboxStore((s) => s.envLane);
+  const laneState = useSandboxStore((s) => s.laneState);
+  const availableScripts = useSandboxStore((s) => s.availableScripts);
+  const projectId = useSandboxStore((s) => s.projectId);
+  const switchLane = useSandboxStore((s) => s.switchLane);
+
+  // Without a build script there is only a dev lane — hide the pill entirely.
+  if (!projectId || !availableScripts.includes('build')) return null;
+
+  const switching = laneState?.status === 'switching';
+  const failed = laneState?.status === 'failed';
+
+  const stops: { id: 'dev' | 'preview' | 'production'; label: string; title: string }[] = [
+    { id: 'dev', label: 'dev', title: 'Dev server — instant hot reload' },
+    { id: 'preview', label: 'Preview', title: 'Build once, then serve the production-like bundle locally for testing' },
+    { id: 'production', label: 'Prod', title: 'Run production gates first, then build and serve the production bundle' },
+  ];
+  const normalizedStops = stops.map((stop) => stop.id === 'dev'
+    ? { ...stop, label: 'Dev', title: 'Run the framework dev server with hot reload/HMR' }
+    : stop);
+
+  return (
+    <div
+      className="flex items-center gap-1 rounded-full border border-[color:var(--panel-border)] bg-[color:var(--panel-bg-muted)] p-0.5"
+      role="radiogroup"
+      aria-label="App environment lane"
+      title={switching ? `Switching to ${laneState?.lane}… (${laneState?.stage ?? 'working'})` : undefined}
+    >
+      {normalizedStops.map((stop) => {
+        const isActive = envLane === stop.id && !switching;
+        const isTarget = switching && laneState?.lane === stop.id;
+        const isFailedTarget = failed && laneState?.lane === stop.id;
+        return (
+          <button
+            key={stop.id}
+            type="button"
+            role="radio"
+            aria-checked={isActive}
+            disabled={switching}
+            onClick={() => { void switchLane(stop.id); }}
+            title={isFailedTarget && laneState?.error ? `${stop.title} — last attempt failed: ${laneState.error}` : stop.title}
+            className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors disabled:cursor-wait ${
+              isActive
+                ? stop.id === 'production'
+                  ? 'bg-red-500/20 text-red-300'
+                  : stop.id === 'preview'
+                    ? 'bg-amber-500/20 text-amber-300'
+                    : 'bg-emerald-500/20 text-emerald-300'
+                : isTarget
+                  ? 'animate-pulse bg-violet-500/20 text-violet-300'
+                  : isFailedTarget
+                    ? 'text-red-400'
+                    : 'text-[color:var(--color-muted)] hover:text-[color:var(--color-body)]'
+            }`}
+          >
+            {isTarget ? `${stop.label}…` : stop.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Toolbar({
   viewMode, setViewMode, previewUrl, devPort,
   breakpoint, setBreakpoint, onRefresh, onOpenExternal, onCopyUrl,
   onScreenshot, onDestroy, showActions, copied, hasFiles, hasActiveSandbox,
   canShowConsoleChrome = false,
-  demoRunning, onToggleDemo, iframeRef,
+  demoRunning, onToggleDemo, onConfigureEnv, iframeRef,
   studioChrome = false,
 }: {
   viewMode: ViewMode;
@@ -940,6 +1323,7 @@ function Toolbar({
   onCopyUrl: () => void;
   onScreenshot: () => void;
   onDestroy: () => void;
+  onConfigureEnv?: () => void;
   showActions: boolean;
   copied?: boolean;
   hasFiles?: boolean;
@@ -1005,17 +1389,28 @@ function Toolbar({
             className={`preview-toolbar-tab ${viewMode === 'preview' ? 'preview-toolbar-tab--active' : 'preview-toolbar-tab--idle'}`}
           >
             <Eye className="h-3 w-3" />
-            Preview
+            App
           </button>
           {hasFiles && (
-            <button
-              onClick={() => setViewMode('code')}
-              className={`preview-toolbar-tab ${viewMode === 'code' ? 'preview-toolbar-tab--active' : 'preview-toolbar-tab--idle'}`}
-            >
-              <Code2 className="h-3 w-3" />
-              Source
-            </button>
+            <>
+              <button
+                onClick={() => setViewMode('code')}
+                className={`preview-toolbar-tab ${viewMode === 'code' ? 'preview-toolbar-tab--active' : 'preview-toolbar-tab--idle'}`}
+              >
+                <Code2 className="h-3 w-3" />
+                Code
+              </button>
+              <button
+                onClick={() => setViewMode('split')}
+                className={`preview-toolbar-tab ${viewMode === 'split' ? 'preview-toolbar-tab--active' : 'preview-toolbar-tab--idle'}`}
+                title="Show code and app side by side"
+              >
+                <Columns2 className="h-3 w-3" />
+                Split
+              </button>
+            </>
           )}
+          <LaneSwitch />
         </div>
       )}
 
@@ -1026,7 +1421,7 @@ function Toolbar({
         className={`preview-toolbar-url flex min-w-[13rem] flex-1 items-center gap-2 px-3 py-2 text-[11px] ${
           devPort ? 'preview-toolbar-url--interactive cursor-pointer' : 'cursor-default opacity-80'
         }`}
-        title={devPort ? `Copy: ${previewUrl}` : 'No live preview'}
+        title={devPort ? `Copy: ${previewUrl}` : 'No live app'}
       >
         <div className={`flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full ${
           devPort ? 'bg-emerald-500/20' : 'bg-[color:var(--panel-bg-muted)]'
@@ -1037,7 +1432,7 @@ function Toolbar({
           <span className="truncate font-mono text-[color:var(--color-muted)]">{previewUrl}</span>
         ) : (
           <span className="text-[color:var(--color-muted)]">
-            {hasActiveSandbox ? 'Starting preview...' : 'No live preview'}
+            {hasActiveSandbox ? 'Starting app...' : 'No live app'}
           </span>
         )}
       </button>
@@ -1101,14 +1496,26 @@ function Toolbar({
               Console
             </button>
             {hasActiveSandbox && (
-              <button
-                onClick={toggleFileExplorer}
-                title={showFileExplorer ? 'Hide files (Ctrl+E)' : 'Show files (Ctrl+E)'}
-                className={showFileExplorer ? 'preview-toolbar-chip--warn flex items-center gap-1' : 'preview-toolbar-btn flex items-center gap-1 px-2 py-1 text-[10px] font-medium'}
-              >
-                <FolderTree className="h-3 w-3" />
-                Files
-              </button>
+              <>
+                {onConfigureEnv && (
+                  <button
+                    onClick={onConfigureEnv}
+                    title="Set local .env values"
+                    className="preview-toolbar-btn flex items-center gap-1 px-2 py-1 text-[10px] font-medium"
+                  >
+                    <KeyRound className="h-3 w-3" />
+                    Env
+                  </button>
+                )}
+                <button
+                  onClick={toggleFileExplorer}
+                  title={showFileExplorer ? 'Hide files (Ctrl+E)' : 'Show files (Ctrl+E)'}
+                  className={showFileExplorer ? 'preview-toolbar-chip--warn flex items-center gap-1' : 'preview-toolbar-btn flex items-center gap-1 px-2 py-1 text-[10px] font-medium'}
+                >
+                  <FolderTree className="h-3 w-3" />
+                  Files
+                </button>
+              </>
             )}
           </>
         )}
@@ -1129,9 +1536,31 @@ function Toolbar({
 /* ═══════════════════════════════════════════════════════════════════════
    ██████  PREVIEW PANEL — Claude Artifacts-inspired sandbox preview
    ═══════════════════════════════════════════════════════════════════════ */
+function derivePreviewFailureCause(error: string | null, buildMessage: string | null | undefined, logs: string[]): string {
+  if (error?.trim()) return error.trim();
+
+  const recentLogs = logs
+    .filter(Boolean)
+    .slice(-120)
+    .reverse();
+  const concrete = recentLogs.find((line) => /Missing\s+[A-Z][A-Z0-9_]+/i.test(line))
+    ?? recentLogs.find((line) => /Preview health check failed|HTTP\s+5\d\d|HTTPError|Internal Server Error|Dev server error|Dev server exited/i.test(line));
+
+  if (concrete) {
+    return concrete
+      .replace(/^.*?Preview health check failed:/i, 'Preview failed:')
+      .replace(/:\s+cause:\s*/i, ': ')
+      .replace(/^cause:\s*/i, '')
+      .trim();
+  }
+
+  return buildMessage || 'The sandbox stopped before the preview became available.';
+}
+
 export function PreviewPanel() {
   const {
-    status, devPort, projectName, projectId, files, error,
+    status, devPort, projectName, projectId, files, logs, error,
+    previewReady, lastPreviewPort,
     deployPhase, deploySteps, deployStartTime, deployStackName, deployTierName,
     deployStack, destroyProject, cancelDeploy, scaffoldFromTemplate,
     markPreviewLoading, markPreviewReady, fetchFiles, startDev,
@@ -1141,6 +1570,8 @@ export function PreviewPanel() {
   const [breakpoint, setBreakpoint] = useState<BreakpointKey>('desktop');
   const [copied, setCopied] = useState(false);
   const [iframeReady, setIframeReady] = useState(false);
+  const [previewWaitExpired, setPreviewWaitExpired] = useState(false);
+  const [envSetupOpen, setEnvSetupOpen] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const seenPreviewKeysRef = useRef<Set<string>>(new Set());
@@ -1148,6 +1579,7 @@ export function PreviewPanel() {
   const themePreference = useLayoutStore((s) => s.themePreference);
   const buildStatus = useLayoutStore((s) => s.buildStatus);
   const showDebugConsole = useLayoutStore((s) => s.showDebugConsole);
+  const showFileExplorer = useLayoutStore((s) => s.showFileExplorer);
   const toggleDebugConsole = useLayoutStore((s) => s.toggleDebugConsole);
   const isStreaming = useChatStore((s) => s.isStreaming);
   // Live pipeline steps of the streaming turn — shown in the handoff card so
@@ -1176,23 +1608,28 @@ export function PreviewPanel() {
       : undefined;
   const previewCacheKey = projectId && devPort ? `${projectId}:${devPort}` : null;
   const hasWarmPreview = previewCacheKey ? seenPreviewKeysRef.current.has(previewCacheKey) : false;
+  const canKeepLoadedPreview = Boolean(
+    devPort
+    && (hasWarmPreview || (previewReady && lastPreviewPort === devPort)),
+  );
+  const shouldRenderPreviewFrame = Boolean(devPort) && (status === 'running' || canKeepLoadedPreview);
   const shouldShowPreviewOverlay = status === 'running' && Boolean(devPort) && !iframeReady && !hasWarmPreview;
-  const failureMessage = error || buildStatus.message || 'The sandbox stopped before the preview became available.';
+  const failureMessage = derivePreviewFailureCause(error, buildStatus.message, logs);
 
   // Reset to preview if code tab becomes unavailable
   useEffect(() => {
-    if (viewMode === 'code' && !hasFiles) setViewMode('preview');
+    if (viewMode !== 'preview' && !hasFiles) setViewMode('preview');
   }, [hasFiles, viewMode]);
 
   // When a build is actively progressing, bias the panel back to the live preview.
   useEffect(() => {
-    if (viewMode === 'code' && hasFiles && status !== 'idle' && status !== 'failed' && status !== 'running') {
+    if (viewMode !== 'preview' && hasFiles && status !== 'idle' && status !== 'failed' && status !== 'running') {
       setViewMode('preview');
     }
   }, [hasFiles, status, viewMode]);
 
   useEffect(() => {
-    if (viewMode === 'code' && projectId) {
+    if (viewMode !== 'preview' && projectId) {
       void fetchFiles();
     }
   }, [fetchFiles, projectId, viewMode]);
@@ -1207,11 +1644,19 @@ export function PreviewPanel() {
       markPreviewLoading(devPort);
       return;
     }
+    if (status === 'failed' && canKeepLoadedPreview) {
+      setIframeReady(true);
+      return;
+    }
     if (status !== 'running') {
       setIframeReady(false);
       markPreviewLoading(null);
     }
-  }, [devPort, markPreviewLoading, previewCacheKey, status]);
+  }, [canKeepLoadedPreview, devPort, markPreviewLoading, previewCacheKey, status]);
+
+  useEffect(() => {
+    setPreviewWaitExpired(false);
+  }, [previewCacheKey, status]);
 
   useEffect(() => {
     if (status === 'running' && devPort && viewMode === 'code' && !hasWarmPreview) {
@@ -1221,8 +1666,13 @@ export function PreviewPanel() {
 
   useEffect(() => {
     const openPreview = () => setViewMode('preview');
+    const openCode = () => setViewMode('code');
     window.addEventListener('vai-open-preview', openPreview);
-    return () => window.removeEventListener('vai-open-preview', openPreview);
+    window.addEventListener('vai-open-code', openCode);
+    return () => {
+      window.removeEventListener('vai-open-preview', openPreview);
+      window.removeEventListener('vai-open-code', openCode);
+    };
   }, []);
 
   // Recovery: if we have a port but status is stuck building, force transition
@@ -1237,6 +1687,17 @@ export function PreviewPanel() {
       return () => clearTimeout(timer);
     }
   }, [devPort, status]);
+
+  // Do not auto-mark the app as live merely because a timeout elapsed. Some
+  // real apps do stall the iframe load event, so we keep a manual "show anyway"
+  // escape hatch; but previewReady should mean the iframe actually loaded.
+  useEffect(() => {
+    if (!shouldShowPreviewOverlay) return;
+    const timer = setTimeout(() => {
+      setPreviewWaitExpired(true);
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, [shouldShowPreviewOverlay]);
 
   const refresh = useCallback(() => {
     if (iframeRef.current) {
@@ -1260,6 +1721,87 @@ export function PreviewPanel() {
   const handleScreenshot = useCallback(() => {
     useCursorStore.getState().screenshot();
   }, []);
+
+  const renderPreviewSurface = (className = 'preview-panel-canvas flex h-full items-stretch justify-stretch') => (
+    <div className={className}>
+      {status === 'failed' && !canKeepLoadedPreview ? (
+        <PreviewFailureState
+          message={failureMessage}
+          canRestart={Boolean(projectId)}
+          onRestart={() => { void startDev(); }}
+          onRepair={() => {
+            window.dispatchEvent(new CustomEvent('vai:prefill-chat', {
+              detail: { prompt: createPreviewRepairPrompt(failureMessage) },
+            }));
+          }}
+          onViewConsole={() => {
+            if (!showDebugConsole) toggleDebugConsole();
+          }}
+        />
+      ) : shouldRenderPreviewFrame && devPort ? (
+        <div
+          ref={previewContainerRef}
+          className="preview-panel-iframe-bg relative h-full w-full overflow-hidden"
+          style={{ width: breakpoint === 'desktop' ? '100%' : BREAKPOINTS[breakpoint].width, maxWidth: '100%' }}
+        >
+          <iframe ref={iframeRef} src={previewUrl} className="h-full w-full" data-testid="preview-iframe"
+            onLoad={() => setTimeout(() => {
+              if (previewCacheKey) {
+                seenPreviewKeysRef.current.add(previewCacheKey);
+              }
+              setIframeReady(true);
+              markPreviewReady(devPort);
+            }, 180)}
+            title="App" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups" />
+          <AnimatePresence>
+            {shouldShowPreviewOverlay && (
+              <motion.div
+                key="preview-handoff-overlay"
+                initial={{ opacity: 1 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="absolute inset-0"
+              >
+                <PreviewHandoffShell
+                  studio={studioChrome}
+                  eyebrow="App warming"
+                  title={previewWaitExpired ? 'Still waiting for the browser load' : 'Connecting the live app'}
+                  body={previewWaitExpired
+                    ? 'The dev server is running, but the iframe has not reported a completed load yet. It may still be compiling, or the app may have a browser-side runtime error. You can show it anyway, but Vai will not mark it as live until the iframe actually loads.'
+                    : 'The sandbox is already running. Holding the handoff shell until the first browser load lands keeps this from feeling like a blank iframe race.'}
+                  previewUrl={previewUrl}
+                  activeStep={activeStepLabel}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (previewCacheKey) seenPreviewKeysRef.current.add(previewCacheKey);
+                    setIframeReady(true);
+                  }}
+                  className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full border border-white/15 bg-black/50 px-3.5 py-1.5 text-[11px] font-medium text-zinc-300 backdrop-blur transition hover:bg-black/70 hover:text-white"
+                >
+                  {previewWaitExpired ? 'Show anyway' : 'Show the app now'}
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      ) : (
+        <PreviewHandoffShell
+          studio={studioChrome}
+          eyebrow="App handoff"
+          title={isStreaming ? 'Building your app' : 'Starting preview'}
+          body={isStreaming
+            ? 'Vai\'s council is working — these are the real pipeline steps as they happen.'
+            : buildStatus.message || 'Creating the sandbox, wiring dependencies, and reconnecting the live app for this conversation.'}
+          previewUrl={devPort ? `http://localhost:${devPort}` : undefined}
+          activeStep={activeStepLabel}
+          steps={liveHandoffSteps}
+        />
+      )}
+    </div>
+  );
 
   // ── Empty state: template gallery ──
   if (!projectId && status === 'idle' && deployPhase === 'idle') {
@@ -1387,6 +1929,7 @@ export function PreviewPanel() {
         breakpoint={breakpoint} setBreakpoint={setBreakpoint}
         onRefresh={refresh} onOpenExternal={openExternal} onCopyUrl={handleCopyUrl}
         onScreenshot={handleScreenshot} onDestroy={destroyProject}
+        onConfigureEnv={projectId ? () => setEnvSetupOpen(true) : undefined}
         showActions copied={copied}
         hasFiles={hasFiles} hasActiveSandbox={hasActiveSandbox} canShowConsoleChrome={canShowConsoleChrome}
         demoRunning={demoRunning} onToggleDemo={toggleDemo}
@@ -1411,11 +1954,12 @@ export function PreviewPanel() {
               transition={{ duration: 0.15 }}
               className="preview-panel-canvas flex h-full items-stretch justify-stretch"
             >
-              {status === 'failed' ? (
+              {status === 'failed' && !canKeepLoadedPreview ? (
                 <PreviewFailureState
                   message={failureMessage}
                   canRestart={Boolean(projectId)}
                   onRestart={() => { void startDev(); }}
+                  onConfigureEnv={projectId ? () => setEnvSetupOpen(true) : undefined}
                   onRepair={() => {
                     window.dispatchEvent(new CustomEvent('vai:prefill-chat', {
                       detail: { prompt: createPreviewRepairPrompt(failureMessage) },
@@ -1425,7 +1969,7 @@ export function PreviewPanel() {
                     if (!showDebugConsole) toggleDebugConsole();
                   }}
                 />
-              ) : status === 'running' && devPort ? (
+              ) : shouldRenderPreviewFrame && devPort ? (
                 <div
                   ref={previewContainerRef}
                   className="preview-panel-iframe-bg relative h-full w-full overflow-hidden"
@@ -1439,7 +1983,7 @@ export function PreviewPanel() {
                       setIframeReady(true);
                       markPreviewReady(devPort);
                     }, 180)}
-                    title="App Preview" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups" />
+                    title="App" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups" />
                   <AnimatePresence>
                     {shouldShowPreviewOverlay && (
                       <motion.div
@@ -1452,12 +1996,25 @@ export function PreviewPanel() {
                       >
                         <PreviewHandoffShell
                           studio={studioChrome}
-                          eyebrow="Preview warming"
-                          title="Connecting the live app"
-                          body="The sandbox is already running. Holding the handoff shell until the first real paint lands keeps this from feeling like a blank iframe race."
+                          eyebrow="App warming"
+                          title={previewWaitExpired ? 'Still waiting for the browser load' : 'Connecting the live app'}
+                          body={previewWaitExpired
+                            ? 'The dev server is running, but the iframe has not reported a completed load yet. It may still be compiling, or the app may have a browser-side runtime error. You can show it anyway, but Vai will not mark it as live until the iframe actually loads.'
+                            : 'The sandbox is already running. Holding the handoff shell until the first browser load lands keeps this from feeling like a blank iframe race.'}
                           previewUrl={previewUrl}
                           activeStep={activeStepLabel}
                         />
+                        {/* Manual escape — the shell is a courtesy, not a gate. */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (previewCacheKey) seenPreviewKeysRef.current.add(previewCacheKey);
+                            setIframeReady(true);
+                          }}
+                          className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full border border-white/15 bg-black/50 px-3.5 py-1.5 text-[11px] font-medium text-zinc-300 backdrop-blur transition hover:bg-black/70 hover:text-white"
+                        >
+                          {previewWaitExpired ? 'Show anyway' : 'Show the app now'}
+                        </button>
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -1465,7 +2022,7 @@ export function PreviewPanel() {
               ) : (
                 <PreviewHandoffShell
                   studio={studioChrome}
-                  eyebrow="Preview handoff"
+                  eyebrow="App handoff"
                   title={isStreaming ? 'Building your app' : 'Starting preview'}
                   body={isStreaming
                     ? 'Vai\'s council is working — these are the real pipeline steps as they happen.'
@@ -1475,6 +2032,35 @@ export function PreviewPanel() {
                   steps={liveHandoffSteps}
                 />
               )}
+            </motion.div>
+          ) : viewMode === 'split' ? (
+            <motion.div
+              key="split"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="h-full min-h-0 bg-zinc-950"
+            >
+              <Group id="app-code-split-layout" orientation="horizontal" className="h-full min-h-0">
+                <Panel id="split-code" defaultSize="48" minSize="18" collapsible collapsedSize={0}>
+                  <div className="h-full min-h-0 min-w-0 border-r border-zinc-800/70">
+                    {projectId ? (
+                      <CodeView projectId={projectId} showExplorer={!showFileExplorer} />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-sm text-zinc-600">
+                        No project active
+                      </div>
+                    )}
+                  </div>
+                </Panel>
+                <HoverResizeHandle direction="vertical" />
+                <Panel id="split-app" defaultSize="52" minSize="22">
+                  <div className="h-full min-h-0 min-w-0">
+                    {renderPreviewSurface()}
+                  </div>
+                </Panel>
+              </Group>
             </motion.div>
           ) : (
             <motion.div
@@ -1486,13 +2072,23 @@ export function PreviewPanel() {
               className="h-full"
             >
               {projectId ? (
-                <CodeView projectId={projectId} />
+                <CodeView projectId={projectId} showExplorer={!showFileExplorer} />
               ) : (
                 <div className="flex h-full items-center justify-center text-sm text-zinc-600">
                   No project active
                 </div>
               )}
             </motion.div>
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {envSetupOpen && projectId && (
+            <EnvSetupDialog
+              projectId={projectId}
+              failureMessage={failureMessage}
+              onClose={() => setEnvSetupOpen(false)}
+              onSaved={async () => { await startDev(); }}
+            />
           )}
         </AnimatePresence>
       </div>

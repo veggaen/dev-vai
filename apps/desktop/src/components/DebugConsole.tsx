@@ -2,7 +2,7 @@ import { useSandboxStore } from '../stores/sandboxStore.js';
 import { useLayoutStore } from '../stores/layoutStore.js';
 import {
   Terminal, Trash2, FolderTree, Copy, ChevronDown,
-  Search, X, Lock, Unlock, Hash, Clock,
+  Search, X, Lock, Unlock, Hash, Clock, Play, Loader2,
 } from 'lucide-react';
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 
@@ -48,12 +48,19 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
 }
 
+/** Scripts worth surfacing as one-click console actions, in display order. */
+const DECK_SCRIPTS = ['build', 'lint', 'test', 'typecheck', 'check', 'format'] as const;
+
 /**
  * Debug Console — shows sandbox build output, install logs, and dev server output.
- * Features: line numbers, timestamps, search, scroll lock, ANSI strip, smart copy.
+ * Features: line numbers, timestamps, search, scroll lock, ANSI strip, smart copy,
+ * and a command deck (run build/lint/test straight from the console).
  */
 export function DebugConsole() {
-  const { status, logs, files, projectName, fetchLogs, destroyProject } = useSandboxStore();
+  const {
+    status, logs, files, projectName, fetchLogs, destroyProject,
+    availableScripts, commandRun, runScript, external,
+  } = useSandboxStore();
   const themePreference = useLayoutStore((state) => state.themePreference);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showCopyMenu, setShowCopyMenu] = useState(false);
@@ -302,13 +309,51 @@ export function DebugConsole() {
               className={`rounded p-1 text-zinc-600 ${
                 isLight ? 'hover:bg-red-50 hover:text-red-500' : 'hover:bg-zinc-800 hover:text-red-400'
               }`}
-              title="Destroy sandbox project"
+              title={external ? 'Close project (your folder is kept)' : 'Destroy sandbox project'}
             >
               <Trash2 className="h-3 w-3" />
             </button>
           )}
         </div>
       </div>
+
+      {/* Command deck — run package.json scripts (build / lint / test …) in one click */}
+      {projectName && availableScripts.some((s) => (DECK_SCRIPTS as readonly string[]).includes(s)) && (
+        <div className={`flex flex-wrap items-center gap-1 border-b px-3 py-1 ${
+          isLight ? 'border-zinc-200 bg-zinc-50/60' : 'border-zinc-800/60 bg-zinc-900/30'
+        }`}>
+          {DECK_SCRIPTS.filter((s) => availableScripts.includes(s)).map((script) => {
+            const isThisRunning = commandRun?.script === script && commandRun.status === 'running';
+            const anyRunning = commandRun?.status === 'running';
+            const lastState = commandRun?.script === script && commandRun.status !== 'running' ? commandRun.status : null;
+            return (
+              <button
+                key={script}
+                onClick={() => void runScript(script)}
+                disabled={anyRunning}
+                className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                  isThisRunning
+                    ? 'bg-violet-500/20 text-violet-300'
+                    : lastState === 'done'
+                      ? (isLight ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20')
+                      : lastState === 'failed'
+                        ? (isLight ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-red-500/10 text-red-400 hover:bg-red-500/20')
+                        : (isLight ? 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200' : 'bg-zinc-800/80 text-zinc-400 hover:bg-zinc-700')
+                }`}
+                title={isThisRunning ? `${script} is running…` : `Run "${script}" (one command at a time)`}
+              >
+                {isThisRunning
+                  ? <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                  : <Play className="h-2.5 w-2.5" />}
+                {script}
+                {lastState === 'failed' && commandRun?.exitCode !== null && (
+                  <span className="text-[9px] opacity-80">exit {commandRun?.exitCode}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Search bar */}
       {showSearch && (

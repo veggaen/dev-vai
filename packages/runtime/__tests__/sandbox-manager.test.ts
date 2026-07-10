@@ -25,7 +25,25 @@ vi.mock('node:child_process', async () => {
   };
 });
 
-import { SandboxManager } from '../src/sandbox/manager.js';
+import { SandboxManager, previewHealthDisposition } from '../src/sandbox/manager.js';
+
+describe('previewHealthDisposition', () => {
+  it('keeps a slow first compile pending instead of marking the app failed', () => {
+    expect(previewHealthDisposition({
+      ok: false,
+      message: 'This operation was aborted',
+      reason: 'timeout',
+    })).toBe('pending');
+  });
+
+  it('marks a rendered application error as failed', () => {
+    expect(previewHealthDisposition({
+      ok: false,
+      message: 'HTTP 500 — Missing VITE_CONVEX_URL',
+      reason: 'application-error',
+    })).toBe('failed');
+  });
+});
 
 function createMockProcess() {
   const proc = new EventEmitter() as EventEmitter & {
@@ -98,6 +116,55 @@ describe('SandboxManager', () => {
 
     it('returns undefined for unknown IDs', () => {
       expect(manager.get('nonexistent')).toBeUndefined();
+    });
+  });
+
+  describe('project discovery', () => {
+    it('automatically resolves one runnable app beneath a selected container folder', async () => {
+      const container = join(testDir, 'external-container');
+      const appRoot = join(container, 'mpm-frontend');
+      await mkdir(appRoot, { recursive: true });
+      await writeFile(join(appRoot, 'package.json'), JSON.stringify({
+        name: 'mpm-frontend',
+        scripts: { dev: 'next dev' },
+        dependencies: { next: '^15.0.0' },
+      }));
+
+      const result = manager.scanFolder(container);
+
+      expect(result.rootDir).toBe(appRoot);
+      expect(result.profile.name).toBe('mpm-frontend');
+      expect(result.profile.framework).toBe('nextjs');
+    });
+
+    it('returns choices instead of guessing when a container has multiple runnable apps', async () => {
+      const container = join(testDir, 'multi-app-container');
+      const webRoot = join(container, 'apps', 'web');
+      const docsRoot = join(container, 'apps', 'docs');
+      await mkdir(webRoot, { recursive: true });
+      await mkdir(docsRoot, { recursive: true });
+      await writeFile(join(webRoot, 'package.json'), JSON.stringify({ name: 'web', scripts: { dev: 'vite' }, devDependencies: { vite: '^7.0.0' } }));
+      await writeFile(join(docsRoot, 'package.json'), JSON.stringify({ name: 'docs', scripts: { dev: 'next dev' }, dependencies: { next: '^15.0.0' } }));
+
+      const discovery = manager.discoverProjects(container);
+
+      expect(discovery.candidates.map((candidate) => candidate.relativePath)).toEqual([
+        join('apps', 'docs'),
+        join('apps', 'web'),
+      ]);
+      expect(() => manager.scanFolder(container)).toThrow(/Multiple runnable projects found/);
+    });
+
+    it('does not inspect dependency or build output folders as project roots', async () => {
+      const container = join(testDir, 'generated-only-container');
+      const dependency = join(container, 'node_modules', 'fake-app');
+      const buildOutput = join(container, 'dist', 'fake-app');
+      await mkdir(dependency, { recursive: true });
+      await mkdir(buildOutput, { recursive: true });
+      await writeFile(join(dependency, 'package.json'), JSON.stringify({ name: 'dependency' }));
+      await writeFile(join(buildOutput, 'index.html'), '<h1>compiled</h1>');
+
+      expect(() => manager.discoverProjects(container)).toThrow(/within two folder levels/);
     });
   });
 
@@ -354,6 +421,90 @@ describe('SandboxManager', () => {
   });
 
   describe('startDev()', () => {
+    it('runs an installed Next CLI directly without a detachable Windows shell', async () => {
+      const project = await manager.create('next-direct-process');
+      await manager.writeFiles(project.id, [
+        {
+          path: 'package.json',
+          content: JSON.stringify({
+            name: 'next-direct-process',
+            private: true,
+            scripts: {
+              dev: 'next dev',
+            },
+            dependencies: {
+              next: '15.5.4',
+            },
+          }, null, 2),
+        },
+        {
+          path: 'node_modules/next/dist/bin/next',
+          content: '#!/usr/bin/env node\n',
+        },
+      ]);
+
+      const proc = createMockProcess();
+      spawnMock.mockReturnValue(proc);
+
+      const startPromise = manager.startDev(project.id);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      proc.stdout.emit('data', Buffer.from('Ready in 100ms\nLocal: http://localhost:4100\n'));
+
+      await startPromise;
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        process.execPath,
+        [
+          expect.stringContaining('node_modules'),
+          'dev',
+          '--port',
+          expect.any(String),
+          '--hostname',
+          '0.0.0.0',
+        ],
+        expect.objectContaining({ shell: false }),
+      );
+
+      manager.stopDev(project.id);
+    });
+
+    it('clears only the generated Next cache when recovering from a failed run', async () => {
+      const project = await manager.create('next-failed-cache');
+      await manager.writeFiles(project.id, [
+        {
+          path: 'package.json',
+          content: JSON.stringify({
+            name: 'next-failed-cache',
+            private: true,
+            scripts: { dev: 'next dev' },
+            dependencies: { next: '15.5.4' },
+          }, null, 2),
+        },
+        {
+          path: 'node_modules/next/dist/bin/next',
+          content: '#!/usr/bin/env node\n',
+        },
+        {
+          path: '.next/static/chunks/app/layout.js',
+          content: 'corrupted generated chunk',
+        },
+      ]);
+      project.status = 'failed';
+
+      const proc = createMockProcess();
+      spawnMock.mockReturnValue(proc);
+
+      const startPromise = manager.startDev(project.id);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      proc.stdout.emit('data', Buffer.from('Ready in 100ms\nLocal: http://localhost:4100\n'));
+      await startPromise;
+
+      expect(existsSync(join(project.rootDir, '.next'))).toBe(false);
+      expect(existsSync(join(project.rootDir, 'package.json'))).toBe(true);
+
+      manager.stopDev(project.id);
+    });
+
     it('waits for the actual bound port after a generic ready line', async () => {
       const project = await manager.create('vite-port-race');
       await manager.writeFiles(project.id, [

@@ -7,6 +7,30 @@ export interface AutoSandboxMessageSelection {
   skippedIds: string[];
 }
 
+export function assistantMessageIds(messages: readonly ChatMessage[]): string[] {
+  return messages
+    .filter((message) => message.role === 'assistant' && message.content.trim())
+    .map((message) => message.id);
+}
+
+export function shouldMarkConversationHistoryProcessed(input: {
+  activeConversationId: string | null;
+  isStreaming: boolean;
+  streamingConversationId: string | null;
+  messages: readonly ChatMessage[];
+}): boolean {
+  if (!input.activeConversationId) return false;
+  if (!input.isStreaming) return true;
+  if (input.streamingConversationId === input.activeConversationId) return false;
+
+  // `conversation_resolved` can adopt a backend id while the local assistant
+  // bubble is still streaming. In that short window the stream id may be stale,
+  // so treat a temp assistant in the selected message list as active work.
+  return !input.messages.some((message) => (
+    message.role === 'assistant' && message.id.startsWith('temp-')
+  ));
+}
+
 export function isProjectUpdateMessage(message: ChatMessage): boolean {
   const trimmed = message.content.trim();
   return trimmed.startsWith('Project update:') || trimmed.includes('[vai-artifact]');

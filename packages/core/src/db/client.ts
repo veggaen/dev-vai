@@ -37,6 +37,29 @@ const CREATE_TABLES_SQL = `
     UNIQUE(provider, provider_account_id)
   );
 
+  CREATE TABLE IF NOT EXISTS platform_user_secrets (
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    value TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, name)
+  );
+
+  CREATE TABLE IF NOT EXISTS memories (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    conversation_id TEXT,
+    kind TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source_excerpt TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_memories_user ON memories(user_id);
+  CREATE INDEX IF NOT EXISTS idx_memories_conversation ON memories(conversation_id);
+
   CREATE TABLE IF NOT EXISTS platform_sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES platform_users(id),
@@ -380,6 +403,27 @@ const MIGRATION_SQL = [
     updated_at INTEGER NOT NULL,
     UNIQUE(provider, provider_account_id)
   )`,
+  `CREATE TABLE IF NOT EXISTS platform_user_secrets (
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    value TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, name)
+  )`,
+  `CREATE TABLE IF NOT EXISTS memories (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    conversation_id TEXT,
+    kind TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source_excerpt TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_memories_user ON memories(user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_memories_conversation ON memories(conversation_id)`,
   `CREATE TABLE IF NOT EXISTS platform_sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES platform_users(id),
@@ -567,6 +611,9 @@ const MIGRATION_SQL = [
   `ALTER TABLE platform_project_audit_results ADD COLUMN claimed_by_client_id TEXT REFERENCES platform_companion_clients(id)`,
   `ALTER TABLE platform_project_audit_results ADD COLUMN claimed_at INTEGER`,
   `ALTER TABLE platform_project_audit_results ADD COLUMN claim_expires_at INTEGER`,
+  // Chats ARE projects: persist the attached local folder on the conversation
+  // so any client (not just the one that attached) reopens the same workspace.
+  `ALTER TABLE conversations ADD COLUMN workspace_root TEXT`,
   // Add image_id column to messages (may already exist in fresh DBs)
   `ALTER TABLE messages ADD COLUMN image_id TEXT REFERENCES images(id)`,
   // Add taught_entries table for VCUS teaching persistence

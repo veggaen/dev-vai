@@ -34,12 +34,63 @@ import {
 } from './settings/SettingsShell.js';
 import { ThemeManager } from './settings/ThemeManager.js';
 import { ShortcutCustomizer } from './settings/ShortcutCustomizer.js';
+import { VoiceSettingsPanel } from './settings/VoiceSettingsPanel.js';
 
 const LAYOUT_MODES = [
-  { id: 'compact' as const, label: 'Compact', hint: 'VS Code — edge-to-edge, minimal chrome' },
-  { id: 'open' as const, label: 'Open', hint: 'Floating panels with soft shadows' },
-  { id: 'odyssey' as const, label: 'Odyssey', hint: 'Odysseus-style — airy canvas, bubble panels' },
+  { id: 'compact' as const, label: 'Compact', tagline: 'Instrument', hint: 'Precision cockpit — edge-to-edge, hairlines, crisp motion' },
+  { id: 'open' as const, label: 'Open', tagline: 'Atelier', hint: 'Airy studio — floating glass cards on a living canvas' },
+  { id: 'odyssey' as const, label: 'Odyssey', tagline: 'Voyage', hint: 'Cinematic deck — aurora, starfield, glowing bubbles' },
 ];
+
+/** Miniature live preview of a layout mode — pure CSS, no screenshots. */
+function LayoutModeMiniature({ mode }: { mode: 'compact' | 'open' | 'odyssey' }) {
+  if (mode === 'compact') {
+    return (
+      <div className="relative h-16 w-full overflow-hidden rounded-md border border-[color:var(--shell-line-soft)] bg-[color:var(--bg)]">
+        <div className="absolute inset-x-0 top-0 h-px bg-[color:var(--accent)] opacity-60" />
+        <div className="absolute inset-y-0 left-0 w-2.5 border-r border-[color:var(--shell-line-soft)] bg-[color:var(--panel)]" />
+        <div className="absolute inset-y-0 left-2.5 w-8 border-r border-[color:var(--shell-line-soft)] bg-[color:var(--panel)]/70" />
+        <div className="absolute left-4 top-2 h-1 w-5 rounded-sm bg-[color:var(--fg)]/25" />
+        <div className="absolute left-4 top-4 h-1 w-4 rounded-sm bg-[color:var(--fg)]/15" />
+        <div className="absolute left-4 top-6 h-1 w-5 rounded-sm bg-[color:var(--fg)]/15" />
+      </div>
+    );
+  }
+  if (mode === 'open') {
+    return (
+      <div className="relative h-16 w-full overflow-hidden rounded-md border border-[color:var(--shell-line-soft)] bg-[color:var(--bg)]">
+        <div className="absolute -left-3 -top-4 h-14 w-14 rounded-full bg-[color:var(--accent)]/12 blur-md" />
+        <div className="absolute bottom-2 left-2 top-2 w-2 rounded-full border border-[color:var(--shell-line-soft)] bg-[color:var(--panel)]/60" />
+        <div className="absolute bottom-2 left-5 top-2 w-9 rounded-lg border border-[color:var(--shell-line-soft)] bg-[color:var(--panel)] shadow-md" />
+        <div className="absolute bottom-2 left-[62px] right-2 top-2 rounded-lg border border-[color:var(--shell-line-soft)] bg-[color:var(--panel)] shadow-md" />
+      </div>
+    );
+  }
+  return (
+    <div className="relative h-16 w-full overflow-hidden rounded-md border border-[color:var(--shell-line-soft)] bg-black/60">
+      <div className="absolute -right-4 -top-6 h-16 w-24 rounded-full bg-[color:var(--accent)]/20 blur-lg" />
+      <div className="absolute left-6 top-2 h-0.5 w-0.5 rounded-full bg-white/70" />
+      <div className="absolute left-16 top-5 h-0.5 w-0.5 rounded-full bg-white/50" />
+      <div className="absolute right-8 top-3 h-0.5 w-0.5 rounded-full bg-white/60" />
+      <div className="absolute bottom-2 left-2 top-2 w-2.5 rounded-xl border border-[color:var(--accent)]/30 bg-[color:var(--panel)] shadow-[0_0_10px_-2px_var(--accent)]" />
+      <div className="absolute bottom-2 left-6 top-2 w-9 rounded-xl border border-[color:var(--accent)]/20 bg-[color:var(--panel)]" />
+      <div className="absolute bottom-2 left-[66px] right-2 top-2 rounded-xl border border-[color:var(--accent)]/20 bg-[color:var(--panel)]" />
+    </div>
+  );
+}
+
+const SETTINGS_TAB_IDS: readonly SettingsTabId[] = ['appearance', 'ai', 'voice', 'integrations', 'engine', 'shortcuts', 'account'];
+
+function consumeRequestedSettingsTab(): SettingsTabId {
+  try {
+    const requested = sessionStorage.getItem('vai-settings-tab') as SettingsTabId | null;
+    if (requested && SETTINGS_TAB_IDS.includes(requested)) {
+      sessionStorage.removeItem('vai-settings-tab');
+      return requested;
+    }
+  } catch { /* non-fatal */ }
+  return 'appearance';
+}
 
 function loadActiveThemeId(): string {
   return getActiveThemeId();
@@ -111,7 +162,7 @@ export function SettingsPanel() {
   const latencyMs = useVinextStore((state: VinextState) => state.latencyMs);
   const motionBudget = useVinextStore((state: VinextState) => state.motionBudget);
   const trustLevel = useVinextStore((state: VinextState) => state.trustLevel);
-  const [activeTab, setActiveTab] = useState<SettingsTabId>('appearance');
+  const [activeTab, setActiveTab] = useState<SettingsTabId>(consumeRequestedSettingsTab);
   const [activeThemeId, setActiveThemeId] = useState(loadActiveThemeId);
   const setThemeEditingBaseId = useLayoutStore((state) => state.setThemeEditingBaseId);
   const [editingThemePresetId, setEditingThemePresetIdLocal] = useState<string | null>(null);
@@ -138,6 +189,15 @@ export function SettingsPanel() {
   const [councilSaving, setCouncilSaving] = useState(false);
   const [timelineView, setTimelineViewState] = useState(isTimelineViewEnabled);
   const [_expandedResults, _setExpandedResults] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const onOpenTab = (event: Event) => {
+      const tab = (event as CustomEvent<SettingsTabId>).detail;
+      if (SETTINGS_TAB_IDS.includes(tab)) setActiveTab(tab);
+    };
+    window.addEventListener('vai:settings-open-tab', onOpenTab);
+    return () => window.removeEventListener('vai:settings-open-tab', onOpenTab);
+  }, []);
   const [_launchingTargetId, setLaunchingTargetId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -443,11 +503,18 @@ export function SettingsPanel() {
                     key={mode.id}
                     type="button"
                     onClick={() => setLayoutMode(mode.id)}
-                    className={`vai-selection-surface rounded-xl px-3 py-3 text-left ${
+                    data-layout-choice={mode.id}
+                    className={`vai-selection-surface group rounded-xl px-3 py-3 text-left transition-transform duration-200 hover:-translate-y-0.5 ${
                       layoutMode === mode.id ? 'is-selected' : ''
                     }`}
                   >
-                    <div className="text-sm font-medium text-[color:var(--fg)]">{mode.label}</div>
+                    <LayoutModeMiniature mode={mode.id} />
+                    <div className="mt-2 flex items-baseline justify-between gap-2">
+                      <span className="text-sm font-medium text-[color:var(--fg)]">{mode.label}</span>
+                      <span className="text-[9px] font-semibold uppercase tracking-[0.22em] text-[color:var(--accent-text)] opacity-0 transition-opacity duration-200 group-hover:opacity-100 data-[selected=true]:opacity-100" data-selected={layoutMode === mode.id}>
+                        {mode.tagline}
+                      </span>
+                    </div>
                     <div className="mt-1 text-[11px] leading-4 text-[color:var(--color-muted)]">{mode.hint}</div>
                   </button>
                 ))}
@@ -526,6 +593,8 @@ export function SettingsPanel() {
           </SettingsSection>
         </>
       )}
+
+      {activeTab === 'voice' && <VoiceSettingsPanel />}
 
       {activeTab === 'integrations' && (
         <>

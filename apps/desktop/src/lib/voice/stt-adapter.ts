@@ -41,6 +41,12 @@ export interface SttStartOptions {
   readonly lang?: string;
   /** Called as interim/final transcripts arrive, so the UI can show live text. */
   readonly onPartial?: (partial: SttPartial) => void;
+  /**
+   * Called ~20×/sec with the current mic loudness (0–1) while capturing, so the UI
+   * can render a live bouncing level meter instead of a spinner. Cosmetic — never
+   * affects the transcript.
+   */
+  readonly onLevel?: (level: number) => void;
   readonly onError?: (error: SttError) => void;
   /**
    * Preferred input device (from {@link enumerateMicrophones}). When set, the OS-permission

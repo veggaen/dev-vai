@@ -1,57 +1,113 @@
+import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import { motion } from 'framer-motion';
 import { Mic, MicOff, Loader2 } from 'lucide-react';
 import type { DictationStatus } from '../../hooks/useVoiceDictation.js';
+import type { MicTriggerMode } from '../../lib/voice/mic-mode.js';
+import { LevelBars } from './DictationLevel.js';
 
 interface MicButtonProps {
   readonly status: DictationStatus;
   readonly supported: boolean;
-  /** Press-and-hold to talk (pointer); release to insert. */
+  readonly mode?: MicTriggerMode;
   readonly onHoldStart: () => void;
   readonly onHoldEnd: () => void;
+  readonly level?: number;
   readonly disabled?: boolean;
-  /** Right-click → open the mic device-picker menu at the pointer. */
+  /** Right-click → voice menu (settings + mic picker). */
   readonly onContextMenu?: (at: { x: number; y: number }) => void;
 }
 
-/**
- * Composer mic button — press-and-hold to dictate (mirrors the Alt+Win hotkey).
- *
- * States: idle (mic), listening (pulsing ring), transcribing (spinner), error /
- * unsupported (muted, disabled). Per the UI rubric we animate only transform and
- * opacity — the "listening" ring uses scale/opacity, never box-shadow — and every
- * state has an accessible label + title.
- */
-export function MicButton({ status, supported, onHoldStart, onHoldEnd, disabled, onContextMenu }: MicButtonProps) {
+export function MicButton({
+  status,
+  supported,
+  mode = 'hold',
+  onHoldStart,
+  onHoldEnd,
+  level = 0,
+  disabled,
+  onContextMenu,
+}: MicButtonProps) {
   const listening = status === 'listening';
   const transcribing = status === 'transcribing';
-  const isDisabled = disabled || !supported || status === 'unsupported';
+  const dictationBlocked = Boolean(disabled || !supported || status === 'unsupported');
+  const pointerHoldingRef = useRef(false);
 
   const title = !supported || status === 'unsupported'
     ? 'Voice input is not available in this environment'
     : listening
-      ? 'Listening… release to insert'
+      ? mode === 'toggle'
+        ? 'Listening… click to finish'
+        : 'Listening… release to insert'
       : transcribing
         ? 'Transcribing…'
-        : 'Hold to dictate (or hold Alt+Win) · right-click to pick a microphone';
+        : mode === 'toggle'
+          ? 'Click to dictate · right-click for voice settings'
+          : 'Hold to dictate (game-safe: Ctrl+Shift+Space; Win+Alt also works) · right-click for voice settings';
+
+  const handlePrimary = useCallback(() => {
+    if (dictationBlocked || transcribing) return;
+    if (mode === 'toggle') {
+      if (listening) onHoldEnd();
+      else onHoldStart();
+      return;
+    }
+    onHoldStart();
+  }, [dictationBlocked, transcribing, mode, listening, onHoldEnd, onHoldStart]);
+
+  const handleRelease = useCallback((force = false) => {
+    if (mode === 'toggle') return;
+    if (!force && dictationBlocked) return;
+    onHoldEnd();
+  }, [dictationBlocked, mode, onHoldEnd]);
+
+  const beginPointerHold = useCallback((e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (dictationBlocked || transcribing || mode !== 'hold' || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    if (pointerHoldingRef.current) return;
+    pointerHoldingRef.current = true;
+    handlePrimary();
+  }, [dictationBlocked, handlePrimary, mode, transcribing]);
+
+  const endPointerHold = useCallback((e?: ReactPointerEvent<HTMLButtonElement>) => {
+    if (mode !== 'hold' || !pointerHoldingRef.current) return;
+    pointerHoldingRef.current = false;
+    e?.currentTarget.releasePointerCapture?.(e.pointerId);
+    handleRelease(true);
+  }, [handleRelease, mode]);
 
   return (
     <motion.button
       type="button"
       aria-label={title}
       aria-pressed={listening}
+      aria-disabled={dictationBlocked}
       title={title}
-      disabled={isDisabled}
-      // Pointer + touch press-and-hold. Pointer-up anywhere ends via the parent's
-      // window listener too, but we end on leave/up here for the common case.
-      onPointerDown={(e) => { if (!isDisabled) { e.preventDefault(); onHoldStart(); } }}
-      onPointerUp={() => { if (!isDisabled) onHoldEnd(); }}
-      onPointerLeave={() => { if (listening) onHoldEnd(); }}
-      // Right-click opens the device picker. Available even when capture is "unsupported" so the
-      // user can still inspect devices / understand why; only the hold-to-talk press is gated.
-      onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu({ x: e.clientX, y: e.clientY }); } : undefined}
-      whileTap={isDisabled ? {} : { scale: 0.92 }}
+      onClick={mode === 'toggle' ? handlePrimary : undefined}
+      onPointerDown={mode === 'hold' ? beginPointerHold : undefined}
+      onPointerUp={mode === 'hold' ? endPointerHold : undefined}
+      onPointerCancel={mode === 'hold' ? endPointerHold : undefined}
+      onLostPointerCapture={mode === 'hold' ? () => {
+        if (!pointerHoldingRef.current) return;
+        pointerHoldingRef.current = false;
+        handleRelease(true);
+      } : undefined}
+      onContextMenu={onContextMenu ? (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu({ x: e.clientX, y: e.clientY });
+      } : undefined}
+      onMouseDown={onContextMenu ? (e) => {
+        // WebView2 sometimes drops contextmenu — right-button mousedown is the fallback.
+        if (e.button === 2) {
+          e.preventDefault();
+          e.stopPropagation();
+          onContextMenu({ x: e.clientX, y: e.clientY });
+        }
+      } : undefined}
+      whileTap={dictationBlocked ? {} : { scale: 0.92 }}
       className={`relative flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-200 ${
-        isDisabled
+        dictationBlocked
           ? 'cursor-not-allowed text-[color:var(--chat-muted)] opacity-50'
           : listening
             ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]'
@@ -71,7 +127,9 @@ export function MicButton({ status, supported, onHoldStart, onHoldEnd, disabled,
         ? <Loader2 className="h-4 w-4 animate-spin" />
         : !supported || status === 'unsupported'
           ? <MicOff className="h-4 w-4" />
-          : <Mic className="h-4 w-4" />}
+          : listening
+            ? <LevelBars level={level || 0.18} height={15} />
+            : <Mic className="h-4 w-4" />}
     </motion.button>
   );
 }

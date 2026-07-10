@@ -27787,6 +27787,20 @@ A simple 2-player tic-tac-toe with board display, move validation, and win/draw 
         '**Rule:** No artifact reaches a sandbox preview without at least one approval. No artifact reaches production without preview testing + deploy approval.';
     }
 
+    // Concrete sandbox preview repair: missing env/config should never be
+    // answered with the generic lifecycle-state design note. It is a project
+    // setup/code-fallback decision, and secrets must not be invented.
+    const missingPreviewEnv = /\bmissing\s+([a-z][a-z0-9_]*|vite_[a-z0-9_]+)\b/i.exec(lower);
+    if (missingPreviewEnv && /\b(repair|preview|sandbox|app stopped|runnable state|environment configuration)\b/i.test(lower)) {
+      const envName = missingPreviewEnv[1].toUpperCase();
+      return `The preview is stopped because the app is missing \`${envName}\`.\n\n` +
+        `I should not invent that value — it is environment configuration, not code I can truthfully fabricate.\n\n` +
+        `What I can do safely:\n` +
+        `- tell you to add \`${envName}=...\` to the project's \`.env.local\` / configured env store, then restart the preview;\n` +
+        `- or, if you want the app to stay viewable without backend config, add a small setup-required fallback so the UI renders a clear "missing ${envName}" screen instead of crashing.\n\n` +
+        `I would not call this repaired until the preview restarts and the rendered app passes the visual check.`;
+    }
+
     // Sandbox lifecycle failures
     if (/\bsandbox\b/i.test(lower) && /\b(lifecycle|failure|crash|stuck|expired|quota)\b/i.test(lower)) {
       return '**Sandbox lifecycle failure handling with diagnosable states:**\n\n' +

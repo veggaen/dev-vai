@@ -19,7 +19,7 @@ export function SidebarPanelHeader({
     <header className="flex h-11 flex-shrink-0 items-center justify-between gap-2 px-4">
       <div className="min-w-0">
         <h2
-          className={`truncate text-[11px] font-semibold uppercase tracking-[0.18em] ${
+          className={`vai-panel-title truncate text-[11px] font-semibold uppercase tracking-[0.18em] ${
             isLight ? 'text-zinc-600' : 'text-zinc-400'
           }`}
         >
@@ -36,13 +36,13 @@ export function SidebarPanelHeader({
         <button
           type="button"
           onClick={onCollapse}
-          className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors ${
+          className={`group/collapse flex h-6 w-6 items-center justify-center rounded-md transition-colors ${
             isLight ? 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-900' : 'text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200'
           }`}
           title="Collapse sidebar"
           aria-label="Collapse sidebar"
         >
-          <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+          <ChevronLeft className="h-3.5 w-3.5 transition-transform duration-200 group-hover/collapse:-translate-x-0.5" aria-hidden />
         </button>
       </div>
     </header>

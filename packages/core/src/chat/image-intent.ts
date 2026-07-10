@@ -38,14 +38,20 @@ const IMAGINE_RE = /\b(?:visuali[sz]e|imagine a picture of)\b/i;
 // Phrases that look image-y but are NOT generation requests — guard against false positives.
 const NEGATIVE_RE = /\b(?:look at|read|analy[sz]e|describe|what'?s in|in this|the attached|my screenshot|explain) (?:the |this |my )?(?:image|picture|photo|screenshot)\b/i;
 
+// Leading-preamble strippers for extractSubject. Constant, so compiled once at module
+// load rather than rebuilt on every call. Non-global (`i` only) → safe to reuse.
+const SUBJECT_VERB_PREAMBLE_RE = new RegExp(`^\\s*(?:please\\s+)?${GEN_VERB}\\s+(?:me\\s+)?(?:${IMG_NOUN}\\s+)?(?:of\\s+|that\\s+(?:shows?|depicts?)\\s+)?`, 'i');
+const SUBJECT_NOUN_OF_RE = new RegExp(`^\\s*${IMG_NOUN}\\s+of\\s+`, 'i');
+const SUBJECT_IMAGINE_RE = /^\s*(?:please\s+)?(?:visuali[sz]e|imagine a picture of)\s+/i;
+
 /** Strip the leading request verb/noun to recover the actual subject to draw. */
 function extractSubject(message: string): string {
   let s = message.trim();
   // Remove a leading "<verb> [me] [a/an] [image|picture] [of]" preamble.
-  s = s.replace(new RegExp(`^\\s*(?:please\\s+)?${GEN_VERB}\\s+(?:me\\s+)?(?:${IMG_NOUN}\\s+)?(?:of\\s+|that\\s+(?:shows?|depicts?)\\s+)?`, 'i'), '');
+  s = s.replace(SUBJECT_VERB_PREAMBLE_RE, '');
   // Or a leading "a picture of" form.
-  s = s.replace(new RegExp(`^\\s*${IMG_NOUN}\\s+of\\s+`, 'i'), '');
-  s = s.replace(/^\s*(?:please\s+)?(?:visuali[sz]e|imagine a picture of)\s+/i, '');
+  s = s.replace(SUBJECT_NOUN_OF_RE, '');
+  s = s.replace(SUBJECT_IMAGINE_RE, '');
   return s.trim() || message.trim();
 }
 

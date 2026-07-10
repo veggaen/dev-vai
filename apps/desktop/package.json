@@ -1,6 +1,6 @@
 {
   "name": "@vai/desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,12 +11,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@tauri-apps/api": "^2.10.1",
     "@vai/api-types": "workspace:*",
     "@vai/ui": "workspace:*",
     "cmdk": "^1.1.1",
     "framer-motion": "^12.34.3",
     "lucide-react": "^0.575.0",
+    "monaco-editor": "^0.55.1",
     "react": "^19.0.0",
     "react-arborist": "^3.12.0",
     "react-dom": "^19.0.0",

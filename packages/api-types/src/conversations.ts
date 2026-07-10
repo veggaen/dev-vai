@@ -9,6 +9,8 @@ export const createConversationBodySchema = z
     title: z.string().optional(),
     mode: conversationModeSchema.optional(),
     sandboxProjectId: z.union([z.string(), z.null()]).optional(),
+    /** Absolute local folder this chat works in — persisted so any client reopens the same workspace. */
+    workspaceRoot: z.union([z.string().min(1), z.null()]).optional(),
   })
   .strict();
 
@@ -18,6 +20,7 @@ export const patchConversationBodySchema = z
     title: z.string().min(1, 'Title cannot be empty').max(200, 'Title is too long').optional(),
     mode: conversationModeSchema.optional(),
     sandboxProjectId: z.union([z.string(), z.null()]).optional(),
+    workspaceRoot: z.union([z.string().min(1), z.null()]).optional(),
     visibility: z.enum(['private', 'unlisted', 'public']).optional(),
   })
   .strict();

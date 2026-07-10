@@ -22,9 +22,9 @@ export type SidebarPanel = 'chats' | 'projects' | 'devlogs' | 'knowledge' | 'sea
  * Owner: everything including platform tools.
  */
 export const ROLE_NAV_ITEMS: Record<AppRole, SidebarPanel[]> = {
-  builder: ['chats', 'council', 'settings'],
-  admin:   ['chats', 'council', 'devlogs', 'settings'],
-  owner:   ['chats', 'council', 'control', 'devlogs', 'knowledge', 'vaigym', 'thorsen', 'settings'],
+  builder: ['chats', 'settings'],
+  admin:   ['chats', 'devlogs', 'settings'],
+  owner:   ['chats', 'control', 'devlogs', 'knowledge', 'vaigym', 'thorsen', 'settings'],
 };
 
 /** Three-state sidebar: rail (icons only), expanded (full panel), hidden */
@@ -202,12 +202,9 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       window.dispatchEvent(new CustomEvent('vai:focus-chat-search'));
       return;
     }
-    if (panel === 'projects') {
-      set({ activePanel: 'chats', sidebarState: 'expanded', showSidebar: true, view: 'chat' });
-      return;
-    }
+
     if (panel === 'council') {
-      set({ activePanel: 'council', sidebarState: 'expanded', showSidebar: true, view: 'chat', showCouncilPanel: true });
+      set({ activePanel: 'chats', sidebarState: 'expanded', showSidebar: true, view: 'chat', showCouncilPanel: false });
       return;
     }
 

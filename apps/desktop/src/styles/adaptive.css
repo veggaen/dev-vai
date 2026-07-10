@@ -1,0 +1,97 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Adaptive grammar — the shell answers the screen, not the other way round.
+
+   Loads AFTER layout-modes.css. One principle: the content column is always
+   centered and symmetrical; what changes per screen is how much room the
+   room itself takes.
+
+   • ultrawide (≥ ~21:10)  — the stage letterboxes: the workspace caps its
+     width and centers; the mode's canvas fills the wings symmetrically.
+   • portrait / tall       — width is scarce, height is abundant: the chat
+     column goes full-bleed, chrome tightens, nothing fights for x-space.
+   • narrow (tablet/phone) — paddings compress, touch targets stay ≥40px,
+     rails are expected to collapse (component-level), CSS keeps the column
+     honest in the meantime.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Ultrawide: the letterboxed stage ───────────────────────────────────────
+   On a 21:9/32:9 monitor a full-bleed app reads as two dead oceans of panel.
+   Cap the workspace, center it, let the mode's canvas own the wings. */
+
+@media (min-width: 1720px) and (min-aspect-ratio: 21/10) {
+  .builder-shell-surface {
+    max-width: 112rem;
+    margin-inline: auto;
+    border-inline: 1px solid color-mix(in oklab, var(--fg) 6%, transparent);
+  }
+
+  /* The wings stay quiet in every mode — canvas, not content. */
+  [data-layout-mode="open"] #layout-root::before {
+    left: calc(50% - 56rem);
+  }
+}
+
+/* ── Portrait / tall screens (e.g. a 32" side monitor rotated 90°) ──────────
+   Column discipline: one centered column, full usable width, more of the
+   height given to messages. */
+
+@media (orientation: portrait) {
+  .composer-dock-inner,
+  .composer-scroll .mx-auto {
+    max-width: calc(100% - 1.5rem) !important;
+  }
+
+  .shell-header .mx-auto {
+    max-width: none;
+  }
+
+  /* The open-mode margin rule hugs the edge instead of a 76rem column. */
+  [data-layout-mode="open"] #layout-root::before {
+    left: 12px;
+  }
+
+  /* The odyssey meridian spans the usable width. */
+  [data-layout-mode="odyssey"] #layout-root::before {
+    width: calc(100% - 2rem);
+  }
+}
+
+/* ── Narrow widths: tablets and phones ──────────────────────────────────────
+   The desktop shell is not the phone app, but when the window IS narrow the
+   column must survive: compress chrome, keep touch targets, never overflow. */
+
+@media (max-width: 900px) {
+  .composer-dock-inner {
+    padding-inline: 0.75rem;
+  }
+
+  .composer-scroll .mx-auto {
+    padding-inline: 0.75rem;
+  }
+
+  .shell-header .mx-auto {
+    padding-inline: 0.875rem;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Touch: no element the finger needs is under 40px. */
+  .composer-shell button,
+  .shell-header button {
+    min-height: 40px;
+    min-width: 40px;
+  }
+
+  /* Density chrome that earns nothing on a phone. */
+  [data-layout-mode="compact"] #layout-root {
+    background: var(--bg);
+  }
+}
+
+/* ── Very tall + narrow (portrait phones/monitors): give height to content ── */
+
+@media (orientation: portrait) and (max-width: 900px) {
+  .shell-header {
+    padding-block: 0;
+  }
+}

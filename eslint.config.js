@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import globals from 'globals';
+import reactHooks from 'eslint-plugin-react-hooks';
 
 export default tseslint.config(
   js.configs.recommended,
@@ -35,8 +36,6 @@ export default tseslint.config(
       'temp-*.mjs',
       'temp-*.mts',
       'apps/vcus/**',
-      'apps/extension/**',
-      'apps/vscode-extension/**',
     ],
   },
   {
@@ -54,6 +53,15 @@ export default tseslint.config(
       }],
       '@typescript-eslint/no-explicit-any': 'warn',
       'no-useless-escape': 'warn',
+    },
+  },
+  {
+    // React hooks correctness for the React surfaces (desktop, extension popup/options).
+    files: ['**/*.tsx'],
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
     },
   },
   {

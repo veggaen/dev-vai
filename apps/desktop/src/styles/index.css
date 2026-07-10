@@ -289,8 +289,38 @@
   box-shadow: none !important;
 }
 
-[data-layout-mode="open"] [data-panel-resize-handle-id] {
+[data-layout-mode="open"] [data-separator] {
   background: transparent;
+}
+
+/* Open: rail melts into canvas; sidebar card overlaps the square rail column */
+[data-layout-mode="open"] .shell-nav-cluster {
+  position: relative;
+  align-items: stretch;
+}
+
+[data-layout-mode="open"] .shell-nav-cluster .layout-panel--rail {
+  z-index: 0;
+}
+
+[data-layout-mode="open"] .open-sidebar-slot {
+  position: relative;
+  z-index: 2;
+  margin-left: calc(-1 * var(--layout-gap));
+  border-radius: var(--layout-radius);
+  overflow: hidden;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  clip-path: inset(0 round var(--layout-radius));
+}
+
+[data-layout-mode="open"] .open-sidebar-slot .sidebar-panel-shell {
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--layout-radius);
+  clip-path: inset(0 round var(--layout-radius));
+  background: var(--layout-panel-bg) !important;
 }
 
 /* Odyssey mode — Odysseus-inspired workspace: a deep canvas with bold
@@ -354,16 +384,41 @@
   overflow: hidden;
 }
 
-[data-layout-mode="odyssey"] .odyssey-nav-cluster .layout-panel--rail {
-  border-radius: 999px !important;
-  margin: 6px 0;
+[data-layout-mode="odyssey"] .odyssey-nav-cluster {
+  position: relative;
+  align-items: stretch;
+  overflow: visible;
+}
+
+[data-layout-mode="odyssey"] .odyssey-nav-cluster .layout-panel--rail,
+[data-layout-mode="odyssey"] .odyssey-nav-cluster .odyssey-rail-shell {
+  /* Full-height rail — same vertical span as sidebar + chat (no inset margin gap). */
+  height: 100%;
+  margin: 0;
   align-self: stretch;
+  border-radius: var(--layout-radius) !important;
+  overflow: hidden !important;
   background: color-mix(in srgb, var(--panel) 92%, var(--bg)) !important;
   border: var(--layout-border) !important;
   box-shadow: var(--layout-shadow) !important;
 }
 
+[data-layout-mode="odyssey"] .odyssey-nav-cluster .activity-rail {
+  height: 100%;
+  width: 100%;
+  border: none !important;
+  background: transparent !important;
+}
+
+[data-layout-mode="odyssey"] .odyssey-nav-cluster #vai-shell-sidebar-group {
+  height: 100%;
+  min-height: 0;
+}
+
 [data-layout-mode="odyssey"] .odyssey-sidebar-slot {
+  position: relative;
+  z-index: 2;
+  height: 100%;
   border-radius: var(--layout-radius);
   overflow: hidden;
   background: transparent !important;
@@ -373,6 +428,17 @@
 
 [data-layout-mode="odyssey"] .odyssey-sidebar-slot .sidebar-panel-shell {
   height: 100%;
+  overflow: hidden;
+  border-radius: var(--layout-radius);
+  clip-path: inset(0 round var(--layout-radius));
+}
+
+[data-layout-mode="odyssey"] .sidebar-panel-shell > * {
+  min-width: 0;
+}
+
+[data-layout-mode="odyssey"] .sidebar-panel-shell .overflow-y-auto {
+  overflow-x: hidden;
 }
 
 [data-layout-mode="odyssey"] .layout-panel:not(.layout-panel--rail):not(.layout-panel--odyssey-host):not(.odyssey-sidebar-slot) {
@@ -391,10 +457,30 @@
   opacity: 0.55;
 }
 
-/* Odyssey: separate resize gutters visually */
-[data-layout-mode="odyssey"] [data-panel-resize-handle-id] {
+/* Collapsed sidebar / chat — keep resize border visible for drag-to-expand */
+[data-separator]:hover,
+[data-separator]:focus-visible {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+#shell-sidebar[data-panel-collapsed] + [data-separator],
+#chat[data-panel-collapsed] + [data-separator],
+#console[data-panel-collapsed] + [data-separator] {
+  min-width: 6px;
+  min-height: 6px;
+  opacity: 1;
+  z-index: 2;
+}
+
+/* Open/Odyssey: sidebar ↔ main gutter — wide enough to grab and drag */
+[data-layout-mode="open"] #vai-shell-sidebar-group [data-separator],
+[data-layout-mode="odyssey"] #vai-shell-sidebar-group [data-separator] {
   background: transparent;
-  width: var(--layout-gap) !important;
+  min-width: 10px !important;
+  flex-basis: 10px !important;
+  width: 10px !important;
+  cursor: col-resize;
+  z-index: 3;
 }
 
 #layout-root {
@@ -455,12 +541,16 @@
 }
 
 .layout-panel--rail {
-  overflow: visible !important;
+  overflow: visible;
   z-index: 2;
-  border: none !important;
-  box-shadow: none !important;
-  background: transparent !important;
-  border-radius: 0 !important;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  border-radius: 0;
+}
+
+[data-layout-mode="odyssey"] .odyssey-nav-cluster .layout-panel--rail {
+  z-index: 1;
 }
 
 html, body, #root {
@@ -1193,6 +1283,16 @@ code, pre, kbd {
     0 4px 8px rgba(0, 0, 0, 0.04),
     0 8px 16px rgba(0, 0, 0, 0.04),
     0 16px 32px rgba(0, 0, 0, 0.04);
+}
+/* Dictation ring lives on the COMPOSER, not the inner textarea — the whole
+   surface is what's listening, and the input's own border stays untouched. */
+.composer-shell[data-dictation-active="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--composer-border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
+    0 0 32px -4px var(--selection-glow),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 8px 16px rgba(0, 0, 0, 0.04);
 }
 [data-theme="light"] .composer-shell {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 2px 4px rgba(15, 23, 42, 0.03), 0 4px 8px rgba(15, 23, 42, 0.03), 0 8px 16px rgba(15, 23, 42, 0.03);
@@ -2024,6 +2124,39 @@ body.vai-merge-dragging { cursor: grabbing; user-select: none; }
 }
 .composer-process-strip {
   backdrop-filter: blur(8px);
+}
+/* ComposerDock — the single calm status line above the composer shell.
+   Text-first: no borders, no fills. Segments are quiet buttons; the one
+   shared drawer below is the only boxed surface allowed above the input. */
+.composer-dock-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.375rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--chat-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.composer-dock-seg:hover {
+  color: var(--chat-strong);
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
+}
+.composer-dock-seg--open {
+  color: var(--chat-strong);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+}
+.composer-dock-seg__label {
+  color: var(--chat-strong);
+}
+.composer-dock-drawer {
+  backdrop-filter: blur(8px);
+}
+.composer-notice {
+  min-height: 0;
 }
 .composer-process-strip__bar {
   cursor: pointer;
@@ -2992,6 +3125,281 @@ pre code {
 .reasoning-flow {
   font-size: 12px;
 }
+
+/* Software work progress — one task-oriented surface for Builder/Agent turns.
+   It replaces the reasoning constellation + story + council card stack with a
+   fixed six-stage job model. Machine events are translated into a teachable
+   chronological journal instead of being dumped as raw model reasoning. */
+.software-work-progress {
+  border-top: 1px solid color-mix(in oklab, var(--panel-border-soft) 72%, transparent);
+  border-bottom: 1px solid color-mix(in oklab, var(--panel-border-soft) 72%, transparent);
+  padding: 0.65rem 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+.software-work-summary {
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--chat-body);
+}
+.software-work-summary {
+  border: 0;
+  background: transparent;
+  padding: 0.2rem 0.1rem;
+  text-align: left;
+  cursor: pointer;
+  transition: color 140ms ease;
+}
+.software-work-summary:hover {
+  color: var(--chat-strong);
+}
+.software-work-progress[data-outcome='withheld'] .software-work-summary {
+  color: var(--tone-warn);
+}
+.software-work-summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+.software-work-summary > svg:last-child {
+  transition: transform 160ms ease;
+}
+.software-work-summary-action {
+  flex: 0 0 auto;
+  color: var(--chat-muted);
+  font-size: 10px;
+}
+.software-work-customer-status {
+  display: grid;
+  gap: 0.35rem;
+}
+.software-work-status-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+}
+.software-work-status-kicker,
+.software-work-purpose > span,
+.software-work-detail > span {
+  flex: 0 0 auto;
+  color: var(--chat-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.software-work-active-mark {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.software-work-body {
+  padding-top: 0.65rem;
+}
+.software-work-purpose,
+.software-work-detail {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: 0.5rem;
+  margin: 0 0 0 1rem;
+  color: var(--chat-muted);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.software-work-phases {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.software-work-phase {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.35rem;
+  color: color-mix(in oklab, var(--chat-muted) 64%, transparent);
+}
+.software-work-phase:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 1rem;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--panel-border-soft);
+}
+.software-work-phase[data-status='done'] {
+  color: var(--chat-muted);
+}
+.software-work-phase[data-status='running'] {
+  color: var(--chat-strong);
+}
+.software-work-phase[data-status='attention'] {
+  color: var(--tone-warn);
+}
+.software-work-phase-glyph {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+.software-work-phase-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.software-work-phase[data-status='running'] .software-work-phase-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+}
+.software-work-journal-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid color-mix(in oklab, var(--panel-border-soft) 58%, transparent);
+}
+.software-work-journal-head > div {
+  min-width: 0;
+}
+.software-work-journal-head p {
+  margin: 0;
+  color: var(--chat-strong);
+  font-weight: 650;
+}
+.software-work-journal-head span {
+  color: var(--chat-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.software-work-journal {
+  display: grid;
+  gap: 0;
+  max-height: min(44vh, 440px);
+  margin: 0.55rem 0 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.software-work-journal-item {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr);
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.25rem 0 0.7rem;
+}
+.software-work-journal-rail {
+  position: relative;
+  display: flex;
+  width: 1.4rem;
+  height: 1.4rem;
+  align-items: center;
+  justify-content: center;
+  color: var(--chat-muted);
+}
+.software-work-journal-item:not(:last-child) .software-work-journal-rail::after {
+  content: '';
+  position: absolute;
+  top: 1.25rem;
+  bottom: -0.75rem;
+  left: 50%;
+  width: 1px;
+  background: color-mix(in oklab, var(--panel-border-soft) 72%, transparent);
+}
+.software-work-journal-item[data-status='running'] .software-work-journal-rail {
+  color: var(--accent);
+}
+.software-work-journal-content {
+  min-width: 0;
+}
+.software-work-journal-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.45rem;
+  color: var(--chat-body);
+  line-height: 1.45;
+}
+.software-work-journal-title > span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+  text-wrap: pretty;
+}
+.software-work-journal-phase {
+  flex: 0 0 auto;
+  color: var(--chat-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.software-work-journal time {
+  flex: 0 0 auto;
+  color: var(--chat-muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.software-work-journal-content > p,
+.software-work-journal-notes p {
+  margin: 0.18rem 0 0;
+  color: var(--chat-muted);
+  line-height: 1.5;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+.software-work-journal-notes {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.4rem 0 0;
+  padding: 0.45rem 0 0.1rem 0.55rem;
+  border-left: 1px solid color-mix(in oklab, var(--panel-border-soft) 72%, transparent);
+  list-style: none;
+}
+.software-work-journal-notes li {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  min-width: 0;
+  color: var(--chat-muted);
+}
+.software-work-journal-notes li[data-status='failed'] {
+  color: var(--tone-warn);
+}
+.software-work-journal-notes strong {
+  color: var(--chat-body);
+  font-weight: 600;
+}
+@media (max-width: 640px) {
+  .software-work-phases {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 0.4rem;
+  }
+  .software-work-phase:nth-child(3)::after {
+    display: none;
+  }
+  .software-work-summary-action {
+    display: none;
+  }
+  .software-work-journal {
+    max-height: min(52vh, 420px);
+  }
+}
 .reasoning-flow-headline {
   border-radius: 0.5rem;
   padding: 0.3rem 0.4rem;
@@ -3128,262 +3536,4 @@ pre code {
   border-radius: 999px;
   background: color-mix(in oklab, var(--node-hue, var(--accent)) 88%, var(--fg));
   box-shadow: 0 0 7px color-mix(in oklab, var(--node-hue, var(--accent)) 45%, transparent);
-  transition: transform 200ms ease, box-shadow 200ms ease;
-}
-.reasoning-node:hover .reasoning-node-glyph,
-.reasoning-node--selected .reasoning-node-glyph {
-  background: color-mix(in oklab, var(--node-hue, var(--accent)) 22%, transparent);
-}
-.reasoning-node--selected .reasoning-node-disc {
-  transform: scale(1.25);
-  box-shadow: 0 0 11px color-mix(in oklab, var(--node-hue, var(--accent)) 65%, transparent);
-}
-.reasoning-node--live .reasoning-node-disc {
-  animation: reasoning-node-breathe 1.9s var(--ease-out-expo, ease) infinite;
-}
-@keyframes reasoning-node-breathe {
-  0%, 100% { box-shadow: 0 0 5px color-mix(in oklab, var(--node-hue, var(--accent)) 35%, transparent); }
-  50% { box-shadow: 0 0 13px color-mix(in oklab, var(--node-hue, var(--accent)) 75%, transparent); }
-}
-.reasoning-node-title {
-  max-width: 92px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10.5px;
-  line-height: 1.2;
-  color: var(--chat-body);
-}
-.reasoning-node--selected .reasoning-node-title {
-  color: var(--chat-strong, var(--fg));
-}
-.reasoning-node-time,
-.reasoning-node-meta {
-  font-size: 9.5px;
-  line-height: 1.2;
-  color: var(--chat-muted);
-  opacity: 0.75;
-}
-.reasoning-node--bad .reasoning-node-title {
-  color: color-mix(in srgb, var(--tone-bad) 70%, var(--chat-body));
-}
-
-/* Fit control — one quiet glyph, bottom-right, only when the view left its fit. */
-.reasoning-fit {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 22px;
-  width: 22px;
-  border-radius: 0.45rem;
-  border: 1px solid color-mix(in oklab, var(--panel-border-soft) 80%, transparent);
-  background: color-mix(in srgb, var(--panel) 80%, transparent);
-  color: var(--chat-muted);
-  transition: color 150ms ease, border-color 150ms ease;
-}
-.reasoning-fit:hover {
-  color: var(--chat-body);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--panel-border-soft));
-}
-
-/* Minimap — the whole turn as dots with a viewport window; scrub + wheel-zoom. */
-.reasoning-minimap {
-  position: absolute;
-  left: 50%;
-  bottom: 5px;
-  transform: translateX(-50%);
-  width: min(46%, 220px);
-  opacity: 0;
-  transition: opacity 200ms ease;
-  pointer-events: auto;
-}
-.reasoning-spine-frame:hover .reasoning-minimap,
-.reasoning-spine-frame:focus-within .reasoning-minimap {
-  opacity: 1;
-}
-.reasoning-minimap-track {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 14px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
-  border: 1px solid color-mix(in oklab, var(--panel-border-soft) 70%, transparent);
-  cursor: pointer;
-}
-.reasoning-minimap-dot {
-  height: 4px;
-  width: 4px;
-  border-radius: 999px;
-  opacity: 0.85;
-}
-.reasoning-minimap-window {
-  position: absolute;
-  top: 1px;
-  bottom: 1px;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--fg) 10%, transparent);
-  border: 1px solid color-mix(in oklab, var(--fg) 22%, transparent);
-  pointer-events: none;
-}
-
-/* Spotlight — detail for the selected node, revealed below the spine. */
-.reasoning-spotlight {
-  margin-top: 0.5rem;
-}
-.reasoning-spotlight-inner {
-  border-radius: 0.75rem;
-  border: 1px solid color-mix(in oklab, var(--panel-border-soft) 70%, transparent);
-  background: color-mix(in srgb, var(--panel-bg-muted) 55%, transparent);
-  padding: 0.65rem 0.8rem;
-}
-.reasoning-spotlight-head {
-  display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-}
-.reasoning-spotlight-title {
-  font-size: 12px;
-  font-weight: 550;
-  color: var(--chat-strong, var(--fg));
-}
-.reasoning-verdict {
-  margin-left: auto;
-  font-size: 10.5px;
-  color: var(--phase-verify);
-}
-.reasoning-verdict--warn {
-  color: var(--tone-warn);
-}
-.reasoning-spotlight-summary {
-  margin: 0.35rem 0 0;
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: var(--chat-body);
-}
-.reasoning-note {
-  margin: 0.45rem 0 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 10px;
-  line-height: 1.6;
-  color: var(--chat-body);
-}
-.reasoning-subrow {
-  padding: 0.3rem 0 0;
-}
-.reasoning-subrow-head {
-  display: flex;
-  align-items: baseline;
-  gap: 0.45rem;
-  font-size: 11px;
-}
-.reasoning-subdot {
-  align-self: center;
-  height: 5px;
-  width: 5px;
-  flex-shrink: 0;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--chat-muted) 70%, transparent);
-}
-.reasoning-subdot--live {
-  background: var(--accent);
-  animation: reasoning-node-breathe 1.9s ease infinite;
-}
-.reasoning-subdot--bad {
-  background: var(--tone-bad);
-}
-.reasoning-subrow-label {
-  color: var(--chat-body);
-}
-.reasoning-subrow-detail {
-  color: var(--chat-muted);
-  opacity: 0.85;
-  font-size: 10.5px;
-}
-.reasoning-body-child { padding-left: 0.15rem; }
-.reasoning-body-indent {
-  margin-left: 0.55rem;
-  padding-left: 0.55rem;
-  border-left: 1px solid color-mix(in oklab, var(--panel-border-soft) 75%, transparent);
-}
-
-/* Improvement ledger — Vai's "what I still need" lane. */
-.reasoning-ledger {
-  margin-top: 0.55rem;
-  border-radius: 0.75rem;
-  border: 1px solid color-mix(in oklab, var(--panel-border-soft) 70%, transparent);
-  background: color-mix(in srgb, var(--panel-bg-muted) 45%, transparent);
-  padding: 0.45rem 0.7rem;
-}
-.reasoning-ledger-toggle {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 0.5rem;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  font-size: 11px;
-  color: var(--chat-body);
-}
-.reasoning-ledger-toggle:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent-ring);
-  border-radius: 0.4rem;
-}
-.reasoning-ledger-title { font-weight: 500; }
-.reasoning-ledger-caret {
-  margin-left: auto;
-  color: var(--chat-muted);
-  font-size: 13px;
-  line-height: 1;
-  transition: transform 200ms ease;
-}
-.reasoning-ledger-caret--open { transform: rotate(90deg); }
-.reasoning-ledger-list {
-  margin: 0.45rem 0 0;
-  padding: 0;
-  list-style: none;
-  overflow: hidden;
-}
-.reasoning-ledger-item {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.22rem 0;
-  font-size: 11px;
-  line-height: 1.5;
-}
-.reasoning-ledger-kind {
-  flex-shrink: 0;
-  font-size: 10px;
-  color: var(--chat-muted);
-}
-.reasoning-ledger-kind--missing-capability { color: var(--tone-warn); }
-.reasoning-ledger-kind--method-lesson { color: var(--phase-read); }
-.reasoning-ledger-kind--concern { color: color-mix(in srgb, var(--tone-bad) 80%, var(--chat-body)); }
-.reasoning-ledger-text { color: var(--chat-body); }
-.reasoning-ledger-source {
-  flex-shrink: 0;
-  color: var(--chat-muted);
-  opacity: 0.7;
-  font-size: 10px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .reasoning-node--live .reasoning-node-disc,
-  .reasoning-subdot--live {
-    animation: none;
-  }
-  .reasoning-spine--smooth {
-    transition: none;
-  }
-}
+ 

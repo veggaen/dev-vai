@@ -32,6 +32,7 @@ import { registerPlatformRoutes } from './routes/platform.js';
 import { registerIngestRoutes } from './routes/ingest.js';
 import { registerImageRoutes } from './routes/images.js';
 import { registerSandboxRoutes } from './routes/sandbox.js';
+import { registerPickPathRoute } from './routes/pick-path.js';
 import { registerSessionRoutes } from './routes/sessions.js';
 import { registerDockerRoutes } from './routes/docker.js';
 import { registerVaiGymRoutes } from './routes/vai-gym.js';
@@ -39,12 +40,16 @@ import { registerThorsenRoutes } from './routes/thorsen.js';
 import { registerEvalRoutes } from './routes/eval.js';
 import { registerScaleEvalRoutes } from './routes/scale-eval.js';
 import { registerSearchRoutes } from './routes/search.js';
+import { registerSttRoutes } from './routes/stt.js';
+import { registerIdeRoutes } from './routes/ide.js';
 import { registerSkillRoutes } from './routes/skills.js';
 import { registerFeedbackRoutes } from './routes/feedback.js';
 import { registerSteeringRoutes } from './routes/steering.js';
 import { registerAgentIntrospectRoutes } from './routes/agent-introspect.js';
 import { registerCouncilChangelogRoutes } from './routes/council-changelog.js';
 import { registerKnowledgeGraphRoutes } from './routes/knowledge-graph.js';
+import { registerMemoryRoutes } from './routes/memory.js';
+import { MemoryService } from './memory/service.js';
 import { createGuidanceStore } from './steering/guidance-store.js';
 import { createSelfImproveQueue } from './steering/self-improve-queue.js';
 import { computeSteeringLift } from './steering/analyze-steering.js';
@@ -338,6 +343,9 @@ export async function createServer(options?: ServerOptions) {
   const imageProducer = process.env.VAI_IMAGEGEN === '0' ? undefined : createComfyUiProducer();
   const imageIntentGateAdapter = createGrokCliAdapter({ timeoutMs: 8_000 }) ?? undefined;
   if (imageProducer) console.log(`[VAI] Image generation active: ${imageProducer.id} (ComfyUI; dormant until server reachable)`);
+  // Constructed before ChatService so the builder council can resolve the
+  // designated project folder server-side (real files at turn time).
+  const sandboxManager = new SandboxManager();
   const chatService = new ChatService(
     db,
     models,
@@ -362,6 +370,34 @@ export async function createServer(options?: ServerOptions) {
       visionAdapter,
       imageProducer,
       imageIntentGateAdapter,
+      // Live workspace port — the council edits the real designated folder.
+      workspace: {
+        describe: (projectId: string) => {
+          const project = sandboxManager.get(projectId);
+          if (!project) return null;
+          return {
+            name: project.name,
+            external: project.external,
+            framework: project.framework,
+            devPort: project.devPort,
+          };
+        },
+        listFiles: (projectId: string) => sandboxManager.listFiles(projectId),
+        searchFiles: (projectId: string, options: {
+          query: string;
+          caseSensitive?: boolean;
+          wholeWord?: boolean;
+          regex?: boolean;
+          maxResults?: number;
+        }) => sandboxManager.searchFiles(projectId, options),
+        readFile: async (projectId: string, path: string) => {
+          try {
+            return await sandboxManager.readFile(projectId, path);
+          } catch {
+            return null;
+          }
+        },
+      },
       responseReviewers: [
         ...(localSteeringWorker.isEnabled()
           ? [{
@@ -373,7 +409,6 @@ export async function createServer(options?: ServerOptions) {
       ],
     },
   );
-  const sandboxManager = new SandboxManager();
   const platformAuth = new PlatformAuthService(db, config.platformAuth, {
     ownerEmail: config.ownerEmail,
     adminEmails: config.adminEmails,
@@ -558,6 +593,7 @@ export async function createServer(options?: ServerOptions) {
   registerIngestRoutes(app, pipeline);
   registerImageRoutes(app, pipeline, chatService);
   registerSandboxRoutes(app, sandboxManager, platformAuth, projectService);
+  registerPickPathRoute(app);
   registerProjectRoutes(app, platformAuth, projectService, sandboxManager);
   registerBroadcastRoutes(app, platformAuth, projectService);
   registerDockerRoutes(app);
@@ -589,12 +625,17 @@ export async function createServer(options?: ServerOptions) {
 
   registerSearchRoutes(app, searchPipeline);
 
+  registerSttRoutes(app, db, platformAuth);
+
+  registerIdeRoutes(app);
+
   registerSkillRoutes(app);
   registerFeedbackRoutes(app, db);
   registerSteeringRoutes(app, guidanceStore);
-  registerAgentIntrospectRoutes(app, { models, fallbackChain: effectiveConfig.fallbackChain.models });
+  registerAgentIntrospectRoutes(app, { models, fallbackChain: effectiveConfig.fallbackChain.models, chatService });
   registerCouncilChangelogRoutes(app);
   registerKnowledgeGraphRoutes(app, { chatService, auth: platformAuth });
+  registerMemoryRoutes(app, { memory: new MemoryService(db), chatService, auth: platformAuth });
 
   app.get('/api/usage', async (request) => {
     const query = request.query as { from?: string; to?: string };

@@ -33,6 +33,36 @@ describe('builder request router', () => {
     });
   });
 
+  it('treats an explicitly named project file as a strong edit signal', () => {
+    // Live failure: only 1 visual keyword — fell through the visual gate.
+    const prompt = 'In components/Navbar.tsx, change the navbar brand text "MPM" to "MPM Pro". Keep everything else in the file exactly the same.';
+
+    expect(routeBuilderRequest({
+      input: prompt,
+      activeMode: 'builder',
+      hasActiveSandboxContext: true,
+      snapshotPaths: ['components/Navbar.tsx', 'src/app/page.tsx'],
+    })).toMatchObject({
+      kind: 'active-sandbox-edit',
+      shouldGenerateFreshBuild: false,
+      shouldPatchActiveSandbox: true,
+    });
+  });
+
+  it('asks for context when a named-file edit has no snapshots yet', () => {
+    const prompt = 'Update src/lib/api.ts to add a retry helper.';
+
+    expect(routeBuilderRequest({
+      input: prompt,
+      activeMode: 'builder',
+      hasActiveSandboxContext: true,
+      snapshotPaths: [],
+    })).toMatchObject({
+      kind: 'active-sandbox-needs-context',
+      shouldPatchActiveSandbox: false,
+    });
+  });
+
   it('asks for context only for edit-like prompts against an empty active sandbox', () => {
     const prompt = 'Make the hero heading animated and change the background color.';
 
@@ -47,4 +77,5 @@ describe('builder request router', () => {
       shouldPatchActiveSandbox: false,
     });
   });
-});
+
+  it('r

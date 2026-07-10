@@ -41,7 +41,7 @@ import { registerFileWatchers } from './capture-files.js';
 import { registerTerminalWatchers } from './capture-terminal.js';
 import { registerEditorWatchers } from './capture-editor.js';
 import { registerOutputWatchers } from './capture-output.js';
-import { registerChatParticipant, enqueueBroadcast, triggerBroadcastInChat } from './capture-chat.js';
+import { registerChatParticipant } from './capture-chat.js';
 import { registerStatusBar } from './statusbar.js';
 import { openLogsPanel } from './webview.js';
 import { exportSessionMarkdown } from './export.js';

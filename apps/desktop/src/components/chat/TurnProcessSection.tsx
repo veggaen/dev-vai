@@ -3,6 +3,7 @@ import type { ChatProgressStep, CouncilThinkingUI } from '../../stores/chatStore
 import { useProcessStepReveal } from '../../hooks/useProcessStepReveal.js';
 import { ProcessTree } from './ProcessTree.js';
 import { ReasoningFlow } from './ReasoningFlow.js';
+import { SoftwareWorkProgress } from './SoftwareWorkProgress.js';
 import { isTimelineViewEnabled } from '../../lib/timeline-flag.js';
 
 export interface TurnProcessSectionProps {
@@ -12,6 +13,8 @@ export interface TurnProcessSectionProps {
   readonly imageSteps?: readonly { phase: string; label: string; attempt?: number; matchScore?: number; flaws?: string[] }[];
   readonly vaiProposedDraft?: string;
   readonly durationMs?: number;
+  readonly workKind?: 'software' | 'general';
+  readonly outputFileCount?: number;
 }
 
 /**
@@ -24,6 +27,8 @@ export function TurnProcessSection({
   imageSteps,
   vaiProposedDraft,
   durationMs,
+  workKind = 'general',
+  outputFileCount,
 }: TurnProcessSectionProps) {
   const revealedCount = useProcessStepReveal(steps, isStreaming);
   // The drip can still be draining for a beat AFTER the stream ends (fast turns).
@@ -50,6 +55,17 @@ export function TurnProcessSection({
   }, [live]);
 
   if (!isStreaming && steps.length === 0) return null;
+
+  if (workKind === 'software') {
+    return (
+      <SoftwareWorkProgress
+        live={live}
+        steps={visibleSteps}
+        durationMs={durationMs}
+        outputFileCount={outputFileCount}
+      />
+    );
+  }
 
   // Reasoning flow (behind the timeline flag) renders the same flat steps as a spatial
   // constellation — phases, rounds, gates, and the self-improvement ledger. Falls back to the
@@ -83,16 +99,4 @@ export function TurnProcessSection({
 /** Subscribe to the Timeline-view flag (same-tab + cross-tab changes). */
 function useTimelineView(): boolean {
   const [enabled, setEnabled] = useState(isTimelineViewEnabled);
-  useEffect(() => {
-    const update = () => setEnabled(isTimelineViewEnabled());
-    window.addEventListener('vai-timeline-view-change', update);
-    window.addEventListener('storage', update);
-    return () => {
-      window.removeEventListener('vai-timeline-view-change', update);
-      window.removeEventListener('storage', update);
-    };
-  }, []);
-  return enabled;
-}
-
-export default TurnProcessSection;
+  useEffect(() => 

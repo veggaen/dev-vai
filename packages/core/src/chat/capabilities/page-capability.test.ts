@@ -50,6 +50,14 @@ describe('isPageQuery', () => {
     expect(isPageQuery('https://example.com')).toBe(false);
     expect(isPageQuery('what is the capital of France?')).toBe(false);
   });
+
+  it('does not steal a source-file repair prompt just because the error contains a URL and fetch/reachable words', () => {
+    expect(isPageQuery([
+      'Repair the runtime issue in lib/AppKitProvider.tsx and lib/appkit.ts.',
+      'The overlay reports Failed to fetch and https://mainnet.infura.io/v3/undefined.',
+      'Refactor these files so wallet connect still works when the network is reachable.',
+    ].join(' '))).toBe(false);
+  });
 });
 
 describe('pageCapability.estimate', () => {

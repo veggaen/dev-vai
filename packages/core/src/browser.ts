@@ -23,3 +23,29 @@ export { isExplicitBuildExecutionRequest, classifyAgentBuildIntent } from './cha
 export type { AgentBuildIntent } from './chat/build-execution-intent.js';
 
 export { needsLiveExternalEvidence } from './models/web-conclude-policy.js';
+export {
+  looksLikeAsrArtifactTranscript,
+  repairKnownAsrArtifacts,
+  stripNonSpeechAnnotations,
+  shouldAcceptPolishedTranscript,
+  transcriptWordOverlap,
+} from './voice/polish-guard.js';
+
+// Council-IDE workspace/diff model (Layer 1).
+export {
+  makeProposal,
+  withStatus,
+  changeStats,
+  lineDiff,
+  isDiffable,
+  isProbablyBinaryPath,
+  isSafeRelativePath,
+} from './ide/workspace-edit.js';
+export type {
+  WorkspaceRef,
+  EditAuthor,
+  ReviewStatus,
+  FileEditProposal,
+  DiffLine,
+  ChangeStats,
+} from './ide/workspace-edit.js';

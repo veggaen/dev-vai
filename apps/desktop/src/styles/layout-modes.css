@@ -1,0 +1,421 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Layout Mode Personalities — loads AFTER index.css, overrides win.
+
+   Three modes, three genuinely different rooms — same design DNA:
+   discipline over decoration. No ambient loops, no glow, no aurora.
+   Each mode has exactly ONE signature element.
+
+   • compact  — "Instrument"  precision cockpit: blueprint grid, hairlines,
+                sharp 130ms motion, notch accents, dense and quiet.
+                Signature: the scanline. (The taste anchor — do not touch.)
+   • open     — "Atelier"     editorial reading room: paper-quiet canvas,
+                flush hairline panels, generous space, zero transforms.
+                Signature: the margin rule.
+   • odyssey  — "Stage"       focus theater: near-black canvas, chrome
+                recedes to silhouettes, the content column is lit.
+                Signature: the meridian.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Per-mode motion + surface grammar ──────────────────────────────────── */
+
+[data-layout-mode="compact"] {
+  --mode-dur: 130ms;
+  --mode-ease: cubic-bezier(0.2, 0, 0, 1);
+  --row-radius: 4px;
+  --row-lift: 0px;
+  --menu-radius: 8px;
+  --menu-blur: 14px;
+}
+
+[data-layout-mode="open"] {
+  --mode-dur: 200ms;
+  --mode-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --row-radius: 8px;
+  --row-lift: 0px;
+  --menu-radius: 10px;
+  --menu-blur: 0px;
+}
+
+[data-layout-mode="odyssey"] {
+  --mode-dur: 240ms;
+  --mode-ease: cubic-bezier(0.3, 0, 0, 1);
+  --row-radius: 6px;
+  --row-lift: 0px;
+  --menu-radius: 8px;
+  --menu-blur: 0px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE FRAME — #layout-root stops being a default framework box
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Compact: blueprint instrument panel ────────────────────────────────── */
+
+[data-layout-mode="compact"] #layout-root {
+  background:
+    linear-gradient(color-mix(in oklab, var(--fg) 2.5%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--fg) 2.5%, transparent) 1px, transparent 1px),
+    var(--bg);
+  background-size: 28px 28px, 28px 28px, auto;
+}
+
+/* Hairline accent scan across the very top of the frame */
+[data-layout-mode="compact"] #layout-root::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 30;
+  pointer-events: none;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--accent) 65%, transparent) 18%,
+    var(--accent) 50%,
+    color-mix(in oklab, var(--accent) 65%, transparent) 82%,
+    transparent 100%);
+  background-size: 200% 100%;
+  animation: compact-scanline 14s linear infinite;
+  opacity: 0.5;
+}
+
+@keyframes compact-scanline {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+[data-layout-mode="compact"] .shell-atmosphere {
+  background: transparent;
+}
+
+/* ── Open: the editorial reading room ───────────────────────────────────────
+   Paper, not glass. The canvas is a single quiet warm-tinted surface; panels
+   sit flush and are separated by hairlines, not shadows. Nothing drifts,
+   nothing floats, nothing lifts. The room feels like a well-set book page:
+   the signature is the margin rule — one static hairline that marks the
+   content column like the margin line of a manuscript. */
+
+[data-layout-mode="open"] #layout-root {
+  background: color-mix(in oklab, var(--fg) 1.5%, var(--bg));
+}
+
+[data-layout-mode="open"] .builder-shell-surface {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+[data-layout-mode="open"] .shell-atmosphere {
+  background: transparent;
+  opacity: 1;
+}
+
+[data-layout-mode="open"] .shell-atmosphere::before,
+[data-layout-mode="open"] .shell-atmosphere::after {
+  content: none;
+}
+
+/* The margin rule — one static hairline marking the reading column. */
+[data-layout-mode="open"] #layout-root::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: max(16px, calc(50% - 38rem));
+  width: 1px;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    color-mix(in oklab, var(--fg) 7%, transparent),
+    color-mix(in oklab, var(--fg) 3%, transparent) 30%,
+    color-mix(in oklab, var(--fg) 3%, transparent) 70%,
+    transparent);
+}
+
+/* ── Odyssey: the stage ─────────────────────────────────────────────────────
+   A theater, not a nebula. The canvas deepens toward black and every piece
+   of chrome recedes into silhouette; the content column is the one lit
+   surface in the room. The signature is the meridian — a single crisp
+   accent line at the top of the stage, held still. */
+
+[data-layout-mode="odyssey"] #layout-root {
+  background: color-mix(in oklab, var(--bg) 82%, black);
+}
+
+[data-layout-mode="odyssey"] .shell-atmosphere {
+  background: transparent;
+  opacity: 1;
+  overflow: hidden;
+}
+
+[data-layout-mode="odyssey"] .shell-atmosphere::before,
+[data-layout-mode="odyssey"] .shell-atmosphere::after {
+  content: none;
+}
+
+/* The meridian — one still accent line above the stage. */
+[data-layout-mode="odyssey"] #layout-root::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  translate: -50% 0;
+  width: min(72rem, calc(100% - 3rem));
+  height: 1px;
+  z-index: 30;
+  pointer-events: none;
+  background: linear-gradient(90deg,
+    transparent,
+    color-mix(in oklab, var(--accent) 60%, transparent) 20%,
+    color-mix(in oklab, var(--accent) 60%, transparent) 80%,
+    transparent);
+}
+
+/* The lit stage: the main content surface separates from the dark room by
+   value, not by glow. */
+[data-layout-mode="odyssey"] .builder-shell-surface {
+  background: color-mix(in oklab, var(--bg) 96%, white);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Starfield canvas retired with the aurora deck — the stage holds still. */
+.odyssey-starfield {
+  display: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE RAIL — three different instruments
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Open: flush column, hairline-separated — part of the page, not a boat. */
+[data-layout-mode="open"] .shell-nav-cluster .layout-panel--rail {
+  border-radius: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  border-right: 1px solid color-mix(in oklab, var(--fg) 6%, transparent) !important;
+  box-shadow: none !important;
+}
+
+[data-layout-mode="open"] .shell-nav-cluster .activity-rail {
+  border: none !important;
+  background: transparent !important;
+}
+
+/* Odyssey: silhouette rail — dark, borderless, discovered on hover. */
+[data-layout-mode="odyssey"] .odyssey-nav-cluster .layout-panel--rail,
+[data-layout-mode="odyssey"] .odyssey-nav-cluster .odyssey-rail-shell {
+  position: relative;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  opacity: 0.6;
+  transition: opacity var(--mode-dur) var(--mode-ease);
+}
+
+[data-layout-mode="odyssey"] .odyssey-nav-cluster .layout-panel--rail:hover,
+[data-layout-mode="odyssey"] .odyssey-nav-cluster .layout-panel--rail:focus-within,
+[data-layout-mode="odyssey"] .odyssey-nav-cluster .odyssey-rail-shell:hover,
+[data-layout-mode="odyssey"] .odyssey-nav-cluster .odyssey-rail-shell:focus-within {
+  opacity: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SIDEBAR ROWS + MENUS — mode-aware micro-interactions
+   Components opt in with .vai-side-row / .vai-context-menu / .vai-side-search
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.vai-side-row {
+  border-radius: var(--row-radius, 6px);
+  transition:
+    background-color var(--mode-dur, 160ms) var(--mode-ease, ease),
+    box-shadow var(--mode-dur, 160ms) var(--mode-ease, ease),
+    transform var(--mode-dur, 160ms) var(--mode-ease, ease),
+    color var(--mode-dur, 160ms) var(--mode-ease, ease);
+}
+
+.vai-side-row:hover {
+  transform: translateY(var(--row-lift, 0px));
+}
+
+/* Compact: notch grows in from the left on hover, no float */
+[data-layout-mode="compact"] .vai-side-row {
+  position: relative;
+}
+
+[data-layout-mode="compact"] .vai-side-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 0;
+  width: 2px;
+  translate: 0 -50%;
+  border-radius: 0 2px 2px 0;
+  background: color-mix(in oklab, var(--accent) 55%, transparent);
+  transition: height 140ms var(--mode-ease);
+}
+
+[data-layout-mode="compact"] .vai-side-row:hover::before {
+  height: 55%;
+}
+
+[data-layout-mode="compact"] .vai-side-row[data-active="true"]::before {
+  height: 70%;
+  background: var(--accent);
+}
+
+/* Open: reading-room rows — a tint, never a lift. Active reads like the
+   open page of a book: quiet fill plus a firm left rule. */
+[data-layout-mode="open"] .vai-side-row:hover {
+  background-color: color-mix(in oklab, var(--fg) 4%, transparent);
+}
+
+[data-layout-mode="open"] .vai-side-row[data-active="true"] {
+  background-color: color-mix(in oklab, var(--fg) 6%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--fg) 30%, transparent);
+  border-radius: 0 var(--row-radius) var(--row-radius) 0;
+}
+
+/* Odyssey: silhouettes wake on hover; active joins the lit stage. */
+[data-layout-mode="odyssey"] .vai-side-row {
+  color: color-mix(in oklab, currentColor 75%, transparent);
+}
+
+[data-layout-mode="odyssey"] .vai-side-row:hover {
+  color: currentColor;
+  background-color: color-mix(in oklab, var(--fg) 5%, transparent);
+}
+
+[data-layout-mode="odyssey"] .vai-side-row[data-active="true"] {
+  color: currentColor;
+  background-color: color-mix(in oklab, var(--fg) 7%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  border-radius: 0 var(--row-radius) var(--row-radius) 0;
+}
+
+/* ── Context menu — solid, sharp, shadow does the work. Glass only in
+      compact, where it was born. ─────────────────────────────────────────── */
+
+.vai-context-menu {
+  border-radius: var(--menu-radius, 12px);
+  background: var(--panel);
+  border: 1px solid var(--shell-line-soft);
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.25),
+    0 24px 64px -24px rgba(0, 0, 0, 0.55);
+  animation: vai-menu-in var(--mode-dur, 180ms) var(--mode-ease, ease) both;
+  transform-origin: top left;
+}
+
+[data-layout-mode="compact"] .vai-context-menu {
+  backdrop-filter: blur(var(--menu-blur, 14px)) saturate(1.2);
+  background: color-mix(in oklab, var(--panel) 78%, transparent);
+}
+
+[data-theme="light"] .vai-context-menu {
+  background: white;
+  box-shadow:
+    0 4px 12px rgba(15, 23, 42, 0.08),
+    0 24px 64px -24px rgba(15, 23, 42, 0.25);
+}
+
+[data-theme="light"][data-layout-mode="compact"] .vai-context-menu,
+[data-layout-mode="compact"] [data-theme="light"] .vai-context-menu {
+  background: color-mix(in oklab, white 84%, transparent);
+}
+
+@keyframes vai-menu-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-3px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ── Search input — focus ring personality ──────────────────────────────── */
+
+.vai-side-search {
+  transition:
+    background-color var(--mode-dur, 160ms) var(--mode-ease, ease),
+    box-shadow var(--mode-dur, 160ms) var(--mode-ease, ease);
+}
+
+[data-layout-mode="compact"] .vai-side-search:focus {
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+
+[data-layout-mode="open"] .vai-side-search:focus {
+  box-shadow: inset 0 -1px 0 color-mix(in oklab, var(--fg) 35%, transparent);
+}
+
+[data-layout-mode="odyssey"] .vai-side-search:focus {
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+
+/* ── Panel titles — text is text. The sheen retires with the aurora. ────── */
+
+.vai-panel-title {
+  position: relative;
+}
+
+/* ── New Chat button — the one strong action in the sidebar ─────────────── */
+
+.vai-new-chat-btn {
+  position: relative;
+  overflow: hidden;
+  transition:
+    box-shadow var(--mode-dur, 160ms) var(--mode-ease, ease),
+    transform var(--mode-dur, 160ms) var(--mode-ease, ease),
+    background-color var(--mode-dur, 160ms) var(--mode-ease, ease);
+}
+
+[data-layout-mode="compact"] .vai-new-chat-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 30%, color-mix(in oklab, var(--fg) 10%, transparent) 50%, transparent 70%);
+  background-size: 220% 100%;
+  background-position: 120% 0;
+  transition: background-position 600ms var(--ease-out-expo);
+  pointer-events: none;
+}
+
+[data-layout-mode="compact"] .vai-new-chat-btn:hover::after {
+  background-position: -120% 0;
+}
+
+[data-layout-mode="open"] .vai-new-chat-btn:hover {
+  background-color: color-mix(in oklab, var(--fg) 5%, transparent);
+}
+
+[data-layout-mode="odyssey"] .vai-new-chat-btn {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 22%, transparent);
+}
+
+[data-layout-mode="odyssey"] .vai-new-chat-btn:hover {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 45%, transparent);
+  background-color: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+
+/* ── Drag ghost affordance while merge-dragging ─────────────────────────── */
+
+.vai-side-row[data-dragging="true"] {
+  opacity: 0.55;
+  outline: 1px dashed color-mix(in oklab, var(--accent) 40%, transparent);
+  outline-offset: -1px;
+}
+
+/* ── Mode switch crossfade — layout-root children settle softly ─────────── */
+
+#layout-root .builder-shell-surface,
+#layout-root .shell-atmosphere {
+  transition: opacity 360ms var(--ease-out-expo), background 360ms var(--ease-out-expo);
+}
+
+/* ── Reduced motion: silence the two remaining loops ────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  [data-layout-mode="compact"] #layout-root::before {
+    animation: none !important;
+  }
+}
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                

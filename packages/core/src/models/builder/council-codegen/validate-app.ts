@@ -381,87 +381,115 @@ const SCAFFOLD_OWNED_PATH = /(?:^|\/)(?:package(?:-lock)?\.json|index\.html|tsco
  * Validate an edit-mode reply: only allowed project files, each one complete
  * and compilable. `allowedPaths` are the snapshot paths shown to the coder.
  */
-export async function validateEditedFiles(
-  emitted: ReadonlyMap<string, string>,
-  allowedPaths: readonly string[],
-): Promise<AppValidationReport> {
-  const errors: string[] = [];
-  const softErrors: string[] = [];
-  const warnings: string[] = [];
-  let checker: AppValidationReport['checker'] = 'heuristic';
-
-  if (emitted.size === 0) {
-    errors.push('No titled file blocks were produced — re-emit each changed file in a fenced block with title="path".');
-  }
-
-  const allowed = new Set(allowedPaths.map((p) => p.replace(/\\/g, '/')));
-  allowed.add('src/App.tsx');
-  allowed.add('src/styles.css');
-
-  const ts = await loadTypescript();
-  for (const [path, body] of emitted) {
-    const norm = path.replace(/\\/g, '/');
-    if (SCAFFOLD_OWNED_PATH.test(norm)) {
-      errors.push(`${path} is scaffold-owned — an edit may only change project source files (src/App.tsx, src/styles.css, …).`);
-      continue;
-    }
-    if (!allowed.has(norm)) {
-      errors.push(`${path} is not part of the active project — only re-emit the files you were shown.`);
-      continue;
-    }
-    if (/```/.test(body)) errors.push(`${path} contains a leaked markdown fence.`);
-    checkExternalAssets(body, path, errors);
-
-    if (/\.(?:tsx|ts)$/i.test(norm)) {
-      for (const match of body.matchAll(/^\s*import\s+(?:[^;'"]+from\s+)?['"]([^'"]+)['"]/gm)) {
-        const source = match[1] ?? '';
-        if (source !== 'react' && !source.startsWith('./') && !source.startsWith('../')) {
-          errors.push(`${path} imports "${source}" — only 'react' and local project files are available.`);
-        }
-      }
-      if (ts) {
-        checker = 'tsc';
-        const fileName = norm.split('/').pop() ?? 'App.tsx';
-        const result = ts.transpileModule(body, {
-          reportDiagnostics: true,
-          compilerOptions: {
-            jsx: ts.JsxEmit.ReactJSX,
-            target: ts.ScriptTarget.ES2020,
-            module: ts.ModuleKind.ESNext,
-          },
-          fileName,
-        });
-        let sawSyntaxError = false;
-        for (const diag of result.diagnostics ?? []) {
-          if (diag.category !== ts.DiagnosticCategory.Error) continue;
-          sawSyntaxError = true;
-          const message = ts.flattenDiagnosticMessageText(diag.messageText, ' ');
-          const line = diag.file && diag.start !== undefined
-            ? `:${diag.file.getLineAndCharacterOfPosition(diag.start).line + 1}`
-            : '';
-          errors.push(`${path}${line} — ${message}`);
-          if (errors.length >= 8) break;
-        }
-        if (!sawSyntaxError) {
-          try {
-            errors.push(...semanticErrors(ts, body, fileName).map((e) => e.replace(fileName, path)));
-          } catch {
-            // best-effort; never block the turn on the checker itself
-          }
-        }
-      } else if (!roughlyBalanced(body)) {
-        errors.push(`${path} braces look unbalanced — likely truncated output.`);
-      }
-    } else if (/\.css$/i.test(norm)) {
-      const opens = (body.match(/\{/g) ?? []).length;
-      const closes = (body.match(/\}/g) ?? []).length;
-      if (opens !== closes) errors.push(`${path} braces are unbalanced (${opens} "{" vs ${closes} "}") — likely truncated output.`);
-    }
-  }
-
-  const app = emitted.get('src/App.tsx');
-  const css = emitted.get('src/styles.css');
-  if (app && css) checkCssCoverage(app, css, errors, softErrors, warnings);
-
-  return { ok: errors.length === 0, errors, softErrors, warnings, checker };
+export interface ValidateEditOptions {
+  /** True for user-opened real project folders — own deps/conventions. */
+  readonly external?: boolean;
+  /** Original snapshots — module specifiers already used by the project. */
+  readonly referenceFiles?: readonly { path: string; content: string }[];
+  /** Config/script removal is destructive and must be explicit in the brief. */
+  readonly allowConfigKeyRemoval?: boolean;
+  /** Explicit setup/scaffold requests may add a small safe set of source/config files. */
+  readonly allowNewFiles?: boolean;
+  /** Original user contract for deterministic checks of explicitly requested versions and tooling. */
+  readonly brief?: string;
 }
+
+const SAFE_NEW_PROJECT_FILE = /\.(?:tsx?|jsx?|mjs|cjs|sol|json|md|ya?ml)$/i;
+
+function isSafeNewProjectFile(path: string): boolean {
+  if (!path || path.length > 240 || path.startsWith('/') || /^[A-Za-z]:/.test(path)) return false;
+  const parts = path.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..')) return false;
+  if (parts.some((part) => /^(?:node_modules|\.git)$/i.test(part))) return false;
+  if (/(?:^|\/)\.env(?:\.|$)|(?:^|\/)(?:package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?)$/i.test(path)) return false;
+  return SAFE_NEW_PROJECT_FILE.test(path);
+}
+
+/** Module specifiers imported anywhere in the reference snapshots. */
+function collectKnownImports(referenceFiles: readonly { path: string; content: string }[]): Set<string> {
+  const known = new Set<string>();
+  for (const file of referenceFiles) {
+    for (const match of file.content.matchAll(/^\s*import\s+(?:[^;'"]+from\s+)?['"]([^'"]+)['"]/gm)) {
+      if (match[1]) known.add(match[1]);
+    }
+  }
+  return known;
+}
+
+function packageEntries(value: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const section of ['dependencies', 'devDependencies', 'peerDependencies'] as const) {
+    const entries = value[section];
+    if (!entries || typeof entries !== 'object' || Array.isArray(entries)) continue;
+    for (const [name, version] of Object.entries(entries)) {
+      if (typeof version === 'string') out[name] = version;
+    }
+  }
+  return out;
+}
+
+function parseJsonObject(body: string | undefined): Record<string, unknown> | null {
+  if (!body) return null;
+  try {
+    const value = JSON.parse(body) as unknown;
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function requestedExactVersion(brief: string, packageName: string): string | null {
+  const escaped = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return brief.match(new RegExp(`${escaped}\\s+(?:version\\s+)?(\\d+\\.\\d+\\.\\d+)`, 'i'))?.[1] ?? null;
+}
+
+function relativeModuleExists(sourcePath: string, specifier: string, availablePaths: ReadonlySet<string>): boolean {
+  const sourceParts = sourcePath.replace(/\\/g, '/').split('/');
+  sourceParts.pop();
+  for (const part of specifier.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') sourceParts.pop();
+    else sourceParts.push(part);
+  }
+  const base = sourceParts.join('/');
+  const withoutRuntimeExtension = base.replace(/\.(?:js|mjs|cjs)$/i, '');
+  const candidates = [
+    base,
+    `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`, `${base}.cjs`,
+    `${withoutRuntimeExtension}.ts`, `${withoutRuntimeExtension}.tsx`, `${withoutRuntimeExtension}.js`,
+    `${base}/index.ts`, `${base}/index.tsx`, `${base}/index.js`,
+  ];
+  return candidates.some((candidate) => availablePaths.has(candidate));
+}
+
+function validateHardhat3Lane(
+  emitted: ReadonlyMap<string, string>,
+  options: ValidateEditOptions,
+  errors: string[],
+): void {
+  const brief = options.brief ?? '';
+  if (!/\bhardhat\s+3(?:\b|\.)/i.test(brief) || !/\bchain\//i.test(brief)) return;
+
+  const chainPackage = parseJsonObject(emitted.get('chain/package.json'));
+  const rootPackage = parseJsonObject(emitted.get('package.json'));
+  const config = emitted.get('chain/hardhat.config.ts') ?? '';
+  const entry = emitted.get('chain/contracts/MMM_UnifiedEntry.sol') ?? '';
+  const ignition = emitted.get('chain/ignition/modules/MMM.ts') ?? '';
+  const test = emitted.get('chain/test/MMM_Unified.ts') ?? '';
+
+  if (!chainPackage) {
+    errors.push('Hardhat 3 lane is missing a valid chain/package.json.');
+  } else {
+    const dependencies = packageEntries(chainPackage);
+    for (const name of ['hardhat', '@nomicfoundation/hardhat-toolbox-viem', '@openzeppelin/contracts']) {
+      const requested = requestedExactVersion(brief, name);
+      if (!requested) continue;
+      if (dependencies[name] !== requested) {
+        errors.push(`chain/package.json must pin ${name} to the requested ${requested}; received ${dependencies[name] ?? 'missing'}.`);
+      }
+    }
+    if (chainPackage.type !== 'module') {
+      errors.push('chain/package.json must set "type": "module" for the isolated Hardhat 3 ESM workspace.');
+    }
+    const scripts = chainPackage.scripts && typeof chainPackage.scripts === 'object' && !Array.isArray(chainPackage.scripts)
+      ? chainPackage.scripts as Record<string, 

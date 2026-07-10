@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { councilGenerateApp } from './pipeline.js';
 import { extractJsonObject, specFromBrief } from './pipeline.js';
-import { extractAppFiles, validateGeneratedApp } from './validate-app.js';
+import { extractAppFiles, validateEditedFiles, validateGeneratedApp } from './validate-app.js';
 import { parseActiveSandboxContext } from './parse-sandbox-context.js';
 import type {
   CouncilCodegenEvent,
@@ -356,14 +356,105 @@ describe('councilGenerateApp — edit mode', () => {
   };
   const fancyCss = `${VALID_CSS}\nbody { background: linear-gradient(135deg, #111, #312e81); }`;
 
+  it('allows bounded safe setup files only when the edit explicitly authorizes them', async () => {
+    const files = new Map([
+      ['hardhat.config.ts', 'export default { solidity: "0.8.24" };'],
+      ['contracts/MMM.sol', '// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\ncontract MMM { }'],
+    ]);
+    const baseOptions = { external: true, referenceFiles: [{ path: 'package.json', content: '{"name":"mpm"}' }] };
+
+    const blocked = await validateEditedFiles(files, ['package.json'], baseOptions);
+    expect(blocked.ok).toBe(false);
+    expect(blocked.errors.some((error) => error.includes('not part of the active project'))).toBe(true);
+
+    const allowed = await validateEditedFiles(files, ['package.json'], { ...baseOptions, allowNewFiles: true });
+    expect(allowed.ok).toBe(true);
+
+    const unsafe = await validateEditedFiles(
+      new Map([['../.env', 'PRIVATE_KEY=secret']]),
+      ['package.json'],
+      { ...baseOptions, allowNewFiles: true },
+    );
+    expect(unsafe.ok).toBe(false);
+  });
+
+  it('blocks a Hardhat 2-shaped proposal when the user explicitly requested a Hardhat 3 viem lane', async () => {
+    const brief = 'Add chain/package.json with hardhat 3.9.1, @nomicfoundation/hardhat-toolbox-viem 5.0.7, and @openzeppelin/contracts 5.6.1. Add chain/hardhat.config.ts, chain/contracts/MMM_UnifiedEntry.sol importing ../../MMM_Unified.sol without copying its logic, chain/ignition/modules/MMM.ts, and chain/test/MMM_Unified.ts. Localhost chain id 31337 at http://127.0.0.1:8545. Root scripts chain:install, chain:compile, chain:test, chain:node, chain:deploy:local, all using npm --prefix chain.';
+    const bad = new Map([
+      ['package.json', JSON.stringify({ name: 'mpm', scripts: { 'chain:node': 'npx hardhat node' } })],
+      ['chain/package.json', JSON.stringify({ scripts: { compile: 'hardhat compile', 'deploy:local': 'hardhat deploy --network localhost' }, devDependencies: { hardhat: '2.19.1' } })],
+      ['chain/hardhat.config.ts', 'import { HardhatUserConfig } from "hardhat/config"; import { viem } from "hardhat/plugins"; export default { networks: { localhost: { url: "http://127.0.0.1:8545", chainId: 31337 } }, viem: {} };'],
+      ['chain/contracts/MMM_UnifiedEntry.sol', '// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\nimport "../../MMM_Unified.sol";\ncontract MMM_UnifiedEntry is MrManManUnified {}'],
+      ['chain/ignition/modules/MMM.ts', 'import { Module } from "ignition"; export default class MMM extends Module { async deploy() { return hre.ethers.getContractFactory("MMM_Unified"); } }'],
+      ['chain/test/MMM_Unified.ts', 'import { expect } from "chai";\nimport { ethers } from "hardhat";\nimport { deployMMM } from "./ignition";\nvoid mmm.receive({ value: 1 });'],
+    ]);
+    const report = await validateEditedFiles(bad, ['package.json'], {
+      external: true,
+      allowNewFiles: true,
+      brief,
+      referenceFiles: [
+        { path: 'package.json', content: '{"name":"mpm","scripts":{}}' },
+        { path: 'MMM_Unified.sol', content: 'contract MrManManUnified { receive() external payable {} }' },
+      ],
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('hardhat to the requested 3.9.1'),
+      expect.stringContaining('type": "module'),
+      expect.stringContaining('defineConfig'),
+      expect.stringContaining('buildModule'),
+      expect.stringContaining('Node test runner'),
+      expect.stringContaining('missing local module'),
+    ]));
+  });
+
+  it('accepts the structural Hardhat 3 patterns after the deterministic gates are satisfied', async () => {
+    const brief = 'Set up Hardhat 3.9.1 under chain/. Add @nomicfoundation/hardhat-toolbox-viem 5.0.7 and @openzeppelin/contracts 5.6.1. Add chain/hardhat.config.ts, chain/contracts/MMM_UnifiedEntry.sol importing ../../MMM_Unified.sol without copying its logic, chain/ignition/modules/MMM.ts, and chain/test/MMM_Unified.ts. Use localhost chain id 31337 at http://127.0.0.1:8545. Root scripts chain:install, chain:compile, chain:test, chain:node, chain:deploy:local, all using npm --prefix chain.';
+    const good = new Map([
+      ['package.json', JSON.stringify({ name: 'mpm', scripts: {
+        'chain:install': 'npm --prefix chain install',
+        'chain:compile': 'npm --prefix chain run compile',
+        'chain:test': 'npm --prefix chain run test',
+        'chain:node': 'npm --prefix chain run node',
+        'chain:deploy:local': 'npm --prefix chain run deploy:local',
+      } })],
+      ['chain/package.json', JSON.stringify({ type: 'module', scripts: {
+        compile: 'hardhat build', test: 'hardhat test', node: 'hardhat node',
+        'deploy:local': 'hardhat ignition deploy ./ignition/modules/MMM.ts --network localhost',
+      }, devDependencies: {
+        hardhat: '3.9.1', '@nomicfoundation/hardhat-toolbox-viem': '5.0.7', '@openzeppelin/contracts': '5.6.1',
+      } })],
+      ['chain/hardhat.config.ts', 'import { defineConfig } from "hardhat/config"; import hardhatToolboxViem from "@nomicfoundation/hardhat-toolbox-viem"; export default defineConfig({ plugins: [hardhatToolboxViem], solidity: "0.8.24", networks: { localhost: { type: "http", chainType: "l1", url: "http://127.0.0.1:8545", chainId: 31337 } } });'],
+      ['chain/contracts/MMM_UnifiedEntry.sol', '// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\nimport "../../MMM_Unified.sol";'],
+      ['chain/ignition/modules/MMM.ts', 'import { buildModule } from "@nomicfoundation/hardhat-ignition/modules"; export default buildModule("MMM", (m) => ({ mmm: m.contract("MrManManUnified", ["MrManMan", "MMM"]) }));'],
+      ['chain/test/MMM_Unified.ts', 'import { describe, it } from "node:test"; import { network } from "hardhat"; describe("MMM", () => { it("works", async () => { const { viem } = await network.connect(); const [wallet] = await viem.getWalletClients(); await wallet.sendTransaction({ to: "0x0000000000000000000000000000000000000001", value: 1n }); void ["TOTAL_SUPPLY", "PRE_MINT_AMOUNT", "PHASE_COUNT", "MIN_CONTRIBUTION_WEI"]; }); });'],
+    ]);
+    const report = await validateEditedFiles(good, ['package.json'], {
+      external: true,
+      allowNewFiles: true,
+      brief,
+      referenceFiles: [
+        { path: 'package.json', content: '{"name":"mpm","scripts":{}}' },
+        { path: 'MMM_Unified.sol', content: 'contract MrManManUnified { receive() external payable {} }' },
+      ],
+    });
+
+    expect(report.ok).toBe(true);
+  });
+
   it('patches only the changed file and keeps the app identity', async () => {
     const coder = stubMember('local:big', () => `\`\`\`css title="src/styles.css"\n${fancyCss}\n\`\`\``);
     const { result, events } = await runPipeline([coder], 'make my background more fancy');
     expect(result).not.toBeNull();
-    expect(result!.output).toContain('Updated **kanban-board**');
+    expect(result!.output).toContain('Prepared a Council-reviewed change for **kanban-board**');
+    expect(result!.output).toContain('Nothing is applied until the project approval step completes.');
     expect(result!.output).toContain('title="src/styles.css"');
     expect(result!.output).not.toContain('title="package.json"'); // no scaffold, no new app
     expect(result!.spec.title).toBe('kanban-board');
+    expect(events.some((e) => e.type === 'stage'
+      && e.stage === 'architect'
+      && e.label.includes('Planned a targeted edit'))).toBe(true);
     expect(events.some((e) => e.type === 'stage' && e.label.includes('targeted change'))).toBe(true);
   });
 
@@ -373,107 +464,52 @@ describe('councilGenerateApp — edit mode', () => {
       '{"name": "fancy-background-app"}',
       '```',
     ].join('\n'));
-    const { result } = await runPipeline([coder], 'make my background more fancy');
+    const { result, events } = await runPipeline([coder], 'make my background more fancy');
     expect(result).toBeNull(); // repair re-emits the same junk → no valid edit → caller falls back
+    expect(events.some((event) => event.type === 'stage'
+      && event.stage === 'validate'
+      && event.label.includes('Edit withheld'))).toBe(true);
   });
 
-  async function runPipeline(members: readonly CouncilCodegenMember[], brief: string) {
-    const events: CouncilCodegenEvent[] = [];
-    let result: CouncilCodegenResult | null = null;
-    for await (const event of councilGenerateApp({ brief, members, edit })) {
-      events.push(event);
-      if (event.type === 'result') result = event.result;
-    }
-    return { events, result };
-  }
-});
+  it('refuses truncated package JSON and mixed Storybook majors in external edits', async () => {
+    const originalPackage = JSON.stringify({
+      name: 'storybook-demo',
+      scripts: { start: 'react-scripts start', storybook: 'start-storybook -p 9009' },
+      dependencies: { 'react-scripts': '3.4.1' },
+      devDependencies: {
+        '@storybook/react': '^5.3.19',
+        '@storybook/addon-actions': '^5.3.19',
+      },
+    }, null, 2);
+    const projectEdit = {
+      projectName: 'storybook-demo',
+      external: true,
+      files: [{ path: 'package.json', content: originalPackage }],
+    };
+    const invalid = stubMember('local:big', () => '```json title="package.json"\n{"scripts":{"build":"react\n```');
+    const mixed = stubMember('local:mixed', () => `\`\`\`json title="package.json"\n${JSON.stringify({
+      name: 'storybook-demo',
+      scripts: { start: 'react-scripts start', storybook: 'start-storybook -p 9009' },
+      dependencies: { 'react-scripts': '5.0.1' },
+      devDependencies: {
+        '@storybook/react': '^6.5.19',
+        '@storybook/addon-actions': '^5.3.19',
+      },
+    }, null, 2)}\n\`\`\``);
 
-describe('parseActiveSandboxContext', () => {
-  it('parses project name and snapshot files from the desktop system prompt', () => {
-    const prompt = [
-      'ACTIVE SANDBOX PROJECT: "kanban-board"',
-      'Dev server is RUNNING at http://localhost:4102',
-      '',
-      'CURRENT FILE SNAPSHOTS:',
-      'FILE: src/App.tsx',
-      '```tsx',
-      'export default function App() { return null; }',
-      '```',
-      'FILE: src/styles.css',
-      '```css',
-      '.a { color: red; }',
-      '```',
-      '',
-      'EDITING RULES: prefer targeted edits.',
-    ].join('\n');
-    const ctx = parseActiveSandboxContext(prompt);
-    expect(ctx?.projectName).toBe('kanban-board');
-    expect(ctx?.files.map((f) => f.path)).toEqual(['src/App.tsx', 'src/styles.css']);
-  });
-
-  it('drops truncated snapshots and handles absent context', () => {
-    const prompt = [
-      'ACTIVE SANDBOX PROJECT: "x"',
-      'CURRENT FILE SNAPSHOTS:',
-      'FILE: src/App.tsx',
-      '```tsx',
-      'const a = 1;\n/* truncated for prompt context */',
-      '```',
-    ].join('\n');
-    expect(parseActiveSandboxContext(prompt)?.files).toEqual([]);
-    expect(parseActiveSandboxContext('You are in Builder mode.')).toBeNull();
-    expect(parseActiveSandboxContext(undefined)).toBeNull();
-  });
-});
-
-describe('brand blueprints', () => {
-  it('detects tinder-family briefs and demands the signature features', async () => {
-    const { detectBrandBlueprint } = await import('./brand-blueprints.js');
-    const bp = detectBrandBlueprint('build me a clone of tinder');
-    expect(bp?.brand).toBe('Tinder');
-    expect(bp!.features.join(' ')).toMatch(/It'?s a Match/i);
-    expect(bp!.features.join(' ')).toMatch(/likesYou/);
-    expect(bp!.reviewChecklist.join(' ')).toMatch(/no external image URLs/i);
-    expect(detectBrandBlueprint('build a recipe box app')).toBeNull();
-  });
-
-  it('threads the blueprint into architect/coder/reviewer prompts', async () => {
-    const { detectBrandBlueprint } = await import('./brand-blueprints.js');
-    const { buildArchitectMessages, buildCoderMessages, buildReviewerMessages } = await import('./prompts.js');
-    const bp = detectBrandBlueprint('tinder clone');
-    expect(buildArchitectMessages('tinder clone', bp)[0].content).toContain('BRAND BLUEPRINT — Tinder');
-    const spec = { title: 'T', packageName: 't', summary: 's', features: ['f'], fromArchitect: true } as const;
-    expect(buildCoderMessages('tinder clone', spec, bp)[0].content).toContain('fd297b');
-    expect(buildReviewerMessages('tinder clone', spec, 'code', bp)[0].content).toContain('must-fix');
-  });
-});
-
-describe('external asset ban', () => {
-  it('rejects external image URLs in App.tsx (the randomuser.me case)', async () => {
-    const withRemote = VALID_APP_TSX.replace(
-      "{ id: 1, name: 'Monstera', watered: false },",
-      "{ id: 1, name: 'Monstera', watered: false }, // https://randomuser.me/api/portraits/women/1.jpg",
-    ).replace('<h1>Plant Care</h1>', '<h1>Plant Care</h1><img src="https://randomuser.me/api/portraits/women/1.jpg" alt="x" />');
-    const report = await validateGeneratedApp({ appTsx: withRemote, stylesCss: VALID_CSS });
-    expect(report.ok).toBe(false);
-    expect(report.errors.some((e) => e.includes('randomuser.me'))).toBe(true);
-  });
-
-  it('allows the w3.org SVG namespace', async () => {
-    const withSvg = VALID_APP_TSX.replace(
-      '<h1>Plant Care</h1>',
-      '<h1>Plant Care</h1><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z" /></svg>',
-    );
-    const report = await validateGeneratedApp({ appTsx: withSvg, stylesCss: VALID_CSS });
-    expect(report.ok).toBe(true);
-  });
-});
-
-describe('specFromBrief', () => {
-  it('strips build verbs and titles the remainder', () => {
-    const spec = specFromBrief('build me a houseplant watering tracker');
-    expect(spec.title.toLowerCase()).toContain('houseplant');
-    expect(spec.packageName).toMatch(/^[a-z0-9-]+$/);
-    expect(spec.fromArchitect).toBe(false);
-  });
-});
+    for (const coder of [invalid, mixed]) {
+      const events: CouncilCodegenEvent[] = [];
+      let result: CouncilCodegenResult | null = null;
+      for await (const event of councilGenerateApp({
+        brief: 'Repair the Node 22 failure while preserving the existing app and Storybook scripts.',
+        members: [coder],
+        edit: projectEdit,
+        maxRepairs: 1,
+      })) {
+        events.push(event);
+        if (event.type === 'result') result = event.result;
+      }
+      expect(result).toBeNull();
+      expect(events.some((event) => event.type === 'stage'
+        && event.stage === 'validate'
+        && 

@@ -152,7 +152,7 @@ export function registerConversationRoutes(
       if (!parsed.success) {
         return invalidRequestBody(reply, parsed.error);
       }
-      const { modelId, title, mode, sandboxProjectId: requestedSandboxProjectId } = parsed.data;
+      const { modelId, title, mode, sandboxProjectId: requestedSandboxProjectId, workspaceRoot } = parsed.data;
       const resolvedMode: ConversationMode = mode ?? DEFAULT_CONVERSATION_MODE;
 
       const viewer = await auth.getViewer(request);
@@ -188,15 +188,18 @@ export function registerConversationRoutes(
 
       if (sandboxProjectId) {
         chatService.updateConversationSandbox(id, sandboxProjectId);
-      } else if (resolvedMode === 'builder') {
-        // Auto-create a sandbox project for builder conversations.
-        // Name must be unique per conversation — dozens of projects all named
-        // 'builder-app' made the projects list ambiguous (wrong-app opens).
+      } else if (resolvedMode === 'builder' && !workspaceRoot) {
+        // Auto-create a sandbox project for builder conversations — unless the
+        // chat is bound to a LOCAL folder, which IS its workspace.
         const projectName = uniqueSandboxName(title, id);
         const project = await sandbox.create(projectName, ownerUserId);
         syncSandboxProject(projects, project);
         chatService.updateConversationSandbox(id, project.id);
         sandboxProjectId = project.id;
+      }
+
+      if (workspaceRoot) {
+        chatService.updateConversationWorkspaceRoot(id, workspaceRoot);
       }
 
       return { id, sandboxProjectId };
@@ -211,7 +214,7 @@ export function registerConversationRoutes(
       if (!parsed.success) {
         return invalidRequestBody(reply, parsed.error);
       }
-      const { title, mode, sandboxProjectId, visibility } = parsed.data;
+      const { title, mode, sandboxProjectId, visibility, workspaceRoot } = parsed.data;
 
       let conversation = chatService.getConversation(request.params.id);
       if (!conversation) {
@@ -248,13 +251,17 @@ export function registerConversationRoutes(
       if (mode !== undefined) {
         conversation = chatService.updateConversationMode(request.params.id, mode);
 
-        // If switching to builder and no sandbox exists, create one
-        if (mode === 'builder' && !conversation?.sandboxProjectId) {
+        // If switching to builder and no workspace of ANY kind exists, create a sandbox.
+        if (mode === 'builder' && !conversation?.sandboxProjectId && !conversation?.workspaceRoot && workspaceRoot === undefined) {
           const project = await sandbox.create(uniqueSandboxName(conversation?.title, request.params.id), userId);
           syncSandboxProject(projects, project);
           chatService.updateConversationSandbox(request.params.id, project.id);
           conversation = chatService.getConversation(request.params.id);
         }
+      }
+
+      if (workspaceRoot !== undefined) {
+        conversation = chatService.updateConversationWorkspaceRoot(request.params.id, workspaceRoot);
       }
 
       if (sandboxProjectId !== undefined) {

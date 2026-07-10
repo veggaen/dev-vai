@@ -1,0 +1,32 @@
+# Build outputs & deps
+node_modules
+dist
+.output
+.wxt
+target
+coverage
+.pnpm-store
+
+# Scratch / archives
+artifacts
+Temporary_files
+ztemp_mds
+MDS
+_visible_audit
+.venv
+.codex-run
+eval
+tests
+
+# Generated / lockfiles / data
+pnpm-lock.yaml
+skills-lock.json
+vai-knowledge.json
+*.db
+*.db-shm
+*.db-wal
+
+# Protected documents (never auto-format)
+Master.md
+Master.example.md
+AGENTS.md

@@ -23,6 +23,28 @@ function AuthLoading({ browserLinking }: { browserLinking: boolean }) {
   );
 }
 
+/**
+ * Runtime unreachable ≠ signed out. Showing sign-in buttons here caused daily
+ * needless re-auth: every runtime restart flashed the login panel and users
+ * clicked through the whole provider dance while their session was still valid.
+ */
+function AuthReconnecting() {
+  return (
+    <div className="space-y-5 text-center" aria-live="polite">
+      <div className="mx-auto h-11 w-11 animate-spin rounded-full border-2 border-amber-300/20 border-t-amber-300 motion-reduce:animate-none" />
+      <div>
+        <h2 className="text-xl font-semibold tracking-[-0.02em] text-zinc-100">
+          Connecting To Your Workspace
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-zinc-400">
+          The local runtime isn’t answering yet — usually it’s just starting up.
+          You’re still signed in; this reconnects on its own.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function WorkspaceBenefit({ title, body }: { title: string; body: string }) {
   return (
     <li className="border-l border-zinc-800 pl-4">
@@ -76,6 +98,7 @@ export function AuthGate() {
 
   const desktop = isDesktopApp();
   const isLoading = status === 'loading';
+  const isReconnecting = status === 'error';
   const providerName = providerLabel ?? 'your identity provider';
   const providerGlyph = providerName.slice(0, 1).toUpperCase() || 'V';
   const signIn = desktop ? () => void startLoginInBrowser() : startLogin;
@@ -117,6 +140,8 @@ export function AuthGate() {
           <div className="w-full max-w-sm">
             {browserLinking || isLoading ? (
               <AuthLoading browserLinking={browserLinking} />
+            ) : isReconnecting ? (
+              <AuthReconnecting />
             ) : (
               <>
                 <p className="text-xs font-medium uppercase tracking-[0.2em] text-emerald-300">Welcome To Vai</p>

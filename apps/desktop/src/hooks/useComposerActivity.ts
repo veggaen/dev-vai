@@ -59,10 +59,6 @@ export interface ComposerQueueItem {
 /** Headline + compact queue for the composer strip — never duplicates the in-message ProcessTree. */
 export function useComposerActivity(steps: readonly ChatProgressStep[], isStreaming = false) {
   const revealedCount = useProcessStepReveal(steps, isStreaming);
-  const visibleSteps = useMemo(
-    () => steps.slice(0, revealedCount),
-    [steps, revealedCount],
-  );
   const turnElapsed = useElapsed(steps.length > 0);
   const stepElapsed = useActiveStepElapsed(steps, isStreaming);
 

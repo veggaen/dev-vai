@@ -61,70 +61,53 @@ const longSteps: ChatProgressStep[] = [
   { stage: 'quality-check', label: 'Verify', status: 'done', detail: 'Verification passed', durationMs: 260 },
 ] as unknown as ChatProgressStep[];
 
-// 40-step stress fixture — the perf budget: drag/zoom must stay smooth (transform-only work)
-// and the fit/minimap must remain usable at this density.
-const manySteps: ChatProgressStep[] = Array.from({ length: 40 }, (_, i) => {
-  const kinds = [
-    { stage: 'search', label: 'Gather evidence' },
-    { stage: 'reason', label: 'Reason' },
-    { stage: 'vai-draft', label: 'Drafting' },
-    { stage: 'quality-check', label: 'Verify' },
-  ];
-  const k = kinds[i % kinds.length];
-  return {
-    stage: `${k.stage}-${i}`,
-    label: `${k.label} ${i + 1}`,
+const softwareSteps: ChatProgressStep[] = [
+  {
+    stage: 'multi-intent',
+    label: 'Separated the request into the product goal and the implementation constraints',
     status: 'done',
-    detail: `Step ${i + 1} of a very long turn.`,
-    durationMs: 300 + (i % 7) * 250,
-  };
-}) as unknown as ChatProgressStep[];
-
-function Story() {
-  return (
-    <div style={{ maxWidth: 760, margin: '3rem auto', padding: '0 1.5rem' }}>
-      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
-        ReasoningFlow — settled turn
-      </h2>
-      <div style={{ marginBottom: 48 }}>
-        <ReasoningFlow steps={steps} council={council} live={false} durationMs={10180} />
-      </div>
-
-      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
-        ReasoningFlow — long, multi-round turn (zoom · pan · minimap)
-      </h2>
-      <div style={{ marginBottom: 48 }}>
-        <ReasoningFlow steps={longSteps} council={council} live={false} durationMs={23460} />
-      </div>
-
-      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
-        ReasoningFlow — 40-step stress fixture (perf budget)
-      </h2>
-      <div style={{ marginBottom: 48 }} data-testid="many-step-story">
-        <ReasoningFlow steps={manySteps} live={false} durationMs={64000} />
-      </div>
-
-      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
-        TurnProcessSection — settled rest (one line, click to expand)
-      </h2>
-      <div style={{ marginBottom: 48 }} data-testid="settled-collapse-story">
-        <TurnProcessSection isStreaming={false} steps={longSteps} council={council} durationMs={23460} />
-      </div>
-
-      <h2 style={{ color: 'var(--chat-muted)', fontSize: 12, marginBottom: 24, fontWeight: 500 }}>
-        ReasoningFlow — live turn
-      </h2>
-      <ReasoningFlow
-        steps={[...steps.slice(0, 2), { ...steps[2], status: 'running' } as ChatProgressStep]}
-        council={council}
-        live
-      />
-    </div>
-  );
-}
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <Story />
-  </StrictMode>,
-);
+    detail: 'The result must be runnable, review-first, and must preserve the existing Next.js app.',
+    durationMs: 180,
+    processLog: [
+      { kind: 'thought', label: 'Success condition', body: 'A local-chain lane can compile, test, and deploy without changing Sepolia or the app UI.' },
+      { kind: 'thought', label: 'Safety boundary', body: 'Environment files, lockfiles, deployed addresses, and private keys remain untouched.' },
+    ],
+  },
+  {
+    stage: 'workspace',
+    label: 'Read the relevant project files in mpm-frontend',
+    status: 'done',
+    detail: 'Read package.json plus two read-only references: MMM_Unified.sol and DEPLOYMENT_PARAMS.md.',
+    durationMs: 420,
+    processLog: [
+      { kind: 'read', label: 'Opened package.json', body: 'Captured the existing scripts and dependencies so the proposal can preserve every key.' },
+      { kind: 'read', label: 'Inspected MMM_Unified.sol', body: 'Located the constructor, public constants, contribution entry point, and premint behavior.' },
+      { kind: 'read', label: 'Inspected DEPLOYMENT_PARAMS.md', body: 'Captured the seven development phases and local deployment parameters.' },
+    ],
+  },
+  {
+    stage: 'council-architect',
+    label: 'Planned an isolated Hardhat workspace under chain/',
+    status: 'done',
+    detail: 'The root app remains CommonJS-compatible; all chain tooling runs through npm --prefix chain.',
+    durationMs: 760,
+  },
+  {
+    stage: 'council-code',
+    label: 'Created the six-file review proposal',
+    status: 'done',
+    detail: 'Added chain config, an import-only Solidity entry, an Ignition module, tests, and root chain scripts.',
+    durationMs: 18_200,
+    processLog: [
+      { kind: 'artifact', label: 'Prepared chain/hardhat.config.ts', body: 'Solidity 0.8.24 and localhost chain id 31337.' },
+      { kind: 'artifact', label: 'Prepared chain/test/MMM_Unified.ts', body: 'Constructor constants, premint, minimum contribution, and below-minimum rejection.' },
+    ],
+  },
+  {
+    stage: 'council-review',
+    label: 'Council reviewed the proposal against the requested scope',
+    status: 'done',
+    detail: 'Review found five blocking API and constructor issues that required another pass.',
+    durationMs: 7_100,
+    councilMembers: [
+      { name: 'Qwen code reviewer', verdict: 'needs-work', confidence: 0.86, note: 'Correct the Ignition constructor arguments and preserve ev

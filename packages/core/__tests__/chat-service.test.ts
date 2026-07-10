@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createDb } from '../src/db/client.js';
-import { ChatService } from '../src/chat/service.js';
+import { ChatService, shouldRunFallbackCouncilReview } from '../src/chat/service.js';
 import { ModelRegistry } from '../src/models/adapter.js';
 import type { ModelAdapter, ChatRequest, ChatResponse, ChatChunk } from '../src/models/adapter.js';
 import type { VaiDatabase } from '../src/db/client.js';
@@ -110,6 +110,22 @@ describe('ChatService', () => {
     chatService = new ChatService(db, registry);
   });
 
+  it('never lets the general council redraft a deterministic edit refusal into unvalidated files', () => {
+    expect(shouldRunFallbackCouncilReview({
+      hasBuilderFileBlocks: false,
+      hasText: true,
+      councilEscalateToGenerative: false,
+      terminalCouncilEditRefusal: true,
+    })).toBe(false);
+
+    expect(shouldRunFallbackCouncilReview({
+      hasBuilderFileBlocks: false,
+      hasText: true,
+      councilEscalateToGenerative: false,
+      terminalCouncilEditRefusal: false,
+    })).toBe(true);
+  });
+
   it('creates a conversation', () => {
     const id = chatService.createConversation('mock:test', 'Test Chat');
     expect(id).toBeTruthy();
@@ -161,6 +177,37 @@ describe('ChatService', () => {
 
     const fullText = textChunks.map((c) => c.textDelta).join('');
     expect(fullText).toBe('Hello from VeggaAI!');
+  });
+
+  it('persists progress on the assistant row created by the same turn', async () => {
+    const registry = new ModelRegistry();
+    registry.register(new StubStreamAdapter('mock:trace', [
+      {
+        type: 'progress',
+        progress: {
+          stage: 'workspace-context',
+          label: 'Read the relevant files',
+          detail: 'Read 2 editable files: src/a.ts, src/b.ts',
+          status: 'done',
+        },
+      },
+      { type: 'text_delta', textDelta: 'Current response' },
+      { type: 'done', usage: { promptTokens: 4, completionTokens: 2 }, modelId: 'mock:trace' },
+    ]));
+    const svc = new ChatService(createDb(':memory:'), registry);
+    const convId = svc.createConversation('mock:trace', 'Trace ownership', 'chat');
+    svc.appendAssistantMessage(convId, 'Earlier response');
+
+    for await (const _chunk of svc.sendMessage(convId, 'Write a short response about this code.')) {
+      // Drain the turn so the inner generator commits the assistant row.
+    }
+
+    const assistantRows = svc.getMessages(convId).filter((message) => message.role === 'assistant');
+    expect(assistantRows).toHaveLength(2);
+    expect(assistantRows[0]?.content).toBe('Earlier response');
+    expect(assistantRows[0]?.progressSteps).toBeUndefined();
+    expect(assistantRows[1]?.content).toBe('Current response');
+    expect(assistantRows[1]?.progressSteps?.some((step) => step.stage === 'reason')).toBe(true);
   });
 
   it('withholds an unsupported local recommendation after friend review', async () => {
@@ -1584,59 +1631,4 @@ describe('ChatService', () => {
         responseDepth: 'deep-design-memo',
       },
     )) {
-      // consume
-    }
-
-    const systemText = adapter.lastStreamRequest?.messages
-      .filter((message) => message.role === 'system')
-      .map((message) => message.content)
-      .join('\n\n') ?? '';
-
-    expect(systemText).toMatch(/Hardening profile: strict/i);
-    expect(systemText).toMatch(/Requested response depth: deep-design-memo/i);
-    expect(systemText).toMatch(/Respond with a deeper design memo/i);
-    expect(systemText).toMatch(/Use a rigid sectioned memo with explicit headings and no preamble/i);
-    expect(systemText).toMatch(/Do not add an executive summary, Idea, Overview/i);
-    expect(systemText).toMatch(/use exactly these section headings in this order: Inputs, Signals, Prediction loop, Working set, Guardrails, Metrics, Rollout, Failure modes/i);
-  });
-
-  it('auto-creates and emits conversation_resolved instead of throwing for unknown ids', async () => {
-    // Auto-create now provides race recovery; the only way it can still throw
-    // is if the fallback model adapter itself isn't registered.
-    const warn = console.warn;
-    console.warn = () => {};
-    try {
-      const chunks: ChatChunk[] = [];
-      for await (const chunk of chatService.sendMessage(
-        'nonexistent',
-        'Hi',
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { fallbackModelId: 'mock:test' },
-      )) {
-        chunks.push(chunk);
-      }
-      expect(chunks.find((c) => c.type === 'conversation_resolved')).toBeDefined();
-    } finally {
-      console.warn = warn;
-    }
-  });
-
-  it('deletes a conversation and its messages', async () => {
-    const convId = chatService.createConversation('mock:test');
-
-    for await (const _chunk of chatService.sendMessage(convId, 'Hi')) {
-      // consume
-    }
-
-    chatService.deleteConversation(convId);
-
-    const list = chatService.listConversations();
-    expect(list).toHaveLength(0);
-
-    const msgs = chatService.getMessages(convId);
-    expect(msgs).toHaveLength(0);
-  });
-});
+      /

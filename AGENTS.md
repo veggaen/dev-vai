@@ -76,6 +76,13 @@ When testing the UI as a user: `http://localhost:5173/?devAuthBypass=1` (dev onl
   flags); invalid JSON ⇒ ignored, never blocking. Direction: replace passive
   advice with the **improvement loop** below.
 
+## Design language (binding for desktop UI work)
+
+Any change to `apps/desktop` UI must follow `docs/design/vai-design-language.md`
+— accent/box/ambient budgets, voice separation (answer > process > notice),
+mode grammar (Instrument/Atelier/Stage), and the adaptive rules (ultrawide
+letterbox, portrait, touch). Its "Definition of PASS" extends gate 5 below.
+
 ## Quality gates (do not bypass)
 
 1. App.tsx must pass tsc syntax + semantic checks (react-typed when resolvable).
@@ -92,9 +99,4 @@ When testing the UI as a user: `http://localhost:5173/?devAuthBypass=1` (dev onl
 1. Read `GET /api/agent/introspect` + this file.
 2. Observe real turns (WS stages, ThinkingPanel, eval scripts) and the
    sandbox artifacts in `%LOCALAPPDATA%\Temp\vai-sandbox\`.
-3. Record findings/proposals in `docs/vai-improvement-backlog.md`
-   (append, dated, with evidence). That file is the shared queue between
-   V3gga, Vai, and agents.
-4. Implement behind tests (`packages/core` vitest) + typecheck, then verify
-   live (visible run + screenshots) before claiming success.
-5. Update memory/backlog with what was proven, including failures.
+3. Recor

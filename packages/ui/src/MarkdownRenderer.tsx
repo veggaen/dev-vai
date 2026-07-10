@@ -160,7 +160,7 @@ function CompactCodeBlock({ code, language, title }: { code: string; language: s
           <span>{lineCount} lines</span>
         </div>
         <div className="mt-1 truncate text-[12px] text-zinc-500">
-          {title || 'Code is hidden in chat. Open Preview > Code to inspect or edit, or reveal it here.'}
+          {title || 'Code is hidden in chat. Open Code to inspect or edit it, or reveal it here.'}
         </div>
       </div>
       <button
@@ -316,3 +316,4 @@ export function MarkdownRenderer({ content, className = '', codeVisibility = 'sh
     </div>
   );
 }
+        

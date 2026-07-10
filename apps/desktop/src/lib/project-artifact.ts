@@ -22,6 +22,23 @@ export interface ParsedProjectUpdateBody {
   files: string[];
 }
 
+export function buildProjectCompletionSummary(input: {
+  projectName?: string | null;
+  fileCount: number;
+  previewVerified: boolean;
+  previewReachable: boolean;
+}): string {
+  const target = input.projectName?.trim() || 'the current project';
+  const files = `${input.fileCount} file${input.fileCount === 1 ? '' : 's'}`;
+  if (input.previewVerified) {
+    return `Done — updated ${target} (${files}) and refreshed the App view.`;
+  }
+  if (input.previewReachable) {
+    return `Updated ${target} (${files}). The App is still running; fresh refresh proof is pending.`;
+  }
+  return `Updated ${target} (${files}). Live App verification is still pending.`;
+}
+
 const PROJECT_ARTIFACT_BLOCK_REGEX = /\n?\[vai-artifact\]\s*([\s\S]*?)\s*\[\/vai-artifact\]\s*/i;
 
 export function serializeProjectUpdateArtifact(artifact: ProjectUpdateArtifact): string {

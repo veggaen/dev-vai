@@ -6,6 +6,7 @@ import type {
   SttErrorCode,
   MicDevice,
 } from './stt-adapter.js';
+import { buildMicConstraints } from './audio-constraints.js';
 
 /**
  * Zero-dependency STT adapter over the browser SpeechRecognition API.
@@ -95,9 +96,8 @@ async function acquireMicStream(deviceId?: string): Promise<MediaStream> {
   if (!md?.getUserMedia) {
     throw { code: 'unsupported', message: 'mediaDevices.getUserMedia is unavailable in this environment.' } satisfies SttError;
   }
-  const audio: MediaTrackConstraints | boolean = deviceId ? { deviceId: { exact: deviceId } } : true;
   try {
-    return await md.getUserMedia({ audio });
+    return await md.getUserMedia(buildMicConstraints(deviceId));
   } catch (e) {
     const name = e instanceof Error ? e.name : '';
     const code = mapMediaError(name);
@@ -125,7 +125,7 @@ export async function enumerateMicrophones(): Promise<MicDevice[]> {
   } catch { /* keep going — labels may be blank but ids are still useful */ }
   const devices = await md.enumerateDevices();
   return devices
-    .filter((d) => d.kind === 'audioinput')
+    .filter((d) => d.kind === 'audioinput' && d.deviceId)
     .map((d) => ({ deviceId: d.deviceId, label: d.label || 'Microphone' }));
 }
 
@@ -157,8 +157,10 @@ export class WebSpeechAdapter implements SttAdapter {
     recog.interimResults = true;
 
     let finalTranscript = '';
+    let latestTranscript = '';
     let stopResolve: ((value: string) => void) | null = null;
     let aborted = false;
+    const bestTranscript = () => finalTranscript.trim() || latestTranscript.trim();
 
     recog.onresult = (event) => {
       let interim = '';
@@ -168,8 +170,9 @@ export class WebSpeechAdapter implements SttAdapter {
         if (result.isFinal) finalTranscript += text;
         else interim += text;
       }
+      latestTranscript = (finalTranscript + interim).trim();
       options?.onPartial?.({
-        transcript: (finalTranscript + interim).trim(),
+        transcript: latestTranscript,
         isFinal: interim.length === 0 && finalTranscript.length > 0,
       });
     };
@@ -186,7 +189,7 @@ export class WebSpeechAdapter implements SttAdapter {
       // Recognition ended → free the mic so the OS "in use" indicator clears.
       releaseStream();
       if (stopResolve) {
-        stopResolve(finalTranscript.trim());
+        stopResolve(bestTranscript());
         stopResolve = null;
       }
     };
@@ -201,11 +204,29 @@ export class WebSpeechAdapter implements SttAdapter {
 
     const session: SttSession = {
       stop() {
-        if (aborted) return Promise.resolve(finalTranscript.trim());
+        if (aborted) return Promise.resolve(bestTranscript());
         return new Promise<string>((resolve) => {
-          stopResolve = resolve;
+          // WebView2's recognizer sometimes NEVER fires onend after stop() — without a
+          // watchdog that leaves the caller (and the "Transcribing…" UI) hanging forever.
+          // Resolve with whatever was heard; the mic is released either way.
+          const watchdog = window.setTimeout(() => {
+            if (stopResolve) {
+              stopResolve = null;
+              releaseStream();
+              resolve(bestTranscript());
+            }
+          }, 3_000);
+          stopResolve = (value) => {
+            window.clearTimeout(watchdog);
+            resolve(value);
+          };
           // onend (fired by recog.stop) releases the stream and resolves; guard the throw path.
-          try { recog.stop(); } catch { releaseStream(); resolve(finalTranscript.trim()); }
+          try { recog.stop(); } catch {
+            window.clearTimeout(watchdog);
+            stopResolve = null;
+            releaseStream();
+            resolve(bestTranscript());
+          }
         });
       },
       abort() {

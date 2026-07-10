@@ -182,7 +182,7 @@ export class ProjectService {
     }
   }
 
-  syncSandboxProject(project: SandboxProject) {
+  syncSandboxProject(project: Pick<SandboxProject, 'id' | 'name' | 'rootDir' | 'ownerUserId' | 'status'>) {
     const now = new Date();
     const existing = this.getProjectBySandboxId(project.id);
     const projectId = existing?.id ?? randomUUID();

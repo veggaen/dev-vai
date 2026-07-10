@@ -1,0 +1,25 @@
+# Line-ending policy: text files are normalized to LF in the repository.
+# Working-tree endings follow platform defaults; Windows-specific scripts stay CRLF.
+* text=auto
+
+*.sh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.pdf binary
+*.db binary
+*.sqlite binary
+*.tar binary
+*.gz binary
+*.zip binary

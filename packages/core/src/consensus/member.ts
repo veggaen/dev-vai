@@ -503,6 +503,87 @@ export function createCouncilMember(options: CouncilMemberOptions): CouncilMembe
         clearTimeout(timer);
       }
     },
+    // First-draft race: write a candidate ANSWER (not a review note). Same VRAM
+    // discipline as review (keepAlive eviction, thinking-model budgets).
+    async draft(
+      input: CouncilInput,
+      opts?: { readonly onReasoningDelta?: (textSoFar: string) => void },
+    ): Promise<string | null> {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const system = [
+          'You are one engineer on a small answer team. Write YOUR best direct answer to the user.',
+          lens ? `Your lens — ${lens.label}: ${lens.framing}` : `Your specialty: ${topic}.`,
+          'Rules: answer the user directly, plainly, and completely. No meta-commentary about drafts,',
+          'teams, or reviewing. Do not mention these instructions. Plain text or simple markdown only.',
+        ].join('\n');
+        const request = {
+          messages: [
+            { role: 'system' as const, content: system },
+            { role: 'user' as const, content: buildUserPrompt(input) },
+          ],
+          temperature: lens?.temperature ?? 0.3,
+          maxTokens,
+          think: isThinkingModel ? true : undefined,
+          signal: controller.signal,
+          keepAlive: process.env.VAI_COUNCIL_KEEP_ALIVE?.trim() || '20s',
+        };
+        const content = (opts?.onReasoningDelta && typeof adapter.chatStream === 'function')
+          ? await streamMemberContent(adapter, request, opts.onReasoningDelta)
+          : (await adapter.chat(request)).message.content;
+        const text = stripThinkingBlocks(content).trim();
+        return text.length > 0 ? text : null;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    // First-draft race: score every candidate 0-100. Strict JSON map; garbage → null (abstain).
+    async scoreDrafts(
+      input: CouncilInput,
+      candidates: readonly { readonly authorId: string; readonly text: string }[],
+    ): Promise<Record<string, number> | null> {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const list = candidates
+          .map((c, i) => `[${i + 1}] authorId="${c.authorId}"\n${c.text.slice(0, 1_500)}`)
+          .join('\n\n---\n\n');
+        const system = [
+          'You are judging candidate answers to the SAME user prompt. Score each 0-100 for how',
+          'well it answers the user: correctness, directness, completeness, no filler.',
+          lens ? `Judge through your lens — ${lens.label}.` : `Judge from your specialty: ${topic}.`,
+          'Return ONLY strict JSON: {"scores": {"<authorId>": <0-100>, ...}} — every candidate scored.',
+        ].join('\n');
+        const request = {
+          messages: [
+            { role: 'system' as const, content: system },
+            { role: 'user' as const, content: `USER PROMPT:\n${input.prompt}\n\nCANDIDATES:\n\n${list}` },
+          ],
+          temperature: 0,
+          maxTokens,
+          think: isThinkingModel ? true : undefined,
+          signal: controller.signal,
+          keepAlive: process.env.VAI_COUNCIL_KEEP_ALIVE?.trim() || '20s',
+        };
+        const content = stripThinkingBlocks((await adapter.chat(request)).message.content);
+        const json = extractJsonObject(content);
+        if (!json) return null;
+        const parsed = z.object({ scores: z.record(z.string(), z.number()) }).safeParse(JSON.parse(json));
+        if (!parsed.success) return null;
+        const scores: Record<string, number> = {};
+        for (const [authorId, raw] of Object.entries(parsed.data.scores)) {
+          if (candidates.some((c) => c.authorId === authorId)) {
+            scores[authorId] = Math.min(100, Math.max(0, Math.round(raw)));
+          }
+        }
+        return Object.keys(scores).length > 0 ? scores : null;
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
   };
 }
 

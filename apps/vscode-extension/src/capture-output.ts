@@ -20,12 +20,13 @@ import { pushEvent, getActiveSession } from './session.js';
 
 let lastDiagCount = 0;
 let lastDiagContent = '';
-const diagDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-const pendingDiagUris: vscode.Uri[] = [];
+// Diagnostics debouncing scaffolding for the (currently disabled) diagnostics capture below.
+const _diagDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const _pendingDiagUris: vscode.Uri[] = [];
 
 /* ── Copilot Command Tracking ──────────────────────────────────── */
 
-const COPILOT_COMMANDS = [
+const _COPILOT_COMMANDS = [
   'github.copilot.chat.open',
   'github.copilot.interactiveEditor.explain',
   'github.copilot.interactiveEditor.fix',
@@ -40,9 +41,9 @@ const COPILOT_COMMANDS = [
   'workbench.action.chat.clearHistory',
 ];
 
-/* ── Debounced Diagnostics Processor ────────────────────────── */
+/* ── Debounced Diagnostics Processor (currently disabled) ───── */
 
-function processDiagnostics(uris: vscode.Uri[]): void {
+function _processDiagnostics(uris: vscode.Uri[]): void {
   if (!getActiveSession()) return;
 
   // Aggregate all current diagnostics across the changed URIs

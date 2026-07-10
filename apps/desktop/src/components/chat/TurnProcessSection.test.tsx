@@ -31,28 +31,23 @@ describe('TurnProcessSection', () => {
     expect(html).toContain('Working through it');
   });
 
-  it('keeps Council R1 visible when Council R2 is added below it live', () => {
+  it('uses one task-oriented progress surface for software work', () => {
     const steps: ChatProgressStep[] = [
+      { stage: 'reason', label: 'Read the intent', status: 'done' },
       {
-        stage: 'council-vai-round-1',
-        label: 'Council asked Vai to revise',
+        stage: 'workspace',
+        label: 'Read the relevant files',
+        detail: '3 files · 1 editable · 2 read-only references',
         status: 'done',
       },
-      {
-        stage: 'vai-redraft',
-        label: 'Vai redrafted from council feedback',
-        status: 'done',
-      },
-      {
-        stage: 'council-vai-round-2',
-        label: 'Council re-reviewing the revised draft',
-        status: 'running',
-      },
+      { stage: 'council-code', label: 'Editing the project', status: 'running' },
     ];
-
-    const html = renderToStaticMarkup(<ProcessTree live steps={steps} />);
-    expect(html).toContain('Council R1');
-    expect(html).toContain('Council R2');
-    expect(html.indexOf('Council R1')).toBeLessThan(html.indexOf('Council R2'));
-  });
-});
+    const html = renderToStaticMarkup(
+      <TurnProcessSection isStreaming steps={steps} workKind="software" />,
+    );
+    expect(html).toContain('software-work-progress');
+    expect(html).toContain('Understand');
+    expect(html).toContain('Investigate');
+    expect(html).toContain('Plan');
+    expect(html).toContain('Build');
+    expect(

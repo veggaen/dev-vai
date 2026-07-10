@@ -4,6 +4,7 @@ import { useChatStore } from '../stores/chatStore.js';
 import { useShortcutsStore } from '../stores/shortcutsStore.js';
 import { eventMatchesShortcut, type ShortcutId } from '../lib/keyboard-shortcuts.js';
 import { FOCUS_CHAT_SEARCH_EVENT } from '../components/SidebarPanel.js';
+import { useWorkspaceStore } from '../stores/workspaceStore.js';
 
 const MODE_BY_SHORTCUT: Partial<Record<ShortcutId, ChatMode>> = {
   modeChat: 'chat',
@@ -27,7 +28,6 @@ export function useKeyboardShortcuts() {
     setActivePanel,
     cycleLayoutMode,
     togglePreviewExpanded,
-    toggleCouncilPanel,
   } = useLayoutStore();
   const activeConversationId = useChatStore((state) => state.activeConversationId);
   const updateConversationMode = useChatStore((state) => state.updateConversationMode);
@@ -84,12 +84,6 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      if (match('toggleCouncil')) {
-        e.preventDefault();
-        toggleCouncilPanel();
-        return;
-      }
-
       if (match('appFullscreen')) {
         e.preventDefault();
         togglePreviewExpanded();
@@ -138,6 +132,33 @@ export function useKeyboardShortcuts() {
         toggleBuilderPanel();
         return;
       }
+
+      if (match('projectPanel')) {
+        e.preventDefault();
+        setActivePanel('chats');
+        return;
+      }
+
+      if (match('attachWorkspace')) {
+        e.preventDefault();
+        // One project-open flow everywhere: the sandbox pipeline (scan → review
+        // → dev server → live preview). The legacy workspace-IDE attach stays
+        // reachable from the Project sidebar's own button.
+        window.dispatchEvent(new CustomEvent('vai:open-workspace'));
+        return;
+      }
+
+      if (match('toggleDiff')) {
+        e.preventDefault();
+        useWorkspaceStore.getState().toggleDiffPanel();
+        return;
+      }
+
+      if (match('detachWorkspace')) {
+        e.preventDefault();
+        useWorkspaceStore.getState().detach();
+        return;
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown);
@@ -151,7 +172,6 @@ export function useKeyboardShortcuts() {
     setMode,
     setShowQuickSwitch,
     toggleBuilderPanel,
-    toggleCouncilPanel,
     toggleDebugConsole,
     toggleFileExplorer,
     toggleFocusMode,

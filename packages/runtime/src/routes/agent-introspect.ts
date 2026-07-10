@@ -18,6 +18,11 @@ export interface AgentIntrospectDeps {
   readonly models: ModelRegistry;
   readonly fallbackChain: readonly string[];
   readonly repoRoot?: string;
+  /** Chat service for deliberation-trace parity (agents see what the UI shows). */
+  readonly chatService?: {
+    getConversation(id: string): unknown;
+    getMessages(id: string): Array<Record<string, unknown>>;
+  };
 }
 
 function readDoc(repoRoot: string, relative: string): string | null {
@@ -111,6 +116,39 @@ export function registerAgentIntrospectRoutes(app: FastifyInstance, deps: AgentI
         agentsGuide: readDoc(repoRoot, 'AGENTS.md'),
         improvementBacklog: readDoc(repoRoot, path.join('docs', 'vai-improvement-backlog.md')),
       },
+    };
+  });
+
+  // 1:1 deliberation-trace parity: agents read the EXACT progress steps the human
+  // UI renders (same persisted blob rehydrated by getMessages → progressSteps).
+  // No re-summarizing, no alternate view — one trace, two audiences.
+  app.get<{ Params: { id: string } }>('/api/agent/conversations/:id/trace', async (request, reply) => {
+    if (!deps.chatService) {
+      reply.code(501);
+      return { error: 'trace introspection not wired on this runtime' };
+    }
+    const conversation = deps.chatService.getConversation(request.params.id);
+    if (!conversation) {
+      reply.code(404);
+      return { error: `Conversation not found: ${request.params.id}` };
+    }
+    const rows = deps.chatService.getMessages(request.params.id);
+    return {
+      schemaVersion: 1,
+      conversationId: request.params.id,
+      renderContract: {
+        uiEntryPoint: 'apps/desktop/src/components/chat/TurnProcessSection.tsx',
+        phases: 'stage → phase via Timeline.logic.ts phaseForStage(); round via /round-(\\d+)/',
+        memberFields: 'councilMembers[]: name, verdict, confidence, note, realIntent, hiddenMeaning, missingCapability, methodLesson, suggestedAction, concerns[], reasoningPreview (live)',
+        processLog: 'processLog[]: kind thought|read|action|artifact|feedback|verdict|tool|tool-response — rendered verbatim, in order',
+      },
+      turns: rows
+        .filter((row) => row.role === 'assistant')
+        .map((row) => ({
+          messageId: row.id,
+          createdAt: row.createdAt,
+          steps: row.progressSteps ?? [],
+        })),
     };
   });
 }

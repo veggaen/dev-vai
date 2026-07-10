@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   auditPriorDraftExcerpt,
   resolveConversationSandboxProjectIdOption,
+  resolveConversationResumeId,
   isConversationWorking,
   mergeAuditPriorDraftExcerpt,
   mergeProgressStepsForMessage,
@@ -20,6 +21,22 @@ describe('resolveConversationSandboxProjectIdOption', () => {
 
   it('preserves explicit null as a clean conversation request', () => {
     expect(resolveConversationSandboxProjectIdOption({ sandboxProjectId: null }, 'active-sandbox')).toBeNull();
+  });
+});
+
+describe('resolveConversationResumeId', () => {
+  const conversations = [{ id: 'chat-a' }, { id: 'chat-b' }];
+
+  it('resumes a saved chat only when it still exists', () => {
+    expect(resolveConversationResumeId(conversations, 'chat-b')).toBe('chat-b');
+  });
+
+  it('refuses stale saved ids so reload does not show a phantom active row', () => {
+    expect(resolveConversationResumeId(conversations, 'deleted-chat')).toBeNull();
+  });
+
+  it('does nothing without a saved id', () => {
+    expect(resolveConversationResumeId(conversations, null)).toBeNull();
   });
 });
 
@@ -143,4 +160,5 @@ describe('mergeProgressStepsForMessage — stable process timeline identity', ()
       'council-vai-round-2',
     ]);
   });
-});
+
+  it('k

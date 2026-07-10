@@ -15,6 +15,7 @@
     "./feedback": "./src/feedback.ts",
     "./search": "./src/search.ts",
     "./ingest": "./src/ingest.ts",
+    "./ide-ws": "./src/ide-ws.ts",
     "./responses": "./src/responses.ts",
     "./session-responses": "./src/session-responses.ts",
     "./project-responses": "./src/project-responses.ts"

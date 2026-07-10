@@ -566,14 +566,20 @@ export function resolveProgrammingIdiom(
  * articles and trailing punctuation are stripped. Deliberately conservative so
  * non-comparison prompts pass through untouched.
  */
+// Comparison matchers, compiled once (constant patterns; non-global → safe to reuse).
+// `_TAIL` bounds the second operand at punctuation, end-of-string, or a trailing clause.
+const CMP_TAIL = '(?:[?.!,;:]|$|\\s+(?:in|for|when|with|give|show|explain|using|on)\\b)';
+const CMP_DIFF_BETWEEN_RE = new RegExp(`\\b(?:difference[s]?|distinction|tradeoffs?|trade-offs?)\\s+between\\s+(.+?)\\s+and\\s+(.+?)${CMP_TAIL}`, 'i');
+const CMP_COMPARE_VERB_RE = new RegExp(`\\bcompare\\s+(.+?)\\s+(?:and|to|with|vs\\.?|versus)\\s+(.+?)${CMP_TAIL}`, 'i');
+const CMP_VS_RE = /\b([a-z0-9][a-z0-9.+#_-]*(?:\s+[a-z0-9.+#_-]+){0,2})\s+(?:vs\.?|versus)\s+([a-z0-9][a-z0-9.+#_-]*(?:\s+[a-z0-9.+#_-]+){0,2})\b/i;
+
 export function comparisonOperands(content: string): [string, string] | null {
   const s = (content || '').trim();
   if (!s) return null;
-  const tail = '(?:[?.!,;:]|$|\\s+(?:in|for|when|with|give|show|explain|using|on)\\b)';
   const m =
-    s.match(new RegExp(`\\b(?:difference[s]?|distinction|tradeoffs?|trade-offs?)\\s+between\\s+(.+?)\\s+and\\s+(.+?)${tail}`, 'i'))
-    ?? s.match(new RegExp(`\\bcompare\\s+(.+?)\\s+(?:and|to|with|vs\\.?|versus)\\s+(.+?)${tail}`, 'i'))
-    ?? s.match(/\b([a-z0-9][a-z0-9.+#_-]*(?:\s+[a-z0-9.+#_-]+){0,2})\s+(?:vs\.?|versus)\s+([a-z0-9][a-z0-9.+#_-]*(?:\s+[a-z0-9.+#_-]+){0,2})\b/i);
+    s.match(CMP_DIFF_BETWEEN_RE)
+    ?? s.match(CMP_COMPARE_VERB_RE)
+    ?? s.match(CMP_VS_RE);
   if (!m) return null;
   const clean = (x: string) => x.trim().replace(/^(?:a|an|the)\s+/i, '').replace(/[?.!]+$/, '').trim();
   const a = clean(m[1]);

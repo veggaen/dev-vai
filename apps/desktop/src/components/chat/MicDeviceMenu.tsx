@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Mic, Volume2, Play, Square, Loader2, GraduationCap } from 'lucide-react';
+import { Check, Mic, Volume2, Play, Square, Loader2, GraduationCap, Settings } from 'lucide-react';
+import { VaiMark } from '../brand/VaiMark.js';
+import '../../styles/voice-menu.css';
+import { loadMicTriggerMode, saveMicTriggerMode, type MicTriggerMode } from '../../lib/voice/mic-mode.js';
 import { enumerateMicrophones } from '../../lib/voice/web-speech-adapter.js';
 import type { MicDevice } from '../../lib/voice/stt-adapter.js';
 import { loadProfile, clearProfile, activeRules } from '../../lib/voice/speech-profile.js';
@@ -21,7 +24,7 @@ interface OutDevice { deviceId: string; label: string }
 async function enumerateOutputs(): Promise<OutDevice[]> {
   const all = await navigator.mediaDevices.enumerateDevices();
   return all
-    .filter((d) => d.kind === 'audiooutput')
+    .filter((d) => d.kind === 'audiooutput' && d.deviceId)
     .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Speaker ${i + 1}` }));
 }
 
@@ -46,6 +49,7 @@ export function MicDeviceMenu({ at, selectedId, onSelect, onClose }: MicDeviceMe
   const [level, setLevel] = useState(0);
   const [test, setTest] = useState<'idle' | 'recording' | 'playing'>('idle');
   const [learned, setLearned] = useState(() => activeRules(loadProfile()).length);
+  const [micMode, setMicMode] = useState<MicTriggerMode>(() => loadMicTriggerMode());
 
   const ref = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -152,7 +156,7 @@ export function MicDeviceMenu({ at, selectedId, onSelect, onClose }: MicDeviceMe
     }
   }, [test, outputId]);
 
-  useEffect(() => () => { recorderRef.current?.stream && playerRef.current?.pause(); }, []);
+  useEffect(() => () => { if (recorderRef.current?.stream) playerRef.current?.pause(); }, []);
 
   const resetLearned = useCallback(() => { clearProfile(); setLearned(0); }, []);
 
@@ -167,22 +171,30 @@ export function MicDeviceMenu({ at, selectedId, onSelect, onClose }: MicDeviceMe
       <motion.div
         ref={ref}
         role="dialog"
-        aria-label="Voice settings"
-        className="fixed z-50 w-[296px] overflow-hidden rounded-2xl border border-white/10 bg-[color:var(--chat-surface,#1b1b22)]/95 p-1.5 shadow-2xl backdrop-blur-xl"
+        aria-label="Voice"
+        className="vai-voice-menu fixed z-50 w-[300px] overflow-hidden rounded-2xl backdrop-blur-xl"
         style={style}
-        initial={{ opacity: 0, scale: 0.95, y: -4 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: -4 }}
-        transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 4 }}
+        transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
       >
+        <div className="vai-voice-menu__header flex items-center gap-2.5 px-3.5 py-3">
+          <VaiMark size={22} variant="gradient" animated />
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-semibold text-[color:var(--fg,#f4f4f5)]">Voice</div>
+            <div className="truncate text-[11px] text-[color:var(--color-muted,#a1a1aa)]">Mic, speakers &amp; dictation</div>
+          </div>
+        </div>
+
+        <div className="p-1.5">
         {/* ── Microphone ── */}
         <SectionLabel icon={<Mic className="h-3 w-3" />} text="Microphone" />
-        {/* Live level meter — proof the selected mic hears you, before any test. */}
-        <div className="mx-3 mb-1.5 h-1 overflow-hidden rounded-full bg-white/[0.07]" aria-hidden="true">
+        <div className="mx-3 mb-1.5 vai-voice-menu__meter" aria-hidden="true">
           <motion.div
-            className="h-full rounded-full bg-[color:var(--accent,#7c3aed)]"
+            className="vai-voice-menu__meter-fill"
             animate={{ scaleX: Math.max(0.02, level) }}
-            style={{ transformOrigin: 'left center', width: '100%' }}
+            style={{ width: '100%' }}
             transition={{ duration: 0.08, ease: 'linear' }}
           />
         </div>
@@ -227,8 +239,40 @@ export function MicDeviceMenu({ at, selectedId, onSelect, onClose }: MicDeviceMe
           </button>
         </div>
 
+        {/* ── Mic button behavior ── */}
+        <div className="mx-1.5 mt-1 border-t border-[color:var(--border)] px-1.5 py-2">
+          <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[color:var(--color-muted)]">Mic button</div>
+          <div className="vai-voice-menu__segment">
+            {(['hold', 'toggle'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => { saveMicTriggerMode(mode); setMicMode(mode); }}
+                className={`vai-voice-menu__segment-btn ${micMode === mode ? 'is-active' : 'text-[color:var(--color-muted)]'}`}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mx-1.5 border-t border-[color:var(--border)] px-1.5 py-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              try { sessionStorage.setItem('vai-settings-tab', 'voice'); } catch { /* non-fatal */ }
+              window.dispatchEvent(new CustomEvent('vai:open-voice-settings'));
+            }}
+            className="vai-voice-menu__row flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[color:var(--fg)]"
+          >
+            <Settings className="h-3.5 w-3.5 shrink-0 text-[color:var(--color-muted)]" aria-hidden="true" />
+            Voice settings
+          </button>
+        </div>
+
         {/* ── Learned speech profile ── */}
-        <div className="mx-1.5 mt-1 flex items-center gap-2 border-t border-white/[0.07] px-1.5 py-2 text-[11px] text-[color:var(--chat-muted)]">
+        <div className="mx-1.5 mt-1 flex items-center gap-2 border-t border-[color:var(--border)] px-1.5 py-2 text-[11px] text-[color:var(--color-muted)]">
           <GraduationCap className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="flex-1">
             {learned === 0 ? 'No learned corrections yet' : `${learned} learned correction${learned === 1 ? '' : 's'} auto-apply`}
@@ -242,6 +286,7 @@ export function MicDeviceMenu({ at, selectedId, onSelect, onClose }: MicDeviceMe
               Reset
             </button>
           )}
+        </div>
         </div>
       </motion.div>
     </AnimatePresence>
@@ -272,8 +317,8 @@ function DeviceRow({ label, selected, onClick }: { label: string; selected: bool
       role="menuitemradio"
       aria-checked={selected}
       onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-white/[0.06] ${
-        selected ? 'text-[color:var(--chat-strong,#fff)]' : 'text-[color:var(--chat-body)]'
+      className={`vai-voice-menu__row flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] ${
+        selected ? 'is-selected text-[color:var(--fg)]' : 'text-[color:var(--fg)] opacity-90'
       }`}
     >
       <span className="flex-1 truncate">{label}</span>

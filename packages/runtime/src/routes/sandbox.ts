@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { SandboxManager, FileWrite } from '../sandbox/manager.js';
+import { detectProjectProfile } from '../sandbox/manager.js';
 import {
   getAllStacks,
   getStack,
@@ -20,6 +21,12 @@ import {
   sandboxDeployBodySchema,
   sandboxFromTemplateBodySchema,
   sandboxWriteFilesBodySchema,
+  sandboxOpenFolderBodySchema,
+  sandboxRunCommandBodySchema,
+  sandboxEnvLocalBodySchema,
+  sandboxSearchBodySchema,
+  sandboxReplaceBodySchema,
+  sandboxSwitchLaneBodySchema,
 } from '@vai/api-types/sandbox';
 import { invalidRequestBody } from '../validation/http-validation.js';
 
@@ -99,6 +106,12 @@ async function getAuthorizedProject(
 
   const viewer = await auth.getViewer(request);
   const viewerId = viewer.user?.id ?? null;
+  if (project.external && viewerId && project.ownerUserId !== viewerId) {
+    // External folders are local IDE resources. If an old anonymous/stale
+    // record was restored after a runtime restart, let the current local viewer
+    // reclaim it instead of permanently 403-locking their own folder.
+    project.ownerUserId = viewerId;
+  }
   projects.syncSandboxProject(project);
   const allowed = access === 'write'
     ? projects.canWriteSandbox(projectId, viewerId)
@@ -256,6 +269,179 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
     },
   );
 
+  /** Scan a local folder WITHOUT opening it — powers the open-folder review step. */
+  app.post<{ Body: { path: string } }>(
+    '/api/sandbox/scan-folder',
+    async (request, reply) => {
+      const parsed = sandboxOpenFolderBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      try {
+        const discovery = sandbox.discoverProjects(parsed.data.path);
+        if (discovery.candidates.length === 1) {
+          const [candidate] = discovery.candidates;
+          return {
+            requestedRootDir: discovery.requestedRootDir,
+            rootDir: candidate.rootDir,
+            profile: candidate.profile,
+            candidates: discovery.candidates,
+          };
+        }
+        return {
+          requestedRootDir: discovery.requestedRootDir,
+          rootDir: null,
+          profile: null,
+          candidates: discovery.candidates,
+        };
+      } catch (err) {
+        reply.status(400);
+        return { error: err instanceof Error ? err.message : 'Unable to scan folder' };
+      }
+    },
+  );
+
+  /** Open an existing local folder as an EXTERNAL project — the "real IDE" path.
+   *  The folder is served in place (dev server + the user's own hot reload);
+   *  destroy() never deletes external folders. */
+  app.post<{ Body: { path: string } }>(
+    '/api/sandbox/open-folder',
+    async (request, reply) => {
+      const parsed = sandboxOpenFolderBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      const ownerUserId = await getViewerUserId(auth, request);
+      try {
+        const { project, profile } = await sandbox.openExternal(parsed.data.path, ownerUserId);
+        projects.syncSandboxProject(project);
+        return {
+          id: project.id,
+          name: project.name,
+          rootDir: project.rootDir,
+          status: project.status,
+          devPort: project.devPort,
+          live: Boolean(project.devProcess && project.devPort),
+          envLane: project.envLane,
+          laneState: project.laneState,
+          version: project.version,
+          external: true,
+          profile,
+        };
+      } catch (err) {
+        reply.status(400);
+        return { error: err instanceof Error ? err.message : 'Unable to open folder' };
+      }
+    },
+  );
+
+  /** Switch the app between dev | preview | production.
+   *  Long-running by design (gates + build) — the caller should poll GET /:id
+   *  for laneState instead of holding this request open; we still return the
+   *  final state for simple callers. */
+  app.post<{ Params: { id: string }; Body: { lane: 'dev' | 'preview' | 'production' } }>(
+    '/api/sandbox/:id/switch-lane',
+    async (request, reply) => {
+      const parsed = sandboxSwitchLaneBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'write');
+      if ('error' in project) {
+        return project;
+      }
+      try {
+        // Conflict checks are sync-shaped: reject them honestly with a 409
+        // instead of swallowing them in the fire-and-forget below.
+        if (project.laneState?.status === 'switching') {
+          reply.status(409);
+          return { error: `Already switching to ${project.laneState.lane} — wait for it to finish` };
+        }
+        if (project.commandRun?.status === 'running') {
+          reply.status(409);
+          return { error: `A command is running (${project.commandRun.script}) — wait for it to finish` };
+        }
+        // Fire the switch; report "accepted" immediately so the UI polls laneState.
+        void sandbox.switchLane(request.params.id, parsed.data.lane).catch(() => { /* recorded in laneState */ });
+        return { ok: true, lane: parsed.data.lane, status: 'switching' };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unable to switch lanes';
+        reply.status(/already switching|command is running/i.test(message) ? 409 : 400);
+        return { error: message };
+      }
+    },
+  );
+
+  /** Run a package.json script (build / lint / test …) — one at a time per project.
+   *  Output streams into project logs; poll GET /api/sandbox/:id for commandRun state. */
+  app.post<{ Params: { id: string }; Body: { script: string } }>(
+    '/api/sandbox/:id/run-command',
+    async (request, reply) => {
+      const parsed = sandboxRunCommandBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'write');
+      if ('error' in project) {
+        return project;
+      }
+      try {
+        const run = sandbox.runCommand(request.params.id, parsed.data.script);
+        return { ok: true, script: run.script, status: run.status, startedAt: run.startedAt };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unable to run command';
+        reply.status(/already running/i.test(message) ? 409 : 400);
+        return { error: message };
+      }
+    },
+  );
+
+  /** Inspect which env vars are configured/missing without returning secret values. */
+  app.get<{ Params: { id: string } }>(
+    '/api/sandbox/:id/env-local',
+    async (request, reply) => {
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'read');
+      if ('error' in project) {
+        return project;
+      }
+      try {
+        return sandbox.getEnvStatus(request.params.id);
+      } catch (err) {
+        reply.status(400);
+        return { error: err instanceof Error ? err.message : 'Unable to inspect environment' };
+      }
+    },
+  );
+
+  /** Write user-provided env values to .env.local, optionally restarting the dev server. */
+  app.post<{ Params: { id: string }; Body: { values: Record<string, string>; restart?: boolean } }>(
+    '/api/sandbox/:id/env-local',
+    async (request, reply) => {
+      const parsed = sandboxEnvLocalBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'write');
+      if ('error' in project) {
+        return project;
+      }
+      try {
+        const status = await sandbox.writeEnvLocal(request.params.id, parsed.data.values);
+        let restarted = false;
+        if (parsed.data.restart) {
+          sandbox.stopDev(request.params.id);
+          await sandbox.startDev(request.params.id);
+          restarted = true;
+        }
+        projects.syncSandboxProject(sandbox.get(request.params.id)!);
+        return { ok: true, restarted, status };
+      } catch (err) {
+        reply.status(400);
+        return { error: err instanceof Error ? err.message : 'Unable to write .env.local' };
+      }
+    },
+  );
+
   /** Create a new sandbox project */
   app.post<{ Body: { name: string } }>(
     '/api/sandbox',
@@ -318,6 +504,7 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
       const fileList = await sandbox.listFiles(request.params.id).catch(() => Object.keys(project.files));
 
       const hasNodeModules = existsSync(join(project.rootDir, 'node_modules'));
+      const profile = detectProjectProfile(project.rootDir);
 
       return {
         id: project.id,
@@ -331,6 +518,21 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
         devStderr: project.devStderr.slice(-20),
         persistentProjectId: persistedProject?.id ?? null,
         role,
+        external: project.external,
+        framework: project.framework ?? profile.framework,
+        scripts: Object.keys(profile.scripts),
+        envLane: project.envLane,
+        laneState: project.laneState,
+        commandRun: project.commandRun
+          ? {
+              script: project.commandRun.script,
+              status: project.commandRun.status,
+              exitCode: project.commandRun.exitCode,
+              startedAt: project.commandRun.startedAt,
+              finishedAt: project.commandRun.finishedAt,
+              tail: project.commandRun.output.slice(-15),
+            }
+          : null,
       };
     },
   );
@@ -537,6 +739,78 @@ export function registerSandboxRoutes(app: FastifyInstance, sandbox: SandboxMana
       const updated = sandbox.get(request.params.id);
       if (updated) projects.syncSandboxProject(updated);
       return { ok: true };
+    },
+  );
+
+  /** VS Code-style text search across project files */
+  app.post<{ Params: { id: string } }>(
+    '/api/sandbox/:id/search',
+    async (request, reply) => {
+      const parsed = sandboxSearchBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'read');
+      if ('error' in project) {
+        return project;
+      }
+      try {
+        return await sandbox.searchFiles(request.params.id, parsed.data);
+      } catch (err) {
+        reply.status(400);
+        return { error: err instanceof Error ? err.message : 'Search failed' };
+      }
+    },
+  );
+
+  /** Search & replace across project files — records a revertable revision */
+  app.post<{ Params: { id: string } }>(
+    '/api/sandbox/:id/replace',
+    async (request, reply) => {
+      const parsed = sandboxReplaceBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidRequestBody(reply, parsed.error);
+      }
+      const project = await getAuthorizedProject(auth, projects, sandbox, request, reply, request.params.id, 'write');
+      if ('error' in project) {
+        return project;
+      }
+      try {
+        const { changes, replacements } = await sandbox.replaceInFiles(request.params.id, parsed.data);
+        if (
+          parsed.data.expectedReplacements !== undefined
+          && replacements !== parsed.data.expectedReplacements
+        ) {
+          reply.status(409);
+          return {
+            error: `Expected ${parsed.data.expectedReplacements} replacement(s), found ${replacements}; no files were changed.`,
+            code: 'replacement_count_mismatch',
+          };
+        }
+        if (changes.length === 0) {
+          return { ok: true, filesChanged: 0, replacements: 0, version: project.version, revisionId: null };
+        }
+        const viewer = await auth.getViewer(request);
+        const baseVersion = project.version;
+        const version = await sandbox.writeFiles(
+          request.params.id,
+          changes.map((c) => ({ path: c.path, content: c.afterContent })),
+          { baseVersion },
+        );
+        projects.syncSandboxProject(sandbox.get(request.params.id)!);
+        const revision = projects.recordSandboxRevision({
+          sandboxProjectId: request.params.id,
+          actorUserId: viewer.user?.id ?? null,
+          baseVersion,
+          version,
+          summary: `Replaced ${replacements} match(es) of "${parsed.data.query}" in ${changes.length} file(s)`,
+          files: changes.map((c) => ({ path: c.path, beforeContent: c.beforeContent, afterContent: c.afterContent })),
+        });
+        return { ok: true, filesChanged: changes.length, replacements, version, revisionId: revision?.id ?? null };
+      } catch (err) {
+        reply.status(400);
+        return { error: err instanceof Error ? err.message : 'Replace failed' };
+      }
     },
   );
 

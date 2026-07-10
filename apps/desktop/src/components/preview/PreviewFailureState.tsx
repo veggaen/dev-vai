@@ -1,10 +1,14 @@
-import { MessageSquare, RotateCcw, Terminal, XCircle } from 'lucide-react';
+import { KeyRound, MessageSquare, RotateCcw, Terminal, XCircle } from 'lucide-react';
 
 export function createPreviewRepairPrompt(message: string): string {
   const reason = message.trim() || 'The preview failed without a reported reason.';
+  const missingEnvMatch = /\bMissing\s+([A-Z][A-Z0-9_]*|VITE_[A-Z0-9_]+)\b/i.exec(reason);
+  const envGuidance = missingEnvMatch
+    ? `\n\nThis looks like missing environment configuration (${missingEnvMatch[1]}). Do not invent real secrets, API keys, deployment URLs, or contract values. If the app can safely render a setup-required screen without those values, implement that small fallback; otherwise leave source behavior intact and reply with the exact env variables the user must add.`
+    : '';
   return `Repair the current sandbox preview failure: ${reason}
 
-Inspect the existing project and logs, identify the root cause, change only the files required, restart the preview, and verify the rendered app before declaring success.`;
+Inspect the existing project and logs, identify the root cause, change only the files required, restart the preview, and verify the rendered app before declaring success.${envGuidance}`;
 }
 
 export function PreviewFailureState({
@@ -12,14 +16,17 @@ export function PreviewFailureState({
   canRestart,
   onRestart,
   onRepair,
+  onConfigureEnv,
   onViewConsole,
 }: {
   message: string;
   canRestart: boolean;
   onRestart: () => void;
   onRepair: () => void;
+  onConfigureEnv?: () => void;
   onViewConsole: () => void;
 }) {
+  const missingEnv = /\bMissing\s+([A-Z][A-Z0-9_]*|VITE_[A-Z0-9_]+)\b/i.test(message);
   return (
     <div className="flex h-full w-full items-center justify-center p-6 sm:p-8">
       <section className="w-full max-w-xl rounded-[1.75rem] border border-[color:color-mix(in_oklab,var(--red)_30%,var(--panel-border))] bg-[color:var(--panel-bg)] p-6 text-left shadow-[0_24px_80px_rgba(0,0,0,0.22)] sm:p-8">
@@ -29,7 +36,7 @@ export function PreviewFailureState({
           </div>
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--red)]">
-              Preview stopped
+              App stopped
             </p>
             <h3 className="mt-1 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--chat-strong)]">
               This build did not reach a runnable state.
@@ -69,6 +76,16 @@ export function PreviewFailureState({
             <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
             Stage repair prompt
           </button>
+          {missingEnv && onConfigureEnv && (
+            <button
+              type="button"
+              onClick={onConfigureEnv}
+              className="inline-flex items-center gap-2 rounded-xl border border-[color:color-mix(in_oklab,var(--accent)_35%,var(--panel-border))] bg-[color:color-mix(in_oklab,var(--accent)_12%,var(--panel-bg-elevated))] px-3.5 py-2 text-[11px] font-semibold text-[color:var(--accent-text)] transition-colors hover:border-[color:var(--accent-ring)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
+            >
+              <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
+              Set env values
+            </button>
+          )}
           <button
             type="button"
             onClick={onViewConsole}

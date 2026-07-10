@@ -251,6 +251,25 @@ export interface CouncilMember {
     opts?: { readonly onReasoningDelta?: (textSoFar: string) => void },
   ) => Promise<CouncilMemberNote | null>;
   /**
+   * First-draft race (optional): write a candidate ANSWER to the user's prompt —
+   * not a review note. Only used when the draft race is enabled; members without
+   * it simply don't field a candidate. Plain text; fact-quarantine does NOT apply
+   * to race drafts because the winning draft goes through the normal approval-gate
+   * rounds (where Vai owns verification) before anything ships.
+   */
+  readonly draft?: (
+    input: CouncilInput,
+    opts?: { readonly onReasoningDelta?: (textSoFar: string) => void },
+  ) => Promise<string | null>;
+  /**
+   * First-draft race (optional): score every candidate 0-100 for how well it
+   * answers the prompt. Returns authorId → score (missing ids = abstain).
+   */
+  readonly scoreDrafts?: (
+    input: CouncilInput,
+    candidates: readonly { readonly authorId: string; readonly text: string }[],
+  ) => Promise<Record<string, number> | null>;
+  /**
    * True for a reasoning model (DeepSeek-R1 et al.) that emits a long chain-of-thought
    * before answering. The council's OUTER per-member timeout (`runOneMember`) extends
    * for these so they aren't aborted mid-think — the internal review budget alone is not

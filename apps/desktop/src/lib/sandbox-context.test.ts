@@ -25,6 +25,25 @@ describe('pickSandboxContextPaths', () => {
     ]);
   });
 
+  it('puts an explicitly named file first even when generic weights favor entry files', () => {
+    // Live failure: "In components/Navbar.tsx, change the navbar brand text"
+    // snapshot-picked page/layout instead — the model never saw Navbar.tsx.
+    const projectFiles = [...files, 'components/Navbar.tsx', 'components/Footer.tsx'];
+    const selected = pickSandboxContextPaths(
+      projectFiles,
+      'In components/Navbar.tsx, change the navbar brand text "MPM" to "MPM Pro". Keep everything else the same.',
+    );
+
+    expect(selected[0]).toBe('components/Navbar.tsx');
+  });
+
+  it('elevates a file named only by basename', () => {
+    const projectFiles = [...files, 'components/Navbar.tsx'];
+    const selected = pickSandboxContextPaths(projectFiles, 'Fix the broken import in Navbar.tsx please.');
+
+    expect(selected[0]).toBe('components/Navbar.tsx');
+  });
+
   it('prioritizes app and style snapshots for motion polish prompts', () => {
     const selected = pickSandboxContextPaths(
       files,

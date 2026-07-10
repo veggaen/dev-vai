@@ -30,9 +30,10 @@ export interface StoryLine {
   readonly text: string;
   /** True while this line describes work still happening (present tense, shimmer). */
   readonly live?: boolean;
+  /** The timeline phase this line belongs to — lets the feed open that phase's spotlight. */
+  readonly phaseId?: string;
 }
 
-const MAX_LINES = 48;
 const MAX_TEXT = 180;
 
 const clip = (s: string): string => {
@@ -96,6 +97,29 @@ function memberLine(
   };
 }
 
+/** Work entries (searches run, sources found, files read/shown) — the story must
+ * show the WORK, not just the deliberation. Mapped from processLog kinds. */
+const WORK_KINDS = new Set(['action', 'artifact', 'read', 'show']);
+
+/** Strip a "1. " list prefix so a single query reads as speech, not an outline. */
+const deList = (s: string): string => s.replace(/^\d+\.\s+/, '');
+
+/** One work/tool node → one story line. The expanded payload stays in the
+ * spotlight; the story carries the headline plus the first concrete detail
+ * (the query run, the top source found). */
+function workLine(child: ProcessNode, id: string, phaseId: string): StoryLine {
+  const body = deList(firstLine(child.children.find((c) => c.note?.trim())?.note ?? child.note));
+  return {
+    id,
+    speaker: 'Vai',
+    role: 'tool',
+    tone: child.status === 'bad' ? 'bad' : 'neutral',
+    text: clip(body && body !== child.label ? `${child.label} — ${body}` : child.label),
+    live: child.status === 'running',
+    phaseId,
+  };
+}
+
 /** Walk one phase's node tree for the exchanges worth narrating. */
 function nodeLines(
   phase: TimelinePhase,
@@ -106,17 +130,41 @@ function nodeLines(
     for (let i = 0; i < node.children.length; i += 1) {
       const child = node.children[i];
       const id = `${phase.id}:${path}:${i}`;
+      if (child.kind && WORK_KINDS.has(child.kind)) {
+        // Searches run, sources found, files read — narrate the headline and
+        // stop: the body child is the same payload expanded.
+        out.push(workLine(child, id, phase.id));
+        continue;
+      }
+      if (child.kind === 'tool') {
+        // A tool run speaks as itself ("web-fetch · ok · 412ms"); its
+        // request/event/response children are spotlight payloads, not speech.
+        out.push({
+          id,
+          speaker: child.label,
+          role: 'tool',
+          tone: child.status === 'bad' ? 'bad' : 'neutral',
+          text: clip(firstLine(child.detail) || (child.status === 'running' ? 'running…' : 'finished')),
+          live: child.status === 'running',
+          phaseId: phase.id,
+        });
+        continue;
+      }
       if (child.kind === 'submodel') {
-        out.push(memberLine(child, council, id));
+        out.push({ ...memberLine(child, council, id), phaseId: phase.id });
       } else if (child.kind === 'verdict') {
         const bad = child.status === 'bad';
+        const body = firstLine(child.detail) || firstLine(child.label);
+        // A verdict row with no actual content ("verdict", "Verdict") is dead weight — skip it.
+        if (!body || /^verdicts?$/i.test(body)) continue;
         out.push({
           id,
           speaker: 'Council',
           to: 'Vai',
           role: 'gate',
           tone: bad ? 'warn' : 'good',
-          text: clip(firstLine(child.detail) || firstLine(child.label)),
+          text: clip(body),
+          phaseId: phase.id,
         });
       } else if ((child.kind === 'reasoning' || child.kind === 'event') && child.note?.trim()) {
         out.push({
@@ -126,6 +174,7 @@ function nodeLines(
           tone: 'neutral',
           text: clip(firstLine(child.note)),
           live: child.status === 'running',
+          phaseId: phase.id,
         });
       }
       walk(child, `${path}:${i}`);
@@ -175,6 +224,7 @@ export function buildStoryLines(
           }${phase.gate.reason ? ` — ${phase.gate.reason}` : ''}`,
         ),
         live: running,
+        phaseId: phase.id,
       });
     } else if (/council (?:could not|couldn't|didn't) convene|council skipped/i.test(`${phase.title} ${summary}`)) {
       // A skipped council is a quiet system fact, never "Vai said…".
@@ -185,6 +235,7 @@ export function buildStoryLines(
         tone: 'neutral',
         text: 'skipped — nothing needed review this turn',
         live: running,
+        phaseId: phase.id,
       });
     } else if (phase.phase === 'compose' || phase.phase === 'redraft') {
       // Never echo the answer's own words back into the story — the reply is right below.
@@ -195,6 +246,7 @@ export function buildStoryLines(
         tone: phase.status === 'bad' ? 'bad' : 'neutral',
         text: phase.phase === 'redraft' ? 'Revised the draft' : running ? 'Drafting the answer…' : 'Drafted the answer',
         live: running,
+        phaseId: phase.id,
       });
     } else if (summary || children.length === 0) {
       // A bare title above lines that already speak for themselves is noise — the head
@@ -206,13 +258,14 @@ export function buildStoryLines(
         tone: phase.status === 'bad' ? 'bad' : 'neutral',
         text: clip(summary || phase.title),
         live: running,
+        phaseId: phase.id,
       });
     }
 
     out.push(...children);
   }
 
-  // Keep the DOM bounded on very long turns: latest lines win (the transcript
-  // is still fully available through each phase's spotlight).
-  return out.length > MAX_LINES ? out.slice(out.length - MAX_LINES) : out;
+  // The full narrative stays available — the feed is a scrollable window that
+  // follows the newest line, never a truncated one.
+  return out;
 }

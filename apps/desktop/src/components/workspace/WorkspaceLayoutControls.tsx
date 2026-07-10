@@ -12,12 +12,15 @@ import {
   Maximize2,
   Minimize2,
   Layers,
-  Users,
   Focus,
   Waypoints,
+  ExternalLink,
+  Code2,
 } from 'lucide-react';
 import { useLayoutStore } from '../../stores/layoutStore.js';
 import { useShortcutsStore } from '../../stores/shortcutsStore.js';
+import { getPopoutPanelFromUrl, usePopoutStore } from '../../stores/popoutStore.js';
+import { useSandboxStore } from '../../stores/sandboxStore.js';
 
 export type WorkspaceControlSurface = 'chat' | 'app';
 
@@ -68,15 +71,20 @@ export function WorkspaceLayoutControls({
     toggleBuilderPanel,
     previewExpanded,
     togglePreviewExpanded,
-    showCouncilPanel,
-    toggleCouncilPanel,
     showKnowledgeGraph,
     toggleKnowledgeGraph,
   } = useLayoutStore();
 
   const shortcut = useShortcutsStore((s) => s.getKeys);
+  const openPopout = usePopoutStore((s) => s.openPopout);
+  const popped = usePopoutStore((s) => s.popped);
+  const projectId = useSandboxStore((s) => s.projectId);
   const sidebarExpanded = sidebarState === 'expanded';
   const showLabels = !compact;
+  const currentPopout = getPopoutPanelFromUrl();
+  const chatPopped = popped.includes('chat');
+  const appPopped = popped.includes('app');
+  const codePopped = popped.includes('code');
 
   const tip = (label: string, id: Parameters<typeof shortcut>[0]) =>
     `${label} (${shortcut(id)})`;
@@ -84,6 +92,30 @@ export function WorkspaceLayoutControls({
   if (surface === 'app') {
     return (
       <div className="flex items-center gap-1" role="toolbar" aria-label="App workspace layout">
+        {currentPopout !== 'app' && (
+          <button
+            type="button"
+            onClick={() => openPopout('app', { projectId })}
+            className={iconBtnClass(appPopped)}
+            title={appPopped ? 'Focus detached app window' : 'Pop app out to another window'}
+            aria-label="Pop app out to another window"
+            aria-pressed={appPopped}
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {currentPopout !== 'code' && (
+          <button
+            type="button"
+            onClick={() => openPopout('code', { projectId })}
+            className={iconBtnClass(codePopped)}
+            title={codePopped ? 'Focus detached code window' : 'Pop code out to another window'}
+            aria-label="Pop code out to another window"
+            aria-pressed={codePopped}
+          >
+            <Code2 className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           type="button"
           onClick={togglePreviewExpanded}
@@ -132,6 +164,19 @@ export function WorkspaceLayoutControls({
         {showLabels && <span>{focusMode ? 'Unfocus' : 'Focus'}</span>}
       </button>
 
+      {currentPopout !== 'chat' && (
+        <button
+          type="button"
+          onClick={() => openPopout('chat')}
+          className={chipClass(chatPopped, studio)}
+          title={chatPopped ? 'Focus detached chat window' : 'Pop chat out to another window'}
+          aria-pressed={chatPopped}
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          {showLabels && <span>{chatPopped ? 'Chat out' : 'Pop chat'}</span>}
+        </button>
+      )}
+
       <button
         type="button"
         onClick={toggleBuilderPanel}
@@ -166,17 +211,6 @@ export function WorkspaceLayoutControls({
           )}
         </button>
       )}
-
-      <button
-        type="button"
-        onClick={toggleCouncilPanel}
-        className={chipClass(showCouncilPanel, studio)}
-        title={tip(showCouncilPanel ? 'Hide council' : 'Show council', 'toggleCouncil')}
-        aria-pressed={showCouncilPanel}
-      >
-        <Users className="h-3.5 w-3.5" />
-        {showLabels && <span>Council</span>}
-      </button>
 
       <button
         type="button"

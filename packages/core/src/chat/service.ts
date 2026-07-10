@@ -23,7 +23,21 @@ import {
   evaluateChatAnswerQuality,
   type ChatAnswerQualityReport,
 } from './chat-answer-quality.js';
-import { isExplicitBuildExecutionRequest, looksLikeFactualQuestion, classifyAgentBuildIntent } from './build-execution-intent.js';
+import {
+  isExplicitBuildExecutionRequest,
+  looksLikeFactualQuestion,
+  classifyAgentBuildIntent,
+  requiresBuildExecution,
+  shouldBypassPreliminaryAnswerDraft,
+  shouldBlockFreshBuildFallback,
+} from './build-execution-intent.js';
+import {
+  renderExactReplaceAction,
+  resolveExactWorkspaceEdit,
+  resolveMissingClerkEnvWorkspaceEdit,
+  resolveMissingConvexEnvWorkspaceEdit,
+  resolveMmmHeroWorkspaceEdit,
+} from './exact-workspace-edit.js';
 import { CONVERSATION_MODE_SYSTEM_PROMPTS, DEFAULT_CONVERSATION_MODE, type ConversationMode, isConversationMode, agentIntentLeadDirective } from './modes.js';
 import { tryHandleChatMeta } from './meta-router.js';
 import { renderInfoBlockHtml } from './info-block.js';
@@ -69,8 +83,9 @@ import type {
   CouncilConsensus,
 } from '../consensus/types.js';
 import type { CouncilRoster } from '../consensus/topic-router.js';
-import { routeTopic, explainDelegatedSelection } from '../consensus/topic-router.js';
+import { routeTopic, explainDelegatedSelection, selectMembers } from '../consensus/topic-router.js';
 import { convene, conveneStreaming, toCouncilThinking, type ConveneResult } from '../consensus/council.js';
+import { runDraftRace, VAI_AUTHOR_ID, type DraftRaceSnapshot } from '../consensus/draft-race.js';
 import { gatherWebEvidence, extractUrls } from '../consensus/web-evidence.js';
 import { buildCouncilReviewPacket } from '../consensus/review-packet.js';
 import {
@@ -129,6 +144,8 @@ import {
   councilGenerateApp,
   extractTitledFiles,
   parseActiveSandboxContext,
+  buildWorkspaceEditContext,
+  type WorkspaceFilePort,
   validateGeneratedApp,
   type CouncilCodegenMember,
   type CouncilEditContext,
@@ -286,6 +303,13 @@ export interface ChatServiceOptions {
   /** Optional knowledge retrieval function for enriching external model prompts */
   readonly retrieveKnowledge?: (query: string, topK?: number) => Array<{ text: string; source: string; score: number }>;
   /**
+   * Live workspace access for the builder council. When set, project-bound
+   * builder turns resolve the DESIGNATED folder server-side (real name, real
+   * files read from disk at turn time) instead of trusting prompt-embedded
+   * snapshots — the council always sees the files the user is talking about.
+   */
+  readonly workspace?: WorkspaceFilePort;
+  /**
    * Ordered model ids to try when vai:v0 produces a low-confidence or
    * "no knowledge" response. The chat service will pick the first registered
    * non-`vai:v0` adapter from this list and re-dispatch the turn against it,
@@ -396,6 +420,18 @@ export interface ChatServiceOptions {
    * image?") on auto-detected (non-explicit) image turns. Typically the council's Grok adapter.
    */
   readonly imageIntentGateAdapter?: import('../models/adapter.js').ModelAdapter;
+}
+
+export function shouldRunFallbackCouncilReview(input: {
+  readonly hasBuilderFileBlocks: boolean;
+  readonly hasText: boolean;
+  readonly councilEscalateToGenerative: boolean;
+  readonly terminalCouncilEditRefusal: boolean;
+}): boolean {
+  return !input.hasBuilderFileBlocks
+    && input.hasText
+    && !input.councilEscalateToGenerative
+    && !input.terminalCouncilEditRefusal;
 }
 
 export interface ChatPromptRewriteOverrides {
@@ -988,6 +1024,13 @@ export class ChatService {
   private councilRoster?: CouncilRoster;
   /** Deliberation depth for the in-flight turn (composer slider). Reset per turn. */
   private turnProcessDepth: 'quick' | 'balanced' | 'deep' = 'balanced';
+  /**
+   * Explicit per-turn council seat selection (composer roundtable picker). Undefined →
+   * full configured roster. Set → only matching members are seated for this turn, and
+   * the balanced-depth delegation cap is bypassed (the user explicitly chose the seats,
+   * so they own the latency tradeoff). Reset per turn like {@link turnProcessDepth}.
+   */
+  private turnCouncilMemberIds?: readonly string[];
 
   /**
    * Wall-clock budget (ms) for the advisory council loop, derived from the turn's depth.
@@ -1025,6 +1068,20 @@ export class ChatService {
     delegationLog?: readonly ProcessLogEntry[];
   } {
     const roster = this.councilRoster!;
+    // Explicit seat selection: honor the user's picks exactly (both depths). Falls back to
+    // the full roster when the filter matches nobody (e.g. stale ids after a roster swap)
+    // rather than silently running an empty council.
+    const explicit = this.applyTurnCouncilSelection(roster);
+    if (explicit) {
+      return {
+        roster: explicit,
+        delegationLog: [{
+          kind: 'action',
+          label: 'Council selection',
+          body: `User seated ${explicit.default.length} member(s): ${explicit.default.map((m) => m.displayName).join(', ')}`,
+        }],
+      };
+    }
     if (this.turnProcessDepth === 'deep') return { roster };
     const envCap = Number(process.env.VAI_COUNCIL_BALANCED_MEMBERS);
     const cap = Number.isFinite(envCap) && envCap > 0 ? Math.floor(envCap) : 1;
@@ -1044,10 +1101,26 @@ export class ChatService {
   setCouncilRoster(roster: CouncilRoster | undefined): void {
     this.councilRoster = roster;
   }
+
+  /**
+   * Apply the per-turn explicit seat selection to a roster. Returns undefined when the
+   * user made no selection (full roundtable). Matching is tolerant of lens-member ids
+   * (`adapterId#lens`): a pick of the base adapter id seats all its lens voices.
+   */
+  private applyTurnCouncilSelection(roster: CouncilRoster): CouncilRoster | undefined {
+    const ids = this.turnCouncilMemberIds;
+    if (!ids?.length) return undefined;
+    const allow = new Set(ids);
+    const matches = (memberId: string): boolean =>
+      allow.has(memberId) || allow.has(memberId.split('#')[0]!);
+    const selected = roster.default.filter((m) => matches(m.id));
+    return selected.length > 0 ? { default: selected } : undefined;
+  }
   private readonly searchForEvidence?: ChatServiceOptions['searchForEvidence'];
   private readonly visionAdapter?: ChatServiceOptions['visionAdapter'];
   private readonly imageProducer?: ChatServiceOptions['imageProducer'];
   private readonly imageIntentGateAdapter?: ChatServiceOptions['imageIntentGateAdapter'];
+  private readonly workspacePort?: WorkspaceFilePort;
 
   constructor(
     private db: VaiDatabase,
@@ -1079,6 +1152,7 @@ export class ChatService {
     this.councilRoster = resolvedOptions?.councilRoster;
     this.searchForEvidence = resolvedOptions?.searchForEvidence;
     this.visionAdapter = resolvedOptions?.visionAdapter;
+    this.workspacePort = resolvedOptions?.workspace;
     this.imageProducer = resolvedOptions?.imageProducer;
     this.imageIntentGateAdapter = resolvedOptions?.imageIntentGateAdapter;
   }
@@ -1095,9 +1169,17 @@ export class ChatService {
       ...this.vaiFallbackChain,
       ...this.models.listByProvider('local').map((adapter) => adapter.id),
     ];
+    // Explicit per-turn seat selection also scopes the builder panel: only picked
+    // models participate. Tolerant matching mirrors applyTurnCouncilSelection; if
+    // nothing matches (stale ids) we fall back to the full ordered list.
+    const allow = this.turnCouncilMemberIds?.length ? new Set(this.turnCouncilMemberIds) : undefined;
+    const allowed = allow
+      ? orderedIds.filter((id) => allow.has(id) || allow.has(id.split('#')[0]!))
+      : orderedIds;
+    const effectiveIds = allowed.length > 0 ? allowed : orderedIds;
     const members: CouncilCodegenMember[] = [];
     const seen = new Set<string>();
-    for (const id of orderedIds) {
+    for (const id of effectiveIds) {
       if (id === 'vai:v0' || seen.has(id)) continue;
       seen.add(id);
       const adapter = this.models.tryGet(id);
@@ -1314,14 +1396,115 @@ export class ChatService {
       };
     }
 
-    const selfCtx: any = (input as any).vaiProjectSelfContext;
-    const fastSelf = !!(selfCtx && selfCtx.fastSelfPrimary);
     const envTimeout = Number(process.env.VAI_COUNCIL_TIMEOUT_MS);
-    const councilTimeout = Number.isFinite(envTimeout) && envTimeout > 0
-      ? envTimeout
-      : (fastSelf ? 30_000 : 30_000);
+    const councilTimeout = Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 30_000;
 
     return { input, councilTimeout, isSelfImprovement };
+  }
+
+  /**
+   * First-draft race (V3gga's flow): Vai's draft is already visible as the quick
+   * take; the topic-routed members each write their OWN candidate answer, then
+   * everyone scores all candidates and the winner becomes the base draft for the
+   * approval-gate rounds. Live snapshots are yielded as `first-drafts` /
+   * `draft-vote` progress steps so the process UI renders the race 1:1.
+   *
+   * Advisory + bounded: any failure or timeout falls back to Vai's own draft.
+   * The winner still goes through the normal council review, so the
+   * fact-quarantine and verification path are unchanged.
+   */
+  private async *runDraftRaceGen(draft: {
+    prompt: string;
+    draftText: string;
+    modelId: string;
+    turnKind: string;
+    hasEvidence: boolean;
+    sources: readonly { title?: string; url?: string; snippet?: string }[];
+  }): AsyncGenerator<CouncilLoopProgressStep, { text: string; winnerId: string; winnerName: string } | undefined> {
+    if (!this.councilRoster) return undefined;
+    const selection = this.councilRosterSelectionForDepth(draft.prompt);
+    const members = selectMembers(routeTopic(draft.prompt), selection.roster)
+      .filter((m) => typeof m.draft === 'function');
+    if (members.length === 0) return undefined;
+
+    const input: CouncilInput = {
+      prompt: draft.prompt,
+      draft: draft.draftText,
+      modelId: draft.modelId,
+      turnKind: draft.turnKind,
+      hasEvidence: draft.hasEvidence,
+      sources: draft.sources,
+    };
+
+    const envBudget = Number(process.env.VAI_DRAFT_RACE_BUDGET_MS);
+    const overallDeadlineMs = Number.isFinite(envBudget) && envBudget > 0 ? envBudget : 90_000;
+
+    // Bridge runDraftRace's onProgress callback into this generator so every
+    // snapshot streams to the UI the moment it happens.
+    const queue: DraftRaceSnapshot[] = [];
+    let notify: (() => void) | undefined;
+    let settled = false;
+    const racePromise = runDraftRace({
+      vaiDraft: { text: draft.draftText, modelId: draft.modelId },
+      members,
+      input,
+      overallDeadlineMs,
+      onProgress: (snapshot) => { queue.push(snapshot); notify?.(); },
+    }).then(
+      (result) => { settled = true; notify?.(); return result; },
+      (err: unknown) => {
+        console.warn(`[draft-race] failed (advisory, Vai's draft stands): ${err instanceof Error ? err.message : String(err)}`);
+        settled = true; notify?.();
+        return undefined;
+      },
+    );
+
+    const stepFor = (s: DraftRaceSnapshot): CouncilLoopProgressStep => {
+      const fielded = s.candidates.filter((c) => !c.pending && !c.failed).length;
+      if (s.status === 'drafting') {
+        const drafting = s.candidates.find((c) => c.pending);
+        return {
+          stage: 'first-drafts',
+          label: drafting ? `${drafting.authorName} writing a first draft…` : `First drafts in: ${fielded}/${s.candidates.length}`,
+          status: 'running',
+          draftRace: s,
+        };
+      }
+      if (s.status === 'voting') {
+        return {
+          stage: 'draft-vote',
+          label: `Council voting on ${fielded} drafts · ${s.votes.length} ballots in`,
+          status: 'running',
+          draftRace: s,
+        };
+      }
+      const winner = s.candidates.find((c) => c.authorId === s.winnerId);
+      return {
+        stage: 'draft-vote',
+        label: s.winnerId === VAI_AUTHOR_ID
+          ? (s.tieBrokenToVai ? 'Tie — Vai\'s draft stands' : 'Vai\'s draft won the vote')
+          : `${winner?.authorName ?? s.winnerId}'s draft won the vote`,
+        status: 'done',
+        draftRace: s,
+      };
+    };
+
+    while (!settled || queue.length > 0) {
+      if (queue.length === 0) {
+        await new Promise<void>((resolve) => { notify = resolve; });
+        notify = undefined;
+        continue;
+      }
+      yield stepFor(queue.shift()!);
+    }
+
+    const result = await racePromise;
+    if (!result) return undefined;
+    return {
+      text: result.winner.text,
+      winnerId: result.winner.authorId,
+      winnerName: result.winner.authorName,
+    };
   }
 
   private async finalizeCouncilConvene(
@@ -2181,6 +2364,16 @@ export class ChatService {
     return this.getConversation(conversationId);
   }
 
+  /** Persist the attached local folder — chats ARE projects; the binding follows the conversation, not the client. */
+  updateConversationWorkspaceRoot(conversationId: string, workspaceRoot: string | null) {
+    this.db.update(conversations)
+      .set({ workspaceRoot, updatedAt: new Date() })
+      .where(eq(conversations.id, conversationId))
+      .run();
+
+    return this.getConversation(conversationId);
+  }
+
   updateConversationVisibility(conversationId: string, visibility: 'private' | 'unlisted' | 'public') {
     const updates: Record<string, unknown> = { visibility, updatedAt: new Date() };
 
@@ -2358,8 +2551,8 @@ export class ChatService {
   /**
    * Public turn entry. Thin wrapper over {@link sendMessageInner} that taps the
    * stream in ONE place to accumulate the progress trace (mirroring the client's
-   * merge) and, on the terminal `done`, persists a pruned snapshot onto the just-
-   * written assistant row. This is what lets the in-message ProcessTree re-expand
+   * merge) and, after the inner generator has committed its assistant row, persists
+   * a pruned snapshot onto that row. This is what lets the in-message process surface re-expand
    * after the app is closed and reopened — without it the trace is client-only and
    * lost on reload. Pure pass-through of every chunk; no behavioural change to the
    * turn itself.
@@ -2377,6 +2570,7 @@ export class ChatService {
       imageMode?: boolean;
       signal?: AbortSignal;
       processDepth?: 'quick' | 'balanced' | 'deep';
+      councilModelIds?: readonly string[];
     },
   ): AsyncGenerator<ChatChunk> {
     // Accumulated server-side using the api-types wire shape (what the persisted
@@ -2394,18 +2588,19 @@ export class ChatService {
       if (chunk.type === 'progress' && chunk.progress) {
         trace = accumulateProgressStep(trace, chunk.progress as ApiChatProgressStep);
       }
-      if (chunk.type === 'done') {
-        // Persist BEFORE yielding `done` so a client that closes immediately after
-        // still has the trace on disk. Best-effort: a persistence failure must never
-        // break the turn the user just received.
-        try {
-          const blob = serializeProgressTrace(trace);
-          if (blob) this.persistProgressTrace(resolvedConversationId, blob);
-        } catch (err) {
-          console.warn('[chat-service] progress trace persist failed:', err);
-        }
-      }
       yield chunk;
+    }
+
+    // `sendMessageInner` writes the assistant row *after* yielding its terminal
+    // `done` chunk. Persisting from inside the loop therefore targeted the previous
+    // assistant row and made one turn display the next turn's evidence. Waiting for
+    // the generator to finish gives us the row that actually belongs to this trace.
+    try {
+      const blob = serializeProgressTrace(trace);
+      if (blob) this.persistProgressTrace(resolvedConversationId, blob);
+    } catch (err) {
+      // Best-effort: trace persistence must never break a completed turn.
+      console.warn('[chat-service] progress trace persist failed:', err);
     }
   }
 
@@ -2440,12 +2635,17 @@ export class ChatService {
       signal?: AbortSignal;
       /** Per-turn deliberation depth from the composer control. Default 'balanced'. */
       processDepth?: 'quick' | 'balanced' | 'deep';
+      /** Explicit per-turn council seats (composer roundtable picker). Empty/omitted → full roster. */
+      councilModelIds?: readonly string[];
     },
   ): AsyncGenerator<ChatChunk> {
     const turnSignal = autoCreateOptions?.signal;
     // Per-turn deliberation depth (composer slider). Stored on the instance so the deep
     // council loop / escalation gates can read it without threading through every frame.
     this.turnProcessDepth = autoCreateOptions?.processDepth ?? 'balanced';
+    this.turnCouncilMemberIds = autoCreateOptions?.councilModelIds?.length
+      ? autoCreateOptions.councilModelIds
+      : undefined;
     // Auto-create on missing conversation: covers the well-known race where
     // the desktop client opens a WebSocket and sends a message before the
     // newly-created conversation row has been persisted (or after a stale
@@ -2530,6 +2730,331 @@ export class ChatService {
     // Always keep at least the most recent pair so the model stays coherent.
     const MAX_HISTORY_MESSAGES = 40;
     const history = this.getMessages(conversationId);
+
+    // A one-literal edit in a very large real file must not ask a 7-8B model
+    // to regenerate the whole file. Resolve a unique case-sensitive match,
+    // expose the proposal to the council, then emit an atomic replace action.
+    if (!image && conv.sandboxProjectId && this.workspacePort) {
+      const missingConvexEnvEdit = await resolveMissingConvexEnvWorkspaceEdit({
+        workspace: this.workspacePort,
+        projectId: conv.sandboxProjectId,
+        prompt: content,
+      }).catch(() => null);
+      if (missingConvexEnvEdit) {
+        const startedAt = Date.now();
+        yield { type: 'turn_kind', turnKind: 'builder' } as ChatChunk;
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'workspace',
+            label: `Found the Convex env crash in ${missingConvexEnvEdit.path}`,
+            detail: 'Preparing a guarded setup-required fallback; the write aborts unless the original file still matches exactly.',
+            status: 'done',
+          },
+        } as ChatChunk;
+
+        let councilThinking: CouncilThinking | undefined;
+        if (this.councilRoster) {
+          const proposal = [
+            `Targeted workspace repair for ${missingConvexEnvEdit.path}.`,
+            'Remove the top-level Missing VITE_CONVEX_URL throw.',
+            'Render a setup-required screen instead of inventing a Convex URL or secret.',
+            'Keep the real ConvexProviderWithClerk path unchanged when VITE_CONVEX_URL exists.',
+            'Applying aborts unless the current file still matches exactly.',
+          ].join(' ');
+          const councilGen = this.streamConveneOnce({
+            prompt: content,
+            draftText: proposal,
+            modelId: 'vai:missing-convex-env-repair',
+            turnKind: 'builder',
+            confidence: 0.98,
+            hasEvidence: true,
+            sources: [],
+            history: history.map((message) => ({ role: message.role, content: message.content })),
+            conversationId,
+          }, 'council-review', Math.min(this.councilLoopBudgetMs(), 45_000));
+          let councilStep = await councilGen.next();
+          while (!councilStep.done) {
+            yield { type: 'progress', progress: councilStep.value } as ChatChunk;
+            councilStep = await councilGen.next();
+          }
+          councilThinking = councilStep.value?.thinking;
+        }
+
+        const response = [
+          `Applying a safe missing-env repair in \`${missingConvexEnvEdit.path}\`.`,
+          '',
+          'I will stop the preview from crashing, show a setup-required screen, and leave the real Convex connection path untouched for when `VITE_CONVEX_URL` is added.',
+          '',
+          renderExactReplaceAction(missingConvexEnvEdit),
+        ].join('\n');
+        const durationMs = Date.now() - startedAt;
+        yield { type: 'text_delta', textDelta: response } as ChatChunk;
+        yield {
+          type: 'done',
+          usage: { promptTokens: 0, completionTokens: 0 },
+          durationMs,
+          thinking: {
+            ...buildDeterministicThinking('missing-convex-env-repair', content, durationMs, 0.98),
+            ...(councilThinking ? { council: councilThinking } : {}),
+          },
+        } as ChatChunk;
+
+        this.db.insert(messages).values({
+          id: ulid(),
+          conversationId,
+          role: 'assistant',
+          content: response,
+          modelId: 'vai:missing-convex-env-repair',
+          durationMs,
+          createdAt: new Date(),
+        }).run();
+
+        const updates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+        if (conv.title === 'New Chat' && content.length > 0) updates.title = this.generateTitle(content);
+        this.db.update(conversations).set(updates).where(eq(conversations.id, conversationId)).run();
+        return;
+      }
+
+      const missingClerkEnvEdit = await resolveMissingClerkEnvWorkspaceEdit({
+        workspace: this.workspacePort,
+        projectId: conv.sandboxProjectId,
+        prompt: content,
+      }).catch(() => null);
+      if (missingClerkEnvEdit) {
+        const startedAt = Date.now();
+        yield { type: 'turn_kind', turnKind: 'builder' } as ChatChunk;
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'workspace',
+            label: `Found the Clerk env crash in ${missingClerkEnvEdit.path}`,
+            detail: 'Preparing one setup-required screen for the missing public app config; the write aborts unless the original file still matches exactly.',
+            status: 'done',
+          },
+        } as ChatChunk;
+
+        let councilThinking: CouncilThinking | undefined;
+        if (this.councilRoster) {
+          const proposal = [
+            `Targeted workspace repair for ${missingClerkEnvEdit.path}.`,
+            'Remove the top-level Missing VITE_CLERK_PUBLISHABLE_KEY throw.',
+            'Render a setup-required screen listing missing Clerk and Convex public env values.',
+            'Do not invent Clerk keys, Convex deployment URLs, or secrets.',
+            'Keep the real ClerkProvider/Convex route unchanged when env exists.',
+            'Applying aborts unless the current file still matches exactly.',
+          ].join(' ');
+          const councilGen = this.streamConveneOnce({
+            prompt: content,
+            draftText: proposal,
+            modelId: 'vai:missing-clerk-env-repair',
+            turnKind: 'builder',
+            confidence: 0.98,
+            hasEvidence: true,
+            sources: [],
+            history: history.map((message) => ({ role: message.role, content: message.content })),
+            conversationId,
+          }, 'council-review', Math.min(this.councilLoopBudgetMs(), 45_000));
+          let councilStep = await councilGen.next();
+          while (!councilStep.done) {
+            yield { type: 'progress', progress: councilStep.value } as ChatChunk;
+            councilStep = await councilGen.next();
+          }
+          councilThinking = councilStep.value?.thinking;
+        }
+
+        const response = [
+          `Applying a safe missing-env repair in \`${missingClerkEnvEdit.path}\`.`,
+          '',
+          'I will stop the SSR crash, show a setup-required screen for the missing public app config, and keep the real Clerk/Convex path untouched for when the env values are added.',
+          '',
+          renderExactReplaceAction(missingClerkEnvEdit),
+        ].join('\n');
+        const durationMs = Date.now() - startedAt;
+        yield { type: 'text_delta', textDelta: response } as ChatChunk;
+        yield {
+          type: 'done',
+          usage: { promptTokens: 0, completionTokens: 0 },
+          durationMs,
+          thinking: {
+            ...buildDeterministicThinking('missing-clerk-env-repair', content, durationMs, 0.98),
+            ...(councilThinking ? { council: councilThinking } : {}),
+          },
+        } as ChatChunk;
+
+        this.db.insert(messages).values({
+          id: ulid(),
+          conversationId,
+          role: 'assistant',
+          content: response,
+          modelId: 'vai:missing-clerk-env-repair',
+          durationMs,
+          createdAt: new Date(),
+        }).run();
+
+        const updates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+        if (conv.title === 'New Chat' && content.length > 0) updates.title = this.generateTitle(content);
+        this.db.update(conversations).set(updates).where(eq(conversations.id, conversationId)).run();
+        return;
+      }
+
+      const sectionEdit = await resolveMmmHeroWorkspaceEdit({
+        workspace: this.workspacePort,
+        projectId: conv.sandboxProjectId,
+        prompt: content,
+      }).catch(() => null);
+      if (sectionEdit) {
+        const startedAt = Date.now();
+        yield { type: 'turn_kind', turnKind: 'builder' } as ChatChunk;
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'workspace',
+            label: `Found the MMM hero section in ${sectionEdit.path}`,
+            detail: 'Preparing one bounded JSX section replacement; the write aborts unless the original section still matches exactly.',
+            status: 'done',
+          },
+        } as ChatChunk;
+
+        let councilThinking: CouncilThinking | undefined;
+        if (this.councilRoster) {
+          const proposal = [
+            `Targeted workspace edit for ${sectionEdit.path}.`,
+            'Replace only the MMM hero JSX section with a stronger launch-focused hero.',
+            'Preserve wallet connection, contract address usage, active network selection, and participation logic outside the hero.',
+            'Applying aborts unless exactly one original hero section still exists.',
+          ].join(' ');
+          const councilGen = this.streamConveneOnce({
+            prompt: content,
+            draftText: proposal,
+            modelId: 'vai:workspace-section-edit',
+            turnKind: 'builder',
+            confidence: 0.97,
+            hasEvidence: true,
+            sources: [],
+            history: history.map((message) => ({ role: message.role, content: message.content })),
+            conversationId,
+          }, 'council-review', Math.min(this.councilLoopBudgetMs(), 45_000));
+          let councilStep = await councilGen.next();
+          while (!councilStep.done) {
+            yield { type: 'progress', progress: councilStep.value } as ChatChunk;
+            councilStep = await councilGen.next();
+          }
+          councilThinking = councilStep.value?.thinking;
+        }
+
+        const response = [
+          `Applying a bounded hero-section edit in \`${sectionEdit.path}\`.`,
+          '',
+          'I found the MMM hero section, kept the wallet/participation logic outside it untouched, and prepared one guarded replacement.',
+          '',
+          renderExactReplaceAction(sectionEdit),
+        ].join('\n');
+        const durationMs = Date.now() - startedAt;
+        yield { type: 'text_delta', textDelta: response } as ChatChunk;
+        yield {
+          type: 'done',
+          usage: { promptTokens: 0, completionTokens: 0 },
+          durationMs,
+          thinking: {
+            ...buildDeterministicThinking('workspace-section-edit', content, durationMs, 0.97),
+            ...(councilThinking ? { council: councilThinking } : {}),
+          },
+        } as ChatChunk;
+
+        this.db.insert(messages).values({
+          id: ulid(),
+          conversationId,
+          role: 'assistant',
+          content: response,
+          modelId: 'vai:workspace-section-edit',
+          durationMs,
+          createdAt: new Date(),
+        }).run();
+
+        const updates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+        if (conv.title === 'New Chat' && content.length > 0) updates.title = this.generateTitle(content);
+        this.db.update(conversations).set(updates).where(eq(conversations.id, conversationId)).run();
+        return;
+      }
+
+      const edit = await resolveExactWorkspaceEdit({
+        workspace: this.workspacePort,
+        projectId: conv.sandboxProjectId,
+        prompt: content,
+      }).catch(() => null);
+      if (edit) {
+        const startedAt = Date.now();
+        yield { type: 'turn_kind', turnKind: 'builder' } as ChatChunk;
+        yield {
+          type: 'progress',
+          progress: {
+            stage: 'workspace',
+            label: `Found one exact match in ${edit.path}`,
+            detail: `Replace "${edit.query}" with "${edit.replacement}"`,
+            status: 'done',
+          },
+        } as ChatChunk;
+
+        let councilThinking: CouncilThinking | undefined;
+        if (this.councilRoster) {
+          const proposal = [
+            `Targeted workspace edit for ${edit.path}.`,
+            `Replace the single exact literal "${edit.query}" with "${edit.replacement}".`,
+            'No other text or files will change. Applying aborts unless exactly one match still exists.',
+          ].join(' ');
+          const councilGen = this.streamConveneOnce({
+            prompt: content,
+            draftText: proposal,
+            modelId: 'vai:workspace-exact-edit',
+            turnKind: 'builder',
+            confidence: 0.99,
+            hasEvidence: true,
+            sources: [],
+            history: history.map((message) => ({ role: message.role, content: message.content })),
+            conversationId,
+          }, 'council-review', Math.min(this.councilLoopBudgetMs(), 45_000));
+          let councilStep = await councilGen.next();
+          while (!councilStep.done) {
+            yield { type: 'progress', progress: councilStep.value } as ChatChunk;
+            councilStep = await councilGen.next();
+          }
+          councilThinking = councilStep.value?.thinking;
+        }
+
+        const response = [
+          `Applying one exact, reversible text edit in \`${edit.path}\`.`,
+          '',
+          renderExactReplaceAction(edit),
+        ].join('\n');
+        const durationMs = Date.now() - startedAt;
+        yield { type: 'text_delta', textDelta: response } as ChatChunk;
+        yield {
+          type: 'done',
+          usage: { promptTokens: 0, completionTokens: 0 },
+          durationMs,
+          thinking: {
+            ...buildDeterministicThinking('workspace-exact-edit', content, durationMs, 0.99),
+            ...(councilThinking ? { council: councilThinking } : {}),
+          },
+        } as ChatChunk;
+
+        this.db.insert(messages).values({
+          id: ulid(),
+          conversationId,
+          role: 'assistant',
+          content: response,
+          modelId: 'vai:workspace-exact-edit',
+          durationMs,
+          createdAt: new Date(),
+        }).run();
+
+        const updates: { updatedAt: Date; title?: string } = { updatedAt: new Date() };
+        if (conv.title === 'New Chat' && content.length > 0) updates.title = this.generateTitle(content);
+        this.db.update(conversations).set(updates).where(eq(conversations.id, conversationId)).run();
+        return;
+      }
+    }
 
     // ── Image-output short-circuit ──
     // When the turn wants an IMAGE back (explicit Image mode, authoritative; else detected
@@ -3313,6 +3838,20 @@ export class ChatService {
       }
     }
 
+    // Resolve active-project edit intent before either primary or fallback
+    // dispatch. This keeps Agent mode visually stable while still allowing a
+    // small edit request to execute the builder/council pipeline.
+    const earlySandboxContext = parseActiveSandboxContext(systemPrompt);
+    const earlyEditRoute = earlySandboxContext && earlySandboxContext.files.length > 0
+      ? routeBuilderRequest({
+        input: content,
+        activeMode: 'builder',
+        hasActiveSandboxContext: true,
+        snapshotPaths: earlySandboxContext.files.map((file) => file.path),
+      })
+      : null;
+    const activeEditTurn = Boolean(earlyEditRoute?.shouldPatchActiveSandbox);
+
     const buildMessagesForModel = (modelId: string, dispatch?: { readonly fallback?: boolean }): Message[] => {
       // The builder fallback hint tells the model to ship runnable files (HTML/app). It must
       // ONLY apply when this turn is actually a build — keying it off `resolvedMode === 'agent'`
@@ -3321,17 +3860,23 @@ export class ChatService {
       // (explicit build request, or classifyAgentBuildIntent==='build'), matching isBuilderMode.
       const buildIntended =
         isExplicitBuildExecutionRequest(content)
+        || activeEditTurn
         || (resolvedMode === 'agent' && classifyAgentBuildIntent(content) === 'build');
       const isBuilderFallback =
         dispatch?.fallback === true
         && (turnKind === 'builder' || resolvedMode === 'builder' || (resolvedMode === 'agent' && buildIntended));
       const requestSystemMessages: Message[] = isBuilderFallback
-        ? [
-          ...(securityHardenDirective ? [{ role: 'system' as const, content: securityHardenDirective }] : []),
-          ...(conversationPrelude ? [{ role: 'system' as const, content: conversationPrelude }] : []),
-          ...(hasActiveSandbox ? [{ role: 'system' as const, content: ACTIVE_SANDBOX_EXECUTION_HINT }] : []),
-          { role: 'system', content: BUILDER_FALLBACK_SYSTEM_HINT },
-        ]
+        ? activeEditTurn
+          // Preserve the real file snapshots and editing rules for a targeted
+          // fallback. Replacing them with the fresh-app hint is how a one-line
+          // Next.js edit became an unrelated index.html scaffold.
+          ? [...systemMessages, { role: 'system', content: BUILDER_FALLBACK_SYSTEM_HINT }]
+          : [
+            ...(securityHardenDirective ? [{ role: 'system' as const, content: securityHardenDirective }] : []),
+            ...(conversationPrelude ? [{ role: 'system' as const, content: conversationPrelude }] : []),
+            ...(hasActiveSandbox ? [{ role: 'system' as const, content: ACTIVE_SANDBOX_EXECUTION_HINT }] : []),
+            { role: 'system', content: BUILDER_FALLBACK_SYSTEM_HINT },
+          ]
         : [...systemMessages];
 
       // Knowledge augmentation for external models:
@@ -3585,7 +4130,15 @@ export class ChatService {
       // dispatch (curated facts, greetings, safety) already returned above, so
       // this only redirects turns the substrate would have answered from its
       // primer store — the documented confident-but-off-topic failure class.
-      const primaryFlip = shouldFlipPrimaryToGenerative({
+      const preliminaryFactualQuestionTurn = looksLikeFactualQuestion(content);
+      const preliminaryBuilderMode = resolvedMode === 'agent'
+        ? classifyAgentBuildIntent(content) === 'build' || activeEditTurn
+        : resolvedMode === 'builder' && !preliminaryFactualQuestionTurn;
+      const primaryFlip = shouldBypassPreliminaryAnswerDraft(
+        preliminaryBuilderMode,
+        content,
+        activeEditTurn,
+      ) || shouldFlipPrimaryToGenerative({
         turnKind,
         mode: resolvedMode,
         hasFallbackModel: true,
@@ -3720,12 +4273,26 @@ export class ChatService {
       // confirm-banner handles the "did you mean build?" case for ambiguous turns. Builder mode is
       // an explicit user choice, so it still builds for anything that isn't a plain factual lookup.
       const agentBuildIntent = classifyAgentBuildIntent(content);
+      // Active-project edit detection runs EARLY: it both lets agent mode handle
+      // edit turns natively (no visible mode flip) and disqualifies off-project
+      // template output below.
       const isBuilderMode = resolvedMode === 'agent'
-        ? agentBuildIntent === 'build'
+        ? agentBuildIntent === 'build' || activeEditTurn
         : resolvedMode === 'builder' && !factualQuestionTurn;
-      const buildExecutionRequired = isBuilderMode && isExplicitBuildExecutionRequest(content);
+      const buildExecutionRequired = requiresBuildExecution(isBuilderMode, content, activeEditTurn);
       const builderFiles = isBuilderMode && hasBuilderFileBlocks(bufferedText);
-      const builderSatisfies = builderFiles
+      // Edit turns on a real attached project: the deterministic engine's template
+      // arm can emit a confident generic scaffold (index.html / src/App.tsx) that
+      // has nothing to do with the project. Any primary artifact whose paths are
+      // not part of the attached project is OFF-PROJECT and must never ship — the
+      // turn falls through to the council edit arm instead. (Live failure: "change
+      // the Participate text" wrote a fresh index.html into a Next.js app.)
+      const primaryArtifactOnProject = !builderFiles || !activeEditTurn
+        ? true
+        : [...extractTitledFiles(bufferedText).keys()].every(
+          (path) => earlySandboxContext!.files.some((file) => file.path === path),
+        );
+      const builderSatisfies = builderFiles && primaryArtifactOnProject
         && evaluateBuilderRequestSatisfaction(content, bufferedText).satisfied;
       const primaryHadEvidence = bufferedSourceChunks.some(
         (chunk) => Array.isArray(chunk.sources) && chunk.sources.length > 0,
@@ -3799,6 +4366,35 @@ export class ChatService {
       let councilAuditMeta: AuditMeta | undefined;
       let councilEscalateToGenerative = false;
       if (!primaryFlip && !builderFiles && !codeReviewRejected && bufferedText.trim()) {
+        // First-draft race: Vai's quick take is already on screen (vai-draft step);
+        // members field their own candidates and everyone votes. A winning member
+        // draft REPLACES the base draft here, then goes through the normal council
+        // review below — so quality gates and the fact-quarantine still apply to it.
+        // Off with VAI_DRAFT_RACE=0; skipped for pure conversational turns.
+        if (process.env.VAI_DRAFT_RACE !== '0' && this.councilRoster
+            && !isPureConversationalTurn(content)) {
+          const raceGen = this.runDraftRaceGen({
+            prompt: content,
+            draftText: bufferedText,
+            modelId: bufferedModelId,
+            turnKind,
+            hasEvidence: primaryHadEvidence,
+            sources: bufferedSourceChunks.flatMap((chunk) => chunk.sources ?? []),
+          });
+          let raceStep = await raceGen.next();
+          while (!raceStep.done) {
+            yield { type: 'progress', progress: raceStep.value } as ChatChunk;
+            raceStep = await raceGen.next();
+          }
+          const race = raceStep.value;
+          if (race && race.winnerId !== VAI_AUTHOR_ID && race.text.trim()) {
+            bufferedText = race.text;
+            bufferedModelId = `council:${race.winnerId}`;
+            reviewReplacedPrimary = true;
+            // Clear the stale in-review draft block so the UI shows the winning draft.
+            if (STREAM_DRAFTS && draftStarted) yield draftChunk('reset', bufferedText);
+          }
+        }
         const councilDraft = {
           prompt: content,
           draftText: bufferedText,
@@ -4119,6 +4715,9 @@ export class ChatService {
         // arm below; the council must never sink the turn.
         let councilResult: Awaited<ReturnType<typeof collectFallback>> | null = null;
         let councilEditUsed = false;
+        let councilKnownUnsafeReason: string | null = null;
+        let councilEditRejected = false;
+        let terminalCouncilEditRefusal = false;
         console.log(`[builder-arm] isBuilderMode=${isBuilderMode} mode=${resolvedMode} turnKind=${turnKind} councilFlag=${process.env.VAI_COUNCIL_CODEGEN !== '0'} brief=${JSON.stringify(content.slice(0, 60))}`);
         if (isBuilderMode && process.env.VAI_COUNCIL_CODEGEN !== '0' && buildExecutionRequired && !needsLiveExternalEvidence(content, webConclusionContext)) {
           const councilMembers = this.builderCouncilMembers();
@@ -4127,17 +4726,75 @@ export class ChatService {
           // PATCH that project. Without this, "make my background more fancy"
           // becomes a brand-new "Fancy Background App" (live failure).
           let councilEdit: CouncilEditContext | undefined;
-          const sandboxContext = parseActiveSandboxContext(systemPrompt);
-          if (sandboxContext && sandboxContext.files.length > 0) {
-            const builderRoute = routeBuilderRequest({
-              input: content,
-              activeMode: 'builder',
-              hasActiveSandboxContext: true,
-              snapshotPaths: sandboxContext.files.map((file) => file.path),
-            });
-            if (builderRoute.shouldPatchActiveSandbox) councilEdit = sandboxContext;
+          // BEST PATH — resolve the DESIGNATED folder server-side: real project
+          // name, real files read from disk at turn time, named-file dominance.
+          // The prompt-parse below survives only as a fallback for clients that
+          // attach snapshots without a bound sandboxProjectId.
+          let workspaceResolved = false;
+          if (conv.sandboxProjectId && this.workspacePort) {
+            try {
+              const resolved = await buildWorkspaceEditContext({
+                workspace: this.workspacePort,
+                projectId: conv.sandboxProjectId,
+                userPrompt: content,
+              });
+              if (resolved) {
+                const builderRoute = routeBuilderRequest({
+                  input: content,
+                  activeMode: 'builder',
+                  hasActiveSandboxContext: true,
+                  snapshotPaths: resolved.files.map((file) => file.path),
+                });
+                if (builderRoute.shouldPatchActiveSandbox) {
+                  councilEdit = resolved;
+                  workspaceResolved = true;
+                  const editableFiles = resolved.files.filter((file) => !file.readonly);
+                  const referenceFiles = resolved.files.filter((file) => file.readonly);
+                  yield {
+                    type: 'progress',
+                    progress: {
+                      stage: 'workspace',
+                      label: `Read the relevant files in ${resolved.projectName}`,
+                      detail: [
+                        `${resolved.files.length} files`,
+                        `${editableFiles.length} editable`,
+                        `${referenceFiles.length} read-only reference${referenceFiles.length === 1 ? '' : 's'}`,
+                        editableFiles.length > 0 ? `Change: ${editableFiles.map((file) => file.path).join(', ')}` : '',
+                      ].filter(Boolean).join(' · '),
+                      status: 'done',
+                    },
+                  } as ChatChunk;
+                }
+              }
+            } catch { /* workspace resolution must never sink the turn */ }
           }
-          if (councilMembers.length > 0) {
+          if (!workspaceResolved) {
+            const sandboxContext = parseActiveSandboxContext(systemPrompt);
+            if (sandboxContext && sandboxContext.files.length > 0) {
+              const builderRoute = routeBuilderRequest({
+                input: content,
+                activeMode: 'builder',
+                hasActiveSandboxContext: true,
+                snapshotPaths: sandboxContext.files.map((file) => file.path),
+              });
+              if (builderRoute.shouldPatchActiveSandbox) councilEdit = sandboxContext;
+            }
+          }
+          const lostBoundWorkspace = shouldBlockFreshBuildFallback(conv.workspaceRoot, Boolean(councilEdit));
+          if (lostBoundWorkspace) {
+            councilKnownUnsafeReason = `the attached project folder could not be read at ${conv.workspaceRoot}; reconnect the folder before retrying`;
+            councilEditRejected = true;
+            yield {
+              type: 'progress',
+              progress: {
+                stage: 'workspace-error',
+                label: 'Stopped — the attached project folder is unavailable',
+                detail: conv.workspaceRoot,
+                status: 'done',
+              },
+            } as ChatChunk;
+          }
+          if (councilMembers.length > 0 && !lostBoundWorkspace) {
             const councilStartedAt = Date.now();
             console.log(`[council] start members=${councilMembers.map((m) => m.id).join(',')} edit=${Boolean(councilEdit)} brief=${JSON.stringify(content.slice(0, 80))}`);
             try {
@@ -4149,8 +4806,12 @@ export class ChatService {
                   console.log(`[council] ${event.stage}/${event.status}: ${event.label}${event.detail ? ` — ${event.detail.slice(0, 140)}` : ''}`);
                 } else {
                   console.log(`[council] result: ${event.result ? `shipped (${event.result.memberIds.join(',')}, repairs=${event.result.repairsUsed})` : 'null'}`);
+                  if (!event.result && councilEdit) councilEditRejected = true;
                 }
                 if (event.type === 'stage') {
+                  if (event.stage === 'validate' && /Edit (?:refused|withheld)/i.test(event.label)) {
+                    councilKnownUnsafeReason = event.detail || event.label;
+                  }
                   const stageKey = `council-${event.stage}`;
                   if (!councilStageStartedAt.has(stageKey)) councilStageStartedAt.set(stageKey, Date.now());
                   const stageDurationMs = event.status === 'done'
@@ -4195,6 +4856,31 @@ export class ChatService {
               } as ChatChunk;
             }
           }
+        }
+
+        // A reviewer-proven unsafe edit is a quality refusal, not a reason to
+        // hand the same task to an unreviewed one-shot fallback. Preserve the
+        // user's files and say exactly which blocker remained.
+        if (!councilResult && (councilKnownUnsafeReason || councilEditRejected)) {
+          terminalCouncilEditRefusal = true;
+          const reason = councilKnownUnsafeReason ?? 'the proposed project edit did not clear Council validation';
+          const compactReason = reason
+            .replace(/\s+/g, ' ')
+            .split(/\s*\|\s*/)
+            .filter(Boolean)
+            .slice(0, 2)
+            .join(' · ')
+            .slice(0, 280);
+          const text = `No project changes were applied. Vai withheld this edit because validation still failed: ${compactReason}${reason.length > compactReason.length ? '…' : ''} Open the work journal for the failed checks.`;
+          councilResult = {
+            chunks: [{ type: 'done', usage: { promptTokens: 0, completionTokens: 0 }, durationMs: 0 } as ChatChunk],
+            sourceChunks: [],
+            text,
+            durationMs: 0,
+            usage: { promptTokens: 0, completionTokens: 0 },
+          };
+          councilEditUsed = true;
+          responseModelId = 'vai:council-quality-gate';
         }
 
         const usedCouncilArtifact = councilResult !== null;
@@ -4269,10 +4955,21 @@ export class ChatService {
           const oneShotFiles = extractTitledFiles(fbText);
           const oneShotApp = oneShotFiles.get('src/App.tsx') ?? null;
           const gateErrors: string[] = [];
-          if (oneShotApp) {
+          // Edit turns may ONLY touch files that exist in the attached project.
+          // A generic scaffold "answer" to a targeted edit is junk regardless of
+          // how well-styled it is — refusing keeps the user's app untouched.
+          if (activeEditTurn && earlySandboxContext) {
+            const offProject = [...oneShotFiles.keys()].filter(
+              (path) => !earlySandboxContext.files.some((file) => file.path === path),
+            );
+            if (offProject.length > 0) {
+              gateErrors.push(`edit turn produced off-project files (${offProject.slice(0, 3).join(', ')}) instead of patching the attached app`);
+            }
+          }
+          if (gateErrors.length === 0 && oneShotApp) {
             const report = await validateGeneratedApp({ appTsx: oneShotApp, stylesCss: oneShotFiles.get('src/styles.css') ?? null });
             gateErrors.push(...report.errors);
-          } else {
+          } else if (gateErrors.length === 0) {
             const html = oneShotFiles.get('index.html') ?? '';
             if (!html) {
               gateErrors.push('no recognizable app artifact (src/App.tsx or index.html)');
@@ -4378,7 +5075,12 @@ export class ChatService {
         let fallbackCouncilAuditMeta: AuditMeta | undefined;
         let fallbackCouncilReviewedText: string | undefined;
         const fbHasFileBlocksForCouncil = isBuilderMode && hasBuilderFileBlocks(fbText);
-        if (!fbHasFileBlocksForCouncil && fbText.trim() && !councilEscalateToGenerative) {
+        if (shouldRunFallbackCouncilReview({
+          hasBuilderFileBlocks: fbHasFileBlocksForCouncil,
+          hasText: Boolean(fbText.trim()),
+          councilEscalateToGenerative,
+          terminalCouncilEditRefusal,
+        })) {
           const fbCouncilHasEvidence = fallbackResult.sourceChunks.some(
             (chunk) => Array.isArray(chunk.sources) && chunk.sources.length > 0,
           );
@@ -4440,7 +5142,7 @@ export class ChatService {
         const fbHasEvidence = fallbackResult.sourceChunks.some(
           (chunk) => Array.isArray(chunk.sources) && chunk.sources.length > 0,
         );
-        if (!fbBuilderFiles && this.shouldReviewDraft(content, fbText)) {
+        if (!terminalCouncilEditRefusal && !fbBuilderFiles && this.shouldReviewDraft(content, fbText)) {
           yield {
             type: 'progress',
             progress: {
@@ -4507,7 +5209,9 @@ export class ChatService {
               // Council artifacts pass their own compile + review gates; the
               // anchor coverage number is reported for the record, not as a
               // verdict (a "Swipe Match" tinder clone legitimately scores 0).
-              ? `council-${councilEditUsed ? 'edit' : 'build'}-shipped`
+              ? terminalCouncilEditRefusal
+                ? 'council-edit-withheld'
+                : `council-${councilEditUsed ? 'edit' : 'build'}-shipped`
               : `${builderRepairAttempted ? 'builder-retry' : 'builder'}-${fbBuilderSatisfaction.satisfied ? 'satisfied' : 'unsatisfied'}`
             : [
               answerQualityRepairAttempted
@@ -4906,76 +5610,4 @@ export class ChatService {
    */
   private buildComparisonConceptExplainer(): ((concept: string) => { summary: string } | null) | undefined {
     const retrieve = this.retrieveKnowledge;
-    if (!retrieve) return undefined;
-    return (concept: string) => {
-      const c = (concept || '').trim();
-      if (c.length < 2) return null;
-      const top = retrieve(c, 1)?.[0];
-      if (!top || top.text.length < 40) return null;
-      const salient = c.toLowerCase().split(/\s+/).find((w) => w.length >= 3);
-      if (salient && !top.text.toLowerCase().includes(salient)) return null;
-      const summary = top.text.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ').trim();
-      return summary.length > 0 ? { summary } : null;
-    };
-  }
-
-  private generateTitle(firstMessage: string): string {
-    // Clean up and truncate the first user message into a chat title
-    const cleaned = firstMessage
-      .replace(/\n+/g, ' ')      // flatten newlines
-      .replace(/\s+/g, ' ')       // collapse whitespace
-      .trim();
-
-    if (cleaned.length <= 40) return cleaned;
-
-    // Cut at word boundary
-    const truncated = cleaned.slice(0, 40);
-    const lastSpace = truncated.lastIndexOf(' ');
-    return (lastSpace > 20 ? truncated.slice(0, lastSpace) : truncated) + '...';
-  }
-
-  deleteConversation(conversationId: string): void {
-    this.db.delete(messages)
-      .where(eq(messages.conversationId, conversationId))
-      .run();
-    this.db.delete(conversations)
-      .where(eq(conversations.id, conversationId))
-      .run();
-  }
-
-  /**
-   * For legacy conversations created before auth (ownerUserId null, e.g. under dev bypass),
-   * assign ownership to the now-authenticated user so they can update it.
-   * Called on first write access after sign-in.
-   */
-  assignOwnerIfLegacy(conversationId: string, ownerUserId: string): void {
-    const conv = this.getConversation(conversationId);
-    if (conv && !conv.ownerUserId) {
-      this.db.update(conversations)
-        .set({ ownerUserId, updatedAt: new Date() })
-        .where(eq(conversations.id, conversationId))
-        .run();
-    }
-  }
-}
-
-function reviewLabelForDraft(prompt: string, draft: string): string {
-  return shouldPeerReviewCode(prompt, draft)
-    ? 'Asking peers to review the code draft'
-    : 'Asking local friends to check the draft';
-}
-
-function formatFriendReviewDetail(review: {
-  reason: string;
-  reviewers: readonly string[];
-  concerns: readonly string[];
-  suggestions: readonly string[];
-}): string {
-  const parts = [
-    review.reason,
-    review.reviewers.length > 0 ? `Reviewed by ${review.reviewers.join(', ')}` : '',
-    review.concerns.length > 0 ? `Concerns: ${review.concerns.slice(0, 3).join('; ')}` : '',
-    review.suggestions.length > 0 ? `Suggestions: ${review.suggestions.slice(0, 3).join('; ')}` : '',
-  ].filter(Boolean);
-  return parts.join(' · ') || 'Peer review completed';
-}
+    if (

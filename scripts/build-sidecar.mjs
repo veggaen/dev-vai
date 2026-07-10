@@ -13,7 +13,7 @@
  */
 
 import { execSync } from 'child_process';
-import { cpSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'fs';
+import { cpSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'fs';
 import { createRequire } from 'module';
 import { dirname, join, resolve } from 'path';
 
@@ -28,6 +28,64 @@ const require = createRequire(import.meta.url);
 const BETTER_SQLITE3_DIR = resolve(require.resolve('better-sqlite3/package.json'), '..');
 const BINDINGS_DIR = resolve(require.resolve('bindings/package.json'), '..');
 const FILE_URI_TO_PATH_DIR = resolve(require.resolve('file-uri-to-path/package.json'), '..');
+
+function resolvePackageRoot(reqFrom, name) {
+  try {
+    return dirname(reqFrom.resolve(`${name}/package.json`));
+  } catch {
+    // Some packages hide package.json behind "exports".
+  }
+
+  let entryPath;
+  try {
+    entryPath = reqFrom.resolve(name);
+  } catch (error) {
+    throw new Error(`could not resolve "${name}": ${error.message}`);
+  }
+
+  let dir = dirname(entryPath);
+  while (true) {
+    if (existsSync(join(dir, 'package.json'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  throw new Error(`could not find package root for "${name}" from ${entryPath}`);
+}
+
+function resolvePackageRootFromPnpmStore(name) {
+  const pnpmDir = join(ROOT, 'node_modules', '.pnpm');
+  if (!existsSync(pnpmDir)) return null;
+
+  const encodedName = name.startsWith('@') ? name.replace('/', '+') : name;
+  const packagePath = join(...name.split('/'));
+  const matches = readdirSync(pnpmDir)
+    .filter((entry) => entry === encodedName || entry.startsWith(`${encodedName}@`))
+    .sort()
+    .reverse();
+
+  for (const entry of matches) {
+    const pkgDir = join(pnpmDir, entry, 'node_modules', packagePath);
+    if (existsSync(join(pkgDir, 'package.json'))) return pkgDir;
+  }
+
+  return null;
+}
+
+function resolvePackageRootWithWorkspaceFallback(reqFrom, name) {
+  try {
+    return resolvePackageRoot(reqFrom, name);
+  } catch (primaryError) {
+    try {
+      return resolvePackageRoot(createRequire(join(ROOT, 'noop.js')), name);
+    } catch {
+      const pnpmStoreRoot = resolvePackageRootFromPnpmStore(name);
+      if (pnpmStoreRoot) return pnpmStoreRoot;
+      throw primaryError;
+    }
+  }
+}
 
 /**
  * Copy a package and its full runtime dependency closure into `destNodeModules`
@@ -50,7 +108,7 @@ function copyPackageClosure(rootPkg, fromDir, destNodeModules) {
     let pkgJsonPath;
     try {
       const reqFrom = createRequire(join(parentDir, 'noop.js'));
-      pkgJsonPath = reqFrom.resolve(`${name}/package.json`);
+      pkgJsonPath = join(resolvePackageRootWithWorkspaceFallback(reqFrom, name), 'package.json');
     } catch {
       // Some packages restrict "exports" and hide package.json; fall back to
       // resolving the package entry and walking up to its package root.
@@ -67,7 +125,9 @@ function copyPackageClosure(rootPkg, fromDir, destNodeModules) {
 
     const pkgDir = dirname(pkgJsonPath);
     copied.add(name);
-    cpSync(pkgDir, join(destNodeModules, name), { recursive: true, force: true, dereference: true });
+    const destDir = join(destNodeModules, name);
+    mkdirSync(dirname(destDir), { recursive: true });
+    cpSync(pkgDir, destDir, { recursive: true, force: true, dereference: true });
 
     const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
     const deps = { ...(pkg.dependencies || {}), ...(pkg.optionalDependencies || {}) };
@@ -112,5 +172,22 @@ const coreRequire = createRequire(join(ROOT, 'packages/core/noop.js'));
 const JSDOM_DIR = resolve(coreRequire.resolve('jsdom/package.json'), '..');
 const jsdomClosure = copyPackageClosure('jsdom', resolve(JSDOM_DIR, '..'), RUNTIME_NODE_MODULES_DIR);
 console.log(`[sidecar]   copied ${jsdomClosure.size} packages for jsdom`);
+
+console.log('[sidecar] Copying @huggingface/transformers dependency closure (external — onnx runtime)...');
+const runtimeRequire = createRequire(join(ROOT, 'packages/runtime/noop.js'));
+const XENOVA_DIR = resolvePackageRoot(runtimeRequire, '@huggingface/transformers');
+const xenovaClosure = copyPackageClosure('@huggingface/transformers', resolve(XENOVA_DIR, '..', '..'), RUNTIME_NODE_MODULES_DIR);
+console.log(`[sidecar]   copied ${xenovaClosure.size} packages for @huggingface/transformers`);
+
+// sharp ships native binaries via postinstall — copying the package alone is not enough.
+const packagedSharp = join(RUNTIME_NODE_MODULES_DIR, 'sharp');
+if (existsSync(join(packagedSharp, 'install', 'check.js'))) {
+  console.log('[sidecar] Verifying sharp native binaries for packaged Whisper...');
+  try {
+    execSync('node install/check.js', { cwd: packagedSharp, stdio: 'inherit' });
+  } catch (error) {
+    console.warn('[sidecar]   ! sharp native verification failed — built-in Whisper may be unavailable:', error);
+  }
+}
 
 console.log(`[sidecar] Done! Sidecar built at: ${OUTPUT}`);

@@ -85,33 +85,70 @@ export function buildCoderMessages(brief: string, spec: CouncilAppSpec, blueprin
 /** Render current sandbox files for the edit prompt. */
 function renderEditFiles(edit: CouncilEditContext): string {
   return edit.files.map((file) => [
-    `FILE: ${file.path}`,
+    `${file.readonly ? 'READ-ONLY REFERENCE' : 'EDITABLE FILE'}: ${file.path}`,
     '```',
     file.content,
     '```',
   ].join('\n')).join('\n\n');
 }
 
+function hardhat3EditRules(brief: string): string[] {
+  if (!/\bhardhat\s+3(?:\b|\.)/i.test(brief)) return [];
+  return [
+    '- HARDHAT 3: the isolated tooling package is ESM ("type": "module"). Pin every explicitly requested package version exactly.',
+    '- HARDHAT 3 CONFIG: use defineConfig(), register @nomicfoundation/hardhat-toolbox-viem in plugins[], and mark localhost as type "http". Do not use HardhatUserConfig, hardhat/plugins, or a top-level viem block.',
+    '- IGNITION: use buildModule from @nomicfoundation/hardhat-ignition/modules and m.contract(name, constructorArgs). Never use ambient hre.ethers or a class extending Module.',
+    '- TESTS: use node:test plus `const { viem } = await network.connect()`. Exercise Solidity receive() with walletClient.sendTransaction({ to, value }); receive is not a callable contract method.',
+    '- IMPORT-ONLY SOLIDITY ENTRY: when asked to import the existing contract without copying logic, emit only pragma + import. Do not declare an empty derived contract with an unsatisfied base constructor.',
+    '- COMMANDS: Hardhat 3 compiles with `hardhat build`; local Ignition deployment uses `hardhat ignition deploy <module> --network localhost`.',
+  ];
+}
+
 export function buildEditMessages(brief: string, edit: CouncilEditContext): readonly CouncilCodegenMessage[] {
+  const allowNewFiles = edit.external
+    && /\b(?:add|create|set\s*up|setup|scaffold|introduce|generate|establish|configure)\b[\s\S]{0,180}\b(?:hardhat|local\s+chain|deployment|tooling|config(?:uration)?|tests?|scripts?|contracts?|files?)\b/i.test(brief);
+  const system = edit.external
+    ? [
+      `You are the coder on a small product council. The user opened their REAL project folder ("${edit.projectName}") and is asking for a change to it. This is professional maintenance work on existing code — an edit, not a new app.`,
+      '',
+      'Hard rules:',
+      '- Apply EXACTLY the requested change. Preserve everything else: same imports, same dependencies, same framework, same formatting conventions, same comments.',
+      '- The project has its own installed dependencies — keep using them. Do NOT rewrite the file to remove libraries, and do NOT introduce new external packages unless the request demands it.',
+      '- Re-emit ONLY the files that must change, each as a COMPLETE file (no diffs, no "rest unchanged" comments) in its own fenced block with title="<path>", e.g.:',
+      '',
+      '```tsx title="components/Navbar.tsx"',
+      '...complete updated file...',
+      '```',
+      '',
+      allowNewFiles
+        ? '- This request explicitly requires setup files. You may add only the minimal new source/config/test files needed. Use safe relative paths; never emit .env files, secrets, lockfiles, node_modules, generated artifacts, or binaries. Existing files may only be changed if marked EDITABLE FILE below.'
+        : '- You may only touch the project files shown below. If the request cannot be satisfied with those files, output the single line CANNOT-EDIT: <reason> instead of guessing.',
+      '- Files marked READ-ONLY REFERENCE may inform imports, APIs, tests, and parameters, but must never be emitted or modified.',
+      ...hardhat3EditRules(brief),
+      '- The emitted file must be syntactically complete and valid — never truncate.',
+      '- PRESERVE FEATURES: never remove functions, props, exports, handlers, or UI elements the request did not ask you to remove. If something looks broken or unused, improve it — removal is a last resort the user must ask for.',
+    ]
+    : [
+      `You are the coder on a small product council. The user has a RUNNING app ("${edit.projectName}") and is asking for a change to it. Apply the requested change to the CURRENT files — this is an edit, not a new app.`,
+      '',
+      'Hard rules:',
+      `- Keep the app's identity: same product, same name, same purpose. Never rename it or replace it with a different app, and never turn the request's words into a new app title.`,
+      '- Re-emit ONLY the files that must change, each as a COMPLETE file (no diffs, no "rest unchanged" comments) in its own fenced block with title="<path>", e.g.:',
+      '',
+      '```tsx title="src/App.tsx"',
+      '...complete updated file...',
+      '```',
+      '',
+      '- You may only touch the project source files shown below (typically src/App.tsx and src/styles.css). Do not emit package.json, index.html, main.tsx, or tsconfig.json.',
+      "- Import ONLY from 'react'. TypeScript strict mode must pass.",
+      '- Plain CSS only; style every class you use; keep the existing design language unless the request says otherwise; interactive elements keep :hover/:focus states.',
+      '- If the change is purely visual (colors, background, typography), prefer changing ONLY src/styles.css.',
+      '- PRESERVE FEATURES: never remove existing functionality, sections, or interactions the request did not ask you to remove — improve them instead.',
+    ];
   return [
     {
       role: 'system',
-      content: [
-        `You are the coder on a small product council. The user has a RUNNING app ("${edit.projectName}") and is asking for a change to it. Apply the requested change to the CURRENT files — this is an edit, not a new app.`,
-        '',
-        'Hard rules:',
-        `- Keep the app's identity: same product, same name, same purpose. Never rename it or replace it with a different app, and never turn the request's words into a new app title.`,
-        '- Re-emit ONLY the files that must change, each as a COMPLETE file (no diffs, no "rest unchanged" comments) in its own fenced block with title="<path>", e.g.:',
-        '',
-        '```tsx title="src/App.tsx"',
-        '...complete updated file...',
-        '```',
-        '',
-        '- You may only touch the project source files shown below (typically src/App.tsx and src/styles.css). Do not emit package.json, index.html, main.tsx, or tsconfig.json.',
-        "- Import ONLY from 'react'. TypeScript strict mode must pass.",
-        '- Plain CSS only; style every class you use; keep the existing design language unless the request says otherwise; interactive elements keep :hover/:focus states.',
-        '- If the change is purely visual (colors, background, typography), prefer changing ONLY src/styles.css.',
-      ].join('\n'),
+      content: system.join('\n'),
     },
     {
       role: 'user',
@@ -241,59 +278,4 @@ export function buildStylistMessages(
     {
       role: 'system',
       content: [
-        `You are the stylist on a small product council. src/App.tsx is FINAL (shown below for structure). Write the complete stylesheet for it.`,
-        'Output EXACTLY one fenced code block and nothing else:',
-        '',
-        '```css title="src/styles.css"',
-        '...the complete stylesheet...',
-        '```',
-        '',
-        'Hard rules:',
-        '- Write a CSS rule for EVERY class in the CLASS LIST below — no class may be left unstyled, and do not invent rules for classes that are not in the list (plus body/element selectors as needed).',
-        '- Plain CSS only: no Tailwind, no @import, no external URLs (offline sandbox).',
-        '- A deliberate visual direction: styled page background, a set font-family, cohesive palette, consistent spacing, rounded corners and shadows where they fit.',
-        '- :hover and :focus-visible states on every interactive class (buttons, cards, tabs, chips).',
-        '- Responsive: @media for narrow screens.',
-        ...(blueprint ? [`Visual identity to reproduce: ${blueprint.visual}`] : []),
-      ].join('\n'),
-    },
-    {
-      role: 'user',
-      content: [
-        `App: ${spec.title} — ${spec.summary}`,
-        '',
-        `CLASS LIST (style every one): ${classNames.join(', ')}`,
-        '',
-        'src/App.tsx (final, for structure):',
-        structure,
-      ].join('\n'),
-    },
-  ];
-}
-
-export function buildStylistRepairMessages(
-  spec: CouncilAppSpec,
-  classNames: readonly string[],
-  previousCss: string,
-  issues: readonly string[],
-  blueprint?: BrandBlueprint | null,
-): readonly CouncilCodegenMessage[] {
-  return [
-    buildStylistMessages(spec, classNames, '', blueprint)[0],
-    {
-      role: 'user',
-      content: [
-        `App: ${spec.title}`,
-        `CLASS LIST (style every one): ${classNames.join(', ')}`,
-        '',
-        'Your previous stylesheet had blocking problems. Fix every issue and re-emit the COMPLETE stylesheet:',
-        ...issues.map((issue, i) => `${i + 1}. ${issue}`),
-        '',
-        'Previous src/styles.css:',
-        '```css',
-        previousCss,
-        '```',
-      ].join('\n'),
-    },
-  ];
-}
+        `You are the stylist on a small product council. src/App.tsx is FINAL (shown below for structure). Wri

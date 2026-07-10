@@ -49,6 +49,14 @@ export const chatWebSocketInboundSchema = z
      * Maps to council budget + how many passes are allowed in the chat service.
      */
     processDepth: z.enum(['quick', 'balanced', 'deep']).optional(),
+    /**
+     * Explicit per-turn council seat selection (composer roundtable picker).
+     * Omitted / empty → the full configured roster ("full roundtable", the default).
+     * Present → only the named members are seated for THIS turn; an explicit pick
+     * bypasses the balanced-depth delegation cap because the user chose the tradeoff.
+     * Ids come from GET /api/council/config `activeMembers[].id`.
+     */
+    councilModelIds: z.array(z.string().min(1)).max(24).optional(),
     // Timestamped evidence supplied by the VS Code companion. The runtime only
     // incorporates matching fields while this capture is fresh.
     editorContext: companionContextEvidenceSchema.refine(
@@ -57,6 +65,10 @@ export const chatWebSocketInboundSchema = z
         || context.terminalOutput !== undefined,
       'At least one captured editor field is required',
     ).optional(),
+    /** Absolute path to an attached local workspace folder (desktop). */
+    workspaceRoot: z.string().min(1).optional(),
+    /** When true (default), file extracts become diff proposals instead of silent writes. */
+    requireDiffApproval: z.boolean().optional(),
   })
   .merge(promptRewriteOverrideSchema)
   .strict();
@@ -145,6 +157,46 @@ const toolRunProgressSchema = z.object({
   output: z.string().optional(),
 }).strict();
 
+/**
+ * One candidate answer in the first-draft race. Vai and every council member
+ * each produce a draft; `provisional: true` marks Vai's quick take, which the
+ * UI may show to the user immediately while the race continues.
+ */
+const draftCandidateSchema = z.object({
+  authorId: z.string().min(1),
+  authorName: z.string().min(1),
+  modelId: z.string().optional(),
+  /** Draft text (capped upstream). Empty while `pending`. */
+  text: z.string(),
+  provisional: z.boolean().optional(),
+  pending: z.boolean().optional(),
+  failed: z.boolean().optional(),
+  durationMs: z.number().nonnegative().optional(),
+}).strict();
+
+/** One member's scoring pass over all candidates (authorId → 0-100). */
+const draftVoteSchema = z.object({
+  voterId: z.string().min(1),
+  voterName: z.string().min(1),
+  scores: z.record(z.string(), z.number().min(0).max(100)),
+  note: z.string().optional(),
+  pending: z.boolean().optional(),
+  failed: z.boolean().optional(),
+}).strict();
+
+/**
+ * Live state of the first-draft race: everyone drafts, everyone votes,
+ * highest total wins (ties break toward Vai). The winner becomes the base
+ * draft for the existing approval-gate rounds.
+ */
+const draftRaceProgressSchema = z.object({
+  status: z.enum(['drafting', 'voting', 'decided']),
+  candidates: z.array(draftCandidateSchema),
+  votes: z.array(draftVoteSchema).default([]),
+  winnerId: z.string().optional(),
+  tieBrokenToVai: z.boolean().optional(),
+}).strict();
+
 export const chatProgressStepSchema = z.object({
   stage: z.string().min(1),
   label: z.string().min(1),
@@ -159,9 +211,14 @@ export const chatProgressStepSchema = z.object({
   processLog: z.array(processLogEntrySchema).optional(),
   /** Agent tool batch — each tool expands to input/output in ProcessTree. */
   toolRuns: z.array(toolRunProgressSchema).optional(),
+  /** First-draft race snapshot (stage `first-drafts` / `draft-vote`). */
+  draftRace: draftRaceProgressSchema.optional(),
 }).strict();
 
 export type AdvisorQualityContract = z.infer<typeof advisorQualityContractSchema>;
 export type AdvisorRouteGuidance = z.infer<typeof advisorRouteGuidanceSchema>;
 export type AdvisorTrace = z.infer<typeof advisorTraceSchema>;
 export type ChatProgressStep = z.infer<typeof chatProgressStepSchema>;
+export type DraftCandidate = z.infer<typeof draftCandidateSchema>;
+export type DraftVote = z.infer<typeof draftVoteSchema>;
+export type DraftRaceProgress = z.infer<typeof draftRaceProgressSchema>;

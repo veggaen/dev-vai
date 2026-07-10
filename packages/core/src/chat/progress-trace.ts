@@ -24,19 +24,31 @@ export function accumulateProgressStep(
   existing: readonly ChatProgressStep[],
   incoming: ChatProgressStep,
 ): ChatProgressStep[] {
-  const priorIndex = existing.findIndex((step) => step.stage === incoming.stage);
+  let priorIndex = -1;
+  for (let index = existing.length - 1; index >= 0; index -= 1) {
+    if (existing[index]?.stage === incoming.stage) {
+      priorIndex = index;
+      break;
+    }
+  }
   if (priorIndex !== -1) {
-    const next = [...existing];
     const prior = existing[priorIndex];
-    next[priorIndex] = {
-      ...prior,
-      ...incoming,
-      advisor: incoming.advisor ?? prior.advisor,
-      councilMembers: incoming.councilMembers?.length ? incoming.councilMembers : prior.councilMembers,
-      processLog: incoming.processLog?.length ? incoming.processLog : prior.processLog,
-      toolRuns: incoming.toolRuns?.length ? incoming.toolRuns : prior.toolRuns,
-    };
-    return next;
+    const identifiesOneLogicalStep = prior?.status === 'running'
+      || prior?.label === incoming.label
+      || /(?:^|-)round-?\d+(?:$|-)/i.test(incoming.stage);
+    if (identifiesOneLogicalStep) {
+      const next = [...existing];
+      next[priorIndex] = {
+        ...prior,
+        ...incoming,
+        advisor: incoming.advisor ?? prior.advisor,
+        councilMembers: incoming.councilMembers?.length ? incoming.councilMembers : prior.councilMembers,
+        processLog: incoming.processLog?.length ? incoming.processLog : prior.processLog,
+        toolRuns: incoming.toolRuns?.length ? incoming.toolRuns : prior.toolRuns,
+        draftRace: incoming.draftRace ?? prior.draftRace,
+      };
+      return next;
+    }
   }
   const settled = existing.map((step) =>
     step.status === 'running' ? { ...step, status: 'done' as const } : step,
@@ -103,6 +115,32 @@ function pruneStep(step: ChatProgressStep): ChatProgressStep {
     }),
   ) as ChatProgressStep['toolRuns'];
 
+  // Persisted race: keep the structure (who fielded, who voted, who won) with the
+  // candidate texts clamped like every other free-text field. Live-only `pending`
+  // flags drop — a persisted candidate has already returned or failed.
+  const race = step.draftRace
+    ? compact({
+        // A persisted race is always settled.
+        status: 'decided' as const,
+        candidates: step.draftRace.candidates.map((c) =>
+          compact({
+            authorId: c.authorId,
+            authorName: c.authorName,
+            modelId: c.modelId,
+            text: clamp(c.text) ?? '',
+            provisional: c.provisional || undefined,
+            failed: c.failed || undefined,
+            durationMs: c.durationMs,
+          }),
+        ),
+        votes: step.draftRace.votes?.map((v) =>
+          compact({ voterId: v.voterId, voterName: v.voterName, scores: v.scores, note: clamp(v.note, 240) }),
+        ) ?? [],
+        winnerId: step.draftRace.winnerId,
+        tieBrokenToVai: step.draftRace.tieBrokenToVai || undefined,
+      })
+    : undefined;
+
   return compact({
     stage: step.stage,
     label: step.label,
@@ -114,6 +152,7 @@ function pruneStep(step: ChatProgressStep): ChatProgressStep {
     councilMembers: council?.length ? council : undefined,
     processLog: log?.length ? log : undefined,
     toolRuns: tools?.length ? tools : undefined,
+    draftRace: race,
   }) as ChatProgressStep;
 }
 
@@ -127,10 +166,10 @@ export function serializeProgressTrace(
 ): string | undefined {
   if (!steps || steps.length === 0) return undefined;
   let pruned = steps.slice(0, MAX_STEPS).map(pruneStep);
-  let blob = JSON.stringify(pruned);
+  let blob = JSON.stringify({ version: 2, steps: pruned });
   while (blob.length > TRACE_BLOB_MAX && pruned.length > 1) {
     pruned = pruned.slice(0, -1);
-    blob = JSON.stringify(pruned);
+    blob = JSON.stringify({ version: 2, steps: pruned });
   }
   // A single oversized step still beats showing nothing — it's already field-clamped.
   return blob;
@@ -146,15 +185,5 @@ export function deserializeProgressTrace(
 ): ChatProgressStep[] | undefined {
   if (!blob) return undefined;
   try {
-    const parsed = JSON.parse(blob);
-    if (!Array.isArray(parsed) || parsed.length === 0) return undefined;
-    // Trust-but-shape: keep only objects with the required stage/label/status.
-    const steps = parsed.filter(
-      (s): s is ChatProgressStep =>
-        s && typeof s.stage === 'string' && typeof s.label === 'string' && typeof s.status === 'string',
-    );
-    return steps.length ? steps : undefined;
-  } catch {
-    return undefined;
-  }
-}
+    const parsed = JSON.parse(blob) as { version?: unknown; steps?: unknown };
+    // Version-1 traces were persisted 

@@ -29,6 +29,16 @@ export {
 } from './topic-router.js';
 
 export {
+  runDraftRace,
+  VAI_AUTHOR_ID,
+  type RaceCandidate,
+  type RaceVote,
+  type DraftRaceSnapshot,
+  type DraftRaceResult,
+  type RunDraftRaceOptions,
+} from './draft-race.js';
+
+export {
   reachConsensus,
   runCouncil,
   convene,

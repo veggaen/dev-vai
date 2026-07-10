@@ -11,6 +11,15 @@ describe('Preview failure recovery', () => {
     expect(prompt).toMatch(/verify the rendered app/i);
   });
 
+  it('does not invite fabricated credentials for missing env failures', () => {
+    const prompt = createPreviewRepairPrompt('Preview failed: Error: Missing VITE_CONVEX_URL');
+
+    expect(prompt).toContain('VITE_CONVEX_URL');
+    expect(prompt).toMatch(/Do not invent real secrets/i);
+    expect(prompt).toMatch(/setup-required screen/i);
+    expect(prompt).toMatch(/exact env variables/i);
+  });
+
   it('renders the real cause and explicit recovery actions', () => {
     const html = renderToStaticMarkup(
       <PreviewFailureState

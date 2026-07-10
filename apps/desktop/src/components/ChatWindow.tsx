@@ -37,18 +37,26 @@ import type { PerIdeConfig } from './BroadcastTargetPicker.js';
 import { ResearchContextRail } from './chat/ResearchContextRail.js';
 import { ChatEmptyState } from './chat/ChatEmptyState.js';
 import { ConversationSourcesSidebar, aggregateConversationSources } from './chat/ConversationSourcesSidebar.js';
-import { FileChangesBar, type FileChangeEntry } from './chat/FileChangesBar.js';
-import { BackgroundProcessWindow } from './chat/BackgroundProcessWindow.js';
+import { ComposerDock, type FileChangeEntry } from './chat/ComposerDock.js';
+import { ComposerNotice } from './chat/ComposerNotice.js';
 import { useBackgroundProcesses, useBackgroundTaskEvents } from '../hooks/useBackgroundProcesses.js';
-import { CouncilProgressPanel } from './panels/CouncilProgressPanel.js';
-import { deriveLiveCouncilFromProgressSteps } from './chat/process-step-enrich.js';
-import { ComposerProcessStrip } from './chat/ComposerProcessStrip.js';
 import { ProcessDepthControl } from './chat/ProcessDepthControl.js';
+import { CouncilSeatPicker } from './chat/CouncilSeatPicker.js';
 import { MicButton } from './chat/MicButton.js';
 import { MicDeviceMenu } from './chat/MicDeviceMenu.js';
+import { WorkspaceChip } from './ide/WorkspaceChip.js';
+import { AttachMenu } from './chat/AttachMenu.js';
+import { useWorkspaceStore } from '../stores/workspaceStore.js';
+import { resolveWorkspaceEditIntent } from '../lib/ide/chat-edit-intent.js';
 import { useVoiceDictation } from '../hooks/useVoiceDictation.js';
+import {
+  COMPOSER_DICTATION_LIVE_EVENT,
+  useComposerDictationLive,
+  type ComposerDictationLiveEvent,
+} from '../hooks/useComposerDictationLive.js';
 import { detectCorrections, mishearingPrompt } from '../lib/voice/correction-detection.js';
-import { learnFromEdit, loadProfile, saveProfile, type AppliedReplacement } from '../lib/voice/speech-profile.js';
+import { confirmCorrection, learnFromEdit, loadProfile, saveProfile, type AppliedReplacement } from '../lib/voice/speech-profile.js';
+import { loadMicTriggerMode, type MicTriggerMode } from '../lib/voice/mic-mode.js';
 import { useComposerActivity } from '../hooks/useComposerActivity.js';
 import { resolveSendTimeWorkIntent } from '../lib/auto-sandbox-intent.js';
 import { extractFilesFromMarkdown } from '../lib/file-extractor.js';
@@ -62,6 +70,7 @@ import {
 } from '../lib/ideMentions.js';
 import { IdeMentionMenu } from './IdeMentionMenu.js';
 import { pickSandboxContextPaths, shouldAttachSandboxContext } from '../lib/sandbox-context.js';
+import { detectPastedFileExtension, shouldAttachTextPaste } from '../lib/composer-paste.js';
 
 /** Fallback chat apps when the extension hasn't reported yet */
 const FALLBACK_CHAT_APPS: { id: string; label: string }[] = [
@@ -105,23 +114,6 @@ function formatRelativeTime(value: string): string {
 }
 
 /* ── File extension detection ── */
-const CODE_PATTERNS: { test: RegExp; ext: string }[] = [
-  { test: /^import\s+.*from\s+['"]|^export\s+(default\s+)?/m, ext: 'tsx' },
-  { test: /^const\s+\w+\s*[:=]|^let\s+|^var\s+|^function\s+\w+\s*\(|=>\s*\{/m, ext: 'ts' },
-  { test: /^<\w+[\s>]|<\/\w+>/m, ext: 'html' },
-  { test: /^\.\w+\s*\{|^@media|^@import/m, ext: 'css' },
-  { test: /^{[\s\n]*"/m, ext: 'json' },
-  { test: /^#!/m, ext: 'sh' },
-  { test: /^def\s+\w+|^class\s+\w+|^import\s+\w+$/m, ext: 'py' },
-];
-
-function detectFileExtension(text: string): string {
-  for (const p of CODE_PATTERNS) {
-    if (p.test.test(text)) return p.ext;
-  }
-  return 'md';
-}
-
 // 10k chars ≈ a full council-built App.tsx. Edits regenerate COMPLETE files
 // from these snapshots, so a tight cap here silently amputates code: the
 // model rewrites what it can see and the applied file loses the rest. The
@@ -153,7 +145,25 @@ interface FileAttachment {
   sizeBytes: number;
 }
 
-const LARGE_PASTE_THRESHOLD = 500;
+/** A single chat's in-progress composer contents, preserved across chat switches. */
+interface ComposerDraft {
+  input: string;
+  pastedImage: PastedImage | null;
+  attachedFiles: FileAttachment[];
+  imageDescription: string;
+  imageQuestion: string;
+  imageMode: boolean;
+}
+
+function isDraftEmpty(d: ComposerDraft): boolean {
+  return !d.input.trim()
+    && !d.pastedImage
+    && d.attachedFiles.length === 0
+    && !d.imageDescription.trim()
+    && !d.imageQuestion.trim()
+    && !d.imageMode;
+}
+
 const MIN_INPUT_HEIGHT = 44;
 const MAX_INPUT_HEIGHT = 240;
 
@@ -192,25 +202,6 @@ export function ChatWindow() {
     themePreference,
     toggleThemePreference,
   } = useLayoutStore();
-  const { showCouncilPanel, toggleCouncilPanel } = useLayoutStore();
-
-  // Auto-open the right Council Progress panel when a new assistant message arrives with council data.
-  // This makes the "live" council review visible immediately in the UI for better transparency and steering.
-  const latestAssistantWithCouncil = useMemo(() => {
-    return [...messages].reverse().find(m => m.role === 'assistant' && m.thinking?.council);
-  }, [messages]);
-
-  const hasLiveCouncilStream = useMemo(() => {
-    if (!isStreaming) return false;
-    const steps = messages[messages.length - 1]?.progressSteps ?? [];
-    return steps.some((step) => step.stage?.startsWith('council'));
-  }, [isStreaming, messages]);
-
-  useEffect(() => {
-    if ((latestAssistantWithCouncil || hasLiveCouncilStream) && !showCouncilPanel) {
-      toggleCouncilPanel();
-    }
-  }, [latestAssistantWithCouncil, hasLiveCouncilStream, showCouncilPanel, toggleCouncilPanel]);
   const studioBuilderChrome = themePreference === 'light';
   const isOwner = useAuthStore((state) => state.isOwner);
   const ownerFeaturesHidden = useAuthStore((state) => state.ownerFeaturesHidden);
@@ -225,6 +216,7 @@ export function ChatWindow() {
   const sandboxProjectName = useSandboxStore((state) => state.projectName);
   const sandboxProjectId = useSandboxStore((state) => state.projectId);
   const sandboxDevPort = useSandboxStore((state) => state.devPort);
+  const sandboxExternal = useSandboxStore((state) => state.external);
   const fetchPeers = useCollabStore((state) => state.fetchPeers);
   const peers = useCollabStore((state) => state.peers);
   const createAudit = useCollabStore((state) => state.createAudit);
@@ -243,6 +235,20 @@ export function ChatWindow() {
   const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([]);
   /** Explicit "Image" output mode — when on, this turn is answered with a generated image. */
   const [imageMode, setImageMode] = useState(false);
+
+  // ── Per-conversation composer drafts ───────────────────────────────────────
+  // Each chat keeps its OWN composer contents (text, pasted image, attached
+  // files) so switching between chats preserves what you were assembling in
+  // each — e.g. three different images staged across three chats. Kept in an
+  // in-memory map for the app session (not persisted to disk).
+  const composerDraftsRef = useRef<Map<string, ComposerDraft>>(new Map());
+  const prevConvIdRef = useRef<string | null>(activeConversationId);
+  // Latest composer values, mirrored every render so the swap effect reads fresh
+  // state without re-subscribing.
+  const draftValuesRef = useRef<ComposerDraft>({
+    input, pastedImage, attachedFiles, imageDescription, imageQuestion, imageMode,
+  });
+  draftValuesRef.current = { input, pastedImage, attachedFiles, imageDescription, imageQuestion, imageMode };
   const [deliveryRoute, setDeliveryRoute] = useState<DeliveryRoute>('vai');
   const [broadcastModel, setBroadcastModel] = useState('gpt-4o');
   const [broadcastChatApp, setBroadcastChatApp] = useState('chat');
@@ -251,17 +257,6 @@ export function ChatWindow() {
   const [showIdePopup, setShowIdePopup] = useState(false);
   const [isResearchRailOpen, setIsResearchRailOpen] = useState(false);
   const [isConversationSourcesOpen, setIsConversationSourcesOpen] = useState(false);
-  // Collapsed by default: the strip sits above the composer and expands on
-  // demand — it must never crowd the message input (direct user feedback).
-  const [activityCollapsed, setActivityCollapsed] = useState(true);
-  const [processStripExpanded, setProcessStripExpanded] = useState(false);
-  // …but while a turn is streaming, background tasks auto-expand.
-  // Composer strip stays collapsed (headline only) — full timeline lives in the message bubble.
-  useEffect(() => {
-    if (isStreaming) setActivityCollapsed(false);
-    if (!isStreaming) setProcessStripExpanded(false);
-  }, [isStreaming]);
-
   const streamingProgressSteps = useMemo(() => {
     if (!isStreaming) return [];
     const last = messages[messages.length - 1];
@@ -288,8 +283,11 @@ export function ChatWindow() {
   // What the last dictation inserted (the baseline we compare the sent text against
   // to spot mishearings). Cleared when the user clears the composer or sends.
   const dictatedBaselineRef = useRef<string>('');
-  const [interimTranscript, setInterimTranscript] = useState('');
-  const [mishearAsk, setMishearAsk] = useState<{ prompt: string; term: string } | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [globalDictationListening, setGlobalDictationListening] = useState(false);
+  const [voiceLevel, setVoiceLevel] = useState(0);
+  const liveDictation = useComposerDictationLive(textareaRef, setInput);
+  const [mishearAsk, setMishearAsk] = useState<{ prompt: string; heard: string; corrected: string } | null>(null);
   // Chosen mic for dictation (the right-click device menu). Persisted so it survives reloads;
   // empty string = system default.
   const [micDeviceId, setMicDeviceId] = useState<string>(() => {
@@ -298,40 +296,199 @@ export function ChatWindow() {
   const selectMicDevice = useCallback((id: string) => {
     setMicDeviceId(id);
     try { localStorage.setItem('vai-voice-device', id); } catch { /* non-fatal */ }
+    window.dispatchEvent(new CustomEvent('vai:voice-device-changed', { detail: id }));
+  }, []);
+  useEffect(() => {
+    const onVoiceDeviceChanged = (event: Event) => {
+      const next = (event as CustomEvent<string>).detail;
+      setMicDeviceId(typeof next === 'string' ? next : '');
+    };
+    window.addEventListener('vai:voice-device-changed', onVoiceDeviceChanged);
+    return () => window.removeEventListener('vai:voice-device-changed', onVoiceDeviceChanged);
   }, []);
   // Where (if anywhere) the right-click mic device menu is open.
   const [micMenuAt, setMicMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [micTriggerMode, setMicTriggerMode] = useState<MicTriggerMode>(loadMicTriggerMode);
+  useEffect(() => {
+    const onMicMode = (event: Event) => {
+      const mode = (event as CustomEvent<MicTriggerMode>).detail;
+      if (mode === 'hold' || mode === 'toggle') setMicTriggerMode(mode);
+    };
+    window.addEventListener('vai:voice-mic-mode-changed', onMicMode);
+    return () => window.removeEventListener('vai:voice-mic-mode-changed', onMicMode);
+  }, []);
   // Speech-profile rules that auto-applied to the last dictation — the self-heal
   // learner needs them at send time to notice when the user reverts one.
   const appliedRulesRef = useRef<readonly AppliedReplacement[]>([]);
-  const insertDictated = useCallback((text: string, applied: readonly AppliedReplacement[] = []) => {
-    setInterimTranscript('');
-    appliedRulesRef.current = applied;
-    // Insert at cursor (or append), then remember what we dictated so a later
-    // manual edit can be detected as a correction / mishearing.
-    const ta = textareaRef.current;
-    setInput((prev) => {
-      const start = ta?.selectionStart ?? prev.length;
-      const end = ta?.selectionEnd ?? prev.length;
-      const sep = prev && start === prev.length && !/\s$/.test(prev) ? ' ' : '';
-      const next = prev.slice(0, start) + sep + text + prev.slice(end);
-      dictatedBaselineRef.current = next;
-      return next;
+  /** Chord releases whose final transcript has not landed yet. */
+  const pendingDictationFinalsRef = useRef(0);
+  /** Finals from PREVIOUS holds still owed to the current anchor — they must
+   *  land BEFORE it, not consume it (duplication / lost-words fix). */
+  const lateDictationFinalsRef = useRef(0);
+  /** True while a global keybind hold is physically DOWN. Read inside the long-lived
+   *  live-dictation listener (whose closure would otherwise capture stale React state)
+   *  to tell a late final from a PREVIOUS hold apart from the current hold's own release. */
+  const holdDownRef = useRef(false);
+  const snapshotDictationBaseline = useCallback(() => {
+    requestAnimationFrame(() => {
+      dictatedBaselineRef.current = textareaRef.current?.value ?? '';
     });
+  }, []);
+
+  const insertDictated = useCallback((text: string, applied: readonly AppliedReplacement[] = []) => {
+    setVoiceError(null);
+    appliedRulesRef.current = applied;
+    if (liveDictation.isActive()) {
+      liveDictation.update(text, { asIs: true, finalize: true });
+    } else {
+      const ta = textareaRef.current;
+      setInput((prev) => {
+        const start = ta?.selectionStart ?? prev.length;
+        const end = ta?.selectionEnd ?? prev.length;
+        const sep = prev && start === prev.length && !/\s$/.test(prev) ? ' ' : '';
+        return prev.slice(0, start) + sep + text + prev.slice(end);
+      });
+    }
+    snapshotDictationBaseline();
     requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [setInput]);
+  }, [liveDictation, setInput, snapshotDictationBaseline]);
+
   const dictation = useVoiceDictation({
     disabled: isStreaming,
     deviceId: micDeviceId || undefined,
-    // Under Tauri the Rust-side Win+Alt watcher owns the hold chord globally (it routes
+    // Under Tauri the Rust-side watcher owns the hold chord globally (it routes
     // back into the composer when this window is focused) — a second local listener
     // would double-start the session. The mic button press still works everywhere.
     holdChord: typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window ? () => false : undefined,
-    onInterim: (text) => setInterimTranscript(text),
-    onFinal: (text, meta) => insertDictated(text, meta?.applied ?? []),
+    keyboardHold: typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window),
+    onLevel: (level) => {
+      setVoiceLevel(level);
+    },
+    onInterim: (text) => {
+      setVoiceError(null);
+      liveDictation.update(text);
+    },
+    onFinal: (text, meta) => {
+      setVoiceLevel(0);
+      appliedRulesRef.current = meta?.applied ?? [];
+      liveDictation.update(text, { asIs: true, finalize: true });
+      snapshotDictationBaseline();
+    },
+    onPolishUpdate: (text, meta) => {
+      // A NEW dictation owns the composer — a late polish from the previous one
+      // must never re-insert old text or consume the fresh anchor.
+      if (liveDictation.isActive()) return;
+      setVoiceLevel(0);
+      appliedRulesRef.current = meta?.applied ?? appliedRulesRef.current;
+      liveDictation.replaceCommitted(text, { asIs: true });
+      snapshotDictationBaseline();
+    },
+    onError: (error) => {
+      setVoiceLevel(0);
+      if (liveDictation.isActive()) liveDictation.cancel();
+      setVoiceError(error.message);
+    },
+    onCancel: () => {
+      setVoiceLevel(0);
+      liveDictation.cancel();
+    },
   });
-  // Global dictation (Win+Alt anywhere) hands the transcript back to the composer when
-  // this window is the focused target.
+
+  // The global hold shortcut streams into the composer while Vai is focused.
+  useEffect(() => {
+    const onLive = (e: Event) => {
+      const detail = (e as CustomEvent<ComposerDictationLiveEvent>).detail;
+      if (!detail) return;
+      if (detail.kind === 'begin') {
+        setVoiceError(null);
+        holdDownRef.current = true;
+        setGlobalDictationListening(true);
+        setVoiceLevel(0.18);
+        // Finals still in flight from earlier holds belong BEFORE this anchor.
+        lateDictationFinalsRef.current = pendingDictationFinalsRef.current;
+        liveDictation.begin();
+        return;
+      }
+      if (detail.kind === 'level') {
+        setGlobalDictationListening(true);
+        setVoiceLevel(detail.level);
+        return;
+      }
+      if (detail.kind === 'interim') {
+        // Do NOT insert live text before release — only the mic indicator shows while
+        // holding; the finalized words land ONCE, on 'groomed'. This kills the
+        // pre-release flicker (interim → different final) and the double-print bug.
+        setVoiceError(null);
+        setGlobalDictationListening(true);
+        return;
+      }
+      if (detail.kind === 'end') {
+        // Keys released — recording is over. Drop every listening effect right
+        // now; the finalized words arrive via 'groomed' a moment later.
+        holdDownRef.current = false;
+        pendingDictationFinalsRef.current += 1;
+        setGlobalDictationListening(false);
+        setVoiceLevel(0);
+        return;
+      }
+      if (detail.kind === 'groomed') {
+        pendingDictationFinalsRef.current = Math.max(0, pendingDictationFinalsRef.current - 1);
+        // A groomed always carries the words of the hold that JUST finalized. Only
+        // treat it as a "land before the anchor" late final when another hold is
+        // physically down RIGHT NOW (globalDictationListening) — otherwise this is the
+        // current hold's own release and must finalize normally. Gating on the live
+        // hold (not just the counter) removes the ordering race that used to inject the
+        // current hold's own text before its anchor mid-hold.
+        if (holdDownRef.current && lateDictationFinalsRef.current > 0 && liveDictation.isActive()) {
+          // Late final from a PREVIOUS hold while a new hold is live: slot it in
+          // before the new anchor and keep listening — finalizing here used to
+          // duplicate the old text and drop the new hold's words entirely.
+          lateDictationFinalsRef.current -= 1;
+          liveDictation.insertBeforeAnchor(detail.text);
+          return;
+        }
+        lateDictationFinalsRef.current = 0;
+        setGlobalDictationListening(false);
+        setVoiceLevel(0);
+        appliedRulesRef.current = detail.applied ?? [];
+        liveDictation.update(detail.text, { asIs: true, finalize: true });
+        snapshotDictationBaseline();
+        return;
+      }
+      if (detail.kind === 'discard') {
+        // A superseded hold will never deliver a 'groomed'. Release the slot it
+        // reserved on release so the late-final routing for the next hold stays
+        // accurate — otherwise the phantom pending mis-fires insertBeforeAnchor and
+        // duplicates / injects text mid-hold. Clamped so an extra one is harmless.
+        pendingDictationFinalsRef.current = Math.max(0, pendingDictationFinalsRef.current - 1);
+        lateDictationFinalsRef.current = Math.max(0, lateDictationFinalsRef.current - 1);
+        return;
+      }
+      if (detail.kind === 'polish') {
+        // Polish only upgrades an already-committed span. If a new hold is
+        // active, or the span changed, replaceCommitted's guard makes it a no-op.
+        if (liveDictation.isActive()) return;
+        setGlobalDictationListening(false);
+        setVoiceLevel(0);
+        appliedRulesRef.current = detail.applied ?? appliedRulesRef.current;
+        liveDictation.replaceCommitted(detail.text, { asIs: true });
+        snapshotDictationBaseline();
+        return;
+      }
+      if (detail.kind === 'cancel') {
+        holdDownRef.current = false;
+        pendingDictationFinalsRef.current = 0;
+        lateDictationFinalsRef.current = 0;
+        setGlobalDictationListening(false);
+        setVoiceLevel(0);
+        liveDictation.cancel();
+      }
+    };
+    window.addEventListener(COMPOSER_DICTATION_LIVE_EVENT, onLive);
+    return () => window.removeEventListener(COMPOSER_DICTATION_LIVE_EVENT, onLive);
+  }, [liveDictation, snapshotDictationBaseline]);
+
+  // Fallback insert when global dictation uses the legacy event path.
   useEffect(() => {
     const onInsert = (e: Event) => {
       const detail = (e as CustomEvent<{ text?: string; applied?: readonly AppliedReplacement[] }>).detail;
@@ -358,6 +515,9 @@ export function ChatWindow() {
   }, []);
   const descriptionRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachButtonRef = useRef<HTMLButtonElement>(null);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const attachedProjectName = useWorkspaceStore((s) => s.localName);
   const idePopupRef = useRef<HTMLDivElement>(null);
   const ideButtonRef = useRef<HTMLButtonElement>(null);
   const mentionQueryPrevRef = useRef('');
@@ -437,6 +597,27 @@ export function ChatWindow() {
     lastSandboxContextHashRef.current = null;
   }, [sandboxProjectId, setHasActiveProject]);
   useEffect(() => { resetConversation(); }, [activeConversationId, resetConversation]);
+  // Swap composer drafts when the active chat changes: stash the outgoing chat's
+  // contents, then restore the incoming chat's (or clear for a fresh one). This
+  // is what lets each chat hold its own text and pasted/attached images.
+  useEffect(() => {
+    const prevId = prevConvIdRef.current;
+    const nextId = activeConversationId;
+    if (prevId === nextId) return;
+    if (prevId) {
+      const outgoing = draftValuesRef.current;
+      if (isDraftEmpty(outgoing)) composerDraftsRef.current.delete(prevId);
+      else composerDraftsRef.current.set(prevId, { ...outgoing, attachedFiles: [...outgoing.attachedFiles] });
+    }
+    const incoming = nextId ? composerDraftsRef.current.get(nextId) : undefined;
+    setInput(incoming?.input ?? '');
+    setPastedImage(incoming?.pastedImage ?? null);
+    setAttachedFiles(incoming ? [...incoming.attachedFiles] : []);
+    setImageDescription(incoming?.imageDescription ?? '');
+    setImageQuestion(incoming?.imageQuestion ?? '');
+    setImageMode(incoming?.imageMode ?? false);
+    prevConvIdRef.current = nextId;
+  }, [activeConversationId]);
   useEffect(() => {
     if (!persistentProjectId) return;
     void fetchPeers(persistentProjectId);
@@ -768,9 +949,9 @@ export function ChatWindow() {
     }
 
     const text = e.clipboardData?.getData('text/plain');
-    if (text && text.length > LARGE_PASTE_THRESHOLD) {
+    if (text && shouldAttachTextPaste(text)) {
       e.preventDefault();
-      const ext = detectFileExtension(text);
+      const ext = detectPastedFileExtension(text);
       const lineCount = text.split('\n').length;
       const name = `pasted-${attachedFiles.length + 1}.${ext}`;
       setAttachedFiles((prev) => [
@@ -790,7 +971,7 @@ export function ChatWindow() {
       const reader = new FileReader();
       reader.onload = () => {
         const content = reader.result as string;
-        const ext = file.name.split('.').pop() || detectFileExtension(content);
+        const ext = file.name.split('.').pop() || detectPastedFileExtension(content);
         setAttachedFiles((prev) => [
           ...prev,
           { id: `file-${Date.now()}-${file.name}`, name: file.name, content, language: ext, sizeBytes: file.size },
@@ -864,7 +1045,11 @@ export function ChatWindow() {
       const correction = detectCorrections(dictatedBaselineRef.current, text);
       const ask = mishearingPrompt(correction);
       if (ask && correction.mishearings[0]) {
-        setMishearAsk({ prompt: ask, term: correction.mishearings[0].corrected });
+        setMishearAsk({
+          prompt: ask,
+          heard: correction.mishearings[0].heard,
+          corrected: correction.mishearings[0].corrected,
+        });
       }
       // Speech-profile learning: every dictate→edit→send cycle teaches the profile.
       // New substitutions become auto-apply rules after two sightings; editing an
@@ -964,6 +1149,27 @@ export function ChatWindow() {
       return;
     }
 
+    /* ── Workspace edit route: the ask names a real file in the attached local
+       folder — the IDE council (real file access, reviewable diffs) handles it,
+       not the server chat council (no local disk; would report file-not-found). ── */
+    const wsForEdit = useWorkspaceStore.getState();
+    if (wsForEdit.kind === 'local' && wsForEdit.localRoot && !pastedImage) {
+      const fileSet = new Set(
+        wsForEdit.tree.filter((e) => !e.dir).map((e) => e.path.replace(/\\/g, '/')),
+      );
+      const editIntent = resolveWorkspaceEditIntent(fullContent, fileSet);
+      if (editIntent) {
+        toast.info(`Council is editing ${editIntent.rel} — review the diff when it's ready`);
+        setInput('');
+        setAttachedFiles([]);
+        requestAnimationFrame(() => {
+          if (textareaRef.current) textareaRef.current.style.height = 'auto';
+        });
+        await wsForEdit.runCouncilEdit(editIntent.task, editIntent.rel);
+        return;
+      }
+    }
+
     if (deliveryRoute === 'group') {
       if (!persistentProjectId) {
         toast.error('Open a project first to use group chat');
@@ -1008,8 +1214,30 @@ export function ChatWindow() {
       if (!sandboxProjectId || (sandboxStatus !== 'running' && sandboxStatus !== 'writing' && sandboxStatus !== 'idle')) return undefined;
       if (!shouldAttachSandboxContext(text)) return undefined;
 
-      const summaryPaths = pickSandboxContextPaths(sandboxFiles, text, 6);
-      const snapshotPaths = pickSandboxContextPaths(sandboxFiles, text, 3);
+      // Files CONTAINING literals the user quoted are the edit targets — path
+      // heuristics can't see content. "change the 'Participate in a…' text"
+      // must snapshot the file with that string, wherever it lives.
+      let contentHitPaths: string[] = [];
+      const quotedLiterals = [...text.matchAll(/["'“”‘’`]([^"'“”‘’`\n]{6,80})["'“”‘’`]/g)]
+        .map((m) => m[1].trim())
+        .filter((literal) => literal.length >= 6)
+        .slice(0, 2);
+      for (const literal of quotedLiterals) {
+        try {
+          const res = await apiFetch(`/api/sandbox/${sandboxProjectId}/search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: literal, maxResults: 30 }),
+          });
+          if (!res.ok) continue;
+          const data = await res.json() as { files?: { path: string }[] };
+          contentHitPaths.push(...(data.files ?? []).map((f) => f.path));
+        } catch { /* content search is best-effort context enrichment */ }
+      }
+      contentHitPaths = [...new Set(contentHitPaths)].slice(0, 3);
+
+      const summaryPaths = [...new Set([...contentHitPaths, ...pickSandboxContextPaths(sandboxFiles, text, 6)])].slice(0, 6);
+      const snapshotPaths = [...new Set([...contentHitPaths, ...pickSandboxContextPaths(sandboxFiles, text, 3)])].slice(0, 3);
       const fileListKey = summaryPaths.join('|');
       const contextHash = `${sandboxProjectId}:${sandboxDevPort ?? 'none'}:${fileListKey}`;
       const fileTreeUnchanged = lastSandboxContextHashRef.current === contextHash;
@@ -1018,6 +1246,9 @@ export function ChatWindow() {
       const lines: string[] = [
         `ACTIVE SANDBOX PROJECT: "${sandboxProjectName || sandboxProjectId}" (project id: ${sandboxProjectId})`,
       ];
+      if (sandboxExternal) {
+        lines.push('This is an EXTERNAL local project folder owned by the user — real code with its own dependencies and conventions. Edits must respect the existing stack and style.');
+      }
       if (sandboxDevPort) {
         lines.push(`Dev server is RUNNING at http://localhost:${sandboxDevPort}`);
       } else {
@@ -1039,7 +1270,7 @@ export function ChatWindow() {
           return {
             path: data.path,
             content: truncateSnapshotContent(data.content),
-            language: detectFileExtension(data.content),
+            language: detectPastedFileExtension(data.content),
           };
         } catch {
           return null;
@@ -1101,107 +1332,43 @@ export function ChatWindow() {
   const charCount = input.length;
   const canSend = input.trim().length > 0 && !isStreaming && (!pastedImage || imageDescription.trim().length > 0);
 
-  const showProjectContextStrip = Boolean(sandboxProjectId);
-  const draftWouldAttachProjectContext = Boolean(sandboxProjectId && shouldAttachSandboxContext(input));
-  const draftContextPaths = useMemo(
-    () => (draftWouldAttachProjectContext ? pickSandboxContextPaths(sandboxFiles, input, 4) : []),
-    [draftWouldAttachProjectContext, input, sandboxFiles],
-  );
   const shellModeLabel = `${mode.charAt(0).toUpperCase()}${mode.slice(1)}`;
   const headerTitle = hasMessages ? 'Workspace' : 'Vai';
-  const composerAssistText = pastedImage
-    ? 'Describe the screenshot and ask the exact question you want answered.'
-    : deliveryRoute === 'broadcast'
-      ? 'Send one prompt to connected IDEs and compare the answers in this thread.'
-      : showProjectContextStrip && draftWouldAttachProjectContext
-        ? `This turn will include the live preview and ${draftContextPaths.length || 1} focused project file${draftContextPaths.length === 1 ? '' : 's'}.`
-        : showProjectContextStrip
-          ? 'General questions stay detached from the active project until you reference the app, preview, or files.'
-        : hasMessages
-          ? 'Use a sharper follow-up to keep the thread moving.'
-          : 'Type here. Workspace context (files, editor) attaches automatically on relevant questions.';
-  const composerStateChips = useMemo(() => {
-    const chips: Array<{ key: string; label: string; tone: 'emerald' | 'blue' | 'violet' | 'amber' }> = [
-      {
-        key: 'mode',
-        label: `${shellModeLabel} mode`,
-        tone: mode === 'builder' || mode === 'agent' ? 'amber' : 'violet',
-      },
-    ];
+  // Files changed this turn — feeds the ComposerDock's "files" segment.
+  // Server-computed diff (true +added/−removed) preferred; bare paths from
+  // buildActivity when no diff yet. Empty unless the latest assistant turn
+  // actually emitted file blocks (never show a husk for research/chat turns).
+  const fileChangeEntries = useMemo<FileChangeEntry[]>(() => {
+    const diffByPath = new Map(lastDiff.map((d) => [d.path, d]));
+    const entries: FileChangeEntry[] = buildActivity
+      .filter((a) => /wrote|changed|created|updated|\.(tsx?|jsx?|css|json|md|html?)$/i.test(a.detail || ''))
+      .slice(-8)
+      .map((a) => {
+        const detail = a.detail || '';
+        const path = detail.replace(/^(?:Wrote|Changed|Created|Updated)\s*/i, '').trim().split(/\s+/)[0];
+        const d = diffByPath.get(path);
+        return { id: a.id, path, added: d?.added, removed: d?.removed };
+      })
+      .filter((f) => f.path.length > 0);
+    if (entries.length === 0) return [];
 
-    if (deliveryRoute === 'broadcast') {
-      const targetCount = broadcastTargetClientIds.length > 0 ? broadcastTargetClientIds.length : onlineIdeCount;
-      chips.push({
-        key: 'route',
-        label: `Broadcast ${Math.max(targetCount, 1)} IDE${targetCount === 1 ? '' : 's'}`,
-        tone: 'blue',
-      });
-    } else if (deliveryRoute === 'group') {
-      chips.push({
-        key: 'route',
-        label: `Group chat ${roundtablePeers.length}`,
-        tone: 'violet',
-      });
+    const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
+    const assistantHasFileBlocks = lastAssistant
+      ? extractFilesFromMarkdown(lastAssistant.content).length > 0
+      : false;
+    if (!assistantHasFileBlocks || lastAssistant?.turnKind === 'research' || lastAssistant?.turnKind === 'conversational') {
+      return [];
     }
+    return entries;
+  }, [buildActivity, lastDiff, messages]);
 
-    if (showProjectContextStrip) {
-      chips.push({
-        key: 'project',
-        label: draftWouldAttachProjectContext
-          ? `Context ${draftContextPaths.length || 1} file${draftContextPaths.length === 1 ? '' : 's'}`
-          : persistentProjectId
-            ? 'Synced project idle'
-            : 'Project attached idle',
-        tone: 'blue',
-      });
-    }
-
-    if (attachedFiles.length > 0) {
-      chips.push({
-        key: 'files',
-        label: `${attachedFiles.length} file${attachedFiles.length === 1 ? '' : 's'}`,
-        tone: 'amber',
-      });
-    }
-
-    if (pastedImage) {
-      chips.push({ key: 'image', label: 'Image attached', tone: 'amber' });
-    }
-
-    return chips.slice(0, 3);
-  }, [
-    attachedFiles.length,
-    broadcastTargetClientIds.length,
-    deliveryRoute,
-    mode,
-    onlineIdeCount,
-    pastedImage,
-    persistentProjectId,
-    roundtablePeers.length,
-    shellModeLabel,
-    draftContextPaths.length,
-    draftWouldAttachProjectContext,
-    showProjectContextStrip,
-  ]);
-  const composerHintChips = useMemo(() => {
-    const hints = [
-      { key: 'enter', label: 'Enter sends' },
-      { key: 'newline', label: 'Shift+Enter newline' },
-    ];
-
-    if (onlineIdeCount > 0) {
-      hints.push({ key: 'route', label: '@ routes to IDE' });
-    }
-
-    if (!pastedImage) {
-      hints.push({ key: 'paste', label: 'Paste big code to attach' });
-    }
-
-    return hints.slice(0, 2);
-  }, [onlineIdeCount, pastedImage]);
-  useEffect(() => {
-    setActivityCollapsed(false);
-  }, [activeConversationId]);
+  const openChangedFile = useCallback((path: string) => {
+    if (!path) return;
+    if (!showBuilderPanel) toggleBuilderPanel();
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new CustomEvent('vai:reveal-file', { detail: { path } }));
+    });
+  }, [showBuilderPanel, toggleBuilderPanel]);
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-row overflow-hidden">
@@ -1553,49 +1720,6 @@ export function ChatWindow() {
       <div className="composer-dock">
         <div className={`composer-dock-inner relative z-[1] mx-auto w-full ${useResearchRailWideLayout ? 'max-w-[min(108rem,calc(100%-2rem))]' : 'max-w-[min(68rem,calc(100%-2rem))]'} px-4 pb-3 pt-2 md:px-5 md:pb-4`}>
 
-          {/* Agent-mode build confirm: don't silently scaffold an app on an ambiguous ask. */}
-          {pendingBuildConfirm && (
-            <div className="mb-2 rounded-xl border border-[color:var(--accent)]/40 bg-[color:var(--accent-soft)] px-3.5 py-3">
-              <div className="text-[13px] font-medium text-[color:var(--fg)]">
-                Did you want an answer, or should I build an app for this?
-              </div>
-              <div className="mt-1 text-[11px] leading-4 text-[color:var(--color-muted)]">
-                “{pendingBuildConfirm.text.length > 90 ? `${pendingBuildConfirm.text.slice(0, 90)}…` : pendingBuildConfirm.text}”
-              </div>
-              <div className="mt-2.5 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const t = pendingBuildConfirm.text;
-                    setPendingBuildConfirm(null);
-                    void handleSend(t, { buildConfirmResolved: 'answer' });
-                  }}
-                  className="rounded-lg border border-[color:var(--border)] bg-[color:var(--panel)] px-3 py-1.5 text-[12px] font-medium text-[color:var(--fg)] transition-colors hover:opacity-90"
-                >
-                  Just answer
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const t = pendingBuildConfirm.text;
-                    setPendingBuildConfirm(null);
-                    void handleSend(t, { buildConfirmResolved: 'build' });
-                  }}
-                  className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/15 px-3 py-1.5 text-[12px] font-medium text-[color:var(--fg)] transition-colors hover:opacity-90"
-                >
-                  Build an app
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPendingBuildConfirm(null)}
-                  className="ml-auto rounded-lg px-2 py-1.5 text-[11px] text-[color:var(--color-muted)] transition-colors hover:text-[color:var(--fg)]"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Image preview row */}
           {pastedImage && (
             <div className="mb-2 rounded-lg border border-zinc-700/50 bg-zinc-900/80 p-2.5">
@@ -1637,7 +1761,7 @@ export function ChatWindow() {
             </div>
           )}
 
-          {/* Attached files row */}
+          {/* Attached files + project row */}
           {attachedFiles.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5">
               {attachedFiles.map((file) => (
@@ -1652,72 +1776,30 @@ export function ChatWindow() {
               ))}
             </div>
           )}
-          {/* File-changes action bar — files changed this turn, with diff stats
-               (when the backend reports them), one-click open into the code view,
-               and turn-level Keep/Discard. The ONLY surface for file mutations;
-               process steps live in-bubble (ProcessTree), council in the right
-               panel. Keeps every surface showing distinct information. */}
-          {(() => {
-            // Prefer the server-computed diff (true +added/−removed) for the latest
-            // write; fall back to bare paths from buildActivity when no diff yet.
-            const diffByPath = new Map(lastDiff.map((d) => [d.path, d]));
-            const fileEntries: FileChangeEntry[] = buildActivity
-              .filter((a) => /wrote|changed|created|updated|\.(tsx?|jsx?|css|json|md|html?)$/i.test(a.detail || ''))
-              .slice(-8)
-              .map((a) => {
-                const detail = a.detail || '';
-                const path = detail.replace(/^(?:Wrote|Changed|Created|Updated)\s*/i, '').trim().split(/\s+/)[0];
-                const d = diffByPath.get(path);
-                return { id: a.id, path, added: d?.added, removed: d?.removed };
-              })
-              .filter((f) => f.path.length > 0);
-            if (fileEntries.length === 0) return null;
-
-            const lastAssistant = [...messages].reverse().find((message) => message.role === 'assistant');
-            const assistantHasFileBlocks = lastAssistant
-              ? extractFilesFromMarkdown(lastAssistant.content).length > 0
-              : false;
-            if (!assistantHasFileBlocks || lastAssistant?.turnKind === 'research' || lastAssistant?.turnKind === 'conversational') {
-              return null;
-            }
-
-            const openFile = (path: string) => {
-              if (!path) return;
-              if (!showBuilderPanel) toggleBuilderPanel();
-              requestAnimationFrame(() => {
-                window.dispatchEvent(new CustomEvent('vai:reveal-file', { detail: { path } }));
-              });
-            };
-
-            return (
-              <FileChangesBar
-                files={fileEntries}
-                studioChrome={studioBuilderChrome}
-                onOpenFile={openFile}
-                onKeep={() => clearBuildActivity()}
-                onDiscard={lastRevisionId ? () => { void revertRevision().then((ok) => {
-                  toast[ok ? 'success' : 'error'](ok ? 'Reverted this turn’s file changes' : 'Could not revert changes');
-                }); } : undefined}
-              />
-            );
-          })()}
-
-          <ComposerProcessStrip
+          {/* The ONE status surface above the input. Live turn steps, background
+              processes, and files-changed all live here as text segments that
+              open a single shared drawer — never parallel stacked boxes.
+              Process detail lives in-bubble (ProcessTree); council in the
+              right panel. Every surface shows distinct information. */}
+          <ComposerDock
             activity={composerActivity}
-            expanded={processStripExpanded}
-            onExpandedChange={setProcessStripExpanded}
-            studioChrome={studioBuilderChrome}
-          />
-
-          <BackgroundProcessWindow
             processes={backgroundProcesses}
-            expanded={!activityCollapsed}
-            onExpandedChange={(open) => setActivityCollapsed(!open)}
+            files={fileChangeEntries}
+            onOpenFile={openChangedFile}
+            onKeepFiles={() => clearBuildActivity()}
+            onDiscardFiles={lastRevisionId ? () => { void revertRevision().then((ok) => {
+              toast[ok ? 'success' : 'error'](ok ? 'Reverted this turn’s file changes' : 'Could not revert changes');
+            }); } : undefined}
+            workspaceSlot={<WorkspaceChip />}
             studioChrome={studioBuilderChrome}
+            suppressTurnSteps={isStreaming && Boolean(messages.at(-1)?.progressSteps?.length)}
           />
 
-          {/* The input box */}
+          {/* The input box — glow ONLY while actively recording (mic held / mic
+              button on). liveDictation.isActive() stays true through transcription
+              after release and must not keep the ring lit. */}
           <motion.div
+            data-dictation-active={dictation.listening || globalDictationListening ? 'true' : undefined}
             className={`composer-shell relative flex flex-col transition-[border-color,box-shadow] duration-200 ${
               deliveryRoute === 'broadcast' && studioBuilderChrome ? 'border-blue-200' : ''
             }`}
@@ -1746,133 +1828,65 @@ export function ChatWindow() {
               )}
             </AnimatePresence>
 
-            <div className="composer-toolbar flex flex-wrap items-center justify-between gap-2 px-3.5 pb-1 pt-2.5">
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-                {composerStateChips.map((chip) => {
-                  const toneClass = chip.tone === 'blue'
-                    ? studioBuilderChrome
-                      ? 'border-sky-200 bg-sky-50 text-sky-700'
-                      : 'border-sky-500/20 bg-sky-500/10 text-sky-200'
-                    : chip.tone === 'amber'
-                      ? studioBuilderChrome
-                        ? 'border-amber-200 bg-amber-50 text-amber-700'
-                        : 'border-amber-500/20 bg-amber-500/10 text-amber-200'
-                      : chip.tone === 'emerald'
-                        ? studioBuilderChrome
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                          : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                        : studioBuilderChrome
-                          ? 'border-blue-200 bg-blue-50 text-blue-700'
-                          : 'border-violet-500/20 bg-violet-500/10 text-violet-200';
-
-                  return (
-                    <span
-                      key={chip.key}
-                      className={`rounded-md border px-2.5 py-1 text-[10px] font-medium tracking-[0.02em] ${toneClass}`}
-                    >
-                      {chip.label}
-                    </span>
-                  );
-                })}
-                <span className={`hidden min-w-0 flex-1 truncate text-[11px] lg:inline ${studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-500'}`}>
-                  {composerAssistText}
-                </span>
-              </div>
-
-              <div className="hidden items-center gap-3 md:flex">
-                {composerHintChips.map((hint) => (
-                  <span
-                    key={hint.key}
-                    className={`text-[10px] ${studioBuilderChrome ? 'text-zinc-500' : 'text-zinc-500'}`}
-                  >
-                    {hint.label}
-                  </span>
-                ))}
-                <ProcessDepthControl
-                  value={processDepth}
-                  onChange={setProcessDepth}
-                  disabled={isStreaming}
-                />
-              </div>
-            </div>
-
-            {/* While a turn streams, typed text can steer the run now or queue
-                for after — instead of the Enter key silently doing nothing. */}
-            {isStreaming && input.trim().length > 0 && (
-              <div className="flex items-center gap-2 px-4 pt-2 text-[11px]">
-                <span className="text-[color:var(--accent-text)]">Vai is working —</span>
-                <button
-                  type="button"
-                  onClick={() => void handleSteer()}
-                  className="rounded-md border border-[color:var(--accent-ring)] bg-[color:var(--accent-soft)] px-2 py-0.5 font-medium text-[color:var(--accent-text)] transition-colors hover:bg-[color:var(--accent-softer)]"
-                  title="Inject this as guidance for the current turn"
-                >
-                  Steer now
-                </button>
-                <button
-                  type="button"
-                  onClick={handleQueue}
-                  className="rounded-md border border-zinc-700 px-2 py-0.5 font-medium text-zinc-300 transition-colors hover:bg-white/[0.05]"
-                  title="Send this automatically when the current turn finishes (Enter)"
-                >
-                  Queue ↵
-                </button>
-              </div>
-            )}
-            {queuedMessage && (
-              <div className="flex items-center gap-2 px-4 pt-2 text-[11px] text-zinc-400">
-                <span className="rounded-full bg-zinc-800 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-zinc-400">Queued</span>
-                <span className="min-w-0 flex-1 truncate">{queuedMessage}</span>
-                <button
-                  type="button"
-                  onClick={() => setQueuedMessage(null)}
-                  className="flex-shrink-0 text-zinc-500 transition-colors hover:text-zinc-200"
-                  title="Cancel queued message"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-
-            {/* Live dictation preview — what the mic is hearing right now. */}
-            {dictation.listening && interimTranscript && (
-              <div className="flex items-center gap-2 px-4 pt-2 text-[11px] text-[color:var(--accent-text)]" aria-live="polite">
-                <span className="rounded-full bg-[color:var(--accent-soft)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em]">Listening</span>
-                <span className="min-w-0 flex-1 truncate italic">{interimTranscript}</span>
-              </div>
-            )}
-
-            {/* Correction learning: "did we mishear you?" — appears after a dictated
-                turn whose wording the user fixed. Non-blocking; the message already sent. */}
-            {mishearAsk && (
-              <div className="flex items-center gap-2 px-4 pt-2 text-[11px] text-zinc-300" aria-live="polite">
-                <span className="min-w-0 flex-1 truncate">{mishearAsk.prompt}</span>
-                <button
-                  type="button"
-                  onClick={() => { addTermToDictionary(mishearAsk.term); setMishearAsk(null); }}
-                  className="flex-shrink-0 rounded-md border border-[color:var(--accent-ring)] bg-[color:var(--accent-soft)] px-2 py-0.5 font-medium text-[color:var(--accent-text)] transition-colors hover:bg-[color:var(--accent-softer)]"
-                  title="Remember this spelling for next time"
-                >
-                  Add to dictionary
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMishearAsk(null)}
-                  className="flex-shrink-0 text-zinc-500 transition-colors hover:text-zinc-200"
-                  title="Dismiss"
-                >
-                  No thanks
-                </button>
-              </div>
-            )}
+            {/* The ONE attention slot inside the shell — build-confirm, mishear,
+                voice, steer/queue, queued render here by priority, one at a
+                time, as the same slim row. Never a stack of styled cards. */}
+            <ComposerNotice
+              buildConfirm={pendingBuildConfirm ? {
+                text: pendingBuildConfirm.text,
+                onAnswer: () => {
+                  const t = pendingBuildConfirm.text;
+                  setPendingBuildConfirm(null);
+                  void handleSend(t, { buildConfirmResolved: 'answer' });
+                },
+                onBuild: () => {
+                  const t = pendingBuildConfirm.text;
+                  setPendingBuildConfirm(null);
+                  void handleSend(t, { buildConfirmResolved: 'build' });
+                },
+                onCancel: () => setPendingBuildConfirm(null),
+              } : null}
+              mishear={mishearAsk ? {
+                prompt: mishearAsk.prompt,
+                onConfirm: () => {
+                  addTermToDictionary(mishearAsk.corrected);
+                  try {
+                    saveProfile(confirmCorrection(loadProfile(), {
+                      heard: mishearAsk.heard,
+                      corrected: mishearAsk.corrected,
+                    }));
+                  } catch { /* learning must never block the UI */ }
+                  setMishearAsk(null);
+                },
+                onDismiss: () => setMishearAsk(null),
+              } : null}
+              voice={voiceError ? {
+                message: voiceError,
+                onCheck: () => {
+                  try { sessionStorage.setItem('vai-settings-tab', 'voice'); } catch { /* non-fatal */ }
+                  window.dispatchEvent(new CustomEvent('vai:open-voice-settings'));
+                },
+              } : null}
+              steer={isStreaming && input.trim().length > 0 ? {
+                onSteer: () => { void handleSteer(); },
+                onQueue: handleQueue,
+              } : null}
+              queued={queuedMessage ? {
+                text: queuedMessage,
+                onCancel: () => setQueuedMessage(null),
+              } : null}
+            />
 
             <textarea
               ref={textareaRef}
+              aria-live={dictation.listening || globalDictationListening || dictation.status === 'transcribing' ? 'polite' : undefined}
+              data-dictation-active={dictation.listening || globalDictationListening || liveDictation.isActive() ? 'true' : undefined}
               value={input}
               onChange={(e) => {
                 const v = e.target.value;
                 const pos = e.target.selectionStart ?? v.length;
                 setInput(v);
+                if (voiceError) setVoiceError(null);
                 // Emptying the field discards any dictation baseline so a fresh
                 // typed message is never mistaken for a correction of old speech.
                 if (!v.trim()) dictatedBaselineRef.current = '';
@@ -1932,9 +1946,7 @@ export function ChatWindow() {
                       : MODE_PLACEHOLDERS[mode]
               }
               rows={1}
-              className={`resize-none overflow-y-auto bg-transparent px-4 pb-2.5 pt-2.5 text-sm leading-relaxed focus:outline-none ${
-                studioBuilderChrome ? 'text-zinc-900 placeholder-zinc-400' : 'text-zinc-100 placeholder-zinc-600'
-              }`}
+              className={`resize-none overflow-y-auto bg-transparent px-4 pb-2.5 pt-2.5 text-sm leading-relaxed transition-shadow duration-200 focus:outline-none ${studioBuilderChrome ? 'text-zinc-900 placeholder-zinc-400' : 'text-zinc-100 placeholder-zinc-600'}`}
               style={{ minHeight: `${MIN_INPUT_HEIGHT}px`, maxHeight: `${MAX_INPUT_HEIGHT}px` }}
             />
             {mentionAt !== null && textareaRef.current && (
@@ -1961,12 +1973,27 @@ export function ChatWindow() {
             <div className="flex items-center justify-between px-3 pb-2.5">
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-600 transition-colors hover:bg-zinc-800/80 hover:text-zinc-300"
-                  title="Attach files"
+                  ref={attachButtonRef}
+                  type="button"
+                  onClick={() => setAttachMenuOpen((v) => !v)}
+                  className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
+                    attachMenuOpen || attachedProjectName || attachedFiles.length > 0
+                      ? 'bg-zinc-800/80 text-violet-300'
+                      : 'text-zinc-600 hover:bg-zinc-800/80 hover:text-zinc-300'
+                  }`}
+                  title="Attach a file or open a project folder"
+                  aria-expanded={attachMenuOpen}
+                  aria-haspopup="menu"
                 >
                   <Paperclip className="h-4 w-4" />
                 </button>
+                <AttachMenu
+                  anchorRef={attachButtonRef}
+                  open={attachMenuOpen}
+                  onClose={() => setAttachMenuOpen(false)}
+                  onFilesAttached={(files) => setAttachedFiles((prev) => [...prev, ...files])}
+                  onTriggerFileInput={() => fileInputRef.current?.click()}
+                />
                 <button
                   onClick={() => setImageMode((v) => !v)}
                   className={`flex h-7 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium transition-all ${
@@ -2030,10 +2057,10 @@ export function ChatWindow() {
                           ? 'bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/30'
                           : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
                       }`}
-                      title="Connect to IDE"
+                      title="Connect to an external IDE agent"
                     >
                       <Plus className="h-3.5 w-3.5" />
-                      <span className="hidden sm:inline">IDE</span>
+                      <span className="hidden sm:inline">Ext IDE</span>
                     </button>
                     {showIdePopup && createPortal(
                       <div
@@ -2045,7 +2072,7 @@ export function ChatWindow() {
                         }}
                       >
                         <div className="border-b border-zinc-800/60 px-3 py-2">
-                          <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-400">Connect IDE</div>
+                          <div className="text-[11px] font-medium uppercase tracking-wider text-zinc-400">Connect external IDE</div>
                         </div>
                         <div className="max-h-60 overflow-y-auto p-1.5 combobox-scroll">
                           {ideTargets.filter((t) => t.id !== 'desktop').map((target) => {
@@ -2123,6 +2150,14 @@ export function ChatWindow() {
               </div>
 
               <div className="flex items-center gap-2">
+                <div className="hidden items-center gap-2 md:flex">
+                  <CouncilSeatPicker disabled={isStreaming} />
+                  <ProcessDepthControl
+                    value={processDepth}
+                    onChange={setProcessDepth}
+                    disabled={isStreaming}
+                  />
+                </div>
                 {charCount > 0 && (
                   <motion.span
                     initial={{ opacity: 0, scale: 0.8 }}
@@ -2134,10 +2169,24 @@ export function ChatWindow() {
                 )}
                 {dictation.supported && (
                   <MicButton
-                    status={dictation.status}
+                    status={globalDictationListening && dictation.status === 'idle' ? 'listening' : dictation.status}
                     supported={dictation.supported}
-                    onHoldStart={() => void dictation.start()}
-                    onHoldEnd={() => void dictation.stop()}
+                    mode={micTriggerMode}
+                    level={voiceLevel}
+                    onHoldStart={() => {
+                      // A global keybind hold already owns the mic — starting the
+                      // button's own STT session too would double-capture the audio
+                      // and double-insert the text. Defer to the hold in progress.
+                      if (globalDictationListening) return;
+                      setVoiceError(null);
+                      setVoiceLevel(0.18);
+                      liveDictation.begin();
+                      void dictation.start();
+                    }}
+                    onHoldEnd={() => {
+                      setVoiceLevel(0);
+                      void dictation.stop();
+                    }}
                     disabled={isStreaming}
                     onContextMenu={(at) => setMicMenuAt(at)}
                   />
@@ -2220,50 +2269,7 @@ export function ChatWindow() {
       onFollowUp={(question) => { void handleSend(question); }}
     />
 
-    {/* Live Council Progress panel — Codex-style right contextual view.
-        Shows when user toggles or when latest assistant turn has council data.
-        This is the key "make council visible and actionable" surface so Vai feels like
-        a transparent, steerable friend rather than a black box. */}
-    {(showCouncilPanel || (() => {
-      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-      if (lastAssistant?.thinking?.council) return true;
-      if (isStreaming && lastAssistant) {
-        return !!deriveLiveCouncilFromProgressSteps(lastAssistant.progressSteps ?? [], true);
-      }
-      return false;
-    })()) && (
-      <div className="flex h-full w-80 flex-shrink-0 border-l border-zinc-800 overflow-hidden">
-        <CouncilProgressPanel
-          council={(() => {
-            const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-            return lastAssistant?.thinking?.council
-              ?? deriveLiveCouncilFromProgressSteps(lastAssistant?.progressSteps ?? [], isStreaming)
-              ?? null;
-          })()}
-          isOpen={true}
-          onClose={() => toggleCouncilPanel()}
-          onApplyLesson={(lesson: string) => {
-            console.log('[CouncilPanel] Apply lesson:', lesson);
-            // Live steering: inject as a system note and re-trigger thinking for next turn visibility
-            void handleSend(`[Council live steering applied] Incorporate this method lesson: ${lesson}. Re-evaluate the previous context with this guidance.`);
-          }}
-          onReconvene={() => {
-            console.log('[CouncilPanel] Re-convene requested');
-            void handleSend('Re-run a fresh council review on the last assistant response using the current context and any previous lessons.');
-          }}
-          onDesignMode={() => {
-            console.log('[CouncilPanel] Design Mode requested');
-            // Simulate annotation: in real, this would open an overlay on the panel itself for pointing at cards/lessons
-            void handleSend('Enter Design Mode for the Council panel: I want to visually annotate the member cards and lessons to refine how they are displayed and acted on.');
-          }}
-          onExportVisualPlan={() => {
-            console.log('[CouncilPanel] Export visual plan');
-            // Generate a shareable artifact of the current council state
-            void handleSend('Export the current council decision as a visual plan artifact for review and sharing.');
-          }}
-        />
-      </div>
-    )}
     </div>
   );
 }
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           

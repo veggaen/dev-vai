@@ -40,10 +40,10 @@ export function HoverResizeHandle({ direction = 'vertical' }: HoverResizeHandleP
       onMouseLeave={handleLeave}
       onPointerDown={() => setArmed(true)}
       className={`group relative flex items-center justify-center transition-all ${
-        isVertical ? 'w-[5px] cursor-col-resize' : 'h-[5px] cursor-row-resize'
+        isVertical ? 'min-w-[10px] w-[10px] cursor-col-resize' : 'min-h-[10px] h-[10px] cursor-row-resize'
       } ${armed ? 'z-10 bg-[color:var(--accent-soft)]' : ''}`}
-      title={armed ? 'Drag to resize' : 'Hover to resize'}
-      aria-label="Resize panel"
+      title={armed ? 'Drag to resize — drag past edge to collapse' : 'Hover to resize — drag to collapse or expand'}
+      aria-label="Resize or collapse panel"
     >
       <div
         className={`pointer-events-none transition-all duration-200 ${

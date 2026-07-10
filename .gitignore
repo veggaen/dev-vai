@@ -100,6 +100,11 @@ packages/runtime/.vai-runtime.lock
 vai.db
 vai.db-shm
 vai.db-wal
+vai.db.backup-*
+/*.err
+.turbo/
+vai.db-shm
+vai.db-wal
 
 # TypeScript incremental build info
 *.tsbuildinfo
@@ -115,3 +120,4 @@ scripts/improve-loop/.supervisor.lock
 
 # runtime-learned knowledge — the live app rewrites this every session; generated data, not source
 packages/runtime/vai-knowledge.json
+backups/

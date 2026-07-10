@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { apiFetch, API_BASE, setApiSessionToken } from '../lib/api.js';
+import { apiFetch, API_BASE, getApiSessionToken, setApiSessionToken } from '../lib/api.js';
 
 interface AuthUser {
   id: string;
@@ -203,8 +203,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const response = await apiFetch('/api/auth/me');
       const payload = await response.json() as AuthBootstrap;
+      // The runtime explicitly says we're anonymous while we still hold a bearer
+      // token — that token is dead (revoked/expired server-side). Drop it so the
+      // next sign-in starts clean instead of sending a corpse with every request.
+      if (payload.enabled && !payload.authenticated && getApiSessionToken()) {
+        setApiSessionToken(null);
+      }
       set(resolveBootstrap(payload));
     } catch {
+      // Network failure — the runtime is unreachable (starting up / restarting).
+      // This is NOT "signed out": keep the user's auth intact and let the gate
+      // show a reconnect state. The 4s poll self-heals when the runtime returns.
       set({
         browserLinking: false,
         status: 'error',

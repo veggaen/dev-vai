@@ -26,7 +26,6 @@ import type { ChatProgressStep, CouncilThinkingUI, ResearchTraceUI, ResponseVeri
 import type { PipelinePhaseUI, TurnEvidenceUI } from './ThinkingPanel.logic.js';
 import { buildAdvisorLessons, buildPipelinePhases, buildThinkingPanelModel, buildReasoningNarrative, describeAdvisorContribution, humanizeStrategy, formatDuration, summarizeProcessTrace, buildTurnEvidence } from './ThinkingPanel.logic.js';
 import { useChatStore } from '../../stores/chatStore.js';
-import { useLayoutStore } from '../../stores/layoutStore.js';
 import { ProcessTree } from './ProcessTree.js';
 
 interface ThinkingPanelProps {
@@ -674,15 +673,11 @@ function EvidenceItem({
 }
 
 /**
- * Council pointer — a single quiet line summarising the consensus outcome with a
- * button that opens the right Council panel. The full debate (member cards,
- * transcript, method lessons, growth box) lives there, NOT here, so the in-chat
- * panel and the right rail never show the same thing twice.
+ * Council pointer — a quiet evidence line summarising the consensus outcome.
+ * The full turn process now stays inline with the message so Council never
+ * claims permanent sidebar space when there is no active review.
  */
 function CouncilPointer({ council }: { council: CouncilThinkingUI }) {
-  const showCouncilPanel = useLayoutStore((s) => s.showCouncilPanel);
-  const toggleCouncilPanel = useLayoutStore((s) => s.toggleCouncilPanel);
-
   const outcomeStyle =
     council.outcome === 'ship'
       ? { label: 'Cleared for release', tone: 'text-[color:var(--tone-good)]', dot: 'bg-emerald-400/80' }
@@ -691,12 +686,10 @@ function CouncilPointer({ council }: { council: CouncilThinkingUI }) {
         : { label: 'Escalated', tone: 'text-[color:var(--tone-info)]', dot: 'bg-sky-400/80' };
 
   return (
-    <button
-      type="button"
-      onClick={() => { if (!showCouncilPanel) toggleCouncilPanel(); }}
+    <div
       data-council-pointer={council.outcome}
-      className="flex w-full items-center gap-2 rounded-lg thinking-surface-soft px-3.5 py-2.5 text-left text-[11px] transition-colors hover:text-[color:var(--chat-strong)] focus-visible:ring-2 focus-visible:ring-[color:var(--accent-ring)]"
-      title="Open the Council panel to see the full member debate, lessons and outcome"
+      className="flex w-full items-center gap-2 rounded-lg thinking-surface-soft px-3.5 py-2.5 text-left text-[11px]"
+      title="Council result for this turn"
     >
       <Users aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[color:var(--accent-text)]" />
       <span className="font-medium text-[color:var(--chat-strong)]">Council</span>
@@ -706,9 +699,9 @@ function CouncilPointer({ council }: { council: CouncilThinkingUI }) {
       </span>
       <span className="text-zinc-600">· {council.members.length} members · {Math.round(council.agreement * 100)}% agree</span>
       <span className="ml-auto flex items-center gap-1 text-[10px] text-[color:var(--accent-text)]">
-        {showCouncilPanel ? 'open →' : 'view debate →'}
+        inline evidence
       </span>
-    </button>
+    </div>
   );
 }
 

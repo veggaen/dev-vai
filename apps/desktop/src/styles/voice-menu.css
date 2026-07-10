@@ -1,0 +1,76 @@
+/* Vai voice surfaces — mic menu + dictation chrome */
+
+.vai-voice-menu {
+  border: 1px solid color-mix(in srgb, var(--accent, #7c3aed) 22%, var(--border, #2a2a32));
+  background: color-mix(in srgb, var(--panel, #1b1b22) 94%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent, #7c3aed) 8%, transparent),
+    0 24px 48px -12px rgb(0 0 0 / 0.55);
+}
+
+.vai-voice-menu__header {
+  border-bottom: 1px solid var(--border, #2a2a32);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-soft, #7c3aed22) 55%, transparent) 0%,
+    transparent 100%
+  );
+}
+
+.vai-voice-menu__segment {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: 0.65rem;
+  background: var(--panel-bg-muted, #14141a);
+  border: 1px solid var(--border, #2a2a32);
+}
+
+.vai-voice-menu__segment-btn {
+  flex: 1;
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: capitalize;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.vai-voice-menu__segment-btn.is-active {
+  background: var(--accent-soft, #7c3aed22);
+  color: var(--accent-text, #c4b5fd);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #7c3aed) 35%, transparent);
+}
+
+.vai-voice-menu__row {
+  border-radius: 0.55rem;
+  transition: background 0.12s ease;
+}
+
+.vai-voice-menu__row:hover {
+  background: color-mix(in srgb, var(--accent-soft, #7c3aed22) 45%, transparent);
+}
+
+.vai-voice-menu__row.is-selected {
+  background: color-mix(in srgb, var(--accent-soft, #7c3aed22) 70%, transparent);
+}
+
+.vai-voice-menu__meter {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--panel-bg-muted, #14141a);
+  overflow: hidden;
+}
+
+.vai-voice-menu__meter-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent, #7c3aed), var(--accent-deep, #5b21b6));
+  transform-origin: left center;
+}
+
+.vai-dictation-pill {
+  border: 1px solid color-mix(in srgb, var(--accent, #7c3aed) 28%, transparent);
+  background: color-mix(in srgb, var(--panel, #17171d) 92%, transparent);
+  box-shadow: 0 16px 40px -10px rgb(0 0 0 / 0.5);
+}

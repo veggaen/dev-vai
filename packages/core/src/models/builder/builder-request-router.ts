@@ -65,6 +65,31 @@ export function routeBuilderRequest(input: BuilderRequestRouteInput): BuilderReq
   }
 
   const wantsVisualEdit = /\b(?:edit|update|change|improve|polish|refine|make|turn|switch|rename|add|style|restyle|redesign|animate|include|insert|tweak|adjust)\b/i.test(lower);
+
+  // An explicit source-file path in the prompt is the strongest edit signal there
+  // is — stronger than any keyword census. Live failure: "In components/Navbar.tsx,
+  // change the brand text" only hit 1 visual signal, so it fell through the visual
+  // gate and could drift toward generic generation.
+  const namesProjectFile = /(?:^|[\s"'`(])[\w@./-]*\/?[\w.-]+\.(?:tsx|ts|jsx|js|mjs|cjs|css|scss|sass|json|html|md|py|yml|yaml|toml|sql)\b/i.test(input.input);
+  if (namesProjectFile && wantsVisualEdit) {
+    if (input.snapshotPaths.length > 0) {
+      return {
+        kind: 'active-sandbox-edit',
+        confidence: 0.95,
+        reasons: ['The prompt names a specific project file and asks for a change.'],
+        shouldGenerateFreshBuild: false,
+        shouldPatchActiveSandbox: true,
+      };
+    }
+    return {
+      kind: 'active-sandbox-needs-context',
+      confidence: 0.8,
+      reasons: ['The prompt names a specific project file, but no file snapshots are available yet.'],
+      shouldGenerateFreshBuild: false,
+      shouldPatchActiveSandbox: false,
+    };
+  }
+
   const visualSignals = [
     /\blanding\s+page\b/i,
     /\bhero\b/i,
@@ -116,7 +141,7 @@ export function routeBuilderRequest(input: BuilderRequestRouteInput): BuilderReq
     };
   }
 
-  const wantsProjectIteration = /\b(?:add|change|modify|update|convert|switch|remove|delete|include|insert|replace|refactor|fix|use|rename|polish|improve|refine|tighten|make|style|restyle|redesign|adjust|tweak|tune)\b/i.test(lower)
+  const wantsProjectIteration = /\b(?:add|change|modify|update|convert|switch|remove|delete|include|insert|replace|refactor|fix|repair|modernize|migrate|upgrade|apply|implement|use|rename|polish|improve|refine|tighten|make|style|restyle|redesign|adjust|tweak|tune)\b/i.test(lower)
     || /\b(?:auth(?:entication)?|login|sign[\s-]?in|session|middleware|filters?|dashboard|chart|date range|traffic sources)\b/i.test(lower);
 
   if (wantsProjectIteration) {
@@ -133,7 +158,4 @@ export function routeBuilderRequest(input: BuilderRequestRouteInput): BuilderReq
     kind: 'non-builder',
     confidence: 0.54,
     reasons: ['No strong fresh-build or active-edit signal.'],
-    shouldGenerateFreshBuild: false,
-    shouldPatchActiveSandbox: false,
-  };
-}
+    shouldGenerateFreshBuild: false,

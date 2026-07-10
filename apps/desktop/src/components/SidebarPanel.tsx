@@ -18,7 +18,8 @@ import { useChatMergeDrag } from './sidebar/ChatMergeDrag.js';
 const SessionList = lazy(async () => ({ default: (await import('./SessionList.js')).SessionList }));
 const DockerPanel = lazy(async () => ({ default: (await import('./DockerPanel.js')).DockerPanel }));
 const KnowledgeSidePanel = lazy(async () => ({ default: (await import('./panels/KnowledgeSidePanel.js')).KnowledgeSidePanel }));
-const CouncilProgressPanel = lazy(async () => ({ default: (await import('./panels/CouncilProgressPanel.js')).CouncilProgressPanel }));
+const ProjectOversightPanel = lazy(async () => ({ default: (await import('./sidebar/ProjectOversightPanel.js')).ProjectOversightPanel }));
+const ProjectsHomePanel = lazy(async () => ({ default: (await import('./sidebar/ProjectsHomePanel.js')).ProjectsHomePanel }));
 
 /* ── Helpers ───────────────────────────────────────────────────── */
 
@@ -114,10 +115,17 @@ function saveConversationOrder(ids: string[]): void {
 
 /* ── Main Panel ────────────────────────────────────────────────── */
 
-const SIDEBAR_PANEL_IDS: PanelType[] = ['chats', 'devlogs', 'knowledge', 'docker', 'control', 'council'];
+const SIDEBAR_PANEL_IDS: PanelType[] = ['projects', 'chats', 'devlogs', 'knowledge', 'docker', 'control'];
 
 function SidebarPanelBody({ panel }: { panel: PanelType }) {
   switch (panel) {
+    case 'projects':
+      return (
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <ProjectsHomePanel />
+          <ProjectOversightPanel />
+        </div>
+      );
     case 'chats':
       return <ChatsPanel />;
     case 'devlogs':
@@ -128,17 +136,20 @@ function SidebarPanelBody({ panel }: { panel: PanelType }) {
       return <DockerPanel />;
     case 'control':
       return <ControlPanel />;
-    case 'council':
-      return <CouncilSidebarView />;
     default:
       return null;
   }
 }
 
-export function SidebarPanel() {
+interface SidebarPanelProps {
+  /** Inside Open/Odyssey resizable shell — fill host width instead of fixed px. */
+  readonly embedded?: boolean;
+}
+
+export function SidebarPanel({ embedded = false }: SidebarPanelProps) {
   const { activePanel, toggleSidebar, themePreference, layoutMode } = useLayoutStore();
   const isLight = themePreference === 'light';
-  const isOdyssey = layoutMode === 'odyssey';
+  const isFloatingPanel = layoutMode === 'odyssey' || layoutMode === 'open';
   const navItem = getSidebarNavItem(activePanel);
   const panelTitle = getSidebarPanelTitle(activePanel);
 
@@ -148,17 +159,21 @@ export function SidebarPanel() {
 
   return (
     <motion.aside
-      initial={{ width: 0, opacity: 0 }}
-      animate={{ width: 'var(--layout-sidebar-effective-width)', opacity: 1 }}
-      exit={{ width: 0, opacity: 0 }}
+      initial={embedded ? { opacity: 0 } : { width: 0, opacity: 0 }}
+      animate={embedded
+        ? { opacity: 1 }
+        : { width: 'var(--layout-sidebar-effective-width)', opacity: 1 }}
+      exit={embedded ? { opacity: 0 } : { width: 0, opacity: 0 }}
       transition={{ duration: 0.15, ease: 'easeOut' }}
       aria-label={panelTitle}
-      className={`sidebar-panel-shell flex h-full min-w-0 flex-shrink-0 flex-col overflow-hidden bg-[color:var(--sidebar-surface)] ${
-        isOdyssey
+      className={`sidebar-panel-shell flex h-full min-w-0 flex-col overflow-hidden bg-[color:var(--sidebar-surface)] ${
+        embedded ? 'w-full' : 'w-auto flex-shrink-0'
+      } ${
+        isFloatingPanel
           ? 'rounded-[var(--layout-radius)] border border-[color:var(--border)] shadow-[var(--layout-shadow)]'
           : 'border-r border-[color:var(--shell-line-soft)]'
       }`}
-      style={{ width: 'var(--layout-sidebar-effective-width)', maxWidth: '100%' }}
+      style={embedded ? undefined : { width: 'var(--layout-sidebar-effective-width)', maxWidth: '100%' }}
     >
       <SidebarPanelHeader
         title={panelTitle}
@@ -167,7 +182,7 @@ export function SidebarPanel() {
         onCollapse={toggleSidebar}
       />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <Suspense fallback={<PanelLoading />}>
           <SidebarPanelBody panel={activePanel} />
         </Suspense>
@@ -405,7 +420,7 @@ function ChatsPanel() {
       <div className="flex-shrink-0 px-3 pb-2 pt-2">
         <button
           onClick={handleNewChat}
-          className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-colors ${
+          className={`vai-new-chat-btn mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium transition-colors ${
             isLight
               ? 'text-zinc-800 hover:bg-zinc-200/70'
               : 'text-zinc-200 hover:bg-white/[0.05]'
@@ -428,10 +443,10 @@ function ChatsPanel() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search chats"
-            className={`w-full rounded-md py-1.5 pl-8 pr-3 text-sm outline-none transition-colors ${
+            className={`vai-side-search w-full rounded-md py-1.5 pl-8 pr-3 text-sm outline-none transition-colors ${
               isLight
-                ? 'bg-zinc-200/55 text-zinc-900 placeholder-zinc-400 focus:bg-white focus:ring-1 focus:ring-zinc-300'
-                : 'bg-white/[0.035] text-zinc-100 placeholder-zinc-600 focus:bg-white/[0.055] focus:ring-1 focus:ring-white/10'
+                ? 'bg-zinc-200/55 text-zinc-900 placeholder-zinc-400 focus:bg-white'
+                : 'bg-white/[0.035] text-zinc-100 placeholder-zinc-600 focus:bg-white/[0.055]'
             }`}
           />
         </div>
@@ -467,7 +482,12 @@ function ChatsPanel() {
               <div
                 key={conv.id}
                 data-conv-id={conv.id}
-                draggable={!merge.isMergeDragging}
+                // Native HTML5 drag stays OFF: it fires `dragstart` on the first move
+                // and swallows the pointermove events the merge follower needs — the
+                // cause of the "won't follow until I release" feel. Merge-drag owns the
+                // full-row gesture now. (The drag handlers below are kept inert; reorder
+                // by drag can return later via a dedicated handle.)
+                draggable={false}
                 onPointerDown={(event) => merge.onRowPointerDown(conv.id, event)}
                 onDragStart={(event) => {
                   if (merge.isMergeDragging) { event.preventDefault(); return; }
@@ -509,7 +529,7 @@ function ChatsPanel() {
                   setDraggedConversationId(null);
                   setDragOverConversationId(null);
                 }}
-                className={`group relative ml-3 flex items-center gap-2 rounded-md px-2 py-1.5 transition-all duration-150 hover:translate-x-0.5 ${draggedConversationId === conv.id ? 'cursor-grabbing opacity-80' : 'cursor-grab'} ${conv.id === activeConversationId
+                className={`vai-side-row group relative ml-3 flex items-center gap-2 rounded-md px-2 py-1.5 ${draggedConversationId === conv.id ? 'cursor-grabbing opacity-80' : 'cursor-grab'} ${conv.id === activeConversationId
                   ? isLight
                     ? 'bg-white text-zinc-950 shadow-sm'
                     : 'bg-white/[0.065] text-zinc-100'
@@ -517,6 +537,8 @@ function ChatsPanel() {
                     ? 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
                     : 'text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200'
                   } ${dragOverConversationId === conv.id ? 'bg-[color:var(--accent-soft)]' : ''} ${merge.mergeTargetId === conv.id ? 'vai-merge-target' : ''} ${merge.mergeSourceId === conv.id ? 'vai-merge-source' : ''}`}
+                data-active={conv.id === activeConversationId || undefined}
+                data-dragging={draggedConversationId === conv.id || undefined}
                 title={conv.title}
                 onClick={() => {
                   if (Date.now() < suppressSelectUntilRef.current) return;
@@ -667,9 +689,7 @@ function ChatsPanel() {
           <div
             onClick={(e) => e.stopPropagation()}
             style={{ top: contextMenu.y, left }}
-            className={`fixed z-50 w-44 overflow-hidden rounded-lg border py-1 shadow-xl ${
-              isLight ? 'border-zinc-200 bg-white' : 'border-white/10 bg-zinc-900'
-            }`}
+            className="vai-context-menu fixed z-50 w-44 overflow-hidden py-1"
           >
             <button className={itemClass} onClick={() => beginRename(conv.id, conv.title)}>
               <Pencil className="h-3.5 w-3.5 opacity-70" /> Rename
@@ -970,57 +990,6 @@ function ControlAction({
       <div className="text-sm text-zinc-100">{title}</div>
       <div className="mt-1 text-xs text-zinc-500">{description}</div>
     </button>
-  );
-}
-
-function CouncilSidebarView() {
-  const setActivePanel = useLayoutStore((state) => state.setActivePanel);
-  const toggleCouncilPanel = useLayoutStore((state) => state.toggleCouncilPanel);
-  const showCouncilPanel = useLayoutStore((state) => state.showCouncilPanel);
-  const messages = useChatStore((state) => state.messages);
-
-  const council = useMemo(() => {
-    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
-    return lastAssistant?.thinking?.council ?? null;
-  }, [messages]);
-
-  const returnToChat = useCallback(() => setActivePanel('chats'), [setActivePanel]);
-
-  return (
-    <div className="flex h-full min-h-0 flex-col p-2">
-      <div className="mb-2 flex items-center justify-end">
-        <button
-          type="button"
-          onClick={() => toggleCouncilPanel()}
-          className={`rounded-md border px-2 py-1 text-[10px] transition-colors ${
-            showCouncilPanel
-              ? 'border-[color:var(--accent-ring)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]'
-              : 'border-[color:var(--border)] text-zinc-500 hover:bg-white/5 hover:text-zinc-300'
-          }`}
-          aria-pressed={showCouncilPanel}
-        >
-          {showCouncilPanel ? 'Right panel on' : 'Show right panel'}
-        </button>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-[color:var(--border)] bg-[color:var(--panel)]/30">
-        <CouncilProgressPanel
-          council={council}
-          isOpen
-          onClose={returnToChat}
-          onApplyLesson={() => {
-            toast.success('Lesson queued for the next review');
-            returnToChat();
-          }}
-          onReconvene={() => {
-            toast('Requesting fresh council review…');
-            returnToChat();
-          }}
-          onDesignMode={returnToChat}
-          onExportVisualPlan={returnToChat}
-        />
-      </div>
-    </div>
   );
 }
 

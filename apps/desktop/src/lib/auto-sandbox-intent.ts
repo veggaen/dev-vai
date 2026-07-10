@@ -23,6 +23,11 @@ export interface ResolvedAutoSandboxIntent {
 
 export type SendTimeWorkIntent = 'none' | 'build' | 'edit';
 
+export interface TerminalNoActionStatus {
+  readonly step: 'ready' | 'failed';
+  readonly message: string;
+}
+
 export interface ResolveSendTimeWorkIntentInput {
   userPrompt: string;
   mode: AutoSandboxMode;
@@ -41,6 +46,19 @@ export interface ResolvedSendTimeWorkIntent {
    * Never set when {@link shouldPrimeBuilder} is true — a clear build doesn't need confirming.
    */
   readonly needsBuildConfirm?: boolean;
+}
+
+/**
+ * Agent is the autonomous chat + code mode. Its file output is constrained by
+ * the attached-project router, council validation, and reversible sandbox
+ * revisions, so stopping again at a diff queue breaks the mode's contract.
+ * Builder and Chat still honour the user's explicit review preference.
+ */
+export function shouldStageGeneratedFilesForReview(input: {
+  readonly mode: AutoSandboxMode;
+  readonly requireDiffApproval: boolean;
+}): boolean {
+  return input.requireDiffApproval && input.mode !== 'agent';
 }
 
 const BUILD_MODES = new Set<AutoSandboxMode>(['builder', 'agent']);
@@ -67,6 +85,36 @@ export function isChatOnlyAssistantTurn(message: {
   return true;
 }
 
+/**
+ * Settle builder chrome when a completed answer intentionally contains no
+ * actionable file payload. Ordinary Agent conversation returns null, while a
+ * build/edit refusal becomes a short, terminal and truthful status.
+ */
+export function resolveTerminalNoActionStatus(input: {
+  readonly workIntent: SendTimeWorkIntent;
+  readonly hasActiveProject: boolean;
+  readonly assistantContent: string;
+}): TerminalNoActionStatus | null {
+  if (input.workIntent === 'none') return null;
+
+  const safelyRefused = /(?:did(?:n't| not) apply|left unchanged|no changes (?:were )?applied|blocking issue|below the quality bar)/i
+    .test(input.assistantContent);
+  if (input.hasActiveProject) {
+    return {
+      step: 'ready',
+      message: safelyRefused
+        ? 'No changes applied — Vai stopped safely and the preview is unchanged.'
+        : 'Vai finished without a validated code update. The preview is unchanged.',
+    };
+  }
+  return {
+    step: 'failed',
+    message: safelyRefused
+      ? 'No changes applied — Vai stopped safely before creating a preview.'
+      : 'Vai finished without producing a runnable update.',
+  };
+}
+
 export function resolveAutoSandboxIntent(input: ResolveAutoSandboxIntentInput): ResolvedAutoSandboxIntent {
   const { userPrompt, mode, hasActiveProject, hasPackageJsonOutput } = input;
   const isBuildMode = BUILD_MODES.has(mode);
@@ -79,10 +127,16 @@ export function resolveAutoSandboxIntent(input: ResolveAutoSandboxIntentInput): 
     && !DISCUSSION_OR_RECOMMENDATION_REQUEST.test(userPrompt)
     && EXPLICIT_BUILD_REQUEST.test(userPrompt)
     && (EXPLICIT_BUILD_TARGET.test(userPrompt) || EXPLICIT_TRY_INTENT.test(userPrompt));
-  const explicitChatEditRequest = mode === 'chat' && !productEngineeringPlanning && Boolean(detectEditIntent(userPrompt, {
-    hasActiveProject,
-    isBuildMode,
-  }));
+  // Agent is the auto chat+code home mode. Once a real project is attached, a
+  // clear edit belongs to that project and must not fall into the ambiguous
+  // "answer or build an app?" confirmation path.
+  const explicitChatEditRequest = (mode === 'chat' || mode === 'agent')
+    && hasActiveProject
+    && !productEngineeringPlanning
+    && Boolean(detectEditIntent(userPrompt, {
+      hasActiveProject,
+      isBuildMode,
+    }));
   const freshBuildOnAttachedProject = hasActiveProject
     && NEW_BUILD_REQUEST.test(userPrompt)
     && EXPLICIT_BUILD_TARGET.test(userPrompt)
@@ -123,11 +177,18 @@ export function resolveSendTimeWorkIntent(input: ResolveSendTimeWorkIntentInput)
     };
   }
 
-  // Agent mode: grade the build intent so we don't silently scaffold an app on an ambiguous ask.
-  // 'build' → prime the builder; 'ambiguous' → ask the user; 'answer' → stay a chat turn.
+  const sandboxIntent = resolveAutoSandboxIntent({
+    userPrompt,
+    mode,
+    hasActiveProject,
+    hasPackageJsonOutput: false,
+  });
+
+  // Agent mode: grade the build intent so we don't silently scaffold an app on
+  // an ambiguous ask. A recognized attached-project edit is not ambiguous.
   const agentBuildIntent = mode === 'agent' ? classifyAgentBuildIntent(userPrompt) : 'answer';
   const agentNewBuildRequest = mode === 'agent' && agentBuildIntent === 'build';
-  if (mode === 'agent' && agentBuildIntent === 'ambiguous') {
+  if (mode === 'agent' && agentBuildIntent === 'ambiguous' && !sandboxIntent.explicitChatEditRequest) {
     return {
       intent: 'none',
       shouldPrimeBuilder: false,
@@ -137,12 +198,6 @@ export function resolveSendTimeWorkIntent(input: ResolveSendTimeWorkIntentInput)
   const builderNewBuildRequest = mode === 'builder'
     && NEW_BUILD_REQUEST.test(userPrompt)
     && EXPLICIT_BUILD_TARGET.test(userPrompt);
-  const sandboxIntent = resolveAutoSandboxIntent({
-    userPrompt,
-    mode,
-    hasActiveProject,
-    hasPackageJsonOutput: false,
-  });
 
   const shouldPrimeBuilder = sandboxIntent.explicitStarterRequest
     || builderNewBuildRequest
@@ -197,18 +252,4 @@ export function resolveSendTimeWorkIntent(input: ResolveSendTimeWorkIntentInput)
         : 'Preparing a runnable preview from this request...',
     requestSystemPrompt: [
       'This user message is an execute-now build request, not a discussion request.',
-      'Treat this turn like a builder execution turn while keeping the normal chat UX.',
-      'Do not output research notes, grounding notes, citations, or architecture advice unless they are strictly required to unblock the build.',
-      sandboxIntent.explicitStarterRequest
-        ? 'Prefer the cleanest starter path, including sandbox template markers when that is the fastest honest way to launch the preview.'
-        : freshBuildOnAttachedProject
-          ? 'The user phrased this as a fresh build request. Do not mutate the currently attached app unless they explicitly ask to reuse it.'
-        : 'Answer briefly and then emit the files and sandbox action markers needed to create or update the runnable preview in this turn.',
-      'If you emit files for a new app, include a complete runnable file set with title="path/to/file" code blocks and include package.json.',
-      freshBuildOnAttachedProject
-        ? 'Prefer a fresh runnable app for this turn instead of iterating the attached preview.'
-        : 'If an active preview exists, continue that app unless the user explicitly asked for a fresh rebuild.',
-      'If you are truly blocked, ask one short blocking question instead of emitting speculative files.',
-    ].join(' '),
-  };
-}
+      'Treat this turn like a

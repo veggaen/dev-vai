@@ -35,10 +35,17 @@ import { hasPageEvidence, pageEvidenceIds, type PageEvidence } from '../../tools
 /** A turn is page-shaped when it names a URL AND asks to inspect/read/check it. */
 const URL_RE = /https?:\/\/[^\s<>"'`]+/i;
 const INSPECT_RE = /\b(what(?:'s| is| does)|does (?:it|the page|that page)|is (?:it|the page|that page)|title of|inspect|check|look at|read|open|visit|load|fetch|status of|up\??|have an?|contain|show)\b/i;
+const SOURCE_FILE_RE = /(?:^|[\s`"'(])(?:[\w.-]+[\\/])*[\w.-]+\.(?:tsx?|jsx?|css|scss|sass|json|html|vue|svelte)(?=$|[\s`"'),:])/i;
+const CODE_EDIT_RE = /\b(?:fix|repair|debug|edit|change|update|refactor|rewrite|patch|apply|implement|modify|remove|replace)\b/i;
 
 /** Classify whether the turn asks to observe a named page. Pure. */
 export function isPageQuery(text: string): boolean {
   const t = text ?? '';
+  // Error reports often contain a failing URL plus phrases such as "failed to
+  // fetch" or "network reachable". If the same turn explicitly names source
+  // files and asks to edit them, it is a code-repair turn â€” observing the URL
+  // must not steal the request before Builder/Council can act.
+  if (SOURCE_FILE_RE.test(t) && CODE_EDIT_RE.test(t)) return false;
   return URL_RE.test(t) && INSPECT_RE.test(t);
 }
 

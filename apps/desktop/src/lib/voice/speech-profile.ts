@@ -16,7 +16,8 @@
  * Pure logic + a thin localStorage persistence seam; fully unit-tested.
  */
 
-import { detectCorrections } from './correction-detection.js';
+import { detectCorrections, plausibleMishearing } from './correction-detection.js';
+import { repairKnownAsrArtifacts } from '@vai/core/browser';
 
 export interface SpeechRule {
   /** Normalized token(s) the engine keeps mishearing. */
@@ -54,6 +55,18 @@ export function emptyProfile(): SpeechProfile {
 /** Rules currently active (promoted and not struck out). */
 export function activeRules(profile: SpeechProfile): readonly SpeechRule[] {
   return profile.rules.filter((r) => r.count >= PROMOTE_AT && r.strikes < RETIRE_AT);
+}
+
+/** All rules, newest first — for a "Learned corrections" settings list (transparency). */
+export function listRules(profile: SpeechProfile): readonly SpeechRule[] {
+  return [...profile.rules].sort((a, b) => (b.lastSeen > a.lastSeen ? 1 : -1));
+}
+
+/** Delete a specific learned rule (user removed a correction they didn't want). */
+export function removeRule(profile: SpeechProfile, heard: string, corrected: string): SpeechProfile {
+  const h = norm(heard);
+  const c = norm(corrected);
+  return { version: 1, rules: profile.rules.filter((r) => !(norm(r.heard) === h && norm(r.corrected) === c)) };
 }
 
 /**
@@ -101,6 +114,17 @@ export function learnFromEdit(
   },
 ): SpeechProfile {
   const { insertedText, sentText, applied = [] } = args;
+
+  // Span-integrity guard: only learn when the dictated text substantially SURVIVES in
+  // what was sent. If the user deleted or rewrote most of it, there's no clean signal
+  // (this covers "they removed the whole sentence" and unrelated later edits).
+  const insertedTokens = insertedText.trim().split(/\s+/).filter(Boolean);
+  if (insertedTokens.length > 0) {
+    const sentSet = new Set(sentText.toLowerCase().split(/\s+/).filter(Boolean));
+    const survived = insertedTokens.filter((t) => sentSet.has(t.toLowerCase())).length;
+    if (survived / insertedTokens.length < 0.5) return profile;
+  }
+
   const result = detectCorrections(insertedText, sentText);
   const now = new Date().toISOString();
   const rules = new Map<string, SpeechRule>(profile.rules.map((r) => [`${norm(r.heard)}→${norm(r.corrected)}`, r]));
@@ -110,7 +134,8 @@ export function learnFromEdit(
     const corrected = m.corrected.trim();
     if (!heard || !corrected || heard === norm(corrected)) continue;
 
-    // Self-heal: the user reverted an auto-applied rule (corrected → back to heard).
+    // Self-heal FIRST (ungated): the user reverted an auto-applied rule back to what we
+    // heard. This must always register a strike, regardless of phonetics.
     const reverted = applied.find((a) => norm(a.corrected) === heard && norm(a.heard) === norm(corrected));
     if (reverted) {
       const key = `${norm(reverted.heard)}→${norm(reverted.corrected)}`;
@@ -118,6 +143,10 @@ export function learnFromEdit(
       if (rule) rules.set(key, { ...rule, strikes: rule.strikes + 1, lastSeen: now });
       continue;
     }
+
+    // Plausibility gate: only a genuine mishearing of a distinctive word becomes a rule.
+    // Rejects change-of-mind swaps ("park"→"beach") and common-word homophones.
+    if (plausibleMishearing(m.heard, m.corrected) === 'none') continue;
 
     const key = `${heard}→${norm(corrected)}`;
     const existing = rules.get(key);
@@ -138,8 +167,31 @@ export function learnFromEdit(
  * Deterministic transcript groom — the zero-latency "prettify" pass.
  * Order matters: fillers → doubles → spacing → casing → terminal punctuation.
  */
+export function confirmCorrection(
+  profile: SpeechProfile,
+  args: { readonly heard: string; readonly corrected: string },
+): SpeechProfile {
+  const heard = norm(args.heard);
+  const corrected = args.corrected.trim();
+  if (!heard || !corrected || heard === norm(corrected)) return profile;
+
+  const now = new Date().toISOString();
+  const rules = new Map<string, SpeechRule>(profile.rules.map((r) => [`${norm(r.heard)}→${norm(r.corrected)}`, r]));
+  const key = `${heard}→${norm(corrected)}`;
+  const existing = rules.get(key);
+  rules.set(key, existing
+    ? { ...existing, count: Math.max(PROMOTE_AT, existing.count + 1), strikes: 0, lastSeen: now }
+    : { heard, corrected, count: PROMOTE_AT, strikes: 0, lastSeen: now });
+
+  const kept = [...rules.values()]
+    .sort((a, b) => (b.lastSeen > a.lastSeen ? 1 : -1))
+    .slice(0, 200);
+
+  return { version: 1, rules: kept };
+}
+
 export function prettifyTranscript(raw: string): string {
-  let t = raw.trim();
+  let t = repairKnownAsrArtifacts(raw).trim();
   if (!t) return t;
 
   // Strip standalone filler tokens (never inside words).

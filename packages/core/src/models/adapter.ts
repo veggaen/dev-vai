@@ -141,7 +141,8 @@ export interface ChatChunk {
     | 'fallback_notice'
     | 'verification'
     | 'image_progress'
-    | 'image_result';
+    | 'image_result'
+    | 'ide_event';
   readonly textDelta?: string;
   readonly reasoningDelta?: string;
   /** Live WORK PRODUCT (not hidden thought): Vai's in-review DRAFT answer as it is written,
@@ -210,6 +211,32 @@ export interface ChatChunk {
       readonly input?: string;
       readonly output?: string;
     }[];
+    /** First-draft race snapshot (stage `first-drafts` / `draft-vote`): Vai + members
+     *  each write a candidate answer, everyone scores them, the winner becomes the
+     *  base draft for the approval-gate rounds. Mirrors api-types draftRaceProgressSchema. */
+    readonly draftRace?: {
+      readonly status: 'drafting' | 'voting' | 'decided';
+      readonly candidates: readonly {
+        readonly authorId: string;
+        readonly authorName: string;
+        readonly modelId?: string;
+        readonly text: string;
+        readonly provisional?: boolean;
+        readonly pending?: boolean;
+        readonly failed?: boolean;
+        readonly durationMs?: number;
+      }[];
+      readonly votes?: readonly {
+        readonly voterId: string;
+        readonly voterName: string;
+        readonly scores: Readonly<Record<string, number>>;
+        readonly note?: string;
+        readonly pending?: boolean;
+        readonly failed?: boolean;
+      }[];
+      readonly winnerId?: string;
+      readonly tieBrokenToVai?: boolean;
+    };
   };
   /** High-level routing classification for the current assistant turn. */
   readonly turnKind?: ChatTurnKind;
@@ -287,6 +314,29 @@ export interface ChatChunk {
     readonly height?: number;
     /** Whether the final image met the accept threshold. */
     readonly accepted?: boolean;
+  };
+  /** IDE domain event — workspace attach, proposals, checkpoints, gates (T3-style receipts). */
+  readonly ideEvent?: {
+    readonly type: string;
+    readonly proposals?: readonly {
+      readonly id: string;
+      readonly path: string;
+      readonly before: string | null;
+      readonly after: string | null;
+      readonly summary: string;
+      readonly author: { readonly memberId: string; readonly role?: string };
+      readonly status: 'pending' | 'approved' | 'rejected';
+    }[];
+    readonly id?: string;
+    readonly status?: 'pending' | 'approved' | 'rejected';
+    readonly label?: string;
+    readonly proposalIds?: readonly string[];
+    readonly applied?: readonly string[];
+    readonly failed?: readonly { readonly id: string; readonly error: string }[];
+    readonly gate?: 'tsc' | 'visual' | 'test';
+    readonly pass?: boolean;
+    readonly detail?: string;
+    readonly workspace?: { readonly id: string; readonly path: string; readonly name: string; readonly attachedAt: string };
   };
 }
 

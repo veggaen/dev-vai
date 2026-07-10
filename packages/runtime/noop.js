@@ -1,0 +1,1 @@
+// Anchor for createRequire when resolving runtime package deps from scripts/.

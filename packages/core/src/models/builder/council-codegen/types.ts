@@ -95,6 +95,8 @@ export type CouncilCodegenEvent =
 export interface CouncilEditFile {
   readonly path: string;
   readonly content: string;
+  /** Context-only source: Council may inspect it but validation forbids emitting it. */
+  readonly readonly?: boolean;
 }
 
 /**
@@ -108,6 +110,10 @@ export interface CouncilEditContext {
   readonly projectName: string;
   /** Current file snapshots from the running sandbox (possibly truncated). */
   readonly files: readonly CouncilEditFile[];
+  /** True when this is a user-opened REAL project folder (own deps, own conventions)
+   *  rather than a Vai-generated single-file sandbox app. Changes the edit contract:
+   *  keep existing imports/stack, respect file conventions, no react-only rules. */
+  readonly external?: boolean;
 }
 
 export interface CouncilCodegenInput {
@@ -117,6 +123,4 @@ export interface CouncilCodegenInput {
   readonly maxRepairs?: number;
   /** Cap on reviewers consulted (members[1..]). Default 2. */
   readonly maxReviewers?: number;
-  /** When set, run as a targeted edit of the active project instead of a fresh build. */
-  readonly edit?: CouncilEditContext;
-}
+  /** When

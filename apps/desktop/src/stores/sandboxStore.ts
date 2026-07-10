@@ -36,8 +36,62 @@ export interface SandboxFileDiff {
   removed: number;
 }
 
+/** One-shot script run state (build / lint / test) mirrored from the runtime. */
+export interface CommandRunInfo {
+  script: string;
+  status: 'running' | 'done' | 'failed';
+  exitCode: number | null;
+  tail?: string[];
+}
+
+export type EnvLane = 'dev' | 'preview' | 'production';
+
+export interface LaneStateInfo {
+  lane: EnvLane;
+  status: 'switching' | 'ready' | 'failed';
+  stage: string | null;
+  error: string | null;
+}
+
 const MAX_BUILD_ACTIVITY = 120;
 const MAX_CLIENT_LOG_ENTRIES = 500;
+
+function derivePreviewFailureMessage(logs: string[], devStderr: string[] = []): string {
+  const lines = [...devStderr, ...logs].filter(Boolean).slice(-80).reverse();
+  const missingEnv = lines.find((line) => /Missing VITE_[A-Z0-9_]+/i.test(line));
+  if (missingEnv) return missingEnv.trim().replace(/^cause:\s*/i, '');
+  const health = lines.find((line) => /Preview health check failed/i.test(line));
+  if (health) return health.replace(/^.*?Preview health check failed:/i, 'Preview failed:').trim();
+  const serverError = lines.find((line) => /(HTTPError|Internal Server Error|Dev server exited|Dev server error)/i.test(line));
+  return serverError?.trim() ?? 'Preview failed after starting. Check the project console for details.';
+}
+
+interface OpenLocalFolderResponse {
+  id?: string;
+  name?: string;
+  rootDir?: string;
+  version?: number;
+  status?: SandboxStatus;
+  devPort?: number | null;
+  live?: boolean;
+  envLane?: EnvLane;
+  laneState?: LaneStateInfo | null;
+  error?: string;
+  profile?: {
+    framework: string;
+    frameworkLabel: string;
+    scripts: Record<string, string>;
+    hasPackageJson: boolean;
+    hasNodeModules: boolean;
+  };
+}
+
+/** Reopening an already-live local project is an attach, not a restart. */
+export function reusableLocalProjectPort(data: OpenLocalFolderResponse): number | null {
+  return data.live === true && Number.isInteger(data.devPort) && (data.devPort ?? 0) > 0
+    ? data.devPort as number
+    : null;
+}
 
 export interface DeployStepState {
   id: string;
@@ -92,6 +146,16 @@ interface SandboxState {
   error: string | null;
   templates: SandboxTemplateInfo[];
 
+  /** External (user-opened) local folder state */
+  external: boolean;
+  framework: string | null;
+  rootDir: string | null;
+  availableScripts: string[];
+  commandRun: CommandRunInfo | null;
+  /** Which lane the app is serving (dev = hot reload; preview/production = built output). */
+  envLane: EnvLane;
+  laneState: LaneStateInfo | null;
+
   /** Deploy pipeline state */
   deployPhase: DeployPhase;
   deploySteps: DeployStepState[];
@@ -101,6 +165,12 @@ interface SandboxState {
 
   createProject: (name: string) => Promise<string>;
   writeFiles: (files: SandboxFile[]) => Promise<void>;
+  replaceText: (action: {
+    query: string;
+    replacement: string;
+    paths: string[];
+    expectedReplacements: number;
+  }) => Promise<{ filesChanged: number; replacements: number; revisionId: string | null }>;
   installDeps: () => Promise<boolean>;
   startDev: () => Promise<number | null>;
   stopDev: () => Promise<void>;
@@ -111,6 +181,12 @@ interface SandboxState {
   cancelDeploy: () => void;
   reset: () => void;
   attachProject: (sandboxProjectId: string) => Promise<void>;
+  /** Open an existing local folder (e.g. C:\Users\you\Documents\my-app): scan → install if needed → dev server → preview. */
+  openLocalFolder: (path: string) => Promise<{ id: string; framework: string; port: number | null }>;
+  /** Run a package.json script (build / lint / test …) and poll until it finishes. */
+  runScript: (script: string) => Promise<boolean>;
+  /** Blue-green lane switch: dev | preview | production. Old server keeps serving until the new lane is ready. */
+  switchLane: (lane: EnvLane) => Promise<boolean>;
   pollDesktopHandoff: (signal?: AbortSignal) => Promise<boolean>;
   markPreviewLoading: (port: number | null) => void;
   markPreviewReady: (port: number | null) => void;
@@ -183,6 +259,13 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
   lastDiff: [],
   error: null,
   templates: [],
+  external: false,
+  framework: null,
+  rootDir: null,
+  availableScripts: [],
+  commandRun: null,
+  envLane: 'dev' as EnvLane,
+  laneState: null,
 
   clearBuildActivity: () => set({ buildActivity: [], lastRevisionId: null, lastDiff: [] }),
 
@@ -239,6 +322,64 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       }
     } catch (err) {
       set({ status: 'failed', error: (err as Error).message });
+      throw err;
+    }
+  },
+
+  replaceText: async (action) => {
+    const { projectId, devPort } = get();
+    if (!projectId) throw new Error('No project');
+    set({ status: 'writing', error: null });
+    try {
+      const res = await apiFetch(`/api/sandbox/${projectId}/replace`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: action.query,
+          replacement: action.replacement,
+          paths: action.paths,
+          caseSensitive: true,
+          regex: false,
+          expectedReplacements: action.expectedReplacements,
+        }),
+      });
+      const data = await res.json().catch(() => null) as {
+        error?: string;
+        filesChanged?: number;
+        replacements?: number;
+        version?: number;
+        revisionId?: string | null;
+      } | null;
+      if (!res.ok) throw new Error(data?.error ?? 'Unable to apply exact text edit');
+      if (data?.replacements !== action.expectedReplacements || data.filesChanged !== 1) {
+        throw new Error(`Exact edit was not applied safely (expected 1 match, changed ${data?.replacements ?? 0}).`);
+      }
+
+      await get().fetchFiles();
+      const now = Date.now();
+      set((state) => ({
+        status: devPort ? 'running' : 'idle',
+        projectVersion: data.version ?? state.projectVersion,
+        lastRevisionId: data.revisionId ?? state.lastRevisionId,
+        buildActivity: [
+          ...state.buildActivity,
+          {
+            id: `${now}-replace-${Math.random().toString(36).slice(2, 9)}`,
+            kind: 'wrote' as const,
+            detail: action.paths[0],
+            at: now,
+          },
+        ].slice(-MAX_BUILD_ACTIVITY),
+      }));
+      if (data.revisionId) void get().fetchRevisionDiff(data.revisionId);
+      return {
+        filesChanged: data.filesChanged,
+        replacements: data.replacements,
+        revisionId: data.revisionId ?? null,
+      };
+    } catch (error) {
+      set({ status: 'failed', error: error instanceof Error ? error.message : String(error) });
+      throw error;
     }
   },
 
@@ -317,10 +458,14 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
             version?: number;
             files: string[];
             logs: string[];
+            devStderr?: string[];
             persistentProjectId: string | null;
           };
 
           resolvedPort = projectData.devPort ?? resolvedPort;
+          const previewError = projectData.status === 'failed'
+            ? derivePreviewFailureMessage(projectData.logs, projectData.devStderr)
+            : null;
           set({
             projectId: projectData.id,
             persistentProjectId: projectData.persistentProjectId,
@@ -332,7 +477,7 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
             lastPreviewPort: projectData.devPort,
             files: projectData.files,
             logs: projectData.logs,
-            error: null,
+            error: previewError,
           });
 
           if (projectData.status === 'running' && (projectData.devPort !== data.port || attempt >= 2)) {
@@ -428,8 +573,148 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       previewReady: false, lastPreviewPort: null, files: [], logs: [], buildActivity: [], error: null,
       deployPhase: 'idle', deploySteps: [], deployStartTime: 0,
       deployStackName: '', deployTierName: '',
+      external: false, framework: null, rootDir: null, availableScripts: [], commandRun: null,
+      envLane: 'dev', laneState: null,
     });
     useLayoutStore.getState().setBuildStatus({ step: 'idle' });
+  },
+
+  openLocalFolder: async (path: string) => {
+    set({
+      status: 'creating', error: null, buildActivity: [], logs: [],
+      external: false, framework: null, rootDir: null, availableScripts: [], commandRun: null,
+    });
+    const res = await apiFetch('/api/sandbox/open-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    const data = await res.json().catch(() => null) as OpenLocalFolderResponse | null;
+    if (!res.ok || !data?.id) {
+      const message = data?.error ?? 'Unable to open folder';
+      set({ status: 'failed', error: message });
+      throw new Error(message);
+    }
+
+    const reusablePort = reusableLocalProjectPort(data);
+    set({
+      projectId: data.id,
+      persistentProjectId: null,
+      projectName: data.name ?? null,
+      projectVersion: data.version ?? 0,
+      status: reusablePort ? 'running' : 'idle',
+      devPort: reusablePort,
+      previewReady: false,
+      lastPreviewPort: reusablePort,
+      external: true,
+      framework: data.profile?.framework ?? null,
+      rootDir: data.rootDir ?? null,
+      availableScripts: Object.keys(data.profile?.scripts ?? {}),
+      envLane: data.envLane ?? 'dev',
+      laneState: data.laneState ?? null,
+    });
+    void get().fetchFiles();
+
+    // The runtime already owns a healthy dev/preview/production process for
+    // this exact folder. Preserve it and merely remount the App iframe. Starting
+    // another Next process here races .next locks and needlessly burns a port.
+    if (reusablePort) {
+      useLayoutStore.getState().setBuildStatus({ step: 'idle' });
+      return { id: data.id, framework: data.profile?.framework ?? 'unknown', port: reusablePort };
+    }
+
+    // Install first when node_modules is missing — then bring the dev server up.
+    if (data.profile?.hasPackageJson && !data.profile.hasNodeModules) {
+      useLayoutStore.getState().setBuildStatus({ step: 'building', message: 'Installing dependencies…' });
+      const ok = await get().installDeps();
+      if (!ok) throw new Error('Dependency install failed — check the console');
+    }
+    useLayoutStore.getState().setBuildStatus({ step: 'building', message: 'Starting dev server…' });
+    const port = await get().startDev();
+    useLayoutStore.getState().setBuildStatus({ step: 'idle' });
+    return { id: data.id, framework: data.profile?.framework ?? 'unknown', port };
+  },
+
+  runScript: async (script: string) => {
+    const { projectId } = get();
+    if (!projectId) return false;
+    const res = await apiFetch(`/api/sandbox/${projectId}/run-command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ script }),
+    });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null) as { error?: string } | null;
+      set({ error: payload?.error ?? `Unable to run ${script}` });
+      return false;
+    }
+    set({ commandRun: { script, status: 'running', exitCode: null } });
+
+    // Poll logs + command state until the run settles (max ~10.5 min, matches server kill timer).
+    for (let attempt = 0; attempt < 630; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (get().projectId !== projectId) return false; // project switched mid-run
+      await get().fetchLogs();
+      try {
+        const statusRes = await apiFetch(`/api/sandbox/${projectId}`);
+        if (!statusRes.ok) continue;
+        const statusData = await statusRes.json() as { commandRun?: CommandRunInfo | null };
+        if (statusData.commandRun) {
+          set({ commandRun: statusData.commandRun });
+          if (statusData.commandRun.status !== 'running') {
+            return statusData.commandRun.status === 'done';
+          }
+        }
+      } catch { /* transient poll failure — keep going */ }
+    }
+    return false;
+  },
+
+  switchLane: async (lane: EnvLane) => {
+    const { projectId, envLane } = get();
+    if (!projectId || envLane === lane) return envLane === lane;
+    const res = await apiFetch(`/api/sandbox/${projectId}/switch-lane`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lane }),
+    });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null) as { error?: string } | null;
+      set({ error: payload?.error ?? `Unable to switch to ${lane}` });
+      return false;
+    }
+    set({ laneState: { lane, status: 'switching', stage: 'preparing', error: null } });
+
+    // Poll until the lane settles. Gates + build can take minutes on big apps.
+    for (let attempt = 0; attempt < 900; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (get().projectId !== projectId) return false;
+      await get().fetchLogs();
+      try {
+        const statusRes = await apiFetch(`/api/sandbox/${projectId}`);
+        if (!statusRes.ok) continue;
+        const statusData = await statusRes.json() as {
+          envLane?: EnvLane;
+          laneState?: LaneStateInfo | null;
+          devPort?: number | null;
+          status?: SandboxStatus;
+        };
+        if (statusData.laneState) set({ laneState: statusData.laneState });
+        if (statusData.laneState && statusData.laneState.status !== 'switching') {
+          const ready = statusData.laneState.status === 'ready';
+          set({
+            envLane: statusData.envLane ?? (ready ? lane : get().envLane),
+            devPort: statusData.devPort ?? get().devPort,
+            status: statusData.status ?? get().status,
+            previewReady: false, // remount the iframe onto the new lane's port
+            lastPreviewPort: statusData.devPort ?? get().lastPreviewPort,
+            error: ready ? null : statusData.laneState.error,
+          });
+          return ready;
+        }
+      } catch { /* transient poll failure — keep going */ }
+    }
+    return false;
   },
 
   attachProject: async (sandboxProjectId: string) => {
@@ -470,6 +755,12 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       files: string[];
       logs: string[];
       persistentProjectId: string | null;
+      external?: boolean;
+      framework?: string | null;
+      scripts?: string[];
+      commandRun?: CommandRunInfo | null;
+      envLane?: EnvLane;
+      laneState?: LaneStateInfo | null;
     };
     if (token !== attachProjectToken) return;
 
@@ -486,6 +777,12 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       logs: data.logs,
       buildActivity: [],
       error: null,
+      external: data.external ?? false,
+      framework: data.framework ?? null,
+      availableScripts: data.scripts ?? [],
+      commandRun: data.commandRun ?? null,
+      envLane: data.envLane ?? 'dev',
+      laneState: data.laneState ?? null,
     });
     // Auto-restart dev server if node_modules exist but server isn't running
     // (happens after runtime restarts — deps are already installed, just need to start)
@@ -716,6 +1013,4 @@ export const useSandboxStore = create<SandboxState>((set, get) => ({
       if (deployAbortController === controller) {
         deployAbortController = null;
       }
-    }
-  },
-}));
+    

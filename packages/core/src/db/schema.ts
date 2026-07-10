@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, index, uniqueIndex, primaryKey } from 'drizzle-orm/sqlite-core';
 import type { ConversationMode } from '../chat/modes.js';
 
 // ---- Platform Auth ----
@@ -32,6 +32,26 @@ export const platformAccounts = sqliteTable('platform_accounts', {
 }, (table) => ({
   providerAccountUnique: uniqueIndex('idx_platform_accounts_provider_unique').on(table.provider, table.providerAccountId),
   userIdx: index('idx_platform_accounts_user').on(table.userId),
+}));
+
+/**
+ * Per-user encrypted-at-rest-optional secrets — currently the user's own
+ * bring-your-own transcription (STT) API key. Keyed by (userId, name) so a user
+ * can store several kinds of secret. `userId` is the platform user id when
+ * signed in, or the sentinel 'local' for the local single-user desktop.
+ *
+ * DATA OWNERSHIP: this row is the user's own data. It is removed when the user
+ * clears the key themselves (DELETE /api/stt/key) and MUST be purged when the
+ * account is deleted — see deleteUserSecrets() in the runtime.
+ */
+export const platformUserSecrets = sqliteTable('platform_user_secrets', {
+  userId: text('user_id').notNull(),
+  name: text('name').notNull(),
+  value: text('value').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.name] }),
 }));
 
 export const platformSessions = sqliteTable('platform_sessions', {
@@ -241,12 +261,40 @@ export const platformProjectAuditResults = sqliteTable('platform_project_audit_r
 
 // ---- Chat ----
 
+/**
+ * Vai Memory — durable, TYPED, user-governed facts extracted from conversations.
+ * The re-architected "knowledge graph": instead of untyped word-overlap edges,
+ * each row is an inspectable memory card with provenance (the chat it came from),
+ * so it can be surfaced into new work, edited, or deleted. Retrieval is selective
+ * (never dumped into every prompt) to avoid context rot.
+ */
+export const memories = sqliteTable('memories', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  /** Source conversation for provenance (nullable if manually added). */
+  conversationId: text('conversation_id'),
+  kind: text('kind', { enum: ['decision', 'project', 'preference', 'fact'] }).notNull(),
+  /** The memory itself, one concise statement. */
+  content: text('content').notNull(),
+  /** A short verbatim quote from the source, so the user can verify it. */
+  sourceExcerpt: text('source_excerpt'),
+  status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+}, (table) => ({
+  userIdx: index('idx_memories_user').on(table.userId),
+  convIdx: index('idx_memories_conversation').on(table.conversationId),
+}));
+
 export const conversations = sqliteTable('conversations', {
   id: text('id').primaryKey(),
   title: text('title').notNull(),
   modelId: text('model_id').notNull(),
   ownerUserId: text('owner_user_id'),
   sandboxProjectId: text('sandbox_project_id'),
+  /** Absolute local folder this chat works in (desktop attach) — server-persisted
+      so ANY client opening the chat re-attaches the same workspace. */
+  workspaceRoot: text('workspace_root'),
   mode: text('mode', { enum: ['chat', 'agent', 'builder', 'plan', 'debate'] }).$type<ConversationMode>().notNull().default('chat'),
   visibility: text('visibility', { enum: ['private', 'unlisted', 'public'] }).notNull().default('private'),
   shareSlug: text('share_slug'),

@@ -3,8 +3,9 @@ import { useSandboxStore } from '../stores/sandboxStore.js';
 import { API_BASE, buildApiHeaders } from '../lib/api.js';
 import {
   FolderTree, File, FolderOpen, Folder, ChevronRight, ChevronDown,
-  RefreshCw, Trash2, Plus, Copy, Download, Search, X, Loader2,
+  RefreshCw, Trash2, Plus, Copy, Download, Search, X, Loader2, ListFilter,
 } from 'lucide-react';
+import { SearchPanel } from './ide/SearchPanel.js';
 
 /* ── Tree node type ── */
 interface TreeNode {
@@ -280,6 +281,15 @@ export function FileExplorer() {
     setShowViewer(true);
   }, []);
 
+  // 'files' = tree browser · 'search' = project-wide text search (VS Code style)
+  const [mode, setMode] = useState<'files' | 'search'>('files');
+
+  const handleOpenFromSearch = useCallback((path: string) => {
+    setMode('files');
+    setSelectedFile(path);
+    setShowViewer(true);
+  }, []);
+
   if (!projectId) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-4 text-center">
@@ -306,13 +316,24 @@ export function FileExplorer() {
           </span>
         </div>
         <div className="flex items-center gap-0.5">
+          {/* Files ⇄ project-wide search mode toggle */}
           <button
-            onClick={() => { setShowSearch((v) => !v); if (showSearch) setSearchQuery(''); }}
-            className={`rounded p-1 transition-colors ${showSearch ? 'text-violet-400' : 'text-zinc-600'} hover:bg-zinc-800`}
-            title="Search files"
+            onClick={() => setMode((m) => (m === 'search' ? 'files' : 'search'))}
+            className={`rounded p-1 transition-colors ${mode === 'search' ? 'bg-violet-500/20 text-violet-300' : 'text-zinc-600'} hover:bg-zinc-800`}
+            title={mode === 'search' ? 'Back to file tree' : 'Search in all files (match case, whole word, regex, replace)'}
+            aria-pressed={mode === 'search'}
           >
             <Search className="h-3 w-3" />
           </button>
+          {mode === 'files' && (
+            <button
+              onClick={() => { setShowSearch((v) => !v); if (showSearch) setSearchQuery(''); }}
+              className={`rounded p-1 transition-colors ${showSearch ? 'text-violet-400' : 'text-zinc-600'} hover:bg-zinc-800`}
+              title="Filter file names"
+            >
+              <ListFilter className="h-3 w-3" />
+            </button>
+          )}
           <button
             onClick={() => fetchFiles()}
             className="rounded p-1 text-zinc-600 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
@@ -329,6 +350,13 @@ export function FileExplorer() {
           </button>
         </div>
       </div>
+
+      {mode === 'search' ? (
+        <div className="min-h-0 flex-1">
+          <SearchPanel onOpenFile={handleOpenFromSearch} />
+        </div>
+      ) : (
+      <>
 
       {/* Search bar */}
       {showSearch && (
@@ -394,6 +422,8 @@ export function FileExplorer() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

@@ -1,22 +1,21 @@
 /**
  * ChatMergeDrag — hold-to-combine gesture for the sidebar chat list.
  *
- * Press and HOLD a chat row (~250ms, left button) to lift it into "merge mode":
- * a glowing ghost with soft particles follows the cursor, candidate rows light
- * up as you pass over them, and a hint explains the gesture. Release over
- * another chat/project → a confirmation card asks whether to create a new
- * project from the combination. Confirm → Vai + the council take over through
- * the REAL user path (new agent conversation + a distilled merge brief), so
- * every quality gate the builder already enforces applies to the merged output.
- *
- * A quick drag (movement before the hold elapses) still does what it always
- * did — reorder. The two gestures never fight: movement cancels the hold.
+ * Drag a chat row (left button) to lift it into "merge mode": the moment the
+ * pointer moves, a glowing ghost with soft particles follows the cursor,
+ * candidate rows light up as you pass over them, and a hint explains the
+ * gesture. (Pressing and holding still for ~250ms lifts it too, for users who
+ * don't move first.) Release over another chat/project → a confirmation card
+ * asks whether to combine them into a new project. Confirm → Vai + the council
+ * take over through the REAL user path (new agent conversation + a distilled
+ * merge brief), so every quality gate the builder already enforces applies to
+ * the merged output.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { GitMerge, Sparkles, X } from 'lucide-react';
+import { GitMerge, Layers, Sparkles, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useChatStore } from '../../stores/chatStore.js';
 import { apiFetch } from '../../lib/api.js';
@@ -86,6 +85,8 @@ export function useChatMergeDrag(conversations: readonly MergeConversation[]) {
   const [drag, setDrag] = useState<ActiveDrag | null>(null);
   const [pending, setPending] = useState<PendingPair | null>(null);
   const [merging, setMerging] = useState(false);
+  /** What happens to the two source chats after a successful merge. Default: keep both. */
+  const [purgeOriginals, setPurgeOriginals] = useState(false);
   const holdTimer = useRef<number | null>(null);
   const startPos = useRef({ x: 0, y: 0 });
   const armedId = useRef<string | null>(null);
@@ -122,11 +123,19 @@ export function useChatMergeDrag(conversations: readonly MergeConversation[]) {
     const onMove = (e: PointerEvent) => {
       const active = dragRef.current;
       if (!active) {
-        // Armed but not lifted: real movement means the user wants the reorder drag.
+        // Armed but not lifted: the moment the pointer actually moves, LIFT the
+        // merge follower and let it track the cursor — a plain drag is the whole
+        // gesture, no press-and-hold wait. (Press-and-hold-still still lifts too,
+        // via the timer, for users who don't move first.)
         if (armedId.current !== null) {
           const dx = e.clientX - startPos.current.x;
           const dy = e.clientY - startPos.current.y;
-          if (Math.hypot(dx, dy) > HOLD_SLOP_PX) clearHold();
+          if (Math.hypot(dx, dy) > HOLD_SLOP_PX) {
+            const id = armedId.current;
+            if (holdTimer.current !== null) { window.clearTimeout(holdTimer.current); holdTimer.current = null; }
+            document.body.classList.add('vai-merge-dragging');
+            setDrag({ sourceId: id, x: e.clientX, y: e.clientY, targetId: null });
+          }
         }
         return;
       }
@@ -173,14 +182,27 @@ export function useChatMergeDrag(conversations: readonly MergeConversation[]) {
       const store = useChatStore.getState();
       await store.createConversation('vai:v0', 'agent', { sandboxProjectId: null });
       store.sendMessage(buildMergeBrief(source, target, sourceText, targetText));
-      toast.success('Vai + the council are merging the two — watch the new chat.');
+      // Only now that both transcripts are safely captured in the brief and the new
+      // chat is under way do we (optionally) remove the originals — never before.
+      if (purgeOriginals) {
+        try {
+          await store.deleteConversation(source.id);
+          await store.deleteConversation(target.id);
+          toast.success('Merged into a new chat — the two originals were removed.');
+        } catch {
+          toast.success('Merged into a new chat. (Couldn’t remove the originals — remove them manually.)');
+        }
+      } else {
+        toast.success('Vai + the council are merging the two — watch the new chat.');
+      }
       setPending(null);
+      setPurgeOriginals(false);
     } catch {
       toast.error('Merge kick-off failed — both chats are untouched.');
     } finally {
       setMerging(false);
     }
-  }, [pending, merging]);
+  }, [pending, merging, purgeOriginals]);
 
   const sourceConv = drag ? conversations.find((c) => c.id === drag.sourceId) : null;
 
@@ -224,7 +246,7 @@ export function useChatMergeDrag(conversations: readonly MergeConversation[]) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={() => !merging && setPending(null)}
+          onClick={() => { if (!merging) { setPending(null); setPurgeOriginals(false); } }}
         >
           <motion.div
             role="dialog"
@@ -240,25 +262,67 @@ export function useChatMergeDrag(conversations: readonly MergeConversation[]) {
             <div className="vai-merge-dialog__head">
               <Sparkles className="h-4 w-4 text-[color:var(--accent)]" />
               <span>Combine into a new project?</span>
-              <button type="button" aria-label="Cancel merge" onClick={() => setPending(null)} disabled={merging} className="vai-merge-dialog__close">
+              <button type="button" aria-label="Cancel merge" onClick={() => { setPending(null); setPurgeOriginals(false); }} disabled={merging} className="vai-merge-dialog__close">
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
             <p className="vai-merge-dialog__body">
-              Vai + the council will read both conversations and seamlessly merge their
-              ideas{' '}and any project code into one clean, new project.
+              Vai + the council read both conversations and build one clean, new
+              project from their ideas and any code. This creates a brand-new chat —
+              nothing here is overwritten.
             </p>
             <div className="vai-merge-dialog__pair">
               <span className="vai-merge-dialog__chip">{pending.source.title}</span>
               <GitMerge className="h-3.5 w-3.5 shrink-0 text-[color:var(--accent)]" />
               <span className="vai-merge-dialog__chip">{pending.target.title}</span>
             </div>
+
+            {/* What happens to the two originals — an explicit, non-scary choice. */}
+            <div className="mt-1">
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--color-subheader)]">
+                The two originals
+              </div>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPurgeOriginals(false)}
+                  disabled={merging}
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-medium transition-colors ${
+                    !purgeOriginals
+                      ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)] text-[color:var(--fg)]'
+                      : 'border-[color:var(--border)] text-[color:var(--color-muted)] hover:text-[color:var(--fg)]'
+                  }`}
+                >
+                  <Layers className="h-3.5 w-3.5 shrink-0" />
+                  Keep both
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPurgeOriginals(true)}
+                  disabled={merging}
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-medium transition-colors ${
+                    purgeOriginals
+                      ? 'border-red-500/40 bg-red-500/10 text-red-200'
+                      : 'border-[color:var(--border)] text-[color:var(--color-muted)] hover:text-[color:var(--fg)]'
+                  }`}
+                >
+                  <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                  Delete after merge
+                </button>
+              </div>
+              <p className="mt-1.5 text-[11px] leading-4 text-[color:var(--color-muted)]">
+                {purgeOriginals
+                  ? 'Both source chats are removed once the new project is created.'
+                  : 'Both source chats stay in your sidebar — nothing is deleted.'}
+              </p>
+            </div>
+
             <div className="vai-merge-dialog__actions">
-              <button type="button" onClick={() => setPending(null)} disabled={merging} className="vai-merge-dialog__btn">
-                Keep them separate
+              <button type="button" onClick={() => { setPending(null); setPurgeOriginals(false); }} disabled={merging} className="vai-merge-dialog__btn">
+                Cancel
               </button>
               <button type="button" onClick={() => { void confirmMerge(); }} disabled={merging} className="vai-merge-dialog__btn vai-merge-dialog__btn--primary">
-                {merging ? 'Starting…' : 'Merge with Vai + Council'}
+                {merging ? 'Starting…' : 'Create merged project'}
               </button>
             </div>
           </motion.div>

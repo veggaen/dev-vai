@@ -2,7 +2,7 @@ import type { ConversationMode } from './modes.js';
 import { isProductEngineeringPlanningPrompt } from './product-engineering-intent.js';
 
 const EXPLICIT_BUILD_REQUEST =
-  /^(?:now\s+)?(?:(?:can|could|would|will)\s+you\s+|please\s+|let['']s\s+)?(?:make|build|create|generate|design|develop|scaffold|start|spin\s*up|launch|ship|prototype)\b|\b(?:i\s+(?:want|need|would\s+like)\s+(?:you\s+)?to)\s+(?:make|build|create|generate|design|develop|scaffold|start|spin\s*up|launch|ship|prototype)\b/i;
+  /^(?:now\s+)?(?:(?:can|could|would|will)\s+you\s+|please\s+|let['']s\s+)?(?:make|build|create|generate|design|develop|scaffold|start|set\s*up|setup|configure|install|deploy|spin\s*up|launch|ship|prototype|fix|repair|update|upgrade|modernize|migrate|refactor|implement|apply)\b|\b(?:i\s+(?:want|need|would\s+like)\s+(?:you\s+)?to)\s+(?:make|build|create|generate|design|develop|scaffold|start|set\s*up|setup|configure|install|deploy|spin\s*up|launch|ship|prototype|fix|repair|update|upgrade|modernize|migrate|refactor|implement|apply)\b/i;
 
 const EXPLICIT_BUILD_TARGET =
   /\b(?:app|application|project|site|website|dashboard|tool|mvp|workspace|shell|preview|page|landing|portfolio|gallery|blog|clone|files?|runnable)\b/i;
@@ -27,6 +27,40 @@ export function isExplicitBuildExecutionRequest(content: string): boolean {
 }
 
 /**
+ * Decide whether a turn that already entered the builder lane must execute the
+ * code-generation pipeline. Targeted edits are execution requests even when
+ * their wording is intentionally small ("change this text", "fix the header").
+ */
+export function requiresBuildExecution(
+  isBuilderMode: boolean,
+  content: string,
+  activeEditTurn: boolean,
+): boolean {
+  return isBuilderMode && (activeEditTurn || isExplicitBuildExecutionRequest(content));
+}
+
+/**
+ * Execution turns go straight to the artifact pipeline. Streaming an ordinary
+ * answer draft first is both noisy and unsafe: a URL or domain word can trigger
+ * an unrelated fact route (for example, defining HTTP while Hardhat is editing).
+ */
+export function shouldBypassPreliminaryAnswerDraft(
+  isBuilderMode: boolean,
+  content: string,
+  activeEditTurn: boolean,
+): boolean {
+  return requiresBuildExecution(isBuilderMode, content, activeEditTurn);
+}
+
+/** A durable local-folder chat may never silently degrade into a fresh sandbox build. */
+export function shouldBlockFreshBuildFallback(
+  workspaceRoot: string | null | undefined,
+  workspaceEditResolved: boolean,
+): boolean {
+  return Boolean(workspaceRoot?.trim()) && !workspaceEditResolved;
+}
+
+/**
  * Three-band build intent for AGENT mode. The old binary "build verb + target word → scaffold an
  * app" silently hijacked plain asks ("can you make this more useful", "tell me a story about X")
  * into 260-second builds. This grades the intent so agent mode can CONFIRM before building when it
@@ -42,7 +76,7 @@ export function isExplicitBuildExecutionRequest(content: string): boolean {
 export type AgentBuildIntent = 'build' | 'ambiguous' | 'answer';
 
 /** Verbs that, on their own, only HINT at a build (improve/update/change/add) vs. ship a new app. */
-const SOFT_BUILD_VERB = /\b(?:improve|update|change|tweak|adjust|enhance|refine|fix|edit|modify|extend|refactor|polish|add|implement|wire|hook\s+up)\b/i;
+const SOFT_BUILD_VERB = /\b(?:improve|update|change|tweak|adjust|enhance|refine|fix|repair|edit|modify|extend|refactor|modernize|migrate|upgrade|polish|add|apply|implement|wire|hook\s+up)\b/i;
 /** Clearly conversational / non-build asks even if they contain a stray verb. */
 const CONVERSATIONAL_LEAD = /^\s*(?:tell me|write me|explain|describe|summari[sz]e|what|who|when|where|why|which|how (?:much|many|do|does|did|to)|is|are|was|were|can you (?:explain|tell|help|describe)|help me understand|i('?m| am) (?:asking|wondering|curious)|just (?:asking|wondering|curious))\b/i;
 
@@ -98,18 +132,4 @@ export function looksLikeFactualQuestion(content: string): boolean {
   const text = (content || '').trim();
   if (!text) return false;
   // An explicit build request is never "just a question".
-  if (isExplicitBuildExecutionRequest(text)) return false;
-  // Interrogative lead OR a fresh-data ask, AND reasonably short (real questions are).
-  const wordCount = text.split(/\s+/).length;
-  const interrogative = FACTUAL_QUESTION_LEAD.test(text) || text.endsWith('?');
-  // A build/make/create verb anywhere disqualifies it (so "how do I build a price widget"
-  // is a build question, not a fresh-data lookup) — EXCEPT when the text is a clean
-  // interrogative that merely *mentions* a build gerund ("what's a great idea when CREATING
-  // a company in Norway?"). Imperative build asks ("how do I build X") are caught by
-  // EXPLICIT_BUILD_REQUEST / FACTUAL exclusion below, so the question form stays factual.
-  // This is the fix for the Norway opportunity question that "creating" wrongly disqualified.
-  if (EXPLICIT_BUILD_REQUEST.test(text)) return false;
-  if (BUILD_VERB_ANYWHERE.test(text) && !interrogative) return false;
-  const freshData = FRESH_DATA_LEAD.test(text);
-  return (interrogative || freshData) && wordCount <= 40;
-}
+  if (isExplicitBuildExecutionRequest(text)) retu

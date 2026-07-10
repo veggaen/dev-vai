@@ -1,6 +1,6 @@
 import { mkdir, writeFile, readFile, rm, readdir } from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, join, dirname, relative, resolve } from 'node:path';
+import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
+import { isAbsolute, join, dirname, relative, resolve, basename } from 'node:path';
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -66,6 +66,361 @@ export interface SandboxProject {
   status: 'idle' | 'writing' | 'installing' | 'building' | 'running' | 'failed';
   version: number;
   createdAt: Date;
+  /** True when rootDir is a user-opened folder OUTSIDE the sandbox baseDir. External
+   *  folders are served in place and are NEVER deleted by destroy(). */
+  external: boolean;
+  /** Detected framework id (nextjs | vite | vinext | …) for opened folders. */
+  framework: FrameworkId | null;
+  /** Latest one-shot script run (build / lint / test) — one at a time per project. */
+  commandRun: CommandRun | null;
+  /** Environment lane of the served app — dev (HMR) · preview (built) · production (gated build). */
+  envLane: EnvLane;
+  /** Progress/result of the most recent lane switch. */
+  laneState: LaneState | null;
+}
+
+export interface CommandRun {
+  script: string;
+  status: 'running' | 'done' | 'failed';
+  startedAt: number;
+  finishedAt: number | null;
+  exitCode: number | null;
+  /** Ring buffer of output lines (~400 max). */
+  output: string[];
+}
+
+/** Which environment the app window is serving. */
+export type EnvLane = 'dev' | 'preview' | 'production';
+
+export interface LaneState {
+  lane: EnvLane;
+  status: 'switching' | 'ready' | 'failed';
+  /** Human stage while switching: gate · build · serve */
+  stage: string | null;
+  startedAt: number;
+  error: string | null;
+}
+
+export type FrameworkId = 'vinext' | 'nextjs' | 'vite' | 'remix' | 'astro' | 'node' | 'static' | 'unknown';
+
+export interface ProjectProfile {
+  name: string | null;
+  framework: FrameworkId;
+  frameworkLabel: string;
+  packageManager: 'pnpm' | 'yarn' | 'npm' | 'bun';
+  scripts: Record<string, string>;
+  hasPackageJson: boolean;
+  hasNodeModules: boolean;
+  hasTypeScript: boolean;
+  /** True for pnpm-workspace.yaml or package.json workspaces — dev may fan out to multiple apps. */
+  monorepo: boolean;
+  /** Uncommented VAR= names in .env.example that are missing from .env/.env.local. */
+  missingEnvVars: string[];
+  /** The project's own README Installation/Prerequisites section — surfaced as setup notes. */
+  readmeSetup: string | null;
+  /** True when the dev script cannot run as-is on this OS (e.g. bash on Windows). */
+  devScriptPortable: boolean;
+  /** engines.node from package.json, when declared. */
+  requiredNode: string | null;
+  /** True when engines.node is declared and the runtime's Node version does not satisfy it. */
+  nodeMismatch: boolean;
+}
+
+export interface ProjectEnvStatus {
+  exampleVars: string[];
+  configuredVars: string[];
+  missingEnvVars: string[];
+  envLocalExists: boolean;
+}
+
+export interface ProjectCandidate {
+  rootDir: string;
+  /** Human-readable path relative to the folder the user selected. */
+  relativePath: string;
+  profile: ProjectProfile;
+}
+
+export interface ProjectDiscovery {
+  requestedRootDir: string;
+  candidates: ProjectCandidate[];
+}
+
+const FRAMEWORK_LABELS: Record<FrameworkId, string> = {
+  vinext: 'Vinext',
+  nextjs: 'Next.js',
+  vite: 'Vite',
+  remix: 'Remix',
+  astro: 'Astro',
+  node: 'Node.js',
+  static: 'Static site',
+  unknown: 'Unknown',
+};
+
+const PROJECT_DISCOVERY_MAX_DEPTH = 2;
+const PROJECT_DISCOVERY_MAX_RESULTS = 20;
+const PROJECT_DISCOVERY_IGNORED_DIRS = new Set([
+  '.git', '.next', '.turbo', '.vite', '.cache', '.output',
+  'node_modules', 'dist', 'build', 'coverage', 'out', 'target',
+]);
+
+function isRunnableProfile(profile: ProjectProfile): boolean {
+  return profile.hasPackageJson || profile.framework === 'static';
+}
+
+/**
+ * Look for runnable apps just beneath a selected container folder. This is
+ * deliberately bounded: project intake should find common `repo/app` layouts
+ * without turning a folder choice into an unbounded disk crawl.
+ */
+function discoverNestedProjects(rootDir: string): ProjectCandidate[] {
+  const found: ProjectCandidate[] = [];
+  const queue: Array<{ dir: string; depth: number }> = [{ dir: rootDir, depth: 0 }];
+
+  while (queue.length > 0 && found.length < PROJECT_DISCOVERY_MAX_RESULTS) {
+    const current = queue.shift();
+    if (!current || current.depth >= PROJECT_DISCOVERY_MAX_DEPTH) continue;
+
+    let children: Array<{ name: string; isDirectory(): boolean }>;
+    try {
+      children = readdirSync(current.dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    const directories = children
+      .filter((entry) => entry.isDirectory())
+      .filter((entry) => !PROJECT_DISCOVERY_IGNORED_DIRS.has(entry.name))
+      .filter((entry) => !entry.name.startsWith('.'))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of directories) {
+      const candidateDir = join(current.dir, entry.name);
+      const profile = detectProjectProfile(candidateDir);
+      if (isRunnableProfile(profile)) {
+        found.push({
+          rootDir: candidateDir,
+          relativePath: relative(rootDir, candidateDir) || '.',
+          profile,
+        });
+        if (found.length >= PROJECT_DISCOVERY_MAX_RESULTS) break;
+        // A runnable project owns its subtree. Avoid showing generated or
+        // example packages as competing roots when the project itself runs.
+        continue;
+      }
+      queue.push({ dir: candidateDir, depth: current.depth + 1 });
+    }
+  }
+
+  return found;
+}
+
+/* ── Project text search ── */
+
+export interface SearchFilesOptions {
+  query: string;
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  regex?: boolean;
+  maxResults?: number;
+}
+
+export interface SearchLineMatch {
+  line: number;
+  column: number;
+  matchText: string;
+  preview: string;
+}
+
+export interface SearchFileMatch {
+  path: string;
+  matches: SearchLineMatch[];
+}
+
+export interface SearchFilesResult {
+  files: SearchFileMatch[];
+  totalMatches: number;
+  filesScanned: number;
+  truncated: boolean;
+}
+
+const MAX_SEARCH_FILE_BYTES = 1_500_000;
+const BINARY_EXT_RE = /\.(png|jpe?g|gif|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp[34]|wav|ogg|webm|zip|gz|br|tar|7z|pdf|exe|dll|so|dylib|wasm|node|db|sqlite|lockb)$/i;
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Build the search regex from VS Code-style options. Throws on invalid user regex. */
+export function buildSearchRegex(options: SearchFilesOptions): RegExp {
+  const raw = options.query;
+  if (!raw) throw new Error('Search query is empty');
+  let source = options.regex ? raw : escapeRegExp(raw);
+  if (options.wholeWord) source = `\\b(?:${source})\\b`;
+  try {
+    return new RegExp(source, options.caseSensitive ? 'g' : 'gi');
+  } catch (err) {
+    throw new Error(`Invalid regular expression: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** Extract the Installation / Prerequisites / Getting Started section from a README, if any. */
+function extractReadmeSetup(rootDir: string): string | null {
+  try {
+    const readmePath = ['README.md', 'readme.md', 'Readme.md'].map((f) => join(rootDir, f)).find((f) => existsSync(f));
+    if (!readmePath) return null;
+    const text = readFileSync(readmePath, 'utf-8');
+    const match = /^(#{1,3})\s*(installation|prerequisites|requirements|getting started|setup)\b[^\n]*$/im.exec(text);
+    if (!match || match.index === undefined) return null;
+    const level = match[1].length;
+    const rest = text.slice(match.index + match[0].length);
+    // Section ends at the next heading of the same or higher level.
+    const end = new RegExp(`^#{1,${level}}\\s`, 'm').exec(rest);
+    const body = (end ? rest.slice(0, end.index) : rest).trim();
+    if (!body) return null;
+    return body.length > 1200 ? `${body.slice(0, 1200)}\n…` : body;
+  } catch {
+    return null;
+  }
+}
+
+/** Uncommented VAR= names in .env.example that are not present in .env or .env.local. */
+function detectMissingEnvVars(rootDir: string): string[] {
+  try {
+    const examplePath = join(rootDir, '.env.example');
+    if (!existsSync(examplePath)) return [];
+    const wanted = readFileSync(examplePath, 'utf-8')
+      .split('\n')
+      .map((l) => /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(l.trim())?.[1])
+      .filter((v): v is string => Boolean(v));
+    if (wanted.length === 0) return [];
+    const present = new Set<string>();
+    for (const envFile of ['.env', '.env.local', '.env.development', '.env.development.local']) {
+      const p = join(rootDir, envFile);
+      if (!existsSync(p)) continue;
+      for (const l of readFileSync(p, 'utf-8').split('\n')) {
+        const name = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(l.trim())?.[1];
+        if (name) present.add(name);
+      }
+    }
+    return wanted.filter((v) => !present.has(v)).slice(0, 12);
+  } catch {
+    return [];
+  }
+}
+
+/** True when a dev script can run as-is on the current OS. */
+export function isDevScriptPortable(devScript: string): boolean {
+  if (!devScript) return true;
+  return process.platform !== 'win32' || !/(^|\s)(bash|sh)\s|\.sh\b/.test(devScript);
+}
+
+/**
+ * Scan a project folder and figure out what it is: framework, package manager,
+ * available scripts, install state. Pure fs reads — no processes spawned.
+ */
+export function detectProjectProfile(rootDir: string): ProjectProfile {
+  const pkgPath = join(rootDir, 'package.json');
+  const hasPackageJson = existsSync(pkgPath);
+  let name: string | null = null;
+  let scripts: Record<string, string> = {};
+  let deps: Record<string, string> = {};
+  let requiredNode: string | null = null;
+  if (hasPackageJson) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as {
+        name?: string;
+        scripts?: Record<string, string>;
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+        engines?: { node?: string };
+        packageManager?: string;
+      };
+      name = typeof pkg.name === 'string' ? pkg.name : null;
+      scripts = pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {};
+      deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+      requiredNode = typeof pkg.engines?.node === 'string' ? pkg.engines.node : null;
+    } catch { /* unreadable package.json — treat as unknown */ }
+  }
+
+  const devScript = typeof scripts.dev === 'string' ? scripts.dev : '';
+  const hasAny = (...files: string[]) => files.some((f) => existsSync(join(rootDir, f)));
+
+  let framework: FrameworkId = 'unknown';
+  if (deps.vinext || devScript.startsWith('vinext')) framework = 'vinext';
+  else if (deps.next || hasAny('next.config.js', 'next.config.mjs', 'next.config.ts')) framework = 'nextjs';
+  else if (deps.astro) framework = 'astro';
+  else if (deps['@remix-run/react'] || deps['@remix-run/node']) framework = 'remix';
+  else if (deps.vite || /\bvite\b/.test(devScript) || hasAny('vite.config.ts', 'vite.config.js', 'vite.config.mts', 'vite.config.mjs')) framework = 'vite';
+  else if (hasPackageJson && (scripts.dev || scripts.start)) framework = 'node';
+  else if (existsSync(join(rootDir, 'index.html'))) framework = 'static';
+
+  const declaredPackageManager = (() => {
+    if (!hasPackageJson) return null;
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { packageManager?: string };
+      return typeof pkg.packageManager === 'string' ? pkg.packageManager.split('@')[0] : null;
+    } catch {
+      return null;
+    }
+  })();
+  const packageManager = existsSync(join(rootDir, 'bun.lock')) || existsSync(join(rootDir, 'bun.lockb')) || declaredPackageManager === 'bun' ? 'bun'
+    : existsSync(join(rootDir, 'pnpm-lock.yaml')) || declaredPackageManager === 'pnpm' ? 'pnpm'
+    : existsSync(join(rootDir, 'yarn.lock')) || declaredPackageManager === 'yarn' ? 'yarn'
+    : 'npm';
+
+  let monorepo = existsSync(join(rootDir, 'pnpm-workspace.yaml'));
+  if (!monorepo && hasPackageJson) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { workspaces?: unknown };
+      monorepo = Boolean(pkg.workspaces);
+    } catch { /* already handled above */ }
+  }
+
+  return {
+    name,
+    framework,
+    frameworkLabel: FRAMEWORK_LABELS[framework],
+    packageManager,
+    scripts,
+    hasPackageJson,
+    hasNodeModules: existsSync(join(rootDir, 'node_modules')),
+    hasTypeScript: existsSync(join(rootDir, 'tsconfig.json')),
+    monorepo,
+    missingEnvVars: detectMissingEnvVars(rootDir),
+    readmeSetup: extractReadmeSetup(rootDir),
+    devScriptPortable: isDevScriptPortable(devScript),
+    requiredNode,
+    nodeMismatch: requiredNode ? !nodeVersionSatisfies(requiredNode) : false,
+  };
+}
+
+/** Loose semver-range check for engines.node against the runtime's own Node version.
+ *  Handles the common forms: `>=18`, `^24.1.0`, `20.x`, `>=18 <23`, exact `22.1.0`.
+ *  Unparseable ranges return true (no false alarms). */
+export function nodeVersionSatisfies(range: string, current: string = process.versions.node): boolean {
+  const major = Number(current.split('.')[0]);
+  if (!Number.isFinite(major)) return true;
+  const clauses = range.split(/\s*\|\|\s*/);
+  const clauseOk = (clause: string): boolean => {
+    const parts = clause.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return true;
+    return parts.every((part) => {
+      const m = /^(>=|<=|>|<|\^|~)?v?(\d+)(?:\.(?:\d+|x|\*))?(?:\.(?:\d+|x|\*))?/.exec(part);
+      if (!m) return true;
+      const op = m[1] ?? '';
+      const target = Number(m[2]);
+      switch (op) {
+        case '>=': return major >= target;
+        case '>': return major > target;
+        case '<=': return major <= target;
+        case '<': return major < target;
+        case '^': return major === target;
+        case '~': return major === target;
+        default: return major === target; // exact or x-range — major must match
+      }
+    });
+  };
+  return clauses.some(clauseOk);
 }
 
 export interface FileWrite {
@@ -147,6 +502,32 @@ function isOutdatedPnpmLockfile(output: string): boolean {
   return /ERR_PNPM_OUTDATED_LOCKFILE|Cannot install with "frozen-lockfile" because pnpm-lock\.yaml is not up to date/i.test(output);
 }
 
+/** Kill whatever process is LISTENING on a port (full tree on Windows). Best effort. */
+function killPortOwner(port: number): boolean {
+  try {
+    if (process.platform === 'win32') {
+      const out = execSync('netstat -ano -p tcp', { encoding: 'utf8' });
+      const line = out.split('\n').find((l) => new RegExp(`[:.]${port}\\s`).test(l) && /LISTENING/i.test(l));
+      const pid = Number(line?.trim().split(/\s+/).pop());
+      if (Number.isInteger(pid) && pid > 4 && pid !== process.pid) {
+        execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
+        return true;
+      }
+    } else {
+      const out = execSync(`lsof -ti tcp:${port} -s tcp:listen 2>/dev/null || true`, { encoding: 'utf8' }).trim();
+      let killed = false;
+      for (const pidStr of out.split('\n').filter(Boolean)) {
+        const pid = Number(pidStr);
+        if (Number.isInteger(pid) && pid > 1 && pid !== process.pid) {
+          try { process.kill(pid, 'SIGKILL'); killed = true; } catch { /* gone already */ }
+        }
+      }
+      return killed;
+    }
+  } catch { /* best effort */ }
+  return false;
+}
+
 /**
  * SandboxManager — creates temporary project directories, writes files,
  * installs deps, and runs dev servers for builder mode preview.
@@ -154,14 +535,157 @@ function isOutdatedPnpmLockfile(output: string): boolean {
 const MAX_LOG_ENTRIES = 500;
 const START_DEV_TIMEOUT_MS = 6000;
 const READY_PORT_SETTLE_MS = 1500;
+const PREVIEW_HEALTH_TIMEOUT_MS = 8000;
+
+export type PreviewHealthResult =
+  | { ok: true }
+  | { ok: false; message: string; reason: 'timeout' | 'application-error' };
+
+export function previewHealthDisposition(result: PreviewHealthResult): 'ready' | 'pending' | 'failed' {
+  if (result.ok) return 'ready';
+  return result.reason === 'timeout' ? 'pending' : 'failed';
+}
+
+function summarizePreviewBody(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 220);
+}
+
+function parseEnvNames(content: string): string[] {
+  return content
+    .split('\n')
+    .map((line) => /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(line.trim())?.[1])
+    .filter((value): value is string => Boolean(value));
+}
+
+function readEnvFileMap(path: string): Map<string, string> {
+  const values = new Map<string, string>();
+  if (!existsSync(path)) return values;
+  for (const line of readFileSync(path, 'utf-8').split(/\r?\n/)) {
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if (!match) continue;
+    values.set(match[1], match[2] ?? '');
+  }
+  return values;
+}
+
+function serializeEnvLine(key: string, value: string): string {
+  if (/^[^\r\n#]*$/.test(value) && !/^\s|\s$/.test(value)) {
+    return `${key}=${value}`;
+  }
+  const escaped = value
+    .replace(/\\/g, '\\\\')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/"/g, '\\"');
+  return `${key}="${escaped}"`;
+}
+
+function classifyPreviewFailure(status: number, contentType: string, body: string): string | null {
+  const summary = summarizePreviewBody(body);
+  if (status >= 500) {
+    return `HTTP ${status}${summary ? ` — ${summary}` : ''}`;
+  }
+
+  const trimmed = body.trim();
+  if (/json/i.test(contentType) || trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { status?: unknown; message?: unknown; error?: unknown };
+      const parsedStatus = typeof parsed.status === 'number' ? parsed.status : null;
+      if (parsedStatus !== null && parsedStatus >= 500) {
+        const parsedMessage = typeof parsed.message === 'string'
+          ? parsed.message
+          : typeof parsed.error === 'string'
+            ? parsed.error
+            : summary;
+        return `HTTP ${parsedStatus}${parsedMessage ? ` — ${parsedMessage}` : ''}`;
+      }
+    } catch {
+      // Not actually JSON; continue with text heuristics.
+    }
+  }
+
+  if (/\b(HTTPError|Internal Server Error|Missing VITE_[A-Z0-9_]+|Vite Error)\b/i.test(summary)) {
+    return summary || 'Preview rendered an application error';
+  }
+
+  return null;
+}
+
+async function checkPreviewHealth(port: number): Promise<PreviewHealthResult> {
+  const deadline = Date.now() + PREVIEW_HEALTH_TIMEOUT_MS;
+  let lastFailure = 'preview did not respond before the health-check timeout';
+  let sawApplicationFailure = false;
+
+  while (Date.now() < deadline) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1800);
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/`, {
+        signal: controller.signal,
+        headers: { accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8' },
+      });
+      const body = await response.text();
+      const failure = classifyPreviewFailure(response.status, response.headers.get('content-type') ?? '', body);
+      if (!failure) return { ok: true };
+      lastFailure = failure;
+      sawApplicationFailure = true;
+    } catch (err) {
+      lastFailure = err instanceof Error ? err.message : String(err);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  return {
+    ok: false,
+    message: lastFailure,
+    reason: sawApplicationFailure ? 'application-error' : 'timeout',
+  };
+}
 
 export class SandboxManager {
   private projects = new Map<string, SandboxProject>();
   private baseDir: string;
+  private pidDir: string;
   private nextPort = 4100; // sandbox dev servers start at 4100
 
   constructor(baseDir?: string) {
     this.baseDir = baseDir ?? join(tmpdir(), 'vai-sandbox');
+    this.pidDir = join(this.baseDir, '.pids');
+    // Reap dev servers orphaned by a previous runtime life. tsx-watch restarts
+    // lose ChildProcess handles, and orphaned `next dev` instances sharing one
+    // .next folder corrupt each other's chunks (live failure: 7 servers on one
+    // project → Runtime SyntaxError / ChunkLoadError in the preview).
+    this.reapOrphanDevServers();
+  }
+
+  /** Persist "this project has a dev server on this port" so a future runtime life can reap it. */
+  private writePidfile(projectId: string, pid: number | undefined, port: number): void {
+    try {
+      mkdirSync(this.pidDir, { recursive: true });
+      writeFileSync(join(this.pidDir, `${projectId}.json`), JSON.stringify({ pid: pid ?? null, port, startedAt: Date.now() }), 'utf-8');
+    } catch { /* best effort */ }
+  }
+
+  private removePidfile(projectId: string): void {
+    try { rmSync(join(this.pidDir, `${projectId}.json`), { force: true }); } catch { /* best effort */ }
+  }
+
+  /** Kill every dev server recorded by previous runtime lives, then clear the records. */
+  private reapOrphanDevServers(): void {
+    try {
+      if (!existsSync(this.pidDir)) return;
+      for (const file of readdirSync(this.pidDir)) {
+        if (!file.endsWith('.json')) continue;
+        try {
+          const record = JSON.parse(readFileSync(join(this.pidDir, file), 'utf-8')) as { port?: number };
+          if (record.port) killPortOwner(record.port);
+        } catch { /* unreadable record — drop it */ }
+        try { rmSync(join(this.pidDir, file), { force: true }); } catch { /* best effort */ }
+      }
+    } catch { /* best effort */ }
   }
 
   /** Append a log line, evicting oldest entry when the ring is full. */
@@ -192,10 +716,123 @@ export class SandboxManager {
       status: 'idle',
       version: 0,
       createdAt: new Date(),
+      external: false,
+      framework: null,
+      commandRun: null,
+      envLane: 'dev',
+      laneState: null,
     };
 
     this.projects.set(id, project);
     return project;
+  }
+
+  /** Validate a user-selected folder before project discovery/opening. */
+  private validateExternalFolderRoot(folderPath: string): string {
+    const rootDir = resolve(folderPath.trim());
+    if (!isAbsolute(rootDir)) throw new Error('Folder path must be absolute');
+    if (!existsSync(rootDir)) throw new Error(`Folder not found: ${rootDir}`);
+    if (!statSync(rootDir).isDirectory()) throw new Error(`Not a folder: ${rootDir}`);
+    if (dirname(rootDir) === rootDir || rootDir === resolve(this.baseDir)) {
+      throw new Error('Refusing to open this folder');
+    }
+    // Recursion guard: opening Vai's own runtime (or the repo that contains it)
+    // as a project would start Vai inside Vai — port collisions and chaos.
+    // Owner-enabled escape hatch (VAI_ALLOW_SELF_WORKSPACE=1): dogfooding Vai on
+    // its own codebase is a legitimate self-improvement workflow, so the guard
+    // is a conscious gate, not a hard wall.
+    const selfDir = resolve(process.cwd());
+    if (rootDir === selfDir || selfDir.startsWith(rootDir + '\\') || selfDir.startsWith(rootDir + '/')) {
+      if (process.env.VAI_ALLOW_SELF_WORKSPACE !== '1') {
+        throw new Error("That folder contains Vai's own running runtime — opening it inside itself is blocked by default. Owner override: set VAI_ALLOW_SELF_WORKSPACE=1 and restart if you really want Vai working on its own code.");
+      }
+      console.warn(`[sandbox] SELF-WORKSPACE OPEN (owner-enabled): ${rootDir} contains the running runtime — dev-server starts here can collide with Vai's own ports.`);
+    }
+    return rootDir;
+  }
+
+  /**
+   * Return every plausible app root beneath a selected folder. A runnable
+   * selected root always wins; otherwise discovery is bounded to two levels.
+   */
+  discoverProjects(folderPath: string): ProjectDiscovery {
+    const requestedRootDir = this.validateExternalFolderRoot(folderPath);
+    const directProfile = detectProjectProfile(requestedRootDir);
+    if (isRunnableProfile(directProfile)) {
+      return {
+        requestedRootDir,
+        candidates: [{ rootDir: requestedRootDir, relativePath: '.', profile: directProfile }],
+      };
+    }
+
+    const candidates = discoverNestedProjects(requestedRootDir);
+    if (candidates.length === 0) {
+      throw new Error('No package.json or index.html found here or within two folder levels');
+    }
+    return { requestedRootDir, candidates };
+  }
+
+  /** Validate a folder path and return one unambiguous profile WITHOUT registering a project. */
+  scanFolder(folderPath: string): { rootDir: string; profile: ProjectProfile } {
+    const discovery = this.discoverProjects(folderPath);
+    if (discovery.candidates.length > 1) {
+      const choices = discovery.candidates.map((candidate) => candidate.relativePath).join(', ');
+      throw new Error(`Multiple runnable projects found: ${choices}. Choose one project folder.`);
+    }
+    const [{ rootDir, profile }] = discovery.candidates;
+    return { rootDir, profile };
+  }
+
+  /**
+   * Open an EXISTING local folder (e.g. C:\Users\you\Documents\my-app) as an external
+   * project. The folder is served in place — dev server runs inside the user's own
+   * directory with their own hot reload. External folders are never mutated beyond what
+   * the user explicitly asks for and never deleted by destroy().
+   */
+  async openExternal(folderPath: string, ownerUserId: string | null = null): Promise<{ project: SandboxProject; profile: ProjectProfile }> {
+    const { rootDir, profile } = this.scanFolder(folderPath);
+
+    // Reuse an already-open entry for the same folder instead of duplicating it.
+    // Local-first ownership: the filesystem is the real access boundary for an
+    // external folder — whoever opens the path from this machine claims the entry.
+    // Without this, a stale owner (earlier session, API test, anonymous run) leaves
+    // the project permanently 403-locked for the current user.
+    for (const existing of this.projects.values()) {
+      if (existing.external && resolve(existing.rootDir) === rootDir) {
+        if (existing.ownerUserId !== ownerUserId) {
+          existing.ownerUserId = ownerUserId;
+          this.pushLog(existing, `Ownership claimed by current local caller (${ownerUserId ?? 'anonymous'})`);
+        }
+        return { project: existing, profile };
+      }
+    }
+
+    const id = randomUUID().slice(0, 8);
+    const project: SandboxProject = {
+      id,
+      name: profile.name ?? basename(rootDir),
+      rootDir,
+      ownerUserId,
+      files: {},
+      devProcess: null,
+      devPort: null,
+      logs: [],
+      devStderr: [],
+      status: 'idle',
+      version: 0,
+      createdAt: new Date(),
+      external: true,
+      framework: profile.framework,
+      commandRun: null,
+      envLane: 'dev',
+      laneState: null,
+    };
+    this.pushLog(project, `Opened local folder: ${rootDir}`);
+    this.pushLog(project, `Detected: ${profile.frameworkLabel} · ${profile.packageManager}`
+      + (profile.hasTypeScript ? ' · TypeScript' : '')
+      + (profile.hasNodeModules ? '' : ' · node_modules missing (install needed)'));
+    this.projects.set(id, project);
+    return { project, profile };
   }
 
   /** Get a sandbox project by ID */
@@ -315,6 +952,11 @@ export class SandboxManager {
       status: 'idle',
       version: 0,
       createdAt: new Date(),
+      external: false,
+      framework: 'nextjs',
+      commandRun: null,
+      envLane: 'dev',
+      laneState: null,
     };
 
     this.projects.set(id, project);
@@ -346,6 +988,11 @@ export class SandboxManager {
       status: project.status ?? 'idle',
       version: 0,
       createdAt: new Date(),
+      external: this.isOutsideBaseDir(project.rootDir),
+      framework: null,
+      commandRun: null,
+      envLane: 'dev',
+      laneState: null,
     };
 
     this.projects.set(project.id, restored);
@@ -375,6 +1022,12 @@ export class SandboxManager {
     // Require a matching owner — null-owner projects are read-only for unauthenticated callers.
     if (project.ownerUserId === null) return userId === null; // anonymous dev mode: caller must also be anonymous
     return project.ownerUserId === userId;
+  }
+
+  /** True when a rootDir lives outside the managed sandbox baseDir (i.e. a user folder). */
+  private isOutsideBaseDir(rootDir: string): boolean {
+    const rel = relative(resolve(this.baseDir), resolve(rootDir));
+    return rel.startsWith('..') || isAbsolute(rel);
   }
 
   /** Resolve a file path within the sandbox root, guarding against path traversal. */
@@ -459,6 +1112,66 @@ export class SandboxManager {
     return readFile(this.safePath(project.rootDir, filePath), 'utf-8');
   }
 
+  getEnvStatus(projectId: string): ProjectEnvStatus {
+    const project = this.projects.get(projectId);
+    if (!project) throw new Error(`Sandbox project not found: ${projectId}`);
+
+    const examplePath = join(project.rootDir, '.env.example');
+    const exampleVars = existsSync(examplePath)
+      ? Array.from(new Set(parseEnvNames(readFileSync(examplePath, 'utf-8')))).slice(0, 80)
+      : [];
+    const configured = new Set<string>();
+    for (const envFile of ['.env', '.env.local', '.env.development', '.env.development.local']) {
+      const fullPath = join(project.rootDir, envFile);
+      if (!existsSync(fullPath)) continue;
+      for (const name of parseEnvNames(readFileSync(fullPath, 'utf-8'))) configured.add(name);
+    }
+
+    return {
+      exampleVars,
+      configuredVars: [...configured].sort(),
+      missingEnvVars: exampleVars.filter((name) => !configured.has(name)).slice(0, 80),
+      envLocalExists: existsSync(join(project.rootDir, '.env.local')),
+    };
+  }
+
+  async writeEnvLocal(projectId: string, values: Record<string, string>): Promise<ProjectEnvStatus> {
+    const project = this.projects.get(projectId);
+    if (!project) throw new Error(`Sandbox project not found: ${projectId}`);
+
+    const entries = Object.entries(values)
+      .map(([key, value]) => [key.trim(), value] as const)
+      .filter(([key]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key));
+    if (entries.length === 0) throw new Error('No valid env values were provided');
+
+    const envPath = this.safePath(project.rootDir, '.env.local');
+    const existingLines = existsSync(envPath) ? readFileSync(envPath, 'utf-8').split(/\r?\n/) : [];
+    const existingMap = readEnvFileMap(envPath);
+    const updateKeys = new Set(entries.map(([key]) => key));
+    const nextLines: string[] = [];
+
+    for (const line of existingLines) {
+      const key = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(line)?.[1];
+      if (!key || !updateKeys.has(key)) {
+        if (line.length > 0) nextLines.push(line);
+        continue;
+      }
+      const value = entries.find(([entryKey]) => entryKey === key)?.[1] ?? existingMap.get(key) ?? '';
+      nextLines.push(serializeEnvLine(key, value));
+      updateKeys.delete(key);
+    }
+
+    if (nextLines.length > 0 && updateKeys.size > 0) nextLines.push('');
+    for (const [key, value] of entries) {
+      if (!updateKeys.has(key)) continue;
+      nextLines.push(serializeEnvLine(key, value));
+    }
+
+    await writeFile(envPath, `${nextLines.join('\n').replace(/\n+$/, '')}\n`, 'utf-8');
+    this.pushLog(project, `Updated .env.local with ${entries.length} value(s): ${entries.map(([key]) => key).join(', ')}`);
+    return this.getEnvStatus(projectId);
+  }
+
   /** List files in the sandbox project directory tree */
   async listFiles(projectId: string, subDir = ''): Promise<string[]> {
     const project = this.projects.get(projectId);
@@ -490,14 +1203,23 @@ export class SandboxManager {
     this.pushLog(project, 'Installing dependencies...');
 
     return new Promise((resolve) => {
-      // Always prefer pnpm: uses a global content-addressable store with hard-links,
-      // so repeated installs with the same packages are nearly instant.
-      // Fall back to npm only if pnpm isn't on PATH.
-      const cmd = 'pnpm';
-      // Always allow lockfile refresh for AI-edited package.json files.
-      // `--prefer-offline` still keeps repeated installs fast via pnpm's global store
-      // without showing a noisy frozen-lockfile failure on first boot.
-      const args = ['install', '--no-frozen-lockfile', '--prefer-offline'];
+      // Respect the project's OWN package manager. Generated sandbox projects
+      // are pnpm (fast hard-links from the global store), but an external
+      // npm/yarn project must NEVER be pnpm-installed — mixed layouts corrupt
+      // node_modules in ways that surface as bizarre runtime chunk errors.
+      const pm = project.external
+        ? (existsSync(join(project.rootDir, 'pnpm-lock.yaml')) ? 'pnpm'
+          : existsSync(join(project.rootDir, 'yarn.lock')) ? 'yarn'
+          : 'npm')
+        : 'pnpm';
+      const cmd = pm;
+      const args = pm === 'pnpm'
+        // Allow lockfile refresh for AI-edited package.json files; --prefer-offline
+        // keeps repeated installs fast via pnpm's global store.
+        ? ['install', '--no-frozen-lockfile', '--prefer-offline']
+        : pm === 'yarn'
+          ? ['install']
+          : ['install', '--no-audit', '--no-fund'];
       const pkgPath = join(project.rootDir, 'package.json');
       if (existsSync(pkgPath)) {
         try {
@@ -578,12 +1300,24 @@ export class SandboxManager {
   async startDev(projectId: string): Promise<{ port: number }> {
     const project = this.projects.get(projectId);
     if (!project) throw new Error(`Sandbox project not found: ${projectId}`);
+    const recoveringFromFailedRun = project.status === 'failed';
+    const hadTrackedDevProcess = Boolean(project.devProcess);
 
-    // Kill existing dev process
+    // Kill existing dev process — including one whose handle was lost to a
+    // runtime reload (pidfile survives lives; a second concurrent server on the
+    // same project corrupts its build cache).
     if (project.devProcess) {
       project.devProcess.kill();
       project.devProcess = null;
     }
+    try {
+      const pidfilePath = join(this.pidDir, `${projectId}.json`);
+      if (existsSync(pidfilePath)) {
+        const record = JSON.parse(readFileSync(pidfilePath, 'utf-8')) as { port?: number };
+        if (record.port) killPortOwner(record.port);
+      }
+    } catch { /* best effort */ }
+    this.removePidfile(projectId);
 
     const port = await findFreePort(this.nextPort);
     this.nextPort = port + 1;
@@ -592,9 +1326,10 @@ export class SandboxManager {
     project.devStderr = []; // reset stderr capture for this dev server run
     this.pushLog(project, `Starting dev server on port ${port}...`);
 
-    // Inject console bridge for Next.js projects (no index.html to inject into)
+    // Inject console bridge for Next.js projects (no index.html to inject into).
+    // NEVER for external/user folders — we don't mutate code the user didn't ask us to touch.
     const layoutPath = join(project.rootDir, 'src', 'app', 'layout.tsx');
-    if (existsSync(layoutPath)) {
+    if (!project.external && existsSync(layoutPath)) {
       try {
         const bridgeComponentPath = join(project.rootDir, 'src', 'app', 'ConsoleBridge.tsx');
         if (!existsSync(bridgeComponentPath)) {
@@ -642,6 +1377,7 @@ export class SandboxManager {
     // Detect what to run
     let cmd: string;
     let args: string[];
+    let spawnWithShell = true;
 
     const pkgPath = join(project.rootDir, 'package.json');
     if (existsSync(pkgPath)) {
@@ -652,9 +1388,18 @@ export class SandboxManager {
         const devScript = typeof scripts.dev === 'string' ? scripts.dev : '';
         const hasVinextDep = !!(pkg.dependencies?.vinext ?? pkg.devDependencies?.vinext);
         const isVinext = hasVinextDep || devScript.startsWith('vinext');
+        // Real-world dev scripts can be non-portable (e.g. `bash scripts/dev.sh` on Windows).
+        // When the script can't run on this OS, classify by dependencies instead so we can
+        // still bring the app up with the framework binary directly.
+        const devScriptPortable = isDevScriptPortable(devScript);
+        const hasNextDep = !!(pkg.dependencies?.next ?? pkg.devDependencies?.next);
+        const hasViteDep = !!(pkg.dependencies?.vite ?? pkg.devDependencies?.vite);
         // Must check vinext before next — "vinext dev" contains the substring "next"
-        const isNextjs = !isVinext && /\bnext\b/.test(devScript);
-            const isVite = !isVinext && !isNextjs && /\bvite\b/.test(devScript);
+        const isNextjs = !isVinext && (/\bnext\b/.test(devScript) || (!devScriptPortable && hasNextDep));
+            const isVite = !isVinext && !isNextjs && (/\bvite\b/.test(devScript) || (!devScriptPortable && hasViteDep));
+        if (!devScriptPortable) {
+          this.pushLog(project, `dev script "${devScript}" is not runnable on this OS — using the ${isNextjs ? 'next' : isVite ? 'vite' : 'npm'} binary directly`);
+        }
         if (isVinext) {
           if (usePnpm) {
             cmd = 'pnpm';
@@ -664,7 +1409,29 @@ export class SandboxManager {
             args = ['vinext', 'dev', '--port', String(port), '--host', '0.0.0.0'];
           }
         } else if (isNextjs) {
-          if (usePnpm) {
+          // Next shares its compiled cache across dev-server lives. If the
+          // previous server failed—or an external project is being reattached
+          // without a trustworthy live-process handle—that cache may contain half-written chunks
+          // (observed as `app/layout.js: Invalid or unexpected token` in the
+          // embedded preview). Source files are untouched; only generated
+          // framework output is discarded before recovery.
+          if (recoveringFromFailedRun || (project.external && !hadTrackedDevProcess)) {
+            this.pushLog(project, 'Clearing stale .next cache before untracked external-project start...');
+            try {
+              await rm(join(project.rootDir, '.next'), { recursive: true, force: true });
+            } catch { /* best effort — Next can still rebuild/diagnose */ }
+          }
+          // Prefer the project's installed Next CLI directly. On Windows,
+          // `shell: true` + `npx next dev` can detach the actual server from the
+          // shell process: the wrapper exits, Vai marks the preview failed, and
+          // the child becomes an orphan. Direct Node execution gives us the
+          // real long-lived process and a PID that restart/stop can trust.
+          const localNextCli = join(project.rootDir, 'node_modules', 'next', 'dist', 'bin', 'next');
+          if (existsSync(localNextCli)) {
+            cmd = process.execPath;
+            args = [localNextCli, 'dev', '--port', String(port), '--hostname', '0.0.0.0'];
+            spawnWithShell = false;
+          } else if (usePnpm) {
             cmd = 'pnpm';
             args = ['exec', 'next', 'dev', '--port', String(port), '--hostname', '0.0.0.0'];
           } else {
@@ -680,8 +1447,11 @@ export class SandboxManager {
                 args = ['vite', '--port', String(port), '--host', '0.0.0.0'];
               }
         } else {
+          // Unknown/custom dev runner (e.g. `node scripts/dev-runner.ts dev`): run it UNTOUCHED.
+          // Injected `--port/--host` flags break custom CLIs — rely on the PORT env hint and
+          // port auto-detection from the server banner instead.
           cmd = usePnpm ? 'pnpm' : 'npm';
-          args = ['run', 'dev', '--', '--port', String(port), '--host'];
+          args = ['run', 'dev'];
         }
       } else if (scripts.start) {
         cmd = existsSync(join(project.rootDir, 'pnpm-lock.yaml')) ? 'pnpm' : 'npm';
@@ -701,14 +1471,19 @@ export class SandboxManager {
 
     const proc = spawn(cmd, args, {
       cwd: project.rootDir,
-      shell: true,
+      shell: spawnWithShell,
       env: { ...process.env, PORT: String(port), NODE_ENV: 'development' },
     });
 
     project.devProcess = proc;
+    // Record the server for cross-life reaping — if this runtime dies/reloads,
+    // the next life kills this server instead of leaving an orphan to corrupt
+    // the project's build cache with a second concurrent instance.
+    this.writePidfile(projectId, proc.pid, port);
 
     let resolveObservedPort: ((value: number) => void) | null = null;
     let readySignalSeen = false;
+    let portSettled = false;
     let readyPortSettleTimer: NodeJS.Timeout | null = null;
     const observedPort = new Promise<number>((resolve) => {
       resolveObservedPort = resolve;
@@ -723,6 +1498,7 @@ export class SandboxManager {
 
     const settleObservedPort = (value: number) => {
       clearReadyPortSettleTimer();
+      portSettled = true;
       resolveObservedPort?.(value);
       resolveObservedPort = null;
     };
@@ -731,6 +1507,10 @@ export class SandboxManager {
       const detectedPort = extractBoundPort(stripAnsi(text));
       if (!detectedPort) return null;
       if (detectedPort === project.devPort) return detectedPort;
+      // Multi-process dev runners (web + api server) print several port banners.
+      // Once the user-facing port has settled, later banners (e.g. an API server
+      // on another port) must not steal the preview URL.
+      if (portSettled) return null;
       project.devPort = detectedPort;
       this.nextPort = Math.max(this.nextPort, detectedPort + 1);
       this.pushLog(project, `Detected actual dev server port: ${detectedPort}`);
@@ -775,9 +1555,24 @@ export class SandboxManager {
       }
       markRunningIfReady(text);
     });
-    proc.on('close', () => {
-      project.devProcess = null;
-      if (project.status === 'building') project.status = 'failed';
+    proc.on('close', (code, signal) => {
+      // A restarted server may already own project.devProcess. A late close
+      // from the previous process must never null or fail the replacement.
+      if (project.devProcess === proc) {
+        project.devProcess = null;
+        if (project.status === 'building' || project.status === 'running') {
+          project.status = 'failed';
+          this.pushLog(project, `Dev server exited${code !== null ? ` (code ${code})` : signal ? ` (${signal})` : ''}`);
+        }
+      }
+      settleObservedPort(project.devPort ?? port);
+    });
+    proc.on('error', (error) => {
+      if (project.devProcess === proc) {
+        project.devProcess = null;
+        project.status = 'failed';
+        this.pushLog(project, `Dev server error: ${error.message}`);
+      }
       settleObservedPort(project.devPort ?? port);
     });
 
@@ -785,6 +1580,34 @@ export class SandboxManager {
       observedPort,
       new Promise<number>((resolve) => setTimeout(() => resolve(project.devPort ?? port), START_DEV_TIMEOUT_MS)),
     ]);
+
+    // The server may have bound a different port than requested (framework picked
+    // its own). Keep the pidfile accurate so reaping targets the real port.
+    if (settledPort !== port) this.writePidfile(projectId, proc.pid, settledPort);
+
+    // A dev server can be "ready" while the app root is still a real user-facing
+    // failure (Vite/SSR 500, missing env JSON, framework overlay). For opened
+    // local folders, verify the rendered root before the desktop app paints the
+    // preview green; otherwise Vai looks confident while the iframe is broken.
+    if (project.external && (project.status as SandboxProject['status']) === 'running') {
+      const health = await checkPreviewHealth(settledPort);
+      if (!health.ok) {
+        if (previewHealthDisposition(health) === 'pending') {
+          this.pushLog(project, 'Preview is still compiling; keeping the dev server live while the App view waits.');
+          return { port: settledPort };
+        }
+        const concreteStderr = project.devStderr
+          .slice()
+          .reverse()
+          .find((line) => /Missing VITE_[A-Z0-9_]+|Error:/i.test(line.trim()));
+        const detail = (concreteStderr ?? health.message).trim().replace(/^cause:\s*/i, '');
+        const message = `Preview health check failed: ${detail}`;
+        project.status = 'failed';
+        this.pushLog(project, message);
+        if (project.devStderr.length >= 50) project.devStderr.shift();
+        project.devStderr.push(message);
+      }
+    }
 
     return { port: settledPort };
   }
@@ -803,23 +1626,282 @@ export class SandboxManager {
         project.devProcess.kill('SIGTERM');
       }
       project.devProcess = null;
+    } else if (project.devPort) {
+      // Handle lost to a runtime reload — kill by port so stop ALWAYS works.
+      killPortOwner(project.devPort);
     }
+    this.removePidfile(projectId);
     project.status = 'idle';
     project.devPort = null;
   }
 
-  /** Delete a sandbox project entirely */
+  /** Delete a sandbox project. External/user folders are ONLY closed — never deleted. */
   async destroy(projectId: string): Promise<void> {
     const project = this.projects.get(projectId);
     if (!project) return;
 
     this.stopDev(projectId);
 
-    try {
-      await rm(project.rootDir, { recursive: true, force: true });
-    } catch { /* cleanup failure is ok */ }
+    // Belt and braces: only ever rm folders we created under our own baseDir.
+    if (!project.external && !this.isOutsideBaseDir(project.rootDir)) {
+      try {
+        await rm(project.rootDir, { recursive: true, force: true });
+      } catch { /* cleanup failure is ok */ }
+    }
 
     this.projects.delete(projectId);
+  }
+
+  /**
+   * Run a package.json script (build / lint / test / typecheck …) inside the project.
+   * One command at a time per project — protects the machine from stacked heavy tasks.
+   * Output streams into project logs and the CommandRun ring buffer; poll GET /:id.
+   */
+  runCommand(projectId: string, script: string): CommandRun {
+    const project = this.projects.get(projectId);
+    if (!project) throw new Error(`Sandbox project not found: ${projectId}`);
+    if (project.commandRun?.status === 'running') {
+      throw new Error(`A command is already running (${project.commandRun.script}) — wait for it to finish`);
+    }
+    if (!/^[\w:.-]+$/.test(script)) throw new Error(`Invalid script name: ${script}`);
+    if (script === 'dev' || script === 'start') {
+      throw new Error('Use the dev-server controls for dev/start');
+    }
+    const pkgPath = join(project.rootDir, 'package.json');
+    if (!existsSync(pkgPath)) throw new Error('No package.json in this project');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { scripts?: Record<string, string> };
+    if (!pkg.scripts?.[script]) throw new Error(`Script "${script}" is not defined in package.json`);
+
+    const usePnpm = existsSync(join(project.rootDir, 'pnpm-lock.yaml'));
+    const cmd = usePnpm ? 'pnpm' : existsSync(join(project.rootDir, 'yarn.lock')) ? 'yarn' : 'npm';
+
+    const run: CommandRun = {
+      script,
+      status: 'running',
+      startedAt: Date.now(),
+      finishedAt: null,
+      exitCode: null,
+      output: [],
+    };
+    project.commandRun = run;
+    this.pushLog(project, `▶ ${cmd} run ${script}`);
+
+    const proc = spawn(cmd, ['run', script], {
+      cwd: project.rootDir,
+      shell: true,
+      env: { ...process.env },
+    });
+
+    const capture = (d: Buffer) => {
+      for (const raw of d.toString().split('\n')) {
+        const line = stripAnsi(raw).trimEnd();
+        if (!line.trim()) continue;
+        if (run.output.length >= 400) run.output.shift();
+        run.output.push(line);
+        this.pushLog(project, line);
+      }
+    };
+    proc.stdout?.on('data', capture);
+    proc.stderr?.on('data', capture);
+
+    // Safety net: kill runaway commands after 10 minutes.
+    const killTimer = setTimeout(() => {
+      if (run.status !== 'running') return;
+      if (process.platform === 'win32' && proc.pid) {
+        try { execSync(`taskkill /PID ${proc.pid} /T /F`, { stdio: 'ignore' }); } catch { /* best effort */ }
+      } else {
+        proc.kill('SIGTERM');
+      }
+      this.pushLog(project, `✗ ${script} timed out after 10 minutes — killed`);
+    }, 10 * 60_000);
+
+    proc.on('close', (code) => {
+      clearTimeout(killTimer);
+      run.exitCode = code;
+      run.finishedAt = Date.now();
+      run.status = code === 0 ? 'done' : 'failed';
+      this.pushLog(project, code === 0 ? `✓ ${script} finished` : `✗ ${script} failed (exit ${code})`);
+    });
+    proc.on('error', (err) => {
+      clearTimeout(killTimer);
+      run.finishedAt = Date.now();
+      run.status = 'failed';
+      this.pushLog(project, `✗ ${script} error: ${err.message}`);
+    });
+
+    return run;
+  }
+
+  /** Await the project's current command run (poll-based; resolves when it settles). */
+  private awaitCommand(project: SandboxProject): Promise<CommandRun | null> {
+    return new Promise((resolveRun) => {
+      const check = () => {
+        const run = project.commandRun;
+        if (!run || run.status !== 'running') { resolveRun(run); return; }
+        setTimeout(check, 500);
+      };
+      check();
+    });
+  }
+
+  /**
+   * Switch the app window between environment lanes:
+   *   dev        → the framework dev server (HMR) — the default.
+   *   preview    → `build`, then serve the built output locally.
+   *   production → lint + typecheck gates, then `build`, then serve.
+   *
+   * Blue-green promise: the CURRENT server keeps serving while gates/build run;
+   * the swap happens only when the new lane is ready. A failed switch restores dev.
+   */
+  async switchLane(projectId: string, lane: EnvLane): Promise<LaneState> {
+    const project = this.projects.get(projectId);
+    if (!project) throw new Error(`Sandbox project not found: ${projectId}`);
+    if (project.laneState?.status === 'switching') {
+      throw new Error(`Already switching to ${project.laneState.lane} — wait for it to finish`);
+    }
+    if (project.commandRun?.status === 'running') {
+      throw new Error(`A command is running (${project.commandRun.script}) — wait for it to finish`);
+    }
+
+    const state: LaneState = { lane, status: 'switching', stage: 'preparing', startedAt: Date.now(), error: null };
+    project.laneState = state;
+    this.pushLog(project, `⇆ Switching app to ${lane}…`);
+
+    const profile = detectProjectProfile(project.rootDir);
+    // Frameworks whose build writes into the SAME directory the dev server is
+    // serving from (Next/Vinext: .next). Building under a live dev server
+    // corrupts both (live failure: routes-manifest ENOENT + missing chunks).
+    // Vite-family builds into dist/, which dev ignores → true blue-green there.
+    const buildCollidesWithDev = profile.framework === 'nextjs' || profile.framework === 'vinext';
+
+    try {
+      if (lane === 'dev') {
+        state.stage = 'starting dev server';
+        this.stopDev(projectId);
+        project.status = 'building';
+        await this.startDev(projectId);
+        project.envLane = 'dev';
+        state.status = 'ready';
+        state.stage = null;
+        this.pushLog(project, '✓ dev lane ready');
+        return state;
+      }
+
+      if (!profile.scripts.build) throw new Error('No "build" script in package.json — cannot build this app');
+
+      // Production gate: lint + typecheck must pass BEFORE we spend time building.
+      if (lane === 'production') {
+        for (const gate of ['lint', 'typecheck'] as const) {
+          if (!profile.scripts[gate]) continue;
+          state.stage = `gate: ${gate}`;
+          this.runCommand(projectId, gate);
+          const run = await this.awaitCommand(project);
+          if (run?.exitCode !== 0) {
+            throw new Error(`${gate} failed (exit ${run?.exitCode ?? '?'}) — fix it before going to production`);
+          }
+        }
+      }
+
+      // Build. True blue-green (old server keeps serving) only when the build
+      // output cannot collide with the dev server's working directory.
+      if (buildCollidesWithDev) {
+        state.stage = 'stopping dev server (Next.js build shares .next)';
+        this.stopDev(projectId);
+        // A previous collided build may have left .next corrupted — clear it.
+        try { await rm(join(project.rootDir, '.next'), { recursive: true, force: true }); } catch { /* best effort */ }
+      }
+      state.stage = 'building';
+      this.runCommand(projectId, 'build');
+      const buildRun = await this.awaitCommand(project);
+      if (buildRun?.exitCode !== 0) {
+        throw new Error(`build failed (exit ${buildRun?.exitCode ?? '?'}) — check the console`);
+      }
+
+      // Swap: stop the old server only now, then serve the built output.
+      state.stage = 'starting server';
+      this.stopDev(projectId);
+      project.status = 'building';
+      await this.startServeProcess(project, lane, profile);
+      project.status = 'running';
+      project.envLane = lane;
+      state.status = 'ready';
+      state.stage = null;
+      this.pushLog(project, `✓ ${lane} lane ready on port ${project.devPort}`);
+      return state;
+    } catch (err) {
+      state.status = 'failed';
+      state.error = err instanceof Error ? err.message : String(err);
+      state.stage = null;
+      this.pushLog(project, `✗ ${lane} switch failed: ${state.error}`);
+      // Restore the dev lane if the swap left the app without a server.
+      if (!project.devProcess) {
+        try {
+          project.status = 'building';
+          await this.startDev(projectId);
+          project.envLane = 'dev';
+          this.pushLog(project, '↩ dev server restored');
+        } catch { /* stays down — surfaced by status */ }
+      }
+      return state;
+    }
+  }
+
+  /** Serve the built output for preview/production and wait for readiness. */
+  private async startServeProcess(project: SandboxProject, lane: EnvLane, profile: ProjectProfile): Promise<void> {
+    const port = await findFreePort(this.nextPort);
+    this.nextPort = port + 1;
+    const usePnpm = profile.packageManager === 'pnpm';
+
+    let cmd: string;
+    let args: string[];
+    if (profile.framework === 'vinext') {
+      cmd = usePnpm ? 'pnpm' : 'npx';
+      args = usePnpm ? ['exec', 'vinext', 'start', '--port', String(port)] : ['vinext', 'start', '--port', String(port)];
+    } else if (profile.framework === 'nextjs') {
+      cmd = usePnpm ? 'pnpm' : 'npx';
+      args = usePnpm
+        ? ['exec', 'next', 'start', '--port', String(port), '--hostname', '0.0.0.0']
+        : ['next', 'start', '--port', String(port), '--hostname', '0.0.0.0'];
+    } else if (profile.framework === 'vite' || profile.framework === 'astro' || profile.framework === 'remix') {
+      cmd = usePnpm ? 'pnpm' : 'npx';
+      args = usePnpm
+        ? ['exec', 'vite', 'preview', '--port', String(port), '--host', '0.0.0.0']
+        : ['vite', 'preview', '--port', String(port), '--host', '0.0.0.0'];
+    } else if (profile.scripts.start) {
+      cmd = usePnpm ? 'pnpm' : 'npm';
+      args = ['run', 'start'];
+    } else {
+      throw new Error(`No serve strategy for a built ${profile.frameworkLabel} app`);
+    }
+
+    this.pushLog(project, `Serve command (${lane}): ${cmd} ${args.join(' ')}`);
+    const proc = spawn(cmd, args, {
+      cwd: project.rootDir,
+      shell: true,
+      env: { ...process.env, PORT: String(port), NODE_ENV: 'production' },
+    });
+    project.devProcess = proc;
+    project.devPort = port;
+    this.writePidfile(project.id, proc.pid, port);
+
+    proc.stdout?.on('data', (d: Buffer) => this.pushLog(project, stripAnsi(d.toString()).trim()));
+    proc.stderr?.on('data', (d: Buffer) => this.pushLog(project, stripAnsi(d.toString()).trim()));
+    proc.on('close', () => {
+      project.devProcess = null;
+      if (project.status === 'building') project.status = 'failed';
+    });
+
+    // Readiness: the server answers HTTP (any status) within 60s.
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      if (!project.devProcess) throw new Error('server exited before becoming ready — check the console');
+      try {
+        await fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(3_000) });
+        return;
+      } catch { /* not up yet */ }
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    throw new Error('server did not answer within 60s');
   }
 
   /** Get recent logs for a project */
@@ -827,6 +1909,105 @@ export class SandboxManager {
     const project = this.projects.get(projectId);
     if (!project) return [];
     return project.logs.slice(-count);
+  }
+
+  /**
+   * VS Code-style project text search. Walks project files (skipping node_modules,
+   * build output, and binary formats), matching per line with case / whole-word /
+   * regex options. Read-only.
+   */
+  async searchFiles(projectId: string, options: SearchFilesOptions): Promise<SearchFilesResult> {
+    const project = this.projects.get(projectId);
+    if (!project) throw new Error(`Sandbox project not found: ${projectId}`);
+
+    const pattern = buildSearchRegex(options);
+    const maxResults = Math.min(Math.max(options.maxResults ?? 500, 1), 2000);
+    const paths = await this.listFiles(projectId);
+
+    const matches: SearchFileMatch[] = [];
+    let totalMatches = 0;
+    let filesScanned = 0;
+    let truncated = false;
+
+    for (const path of paths) {
+      if (truncated) break;
+      if (BINARY_EXT_RE.test(path)) continue;
+      let content: string;
+      try {
+        const full = this.safePath(project.rootDir, path);
+        const stat = statSync(full);
+        if (stat.size > MAX_SEARCH_FILE_BYTES) continue;
+        content = await readFile(full, 'utf-8');
+      } catch { continue; }
+      if (content.includes('\u0000')) continue; // binary content sneaked past the extension filter
+      filesScanned += 1;
+
+      const lines = content.split('\n');
+      let fileMatches: SearchLineMatch[] | null = null;
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        pattern.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = pattern.exec(line)) !== null) {
+          if (totalMatches >= maxResults) { truncated = true; break; }
+          fileMatches ??= [];
+          fileMatches.push({
+            line: i + 1,
+            column: m.index + 1,
+            matchText: m[0].slice(0, 200),
+            preview: line.length > 300 ? line.slice(Math.max(0, m.index - 80), m.index + 220) : line,
+          });
+          totalMatches += 1;
+          if (m[0].length === 0) pattern.lastIndex += 1; // avoid zero-width infinite loops
+        }
+        if (truncated) break;
+      }
+      if (fileMatches) matches.push({ path, matches: fileMatches });
+    }
+
+    return { files: matches, totalMatches, filesScanned, truncated };
+  }
+
+  /**
+   * Replace matches across project files (same options as searchFiles).
+   * Returns the before/after snapshots of every changed file so the caller
+   * can record a revertable revision. Restricted to `paths` when provided.
+   */
+  async replaceInFiles(
+    projectId: string,
+    options: SearchFilesOptions & { replacement: string; paths?: string[] },
+  ): Promise<{ changes: { path: string; beforeContent: string; afterContent: string }[]; replacements: number }> {
+    const project = this.projects.get(projectId);
+    if (!project) throw new Error(`Sandbox project not found: ${projectId}`);
+
+    const pattern = buildSearchRegex(options);
+    const allowed = options.paths?.length ? new Set(options.paths) : null;
+    const paths = await this.listFiles(projectId);
+    const changes: { path: string; beforeContent: string; afterContent: string }[] = [];
+    let replacements = 0;
+
+    for (const path of paths) {
+      if (allowed && !allowed.has(path)) continue;
+      if (BINARY_EXT_RE.test(path)) continue;
+      let content: string;
+      try {
+        const full = this.safePath(project.rootDir, path);
+        if (statSync(full).size > MAX_SEARCH_FILE_BYTES) continue;
+        content = await readFile(full, 'utf-8');
+      } catch { continue; }
+      if (content.includes('\u0000')) continue;
+
+      pattern.lastIndex = 0;
+      if (!pattern.test(content)) continue;
+      pattern.lastIndex = 0;
+      let count = 0;
+      const next = content.replace(pattern, () => { count += 1; return options.replacement; });
+      if (next === content) continue;
+      replacements += count;
+      changes.push({ path, beforeContent: content, afterContent: next });
+    }
+
+    return { changes, replacements };
   }
 
   /**

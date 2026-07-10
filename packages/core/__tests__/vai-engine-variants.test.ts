@@ -4392,6 +4392,18 @@ describe('VaiEngine', () => {
     expect(response.message.content).toMatch(/Queued|building|crashed|expired|quota-blocked|logs|retry/i);
   });
 
+  it('answers concrete missing-env preview repair prompts instead of generic sandbox lifecycle advice (variant)', async () => {
+    const response = await engine.chat({
+      messages: [{ role: 'user', content: 'Repair the current sandbox preview failure: Preview failed: Error: Missing VITE_CONVEX_URL. This looks like missing environment configuration. Do not invent real secrets.' }],
+    });
+
+    expect(response.message.content).toMatch(/VITE_CONVEX_URL/);
+    expect(response.message.content).toMatch(/should not invent|not invent/i);
+    expect(response.message.content).toMatch(/\.env\.local|env store/i);
+    expect(response.message.content).toMatch(/setup-required fallback|missing VITE_CONVEX_URL/i);
+    expect(response.message.content).not.toMatch(/Queued|quota-blocked/i);
+  });
+
   it('resolves simple but enterprise-grade prompts instead of falling back (variant)', async () => {
     const response = await engine.chat({
       messages: [{ role: 'user', content: 'Make it simple but also enterprise-grade.' }],

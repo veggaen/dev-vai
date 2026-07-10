@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyProfile,
+  confirmCorrection,
   emptyProfile,
   learnFromEdit,
   prettifyTranscript,
@@ -36,6 +37,21 @@ describe('prettifyTranscript', () => {
     expect(prettifyTranscript('wait , what is this ?')).toBe('Wait, what is this?');
   });
 
+  it('repairs seeded ASR word debris before punctuation', () => {
+    expect(prettifyTranscript("i'm eating a joke-o-o-gost in the morning"))
+      .toBe("I'm eating yoghourt in the morning.");
+  });
+
+  it('repairs the seeded words/worlds dictation artifact before punctuation', () => {
+    expect(prettifyTranscript('i hope all the worlds that i am saying are being recorded'))
+      .toBe('I hope all the words that I am saying are being recorded.');
+  });
+
+  it('repairs the seeded keybind ASR artifact before punctuation', () => {
+    expect(prettifyTranscript('i am pressing my key amount now'))
+      .toBe('I am pressing my keybind now.');
+  });
+
   it('uppercases standalone i', () => {
     expect(prettifyTranscript('yesterday i shipped it and i tested it')).toBe('Yesterday I shipped it and I tested it.');
   });
@@ -64,6 +80,26 @@ describe('applyProfile', () => {
   it('never replaces inside larger words', () => {
     const p = profileWith([{ heard: 'vay', corrected: 'vai' }]);
     expect(applyProfile('voyage stays', p).text).toBe('voyage stays');
+  });
+});
+
+describe('confirmCorrection', () => {
+  it('promotes an explicit user correction immediately', () => {
+    const p = confirmCorrection(emptyProfile(), { heard: 'help me', corrected: 'hear me' });
+    expect(activeRules(p)).toEqual([expect.objectContaining({
+      heard: 'help me',
+      corrected: 'hear me',
+      count: PROMOTE_AT,
+      strikes: 0,
+    })]);
+    expect(applyProfile('can you help me', p).text).toBe('can you hear me');
+  });
+
+  it('revives a struck rule when the user explicitly confirms it', () => {
+    const base = profileWith([{ heard: 'vay', corrected: 'Vai', strikes: RETIRE_AT }]);
+    const p = confirmCorrection(base, { heard: 'vay', corrected: 'Vai' });
+    expect(activeRules(p)).toHaveLength(1);
+    expect(activeRules(p)[0]?.strikes).toBe(0);
   });
 });
 

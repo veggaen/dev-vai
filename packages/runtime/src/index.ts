@@ -112,6 +112,20 @@ function removeLockFile(): void {
 }
 
 async function main() {
+  // ── Stay-alive guards ──
+  // Keep the runtime serving through non-fatal async errors. Without these, a single
+  // uncaught exception or unhandled promise rejection ANYWHERE (e.g. a hiccup deep in
+  // an STT inference call or a background task) terminates the whole Node process — and
+  // every request after that dies on the client as "Failed to fetch", with no server
+  // to answer. Log loudly and keep serving instead. (Native crashes — e.g. an
+  // onnxruntime segfault — can't be caught here; those need engine isolation.)
+  process.on('uncaughtException', (err) => {
+    console.error('[VAI] uncaughtException (runtime kept alive):', err);
+  });
+  process.on('unhandledRejection', (reason) => {
+    console.error('[VAI] unhandledRejection (runtime kept alive):', reason);
+  });
+
   const { app, port, vaiEngine, chatService, config, localSteeringWorker, sandboxManager, startBackgroundHydrate } = await createServer();
   const host = resolveRuntimeHost();
   assertSecureRuntimeExposure(host, config.authEnabled && config.apiKeys.length > 0);

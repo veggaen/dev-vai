@@ -43,7 +43,7 @@ import {
  * Zoom moves node POSITIONS only (translateX per node) — no canvas scale(), so text stays crisp
  * and nothing can overflow the frame by being scaled up.
  */
-function useSpineViewport(count: number, reduce: boolean) {
+function useSpineViewport(count: number, reduce: boolean, onUserNav?: () => void) {
   const [vp, setVp] = useState<Viewport>(IDENTITY_VIEWPORT);
   const [frameW, setFrameW] = useState(0);
   const [smooth, setSmooth] = useState(false);
@@ -93,13 +93,14 @@ function useSpineViewport(count: number, reduce: boolean) {
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return; // plain wheel: never hijack page scroll
       e.preventDefault();
+      onUserNav?.();
       const rect = el.getBoundingClientRect();
       const factor = Math.exp(-e.deltaY * 0.0035);
       apply(zoomAbout(vpRef.current, factor, e.clientX - rect.left));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [reduce, apply]);
+  }, [reduce, apply, onUserNav]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (reduce || e.button !== 0) return;
@@ -110,10 +111,11 @@ function useSpineViewport(count: number, reduce: boolean) {
     // Never swallow node or minimap interactions with pointer capture.
     const t = e.target as HTMLElement;
     if (t.closest('.reasoning-node, .reasoning-minimap, .reasoning-fit')) return;
+    onUserNav?.();
     drag.current = { startX: e.clientX, startPan: vpRef.current.panX };
     setDragging(true);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }, [reduce, contentWidth]);
+  }, [reduce, contentWidth, onUserNav]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!drag.current) return;
@@ -146,22 +148,31 @@ function useSpineViewport(count: number, reduce: boolean) {
     if (reduce || e.target !== e.currentTarget) return; // node buttons keep their own keys
     const frame = frameRef.current?.clientWidth ?? 0;
     const cur = vpRef.current;
-    if (e.key === 'ArrowLeft') { e.preventDefault(); apply(panBy(cur, 80)); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); apply(panBy(cur, -80)); }
-    else if (e.key === '+' || e.key === '=') { e.preventDefault(); applySmooth(zoomAbout(cur, 1.25, frame / 2)); }
-    else if (e.key === '-' || e.key === '_') { e.preventDefault(); applySmooth(zoomAbout(cur, 1 / 1.25, frame / 2)); }
-    else if (e.key === '0') { e.preventDefault(); fit(); }
-  }, [reduce, apply, applySmooth, fit]);
+    if (e.key === 'ArrowLeft') { e.preventDefault(); onUserNav?.(); apply(panBy(cur, 80)); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); onUserNav?.(); apply(panBy(cur, -80)); }
+    else if (e.key === '+' || e.key === '=') { e.preventDefault(); onUserNav?.(); applySmooth(zoomAbout(cur, 1.25, frame / 2)); }
+    else if (e.key === '-' || e.key === '_') { e.preventDefault(); onUserNav?.(); applySmooth(zoomAbout(cur, 1 / 1.25, frame / 2)); }
+    else if (e.key === '0') { e.preventDefault(); onUserNav?.(); fit(); }
+  }, [reduce, apply, applySmooth, fit, onUserNav]);
 
   const scrubTo = useCallback((fraction: number) => {
     const frame = frameRef.current?.clientWidth ?? 0;
+    onUserNav?.();
     apply(panToFraction(vpRef.current, fraction, contentWidth, frame));
-  }, [apply, contentWidth]);
+  }, [apply, contentWidth, onUserNav]);
 
   const zoomFromMinimap = useCallback((deltaY: number) => {
     const frame = frameRef.current?.clientWidth ?? 0;
+    onUserNav?.();
     apply(zoomAbout(vpRef.current, Math.exp(-deltaY * 0.0035), frame / 2));
-  }, [apply]);
+  }, [apply, onUserNav]);
+
+  /** Pan (preserving zoom) so node `index` sits centered in the frame — the live follow. */
+  const centerOnNode = useCallback((index: number) => {
+    const frame = frameRef.current?.clientWidth ?? 0;
+    if (frame <= 0) return;
+    applySmooth({ scale: vpRef.current.scale, panX: frame / 2 - nodeX(index, vpRef.current.scale) });
+  }, [applySmooth]);
 
   const atFit = isAtFit(vp, count, frameW);
   // The spine overflows the frame → panning is meaningful (drives the grab cursor).
@@ -170,7 +181,7 @@ function useSpineViewport(count: number, reduce: boolean) {
   return {
     vp, frameW, contentWidth, frameRef, dragging, smooth, atFit, pannable,
     onPointerDown, onPointerMove, endDrag, onDoubleClick, onKeyDown,
-    fit, jumpToNode, scrubTo, zoomFromMinimap,
+    fit, jumpToNode, scrubTo, zoomFromMinimap, centerOnNode,
   };
 }
 
@@ -239,15 +250,30 @@ export function ReasoningFlow({ steps, council, live = false, durationMs, collap
   const reduce = useReducedMotion();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const count = model.phases.length;
-  const view = useSpineViewport(count, !!reduce);
+
+  // The view follows the RUNNING phase while live — unless the user just navigated
+  // (drag/zoom/scrub/keys), in which case the follow yields for a few seconds.
+  const navHoldUntil = useRef(0);
+  const noteUserNav = useCallback(() => { navHoldUntil.current = Date.now() + 5000; }, []);
+  const view = useSpineViewport(count, !!reduce, noteUserNav);
   const tier: ZoomTier = zoomTier(view.vp.scale);
 
   // Selection auto-follows the live phase so the user watches the active step without clicking;
   // once the user picks a node themselves, their choice sticks (tracked by a ref-guarded default).
   const userPicked = useRef(false);
   const livePhase = live ? model.phases.find((p) => p.status === 'running') : undefined;
+  const liveIndex = livePhase ? model.phases.indexOf(livePhase) : -1;
   const effectiveSelectedId = selectedId ?? livePhase?.id ?? null;
   const selected = model.phases.find((p) => p.id === effectiveSelectedId) ?? null;
+
+  // Bring the active phase into view as the turn progresses (only when the spine
+  // overflows the frame — a fitted spine is already fully visible).
+  useEffect(() => {
+    if (!live || reduce || liveIndex < 0) return;
+    if (Date.now() < navHoldUntil.current) return;
+    if (view.pannable) view.centerOnNode(liveIndex);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, liveIndex, reduce, view.pannable]);
 
   if (count === 0) return null;
 
@@ -257,9 +283,20 @@ export function ReasoningFlow({ steps, council, live = false, durationMs, collap
 
   const select = (id: string, index: number, viaKeyboard: boolean) => {
     userPicked.current = true;
+    noteUserNav();
     setSelectedId((cur) => (cur === id ? null : id));
     // Keyboard activation and double-click both jump to the node's detail tier.
     if (viaKeyboard && !reduce) view.jumpToNode(index);
+  };
+
+  /** A story row or minimap dot names a phase → open its spotlight and bring it into view. */
+  const selectPhaseById = (id: string) => {
+    const index = model.phases.findIndex((p) => p.id === id);
+    if (index < 0) return;
+    userPicked.current = true;
+    noteUserNav();
+    setSelectedId(id);
+    if (!reduce && view.pannable) view.centerOnNode(index);
   };
 
   const railStart = nodeX(0, view.vp.scale);
@@ -394,8 +431,10 @@ export function ReasoningFlow({ steps, council, live = false, durationMs, collap
             vp={view.vp}
             contentWidth={view.contentWidth}
             frameWidth={view.frameW}
+            selectedId={effectiveSelectedId}
             onScrub={view.scrubTo}
             onZoom={view.zoomFromMinimap}
+            onSelect={selectPhaseById}
           />
         )}
 
@@ -407,7 +446,7 @@ export function ReasoningFlow({ steps, council, live = false, durationMs, collap
 
       {/* The story — the same turn as an attributed conversation: Vai working in prose,
           each peer speaking TO Vai, the gate ruling. Streams live; collapses at rest. */}
-      <ReasoningStory phases={model.phases} council={council} live={live} />
+      <ReasoningStory phases={model.phases} council={council} live={live} onSelectPhase={selectPhaseById} />
 
       {/* Spotlight — detail for the selected node, revealed on intent below the spine. */}
       <AnimatePresence initial={false} mode="wait">
@@ -515,24 +554,29 @@ function FlowNode({
 }
 
 /**
- * Overview minimap — the whole turn as bare dots with a window marking what's on screen. It IS the
- * navigation instrument: drag/click scrubs the pan, wheel over it zooms. Visible whenever the view
- * shows a sub-range, or on frame hover.
+ * Overview minimap — the whole turn as dots with a window marking what's on screen. It IS the
+ * navigation instrument: drag/click on the track scrubs the pan, wheel over it zooms, and each
+ * DOT is a real button that opens its phase. Visible whenever the view shows a sub-range, or on
+ * frame hover.
  */
 function Minimap({
   phases,
   vp,
   contentWidth,
   frameWidth,
+  selectedId,
   onScrub,
   onZoom,
+  onSelect,
 }: {
   phases: readonly TimelinePhase[];
   vp: Viewport;
   contentWidth: number;
   frameWidth: number;
+  selectedId: string | null;
   onScrub: (fraction: number) => void;
   onZoom: (deltaY: number) => void;
+  onSelect: (phaseId: string) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const scrubbing = useRef(false);
@@ -561,11 +605,13 @@ function Minimap({
   if (!isSubRange) return null;
 
   return (
-    <div className="reasoning-minimap" aria-hidden="true">
+    <div className="reasoning-minimap">
       <div
         className="reasoning-minimap-track"
         ref={trackRef}
         onPointerDown={(e) => {
+          // A dot handles its own click; the bare track scrubs.
+          if ((e.target as HTMLElement).closest('.reasoning-minimap-dot')) return;
           e.stopPropagation();
           scrubbing.current = true;
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -582,7 +628,18 @@ function Minimap({
             : p.gate
               ? p.gate.approved ? 'var(--phase-verify)' : 'var(--tone-warn)'
               : PHASE_HUE[p.phase] ?? 'var(--accent)';
-          return <span key={p.id} className="reasoning-minimap-dot" style={{ background: hue }} />;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              className={`reasoning-minimap-dot ${p.id === selectedId ? 'reasoning-minimap-dot--selected' : ''}`}
+              style={{ background: hue }}
+              aria-label={p.title}
+              title={p.title}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onSelect(p.id); }}
+            />
+          );
         })}
         <span
           className="reasoning-minimap-window"

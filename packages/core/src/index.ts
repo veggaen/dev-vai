@@ -97,6 +97,13 @@ export type {
   ConversationGroundingDependencies,
   ContextGroundedFollowUpIntent,
 } from './chat/conversation-grounding.js';
+export {
+  looksLikeAsrArtifactTranscript,
+  repairKnownAsrArtifacts,
+  stripNonSpeechAnnotations,
+  shouldAcceptPolishedTranscript,
+  transcriptWordOverlap,
+} from './voice/polish-guard.js';
 export { classifyTurn } from './chat/turn-classifier.js';
 export type { TurnClass, TurnClassification } from './chat/turn-classifier.js';
 export { extractActiveTopicBrief, hasTopicOverlap } from './chat/active-topic-brief.js';

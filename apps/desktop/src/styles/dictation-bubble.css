@@ -1,0 +1,192 @@
+/* Standalone dictation bubble window (Wispr-Flow style). The window itself is
+   transparent; only the card is visible. Compact, calm, readable at a glance. */
+
+html[data-view="dictation-bubble"],
+html[data-view="dictation-bubble"] body,
+html[data-view="dictation-bubble"] #root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+html[data-view="dictation-bubble"] body {
+  color: #e8e8ee;
+  transition: none;
+}
+
+.vai-bubble {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 10px;
+  background: transparent;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.vai-bubble-card {
+  width: 100%;
+  max-width: 440px;
+  background: rgba(16, 16, 20, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  padding: 10px 12px;
+  color: #e8e8ee;
+  backdrop-filter: blur(12px);
+}
+
+/* ── Wispr-style pill: the ONLY chrome while speaking / delivering ─────────── */
+
+.vai-bubble-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 440px;
+  padding: 8px 14px;
+  background: rgba(16, 16, 20, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  color: #e8e8ee;
+  backdrop-filter: blur(12px);
+}
+.vai-bubble-pill.ok { border-color: rgba(93, 219, 138, 0.35); }
+
+.vai-bubble-pill-label {
+  font-size: 12px;
+  font-weight: 550;
+  color: #cfcfda;
+}
+
+/* Vertical bars that grow with the mic level — visual proof the mic hears you. */
+.vai-bubble-bars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+}
+
+.vai-bubble-bar {
+  width: 3px;
+  min-height: 4px;
+  border-radius: 2px;
+  background: #b9a5f7;
+  transition: height 90ms ease-out, opacity 90ms ease-out;
+}
+
+/* Truncated one-line live draft next to the bars. */
+.vai-bubble-draft {
+  max-width: 300px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  color: #a9a9b8;
+}
+
+/* Three dots breathing while the words are being finalized. */
+.vai-bubble-thinking {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+}
+.vai-bubble-thinking span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #b9a5f7;
+  animation: vai-bubble-think 1s ease-in-out infinite;
+}
+.vai-bubble-thinking span:nth-child(2) { animation-delay: 0.16s; }
+.vai-bubble-thinking span:nth-child(3) { animation-delay: 0.32s; }
+
+@keyframes vai-bubble-think {
+  0%, 100% { transform: translateY(0); opacity: 0.4; }
+  50% { transform: translateY(-4px); opacity: 1; }
+}
+
+.vai-bubble-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 22px;
+}
+
+.vai-bubble-title {
+  font-size: 12.5px;
+  font-weight: 550;
+  letter-spacing: 0.01em;
+  color: #cfcfda;
+}
+
+.vai-bubble-spacer { flex: 1; }
+
+.vai-bubble-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff5d5d;
+}
+.vai-bubble-dot.listening { animation: vai-bubble-pulse 1.2s ease-in-out infinite; }
+
+@keyframes vai-bubble-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
+}
+
+.vai-bubble-spin { animation: vai-bubble-rotate 0.9s linear infinite; }
+@keyframes vai-bubble-rotate { to { transform: rotate(360deg); } }
+
+.vai-bubble-ok { color: #5ddb8a; }
+.vai-bubble-warn { color: #f4b35e; }
+
+.vai-bubble-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #8b8b98;
+  cursor: pointer;
+}
+.vai-bubble-icon:hover { background: rgba(255, 255, 255, 0.08); color: #e8e8ee; }
+
+.vai-bubble-text {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  max-height: 84px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  color: #e8e8ee;
+}
+.vai-bubble-text.interim { color: #a9a9b8; font-style: italic; }
+
+.vai-bubble-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.vai-bubble-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8e8ee;
+  font-size: 12px;
+  cursor: pointer;
+}
+.vai-bubble-btn:hover { background: rgba(255, 255, 255, 0.12); }

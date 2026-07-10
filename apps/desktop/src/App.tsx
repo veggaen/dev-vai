@@ -1,25 +1,32 @@
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { Toaster } from 'sonner';
-import { Group, Panel } from 'react-resizable-panels';
+
 import { AnimatePresence, motion } from 'framer-motion';
 import { ActivityRail } from './components/ActivityRail.js';
 import { SidebarPanel } from './components/SidebarPanel.js';
 import { QuickSwitch } from './components/QuickSwitch.js';
+import { OpenFolderDialog } from './components/OpenFolderDialog.js';
 import { ChatWindow } from './components/ChatWindow.js';
 import { useEngineStore } from './stores/engineStore.js';
 import { useAuthStore } from './stores/authStore.js';
 import { useChatStore } from './stores/chatStore.js';
 import { useLayoutStore } from './stores/layoutStore.js';
 import { useSandboxStore } from './stores/sandboxStore.js';
+import { useWorkspaceStore } from './stores/workspaceStore.js';
 import { useSettingsStore } from './stores/settingsStore.js';
 import { useVinextStore } from './stores/vinextStore.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { useAutoSandbox } from './hooks/useAutoSandbox.js';
+import { useWorkspaceIde } from './hooks/useWorkspaceIde.js';
 import { VaiOverlaySystem } from './components/VaiOverlaySystem.js';
 import { GlobalDictation } from './components/chat/GlobalDictationOverlay.js';
+import { IdeWorkspacePanel } from './components/ide/IdeWorkspacePanel.js';
 import { CursorFocusBox } from './components/CursorFocusBox.js';
 import { TitleBar } from './components/TitleBar.js';
 import { KnowledgeGraphView } from './components/KnowledgeGraphView.js';
+import { TopCommandBar } from './components/shell/TopCommandBar.js';
+import { DockRail } from './components/shell/DockRail.js';
+import { initPopoutMainWindow } from './stores/popoutStore.js';
 import { SettingsDrawer } from './components/panels/SettingsDrawer.js';
 import { AuthGate } from './components/AuthGate.js';
 import { toast } from 'sonner';
@@ -27,10 +34,9 @@ import { isDevAuthBypassEnabled } from './lib/dev-auth-bypass.js';
 import { applyThemeById, getActiveThemeId } from './lib/odysseus-theme.js';
 import { VaiMark } from './components/brand/VaiMark.js';
 
-const DebugConsole = lazy(async () => ({ default: (await import('./components/DebugConsole.js')).DebugConsole }));
-const FileExplorer = lazy(async () => ({ default: (await import('./components/FileExplorer.js')).FileExplorer }));
+
 const KnowledgePanel = lazy(async () => ({ default: (await import('./components/KnowledgePanel.js')).KnowledgePanel }));
-const PreviewPanel = lazy(async () => ({ default: (await import('./components/PreviewPanel.js')).PreviewPanel }));
+
 const SessionViewer = lazy(async () => ({ default: (await import('./components/SessionViewer.js')).SessionViewer }));
 const ThorsenPanel = lazy(async () => ({ default: (await import('./components/ThorsenPanel.js')).ThorsenPanel }));
 const VaiGym = lazy(async () => ({ default: (await import('./components/VaiGym.js')).VaiGym }));
@@ -79,7 +85,8 @@ function BootScreen() {
   );
 }
 
-import { HoverResizeHandle } from './components/workspace/HoverResizeHandle.js';
+import { ShellSidebarLayout } from './components/shell/ShellSidebarLayout.js';
+import { MainWorkspaceLayout } from './components/shell/MainWorkspaceLayout.js';
 
 function PanelLoading() {
   return (
@@ -107,11 +114,12 @@ export function App() {
   const motionBudget = useVinextStore((state) => state.motionBudget);
   const trustLevel = useVinextStore((state) => state.trustLevel);
   const {
-    showDebugConsole, showFileExplorer, showBuilderPanel,
+    showBuilderPanel,
     sidebarState, focusMode, previewExpanded, view, activePanel,
     layoutMode, themePreference, updateScreenClass, screenClass,
   } = useLayoutStore();
-  const { projectId, deployPhase, status: sandboxStatus } = useSandboxStore();
+  const { deployPhase, status: sandboxStatus } = useSandboxStore();
+  const activeConversationId = useChatStore((s) => s.activeConversationId);
   const showOwnerFeatures = isOwner && !ownerFeaturesHidden;
   const devAuthBypassEnabled = isDevAuthBypassEnabled();
   const prevRevealPreviewRef = useRef(
@@ -165,6 +173,28 @@ export function App() {
   }, []);
   useKeyboardShortcuts();
   useAutoSandbox();
+  useWorkspaceIde();
+
+  useEffect(() => {
+    void useWorkspaceStore.getState().bindConversation(activeConversationId);
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    const openVoiceSettings = () => {
+      try { sessionStorage.setItem('vai-settings-tab', 'voice'); } catch { /* non-fatal */ }
+      useLayoutStore.setState({
+        activePanel: 'settings',
+        sidebarState: 'rail',
+        showSidebar: true,
+        view: 'chat',
+      });
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('vai:settings-open-tab', { detail: 'voice' }));
+      }, 0);
+    };
+    window.addEventListener('vai:open-voice-settings', openVoiceSettings);
+    return () => window.removeEventListener('vai:open-voice-settings', openVoiceSettings);
+  }, []);
 
   // URL-param QA trigger: ?qa=build | ?qa=run | ?qa=verify
   useEffect(() => {
@@ -212,9 +242,6 @@ export function App() {
   useEffect(() => {
     applyThemeById(getActiveThemeId());
   }, []);
-
-  const hasActiveSandbox = projectId !== null;
-  const canShowConsole = hasActiveSandbox || sandboxStatus === 'failed';
 
   useEffect(() => {
     const previewActive = deployPhase === 'deploying'
@@ -296,6 +323,11 @@ export function App() {
     }
   }, [activePanel, isOwner, ownerFeaturesHidden, showOwnerFeatures]);
 
+  // Popout panels announce open/close over a BroadcastChannel — listen once.
+  useEffect(() => {
+    initPopoutMainWindow();
+  }, []);
+
   // Only show full-screen boot if we've NEVER connected before
   if (!hasEverConnected && status !== 'ready') {
     return <BootScreen />;
@@ -308,12 +340,48 @@ export function App() {
   const isReconnecting = status === 'reconnecting' || status === 'offline';
   const isPhoneViewport = screenClass === 'phone';
   const showRail = !isPhoneViewport && sidebarState !== 'hidden' && !focusMode && !previewExpanded;
-  const showPanel = !isPhoneViewport && sidebarState === 'expanded' && !focusMode && !previewExpanded;
-  const showBuilderWorkspace = showBuilderPanel && (!isPhoneViewport || previewExpanded);
-
-  // DevLogs view — activated when sidebar panel is 'devlogs'
   const isDevLogsView = view === 'devlogs' || activePanel === 'devlogs';
   const isSettingsOpen = activePanel === 'settings';
+  const showPanel = !isPhoneViewport && sidebarState === 'expanded' && !focusMode && !previewExpanded;
+  const useShellSidebar = layoutMode === 'open' || layoutMode === 'odyssey';
+  const shellSidebarMounted = useShellSidebar && !isPhoneViewport && sidebarState !== 'hidden' && !focusMode && !previewExpanded && !isSettingsOpen;
+  const shellSidebarExpanded = sidebarState === 'expanded';
+  const showBuilderWorkspace = showBuilderPanel && (!isPhoneViewport || previewExpanded);
+  // Nav placement is the structural signature of each layout mode:
+  // compact → left rail · open → top command bar · odyssey → bottom dock.
+  const navPlacement = layoutMode === 'open' ? 'top' : layoutMode === 'odyssey' ? 'dock' : 'left';
+  const showShellNav = !isPhoneViewport && !focusMode && !previewExpanded && !isSettingsOpen;
+
+  const mainWorkspace = (
+    <Suspense fallback={<PanelLoading />}>
+      {!isSettingsOpen && (isDevLogsView && showPanel ? (
+        <div className="layout-panel min-w-0 flex-1">
+          <SessionViewer />
+        </div>
+      ) : activePanel === 'knowledge' && showPanel ? (
+        <div className="layout-panel min-w-0 flex-1">
+          <KnowledgePanel onClose={() => useLayoutStore.getState().setActivePanel('chats')} />
+        </div>
+      ) : view === 'vaigym' ? (
+        <div className="layout-panel min-w-0 flex-1">
+          <VaiGym />
+        </div>
+      ) : view === 'thorsen' ? (
+        <div className="layout-panel min-w-0 flex-1">
+          <ThorsenPanel />
+        </div>
+      ) : (
+        <MainWorkspaceLayout
+          showBuilder={showBuilderWorkspace}
+          previewExpanded={previewExpanded}
+          layoutMode={layoutMode}
+          builder={<IdeWorkspacePanel />}
+        >
+          <ChatWindow />
+        </MainWorkspaceLayout>
+      ))}
+    </Suspense>
+  );
 
   return (
     <>
@@ -330,11 +398,16 @@ export function App() {
       {/* Quick Switch overlay */}
       <QuickSwitch />
 
+      {/* Open local project folder (vai:open-workspace / Ctrl+Shift+O) */}
+      <OpenFolderDialog />
+
       {/* Vai AI cursor + overlays — covers entire viewport */}
       <VaiOverlaySystem />
 
-      {/* Win+Alt-anywhere dictation: listening pill, pasted toast, nowhere-to-type modal */}
+      {/* Global hold-to-dictate: listening pill, pasted toast, nowhere-to-type modal */}
       <GlobalDictation />
+
+
 
       {/* Cursor focus box — follows mouse, highlights interactive elements */}
       <CursorFocusBox />
@@ -364,6 +437,8 @@ export function App() {
           height: `calc(100dvh - var(--safe-top) - var(--safe-bottom) - var(--titlebar-height, 0px))`,
         }}
       >
+        {/* Stage rework: the odyssey starfield retired with the aurora deck —
+            the atmosphere layer is now pure CSS in every mode. */}
         <div aria-hidden className="shell-atmosphere" />
 
         <div className="builder-shell-surface relative z-[1] flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -384,26 +459,36 @@ export function App() {
             )}
           </AnimatePresence>
 
+          {navPlacement === 'top' && showShellNav && <TopCommandBar />}
+
           <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" style={{ gap: 'var(--layout-gap)' }}>
-          {/* Activity Rail — always visible unless hidden/focus */}
-          {showRail && (
-            <div
-              className={`h-full self-stretch ${layoutMode === 'odyssey' ? 'odyssey-nav-cluster flex min-h-0 shrink-0 items-stretch' : ''}`}
-              style={layoutMode === 'odyssey' ? { gap: 'var(--layout-gap)' } : undefined}
+          {!isSettingsOpen && useShellSidebar && !isPhoneViewport && !focusMode && !previewExpanded ? (
+            <ShellSidebarLayout
+              showSidebar={shellSidebarMounted}
+              sidebarExpanded={shellSidebarExpanded}
+              layoutMode={layoutMode}
+              showRail={false}
             >
-            <div className="layout-panel layout-panel--rail h-full">
-              <ActivityRail />
-            </div>
-            {/* Odyssey: sidebar sits beside rail as a second bubble (not square-attached) */}
-            {layoutMode === 'odyssey' && showPanel && !isSettingsOpen && (
-              <div className="layout-panel odyssey-sidebar-slot min-h-0">
-                <SidebarPanel />
+              {mainWorkspace}
+            </ShellSidebarLayout>
+          ) : showRail && !isSettingsOpen ? (
+            <>
+              <div className="layout-panel layout-panel--rail h-full shrink-0 self-stretch">
+                <ActivityRail />
               </div>
-            )}
-            </div>
+              <AnimatePresence mode="popLayout">
+                {showPanel && (
+                  <div className="layout-panel h-full shrink-0" key="sidebar-panel-wrap">
+                    <SidebarPanel />
+                  </div>
+                )}
+              </AnimatePresence>
+              {mainWorkspace}
+            </>
+          ) : (
+            !isSettingsOpen && mainWorkspace
           )}
 
-          {/* Settings drawer — ~80% width + click-outside backdrop */}
           <AnimatePresence mode="popLayout">
             {isSettingsOpen && (
               <div className="layout-panel flex min-h-0 min-w-0 flex-1 overflow-hidden" key="settings-drawer-wrap">
@@ -411,113 +496,12 @@ export function App() {
               </div>
             )}
           </AnimatePresence>
-
-          {/* Sidebar Panel — expanded (compact/open only; odyssey uses cluster above) */}
-          <AnimatePresence mode="popLayout">
-            {showPanel && !isSettingsOpen && layoutMode !== 'odyssey' && (
-              <div className="layout-panel" key="sidebar-panel-wrap">
-                <SidebarPanel key="sidebar-panel" />
-              </div>
-            )}
-          </AnimatePresence>
-
-          {/* Main content area — hidden while settings drawer is open */}
-          <Suspense fallback={<PanelLoading />}>
-          {!isSettingsOpen && (isDevLogsView && showPanel ? (
-            /* Dev Logs: session viewer fills the main area */
-            <div className="layout-panel flex-1 min-w-0">
-              <SessionViewer />
-            </div>
-          ) : activePanel === 'knowledge' && showPanel ? (
-            /* Knowledge Base: full view fills main area */
-            <div className="layout-panel flex-1 min-w-0">
-              <KnowledgePanel onClose={() => useLayoutStore.getState().setActivePanel('chats')} />
-            </div>
-          ) : view === 'vaigym' ? (
-            /* Vai Training Gymnasium: fills entire main area */
-            <div className="layout-panel flex-1 min-w-0">
-              <VaiGym />
-            </div>
-          ) : view === 'thorsen' ? (
-            /* Thorsen Wormhole: intent → artifact pipeline */
-            <div className="layout-panel flex-1 min-w-0">
-              <ThorsenPanel />
-            </div>
-          ) : (
-            <div className={`layout-panel relative flex-1 min-w-0 ${layoutMode === 'odyssey' ? 'layout-panel--odyssey-host' : ''}`}>
-
-              <Group id="vai-main-layout" orientation="horizontal" className={layoutMode === 'odyssey' ? 'odyssey-workspace-row' : undefined}>
-                {/* ── Chat panel — hidden when preview is expanded ── */}
-                {!previewExpanded && (
-                <Panel
-                  id="chat"
-                  defaultSize={showBuilderWorkspace ? '55' : '100'}
-                  minSize="30"
-                >
-                  <div className={layoutMode === 'odyssey' ? 'odyssey-bubble h-full min-h-0' : 'h-full min-h-0'}>
-                    <ChatWindow />
-                  </div>
-                </Panel>
-                )}
-
-                {/* ── Builder panel — collapsible right side, or full width when expanded ── */}
-                {showBuilderWorkspace && (
-                  <>
-                    {!previewExpanded && <HoverResizeHandle direction="vertical" />}
-                    <Panel
-                      id="builder"
-                      defaultSize={previewExpanded ? '100' : '45'}
-                      minSize={previewExpanded ? '100' : '25'}
-                      collapsible={!previewExpanded}
-                    >
-                      <div className={layoutMode === 'odyssey' ? 'odyssey-bubble h-full min-h-0' : 'h-full min-h-0'}>
-                      <Group id="vai-builder-layout" orientation="vertical">
-                        {/* File explorer — top section when active */}
-                        {hasActiveSandbox && showFileExplorer && (
-                          <>
-                            <Panel
-                              id="files"
-                              defaultSize="25"
-                              minSize="10"
-                              collapsible
-                            >
-                              <FileExplorer />
-                            </Panel>
-                            <HoverResizeHandle direction="horizontal" />
-                          </>
-                        )}
-
-                        {/* Preview — main section */}
-                        <Panel id="preview" defaultSize={canShowConsole && showDebugConsole ? '55' : '100'} minSize="20">
-                          <PreviewPanel />
-                        </Panel>
-
-                        {/* Console — bottom section when active */}
-                        {canShowConsole && showDebugConsole && (
-                          <>
-                            <HoverResizeHandle direction="horizontal" />
-                            <Panel
-                              id="console"
-                              defaultSize="30"
-                              minSize="10"
-                              collapsible
-                            >
-                              <DebugConsole />
-                            </Panel>
-                          </>
-                        )}
-                      </Group>
-                      </div>
-                    </Panel>
-                  </>
-                )}
-              </Group>
-            </div>
-          ))}
-          </Suspense>
           </div>
+
+          {navPlacement === 'dock' && showShellNav && <DockRail />}
         </div>
       </div>
     </>
   );
 }
+   

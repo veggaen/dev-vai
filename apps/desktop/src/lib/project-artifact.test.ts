@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildProjectCompletionSummary,
   extractProjectUpdateArtifact,
   parseProjectUpdateBody,
   serializeProjectUpdateArtifact,
@@ -69,5 +70,28 @@ describe('project artifact helpers', () => {
       'Reinstalled dependencies after package changes.',
     ]);
     expect(parsed.files).toEqual(['src/App.tsx', 'package.json']);
+  });
+});
+
+describe('buildProjectCompletionSummary', () => {
+  it('only says the App refreshed when refresh proof exists', () => {
+    expect(buildProjectCompletionSummary({
+      projectName: 'mpm-frontend',
+      fileCount: 1,
+      previewVerified: true,
+      previewReachable: true,
+    })).toBe('Done — updated mpm-frontend (1 file) and refreshed the App view.');
+  });
+
+  it('reports reachable-but-unobserved previews honestly', () => {
+    const summary = buildProjectCompletionSummary({
+      projectName: 'dev-lawn',
+      fileCount: 2,
+      previewVerified: false,
+      previewReachable: true,
+    });
+    expect(summary).toContain('App is still running');
+    expect(summary).toContain('proof is pending');
+    expect(summary).not.toContain('Done');
   });
 });

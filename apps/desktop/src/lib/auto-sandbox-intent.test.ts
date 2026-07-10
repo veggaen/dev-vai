@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { resolveAutoSandboxIntent, resolveSendTimeWorkIntent } from './auto-sandbox-intent.js';
+import {
+  resolveAutoSandboxIntent,
+  resolveSendTimeWorkIntent,
+  resolveTerminalNoActionStatus,
+  shouldStageGeneratedFilesForReview,
+} from './auto-sandbox-intent.js';
 
 describe('resolveAutoSandboxIntent', () => {
   it('treats explicit chat build requests as actionable file output', () => {
@@ -181,6 +186,31 @@ describe('resolveAutoSandboxIntent', () => {
     expect(result.requestSystemPrompt).toContain('execute-now build request');
   });
 
+  it('executes a clear attached-project edit in Agent mode without a build confirmation', () => {
+    const result = resolveSendTimeWorkIntent({
+      userPrompt: 'Change the "Participate in a decentralized ecosystem" text to "Join the decentralized future".',
+      mode: 'agent',
+      hasActiveProject: true,
+    });
+
+    expect(result.intent).toBe('edit');
+    expect(result.shouldPrimeBuilder).toBe(true);
+    expect(result.needsBuildConfirm).toBeUndefined();
+    expect(result.requestSystemPrompt).toContain('edit the active app');
+  });
+
+  it('still asks for confirmation on an ambiguous Agent request without an attached project', () => {
+    const result = resolveSendTimeWorkIntent({
+      userPrompt: 'Improve the timeline ui',
+      mode: 'agent',
+      hasActiveProject: false,
+    });
+
+    expect(result.intent).toBe('none');
+    expect(result.shouldPrimeBuilder).toBe(false);
+    expect(result.needsBuildConfirm).toBe(true);
+  });
+
   it('still primes builder when the hardware user explicitly asks for a web dashboard prototype', () => {
     const result = resolveSendTimeWorkIntent({
       userPrompt: 'Prototype the web dashboard UI for my ESP32 humidity sensor in React now.',
@@ -230,6 +260,26 @@ describe('resolveAutoSandboxIntent', () => {
     expect(result.requestSystemPrompt).toContain('changed files');
   });
 
+  it('treats explicit attached-project hero redesign prompts as code edits', () => {
+    const prompt = 'Redesign the hero section in app/page.tsx for the MMM token page again: make the launch console headline sharper, make Sepolia/MMM trust stats clearer, and keep wallet/connect plus participation logic untouched. Apply the code changes now and validate the preview.';
+    const auto = resolveAutoSandboxIntent({
+      userPrompt: prompt,
+      mode: 'agent',
+      hasActiveProject: true,
+      hasPackageJsonOutput: false,
+    });
+    const sendTime = resolveSendTimeWorkIntent({
+      userPrompt: prompt,
+      mode: 'agent',
+      hasActiveProject: true,
+    });
+
+    expect(auto.explicitChatEditRequest).toBe(true);
+    expect(auto.canAutoApplyFiles).toBe(true);
+    expect(sendTime.intent).toBe('edit');
+    expect(sendTime.shouldPrimeBuilder).toBe(true);
+  });
+
   it('primes fresh builder builds away from the attached app when the ask sounds like a new app', () => {
     const result = resolveSendTimeWorkIntent({
       userPrompt: 'Build me a premium client portal app.',
@@ -243,3 +293,16 @@ describe('resolveAutoSandboxIntent', () => {
     expect(result.requestSystemPrompt).toContain('Do not mutate the currently attached app');
   });
 });
+
+describe('shouldStageGeneratedFilesForReview', () => {
+  it('lets Agent apply reversible, validated edits without a second approval stop', () => {
+    expect(shouldStageGeneratedFilesForReview({ mode: 'agent', requireDiffApproval: true })).toBe(false);
+  });
+
+  it('keeps the explicit review preference for Builder and Chat', () => {
+    expect(shouldStageGeneratedFilesForReview({ mode: 'builder', requireDiffApproval: true })).toBe(true);
+    expect(shouldStageGeneratedFilesForReview({ mode: 'chat', requireDiffApproval: true })).toBe(true);
+  });
+
+  it('does not stage when review is disabled', () => {
+    expect(shouldStageGeneratedFilesForReview({ mode: 'builder', requireDiffApproval: 

@@ -19,6 +19,7 @@ import type { CouncilEditContext } from './types.js';
  */
 
 const PROJECT_NAME = /ACTIVE SANDBOX PROJECT:\s*"([^"\r\n]+)"/i;
+const EXTERNAL_MARKER = /EXTERNAL local project folder/i;
 const SNAPSHOT_FILE = /FILE:\s*([^\r\n`]+)\r?\n```[^\r\n`]*\r?\n([\s\S]*?)```/g;
 const TRUNCATION_MARKER = '/* truncated for prompt context */';
 
@@ -36,5 +37,9 @@ export function parseActiveSandboxContext(systemPrompt: string | undefined): Cou
     files.push({ path, content });
   }
 
-  return { projectName: nameMatch[1].trim(), files };
+  return {
+    projectName: nameMatch[1].trim(),
+    files,
+    external: EXTERNAL_MARKER.test(systemPrompt),
+  };
 }

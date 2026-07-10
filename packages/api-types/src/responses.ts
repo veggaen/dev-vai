@@ -16,6 +16,8 @@ export const conversationSummarySchema = z
     modelId: z.string(),
     ownerUserId: z.string().nullable().optional(),
     sandboxProjectId: z.string().nullable().optional(),
+    /** Attached local folder — persisted server-side so the workspace follows the chat. */
+    workspaceRoot: z.string().nullable().optional(),
     projectId: z.string().nullable().optional(),
     projectName: z.string().nullable().optional(),
     mode: conversationModeResponseSchema,
