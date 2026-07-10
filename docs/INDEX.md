@@ -7,9 +7,9 @@ This folder holds supporting documents for VeggaAI. The permanent authority docu
 - [`../Master.md`](../Master.md) — project doctrine, authority, priorities, quality floors
 - [`../README.md`](../README.md) — repo overview, quickstart, architecture, commands
 
-## Proposals (pending Vegga's authorization)
+## Proposals
 
-- [`proposals/master-amendment-vai-ide-tci.md`](proposals/master-amendment-vai-ide-tci.md) — proposed Master.md §12.6: VAI IDE, TCI, demonstration doctrine, reference priority
+- [`proposals/master-amendment-vai-ide-tci.md`](proposals/master-amendment-vai-ide-tci.md) — Master.md §12.6 amendment (authorized + applied 2026-07-10): VAI IDE, TCI, demonstration doctrine, reference priority
 
 ## Supporting docs
 

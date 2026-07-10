@@ -1,6 +1,6 @@
 # Proposed Master.md Amendment — VAI IDE and Thorsen Computer Intelligence
 
-**Status:** Proposed — awaiting authorization from Vegga Thorsen (Master.md §1: only Vegga may authorize changes)
+**Status:** Authorized by Vegga Thorsen 2026-07-10 — applied to Master.md §12.6
 **Proposed:** 2026-07-10, by the VAI engineering team. Revised same day per Vegga's correction on the workspace model.
 **Insertion point:** new section `12.6`, immediately after `12.5 Architecture Direction — The Orchestrator / Bridge`
 **Effect:** additive to Master.md. Revises exactly one line of subordinate doctrine (see below).
@@ -39,7 +39,7 @@ Vegga (2026-07-10), the durable model is stronger:
 - The council / review-every-diff model from `docs/vai-ide-vision.md` is not weakened —
   §12.6.2 promotes its core rule to constitutional status.
 
-## Open questions for Vegga (answer before or at authorization)
+## Open questions for Vegga — all three confirmed at authorization (2026-07-10)
 
 1. Confirm the name **Thorsen Computer Intelligence (TCI)** for the intelligence layer.
 2. Confirm **VAI IDE** as the product name of the desktop workspace (vs. "Vai IDE" as
