@@ -129,3 +129,6 @@ _build.log
 vai.db.bak*
 *.db.bak*
 __pycache__/
+
+apps/vcus/test-results-*.txt
+apps/vcus/failing-answers.txt

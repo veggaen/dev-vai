@@ -1167,9 +1167,23 @@ fn ide_spawn_dev_server(
         .unwrap_or(0);
     let log_path = std::env::temp_dir().join(format!("vai-dev-{ts}.log"));
     let log_display = log_path.display().to_string();
-    let inner = format!("{command} 1>> \"{log_display}\" 2>>&1");
-    let mut cmd = Command::new("cmd");
-    cmd.args(["/C", &inner]).current_dir(&root);
+    // `2>&1` (duplicate stderr onto stdout) — the previous `2>>&1` is not valid cmd
+    // redirection, so dev-server stderr never reached the log and the repair loop
+    // diagnosed crashes blind.
+    let inner = format!("{command} 1>> \"{log_display}\" 2>&1");
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.args(["/C", &inner]);
+        c
+    };
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = {
+        let mut c = Command::new("sh");
+        c.args(["-c", &inner]);
+        c
+    };
+    cmd.current_dir(&root);
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
     let child = cmd.spawn().map_err(|e| e.to_string())?;
@@ -1195,6 +1209,23 @@ fn ide_probe_port(port: u16) -> bool {
 
 #[tauri::command]
 fn ide_tail_dev_log(path: String, max_bytes: u64) -> Result<String, String> {
+    // Only the app's own dev-server logs (vai-dev-*.log in the OS temp dir) may be
+    // tailed. This command is renderer-reachable, so without this guard it would be
+    // an arbitrary-file-read primitive for anything that compromises the webview.
+    let requested = std::path::PathBuf::from(&path);
+    let file_name = requested
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    if !file_name.starts_with("vai-dev-") || !file_name.ends_with(".log") {
+        return Err("not a vai dev log".to_string());
+    }
+    let temp_canon =
+        std::fs::canonicalize(std::env::temp_dir()).map_err(|e| e.to_string())?;
+    let path = std::fs::canonicalize(&requested).map_err(|e| e.to_string())?;
+    if !path.starts_with(&temp_canon) {
+        return Err("log path outside the temp dir".to_string());
+    }
     let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
     let len = meta.len();
     if len == 0 {
@@ -1222,9 +1253,20 @@ async fn ide_run_command(root: String, command: String) -> Result<String, String
         return Err("empty command".to_string());
     }
     let output = tauri::async_runtime::spawn_blocking(move || {
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/C", &command])
-            .current_dir(&root)
+        // §9.1: never assume one platform. cmd on Windows, sh everywhere else.
+        #[cfg(target_os = "windows")]
+        let mut cmd = {
+            let mut c = Command::new("cmd");
+            c.args(["/C", &command]);
+            c
+        };
+        #[cfg(not(target_os = "windows"))]
+        let mut cmd = {
+            let mut c = Command::new("sh");
+            c.args(["-c", &command]);
+            c
+        };
+        cmd.current_dir(&root)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         #[cfg(target_os = "windows")]

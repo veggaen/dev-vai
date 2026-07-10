@@ -52,7 +52,7 @@ export function TitleBar() {
           <path d="M14 13 L32 51 L46 23" stroke="var(--accent)" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
           <circle cx="51.5" cy="12.5" r="7" fill="var(--accent)" />
         </svg>
-        <span data-tauri-drag-region>VeggaAI</span>
+        <span data-tauri-drag-region>VAI IDE</span>
       </div>
 
       <div className="vai-titlebar__controls">

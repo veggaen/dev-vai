@@ -163,7 +163,7 @@ export function App() {
       .then((version) => {
         const previousVersion = localStorage.getItem(seenVersionKey);
         if (previousVersion && previousVersion !== version) {
-          toast.success(`VeggaAI updated to ${version}`);
+          toast.success(`VAI IDE updated to ${version}`);
         }
         localStorage.setItem(seenVersionKey, version);
       })
