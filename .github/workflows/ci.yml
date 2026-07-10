@@ -96,6 +96,17 @@ jobs:
           set -euo pipefail
           pnpm exec vitest run packages/core/__tests__/scenarios.test.ts --reporter=basic
 
+      - name: Performance budgets (advisory until baseline recorded)
+        if: matrix.node-version == 22
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          # §12.6.6 measured-not-claimed. Advisory (--advisory + continue-on-error)
+          # until 3 green baseline runs are recorded — then remove BOTH softeners
+          # in one commit so budgets become a hard gate.
+          pnpm perf:budgets:advisory
+
       - name: Retrieval flywheel regression gate (non-blocking)
         if: matrix.node-version == 22
         continue-on-error: true

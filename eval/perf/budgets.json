@@ -1,0 +1,24 @@
+{
+  "$doc": "Performance budgets — Master.md §12.6.6: budgets are requirements, regress-tested like correctness. Measured by scripts/perf-budgets.mjs. Numbers are initial ceilings set 2026-07-10 before a recorded baseline; tighten them as real baselines land, never loosen without a Master.md-conscious reason in the commit message.",
+  "runtime": {
+    "coldBootToHealthyMs": {
+      "budget": 6000,
+      "why": "dev-mode (tsx) runtime boot to /health 200. Desktop sidecar boot must feel instant-adjacent; 6s is the never-worse-than ceiling for CI dev boots."
+    },
+    "healthP95Ms": {
+      "budget": 25,
+      "why": "/health is the liveness hot path polled by the shell; it must never queue behind work."
+    },
+    "searchP50Ms": {
+      "budget": 400,
+      "why": "POST /api/search grounded answer, warm. TCI retrieval is the IDE's understanding loop — JetBrains-style 'intelligence that taxes the loop' is the named failure mode (research doc E1/E4)."
+    },
+    "searchP95Ms": {
+      "budget": 1200,
+      "why": "tail latency ceiling for grounded search before it reads as 'stuck'."
+    }
+  },
+  "desktop": {
+    "$todo": "cold start to interactive, keystroke-to-paint, session-spawn time — measurable only in a desktop session with the app running; wire via visual-drive scripts when the P1 shell lands."
+  }
+}
