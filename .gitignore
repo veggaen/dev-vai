@@ -121,3 +121,11 @@ scripts/improve-loop/.supervisor.lock
 # runtime-learned knowledge — the live app rewrites this every session; generated data, not source
 packages/runtime/vai-knowledge.json
 backups/
+
+# hygiene guard additions 2026-07-10
+terminals/
+agent-tools/
+_build.log
+vai.db.bak*
+*.db.bak*
+__pycache__/
