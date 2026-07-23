@@ -244,7 +244,9 @@ export function useGlobalDictation(options?: { readonly deviceId?: string }) {
       setPhase({ kind: 'polishing', raw: text });
       void deliver(text, applied);
     },
-    onPolishUpdate: () => { /* global PTT deliberately skips model polish */ },
+    onPolishUpdate: () => {
+      // Global PTT deliberately skips model polish.
+    },
     onDiscardedFinal: () => {
       // A newer hold superseded this session before its words landed — no 'groomed'
       // will follow it. Tell the composer to release the pending slot it reserved on

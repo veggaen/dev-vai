@@ -89,7 +89,9 @@ export class WorktreeManager {
       await this.runGit(['worktree', 'add', '-b', branch, root, baseRef], workspaceRoot);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      throw new Error(`Worktree creation failed: ${detail}. Diagnostic: ${diagnosticCommand}`);
+      throw new Error(`Worktree creation failed: ${detail}. Diagnostic: ${diagnosticCommand}`, {
+        cause: error,
+      });
     }
     return { root, branch, baseRef, diagnosticCommand };
   }

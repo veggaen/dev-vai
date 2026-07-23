@@ -1233,7 +1233,7 @@ export function extractSnoOsloPriceExcerpt(text: string): string | null {
   return extracted.length > 0 ? extracted.join('\n') : null;
 }
 
-const OPENING_HOURS_CLOCK = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b|\b(?:[01]?\d|2[0-3])\.[0-5]\d(?!\.)|\b(?:1[0-2]|0?[1-9])\s*(?:a\.?m\.?|p\.?m\.?)\b|\b(?:[01]?\d|2[0-3])\s*[-–—]​?\s*(?:[01]?\d|2[0-3])\s*(?:uhr|h)\b/i;
+const OPENING_HOURS_CLOCK = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b|\b(?:[01]?\d|2[0-3])\.[0-5]\d(?!\.)|\b(?:1[0-2]|0?[1-9])\s*(?:a\.?m\.?|p\.?m\.?)\b|\b(?:[01]?\d|2[0-3])\s*[-–—]\u200B?\s*(?:[01]?\d|2[0-3])\s*(?:uhr|h)\b/i;
 const OPENING_HOURS_DAY_OR_LABEL = /\b(?:opening\s+hours?|hours?|open|closed|weekday|weekend|every\s+day|daily|alle\s+dager|hver\s+dag|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag|stengt|åpent|åpningstid(?:er)?|lunes|martes|miércoles|jueves|viernes|sábado|domingo|horarios?|abiert[oa]|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|horaires?|ouvert[es]?|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|öffnungszeiten|geöffnet|lunedì|martedì|mercoledì|giovedì|venerdì|sabato|domenica|orari|apert[oa]|segunda|terça|quarta|quinta|sexta|horários?|abert[oa]|maandag|dinsdag|woensdag|donderdag|vrijdag|zaterdag|zondag|openingstijden|geopend)\b|(?:営業時間|開店時間|閉店時間|月曜日|火曜日|水曜日|木曜日|金曜日|土曜日|日曜日|毎日|营业时间|營業時間|星期[一二三四五六日天]|영업시간|[월화수목금토일]요일)/iu;
 const OPENING_HOURS_CLOSED = /\b(?:closed|stengt|stängd|lukket|cerrad[oa]|fermé[es]?|geschlossen|chius[oa]|fechad[oa]|gesloten|open\s+24\s+hours?|24\/7)\b|(?:休業|定休日|休息|휴무)/iu;
 const INTERNATIONAL_STANDALONE_CLOSED = /^(?:closed|stengt|stängd|lukket|cerrad[oa]|fermé[es]?|geschlossen|chius[oa]|fechad[oa]|gesloten|休業|定休日|休息|휴무)[.!]?$/iu;
